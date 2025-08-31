@@ -237,6 +237,8 @@ public class CompactUi : WindowMediatorSubscriberBase
             }
         }, false, null, () => {
             // Settings button
+            ImGui.SetCursorPosY(ImGui.GetCursorPosY() - 3.0f);
+            ImGui.SetCursorPosX(ImGui.GetCursorPosX() - 2.0f);
             if (_uiSharedService.IconButton(FontAwesomeIcon.Cog))
             {
                 Mediator.Publish(new UiToggleMessage(typeof(SettingsUi)));
@@ -250,6 +252,8 @@ public class CompactUi : WindowMediatorSubscriberBase
             
             // Close button
             ImGui.SameLine();
+            ImGui.SetCursorPosY(ImGui.GetCursorPosY() - 3.0f);
+            ImGui.SetCursorPosX(ImGui.GetCursorPosX() - 2.0f);
             if (_uiSharedService.IconButton(FontAwesomeIcon.Times))
             {
                 IsOpen = false;
@@ -333,7 +337,17 @@ public class CompactUi : WindowMediatorSubscriberBase
             ? SpheneColors.CrystalBlue 
             : SpheneColors.NetworkDisconnected;
         
+        // Draw Sphene-themed status indicator with proper alignment
         SpheneUIEnhancements.DrawSpheneStatusIndicator(connectionStatus, _apiController.ServerState == ServerState.Connected);
+        
+        // Always show reconnect button with proper alignment
+        ImGui.SameLine();
+        ImGui.AlignTextToFramePadding();
+        if (_uiSharedService.IconTextButton(FontAwesomeIcon.Redo, ""))
+        {
+            _ = Task.Run(() => _apiController.CreateConnectionsAsync());
+        }
+        UiSharedService.AttachToolTip("Reconnect to the Sphene Network");
         
         if (_apiController.ServerState == ServerState.Connected)
         {

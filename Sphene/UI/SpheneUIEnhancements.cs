@@ -93,11 +93,15 @@ public static class SpheneUIEnhancements
             
             drawList.AddRectFilled(headerMin, headerMax, headerBg, 12.0f);
             
-            ImGui.SetCursorPosY(ImGui.GetCursorPosY() + 8.0f);
+            // Calculate vertical center position for header content
+            var headerStartY = ImGui.GetCursorPosY();
+            var headerCenterY = headerStartY + (headerHeight - ImGui.GetTextLineHeight()) * 0.5f;
+            
             using var headerColor = ImRaii.PushColor(ImGuiCol.Text, SpheneColors.ToImGuiColor(SpheneColors.CrystalBlue));
             
             if (collapsible)
             {
+                ImGui.SetCursorPosY(headerCenterY);
                 if (ImGui.CollapsingHeader(title, ImGuiTreeNodeFlags.DefaultOpen))
                 {
                     ImGui.Spacing();
@@ -106,17 +110,22 @@ public static class SpheneUIEnhancements
             }
             else
             {
-                // Header layout with title and buttons
-                ImGui.SetCursorPosX(ImGui.GetCursorPosX() + 8.0f);
+                // Header layout with title and buttons - center everything vertically
+                ImGui.SetCursorPos(new Vector2(ImGui.GetCursorPosX() + 8.0f, headerCenterY));
                 
                 if (headerButtons != null)
                 {
                     // Draw title on the left
                     ImGui.TextUnformatted(title);
                     
-                    // Draw buttons on the right side of the header
-                    ImGui.SameLine(ImGui.GetContentRegionAvail().X - 40.0f);
-                    ImGui.SetCursorPosY(ImGui.GetCursorPosY() - 0.0f);
+                    // Calculate button area width (assuming 2 buttons with spacing)
+                    var buttonSize = ImGui.GetFrameHeight();
+                    var buttonAreaWidth = buttonSize * 2 + ImGui.GetStyle().ItemSpacing.X;
+                    
+                    // Position buttons on the right side of the header
+                    var contentWidth = ImGui.GetContentRegionAvail().X;
+                    var buttonStartX = ImGui.GetCursorPosX() + contentWidth - buttonAreaWidth;
+                    ImGui.SetCursorPos(new Vector2(buttonStartX, headerCenterY));
                     headerButtons();
                 }
                 else
@@ -124,7 +133,8 @@ public static class SpheneUIEnhancements
                     ImGui.TextUnformatted(title);
                 }
                 
-                ImGui.SetCursorPosY(ImGui.GetCursorPosY() + 8.0f);
+                // Move cursor to end of header area
+                ImGui.SetCursorPosY(headerStartY + headerHeight);
                 
                 // Subtle separator line
                 var separatorColor = SpheneColors.ToImGuiColor(SpheneColors.WithAlpha(SpheneColors.CrystalBlue, 0.3f));
@@ -316,10 +326,16 @@ public static class SpheneUIEnhancements
     {
         var statusColor = SpheneColors.GetConnectionStatusColor(isActive, hasWarning, hasError);
         var drawList = ImGui.GetWindowDrawList();
-        var pos = ImGui.GetCursorScreenPos();
         
-        // Draw status circle
-        var circleCenter = new Vector2(pos.X + 8, pos.Y + ImGui.GetTextLineHeight() * 0.5f);
+        // Align text to frame padding for better vertical centering
+        ImGui.AlignTextToFramePadding();
+        var alignedPos = ImGui.GetCursorScreenPos();
+        
+        // Calculate circle center to align with text baseline
+        var frameHeight = ImGui.GetFrameHeight();
+        var circleCenter = new Vector2(alignedPos.X + 8, alignedPos.Y + frameHeight * 0.5f);
+        
+        // Draw status circle with proper vertical alignment
         drawList.AddCircleFilled(circleCenter, 6, SpheneColors.ToImGuiColor(statusColor));
         drawList.AddCircle(circleCenter, 6, SpheneColors.ToImGuiColor(SpheneColors.CrystalWhite), 12, 1.5f);
         
