@@ -1,0 +1,3 @@
+[submodule "SpheneAPI"]
+	path = SpheneAPI
+	url = https://github.com/SpheneDev/SpheneAPI.git
