@@ -25,9 +25,9 @@
       },
       "Glamourer.Api": {
         "type": "Direct",
-        "requested": "[2.4.0, )",
-        "resolved": "2.4.0",
-        "contentHash": "i8PEKb4R2tyunfHEHZHY+yCx2p6D0hsoQ24Q8UDVb7rNvynzDqMrRhGTQjuF+Tg2XGWA7sb32wJqHXCv0oKoeA=="
+        "requested": "[2.6.0, )",
+        "resolved": "2.6.0",
+        "contentHash": "zysCZgNBRm3k3qvibyw/31MmEckX0Uh0ZsT+Sax3ZHnYIRELr9Qhbz3cjJz7u0RHGIrNJiRpktu/LxgHEqDItw=="
       },
       "K4os.Compression.LZ4.Legacy": {
         "type": "Direct",

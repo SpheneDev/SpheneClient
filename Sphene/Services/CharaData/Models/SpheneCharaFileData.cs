@@ -12,6 +12,10 @@ public record SpheneCharaFileData
     public string GlamourerData { get; set; } = string.Empty;
     public string CustomizePlusData { get; set; } = string.Empty;
     public string ManipulationData { get; set; } = string.Empty;
+    public string HeelsData { get; set; } = string.Empty;
+    public string HonorificData { get; set; } = string.Empty;
+    public string MoodlesData { get; set; } = string.Empty;
+    public string PetNamesData { get; set; } = string.Empty;
     public List<FileData> Files { get; set; } = [];
     public List<FileSwap> FileSwaps { get; set; } = [];
 
@@ -28,6 +32,10 @@ public record SpheneCharaFileData
         dto.CustomizePlusData.TryGetValue(ObjectKind.Player, out var customizePlusData);
         CustomizePlusData = customizePlusData ?? string.Empty;
         ManipulationData = dto.ManipulationData;
+        HeelsData = dto.HeelsData;
+        HonorificData = dto.HonorificData;
+        MoodlesData = dto.MoodlesData;
+        PetNamesData = dto.PetNamesData;
 
         if (dto.FileReplacements.TryGetValue(ObjectKind.Player, out var fileReplacements))
         {

@@ -167,6 +167,10 @@ public sealed partial class CharaDataManager : DisposableMediatorSubscriberBase
             GlamourerData = dataDto.GlamourerData,
             FileSwaps = dataDto.FileSwaps,
             ManipulationData = dataDto.ManipulationData,
+            HeelsData = dataDto.HeelsData,
+            HonorificData = dataDto.HonorificData,
+            MoodlesData = dataDto.MoodlesData,
+            PetNamesData = dataDto.PetNamesData,
             UpdatedDate = dataDto.UpdatedDate
         };
 
@@ -492,7 +496,9 @@ public sealed partial class CharaDataManager : DisposableMediatorSubscriberBase
                     .ConfigureAwait(false);
                 await ApplyDataAsync(applicationId, tempHandler, isSelf, autoRevert: false, extended,
                     extractedFiles, charaFile.CharaFileData.ManipulationData, charaFile.CharaFileData.GlamourerData,
-                    charaFile.CharaFileData.CustomizePlusData, CancellationToken.None).ConfigureAwait(false);
+                    charaFile.CharaFileData.CustomizePlusData, charaFile.CharaFileData.HeelsData, 
+                    charaFile.CharaFileData.HonorificData, charaFile.CharaFileData.MoodlesData, 
+                    charaFile.CharaFileData.PetNamesData, CancellationToken.None).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -695,6 +701,10 @@ public sealed partial class CharaDataManager : DisposableMediatorSubscriberBase
             GlamourerData = dataDto.GlamourerData,
             FileSwaps = dataDto.FileSwaps,
             ManipulationData = dataDto.ManipulationData,
+            HeelsData = dataDto.HeelsData,
+            HonorificData = dataDto.HonorificData,
+            MoodlesData = dataDto.MoodlesData,
+            PetNamesData = dataDto.PetNamesData,
             UpdatedDate = dataDto.UpdatedDate
         };
 
@@ -818,7 +828,8 @@ public sealed partial class CharaDataManager : DisposableMediatorSubscriberBase
     }
 
     private async Task ApplyDataAsync(Guid applicationId, GameObjectHandler tempHandler, bool isSelf, bool autoRevert,
-        CharaDataMetaInfoExtendedDto metaInfo, Dictionary<string, string> modPaths, string? manipData, string? glamourerData, string? customizeData, CancellationToken token)
+        CharaDataMetaInfoExtendedDto metaInfo, Dictionary<string, string> modPaths, string? manipData, string? glamourerData, string? customizeData, 
+        string? heelsData, string? honorificData, string? moodlesData, string? petNamesData, CancellationToken token)
     {
         Guid? cPlusId = null;
         Guid penumbraCollection;
@@ -858,6 +869,35 @@ public sealed partial class CharaDataManager : DisposableMediatorSubscriberBase
             else
             {
                 cPlusId = await _ipcManager.CustomizePlus.SetBodyScaleAsync(tempHandler.Address, Convert.ToBase64String(Encoding.UTF8.GetBytes("{}"))).ConfigureAwait(false);
+            }
+
+            // Apply additional data types
+            DataApplicationProgress = "Applying Heels data";
+            Logger.LogTrace("[{appId}] Applying Heels data", applicationId);
+            if (!string.IsNullOrEmpty(heelsData))
+            {
+                await _ipcManager.Heels.SetOffsetForPlayerAsync(tempHandler.Address, heelsData).ConfigureAwait(false);
+            }
+
+            DataApplicationProgress = "Applying Honorific data";
+            Logger.LogTrace("[{appId}] Applying Honorific data", applicationId);
+            if (!string.IsNullOrEmpty(honorificData))
+            {
+                await _ipcManager.Honorific.SetTitleAsync(tempHandler.Address, honorificData).ConfigureAwait(false);
+            }
+
+            DataApplicationProgress = "Applying Moodles data";
+            Logger.LogTrace("[{appId}] Applying Moodles data", applicationId);
+            if (!string.IsNullOrEmpty(moodlesData))
+            {
+                await _ipcManager.Moodles.SetStatusAsync(tempHandler.Address, moodlesData).ConfigureAwait(false);
+            }
+
+            DataApplicationProgress = "Applying PetNames data";
+            Logger.LogTrace("[{appId}] Applying PetNames data", applicationId);
+            if (!string.IsNullOrEmpty(petNamesData))
+            {
+                await _ipcManager.PetNames.SetPlayerData(tempHandler.Address, petNamesData).ConfigureAwait(false);
             }
 
             if (autoRevert)
@@ -980,7 +1020,7 @@ public sealed partial class CharaDataManager : DisposableMediatorSubscriberBase
         var extendedMetaInfo = await CacheData(metaInfo).ConfigureAwait(false);
 
         await ApplyDataAsync(applicationId, tempHandler, isSelf, autoRevert, extendedMetaInfo, modPaths, charaDataDownloadDto.ManipulationData, charaDataDownloadDto.GlamourerData,
-            charaDataDownloadDto.CustomizeData, token).ConfigureAwait(false);
+            charaDataDownloadDto.CustomizeData, charaDataDownloadDto.HeelsData, charaDataDownloadDto.HonorificData, charaDataDownloadDto.MoodlesData, charaDataDownloadDto.PetNamesData, token).ConfigureAwait(false);
     }
 
     public async Task<(string Result, bool Success)> UploadFiles(List<GamePathEntry> missingFileList, Func<Task>? postUpload = null)
