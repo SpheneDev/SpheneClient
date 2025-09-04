@@ -118,8 +118,13 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
                 try
                 {
                     if (_usersToPushDataTo.Count == 0) return;
-                    Logger.LogDebug("Pushing {data} to {users}", dataToSend.DataHash, string.Join(", ", _usersToPushDataTo.Select(k => k.AliasOrUID)));
-                    await _apiController.PushCharacterData(dataToSend, [.. _usersToPushDataTo]).ConfigureAwait(false);
+                    
+                    // Generate acknowledgment ID and set pending status for all recipients
+                    var acknowledgmentId = Guid.NewGuid().ToString();
+                    _pairManager.SetPendingAcknowledgmentForUsers([.. _usersToPushDataTo], acknowledgmentId);
+                    
+                    Logger.LogDebug("Pushing {data} to {users} with acknowledgment ID {ackId}", dataToSend.DataHash, string.Join(", ", _usersToPushDataTo.Select(k => k.AliasOrUID)), acknowledgmentId);
+                    await _apiController.PushCharacterData(dataToSend, [.. _usersToPushDataTo], acknowledgmentId).ConfigureAwait(false);
                     _usersToPushDataTo.Clear();
                 }
                 finally

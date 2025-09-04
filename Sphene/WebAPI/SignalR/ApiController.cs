@@ -60,6 +60,7 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IM
         Mediator.Subscribe<CyclePauseMessage>(this, (msg) => _ = CyclePauseAsync(msg.UserData));
         Mediator.Subscribe<CensusUpdateMessage>(this, (msg) => _lastCensus = msg);
         Mediator.Subscribe<PauseMessage>(this, (msg) => _ = PauseAsync(msg.UserData));
+        Mediator.Subscribe<SendCharacterDataAcknowledgmentMessage>(this, (msg) => _ = UserSendCharacterDataAcknowledgment(msg.AcknowledgmentDto));
 
         ServerState = ServerState.Offline;
 
@@ -443,6 +444,7 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IM
         OnUserUpdateProfile(dto => _ = Client_UserUpdateProfile(dto));
         OnUserDefaultPermissionUpdate(dto => _ = Client_UserUpdateDefaultPermissions(dto));
         OnUpdateUserIndividualPairStatusDto(dto => _ = Client_UpdateUserIndividualPairStatusDto(dto));
+        OnUserReceiveCharacterDataAcknowledgment(dto => _ = Client_UserReceiveCharacterDataAcknowledgment(dto));
 
         OnGroupChangePermissions((dto) => _ = Client_GroupChangePermissions(dto));
         OnGroupDelete((dto) => _ = Client_GroupDelete(dto));

@@ -133,6 +133,15 @@ public partial class ApiController
         return Task.CompletedTask;
     }
 
+    public Task Client_UserReceiveCharacterDataAcknowledgment(CharacterDataAcknowledgmentDto acknowledgmentDto)
+    {
+        Logger.LogInformation("Client_UserReceiveCharacterDataAcknowledgment received from server - AckId: {acknowledgmentId}, User: {user}, Success: {success}", 
+            acknowledgmentDto.AcknowledgmentId, acknowledgmentDto.User.AliasOrUID, acknowledgmentDto.Success);
+        ExecuteSafely(() => _pairManager.ReceiveCharacterDataAcknowledgment(acknowledgmentDto));
+        Logger.LogInformation("Successfully processed acknowledgment callback for AckId: {acknowledgmentId}", acknowledgmentDto.AcknowledgmentId);
+        return Task.CompletedTask;
+    }
+
     public Task Client_UserReceiveUploadStatus(UserDto dto)
     {
         Logger.LogTrace("Client_UserReceiveUploadStatus: {dto}", dto);
@@ -312,6 +321,12 @@ public partial class ApiController
     {
         if (_initialized) return;
         _mareHub!.On(nameof(Client_UserReceiveCharacterData), act);
+    }
+
+    public void OnUserReceiveCharacterDataAcknowledgment(Action<CharacterDataAcknowledgmentDto> act)
+    {
+        if (_initialized) return;
+        _mareHub!.On(nameof(Client_UserReceiveCharacterDataAcknowledgment), act);
     }
 
     public void OnUserReceiveUploadStatus(Action<UserDto> act)

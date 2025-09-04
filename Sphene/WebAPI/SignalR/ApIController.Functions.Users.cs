@@ -10,13 +10,13 @@ namespace Sphene.WebAPI;
 #pragma warning disable MA0040
 public partial class ApiController
 {
-    public async Task PushCharacterData(CharacterData data, List<UserData> visibleCharacters)
+    public async Task PushCharacterData(CharacterData data, List<UserData> visibleCharacters, string? acknowledgmentId = null)
     {
         if (!IsConnected) return;
 
         try
         {
-            await PushCharacterDataInternal(data, [.. visibleCharacters]).ConfigureAwait(false);
+            await PushCharacterDataInternal(data, [.. visibleCharacters], acknowledgmentId).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -109,9 +109,31 @@ public partial class ApiController
         await _mareHub!.InvokeAsync(nameof(UserUpdateDefaultPermissions), defaultPermissionsDto).ConfigureAwait(false);
     }
 
-    private async Task PushCharacterDataInternal(CharacterData character, List<UserData> visibleCharacters)
+    public async Task UserSendCharacterDataAcknowledgment(CharacterDataAcknowledgmentDto acknowledgmentDto)
     {
-        Logger.LogInformation("Pushing character data for {hash} to {charas}", character.DataHash.Value, string.Join(", ", visibleCharacters.Select(c => c.AliasOrUID)));
+        Logger.LogInformation("UserSendCharacterDataAcknowledgment called - AckId: {acknowledgmentId}, User: {user}, Success: {success}, Connected: {connected}", 
+            acknowledgmentDto.AcknowledgmentId, acknowledgmentDto.User.AliasOrUID, acknowledgmentDto.Success, IsConnected);
+        
+        if (!IsConnected) 
+        {
+            Logger.LogWarning("Cannot send acknowledgment - not connected to server. AckId: {acknowledgmentId}", acknowledgmentDto.AcknowledgmentId);
+            return;
+        }
+        
+        try
+        {
+            await _mareHub!.SendAsync(nameof(UserSendCharacterDataAcknowledgment), acknowledgmentDto).ConfigureAwait(false);
+            Logger.LogInformation("Successfully sent acknowledgment to server - AckId: {acknowledgmentId}", acknowledgmentDto.AcknowledgmentId);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to send acknowledgment to server - AckId: {acknowledgmentId}", acknowledgmentDto.AcknowledgmentId);
+        }
+    }
+
+    private async Task PushCharacterDataInternal(CharacterData character, List<UserData> visibleCharacters, string? acknowledgmentId = null)
+    {
+        Logger.LogInformation("Pushing character data for {hash} to {charas} with acknowledgment ID {ackId}", character.DataHash.Value, string.Join(", ", visibleCharacters.Select(c => c.AliasOrUID)), acknowledgmentId);
         StringBuilder sb = new();
         foreach (var kvp in character.FileReplacements.ToList())
         {
@@ -131,7 +153,7 @@ public partial class ApiController
             Logger.LogDebug("Attaching Census Data: {data}", censusDto);
         }
 
-        await UserPushData(new(visibleCharacters, character, censusDto)).ConfigureAwait(false);
+        await UserPushData(new(visibleCharacters, character, censusDto) { AcknowledgmentId = acknowledgmentId }).ConfigureAwait(false);
     }
 }
 #pragma warning restore MA0040

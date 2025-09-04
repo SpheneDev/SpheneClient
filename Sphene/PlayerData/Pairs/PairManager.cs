@@ -168,6 +168,9 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
 
     public void ReceiveCharaData(OnlineUserCharaDataDto dto)
     {
+        Logger.LogInformation("ReceiveCharaData called - User: {user}, AckId: {acknowledgmentId}, RequiresAck: {requiresAck}", 
+            dto.User.AliasOrUID, dto.AcknowledgmentId, dto.RequiresAcknowledgment);
+        
         if (!_allClientPairs.TryGetValue(dto.User, out var pair))
         {
             Logger.LogWarning("Received character data for user {User} who is not in paired users list. This can happen during connection setup.", dto.User.AliasOrUID);
@@ -175,7 +178,32 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         }
 
         Mediator.Publish(new EventMessage(new Event(pair.UserData, nameof(PairManager), EventSeverity.Informational, "Received Character Data")));
+        Logger.LogInformation("Calling ApplyData for user {user} with AckId {acknowledgmentId}", dto.User.AliasOrUID, dto.AcknowledgmentId);
         pair.ApplyData(dto);
+    }
+
+    public void ReceiveCharacterDataAcknowledgment(CharacterDataAcknowledgmentDto acknowledgmentDto)
+    {
+        Logger.LogInformation("ReceiveCharacterDataAcknowledgment called - AckId: {acknowledgmentId}, User: {user}, Success: {success}", 
+            acknowledgmentDto.AcknowledgmentId, acknowledgmentDto.User.AliasOrUID, acknowledgmentDto.Success);
+        
+        // Find the pair that is waiting for this acknowledgment (has pending acknowledgment with matching ID)
+        var waitingPair = _allClientPairs.Values.FirstOrDefault(p => p.HasPendingAcknowledgment && p.LastAcknowledgmentId == acknowledgmentDto.AcknowledgmentId);
+        if (waitingPair != null)
+        {
+            Logger.LogInformation("Found waiting pair for acknowledgment - User: {user}, updating status", waitingPair.UserData.AliasOrUID);
+            // Update the pair's acknowledgment status
+            waitingPair.UpdateAcknowledgmentStatus(acknowledgmentDto.AcknowledgmentId, acknowledgmentDto.Success, acknowledgmentDto.AcknowledgedAt);
+            
+            Mediator.Publish(new EventMessage(new Event(waitingPair.UserData, nameof(PairManager), EventSeverity.Informational, 
+                acknowledgmentDto.Success ? "Character Data Acknowledged" : "Character Data Acknowledgment Failed")));
+            Logger.LogInformation("Successfully updated acknowledgment status for user {user}", waitingPair.UserData.AliasOrUID);
+        }
+        else
+        {
+            Logger.LogWarning("Could not find waiting pair for acknowledgment - AckId: {acknowledgmentId}, acknowledging user: {user}", 
+                acknowledgmentDto.AcknowledgmentId, acknowledgmentDto.User.AliasOrUID);
+        }
     }
 
     public void RemoveGroup(GroupData data)
@@ -401,6 +429,21 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
             pair.ApplyLastReceivedData(forced: true);
         }
     }
+
+    public void SetPendingAcknowledgmentForUsers(List<UserData> users, string acknowledgmentId)
+    {
+        foreach (var userData in users)
+        {
+            if (_allClientPairs.TryGetValue(userData, out var pair))
+            {
+                pair.SetPendingAcknowledgment(acknowledgmentId);
+                Logger.LogDebug("Set pending acknowledgment for user {user} with ID {id}", userData.AliasOrUID, acknowledgmentId);
+            }
+        }
+        Mediator.Publish(new RefreshUiMessage());
+    }
+
+
 
     private void RecreateLazy()
     {

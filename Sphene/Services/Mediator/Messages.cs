@@ -3,6 +3,7 @@ using Sphene.API.Data;
 using Sphene.API.Dto;
 using Sphene.API.Dto.CharaData;
 using Sphene.API.Dto.Group;
+using Sphene.API.Dto.User;
 using Sphene.SpheneConfiguration.Models;
 using Sphene.PlayerData.Handlers;
 using Sphene.PlayerData.Pairs;
@@ -93,5 +94,6 @@ public record GPoseLobbyReceiveCharaData(CharaDataDownloadDto CharaDataDownloadD
 public record GPoseLobbyReceivePoseData(UserData UserData, PoseData PoseData) : MessageBase;
 public record GPoseLobbyReceiveWorldData(UserData UserData, WorldData WorldData) : MessageBase;
 public record OpenCharaDataHubWithFilterMessage(UserData UserData) : MessageBase;
+public record SendCharacterDataAcknowledgmentMessage(CharacterDataAcknowledgmentDto AcknowledgmentDto) : MessageBase;
 #pragma warning restore S2094
 #pragma warning restore MA0048 // File name must match type name

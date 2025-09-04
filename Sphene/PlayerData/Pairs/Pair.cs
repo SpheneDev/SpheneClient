@@ -52,6 +52,12 @@ public class Pair
     public long LastAppliedDataTris { get; set; } = -1;
     public long LastAppliedApproximateVRAMBytes { get; set; } = -1;
     public string Ident => _onlineUserIdentDto?.Ident ?? string.Empty;
+    
+    // Data synchronization status properties
+    public bool? LastAcknowledgmentSuccess { get; private set; } = null;
+    public DateTimeOffset? LastAcknowledgmentTime { get; private set; } = null;
+    public string? LastAcknowledgmentId { get; private set; } = null;
+    public bool HasPendingAcknowledgment { get; private set; } = false;
 
     public UserData UserData => UserPair.User;
 
@@ -163,12 +169,18 @@ public class Pair
                 {
                     _logger.LogDebug("Applying delayed data for {uid}", data.User.UID);
                     ApplyLastReceivedData();
+                    await SendAcknowledgmentIfRequired(data, true).ConfigureAwait(false);
+                }
+                else
+                {
+                    await SendAcknowledgmentIfRequired(data, false).ConfigureAwait(false);
                 }
             });
             return;
         }
 
         ApplyLastReceivedData();
+        _ = Task.Run(async () => await SendAcknowledgmentIfRequired(data, true).ConfigureAwait(false));
     }
 
     public void ApplyLastReceivedData(bool forced = false)
@@ -290,5 +302,61 @@ public class Pair
         }
 
         return data;
+    }
+
+    public void UpdateAcknowledgmentStatus(string acknowledgmentId, bool success, DateTimeOffset timestamp)
+    {
+        _logger.LogInformation("Updating acknowledgment status: {acknowledgmentId} - Success: {success} for user {user}", acknowledgmentId, success, UserData.AliasOrUID);
+        LastAcknowledgmentId = acknowledgmentId;
+        LastAcknowledgmentSuccess = success;
+        LastAcknowledgmentTime = timestamp;
+        HasPendingAcknowledgment = false;
+        
+        // Trigger UI update
+        _mediator.Publish(new RefreshUiMessage());
+    }
+
+    public void SetPendingAcknowledgment(string acknowledgmentId)
+    {
+        _logger.LogInformation("Setting pending acknowledgment: {acknowledgmentId} for user {user}", acknowledgmentId, UserData.AliasOrUID);
+        LastAcknowledgmentId = acknowledgmentId;
+        HasPendingAcknowledgment = true;
+        LastAcknowledgmentSuccess = null;
+        LastAcknowledgmentTime = null;
+    }
+
+
+
+    private async Task SendAcknowledgmentIfRequired(OnlineUserCharaDataDto data, bool success)
+    {
+        _logger.LogInformation("SendAcknowledgmentIfRequired called - RequiresAcknowledgment: {requires}, AcknowledgmentId: {id}, Success: {success}", 
+            data.RequiresAcknowledgment, data.AcknowledgmentId, success);
+        
+        if (!data.RequiresAcknowledgment || string.IsNullOrEmpty(data.AcknowledgmentId))
+        {
+            _logger.LogInformation("Skipping acknowledgment - RequiresAcknowledgment: {requires}, AcknowledgmentId null/empty: {empty}", 
+                data.RequiresAcknowledgment, string.IsNullOrEmpty(data.AcknowledgmentId));
+            return;
+        }
+
+        try
+        {
+            var acknowledgmentDto = new CharacterDataAcknowledgmentDto(UserData, data.AcknowledgmentId)
+            {
+                Success = success,
+                AcknowledgedAt = DateTime.UtcNow
+            };
+
+            _logger.LogInformation("Sending acknowledgment to server - AckId: {acknowledgmentId}, User: {user}, Success: {success}", 
+                data.AcknowledgmentId, UserData.AliasOrUID, success);
+
+            // Send acknowledgment through the mediator
+            _mediator.Publish(new SendCharacterDataAcknowledgmentMessage(acknowledgmentDto));
+            _logger.LogInformation("Successfully published SendCharacterDataAcknowledgmentMessage for {acknowledgmentId}", data.AcknowledgmentId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to send character data acknowledgment for {acknowledgmentId}", data.AcknowledgmentId);
+        }
     }
 }

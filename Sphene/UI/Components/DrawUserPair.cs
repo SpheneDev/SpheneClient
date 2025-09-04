@@ -13,6 +13,7 @@ using Sphene.Services.Mediator;
 using Sphene.Services.ServerConfiguration;
 using Sphene.UI.Handlers;
 using Sphene.WebAPI;
+using System.Numerics;
 
 namespace Sphene.UI.Components;
 
@@ -265,6 +266,39 @@ public class DrawUserPair
             userPairText = _pair.UserData.AliasOrUID + " is online";
         }
 
+        // Add synchronization status indicator
+        if (_pair.IsOnline)
+        {
+            ImGui.SameLine();
+            if (_pair.HasPendingAcknowledgment)
+            {
+                using var _ = ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.DalamudYellow);
+                _uiSharedService.IconText(FontAwesomeIcon.Clock);
+                UiSharedService.AttachToolTip("Data synchronization pending...");
+            }
+            else if (_pair.LastAcknowledgmentSuccess.HasValue)
+            {
+                if (_pair.LastAcknowledgmentSuccess.Value)
+                {
+                    using var _ = ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.ParsedGreen);
+                    _uiSharedService.IconText(FontAwesomeIcon.CheckCircle);
+                    var timeAgo = _pair.LastAcknowledgmentTime.HasValue 
+                        ? $" ({(DateTimeOffset.UtcNow - _pair.LastAcknowledgmentTime.Value).TotalSeconds:F0}s ago)"
+                        : string.Empty;
+                    UiSharedService.AttachToolTip($"Data synchronized successfully{timeAgo}");
+                }
+                else
+                {
+                    using var _ = ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.DalamudRed);
+                    _uiSharedService.IconText(FontAwesomeIcon.ExclamationTriangle);
+                    var timeAgo = _pair.LastAcknowledgmentTime.HasValue 
+                        ? $" ({(DateTimeOffset.UtcNow - _pair.LastAcknowledgmentTime.Value).TotalSeconds:F0}s ago)"
+                        : string.Empty;
+                    UiSharedService.AttachToolTip($"Data synchronization failed{timeAgo}");
+                }
+            }
+        }
+
         if (_pair.IndividualPairStatus == API.Data.Enum.IndividualPairStatus.OneSided)
         {
             userPairText += UiSharedService.TooltipSeparator + "User has not added you back";
@@ -288,6 +322,20 @@ public class DrawUserPair
                 userPairText += Environment.NewLine + "Approx. Triangle Count (excl. Vanilla): "
                     + (_pair.LastAppliedDataTris > 1000 ? (_pair.LastAppliedDataTris / 1000d).ToString("0.0'k'") : _pair.LastAppliedDataTris);
             }
+        }
+
+        // Add synchronization status information
+        if (_pair.HasPendingAcknowledgment)
+        {
+            userPairText += UiSharedService.TooltipSeparator + "Data Sync: Pending acknowledgment...";
+        }
+        else if (_pair.LastAcknowledgmentSuccess.HasValue)
+        {
+            var syncStatus = _pair.LastAcknowledgmentSuccess.Value ? "Successfully synchronized" : "Synchronization failed";
+            var timeAgo = _pair.LastAcknowledgmentTime.HasValue 
+                ? $" ({(DateTimeOffset.UtcNow - _pair.LastAcknowledgmentTime.Value).TotalSeconds:F0}s ago)"
+                : string.Empty;
+            userPairText += UiSharedService.TooltipSeparator + $"Data Sync: {syncStatus}{timeAgo}";
         }
 
         if (_syncedGroups.Any())
@@ -371,10 +419,12 @@ public class DrawUserPair
         var pauseIcon = _pair.UserPair!.OwnPermissions.IsPaused() ? FontAwesomeIcon.Play : FontAwesomeIcon.Pause;
         var pauseButtonSize = _uiSharedService.GetIconButtonSize(pauseIcon);
         var barButtonSize = _uiSharedService.GetIconButtonSize(FontAwesomeIcon.EllipsisV);
+        var reloadButtonSize = _pair.IsVisible ? _uiSharedService.GetIconButtonSize(FontAwesomeIcon.Sync) : Vector2.Zero;
         var spacingX = ImGui.GetStyle().ItemSpacing.X;
         var windowEndX = ImGui.GetWindowContentRegionMin().X + UiSharedService.GetWindowContentRegionWidth();
         float currentRightSide = windowEndX - barButtonSize.X;
 
+        // Context menu button (rightmost)
         ImGui.SameLine(currentRightSide);
         ImGui.AlignTextToFramePadding();
         if (_uiSharedService.IconButton(FontAwesomeIcon.EllipsisV))
@@ -382,6 +432,19 @@ public class DrawUserPair
             ImGui.OpenPopup("User Flyout Menu");
         }
 
+        // Reload button (only if pair is visible)
+        if (_pair.IsVisible)
+        {
+            currentRightSide -= (reloadButtonSize.X + spacingX);
+            ImGui.SameLine(currentRightSide);
+            if (_uiSharedService.IconButton(FontAwesomeIcon.Sync))
+            {
+                _pair.ApplyLastReceivedData(forced: true);
+            }
+            UiSharedService.AttachToolTip("Reload last received character data");
+        }
+
+        // Pause/Play button (leftmost of the three)
         currentRightSide -= (pauseButtonSize.X + spacingX);
         ImGui.SameLine(currentRightSide);
         if (_uiSharedService.IconButton(pauseIcon))
