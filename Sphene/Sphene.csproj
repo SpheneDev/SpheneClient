@@ -23,6 +23,15 @@
     <AssemblyName>Sphene</AssemblyName>
   </PropertyGroup>
 
+  <!-- Debug configuration with build timestamp -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Debug'">
+    <BuildDate>$([System.DateTime]::Now.ToString("ddMM"))</BuildDate>
+    <BuildTime>$([System.DateTime]::Now.ToString("HHMM"))</BuildTime>
+    <Version>0.0.16-debug$(BuildDate)$(BuildTime)</Version>
+    <AssemblyVersion>0.16.$(BuildDate).$(BuildTime)</AssemblyVersion>
+    <FileVersion>0.16.$(BuildDate).$(BuildTime)</FileVersion>
+  </PropertyGroup>
+
   <!-- Release configuration to hide source file paths -->
   <PropertyGroup Condition="'$(Configuration)' == 'Release'">
     <DebugType>none</DebugType>

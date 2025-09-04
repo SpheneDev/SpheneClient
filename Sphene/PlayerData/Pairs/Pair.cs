@@ -14,12 +14,10 @@ using Microsoft.Extensions.Logging;
 
 namespace Sphene.PlayerData.Pairs;
 
-public class Pair
+public class Pair : DisposableMediatorSubscriberBase
 {
     private readonly PairHandlerFactory _cachedPlayerFactory;
     private readonly SemaphoreSlim _creationSemaphore = new(1);
-    private readonly ILogger<Pair> _logger;
-    private readonly SpheneMediator _mediator;
     private readonly ServerConfigurationManager _serverConfigurationManager;
     private readonly PlayerPerformanceConfigService _playerPerformanceConfigService;
     private CancellationTokenSource _applicationCts = new();
@@ -27,14 +25,15 @@ public class Pair
 
     public Pair(ILogger<Pair> logger, UserFullPairDto userPair, PairHandlerFactory cachedPlayerFactory,
         SpheneMediator mediator, ServerConfigurationManager serverConfigurationManager,
-        PlayerPerformanceConfigService playerPerformanceConfigService)
+        PlayerPerformanceConfigService playerPerformanceConfigService) : base(logger, mediator)
     {
-        _logger = logger;
         UserPair = userPair;
         _cachedPlayerFactory = cachedPlayerFactory;
-        _mediator = mediator;
         _serverConfigurationManager = serverConfigurationManager;
         _playerPerformanceConfigService = playerPerformanceConfigService;
+        
+        // Subscribe to character data application completion messages
+        Mediator.Subscribe<CharacterDataApplicationCompletedMessage>(this, OnCharacterDataApplicationCompleted);
     }
 
     public bool HasCachedPlayer => CachedPlayer != null && !string.IsNullOrEmpty(CachedPlayer.PlayerName) && _onlineUserIdentDto != null;
@@ -58,6 +57,9 @@ public class Pair
     public DateTimeOffset? LastAcknowledgmentTime { get; private set; } = null;
     public string? LastAcknowledgmentId { get; private set; } = null;
     public bool HasPendingAcknowledgment { get; private set; } = false;
+    
+    // Pending acknowledgment data for delayed sending
+    private OnlineUserCharaDataDto? _pendingAcknowledgmentData = null;
 
     public UserData UserData => UserPair.User;
 
@@ -88,7 +90,7 @@ public class Pair
         args.AddMenuItem(new MenuItem()
         {
             Name = openProfileSeString,
-            OnClicked = (a) => _mediator.Publish(new ProfileOpenStandaloneMessage(this)),
+            OnClicked = (a) => Mediator.Publish(new ProfileOpenStandaloneMessage(this)),
             UseDefaultPrefix = false,
             PrefixChar = 'S',
             PrefixColor = 500
@@ -106,7 +108,7 @@ public class Pair
         args.AddMenuItem(new MenuItem()
         {
             Name = changePermissions,
-            OnClicked = (a) => _mediator.Publish(new OpenPermissionWindow(this)),
+            OnClicked = (a) => Mediator.Publish(new OpenPermissionWindow(this)),
             UseDefaultPrefix = false,
             PrefixChar = 'S',
             PrefixColor = 500
@@ -115,7 +117,7 @@ public class Pair
         args.AddMenuItem(new MenuItem()
         {
             Name = cyclePauseState,
-            OnClicked = (a) => _mediator.Publish(new CyclePauseMessage(UserData)),
+            OnClicked = (a) => Mediator.Publish(new CyclePauseMessage(UserData)),
             UseDefaultPrefix = false,
             PrefixChar = 'S',
             PrefixColor = 500
@@ -130,13 +132,13 @@ public class Pair
                 {
                     // Remove from whitelist
                     config.UIDsToIgnore.Remove(UserData.UID);
-                    _logger.LogInformation("Removed {identifier} ({uid}) from performance whitelist", userIdentifier, UserData.UID);
+                    Logger.LogInformation("Removed {identifier} ({uid}) from performance whitelist", userIdentifier, UserData.UID);
                 }
                 else
                 {
                     // Add to whitelist with identifier for reference
                     config.UIDsToIgnore.Add(UserData.UID);
-                    _logger.LogInformation("Added {identifier} ({uid}) to performance whitelist", userIdentifier, UserData.UID);
+                    Logger.LogInformation("Added {identifier} ({uid}) to performance whitelist", userIdentifier, UserData.UID);
                 }
                 _playerPerformanceConfigService.Save();
             },
@@ -153,7 +155,7 @@ public class Pair
 
         if (CachedPlayer == null)
         {
-            _logger.LogDebug("Received Data for {uid} but CachedPlayer does not exist, waiting", data.User.UID);
+            Logger.LogDebug("Received Data for {uid} but CachedPlayer does not exist, waiting", data.User.UID);
             _ = Task.Run(async () =>
             {
                 using var timeoutCts = new CancellationTokenSource();
@@ -167,9 +169,15 @@ public class Pair
 
                 if (!combined.IsCancellationRequested)
                 {
-                    _logger.LogDebug("Applying delayed data for {uid}", data.User.UID);
+                    Logger.LogDebug("Applying delayed data for {uid}", data.User.UID);
                     ApplyLastReceivedData();
-                    await SendAcknowledgmentIfRequired(data, true).ConfigureAwait(false);
+                    
+                    // Store acknowledgment data for delayed sending after application completes
+                    if (data.RequiresAcknowledgment && !string.IsNullOrEmpty(data.AcknowledgmentId))
+                    {
+                        _pendingAcknowledgmentData = data;
+                        Logger.LogInformation("Stored pending acknowledgment data for delayed sending (delayed path) - AckId: {acknowledgmentId}", data.AcknowledgmentId);
+                    }
                 }
                 else
                 {
@@ -180,7 +188,13 @@ public class Pair
         }
 
         ApplyLastReceivedData();
-        _ = Task.Run(async () => await SendAcknowledgmentIfRequired(data, true).ConfigureAwait(false));
+        
+        // Store acknowledgment data for delayed sending after application completes
+        if (data.RequiresAcknowledgment && !string.IsNullOrEmpty(data.AcknowledgmentId))
+        {
+            _pendingAcknowledgmentData = data;
+            Logger.LogInformation("Stored pending acknowledgment data for delayed sending - AckId: {acknowledgmentId}", data.AcknowledgmentId);
+        }
     }
 
     public void ApplyLastReceivedData(bool forced = false)
@@ -265,10 +279,10 @@ public class Pair
 
     private CharacterData? RemoveNotSyncedFiles(CharacterData? data)
     {
-        _logger.LogTrace("Removing not synced files");
+        Logger.LogTrace("Removing not synced files");
         if (data == null)
         {
-            _logger.LogTrace("Nothing to remove");
+            Logger.LogTrace("Nothing to remove");
             return data;
         }
 
@@ -276,13 +290,13 @@ public class Pair
         bool disableIndividualVFX = (UserPair.OtherPermissions.IsDisableVFX() || UserPair.OwnPermissions.IsDisableVFX());
         bool disableIndividualSounds = (UserPair.OtherPermissions.IsDisableSounds() || UserPair.OwnPermissions.IsDisableSounds());
 
-        _logger.LogTrace("Disable: Sounds: {disableIndividualSounds}, Anims: {disableIndividualAnims}; " +
+        Logger.LogTrace("Disable: Sounds: {disableIndividualSounds}, Anims: {disableIndividualAnims}; " +
             "VFX: {disableGroupSounds}",
             disableIndividualSounds, disableIndividualAnimations, disableIndividualVFX);
 
         if (disableIndividualAnimations || disableIndividualSounds || disableIndividualVFX)
         {
-            _logger.LogTrace("Data cleaned up: Animations disabled: {disableAnimations}, Sounds disabled: {disableSounds}, VFX disabled: {disableVFX}",
+            Logger.LogTrace("Data cleaned up: Animations disabled: {disableAnimations}, Sounds disabled: {disableSounds}, VFX disabled: {disableVFX}",
                 disableIndividualAnimations, disableIndividualSounds, disableIndividualVFX);
             foreach (var objectKind in data.FileReplacements.Select(k => k.Key))
             {
@@ -306,35 +320,44 @@ public class Pair
 
     public void UpdateAcknowledgmentStatus(string acknowledgmentId, bool success, DateTimeOffset timestamp)
     {
-        _logger.LogInformation("Updating acknowledgment status: {acknowledgmentId} - Success: {success} for user {user}", acknowledgmentId, success, UserData.AliasOrUID);
+        Logger.LogInformation("Updating acknowledgment status: {acknowledgmentId} - Success: {success} for user {user}", acknowledgmentId, success, UserData.AliasOrUID);
         LastAcknowledgmentId = acknowledgmentId;
         LastAcknowledgmentSuccess = success;
         LastAcknowledgmentTime = timestamp;
         HasPendingAcknowledgment = false;
         
         // Trigger UI update
-        _mediator.Publish(new RefreshUiMessage());
+        Mediator.Publish(new RefreshUiMessage());
     }
 
     public void SetPendingAcknowledgment(string acknowledgmentId)
     {
-        _logger.LogInformation("Setting pending acknowledgment: {acknowledgmentId} for user {user}", acknowledgmentId, UserData.AliasOrUID);
+        Logger.LogInformation("Setting pending acknowledgment: {acknowledgmentId} for user {user}", acknowledgmentId, UserData.AliasOrUID);
         LastAcknowledgmentId = acknowledgmentId;
         HasPendingAcknowledgment = true;
         LastAcknowledgmentSuccess = null;
         LastAcknowledgmentTime = null;
     }
 
+    public void SetBuildStartPendingStatus()
+    {
+        Logger.LogInformation("Setting build start pending status for user {user}", UserData.AliasOrUID);
+        HasPendingAcknowledgment = true;
+        LastAcknowledgmentSuccess = null;
+        LastAcknowledgmentTime = null;
+        LastAcknowledgmentId = null; // No specific acknowledgment ID for build start
+    }
+
 
 
     private async Task SendAcknowledgmentIfRequired(OnlineUserCharaDataDto data, bool success)
     {
-        _logger.LogInformation("SendAcknowledgmentIfRequired called - RequiresAcknowledgment: {requires}, AcknowledgmentId: {id}, Success: {success}", 
+        Logger.LogInformation("SendAcknowledgmentIfRequired called - RequiresAcknowledgment: {requires}, AcknowledgmentId: {id}, Success: {success}", 
             data.RequiresAcknowledgment, data.AcknowledgmentId, success);
         
         if (!data.RequiresAcknowledgment || string.IsNullOrEmpty(data.AcknowledgmentId))
         {
-            _logger.LogInformation("Skipping acknowledgment - RequiresAcknowledgment: {requires}, AcknowledgmentId null/empty: {empty}", 
+            Logger.LogInformation("Skipping acknowledgment - RequiresAcknowledgment: {requires}, AcknowledgmentId null/empty: {empty}", 
                 data.RequiresAcknowledgment, string.IsNullOrEmpty(data.AcknowledgmentId));
             return;
         }
@@ -347,16 +370,41 @@ public class Pair
                 AcknowledgedAt = DateTime.UtcNow
             };
 
-            _logger.LogInformation("Sending acknowledgment to server - AckId: {acknowledgmentId}, User: {user}, Success: {success}", 
+            Logger.LogInformation("Sending acknowledgment to server - AckId: {acknowledgmentId}, User: {user}, Success: {success}", 
                 data.AcknowledgmentId, UserData.AliasOrUID, success);
 
             // Send acknowledgment through the mediator
-            _mediator.Publish(new SendCharacterDataAcknowledgmentMessage(acknowledgmentDto));
-            _logger.LogInformation("Successfully published SendCharacterDataAcknowledgmentMessage for {acknowledgmentId}", data.AcknowledgmentId);
+             Mediator.Publish(new SendCharacterDataAcknowledgmentMessage(acknowledgmentDto));
+            Logger.LogInformation("Successfully published SendCharacterDataAcknowledgmentMessage for {acknowledgmentId}", data.AcknowledgmentId);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to send character data acknowledgment for {acknowledgmentId}", data.AcknowledgmentId);
+            Logger.LogWarning(ex, "Failed to send character data acknowledgment for {acknowledgmentId}", data.AcknowledgmentId);
+        }
+    }
+    
+    /// <summary>
+    /// Handles character data application completion and sends delayed acknowledgment if needed
+    /// </summary>
+    private void OnCharacterDataApplicationCompleted(CharacterDataApplicationCompletedMessage message)
+    {
+        // Check if this message is for this pair and we have pending acknowledgment data
+        if (message.UserUID == UserPair.User.UID && _pendingAcknowledgmentData != null)
+        {
+            Logger.LogInformation("Character data application completed for {playerName} - sending delayed acknowledgment", message.PlayerName);
+            
+            try
+            {
+                _ = Task.Run(async () => 
+                {
+                    await SendAcknowledgmentIfRequired(_pendingAcknowledgmentData, message.Success).ConfigureAwait(false);
+                    _pendingAcknowledgmentData = null; // Clear pending data after sending
+                }).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "Failed to send delayed acknowledgment for {userUid}", message.UserUID);
+            }
         }
     }
 }

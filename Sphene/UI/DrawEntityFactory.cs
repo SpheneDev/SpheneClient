@@ -25,12 +25,14 @@ public class DrawEntityFactory
     private readonly SelectTagForPairUi _selectTagForPairUi;
     private readonly TagHandler _tagHandler;
     private readonly IdDisplayHandler _uidDisplayHandler;
+    private readonly PairManager _pairManager;
 
     public DrawEntityFactory(ILogger<DrawEntityFactory> logger, ApiController apiController, IdDisplayHandler uidDisplayHandler,
         SelectTagForPairUi selectTagForPairUi, SpheneMediator mediator,
         TagHandler tagHandler, SelectPairForTagUi selectPairForTagUi,
         ServerConfigurationManager serverConfigurationManager, UiSharedService uiSharedService,
-        PlayerPerformanceConfigService playerPerformanceConfigService, CharaDataManager charaDataManager)
+        PlayerPerformanceConfigService playerPerformanceConfigService, CharaDataManager charaDataManager,
+        PairManager pairManager)
     {
         _logger = logger;
         _apiController = apiController;
@@ -43,6 +45,7 @@ public class DrawEntityFactory
         _uiSharedService = uiSharedService;
         _playerPerformanceConfigService = playerPerformanceConfigService;
         _charaDataManager = charaDataManager;
+        _pairManager = pairManager;
     }
 
     public DrawFolderGroup CreateDrawGroupFolder(GroupFullInfoDto groupFullInfoDto,
@@ -66,6 +69,6 @@ public class DrawEntityFactory
     {
         return new DrawUserPair(id + user.UserData.UID, user, groups, currentGroup, _apiController, _uidDisplayHandler,
             _mediator, _selectTagForPairUi, _serverConfigurationManager, _uiSharedService, _playerPerformanceConfigService,
-            _charaDataManager);
+            _charaDataManager, _pairManager);
     }
 }

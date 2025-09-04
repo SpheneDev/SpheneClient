@@ -31,6 +31,7 @@ public class DrawUserPair
     private readonly UiSharedService _uiSharedService;
     private readonly PlayerPerformanceConfigService _performanceConfigService;
     private readonly CharaDataManager _charaDataManager;
+    private readonly PairManager _pairManager;
     private float _menuWidth = -1;
     private bool _wasHovered = false;
 
@@ -40,7 +41,7 @@ public class DrawUserPair
         SpheneMediator mareMediator, SelectTagForPairUi selectTagForPairUi,
         ServerConfigurationManager serverConfigurationManager,
         UiSharedService uiSharedService, PlayerPerformanceConfigService performanceConfigService,
-        CharaDataManager charaDataManager)
+        CharaDataManager charaDataManager, PairManager pairManager)
     {
         _id = id;
         _pair = entry;
@@ -54,6 +55,7 @@ public class DrawUserPair
         _uiSharedService = uiSharedService;
         _performanceConfigService = performanceConfigService;
         _charaDataManager = charaDataManager;
+        _pairManager = pairManager;
     }
 
     public Pair Pair => _pair;
@@ -266,15 +268,16 @@ public class DrawUserPair
             userPairText = _pair.UserData.AliasOrUID + " is online";
         }
 
-        // Add synchronization status indicator
-        if (_pair.IsOnline)
+        // Add synchronization status indicator - only show for visible pairs
+        if (_pair.IsOnline && _pair.IsVisible)
         {
             ImGui.SameLine();
-            if (_pair.HasPendingAcknowledgment)
+            // Check if sender is waiting for acknowledgment from this specific user
+            if (_pairManager.HasPendingAcknowledgmentForUser(_pair.UserData))
             {
                 using var _ = ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.DalamudYellow);
                 _uiSharedService.IconText(FontAwesomeIcon.Clock);
-                UiSharedService.AttachToolTip("Data synchronization pending...");
+                UiSharedService.AttachToolTip("Waiting for acknowledgment from this user...");
             }
             else if (_pair.LastAcknowledgmentSuccess.HasValue)
             {
@@ -324,18 +327,21 @@ public class DrawUserPair
             }
         }
 
-        // Add synchronization status information
-        if (_pair.HasPendingAcknowledgment)
+        // Add synchronization status information - only show for visible pairs
+        if (_pair.IsOnline && _pair.IsVisible)
         {
-            userPairText += UiSharedService.TooltipSeparator + "Data Sync: Pending acknowledgment...";
-        }
-        else if (_pair.LastAcknowledgmentSuccess.HasValue)
-        {
-            var syncStatus = _pair.LastAcknowledgmentSuccess.Value ? "Successfully synchronized" : "Synchronization failed";
-            var timeAgo = _pair.LastAcknowledgmentTime.HasValue 
-                ? $" ({(DateTimeOffset.UtcNow - _pair.LastAcknowledgmentTime.Value).TotalSeconds:F0}s ago)"
-                : string.Empty;
-            userPairText += UiSharedService.TooltipSeparator + $"Data Sync: {syncStatus}{timeAgo}";
+            if (_pairManager.HasPendingAcknowledgmentForUser(_pair.UserData))
+            {
+                userPairText += UiSharedService.TooltipSeparator + "Data Sync: Waiting for acknowledgment from this user...";
+            }
+            else if (_pair.LastAcknowledgmentSuccess.HasValue)
+            {
+                var syncStatus = _pair.LastAcknowledgmentSuccess.Value ? "Successfully synchronized" : "Synchronization failed";
+                var timeAgo = _pair.LastAcknowledgmentTime.HasValue 
+                    ? $" ({(DateTimeOffset.UtcNow - _pair.LastAcknowledgmentTime.Value).TotalSeconds:F0}s ago)"
+                    : string.Empty;
+                userPairText += UiSharedService.TooltipSeparator + $"Data Sync: {syncStatus}{timeAgo}";
+            }
         }
 
         if (_syncedGroups.Any())

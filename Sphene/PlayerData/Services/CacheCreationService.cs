@@ -214,6 +214,9 @@ public sealed class CacheCreationService : DisposableMediatorSubscriberBase
 
             try
             {
+                // Publish message when character data building starts
+                Mediator.Publish(new CharacterDataBuildStartedMessage());
+                
                 Dictionary<ObjectKind, CharacterDataFragment?> createdData = [];
                 foreach (var objectKind in _currentlyCreating)
                 {

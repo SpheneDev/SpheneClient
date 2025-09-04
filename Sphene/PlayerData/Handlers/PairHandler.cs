@@ -516,6 +516,9 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             _cachedData = charaData;
 
             Logger.LogDebug("[{applicationId}] Application finished", _applicationId);
+            
+            // Publish message that character data application is completed
+            Mediator.Publish(new CharacterDataApplicationCompletedMessage(PlayerName ?? string.Empty, Pair.UserData.UID, _applicationId, true));
         }
         catch (Exception ex)
         {
@@ -530,6 +533,9 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             {
                 Logger.LogWarning(ex, "[{applicationId}] Cancelled", _applicationId);
             }
+            
+            // Publish message that character data application failed
+            Mediator.Publish(new CharacterDataApplicationCompletedMessage(PlayerName ?? string.Empty, Pair.UserData.UID, _applicationId, false));
         }
     }
 

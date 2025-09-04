@@ -9,6 +9,9 @@ using Sphene.SpheneConfiguration.Models;
 using Sphene.PlayerData.Factories;
 using Sphene.Services.Events;
 using Sphene.Services.Mediator;
+using Sphene.Services.ServerConfiguration;
+using Sphene.WebAPI;
+using Sphene.API.Data.Comparer;
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
 
@@ -18,22 +21,31 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
 {
     private readonly ConcurrentDictionary<UserData, Pair> _allClientPairs = new(UserDataComparer.Instance);
     private readonly ConcurrentDictionary<GroupData, GroupFullInfoDto> _allGroups = new(GroupDataComparer.Instance);
+    private readonly ConcurrentDictionary<string, HashSet<UserData>> _senderPendingAcknowledgments = new();
     private readonly SpheneConfigService _configurationService;
     private readonly IContextMenu _dalamudContextMenu;
     private readonly PairFactory _pairFactory;
+    private readonly ServerConfigurationManager _serverConfigurationManager;
+    private readonly Lazy<ApiController> _apiController;
+
     private Lazy<List<Pair>> _directPairsInternal;
     private Lazy<Dictionary<GroupFullInfoDto, List<Pair>>> _groupPairsInternal;
     private Lazy<Dictionary<Pair, List<GroupFullInfoDto>>> _pairsWithGroupsInternal;
 
     public PairManager(ILogger<PairManager> logger, PairFactory pairFactory,
                 SpheneConfigService configurationService, SpheneMediator mediator,
-                IContextMenu dalamudContextMenu) : base(logger, mediator)
+                IContextMenu dalamudContextMenu, ServerConfigurationManager serverConfigurationManager,
+                Lazy<ApiController> apiController) : base(logger, mediator)
     {
         _pairFactory = pairFactory;
         _configurationService = configurationService;
         _dalamudContextMenu = dalamudContextMenu;
+        _serverConfigurationManager = serverConfigurationManager;
+        _apiController = apiController;
+
         Mediator.Subscribe<DisconnectedMessage>(this, (_) => ClearPairs());
         Mediator.Subscribe<CutsceneEndMessage>(this, (_) => ReapplyPairData());
+        Mediator.Subscribe<CharacterDataBuildStartedMessage>(this, (_) => SetPendingAcknowledgmentForBuildStart());
         _directPairsInternal = DirectPairsLazy();
         _groupPairsInternal = GroupPairsLazy();
         _pairsWithGroupsInternal = PairsWithGroupsLazy();
@@ -187,22 +199,84 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         Logger.LogInformation("ReceiveCharacterDataAcknowledgment called - AckId: {acknowledgmentId}, User: {user}, Success: {success}", 
             acknowledgmentDto.AcknowledgmentId, acknowledgmentDto.User.AliasOrUID, acknowledgmentDto.Success);
         
-        // Find the pair that is waiting for this acknowledgment (has pending acknowledgment with matching ID)
-        var waitingPair = _allClientPairs.Values.FirstOrDefault(p => p.HasPendingAcknowledgment && p.LastAcknowledgmentId == acknowledgmentDto.AcknowledgmentId);
-        if (waitingPair != null)
+        // Check if the acknowledging user is the sender themselves (self-acknowledgment)
+        var currentUserUID = _apiController.Value.UID;
+        Logger.LogInformation("Self-acknowledgment check - Current user UID: {CurrentUID}, Acknowledging user UID: {AckUID}", 
+            currentUserUID, acknowledgmentDto.User.UID);
+        
+        if (!string.IsNullOrEmpty(currentUserUID) && string.Equals(acknowledgmentDto.User.UID, currentUserUID, StringComparison.Ordinal))
         {
-            Logger.LogInformation("Found waiting pair for acknowledgment - User: {user}, updating status", waitingPair.UserData.AliasOrUID);
-            // Update the pair's acknowledgment status
-            waitingPair.UpdateAcknowledgmentStatus(acknowledgmentDto.AcknowledgmentId, acknowledgmentDto.Success, acknowledgmentDto.AcknowledgedAt);
+            Logger.LogInformation("Ignoring acknowledgment from sender themselves: {user}", acknowledgmentDto.User.AliasOrUID);
+            return;
+        }
+        
+        // Debug: Log all current pending acknowledgments
+        Logger.LogInformation("Current pending acknowledgments count: {count}", _senderPendingAcknowledgments.Count);
+        foreach (var kvp in _senderPendingAcknowledgments)
+        {
+            Logger.LogInformation("Pending AckId: {ackId}, Recipients: [{recipients}]", 
+                kvp.Key, string.Join(", ", kvp.Value.Select(u => u.AliasOrUID)));
+        }
+        
+        // Check if this is a sender acknowledgment (we sent data and are receiving confirmation)
+        if (_senderPendingAcknowledgments.TryGetValue(acknowledgmentDto.AcknowledgmentId, out var pendingRecipients))
+        {
+            Logger.LogInformation("Found matching pending acknowledgment for AckId: {acknowledgmentId}", acknowledgmentDto.AcknowledgmentId);
             
-            Mediator.Publish(new EventMessage(new Event(waitingPair.UserData, nameof(PairManager), EventSeverity.Informational, 
+            // Debug: Log the UIDs of all pending recipients
+            Logger.LogInformation("Pending recipients UIDs: [{uids}]", string.Join(", ", pendingRecipients.Select(u => u.UID)));
+            Logger.LogInformation("Acknowledging user UID: {ackUID}", acknowledgmentDto.User.UID);
+            
+            // Debug: Check if any pending recipient has matching UID
+            var matchingRecipient = pendingRecipients.FirstOrDefault(u => string.Equals(u.UID, acknowledgmentDto.User.UID, StringComparison.Ordinal));
+            Logger.LogInformation("Found matching recipient by UID: {found}, Recipient: {recipient}", 
+                matchingRecipient != null, matchingRecipient?.AliasOrUID ?? "null");
+            
+            // Remove the acknowledging user from pending list
+            var removed = pendingRecipients.Remove(acknowledgmentDto.User);
+            Logger.LogInformation("Attempted to remove user {user} from pending acknowledgments. Removed: {removed}, Remaining: {count}", 
+                acknowledgmentDto.User.AliasOrUID, removed, pendingRecipients.Count);
+            
+            // If direct removal failed but we found a matching UID, try manual removal
+            if (!removed && matchingRecipient != null)
+            {
+                Logger.LogInformation("Direct removal failed, attempting manual removal of matching recipient");
+                var manualRemoved = pendingRecipients.Remove(matchingRecipient);
+                Logger.LogInformation("Manual removal result: {manualRemoved}, Remaining: {count}", 
+                    manualRemoved, pendingRecipients.Count);
+                removed = manualRemoved;
+            }
+            
+            // Update the acknowledgment status for the specific user pair
+            if (_allClientPairs.TryGetValue(acknowledgmentDto.User, out var pair))
+            {
+                pair.UpdateAcknowledgmentStatus(acknowledgmentDto.AcknowledgmentId, acknowledgmentDto.Success, DateTimeOffset.Now);
+                Logger.LogInformation("Updated acknowledgment status for user {user} - Success: {success}", 
+                    acknowledgmentDto.User.AliasOrUID, acknowledgmentDto.Success);
+            }
+            else
+            {
+                Logger.LogWarning("Could not find pair for acknowledging user: {user}", acknowledgmentDto.User.AliasOrUID);
+            }
+            
+            // If no more pending recipients, remove the acknowledgment entirely
+            if (pendingRecipients.Count == 0)
+            {
+                _senderPendingAcknowledgments.TryRemove(acknowledgmentDto.AcknowledgmentId, out _);
+                Logger.LogInformation("All acknowledgments received for ID {acknowledgmentId}, removed from pending list", acknowledgmentDto.AcknowledgmentId);
+            }
+            
+            Mediator.Publish(new EventMessage(new Event(acknowledgmentDto.User, nameof(PairManager), EventSeverity.Informational, 
                 acknowledgmentDto.Success ? "Character Data Acknowledged" : "Character Data Acknowledgment Failed")));
-            Logger.LogInformation("Successfully updated acknowledgment status for user {user}", waitingPair.UserData.AliasOrUID);
+            Mediator.Publish(new RefreshUiMessage());
+            Logger.LogInformation("Published UI refresh message for acknowledgment");
         }
         else
         {
-            Logger.LogWarning("Could not find waiting pair for acknowledgment - AckId: {acknowledgmentId}, acknowledging user: {user}", 
+            Logger.LogWarning("Could not find sender pending acknowledgment - AckId: {acknowledgmentId}, acknowledging user: {user}", 
                 acknowledgmentDto.AcknowledgmentId, acknowledgmentDto.User.AliasOrUID);
+            Logger.LogWarning("Available pending acknowledgment IDs: [{ids}]", 
+                string.Join(", ", _senderPendingAcknowledgments.Keys));
         }
     }
 
@@ -443,7 +517,71 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         Mediator.Publish(new RefreshUiMessage());
     }
 
+    public void SetPendingAcknowledgmentForSender(List<UserData> recipients, string acknowledgmentId)
+    {
+        // Track pending acknowledgments from sender's perspective
+        _senderPendingAcknowledgments[acknowledgmentId] = new HashSet<UserData>(recipients, UserDataComparer.Instance);
+        
+        // Also set pending acknowledgment on individual pairs for UI display
+        foreach (var recipient in recipients)
+        {
+            if (_allClientPairs.TryGetValue(recipient, out var pair))
+            {
+                pair.SetPendingAcknowledgment(acknowledgmentId);
+                Logger.LogDebug("Set pending acknowledgment on pair for recipient {user} with ID {id}", recipient.AliasOrUID, acknowledgmentId);
+            }
+        }
+        
+        Logger.LogInformation("Set pending acknowledgment for sender with ID {id} waiting for {count} recipients: [{recipients}]", 
+            acknowledgmentId, recipients.Count, string.Join(", ", recipients.Select(r => r.AliasOrUID)));
+        Logger.LogInformation("Total pending acknowledgments after adding: {count}", _senderPendingAcknowledgments.Count);
+        Mediator.Publish(new RefreshUiMessage());
+    }
 
+    public bool HasPendingAcknowledgmentForUser(UserData userData)
+    {
+        // Check if the sender is waiting for acknowledgment from this specific user
+        var hasSenderPending = _senderPendingAcknowledgments.Values.Any(recipients => recipients.Contains(userData));
+        
+        // Also check if the individual pair has a pending acknowledgment
+        var hasIndividualPending = false;
+        if (_allClientPairs.TryGetValue(userData, out var pair))
+        {
+            hasIndividualPending = pair.HasPendingAcknowledgment;
+        }
+        
+        Logger.LogDebug("HasPendingAcknowledgmentForUser {user} - SenderPending: {senderPending}, IndividualPending: {individualPending}", 
+            userData.AliasOrUID, hasSenderPending, hasIndividualPending);
+        
+        return hasSenderPending || hasIndividualPending;
+    }
+
+    public bool HasAnySenderPendingAcknowledgments()
+    {
+        // Check if the sender has any pending acknowledgments
+        return _senderPendingAcknowledgments.Any();
+    }
+
+    public void SetPendingAcknowledgmentForBuildStart()
+    {
+        // Get all visible and online pairs
+        var visiblePairs = _allClientPairs.Values
+            .Where(p => p.IsVisible && p.IsOnline)
+            .ToList();
+        
+        if (visiblePairs.Any())
+        {
+            // Set UI pending status without creating a trackable acknowledgment
+            // This will show the yellow clock until real data is sent
+            foreach (var pair in visiblePairs)
+            {
+                pair.SetBuildStartPendingStatus();
+            }
+            
+            Logger.LogInformation("Set build start pending status for {count} visible pairs", visiblePairs.Count);
+            Mediator.Publish(new RefreshUiMessage());
+        }
+    }
 
     private void RecreateLazy()
     {
