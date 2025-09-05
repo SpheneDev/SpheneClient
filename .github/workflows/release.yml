@@ -73,7 +73,7 @@ jobs:
     - name: Create release package
       run: |
         $version = "${{ steps.get_version.outputs.version }}"
-        $outputDir = "release-package"
+        $outputDir = "Sphene-v$version"
         New-Item -ItemType Directory -Path $outputDir -Force
         
         # Copy all files from Release directory except Sphene subfolder
@@ -85,7 +85,7 @@ jobs:
         } | Copy-Item -Destination $outputDir -Recurse
         
         # Create zip file
-        $zipName = "Sphene-v$version.zip"
+        $zipName = "latest.zip"
         Compress-Archive -Path "$outputDir/*" -DestinationPath $zipName
         echo "zip_name=$zipName" >> $env:GITHUB_OUTPUT
       shell: powershell
@@ -99,10 +99,21 @@ jobs:
         body: |
           ## Sphene Client Release v${{ steps.get_version.outputs.version }}
           
-          ### Installation
-          1. Download the `Sphene-v${{ steps.get_version.outputs.version }}.zip` file
+          ### Installation via Dalamud Plugin Repository
+          
+          **Recommended Method:**
+          1. Open Dalamud Settings in-game (`/xlsettings`)
+          2. Go to "Experimental" tab
+          3. Add this repository URL: `https://raw.githubusercontent.com/SpheneDev/repo/refs/heads/main/plogonmaster.json`
+          4. Install "Sphene" from the plugin installer
+          
+          ### Manual Installation
+          1. Download the `latest.zip` file from this release
           2. Extract it to your Dalamud plugins directory
           3. Restart Final Fantasy XIV or reload Dalamud plugins
+          
+          ### Registration Required
+          Before using Sphene, join our [Discord Server](https://discord.gg/GbnwsP2XsF) and register in the `#sphene-registration` channel to get your Secret Key.
           
           ### Changes
           See commit history for detailed changes in this release.
