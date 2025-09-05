@@ -11,6 +11,7 @@ using Sphene.Services.ServerConfiguration;
 using Sphene.SpheneConfiguration;
 using Sphene.Utils;
 using Microsoft.Extensions.Logging;
+using System.Collections.Concurrent;
 
 namespace Sphene.PlayerData.Pairs;
 
@@ -33,7 +34,7 @@ public class Pair : DisposableMediatorSubscriberBase
         _playerPerformanceConfigService = playerPerformanceConfigService;
         
         // Subscribe to character data application completion messages
-        Mediator.Subscribe<CharacterDataApplicationCompletedMessage>(this, OnCharacterDataApplicationCompleted);
+        Mediator.Subscribe<CharacterDataApplicationCompletedMessage>(this, async (message) => await OnCharacterDataApplicationCompleted(message));
     }
 
     public bool HasCachedPlayer => CachedPlayer != null && !string.IsNullOrEmpty(CachedPlayer.PlayerName) && _onlineUserIdentDto != null;
@@ -58,8 +59,9 @@ public class Pair : DisposableMediatorSubscriberBase
     public string? LastAcknowledgmentId { get; private set; } = null;
     public bool HasPendingAcknowledgment { get; private set; } = false;
     
-    // Pending acknowledgment data for delayed sending
-    private OnlineUserCharaDataDto? _pendingAcknowledgmentData = null;
+    // Queue for pending acknowledgment data to handle multiple rapid requests
+    private readonly ConcurrentQueue<OnlineUserCharaDataDto> _pendingAcknowledgmentQueue = new();
+    private volatile int _acknowledgmentSequence = 0;
 
     public UserData UserData => UserPair.User;
 
@@ -153,6 +155,9 @@ public class Pair : DisposableMediatorSubscriberBase
         _applicationCts = _applicationCts.CancelRecreate();
         LastReceivedCharacterData = data.CharaData;
 
+        // Assign sequence number for tracking order
+        var currentSequence = Interlocked.Increment(ref _acknowledgmentSequence);
+        
         if (CachedPlayer == null)
         {
             Logger.LogDebug("Received Data for {uid} but CachedPlayer does not exist, waiting", data.User.UID);
@@ -172,11 +177,14 @@ public class Pair : DisposableMediatorSubscriberBase
                     Logger.LogDebug("Applying delayed data for {uid}", data.User.UID);
                     ApplyLastReceivedData();
                     
-                    // Store acknowledgment data for delayed sending after application completes
+                    // Enqueue acknowledgment data for delayed sending after application completes
                     if (data.RequiresAcknowledgment && !string.IsNullOrEmpty(data.AcknowledgmentId))
                     {
-                        _pendingAcknowledgmentData = data;
-                        Logger.LogInformation("Stored pending acknowledgment data for delayed sending (delayed path) - AckId: {acknowledgmentId}", data.AcknowledgmentId);
+                        // Add sequence number to track order
+                        var dataWithSequence = data.DeepClone();
+                        dataWithSequence.SequenceNumber = currentSequence;
+                        _pendingAcknowledgmentQueue.Enqueue(dataWithSequence);
+                        Logger.LogInformation("Enqueued pending acknowledgment data for delayed sending (delayed path) - AckId: {acknowledgmentId}, Sequence: {sequence}", data.AcknowledgmentId, currentSequence);
                     }
                 }
                 else
@@ -189,11 +197,14 @@ public class Pair : DisposableMediatorSubscriberBase
 
         ApplyLastReceivedData();
         
-        // Store acknowledgment data for delayed sending after application completes
+        // Enqueue acknowledgment data for delayed sending after application completes
         if (data.RequiresAcknowledgment && !string.IsNullOrEmpty(data.AcknowledgmentId))
         {
-            _pendingAcknowledgmentData = data;
-            Logger.LogInformation("Stored pending acknowledgment data for delayed sending - AckId: {acknowledgmentId}", data.AcknowledgmentId);
+            // Add sequence number to track order
+            var dataWithSequence = data.DeepClone();
+            dataWithSequence.SequenceNumber = currentSequence;
+            _pendingAcknowledgmentQueue.Enqueue(dataWithSequence);
+            Logger.LogInformation("Enqueued pending acknowledgment data for delayed sending - AckId: {acknowledgmentId}, Sequence: {sequence}, Queue size: {queueSize}", data.AcknowledgmentId, currentSequence, _pendingAcknowledgmentQueue.Count);
         }
     }
 
@@ -386,24 +397,61 @@ public class Pair : DisposableMediatorSubscriberBase
     /// <summary>
     /// Handles character data application completion and sends delayed acknowledgment if needed
     /// </summary>
-    private void OnCharacterDataApplicationCompleted(CharacterDataApplicationCompletedMessage message)
+    private async Task OnCharacterDataApplicationCompleted(CharacterDataApplicationCompletedMessage message)
     {
-        // Check if this message is for this pair and we have pending acknowledgment data
-        if (message.UserUID == UserPair.User.UID && _pendingAcknowledgmentData != null)
+        // Check if this message is for this pair
+        if (message.UserUID == UserPair.User.UID)
         {
-            Logger.LogInformation("Character data application completed for {playerName} - sending delayed acknowledgment", message.PlayerName);
+            Logger.LogInformation("Character data application completed for {playerName} - processing acknowledgment queue", message.PlayerName);
             
-            try
+            // Process acknowledgment queue and send only the latest acknowledgment
+            if (!_pendingAcknowledgmentQueue.IsEmpty)
             {
-                _ = Task.Run(async () => 
+                OnlineUserCharaDataDto? latestAcknowledgment = null;
+                var processedCount = 0;
+                var discardedCount = 0;
+                
+                // Dequeue all pending acknowledgments and keep only the latest one
+                while (_pendingAcknowledgmentQueue.TryDequeue(out var acknowledgmentData))
                 {
-                    await SendAcknowledgmentIfRequired(_pendingAcknowledgmentData, message.Success).ConfigureAwait(false);
-                    _pendingAcknowledgmentData = null; // Clear pending data after sending
-                }).ConfigureAwait(false);
+                    processedCount++;
+                    if (latestAcknowledgment == null || acknowledgmentData.SequenceNumber > latestAcknowledgment.SequenceNumber)
+                    {
+                        if (latestAcknowledgment != null)
+                        {
+                            discardedCount++;
+                            Logger.LogInformation("Discarding outdated acknowledgment - AckId: {acknowledgmentId}, Sequence: {sequence}", 
+                                latestAcknowledgment.AcknowledgmentId, latestAcknowledgment.SequenceNumber);
+                        }
+                        latestAcknowledgment = acknowledgmentData;
+                    }
+                    else
+                    {
+                        discardedCount++;
+                        Logger.LogInformation("Discarding outdated acknowledgment - AckId: {acknowledgmentId}, Sequence: {sequence}", 
+                            acknowledgmentData.AcknowledgmentId, acknowledgmentData.SequenceNumber);
+                    }
+                }
+                
+                Logger.LogInformation("Processed {processedCount} acknowledgments, discarded {discardedCount}, sending latest with sequence {sequence}", 
+                    processedCount, discardedCount, latestAcknowledgment?.SequenceNumber ?? -1);
+                
+                // Send the latest acknowledgment
+                if (latestAcknowledgment != null)
+                {
+                    try
+                    {
+                        await SendAcknowledgmentIfRequired(latestAcknowledgment, message.Success).ConfigureAwait(false);
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogWarning(ex, "Failed to send delayed acknowledgment for {userUid}", message.UserUID);
+                    }
+                }
             }
-            catch (Exception ex)
+            else
             {
-                Logger.LogWarning(ex, "Failed to send delayed acknowledgment for {userUid}", message.UserUID);
+                Logger.LogInformation("No pending acknowledgment data, but character data application completed for {playerName}", message.PlayerName);
             }
         }
     }
