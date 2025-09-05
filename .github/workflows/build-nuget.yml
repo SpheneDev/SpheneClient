@@ -1,4 +1,10 @@
-name: Build SpheneClient
+name: Build SpheneClient (NuGet API)
+
+# Alternative workflow that uses SpheneAPI as NuGet package instead of ProjectReference
+# To use this workflow:
+# 1. Rename this file to build.yml (and rename the current build.yml to build-projectref.yml)
+# 2. Update Sphene.csproj to use PackageReference instead of ProjectReference
+# 3. Ensure SpheneAPI is published as NuGet package
 
 on:
   push:
@@ -17,18 +23,24 @@ jobs:
       with:
         submodules: recursive
         
-    - name: Checkout SpheneAPI
-      uses: actions/checkout@v4
-      with:
-        repository: SpheneDev/SpheneAPI  # Replace with actual API repository
-        path: SpheneAPI
-        token: ${{ secrets.GITHUB_TOKEN }}  # Use PAT if private repo: ${{ secrets.API_ACCESS_TOKEN }}
-        
     - name: Setup .NET
       uses: actions/setup-dotnet@v4
       with:
         dotnet-version: '9.0.x'
         
+    # Add private NuGet source if SpheneAPI is hosted privately
+    - name: Add NuGet source
+      run: |
+        # Example for GitHub Packages (adjust URL and credentials as needed)
+        # dotnet nuget add source https://nuget.pkg.github.com/SpheneDev/index.json --name github --username ${{ github.actor }} --password ${{ secrets.GITHUB_TOKEN }}
+        
+        # Example for Azure DevOps Artifacts
+        # dotnet nuget add source https://pkgs.dev.azure.com/yourorg/_packaging/yourfeed/nuget/v3/index.json --name azure --username az --password ${{ secrets.AZURE_DEVOPS_PAT }}
+        
+        # For public NuGet.org, no additional source needed
+        Write-Host "Using default NuGet sources"
+      shell: powershell
+      
     - name: Restore dependencies
       run: dotnet restore Sphene.sln
       working-directory: ./
@@ -44,7 +56,7 @@ jobs:
     - name: Upload Debug Artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: sphene-debug
+        name: sphene-debug-nuget
         path: |
           Sphene/bin/Debug/
           !Sphene/bin/Debug/**/*.pdb
@@ -53,7 +65,7 @@ jobs:
     - name: Upload Release Artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: sphene-release
+        name: sphene-release-nuget
         path: |
           Sphene/bin/Release/
           !Sphene/bin/Release/**/*.pdb

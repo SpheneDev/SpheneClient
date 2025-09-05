@@ -358,3 +358,5 @@ MigrationBackup/
 Directory.Build.props
 .github/workflows/README.md
 GITHUB_ACTIONS.md
+.github/API_INTEGRATION.md
+.github/scripts/configure-api-source.ps1

@@ -23,6 +23,13 @@ jobs:
       with:
         submodules: recursive
         
+    - name: Checkout SpheneAPI
+      uses: actions/checkout@v4
+      with:
+        repository: SpheneDev/SpheneAPI  # Replace with actual API repository
+        path: SpheneAPI
+        token: ${{ secrets.GITHUB_TOKEN }}  # Use PAT if private repo: ${{ secrets.API_ACCESS_TOKEN }}
+        
     - name: Setup .NET
       uses: actions/setup-dotnet@v4
       with:
