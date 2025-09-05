@@ -73,7 +73,10 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\SpheneAPI\SpheneAPI\Sphene.API.csproj" />
+    <!-- Local development path (when SpheneAPI is in parent directory) -->
+    <ProjectReference Include="..\..\SpheneAPI\SpheneAPI\Sphene.API.csproj" Condition="Exists('..\..\SpheneAPI\SpheneAPI\Sphene.API.csproj')" />
+    <!-- GitHub Actions path (when SpheneAPI is checked out into SpheneClient directory) -->
+    <ProjectReference Include="..\SpheneAPI\SpheneAPI\Sphene.API.csproj" Condition="Exists('..\SpheneAPI\SpheneAPI\Sphene.API.csproj') And !Exists('..\..\SpheneAPI\SpheneAPI\Sphene.API.csproj')" />
   </ItemGroup>
 
   <ItemGroup>
