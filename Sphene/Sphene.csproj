@@ -74,7 +74,7 @@
 
   <ItemGroup>
     <!-- SpheneAPI reference - works for both local development and GitHub Actions -->
-    <ProjectReference Include="..\..\SpheneAPI\SpheneAPI\Sphene.API.csproj" />
+    <ProjectReference Include=".\SpheneAPI\SpheneAPI\Sphene.API.csproj" />
   </ItemGroup>
 
   <ItemGroup>
