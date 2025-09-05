@@ -372,6 +372,8 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         if (!updatedData.Any())
         {
             Logger.LogDebug("[BASE-{appBase}] Nothing to update for {obj}", applicationBase, this);
+            // Still publish completion message even when no changes are detected
+            Mediator.Publish(new CharacterDataApplicationCompletedMessage(PlayerName ?? string.Empty, Pair.UserData.UID, applicationBase, true));
             return;
         }
 
