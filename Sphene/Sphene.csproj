@@ -76,7 +76,7 @@
     <!-- Local development - SpheneAPI is in parent directory -->
     <ProjectReference Include="..\..\SpheneAPI\SpheneAPI\Sphene.API.csproj" Condition="Exists('..\..\SpheneAPI\SpheneAPI\Sphene.API.csproj')" />
     <!-- GitHub Actions - SpheneAPI is checked out to SpheneClient/SpheneAPI -->
-    <ProjectReference Include=".\SpheneAPI\SpheneAPI\Sphene.API.csproj" Condition="!Exists('..\..\SpheneAPI\SpheneAPI\Sphene.API.csproj') And Exists('..\SpheneAPI\SpheneAPI\Sphene.API.csproj')" />
+    <ProjectReference Include="..\SpheneAPI\SpheneAPI\Sphene.API.csproj" Condition="!Exists('..\..\SpheneAPI\SpheneAPI\Sphene.API.csproj') And Exists('..\SpheneAPI\SpheneAPI\Sphene.API.csproj')" />
   </ItemGroup>
 
   <ItemGroup>
