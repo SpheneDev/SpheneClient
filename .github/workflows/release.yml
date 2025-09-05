@@ -86,7 +86,7 @@ jobs:
         
         # Create zip file
         $zipName = "latest.zip"
-        Compress-Archive -Path "$outputDir/*" -DestinationPath $zipName
+        Compress-Archive -Path "$outputDir/*" -DestinationPath $zipName -Force
         echo "zip_name=$zipName" >> $env:GITHUB_OUTPUT
       shell: powershell
       id: package
