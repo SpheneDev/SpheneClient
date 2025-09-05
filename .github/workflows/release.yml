@@ -60,10 +60,10 @@ jobs:
       shell: powershell
       
     - name: Restore dependencies
-      run: dotnet restore Sphene.sln
+      run: dotnet restore Sphene.Actions.sln
       
     - name: Build Release
-      run: dotnet build Sphene.sln --configuration Release --no-restore
+      run: dotnet build Sphene.Actions.sln --configuration Release --no-restore
       
     - name: Create release package
       run: |

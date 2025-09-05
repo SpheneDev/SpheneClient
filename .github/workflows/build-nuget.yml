@@ -42,15 +42,15 @@ jobs:
       shell: powershell
       
     - name: Restore dependencies
-      run: dotnet restore Sphene.sln
+      run: dotnet restore Sphene.Actions.sln
       working-directory: ./
       
     - name: Build Debug
-      run: dotnet build Sphene.sln --configuration Debug --no-restore
+      run: dotnet build Sphene.Actions.sln --configuration Debug --no-restore
       working-directory: ./
       
     - name: Build Release
-      run: dotnet build Sphene.sln --configuration Release --no-restore
+      run: dotnet build Sphene.Actions.sln --configuration Release --no-restore
       working-directory: ./
       
     - name: Upload Debug Artifacts
@@ -73,7 +73,7 @@ jobs:
         
     - name: Check for compilation errors
       run: |
-        $errors = dotnet build Sphene.sln --configuration Release --verbosity quiet 2>&1 | Select-String "error CS"
+        $errors = dotnet build Sphene.Actions.sln --configuration Release --verbosity quiet 2>&1 | Select-String "error CS"
         if ($errors) {
           Write-Host "Compilation errors found:"
           $errors | ForEach-Object { Write-Host $_ }
