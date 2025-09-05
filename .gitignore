@@ -48,6 +48,13 @@ Generated\ Files/
 TestResult.xml
 nunit-*.xml
 
+# GitHub Actions
+release-package/
+*.zip
+
+# Workflow artifacts
+.github/workflows/artifacts/
+
 # Build Results of an ATL Project
 [Dd]ebugPS/
 [Rr]eleasePS/
@@ -349,3 +356,5 @@ MigrationBackup/
 # Ionide (cross platform F# VS Code tools) working folder
 .ionide/
 Directory.Build.props
+.github/workflows/README.md
+GITHUB_ACTIONS.md

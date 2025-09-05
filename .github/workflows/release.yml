@@ -1,0 +1,106 @@
+name: Release SpheneClient
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g., v1.0.0)'
+        required: true
+        type: string
+
+jobs:
+  release:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+        
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '9.0.x'
+        
+    - name: Get version from tag
+      id: get_version
+      run: |
+        if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+          $version = "${{ github.event.inputs.tag }}"
+        } else {
+          $version = "${{ github.ref_name }}"
+        }
+        $version = $version -replace '^v', ''
+        echo "version=$version" >> $env:GITHUB_OUTPUT
+        echo "Version: $version"
+      shell: powershell
+        
+    - name: Update project version
+      run: |
+        $version = "${{ steps.get_version.outputs.version }}"
+        $csprojPath = "Sphene/Sphene.csproj"
+        $content = Get-Content $csprojPath -Raw
+        $content = $content -replace '<Version>.*?</Version>', "<Version>$version</Version>"
+        $content = $content -replace '<AssemblyVersion>.*?</AssemblyVersion>', "<AssemblyVersion>$version.0</AssemblyVersion>"
+        $content = $content -replace '<FileVersion>.*?</FileVersion>', "<FileVersion>$version.0</FileVersion>"
+        Set-Content $csprojPath $content
+      shell: powershell
+      
+    - name: Restore dependencies
+      run: dotnet restore Sphene.sln
+      
+    - name: Build Release
+      run: dotnet build Sphene.sln --configuration Release --no-restore
+      
+    - name: Create release package
+      run: |
+        $version = "${{ steps.get_version.outputs.version }}"
+        $outputDir = "release-package"
+        New-Item -ItemType Directory -Path $outputDir -Force
+        
+        # Copy main plugin files
+        Copy-Item "Sphene/bin/Release/net9.0-windows7.0/Sphene.dll" $outputDir
+        Copy-Item "Sphene/bin/Release/net9.0-windows7.0/Sphene.json" $outputDir
+        
+        # Copy dependencies (exclude system assemblies)
+        Get-ChildItem "Sphene/bin/Release/net9.0-windows7.0/" -Filter "*.dll" | Where-Object {
+          $_.Name -notmatch '^(System\.|Microsoft\.|Dalamud\.|ImGui\.|FFXIVClientStructs\.)' -and
+          $_.Name -ne 'Sphene.dll'
+        } | Copy-Item -Destination $outputDir
+        
+        # Create zip file
+        $zipName = "Sphene-v$version.zip"
+        Compress-Archive -Path "$outputDir/*" -DestinationPath $zipName
+        echo "zip_name=$zipName" >> $env:GITHUB_OUTPUT
+      shell: powershell
+      id: package
+      
+    - name: Create Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}
+        name: Sphene Client v${{ steps.get_version.outputs.version }}
+        body: |
+          ## Sphene Client Release v${{ steps.get_version.outputs.version }}
+          
+          ### Installation
+          1. Download the `Sphene-v${{ steps.get_version.outputs.version }}.zip` file
+          2. Extract it to your Dalamud plugins directory
+          3. Restart Final Fantasy XIV or reload Dalamud plugins
+          
+          ### Changes
+          See commit history for detailed changes in this release.
+          
+          **Full Changelog**: https://github.com/${{ github.repository }}/commits/${{ github.ref_name }}
+        files: |
+          ${{ steps.package.outputs.zip_name }}
+        draft: false
+        prerelease: ${{ contains(steps.get_version.outputs.version, '-') }}
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

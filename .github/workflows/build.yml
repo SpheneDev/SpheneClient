@@ -1,0 +1,66 @@
+name: Build SpheneClient
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master, develop ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+        
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '9.0.x'
+        
+    - name: Restore dependencies
+      run: dotnet restore Sphene.sln
+      working-directory: ./
+      
+    - name: Build Debug
+      run: dotnet build Sphene.sln --configuration Debug --no-restore
+      working-directory: ./
+      
+    - name: Build Release
+      run: dotnet build Sphene.sln --configuration Release --no-restore
+      working-directory: ./
+      
+    - name: Upload Debug Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: sphene-debug
+        path: |
+          Sphene/bin/Debug/
+          !Sphene/bin/Debug/**/*.pdb
+        retention-days: 30
+        
+    - name: Upload Release Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: sphene-release
+        path: |
+          Sphene/bin/Release/
+          !Sphene/bin/Release/**/*.pdb
+        retention-days: 90
+        
+    - name: Check for compilation errors
+      run: |
+        $errors = dotnet build Sphene.sln --configuration Release --verbosity quiet 2>&1 | Select-String "error CS"
+        if ($errors) {
+          Write-Host "Compilation errors found:"
+          $errors | ForEach-Object { Write-Host $_ }
+          exit 1
+        } else {
+          Write-Host "No compilation errors found."
+        }
+      working-directory: ./
+      shell: powershell
