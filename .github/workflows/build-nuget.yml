@@ -41,6 +41,11 @@ jobs:
         Write-Host "Using default NuGet sources"
       shell: powershell
       
+    - name: Download and install Dalamud
+      run: |
+        Invoke-WebRequest -Uri "https://goatcorp.github.io/dalamud-distrib/stg/latest.zip" -OutFile latest.zip
+        Expand-Archive -Force latest.zip "$env:AppData\XIVLauncher\addon\Hooks\dev"
+        
     - name: Restore dependencies
       run: dotnet restore Sphene.Actions.sln
       working-directory: ./
