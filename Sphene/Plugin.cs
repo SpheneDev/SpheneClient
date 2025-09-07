@@ -90,6 +90,7 @@ public sealed class Plugin : IDalamudPlugin
             collection.AddSingleton(new WindowSystem("MareSynchronos"));
             collection.AddSingleton<FileDialogManager>();
             collection.AddSingleton(new Dalamud.Localization("MareSynchronos.Localization.", "", useEmbedded: true));
+            collection.AddSingleton(commandManager);
 
             // add mare related singletons
             collection.AddSingleton<SpheneMediator>();
@@ -110,6 +111,8 @@ public sealed class Plugin : IDalamudPlugin
             collection.AddSingleton<CharacterAnalyzer>();
             collection.AddSingleton<TokenProvider>();
             collection.AddSingleton<PluginWarningNotificationService>();
+            collection.AddSingleton<UpdateCheckService>();
+            collection.AddSingleton<LoginHandler>();
             collection.AddSingleton<FileCompactor>();
             collection.AddSingleton<TagHandler>();
             collection.AddSingleton<IdDisplayHandler>();
@@ -210,6 +213,13 @@ public sealed class Plugin : IDalamudPlugin
             collection.AddScoped<WindowMediatorSubscriberBase, CreateSyncshellUI>();
             collection.AddScoped<WindowMediatorSubscriberBase, EventViewerUI>();
             collection.AddScoped<WindowMediatorSubscriberBase, CharaDataHubUi>();
+            collection.AddSingleton<WindowMediatorSubscriberBase, UpdateNotificationUi>((s) => new UpdateNotificationUi(
+                s.GetRequiredService<ILogger<UpdateNotificationUi>>(),
+                s.GetRequiredService<UiSharedService>(),
+                s.GetRequiredService<SpheneMediator>(),
+                s.GetRequiredService<PerformanceCollectorService>(),
+                s.GetRequiredService<ICommandManager>()));
+            collection.AddScoped<WindowMediatorSubscriberBase, UpdateTestWindow>();
 
             collection.AddScoped<WindowMediatorSubscriberBase, EditProfileUi>((s) => new EditProfileUi(s.GetRequiredService<ILogger<EditProfileUi>>(),
                 s.GetRequiredService<SpheneMediator>(), s.GetRequiredService<ApiController>(), s.GetRequiredService<UiSharedService>(), s.GetRequiredService<FileDialogManager>(),
@@ -242,6 +252,7 @@ public sealed class Plugin : IDalamudPlugin
             collection.AddHostedService(p => p.GetRequiredService<DtrEntry>());
             collection.AddHostedService(p => p.GetRequiredService<EventAggregator>());
             collection.AddHostedService(p => p.GetRequiredService<IpcProvider>());
+            collection.AddHostedService(p => p.GetRequiredService<LoginHandler>());
             collection.AddHostedService(p => p.GetRequiredService<SphenePlugin>());
         })
         .Build();

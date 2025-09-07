@@ -21,6 +21,12 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
     private readonly HashSet<UserData> _usersToPushDataTo = [];
     private readonly SemaphoreSlim _pushDataSemaphore = new(1, 1);
     private readonly CancellationTokenSource _runtimeCts = new();
+    
+    // Hash-based acknowledgment tracking
+    private readonly Dictionary<UserData, string> _lastSentHashPerUser = new();
+    private readonly Dictionary<UserData, DateTime> _lastSilentAckPerUser = new();
+    private readonly Timer _silentAcknowledgmentTimer;
+    private const int SILENT_ACK_INTERVAL_MINUTES = 1;
 
 
     public VisibleUserDataDistributor(ILogger<VisibleUserDataDistributor> logger, ApiController apiController, DalamudUtilService dalamudUtil,
@@ -30,24 +36,40 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
         _dalamudUtil = dalamudUtil;
         _pairManager = pairManager;
         _fileTransferManager = fileTransferManager;
+        
+        // Initialize silent acknowledgment timer
+        _silentAcknowledgmentTimer = new Timer(SendSilentAcknowledgments, null, 
+            TimeSpan.FromMinutes(SILENT_ACK_INTERVAL_MINUTES), 
+            TimeSpan.FromMinutes(SILENT_ACK_INTERVAL_MINUTES));
+        
         Mediator.Subscribe<DelayedFrameworkUpdateMessage>(this, (_) => FrameworkOnUpdate());
         Mediator.Subscribe<CharacterDataCreatedMessage>(this, (msg) =>
         {
-            var newData = msg.CharacterData;
-            if (_lastCreatedData == null || (!string.Equals(newData.DataHash.Value, _lastCreatedData.DataHash.Value, StringComparison.Ordinal)))
+            var previousHash = _lastCreatedData?.DataHash?.Value;
+            var newHash = msg.CharacterData.DataHash?.Value;
+            
+            _lastCreatedData = msg.CharacterData;
+            
+            // Only push if hash actually changed or if we have users waiting for data
+            if (previousHash != newHash || _usersToPushDataTo.Count > 0)
             {
-                _lastCreatedData = newData;
-                Logger.LogTrace("Storing new data hash {hash}", newData.DataHash.Value);
+                Logger.LogDebug("Character data hash changed from {oldHash} to {newHash}, pushing to users", 
+                    previousHash ?? "null", newHash ?? "null");
                 PushToAllVisibleUsers(forced: true);
             }
             else
             {
-                Logger.LogTrace("Data hash {hash} equal to stored data", newData.DataHash.Value);
+                Logger.LogDebug("Character data hash unchanged ({hash}), skipping push", newHash ?? "null");
             }
         });
 
         Mediator.Subscribe<ConnectedMessage>(this, (_) => PushToAllVisibleUsers());
-        Mediator.Subscribe<DisconnectedMessage>(this, (_) => _previouslyVisiblePlayers.Clear());
+        Mediator.Subscribe<DisconnectedMessage>(this, (_) => 
+        {
+            _previouslyVisiblePlayers.Clear();
+            _lastSentHashPerUser.Clear();
+            _lastSilentAckPerUser.Clear();
+        });
     }
 
     protected override void Dispose(bool disposing)
@@ -56,6 +78,7 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
         {
             _runtimeCts.Cancel();
             _runtimeCts.Dispose();
+            _silentAcknowledgmentTimer?.Dispose();
         }
 
         base.Dispose(disposing);
@@ -63,15 +86,34 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
 
     private void PushToAllVisibleUsers(bool forced = false)
     {
+        var currentHash = _lastCreatedData?.DataHash.Value;
+        if (string.IsNullOrEmpty(currentHash)) return;
+        
         foreach (var user in _pairManager.GetVisibleUsers())
         {
-            _usersToPushDataTo.Add(user);
+            // Only add users who haven't received this hash yet or if forced
+            _lastSentHashPerUser.TryGetValue(user, out var lastHash);
+            if (forced || lastHash == null || !string.Equals(lastHash, currentHash, StringComparison.Ordinal))
+            {
+                _usersToPushDataTo.Add(user);
+                Logger.LogTrace("Adding user {user} to push queue - LastHash: {lastHash}, CurrentHash: {currentHash}, Forced: {forced}", 
+                    user.AliasOrUID, lastHash ?? "NONE", currentHash, forced);
+            }
+            else
+            {
+                Logger.LogTrace("Skipping user {user} - already has hash {hash}", user.AliasOrUID, currentHash);
+            }
         }
 
         if (_usersToPushDataTo.Count > 0)
         {
-            Logger.LogDebug("Pushing data {hash} for {count} visible players", _lastCreatedData?.DataHash.Value ?? "UNKNOWN", _usersToPushDataTo.Count);
+            Logger.LogDebug("Pushing data {hash} for {count} visible players (out of {total} total)", 
+                currentHash, _usersToPushDataTo.Count, _pairManager.GetVisibleUsers().Count());
             PushCharacterData(forced);
+        }
+        else
+        {
+            Logger.LogTrace("No users need data push - all have current hash {hash}", currentHash);
         }
     }
 
@@ -85,14 +127,27 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
         _previouslyVisiblePlayers.AddRange(allVisibleUsers);
         if (newVisibleUsers.Count == 0) return;
 
-        Logger.LogDebug("Scheduling character data push of {data} to {users}",
-            _lastCreatedData?.DataHash.Value ?? string.Empty,
+        Logger.LogDebug("New users entered view: {users}. Scheduling data push check.",
             string.Join(", ", newVisibleUsers.Select(k => k.AliasOrUID)));
+        
+        // Add new users to push queue - they will get data when CharacterDataCreatedMessage fires
+        // or immediately if we have current data
         foreach (var user in newVisibleUsers)
         {
             _usersToPushDataTo.Add(user);
         }
-        PushCharacterData();
+        
+        // Only push immediately if we have data to push
+        if (_lastCreatedData != null)
+        {
+            Logger.LogDebug("Pushing existing character data {hash} to new users",
+                _lastCreatedData.DataHash?.Value ?? "null");
+            PushCharacterData();
+        }
+        else
+        {
+            Logger.LogDebug("No character data available yet, users will receive data when it's created");
+        }
     }
 
     private void PushCharacterData(bool forced = false)
@@ -123,6 +178,15 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
                     var acknowledgmentId = Guid.NewGuid().ToString();
                     _pairManager.SetPendingAcknowledgmentForSender([.. _usersToPushDataTo], acknowledgmentId);
                     
+                    // Track the hash sent to each user
+                    var currentHash = dataToSend.DataHash.Value;
+                    foreach (var user in _usersToPushDataTo)
+                    {
+                        _lastSentHashPerUser[user] = currentHash;
+                        _lastSilentAckPerUser[user] = DateTime.UtcNow;
+                        Logger.LogTrace("Updated hash tracking for user {user}: {hash}", user.AliasOrUID, currentHash);
+                    }
+                    
                     Logger.LogDebug("Pushing {data} to {users} with acknowledgment ID {ackId}", dataToSend.DataHash, string.Join(", ", _usersToPushDataTo.Select(k => k.AliasOrUID)), acknowledgmentId);
                     await _apiController.PushCharacterData(dataToSend, [.. _usersToPushDataTo], acknowledgmentId).ConfigureAwait(false);
                     _usersToPushDataTo.Clear();
@@ -133,5 +197,102 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
                 }
             }
         });
+    }
+    
+    /// <summary>
+    /// Sends silent acknowledgments for users who have the same hash for more than 1 minute
+    /// This maintains connection health without unnecessary data transfers
+    /// </summary>
+    private void SendSilentAcknowledgments(object? state)
+    {
+        // Schedule the actual work on the framework thread to avoid threading issues
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                _dalamudUtil.RunOnFrameworkThread(() =>
+                {
+                    ProcessSilentAcknowledgments();
+                });
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "Failed to schedule silent acknowledgments on framework thread");
+            }
+        });
+    }
+    
+    /// <summary>
+    /// Processes silent acknowledgments on the framework thread
+    /// </summary>
+    private void ProcessSilentAcknowledgments()
+    {
+        if (!_dalamudUtil.GetIsPlayerPresent() || !_apiController.IsConnected || _lastCreatedData == null)
+            return;
+            
+        var currentTime = DateTime.UtcNow;
+        var currentHash = _lastCreatedData.DataHash.Value;
+        var usersForSilentAck = new List<UserData>();
+        
+        foreach (var user in _pairManager.GetVisibleUsers())
+        {
+            // Check if user has the current hash and hasn't received a silent ack recently
+            if (_lastSentHashPerUser.TryGetValue(user, out var userHash) && 
+                string.Equals(userHash, currentHash, StringComparison.Ordinal))
+            {
+                if (_lastSilentAckPerUser.TryGetValue(user, out var lastSilentAck))
+                {
+                    var timeSinceLastAck = currentTime - lastSilentAck;
+                    if (timeSinceLastAck.TotalMinutes >= SILENT_ACK_INTERVAL_MINUTES)
+                    {
+                        usersForSilentAck.Add(user);
+                    }
+                }
+            }
+        }
+        
+        if (usersForSilentAck.Count > 0)
+        {
+            Logger.LogTrace("Sending silent acknowledgment to {count} users with hash {hash}", 
+                usersForSilentAck.Count, currentHash);
+                
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    // Send silent acknowledgment without requiring response
+                    await _apiController.PushCharacterData(_lastCreatedData, usersForSilentAck, null).ConfigureAwait(false);
+                    
+                    // Update silent ack timestamps
+                    foreach (var user in usersForSilentAck)
+                    {
+                        _lastSilentAckPerUser[user] = currentTime;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogWarning(ex, "Failed to send silent acknowledgments");
+                }
+            });
+        }
+    }
+    
+    /// <summary>
+    /// Checks if a user needs data based on hash comparison
+    /// </summary>
+    public bool UserNeedsData(UserData user, string dataHash)
+    {
+        if (!_lastSentHashPerUser.TryGetValue(user, out var lastHash))
+            return true; // User never received any data
+            
+        return !string.Equals(lastHash, dataHash, StringComparison.Ordinal);
+    }
+    
+    /// <summary>
+    /// Gets the last sent hash for a user
+    /// </summary>
+    public string? GetLastSentHashForUser(UserData user)
+    {
+        return _lastSentHashPerUser.TryGetValue(user, out var hash) ? hash : null;
     }
 }

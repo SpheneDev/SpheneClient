@@ -22,6 +22,7 @@ public sealed class CacheCreationService : DisposableMediatorSubscriberBase
     private CancellationTokenSource _debounceCts = new();
     private bool _haltCharaDataCreation;
     private bool _isZoning = false;
+    private string? _lastDataHash = null;
 
     public CacheCreationService(ILogger<CacheCreationService> logger, SpheneMediator mediator, GameObjectHandlerFactory gameObjectHandlerFactory,
         PlayerDataFactory characterDataFactory, DalamudUtilService dalamudUtil) : base(logger, mediator)
@@ -214,9 +215,6 @@ public sealed class CacheCreationService : DisposableMediatorSubscriberBase
 
             try
             {
-                // Publish message when character data building starts
-                Mediator.Publish(new CharacterDataBuildStartedMessage());
-                
                 Dictionary<ObjectKind, CharacterDataFragment?> createdData = [];
                 foreach (var objectKind in _currentlyCreating)
                 {
@@ -228,7 +226,21 @@ public sealed class CacheCreationService : DisposableMediatorSubscriberBase
                     _playerData.SetFragment(kvp.Key, kvp.Value);
                 }
 
-                Mediator.Publish(new CharacterDataCreatedMessage(_playerData.ToAPI()));
+                // Check if data actually changed before publishing
+                var newData = _playerData.ToAPI();
+                var newHash = newData.DataHash?.Value;
+                
+                if (newHash != _lastDataHash)
+                {
+                    Logger.LogDebug("Character data changed, publishing update. Old hash: {oldHash}, New hash: {newHash}", _lastDataHash ?? "null", newHash ?? "null");
+                    _lastDataHash = newHash;
+                    Mediator.Publish(new CharacterDataCreatedMessage(newData));
+                }
+                else
+                {
+                    Logger.LogDebug("Character data unchanged, skipping update. Hash: {hash}", newHash ?? "null");
+                }
+                
                 _currentlyCreating.Clear();
             }
             catch (OperationCanceledException)

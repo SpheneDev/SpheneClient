@@ -42,7 +42,8 @@ public sealed class CommandManagerService : IDisposable
         "\t /sphene toggle on|off - Connects or disconnects to Sphene respectively" + Environment.NewLine +
         "\t /sphene gpose - Opens the Sphene Character Data Hub window" + Environment.NewLine +
         "\t /sphene analyze - Opens the Sphene Character Data Analysis window" + Environment.NewLine +
-        "\t /sphene settings - Opens the Sphene Settings window"
+        "\t /sphene settings - Opens the Sphene Settings window" + Environment.NewLine +
+        "\t /sphene updatetest - Opens the Update Test window"
         });
     }
 
@@ -121,6 +122,10 @@ public sealed class CommandManagerService : IDisposable
         else if (string.Equals(splitArgs[0], "settings", StringComparison.OrdinalIgnoreCase))
         {
             _mediator.Publish(new UiToggleMessage(typeof(SettingsUi)));
+        }
+        else if (string.Equals(splitArgs[0], "updatetest", StringComparison.OrdinalIgnoreCase))
+        {
+            _mediator.Publish(new UiToggleMessage(typeof(UpdateTestWindow)));
         }
     }
 }

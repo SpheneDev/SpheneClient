@@ -164,7 +164,19 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         Logger.LogDebug("[BASE-{appbase}] Applying data for {player}, forceApplyCustomization: {forced}, forceApplyMods: {forceMods}", applicationBase, this, forceApplyCustomization, _forceApplyMods);
         Logger.LogDebug("[BASE-{appbase}] Hash for data is {newHash}, current cache hash is {oldHash}", applicationBase, characterData.DataHash.Value, _cachedData?.DataHash.Value ?? "NODATA");
 
-        if (string.Equals(characterData.DataHash.Value, _cachedData?.DataHash.Value ?? string.Empty, StringComparison.Ordinal) && !forceApplyCustomization) return;
+        // Check if data hash is identical and no forced application is required
+        var hashesAreEqual = string.Equals(characterData.DataHash.Value, _cachedData?.DataHash.Value ?? string.Empty, StringComparison.Ordinal);
+        if (hashesAreEqual && !forceApplyCustomization) 
+        {
+            Logger.LogTrace("[BASE-{appbase}] Skipping application - hash unchanged and no forced customization", applicationBase);
+            return;
+        }
+        
+        // Log when we're applying despite same hash (due to forced application)
+        if (hashesAreEqual && forceApplyCustomization)
+        {
+            Logger.LogDebug("[BASE-{appbase}] Applying despite same hash due to forced customization", applicationBase);
+        }
 
         if (_dalamudUtil.IsInCutscene || _dalamudUtil.IsInGpose || !_ipcManager.Penumbra.APIAvailable || !_ipcManager.Glamourer.APIAvailable)
         {
