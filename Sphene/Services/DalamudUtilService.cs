@@ -38,6 +38,7 @@ public class DalamudUtilService : IHostedService, IMediatorSubscriber
     private readonly IGameGui _gameGui;
     private readonly ILogger<DalamudUtilService> _logger;
     private readonly IObjectTable _objectTable;
+    private readonly IPartyList _partyList;
     private readonly PerformanceCollectorService _performanceCollector;
     private readonly SpheneConfigService _configService;
     private uint? _classJobId = 0;
@@ -51,7 +52,7 @@ public class DalamudUtilService : IHostedService, IMediatorSubscriber
     private Lazy<ulong> _cid;
 
     public DalamudUtilService(ILogger<DalamudUtilService> logger, IClientState clientState, IObjectTable objectTable, IFramework framework,
-        IGameGui gameGui, ICondition condition, IDataManager gameData, ITargetManager targetManager, IGameConfig gameConfig,
+        IGameGui gameGui, ICondition condition, IDataManager gameData, ITargetManager targetManager, IGameConfig gameConfig, IPartyList partyList,
         BlockedCharacterHandler blockedCharacterHandler, SpheneMediator mediator, PerformanceCollectorService performanceCollector,
         SpheneConfigService configService)
     {
@@ -63,6 +64,7 @@ public class DalamudUtilService : IHostedService, IMediatorSubscriber
         _condition = condition;
         _gameData = gameData;
         _gameConfig = gameConfig;
+        _partyList = partyList;
         _blockedCharacterHandler = blockedCharacterHandler;
         Mediator = mediator;
         _performanceCollector = performanceCollector;
@@ -772,5 +774,73 @@ public class DalamudUtilService : IHostedService, IMediatorSubscriber
 
             _delayedFrameworkUpdateCheck = DateTime.UtcNow;
         });
+    }
+
+    /// <summary>
+    /// Checks if the player is currently in a party
+    /// </summary>
+    public bool IsInParty => _partyList?.Length > 1;
+
+    /// <summary>
+    /// Gets the current party size (including the player)
+    /// </summary>
+    public int PartySize => _partyList?.Length ?? 1;
+
+    /// <summary>
+    /// Gets the party leader's name, or null if not in party
+    /// </summary>
+    public string? PartyLeaderName
+    {
+        get
+        {
+            if (_partyList == null || _partyList.Length <= 1) return null;
+            var leaderIndex = (int)_partyList.PartyLeaderIndex;
+            if (leaderIndex >= 0 && leaderIndex < _partyList.Length)
+            {
+                return _partyList[leaderIndex]?.Name?.TextValue;
+            }
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Gets all party member names (excluding the player)
+    /// </summary>
+    public List<string> GetPartyMemberNames()
+    {
+        var members = new List<string>();
+        if (_partyList == null || _partyList.Length <= 1) return members;
+
+        for (int i = 0; i < _partyList.Length; i++)
+        {
+            var member = _partyList[i];
+            if (member != null && !string.IsNullOrEmpty(member.Name?.TextValue))
+            {
+                // Skip the local player
+                if (member.ObjectId != (uint?)_clientState.LocalPlayer?.GameObjectId)
+                {
+                    members.Add(member.Name.TextValue);
+                }
+            }
+        }
+        return members;
+    }
+
+    /// <summary>
+    /// Checks if a specific player is in the current party
+    /// </summary>
+    public bool IsPlayerInParty(string playerName)
+    {
+        if (_partyList == null || _partyList.Length <= 1 || string.IsNullOrEmpty(playerName)) return false;
+
+        for (int i = 0; i < _partyList.Length; i++)
+        {
+            var member = _partyList[i];
+            if (member?.Name?.TextValue?.Equals(playerName, StringComparison.OrdinalIgnoreCase) == true)
+            {
+                return true;
+            }
+        }
+        return false;
     }
 }

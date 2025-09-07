@@ -41,7 +41,7 @@ public sealed class Plugin : IDalamudPlugin
         IFramework framework, IObjectTable objectTable, IClientState clientState, ICondition condition, IChatGui chatGui,
         IGameGui gameGui, IDtrBar dtrBar, IPluginLog pluginLog, ITargetManager targetManager, INotificationManager notificationManager,
         ITextureProvider textureProvider, IContextMenu contextMenu, IGameInteropProvider gameInteropProvider, IGameConfig gameConfig,
-        ISigScanner sigScanner)
+        ISigScanner sigScanner, IPartyList partyList)
     {
         if (!Directory.Exists(pluginInterface.ConfigDirectory.FullName))
             Directory.CreateDirectory(pluginInterface.ConfigDirectory.FullName);
@@ -136,7 +136,7 @@ public sealed class Plugin : IDalamudPlugin
             collection.AddSingleton((s) => new EventAggregator(pluginInterface.ConfigDirectory.FullName,
                 s.GetRequiredService<ILogger<EventAggregator>>(), s.GetRequiredService<SpheneMediator>()));
             collection.AddSingleton((s) => new DalamudUtilService(s.GetRequiredService<ILogger<DalamudUtilService>>(),
-                clientState, objectTable, framework, gameGui, condition, gameData, targetManager, gameConfig,
+                clientState, objectTable, framework, gameGui, condition, gameData, targetManager, gameConfig, partyList,
                 s.GetRequiredService<BlockedCharacterHandler>(), s.GetRequiredService<SpheneMediator>(), s.GetRequiredService<PerformanceCollectorService>(),
                 s.GetRequiredService<SpheneConfigService>()));
             collection.AddSingleton((s) => new DtrEntry(s.GetRequiredService<ILogger<DtrEntry>>(), dtrBar, s.GetRequiredService<SpheneConfigService>(),
@@ -253,6 +253,7 @@ public sealed class Plugin : IDalamudPlugin
             collection.AddHostedService(p => p.GetRequiredService<EventAggregator>());
             collection.AddHostedService(p => p.GetRequiredService<IpcProvider>());
             collection.AddHostedService(p => p.GetRequiredService<LoginHandler>());
+            collection.AddHostedService(p => p.GetRequiredService<UpdateCheckService>());
             collection.AddHostedService(p => p.GetRequiredService<SphenePlugin>());
         })
         .Build();

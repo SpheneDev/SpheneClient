@@ -4,27 +4,39 @@ using System.Text.Json;
 using System.Reflection;
 using Sphene.Services.Mediator;
 using Sphene.UI;
+using Microsoft.Extensions.Hosting;
 
 namespace Sphene.Services;
 
-public class UpdateCheckService
+public class UpdateCheckService : IHostedService, IDisposable
 {
     private readonly ILogger<UpdateCheckService> _logger;
     private readonly HttpClient _httpClient;
     private readonly SpheneMediator _mediator;
+    private readonly DalamudUtilService _dalamudUtilService;
+    private Timer? _updateCheckTimer;
     private const string UPDATE_CHECK_URL = "https://raw.githubusercontent.com/SpheneDev/repo/refs/heads/main/plogonmaster.json";
+    private const int UPDATE_CHECK_INTERVAL_MINUTES = 5;
     
-    public UpdateCheckService(ILogger<UpdateCheckService> logger, HttpClient httpClient, SpheneMediator mediator)
+    public UpdateCheckService(ILogger<UpdateCheckService> logger, HttpClient httpClient, SpheneMediator mediator, DalamudUtilService dalamudUtilService)
     {
         _logger = logger;
         _httpClient = httpClient;
         _mediator = mediator;
+        _dalamudUtilService = dalamudUtilService;
     }
     
-    public async Task<UpdateInfo?> CheckForUpdatesAsync()
+    public async Task<UpdateInfo?> CheckForUpdatesAsync(bool skipCombatCheck = false)
     {
         try
         {
+            // Skip update check if player is in combat or performing, unless explicitly overridden
+            if (!skipCombatCheck && _dalamudUtilService.IsInCombatOrPerforming)
+            {
+                _logger.LogDebug("Skipping update check - player is in combat or performing");
+                return null;
+            }
+            
             _logger.LogInformation("Checking for updates from {url}", UPDATE_CHECK_URL);
             
             var response = await _httpClient.GetStringAsync(UPDATE_CHECK_URL);
@@ -60,8 +72,11 @@ public class UpdateCheckService
                     IsUpdateAvailable = true
                 };
                 
-                // Show update notification UI
-                _mediator.Publish(new ShowUpdateNotificationMessage(updateInfo));
+                // Show update notification UI only if not in combat
+                if (!_dalamudUtilService.IsInCombatOrPerforming)
+                {
+                    _mediator.Publish(new ShowUpdateNotificationMessage(updateInfo));
+                }
                 
                 return updateInfo;
             }
@@ -85,7 +100,7 @@ public class UpdateCheckService
     public async Task TestUpdateCheckAsync()
     {
         _logger.LogInformation("Manual update check triggered for testing");
-        await CheckForUpdatesAsync();
+        await CheckForUpdatesAsync(skipCombatCheck: true); // Skip combat check for manual tests
     }
     
     private Version GetCurrentVersion()
@@ -93,6 +108,46 @@ public class UpdateCheckService
         var assembly = Assembly.GetExecutingAssembly();
         var version = assembly.GetName().Version;
         return version ?? new Version(0, 0, 0, 0);
+    }
+    
+    private async void OnUpdateCheckTimer(object? state)
+    {
+        try
+        {
+            _logger.LogDebug("Periodic update check triggered");
+            await CheckForUpdatesAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error during periodic update check");
+        }
+    }
+    
+    public Task StartAsync(CancellationToken cancellationToken)
+    {
+        _logger.LogInformation("UpdateCheckService started - will check for updates every {minutes} minutes", UPDATE_CHECK_INTERVAL_MINUTES);
+        
+        // Start the timer for periodic update checks
+        _updateCheckTimer = new Timer(
+            OnUpdateCheckTimer,
+            null,
+            TimeSpan.FromMinutes(1), // First check after 1 minute
+            TimeSpan.FromMinutes(UPDATE_CHECK_INTERVAL_MINUTES) // Then every 5 minutes
+        );
+        
+        return Task.CompletedTask;
+    }
+    
+    public Task StopAsync(CancellationToken cancellationToken)
+    {
+        _logger.LogInformation("UpdateCheckService stopping");
+        _updateCheckTimer?.Change(Timeout.Infinite, 0);
+        return Task.CompletedTask;
+    }
+    
+    public void Dispose()
+    {
+        _updateCheckTimer?.Dispose();
     }
 }
 

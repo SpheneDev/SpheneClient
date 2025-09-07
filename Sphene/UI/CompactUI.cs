@@ -26,6 +26,10 @@ using System.Collections.Immutable;
 using System.Globalization;
 using System.Numerics;
 using System.Reflection;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.Formats.Png;
+using SixLabors.ImageSharp.PixelFormats;
+using Dalamud.Interface.Textures.TextureWraps;
 
 namespace Sphene.UI;
 
@@ -44,10 +48,12 @@ public class CompactUi : WindowMediatorSubscriberBase
     private readonly TopTabMenu _tabMenu;
     private readonly TagHandler _tagHandler;
     private readonly UiSharedService _uiSharedService;
+    private readonly DalamudUtilService _dalamudUtilService;
     private List<IDrawFolder> _drawFolders;
     private Pair? _lastAddedUser;
     private string _lastAddedUserComment = string.Empty;
     private Vector2 _lastPosition = Vector2.One;
+    private bool _isNsfwModeActive = false;
     private Vector2 _lastSize = Vector2.One;
     private int _secretKeyIdx = -1;
     private bool _showModalForUserAddition;
@@ -58,7 +64,7 @@ public class CompactUi : WindowMediatorSubscriberBase
     public CompactUi(ILogger<CompactUi> logger, UiSharedService uiShared, SpheneConfigService configService, ApiController apiController, PairManager pairManager,
         ServerConfigurationManager serverManager, SpheneMediator mediator, FileUploadManager fileTransferManager,
         TagHandler tagHandler, DrawEntityFactory drawEntityFactory, SelectTagForPairUi selectTagForPairUi, SelectPairForTagUi selectPairForTagUi,
-        PerformanceCollectorService performanceCollectorService, IpcManager ipcManager)
+        PerformanceCollectorService performanceCollectorService, IpcManager ipcManager, DalamudUtilService dalamudUtilService)
         : base(logger, mediator, "###SpheneMainUI", performanceCollectorService)
     {
         _uiSharedService = uiShared;
@@ -72,7 +78,9 @@ public class CompactUi : WindowMediatorSubscriberBase
         _selectGroupForPairUi = selectTagForPairUi;
         _selectPairsForGroupUi = selectPairForTagUi;
         _ipcManager = ipcManager;
+        _dalamudUtilService = dalamudUtilService;
         _tabMenu = new TopTabMenu(Mediator, _apiController, _pairManager, _uiSharedService);
+
 
         AllowPinning = false;
         AllowClickthrough = false;
@@ -138,6 +146,17 @@ public class CompactUi : WindowMediatorSubscriberBase
             MinimumSize = new Vector2(370, 400),
             MaximumSize = new Vector2(370, 2000),
         };
+    }
+
+    // Removed ConvertSvgBase64ToPng method - no longer needed
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            // No longer need to dispose NSFW icon texture
+        }
+        base.Dispose(disposing);
     }
 
     public override void PreDraw()
@@ -343,11 +362,66 @@ public class CompactUi : WindowMediatorSubscriberBase
         // Always show reconnect button with proper alignment
         ImGui.SameLine();
         ImGui.AlignTextToFramePadding();
-        if (_uiSharedService.IconTextButton(FontAwesomeIcon.Redo, ""))
+        ImGui.PushFont(UiBuilder.IconFont);
+        if (ImGui.Button(FontAwesomeIcon.Redo.ToIconString(), new Vector2(22, 22)))
         {
             _ = Task.Run(() => _apiController.CreateConnectionsAsync());
         }
+        ImGui.PopFont();
         UiSharedService.AttachToolTip("Reconnect to the Sphene Network");
+        
+        // NSFW Mode button next to reconnect
+        ImGui.SameLine();
+        ImGui.AlignTextToFramePadding();
+        
+        if (_isNsfwModeActive)
+        {
+            // Resume mode - use play icon
+            var resumeIcon = FontAwesomeIcon.Play;
+            var resumeColor = ImGuiColors.ParsedGreen;
+            ImGui.PushStyleColor(ImGuiCol.Text, resumeColor);
+            ImGui.PushFont(UiBuilder.IconFont);
+            if (ImGui.Button(resumeIcon.ToIconString(), new Vector2(22, 22)))
+            {
+                _ = Task.Run(() => HandleNsfwModeToggle());
+            }
+            ImGui.PopFont();
+            ImGui.PopStyleColor();
+        }
+        else
+        {
+            // Incognito Mode - use red heart icon
+            var incognitoIcon = FontAwesomeIcon.Heart;
+            var incognitoColor = ImGuiColors.DalamudRed;
+            ImGui.PushStyleColor(ImGuiCol.Text, incognitoColor);
+            ImGui.PushFont(UiBuilder.IconFont);
+            if (ImGui.Button(incognitoIcon.ToIconString(), new Vector2(22, 22)))
+            {
+                _ = Task.Run(() => HandleNsfwModeToggle());
+            }
+            ImGui.PopFont();
+            ImGui.PopStyleColor();
+        }
+        var tooltipText = _isNsfwModeActive ? "Resume - Unpause all pairs and reconnect syncshells" : "Incognito Mode - Pause all pairs and syncshells except party members";
+        UiSharedService.AttachToolTip(tooltipText);
+        
+        // Party Status indicator
+        ImGui.SameLine();
+        ImGui.AlignTextToFramePadding();
+        if (_dalamudUtilService.IsInParty)
+        {
+            ImGui.PushStyleColor(ImGuiCol.Text, ImGuiColors.ParsedBlue);
+            _uiSharedService.IconText(FontAwesomeIcon.Users);
+            ImGui.PopStyleColor();
+            UiSharedService.AttachToolTip($"In Party ({_dalamudUtilService.PartySize} members)\nLeader: {_dalamudUtilService.PartyLeaderName ?? "Unknown"}");
+        }
+        else
+        {
+            ImGui.PushStyleColor(ImGuiCol.Text, ImGuiColors.DalamudGrey);
+            _uiSharedService.IconText(FontAwesomeIcon.User);
+            ImGui.PopStyleColor();
+            UiSharedService.AttachToolTip("Solo - Not in a party");
+        }
         
         if (_apiController.ServerState == ServerState.Connected)
         {
@@ -664,5 +738,107 @@ public class CompactUi : WindowMediatorSubscriberBase
     {
         _wasOpen = IsOpen;
         IsOpen = false;
+    }
+
+    private async Task<bool> IsPlayerInCurrentPartyAsync(string playerName)
+    {
+        if (string.IsNullOrEmpty(playerName)) return false;
+        
+        var partyMembers = await _dalamudUtilService.RunOnFrameworkThread(() => _dalamudUtilService.GetPartyMemberNames());
+        return partyMembers.Contains(playerName, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private async Task HandleNsfwModeToggle()
+    {
+        try
+        {
+            _logger.LogInformation("NSFW mode toggle clicked, current state: {state}", _isNsfwModeActive);
+            
+            if (_isNsfwModeActive)
+            {
+                // Resume: Unpause all user pairs that were paused by NSFW mode
+                var allUserPairs = _pairManager.DirectPairs.ToList();
+                _logger.LogInformation("Resuming {count} user pairs", allUserPairs.Count);
+                foreach (var pair in allUserPairs)
+                {
+                    if (pair.UserPair != null && pair.UserPair.OwnPermissions.IsPaused())
+                    {
+                        var permissions = pair.UserPair.OwnPermissions;
+                        permissions.SetPaused(false);
+                        await _apiController.UserSetPairPermissions(new(pair.UserData, permissions));
+                        _logger.LogInformation("Unpaused pair: {uid}", pair.UserData.UID);
+                    }
+                }
+                
+                // Note: We don't automatically rejoin syncshells as that would require storing which ones were left
+                _isNsfwModeActive = false;
+                _logger.LogInformation("NSFW mode deactivated");
+            }
+            else
+            {
+                // NSFW Mode: Pause user pairs that are NOT in current party
+                var allUserPairs = _pairManager.DirectPairs.ToList();
+                var partyMembers = await _dalamudUtilService.RunOnFrameworkThread(() => _dalamudUtilService.GetPartyMemberNames());
+                _logger.LogInformation("Emergency stop: Checking {count} user pairs against party members: [{members}]", 
+                    allUserPairs.Count, string.Join(", ", partyMembers));
+                
+                foreach (var pair in allUserPairs)
+                {
+                    if (pair.UserPair != null && !pair.UserPair.OwnPermissions.IsPaused())
+                    {
+                        var playerName = pair.PlayerName;
+                        if (!await IsPlayerInCurrentPartyAsync(playerName))
+                        {
+                            var permissions = pair.UserPair.OwnPermissions;
+                            permissions.SetPaused(true);
+                            await _apiController.UserSetPairPermissions(new(pair.UserData, permissions));
+                            _logger.LogInformation("Paused pair (not in party): {uid} - {playerName}", pair.UserData.UID, playerName);
+                        }
+                        else
+                        {
+                            _logger.LogInformation("Skipped pausing pair (in party): {uid} - {playerName}", pair.UserData.UID, playerName);
+                        }
+                    }
+                }
+
+                // Leave syncshells/groups where no members are in current party
+                var groupPairs = _pairManager.GroupPairs.ToList();
+                _logger.LogInformation("NSFW mode: Checking {count} groups for non-party members", groupPairs.Count);
+                
+                foreach (var groupPair in groupPairs)
+                {
+                    var group = groupPair.Key;
+                    var pairsInGroup = groupPair.Value;
+                    
+                    // Check if any member of this group is in the current party
+                    bool hasPartyMember = false;
+                    foreach (var pair in pairsInGroup)
+                    {
+                        if (await IsPlayerInCurrentPartyAsync(pair.PlayerName))
+                        {
+                            hasPartyMember = true;
+                            break;
+                        }
+                    }
+                    
+                    if (!hasPartyMember)
+                    {
+                        await _apiController.GroupLeave(new GroupDto(group.Group));
+                        _logger.LogInformation("Left group (no party members): {gid}", group.Group.GID);
+                    }
+                    else
+                    {
+                        _logger.LogInformation("Kept group (has party members): {gid}", group.Group.GID);
+                    }
+                }
+                
+                _isNsfwModeActive = true;
+                _logger.LogInformation("NSFW mode activated");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error during NSFW mode toggle");
+        }
     }
 }
