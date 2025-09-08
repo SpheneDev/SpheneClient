@@ -170,8 +170,10 @@ jobs:
         # Update the array with modified content
         $jsonArray[0] = $jsonContent
         
-        # Save updated JSON
-        $jsonArray | ConvertTo-Json -Depth 10 | Set-Content "plogonmaster.json" -Encoding UTF8
+        # Save updated JSON as array
+        "[" | Set-Content "plogonmaster.json" -Encoding UTF8
+        $jsonContent | ConvertTo-Json -Depth 10 | Add-Content "plogonmaster.json" -Encoding UTF8
+        "]" | Add-Content "plogonmaster.json" -Encoding UTF8
         
         # Commit and push changes
         git add plogonmaster.json
