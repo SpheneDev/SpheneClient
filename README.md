@@ -5,6 +5,8 @@
 ## ✨ Features
 
 - **Social Integration**: Connect with other players through syncshells and shared data
+- **Acknowledgment System**: Advanced acknowledgment tracking system that ensures reliable data synchronization between players. Monitors pending acknowledgments, tracks success rates, and provides detailed metrics. Use `/sphene ack` to open the monitoring window and view real-time acknowledgment status, retry attempts, and system performance.
+- **Incognito Mode**: Privacy mode that pauses all connections except to party members
 - **Customizable UI**: Draggable interface elements and configurable settings
 - **Real-time Updates**: Live data synchronization with the Sphene server network
 

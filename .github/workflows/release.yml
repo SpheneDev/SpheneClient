@@ -1,13 +1,19 @@
 name: Release SpheneClient
 
 on:
-  push:
-    tags:
-      - 'v*.*.*'
   workflow_dispatch:
     inputs:
-      tag:
-        description: 'Release tag (e.g., v1.0.0)'
+      increment_type:
+        description: 'Version increment type'
+        required: true
+        default: 'patch'
+        type: choice
+        options:
+        - patch
+        - minor
+        - major
+      changelog:
+        description: 'Changelog text for this release (use \n for line breaks)'
         required: true
         type: string
 
@@ -40,17 +46,53 @@ jobs:
         Invoke-WebRequest -Uri "https://goatcorp.github.io/dalamud-distrib/stg/latest.zip" -OutFile latest.zip
         Expand-Archive -Force latest.zip "$env:AppData\XIVLauncher\addon\Hooks\dev"
         
-    - name: Get version from tag
+    - name: Get latest version and increment
       id: get_version
       run: |
-        if ("${{ github.event_name }}" -eq "workflow_dispatch") {
-          $version = "${{ github.event.inputs.tag }}"
-        } else {
-          $version = "${{ github.ref_name }}"
+        # Get latest release version from GitHub API
+        $headers = @{
+          'Authorization' = 'Bearer ${{ secrets.GITHUB_TOKEN }}'
+          'Accept' = 'application/vnd.github.v3+json'
         }
-        $version = $version -replace '^v', ''
-        echo "version=$version" >> $env:GITHUB_OUTPUT
-        echo "Version: $version"
+        
+        try {
+          $response = Invoke-RestMethod -Uri "https://api.github.com/repos/${{ github.repository }}/releases/latest" -Headers $headers
+          $latestVersion = $response.tag_name -replace '^v', ''
+          Write-Host "Latest version found: $latestVersion"
+        } catch {
+          Write-Host "No previous releases found, starting with 0.0.0"
+          $latestVersion = "0.0.0"
+        }
+        
+        # Parse version components
+        $versionParts = $latestVersion.Split('.')
+        $major = [int]$versionParts[0]
+        $minor = [int]$versionParts[1]
+        $patch = [int]$versionParts[2]
+        
+        # Increment based on input
+        switch ("${{ github.event.inputs.increment_type }}") {
+          "major" {
+            $major++
+            $minor = 0
+            $patch = 0
+          }
+          "minor" {
+            $minor++
+            $patch = 0
+          }
+          "patch" {
+            $patch++
+          }
+        }
+        
+        $newVersion = "$major.$minor.$patch"
+        $newTag = "v$newVersion"
+        
+        echo "version=$newVersion" >> $env:GITHUB_OUTPUT
+        echo "tag=$newTag" >> $env:GITHUB_OUTPUT
+        echo "New version: $newVersion"
+        echo "New tag: $newTag"
       shell: powershell
         
     - name: Update project version
@@ -91,10 +133,50 @@ jobs:
       shell: powershell
       id: package
       
+    - name: Update plogonmaster.json in repo
+      run: |
+        # Checkout the repo repository
+        git clone https://github.com/SpheneDev/repo.git temp-repo
+        cd temp-repo
+        
+        # Configure git
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        
+        # Read current plogonmaster.json
+        $jsonContent = Get-Content "plogonmaster.json" -Raw | ConvertFrom-Json
+        
+        # Update version in the JSON
+        $version = "${{ steps.get_version.outputs.version }}"
+        $jsonContent.AssemblyVersion = $version
+        
+        # Update download URL with new tag
+        $newTag = "${{ steps.get_version.outputs.tag }}"
+        $jsonContent.DownloadLinkInstall = "https://github.com/SpheneDev/SpheneClient/releases/download/$newTag/latest.zip"
+        $jsonContent.DownloadLinkTesting = "https://github.com/SpheneDev/SpheneClient/releases/download/$newTag/latest.zip"
+        $jsonContent.DownloadLinkUpdate = "https://github.com/SpheneDev/SpheneClient/releases/download/$newTag/latest.zip"
+        
+        # Update changelog with proper line breaks
+        $changelogText = "${{ github.event.inputs.changelog }}"
+        $changelogText = $changelogText -replace '\\n', "`r`n"
+        $jsonContent.Changelog = $changelogText
+        
+        # Save updated JSON
+        $jsonContent | ConvertTo-Json -Depth 10 | Set-Content "plogonmaster.json" -Encoding UTF8
+        
+        # Commit and push changes
+        git add plogonmaster.json
+        git commit -m "Auto-update version to $version"
+        git push https://${{ secrets.GITHUB_TOKEN }}@github.com/SpheneDev/repo.git main
+        
+        cd ..
+        Remove-Item -Recurse -Force temp-repo
+      shell: powershell
+      
     - name: Create Release
       uses: softprops/action-gh-release@v2
       with:
-        tag_name: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}
+        tag_name: ${{ steps.get_version.outputs.tag }}
         name: Sphene Client v${{ steps.get_version.outputs.version }}
         body: |
           ## Sphene Client Release v${{ steps.get_version.outputs.version }}
