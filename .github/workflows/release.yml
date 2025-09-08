@@ -144,7 +144,8 @@ jobs:
         git config user.email "github-actions[bot]@users.noreply.github.com"
         
         # Read current plogonmaster.json
-        $jsonContent = Get-Content "plogonmaster.json" -Raw | ConvertFrom-Json
+        $jsonArray = Get-Content "plogonmaster.json" -Raw | ConvertFrom-Json
+        $jsonContent = $jsonArray[0]  # Access first element of the array
         
         # Update version in the JSON
         $version = "${{ steps.get_version.outputs.version }}"
@@ -161,8 +162,11 @@ jobs:
         $changelogText = $changelogText -replace '\\n', "`r`n"
         $jsonContent.Changelog = $changelogText
         
+        # Update the array with modified content
+        $jsonArray[0] = $jsonContent
+        
         # Save updated JSON
-        $jsonContent | ConvertTo-Json -Depth 10 | Set-Content "plogonmaster.json" -Encoding UTF8
+        $jsonArray | ConvertTo-Json -Depth 10 | Set-Content "plogonmaster.json" -Encoding UTF8
         
         # Commit and push changes
         git add plogonmaster.json
