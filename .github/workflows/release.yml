@@ -142,6 +142,8 @@ jobs:
         # Configure git
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
+        git config credential.helper store
+        echo "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com" > ~/.git-credentials
         
         # Read current plogonmaster.json
         $jsonArray = Get-Content "plogonmaster.json" -Raw | ConvertFrom-Json
@@ -171,7 +173,7 @@ jobs:
         # Commit and push changes
         git add plogonmaster.json
         git commit -m "Auto-update version to $version"
-        git push https://${{ secrets.GITHUB_TOKEN }}@github.com/SpheneDev/repo.git main
+        git push origin main
         
         cd ..
         Remove-Item -Recurse -Force temp-repo
