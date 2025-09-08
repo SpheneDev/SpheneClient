@@ -6,6 +6,7 @@ using Sphene.SpheneConfiguration.Models;
 using Sphene.Services.Mediator;
 using Sphene.Services.ServerConfiguration;
 using Sphene.UI;
+using Sphene.UI.Components;
 using Sphene.WebAPI;
 using System.Globalization;
 
@@ -43,6 +44,7 @@ public sealed class CommandManagerService : IDisposable
         "\t /sphene gpose - Opens the Sphene Character Data Hub window" + Environment.NewLine +
         "\t /sphene analyze - Opens the Sphene Character Data Analysis window" + Environment.NewLine +
         "\t /sphene settings - Opens the Sphene Settings window" + Environment.NewLine +
+        "\t /sphene ack - Opens the Acknowledgment Monitor window" + Environment.NewLine +
         "\t /sphene updatetest - Opens the Update Test window"
         });
     }
@@ -122,6 +124,10 @@ public sealed class CommandManagerService : IDisposable
         else if (string.Equals(splitArgs[0], "settings", StringComparison.OrdinalIgnoreCase))
         {
             _mediator.Publish(new UiToggleMessage(typeof(SettingsUi)));
+        }
+        else if (string.Equals(splitArgs[0], "ack", StringComparison.OrdinalIgnoreCase))
+        {
+            _mediator.Publish(new UiToggleMessage(typeof(AcknowledgmentMonitorUI)));
         }
         else if (string.Equals(splitArgs[0], "updatetest", StringComparison.OrdinalIgnoreCase))
         {

@@ -274,7 +274,8 @@ public class DrawUserPair
             ImGui.SameLine();
             // Check if sender is waiting for acknowledgment from this specific user
             // Only show indicator for real Penumbra changes (with acknowledgment ID), not for build start status
-            if (_pairManager.HasPendingAcknowledgmentForUser(_pair.UserData) && !string.IsNullOrEmpty(_pair.LastAcknowledgmentId))
+            // Show clock only if the pair itself has a pending acknowledgment (not just any acknowledgment for this user)
+            if (_pair.HasPendingAcknowledgment && !string.IsNullOrEmpty(_pair.LastAcknowledgmentId))
             {
                 using var _ = ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.DalamudYellow);
                 _uiSharedService.IconText(FontAwesomeIcon.Clock);

@@ -14,6 +14,7 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
     private readonly DalamudUtilService _dalamudUtil;
     private readonly FileUploadManager _fileTransferManager;
     private readonly PairManager _pairManager;
+    private readonly SessionAcknowledgmentManager _sessionAcknowledgmentManager;
     private CharacterData? _lastCreatedData;
     private CharacterData? _uploadingCharacterData = null;
     private readonly List<UserData> _previouslyVisiblePlayers = [];
@@ -30,12 +31,13 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
 
 
     public VisibleUserDataDistributor(ILogger<VisibleUserDataDistributor> logger, ApiController apiController, DalamudUtilService dalamudUtil,
-        PairManager pairManager, SpheneMediator mediator, FileUploadManager fileTransferManager) : base(logger, mediator)
+        PairManager pairManager, SpheneMediator mediator, FileUploadManager fileTransferManager, SessionAcknowledgmentManager sessionAcknowledgmentManager) : base(logger, mediator)
     {
         _apiController = apiController;
         _dalamudUtil = dalamudUtil;
         _pairManager = pairManager;
         _fileTransferManager = fileTransferManager;
+        _sessionAcknowledgmentManager = sessionAcknowledgmentManager;
         
         // Initialize silent acknowledgment timer
         _silentAcknowledgmentTimer = new Timer(SendSilentAcknowledgments, null, 
@@ -174,8 +176,8 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
                 {
                     if (_usersToPushDataTo.Count == 0) return;
                     
-                    // Generate acknowledgment ID and set pending status for all recipients from sender's perspective
-                    var acknowledgmentId = Guid.NewGuid().ToString();
+                    // Generate session-aware acknowledgment ID and set pending status for all recipients from sender's perspective
+                    var acknowledgmentId = _sessionAcknowledgmentManager.GenerateAcknowledgmentId();
                     _pairManager.SetPendingAcknowledgmentForSender([.. _usersToPushDataTo], acknowledgmentId);
                     
                     // Track the hash sent to each user

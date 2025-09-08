@@ -22,6 +22,7 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
     private readonly ConcurrentDictionary<UserData, Pair> _allClientPairs = new(UserDataComparer.Instance);
     private readonly ConcurrentDictionary<GroupData, GroupFullInfoDto> _allGroups = new(GroupDataComparer.Instance);
     private readonly ConcurrentDictionary<string, HashSet<UserData>> _senderPendingAcknowledgments = new();
+    private readonly SessionAcknowledgmentManager _sessionAcknowledgmentManager;
     private readonly SpheneConfigService _configurationService;
     private readonly IContextMenu _dalamudContextMenu;
     private readonly PairFactory _pairFactory;
@@ -35,13 +36,14 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
     public PairManager(ILogger<PairManager> logger, PairFactory pairFactory,
                 SpheneConfigService configurationService, SpheneMediator mediator,
                 IContextMenu dalamudContextMenu, ServerConfigurationManager serverConfigurationManager,
-                Lazy<ApiController> apiController) : base(logger, mediator)
+                Lazy<ApiController> apiController, SessionAcknowledgmentManager sessionAcknowledgmentManager) : base(logger, mediator)
     {
         _pairFactory = pairFactory;
         _configurationService = configurationService;
         _dalamudContextMenu = dalamudContextMenu;
         _serverConfigurationManager = serverConfigurationManager;
         _apiController = apiController;
+        _sessionAcknowledgmentManager = sessionAcknowledgmentManager;
 
         Mediator.Subscribe<DisconnectedMessage>(this, (_) => ClearPairs());
         Mediator.Subscribe<CutsceneEndMessage>(this, (_) => ReapplyPairData());
@@ -210,8 +212,11 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
             return;
         }
         
+        // Try session-aware acknowledgment processing first
+        var sessionProcessed = _sessionAcknowledgmentManager.ProcessReceivedAcknowledgment(acknowledgmentDto.AcknowledgmentId, acknowledgmentDto.User);
+        
         // Debug: Log all current pending acknowledgments
-        Logger.LogInformation("Current pending acknowledgments count: {count}", _senderPendingAcknowledgments.Count);
+        Logger.LogInformation("Current pending acknowledgments count: {count}, Session processed: {sessionProcessed}", _senderPendingAcknowledgments.Count, sessionProcessed);
         foreach (var kvp in _senderPendingAcknowledgments)
         {
             Logger.LogInformation("Pending AckId: {ackId}, Recipients: [{recipients}]", 
@@ -519,7 +524,10 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
 
     public void SetPendingAcknowledgmentForSender(List<UserData> recipients, string acknowledgmentId)
     {
-        // Track pending acknowledgments from sender's perspective
+        // Use session-aware acknowledgment manager for thread-safe handling
+        _sessionAcknowledgmentManager.SetPendingAcknowledgmentForSession(recipients, acknowledgmentId);
+        
+        // Keep legacy tracking for backward compatibility during transition
         _senderPendingAcknowledgments[acknowledgmentId] = new HashSet<UserData>(recipients, UserDataComparer.Instance);
         
         // Also set pending acknowledgment on individual pairs for UI display
@@ -535,7 +543,6 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         Logger.LogInformation("Set pending acknowledgment for sender with ID {id} waiting for {count} recipients: [{recipients}]", 
             acknowledgmentId, recipients.Count, string.Join(", ", recipients.Select(r => r.AliasOrUID)));
         Logger.LogInformation("Total pending acknowledgments after adding: {count}", _senderPendingAcknowledgments.Count);
-        Mediator.Publish(new RefreshUiMessage());
     }
 
     public bool HasPendingAcknowledgmentForUser(UserData userData)
@@ -581,6 +588,12 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
             Logger.LogInformation("Set build start pending status for {count} visible pairs", visiblePairs.Count);
             Mediator.Publish(new RefreshUiMessage());
         }
+    }
+
+    public Pair? GetPairForUser(UserData userData)
+    {
+        _allClientPairs.TryGetValue(userData, out var pair);
+        return pair;
     }
 
     private void RecreateLazy()

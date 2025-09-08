@@ -144,7 +144,9 @@ public sealed class Plugin : IDalamudPlugin
             collection.AddSingleton<Lazy<ApiController>>(s => new Lazy<ApiController>(() => s.GetRequiredService<ApiController>()));
             collection.AddSingleton(s => new PairManager(s.GetRequiredService<ILogger<PairManager>>(), s.GetRequiredService<PairFactory>(),
                 s.GetRequiredService<SpheneConfigService>(), s.GetRequiredService<SpheneMediator>(), contextMenu, s.GetRequiredService<ServerConfigurationManager>(),
-                s.GetRequiredService<Lazy<ApiController>>()));
+                s.GetRequiredService<Lazy<ApiController>>(), s.GetRequiredService<SessionAcknowledgmentManager>()));
+            collection.AddSingleton(s => new EnhancedAcknowledgmentManager(s.GetRequiredService<ILogger<EnhancedAcknowledgmentManager>>(),
+                s.GetRequiredService<Lazy<ApiController>>().Value, s.GetRequiredService<SpheneMediator>(), new AcknowledgmentConfiguration()));
             collection.AddSingleton<RedrawManager>();
             collection.AddSingleton((s) => new IpcCallerPenumbra(s.GetRequiredService<ILogger<IpcCallerPenumbra>>(), pluginInterface,
                 s.GetRequiredService<DalamudUtilService>(), s.GetRequiredService<SpheneMediator>(), s.GetRequiredService<RedrawManager>()));
@@ -230,6 +232,21 @@ public sealed class Plugin : IDalamudPlugin
             collection.AddScoped<CacheCreationService>();
             collection.AddScoped<PlayerDataFactory>();
             collection.AddScoped<VisibleUserDataDistributor>();
+            
+            // Enhanced Acknowledgment System
+            collection.AddSingleton<AcknowledgmentConfiguration>();
+            collection.AddScoped<EnhancedAcknowledgmentManager>();
+            collection.AddScoped<WindowMediatorSubscriberBase, AcknowledgmentMonitorUI>();
+            collection.AddSingleton<SessionAcknowledgmentManager>(s => 
+            {
+                var lazyPairManager = new Lazy<PairManager>(() => s.GetRequiredService<PairManager>());
+                return new SessionAcknowledgmentManager(
+                    s.GetRequiredService<ILogger<SessionAcknowledgmentManager>>(),
+                    s.GetRequiredService<SpheneMediator>(),
+                    userData => lazyPairManager.Value.GetPairForUser(userData)
+                );
+            });
+            
             collection.AddScoped((s) => new UiService(s.GetRequiredService<ILogger<UiService>>(), pluginInterface.UiBuilder, s.GetRequiredService<SpheneConfigService>(),
                 s.GetRequiredService<WindowSystem>(), s.GetServices<WindowMediatorSubscriberBase>(),
                 s.GetRequiredService<UiFactory>(),
