@@ -135,15 +135,13 @@ jobs:
       
     - name: Update plogonmaster.json in repo
       run: |
-        # Checkout the repo repository
-        git clone https://github.com/SpheneDev/repo.git temp-repo
+        # Checkout the repo repository with token authentication
+        git clone https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/SpheneDev/repo.git temp-repo
         cd temp-repo
         
         # Configure git
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
-        git config credential.helper store
-        echo "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com" > ~/.git-credentials
         
         # Read current plogonmaster.json
         $jsonArray = Get-Content "plogonmaster.json" -Raw | ConvertFrom-Json
