@@ -136,7 +136,7 @@ jobs:
     - name: Update plogonmaster.json in repo
       run: |
         # Checkout the repo repository with personal access token
-        git clone 'https://x-access-token:${{ secrets.REPO_ACCESS_TOKEN }}@github.com/SpheneDev/repo' temp-repo
+        git clone https://${{ secrets.REPO_ACCESS_TOKEN }}@github.com/SpheneDev/repo.git temp-repo
         cd temp-repo
         
         # Configure git
