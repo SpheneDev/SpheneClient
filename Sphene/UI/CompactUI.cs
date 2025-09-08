@@ -54,6 +54,8 @@ public class CompactUi : WindowMediatorSubscriberBase
     private string _lastAddedUserComment = string.Empty;
     private Vector2 _lastPosition = Vector2.One;
     private bool _isNsfwModeActive = false;
+    private DateTime _lastIncognitoButtonClick = DateTime.MinValue;
+    private DateTime _lastReconnectButtonClick = DateTime.MinValue;
     private Vector2 _lastSize = Vector2.One;
     private int _secretKeyIdx = -1;
     private bool _showModalForUserAddition;
@@ -362,29 +364,60 @@ public class CompactUi : WindowMediatorSubscriberBase
         // Always show reconnect button with proper alignment
         ImGui.SameLine();
         ImGui.AlignTextToFramePadding();
+        
+        var reconnectCurrentTime = DateTime.Now;
+        var reconnectTimeSinceLastClick = reconnectCurrentTime - _lastReconnectButtonClick;
+        var isReconnectButtonDisabled = reconnectTimeSinceLastClick.TotalSeconds < 5.0;
+        
+        var reconnectColor = isReconnectButtonDisabled ? ImGuiColors.DalamudGrey : ImGuiColors.DalamudWhite;
+        ImGui.PushStyleColor(ImGuiCol.Text, reconnectColor);
         ImGui.PushFont(UiBuilder.IconFont);
-        if (ImGui.Button(FontAwesomeIcon.Redo.ToIconString(), new Vector2(22, 22)))
+        
+        using (ImRaii.Disabled(isReconnectButtonDisabled))
         {
-            _ = Task.Run(() => _apiController.CreateConnectionsAsync());
+            if (ImGui.Button(FontAwesomeIcon.Redo.ToIconString(), new Vector2(22, 22)))
+            {
+                _lastReconnectButtonClick = reconnectCurrentTime;
+                _ = Task.Run(() => _apiController.CreateConnectionsAsync());
+            }
         }
+        
         ImGui.PopFont();
-        UiSharedService.AttachToolTip("Reconnect to the Sphene Network");
+        ImGui.PopStyleColor();
+        
+        var reconnectTooltipText = "Reconnect to the Sphene Network";
+        if (isReconnectButtonDisabled)
+        {
+            var reconnectRemainingSeconds = Math.Ceiling(5.0 - reconnectTimeSinceLastClick.TotalSeconds);
+            reconnectTooltipText += $"\nCooldown: {reconnectRemainingSeconds} seconds remaining";
+        }
+        UiSharedService.AttachToolTip(reconnectTooltipText);
         
         // NSFW Mode button next to reconnect
         ImGui.SameLine();
         ImGui.AlignTextToFramePadding();
         
+        var currentTime = DateTime.Now;
+        var timeSinceLastClick = currentTime - _lastIncognitoButtonClick;
+        var isButtonDisabled = timeSinceLastClick.TotalSeconds < 5.0;
+        
         if (_isNsfwModeActive)
         {
             // Resume mode - use play icon
             var resumeIcon = FontAwesomeIcon.Play;
-            var resumeColor = ImGuiColors.ParsedGreen;
+            var resumeColor = isButtonDisabled ? ImGuiColors.DalamudGrey : ImGuiColors.ParsedGreen;
             ImGui.PushStyleColor(ImGuiCol.Text, resumeColor);
             ImGui.PushFont(UiBuilder.IconFont);
-            if (ImGui.Button(resumeIcon.ToIconString(), new Vector2(22, 22)))
+            
+            using (ImRaii.Disabled(isButtonDisabled))
             {
-                _ = Task.Run(() => HandleNsfwModeToggle());
+                if (ImGui.Button(resumeIcon.ToIconString(), new Vector2(22, 22)))
+                {
+                    _lastIncognitoButtonClick = currentTime;
+                    _ = Task.Run(() => HandleNsfwModeToggle());
+                }
             }
+            
             ImGui.PopFont();
             ImGui.PopStyleColor();
         }
@@ -392,17 +425,30 @@ public class CompactUi : WindowMediatorSubscriberBase
         {
             // Incognito Mode - use red heart icon
             var incognitoIcon = FontAwesomeIcon.Heart;
-            var incognitoColor = ImGuiColors.DalamudRed;
+            var incognitoColor = isButtonDisabled ? ImGuiColors.DalamudGrey : ImGuiColors.DalamudRed;
             ImGui.PushStyleColor(ImGuiCol.Text, incognitoColor);
             ImGui.PushFont(UiBuilder.IconFont);
-            if (ImGui.Button(incognitoIcon.ToIconString(), new Vector2(22, 22)))
+            
+            using (ImRaii.Disabled(isButtonDisabled))
             {
-                _ = Task.Run(() => HandleNsfwModeToggle());
+                if (ImGui.Button(incognitoIcon.ToIconString(), new Vector2(22, 22)))
+                {
+                    _lastIncognitoButtonClick = currentTime;
+                    _ = Task.Run(() => HandleNsfwModeToggle());
+                }
             }
+            
             ImGui.PopFont();
             ImGui.PopStyleColor();
         }
         var tooltipText = _isNsfwModeActive ? "Resume - Unpause all pairs and reconnect syncshells" : "Incognito Mode - Pause all pairs and syncshells except party members";
+        
+        if (isButtonDisabled)
+        {
+            var remainingSeconds = Math.Ceiling(5.0 - timeSinceLastClick.TotalSeconds);
+            tooltipText += $"\nCooldown: {remainingSeconds} seconds remaining";
+        }
+        
         UiSharedService.AttachToolTip(tooltipText);
         
         // Party Status indicator
