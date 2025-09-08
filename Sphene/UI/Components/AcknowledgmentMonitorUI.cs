@@ -10,6 +10,7 @@ using Sphene.Services;
 using Sphene.Services.Mediator;
 using System.Numerics;
 using Microsoft.Extensions.Logging;
+using Sphene.WebAPI;
 
 namespace Sphene.UI.Components;
 
@@ -19,6 +20,7 @@ public class AcknowledgmentMonitorUI : WindowMediatorSubscriberBase
     private readonly EnhancedAcknowledgmentManager _acknowledgmentManager;
     private readonly SessionAcknowledgmentManager _sessionAcknowledgmentManager;
     private readonly UiSharedService _uiSharedService;
+    private readonly ApiController _apiController;
     private AcknowledgmentConfiguration _config;
     private AcknowledgmentMetrics _metrics;
     private bool _showAdvancedSettings = false;
@@ -26,12 +28,13 @@ public class AcknowledgmentMonitorUI : WindowMediatorSubscriberBase
     private bool _showSessionDetails = false;
     
     public AcknowledgmentMonitorUI(ILogger<AcknowledgmentMonitorUI> logger, EnhancedAcknowledgmentManager acknowledgmentManager, 
-        SessionAcknowledgmentManager sessionAcknowledgmentManager, UiSharedService uiSharedService, SpheneMediator mediator, PerformanceCollectorService performanceCollectorService)
+        SessionAcknowledgmentManager sessionAcknowledgmentManager, UiSharedService uiSharedService, SpheneMediator mediator, PerformanceCollectorService performanceCollectorService, ApiController apiController)
         : base(logger, mediator, "Acknowledgment Monitor###SpheneAckMonitor", performanceCollectorService)
     {
         _acknowledgmentManager = acknowledgmentManager;
         _sessionAcknowledgmentManager = sessionAcknowledgmentManager;
         _uiSharedService = uiSharedService;
+        _apiController = apiController;
         _config = _acknowledgmentManager.GetConfiguration();
         _metrics = _acknowledgmentManager.GetMetrics();
         
@@ -63,7 +66,12 @@ public class AcknowledgmentMonitorUI : WindowMediatorSubscriberBase
             ImGui.Separator();
             DrawSessionInformation();
             ImGui.Separator();
-            DrawConfiguration();
+            
+            // Only show configuration to admin users
+            if (_apiController.IsAdmin)
+            {
+                DrawConfiguration();
+            }
             
             if (_showMetricsDetails)
             {
