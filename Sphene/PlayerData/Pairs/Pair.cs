@@ -359,6 +359,35 @@ public class Pair : DisposableMediatorSubscriberBase
         LastAcknowledgmentId = null; // No specific acknowledgment ID for build start
     }
 
+    public void ClearPendingAcknowledgment(string acknowledgmentId)
+    {
+        // Only clear if this is the acknowledgment we're waiting for
+        if (LastAcknowledgmentId == acknowledgmentId)
+        {
+            Logger.LogInformation("Clearing pending acknowledgment: {acknowledgmentId} for user {user}", acknowledgmentId, UserData.AliasOrUID);
+            HasPendingAcknowledgment = false;
+            LastAcknowledgmentId = null;
+            
+            // Trigger UI update
+            Mediator.Publish(new RefreshUiMessage());
+        }
+        else
+        {
+            Logger.LogDebug("Not clearing pending acknowledgment - ID mismatch. Expected: {expected}, Got: {got} for user {user}", 
+                LastAcknowledgmentId, acknowledgmentId, UserData.AliasOrUID);
+        }
+    }
+
+    public void ClearPendingAcknowledgmentForce()
+    {
+        Logger.LogInformation("Force clearing pending acknowledgment for user {user}", UserData.AliasOrUID);
+        HasPendingAcknowledgment = false;
+        LastAcknowledgmentId = null;
+        
+        // Trigger UI update
+        Mediator.Publish(new RefreshUiMessage());
+    }
+
 
 
     private async Task SendAcknowledgmentIfRequired(OnlineUserCharaDataDto data, bool success)
@@ -394,9 +423,9 @@ public class Pair : DisposableMediatorSubscriberBase
         }
     }
     
-    /// <summary>
+    
     /// Handles character data application completion and sends delayed acknowledgment if needed
-    /// </summary>
+    
     private async Task OnCharacterDataApplicationCompleted(CharacterDataApplicationCompletedMessage message)
     {
         // Check if this message is for this pair

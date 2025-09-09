@@ -132,10 +132,14 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
             }
         }
         
-        // Remove acknowledgments with user overlap
+        // Remove acknowledgments with user overlap and clear pair status
         foreach (var ackIdToRemove in toRemove)
         {
-            sessionAcks.TryRemove(ackIdToRemove, out _);
+            if (sessionAcks.TryRemove(ackIdToRemove, out var removedInfo))
+            {
+                // Clear pending status from affected pairs
+                ClearPendingStatusFromPairs(removedInfo.Recipients, ackIdToRemove);
+            }
         }
     }
     
@@ -164,10 +168,14 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
             }
         }
         
-        // Remove older acknowledgments
+        // Remove older acknowledgments and clear pair status
         foreach (var ackIdToRemove in toRemove)
         {
-            sessionAcks.TryRemove(ackIdToRemove, out _);
+            if (sessionAcks.TryRemove(ackIdToRemove, out var removedInfo))
+            {
+                // Clear pending status from affected pairs
+                ClearPendingStatusFromPairs(removedInfo.Recipients, ackIdToRemove);
+            }
         }
     }
     
@@ -271,6 +279,74 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
         return 0;
     }
     
+    // Clear pending status from pairs when acknowledgments are removed
+    private void ClearPendingStatusFromPairs(HashSet<UserData> recipients, string acknowledgmentId)
+    {
+        foreach (var recipient in recipients)
+        {
+            var pair = _getPairFunc(recipient);
+            if (pair != null)
+            {
+                pair.ClearPendingAcknowledgment(acknowledgmentId);
+                _logger.LogDebug("Cleared pending acknowledgment {ackId} from pair for user {user}", acknowledgmentId, recipient.AliasOrUID);
+            }
+            else
+            {
+                _logger.LogWarning("Could not find pair for user {user} to clear pending acknowledgment {ackId}", recipient.AliasOrUID, acknowledgmentId);
+            }
+        }
+    }
+
+    // Clean up old pending acknowledgments based on age
+    public void CleanupOldPendingAcknowledgments(TimeSpan maxAge)
+    {
+        var cutoffTime = DateTime.UtcNow.Subtract(maxAge);
+        var toRemove = new List<(string sessionId, string ackId, HashSet<UserData> recipients)>();
+        
+        foreach (var sessionKvp in _userSessionAcknowledgments)
+        {
+            var sessionId = sessionKvp.Key;
+            var sessionAcks = sessionKvp.Value;
+            
+            foreach (var ackKvp in sessionAcks)
+            {
+                var ackId = ackKvp.Key;
+                var ackInfo = ackKvp.Value;
+                
+                if (ackInfo.CreatedAt < cutoffTime)
+                {
+                    toRemove.Add((sessionId, ackId, ackInfo.Recipients));
+                    _logger.LogInformation("Marking old pending acknowledgment {ackId} for removal (age: {age}s)", 
+                        ackId, (DateTime.UtcNow - ackInfo.CreatedAt).TotalSeconds);
+                }
+            }
+        }
+        
+        // Remove old acknowledgments and clear pair status
+        foreach (var (sessionId, ackId, recipients) in toRemove)
+        {
+            if (_userSessionAcknowledgments.TryGetValue(sessionId, out var sessionAcks) && 
+                sessionAcks.TryRemove(ackId, out _))
+            {
+                ClearPendingStatusFromPairs(recipients, ackId);
+                _logger.LogInformation("Removed old pending acknowledgment {ackId} from session {sessionId}", ackId, sessionId);
+                
+                // Clean up empty session
+                if (sessionAcks.IsEmpty)
+                {
+                    _userSessionAcknowledgments.TryRemove(sessionId, out _);
+                    _logger.LogDebug("Cleaned up empty session: {sessionId}", sessionId);
+                }
+            }
+        }
+        
+        if (toRemove.Count > 0)
+        {
+            _logger.LogInformation("Cleaned up {count} old pending acknowledgments", toRemove.Count);
+            Mediator.Publish(new RefreshUiMessage());
+        }
+    }
+
     // Clean up old sessions (call periodically)
     public void CleanupOldSessions(TimeSpan maxAge)
     {
@@ -289,6 +365,12 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
         {
             if (_userSessionAcknowledgments.TryRemove(sessionId, out var removedSession))
             {
+                // Clear pending status from all pairs in removed sessions
+                foreach (var ackInfo in removedSession)
+                {
+                    ClearPendingStatusFromPairs(ackInfo.Value.Recipients, ackInfo.Key);
+                }
+                
                 _logger.LogInformation("Cleaned up old session {sessionId} with {count} pending acknowledgments", 
                     sessionId, removedSession.Values.Sum(info => info.Recipients.Count));
             }

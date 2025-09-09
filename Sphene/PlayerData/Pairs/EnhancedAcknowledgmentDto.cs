@@ -4,9 +4,8 @@ using Sphene.API.Data;
 
 namespace Sphene.PlayerData.Pairs;
 
-/// <summary>
+
 /// Enhanced acknowledgment DTO with priority and error handling
-/// </summary>
 public class EnhancedAcknowledgmentDto
 {
     public string AcknowledgmentId { get; set; } = string.Empty;
@@ -20,14 +19,14 @@ public class EnhancedAcknowledgmentDto
     public DateTime? NextRetryAt { get; set; }
     public Dictionary<string, object>? Metadata { get; set; }
     
-    /// <summary>
+    
     /// Creates a new enhanced acknowledgment DTO
-    /// </summary>
+    
     public EnhancedAcknowledgmentDto() { }
     
-    /// <summary>
+    
     /// Creates a new enhanced acknowledgment DTO from existing data
-    /// </summary>
+    
     public EnhancedAcknowledgmentDto(UserData user, string acknowledgmentId, AcknowledgmentPriority priority = AcknowledgmentPriority.Medium)
     {
         User = user;
@@ -36,9 +35,9 @@ public class EnhancedAcknowledgmentDto
         AcknowledgedAt = DateTime.UtcNow;
     }
     
-    /// <summary>
+    
     /// Marks the acknowledgment as failed with error details
-    /// </summary>
+    
     public void MarkAsFailed(AcknowledgmentErrorCode errorCode, string? errorMessage = null)
     {
         Success = false;
@@ -47,9 +46,9 @@ public class EnhancedAcknowledgmentDto
         AcknowledgedAt = DateTime.UtcNow;
     }
     
-    /// <summary>
+    
     /// Marks the acknowledgment as successful
-    /// </summary>
+    
     public void MarkAsSuccessful()
     {
         Success = true;
@@ -58,27 +57,26 @@ public class EnhancedAcknowledgmentDto
         AcknowledgedAt = DateTime.UtcNow;
     }
     
-    /// <summary>
+    
     /// Increments retry count and sets next retry time
-    /// </summary>
+    
     public void IncrementRetry(TimeSpan nextRetryDelay)
     {
         RetryCount++;
         NextRetryAt = DateTime.UtcNow.Add(nextRetryDelay);
     }
     
-    /// <summary>
+    
     /// Checks if this acknowledgment is ready for retry
-    /// </summary>
+    
     public bool IsReadyForRetry()
     {
         return NextRetryAt.HasValue && DateTime.UtcNow >= NextRetryAt.Value;
     }
 }
 
-/// <summary>
+
 /// Batch acknowledgment DTO for processing multiple acknowledgments together
-/// </summary>
 public class BatchAcknowledgmentDto
 {
     public string BatchId { get; set; } = Guid.NewGuid().ToString();
@@ -88,9 +86,9 @@ public class BatchAcknowledgmentDto
     public bool IsProcessed { get; set; } = false;
     public AcknowledgmentPriority Priority { get; set; } = AcknowledgmentPriority.Medium;
     
-    /// <summary>
+    
     /// Adds an acknowledgment to the batch
-    /// </summary>
+    
     public void AddAcknowledgment(EnhancedAcknowledgmentDto acknowledgment)
     {
         Acknowledgments.Add(acknowledgment);
@@ -101,32 +99,31 @@ public class BatchAcknowledgmentDto
         }
     }
     
-    /// <summary>
+    
     /// Marks the batch as processed
-    /// </summary>
+    
     public void MarkAsProcessed()
     {
         IsProcessed = true;
         ProcessedAt = DateTime.UtcNow;
     }
     
-    /// <summary>
+    
     /// Gets the number of acknowledgments in the batch
-    /// </summary>
+    
     public int Count => Acknowledgments.Count;
     
-    /// <summary>
+    
     /// Checks if the batch is ready to be sent based on size or timeout
-    /// </summary>
+    
     public bool IsReadyToSend(int maxBatchSize, TimeSpan batchTimeout)
     {
         return Count >= maxBatchSize || DateTime.UtcNow - CreatedAt >= batchTimeout;
     }
 }
 
-/// <summary>
+
 /// Acknowledgment metrics for monitoring and diagnostics
-/// </summary>
 public class AcknowledgmentMetrics
 {
     public int TotalSent { get; set; }
@@ -139,19 +136,19 @@ public class AcknowledgmentMetrics
     public Dictionary<AcknowledgmentErrorCode, int> ErrorCounts { get; set; } = new();
     public Dictionary<AcknowledgmentPriority, int> PriorityCounts { get; set; } = new();
     
-    /// <summary>
+    
     /// Calculates the success rate as a percentage
-    /// </summary>
+    
     public double SuccessRate => TotalReceived > 0 ? (double)TotalSuccessful / TotalReceived * 100 : 0;
     
-    /// <summary>
+    
     /// Calculates the failure rate as a percentage
-    /// </summary>
+    
     public double FailureRate => TotalReceived > 0 ? (double)TotalFailed / TotalReceived * 100 : 0;
     
-    /// <summary>
+    
     /// Records a successful acknowledgment
-    /// </summary>
+    
     public void RecordSuccess(AcknowledgmentPriority priority, double responseTimeMs)
     {
         TotalSuccessful++;
@@ -161,9 +158,9 @@ public class AcknowledgmentMetrics
         LastUpdated = DateTime.UtcNow;
     }
     
-    /// <summary>
+    
     /// Records a failed acknowledgment
-    /// </summary>
+    
     public void RecordFailure(AcknowledgmentPriority priority, AcknowledgmentErrorCode errorCode)
     {
         TotalFailed++;
@@ -173,18 +170,18 @@ public class AcknowledgmentMetrics
         LastUpdated = DateTime.UtcNow;
     }
     
-    /// <summary>
+    
     /// Records a sent acknowledgment
-    /// </summary>
+    
     public void RecordSent()
     {
         TotalSent++;
         LastUpdated = DateTime.UtcNow;
     }
     
-    /// <summary>
+    
     /// Records a retry attempt
-    /// </summary>
+    
     public void RecordRetry()
     {
         TotalRetries++;

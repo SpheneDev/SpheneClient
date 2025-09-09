@@ -201,10 +201,10 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
         });
     }
     
-    /// <summary>
+    
     /// Sends silent acknowledgments for users who have the same hash for more than 1 minute
     /// This maintains connection health without unnecessary data transfers
-    /// </summary>
+    
     private void SendSilentAcknowledgments(object? state)
     {
         // Schedule the actual work on the framework thread to avoid threading issues
@@ -224,9 +224,9 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
         });
     }
     
-    /// <summary>
+    
     /// Processes silent acknowledgments on the framework thread
-    /// </summary>
+    
     private void ProcessSilentAcknowledgments()
     {
         if (!_dalamudUtil.GetIsPlayerPresent() || !_apiController.IsConnected || _lastCreatedData == null)
@@ -279,9 +279,9 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
         }
     }
     
-    /// <summary>
+    
     /// Checks if a user needs data based on hash comparison
-    /// </summary>
+    
     public bool UserNeedsData(UserData user, string dataHash)
     {
         if (!_lastSentHashPerUser.TryGetValue(user, out var lastHash))
@@ -290,9 +290,9 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
         return !string.Equals(lastHash, dataHash, StringComparison.Ordinal);
     }
     
-    /// <summary>
+    
     /// Gets the last sent hash for a user
-    /// </summary>
+    
     public string? GetLastSentHashForUser(UserData user)
     {
         return _lastSentHashPerUser.TryGetValue(user, out var hash) ? hash : null;

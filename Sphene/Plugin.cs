@@ -146,7 +146,8 @@ public sealed class Plugin : IDalamudPlugin
                 s.GetRequiredService<SpheneConfigService>(), s.GetRequiredService<SpheneMediator>(), contextMenu, s.GetRequiredService<ServerConfigurationManager>(),
                 s.GetRequiredService<Lazy<ApiController>>(), s.GetRequiredService<SessionAcknowledgmentManager>()));
             collection.AddSingleton(s => new EnhancedAcknowledgmentManager(s.GetRequiredService<ILogger<EnhancedAcknowledgmentManager>>(),
-                s.GetRequiredService<Lazy<ApiController>>().Value, s.GetRequiredService<SpheneMediator>(), new AcknowledgmentConfiguration()));
+                s.GetRequiredService<Lazy<ApiController>>().Value, s.GetRequiredService<SpheneMediator>(), new AcknowledgmentConfiguration(),
+                s.GetRequiredService<SessionAcknowledgmentManager>()));
             collection.AddSingleton<RedrawManager>();
             collection.AddSingleton((s) => new IpcCallerPenumbra(s.GetRequiredService<ILogger<IpcCallerPenumbra>>(), pluginInterface,
                 s.GetRequiredService<DalamudUtilService>(), s.GetRequiredService<SpheneMediator>(), s.GetRequiredService<RedrawManager>()));

@@ -13,9 +13,8 @@ using Sphene.WebAPI;
 
 namespace Sphene.PlayerData.Pairs;
 
-/// <summary>
+
 /// Enhanced acknowledgment manager with timeout management, batching, priority system, and error handling
-/// </summary>
 public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
 {
     private readonly ApiController _apiController;
@@ -41,6 +40,9 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
     private readonly ConcurrentDictionary<string, CachedAcknowledgment> _acknowledgmentCache = new();
     private readonly Timer _cacheCleanupTimer;
     
+    // Session acknowledgment manager for cleanup
+    private readonly SessionAcknowledgmentManager _sessionManager;
+    
     // Thread safety
     private readonly SemaphoreSlim _batchSemaphore = new(1, 1);
     private readonly CancellationTokenSource _cancellationTokenSource = new();
@@ -49,11 +51,13 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
         ApiController apiController, 
         // DalamudUtilService dalamudUtil, // Removed - not needed
         SpheneMediator mediator,
-        AcknowledgmentConfiguration config) : base(logger, mediator)
+        AcknowledgmentConfiguration config,
+        SessionAcknowledgmentManager sessionManager) : base(logger, mediator)
     {
         _apiController = apiController;
         // _dalamudUtil = dalamudUtil; // Removed - not needed
         _config = config;
+        _sessionManager = sessionManager;
         _config.Validate();
         
         // Initialize timers
@@ -72,14 +76,19 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
         _cacheCleanupTimer = new Timer(CleanupCache, null, 
             TimeSpan.FromMinutes(_config.CacheExpirationMinutes / 2), 
             TimeSpan.FromMinutes(_config.CacheExpirationMinutes / 2));
+            
+        // Add cleanup timer for old pending acknowledgments
+        var cleanupTimer = new Timer(CleanupOldAcknowledgments, null,
+            TimeSpan.FromMinutes(2), // First cleanup after 2 minutes
+            TimeSpan.FromMinutes(5)); // Then every 5 minutes
         
         // Subscribe to mediator messages
         Mediator.Subscribe<SendCharacterDataAcknowledgmentMessage>(this, (msg) => _ = HandleSendAcknowledgment(msg));
     }
     
-    /// <summary>
+    
     /// Sends an acknowledgment with priority and error handling
-    /// </summary>
+    
     public async Task<bool> SendAcknowledgmentAsync(EnhancedAcknowledgmentDto acknowledgment)
     {
         try
@@ -117,9 +126,9 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
         }
     }
     
-    /// <summary>
+    
     /// Adds acknowledgment to batch for processing
-    /// </summary>
+    
     private async Task AddToBatchAsync(EnhancedAcknowledgmentDto acknowledgment)
     {
         await _batchSemaphore.WaitAsync(_cancellationTokenSource.Token);
@@ -146,9 +155,9 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
         }
     }
     
-    /// <summary>
+    
     /// Processes a batch of acknowledgments
-    /// </summary>
+    
     private async Task ProcessBatchAsync(BatchAcknowledgmentDto batch)
     {
         try
@@ -170,9 +179,9 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
         }
     }
     
-    /// <summary>
+    
     /// Sends a single acknowledgment
-    /// </summary>
+    
     private async Task<bool> SendSingleAcknowledgmentAsync(EnhancedAcknowledgmentDto acknowledgment)
     {
         var startTime = DateTime.UtcNow;
@@ -226,9 +235,9 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
         }
     }
     
-    /// <summary>
+    
     /// Schedules a retry for a failed acknowledgment
-    /// </summary>
+    
     private async Task ScheduleRetryAsync(EnhancedAcknowledgmentDto acknowledgment)
     {
         var delay = CalculateRetryDelay(acknowledgment.RetryCount);
@@ -242,9 +251,9 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
         _metrics.RecordRetry();
     }
     
-    /// <summary>
+    
     /// Calculates retry delay using exponential backoff
-    /// </summary>
+    
     private TimeSpan CalculateRetryDelay(int retryCount)
     {
         var delay = Math.Min(
@@ -257,9 +266,9 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
         return TimeSpan.FromMilliseconds(delay + jitter);
     }
     
-    /// <summary>
+    
     /// Adds acknowledgment to appropriate priority queue
-    /// </summary>
+    
     private void AddToQueue(EnhancedAcknowledgmentDto acknowledgment)
     {
         switch (acknowledgment.Priority)
@@ -276,9 +285,9 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
         }
     }
     
-    /// <summary>
+    
     /// Determines error code from exception
-    /// </summary>
+    
     private AcknowledgmentErrorCode DetermineErrorCode(Exception ex)
     {
         return ex switch
@@ -290,9 +299,9 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
         };
     }
     
-    /// <summary>
+    
     /// Timer callback to process batches
-    /// </summary>
+    
     private void ProcessBatches(object? state)
     {
         _ = Task.Run(async () =>
@@ -331,9 +340,33 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
         });
     }
     
-    /// <summary>
-    /// Timer callback to check for timeouts
-    /// </summary>
+
+    // Timer callback to cleanup old pending acknowledgments
+    private void CleanupOldAcknowledgments(object? state)
+    {
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                // Cleanup old pending acknowledgments (older than 10 minutes)
+                var maxAge = TimeSpan.FromMinutes(10);
+                _sessionManager.CleanupOldPendingAcknowledgments(maxAge);
+                
+                // Cleanup old sessions (older than 30 minutes)
+                var sessionMaxAge = TimeSpan.FromMinutes(30);
+                _sessionManager.CleanupOldSessions(sessionMaxAge);
+                
+                Logger.LogDebug("Completed cleanup of old acknowledgments and sessions");
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Error in acknowledgment cleanup timer");
+            }
+        });
+    }
+    
+
+    // Timer callback to check for timeouts
     private void CheckTimeouts(object? state)
     {
         _ = Task.Run(() =>
@@ -373,9 +406,9 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
         });
     }
     
-    /// <summary>
+    
     /// Timer callback to process retries
-    /// </summary>
+    
     private void ProcessRetries(object? state)
     {
         _ = Task.Run(async () =>
@@ -411,9 +444,9 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
         });
     }
     
-    /// <summary>
+    
     /// Timer callback to cleanup cache
-    /// </summary>
+    
     private void CleanupCache(object? state)
     {
         _ = Task.Run(() =>
@@ -461,9 +494,9 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
         });
     }
     
-    /// <summary>
+    
     /// Handles send acknowledgment mediator message
-    /// </summary>
+    
     public async Task HandleSendAcknowledgment(SendCharacterDataAcknowledgmentMessage message)
     {
         var enhancedAck = new EnhancedAcknowledgmentDto(
@@ -485,14 +518,14 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
         }
     }
     
-    /// <summary>
+    
     /// Gets current metrics
-    /// </summary>
+    
     public AcknowledgmentMetrics GetMetrics() => _metrics;
     
-    /// <summary>
+    
     /// Gets current configuration
-    /// </summary>
+    
     public AcknowledgmentConfiguration GetConfiguration() => _config;
     
     protected override void Dispose(bool disposing)
@@ -512,9 +545,8 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
     }
 }
 
-/// <summary>
+
 /// Represents a pending acknowledgment with timeout tracking
-/// </summary>
 internal class PendingAcknowledgment
 {
     public EnhancedAcknowledgmentDto Acknowledgment { get; }
@@ -527,9 +559,8 @@ internal class PendingAcknowledgment
     }
 }
 
-/// <summary>
+
 /// Represents a cached acknowledgment
-/// </summary>
 internal class CachedAcknowledgment
 {
     public EnhancedAcknowledgmentDto Acknowledgment { get; }
