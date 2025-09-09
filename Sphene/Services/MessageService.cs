@@ -2,6 +2,8 @@ using Dalamud.Interface.ImGuiNotification;
 using Dalamud.Plugin.Services;
 using Microsoft.Extensions.Logging;
 using Sphene.SpheneConfiguration.Models;
+using Sphene.SpheneConfiguration;
+using Sphene.Services.Mediator;
 using System.Collections.Concurrent;
 using System.Collections;
 using NotificationType = Sphene.SpheneConfiguration.Models.NotificationType;
@@ -55,14 +57,18 @@ public class MessageService : IEnumerable<KeyValuePair<string, Notification>>
 {
     private readonly ILogger<MessageService> _logger;
     private readonly INotificationManager? _notificationManager;
+    private readonly SpheneConfigService? _configService;
+    private readonly SpheneMediator? _mediator;
     private readonly ConcurrentDictionary<string, Notification> _messages = new();
     private readonly ConcurrentDictionary<string, List<Notification>> _taggedMessages = new();
     private readonly object _lock = new();
 
-    public MessageService(ILogger<MessageService> logger, INotificationManager? notificationManager = null)
+    public MessageService(ILogger<MessageService> logger, INotificationManager? notificationManager = null, SpheneConfigService? configService = null, SpheneMediator? mediator = null)
     {
         _logger = logger;
         _notificationManager = notificationManager;
+        _configService = configService;
+        _mediator = mediator;
     }
 
     public int Count => _messages.Count;
@@ -72,6 +78,20 @@ public class MessageService : IEnumerable<KeyValuePair<string, Notification>>
     public void AddTaggedMessage(string tag, string content, NotificationType type = NotificationType.Info, 
         string? title = null, TimeSpan? minimumDuration = null, bool respectUiHidden = true)
     {
+        // Check if this is a "waiting for acknowledgment" message and if those popups are disabled
+        if (IsWaitingForAcknowledgmentMessage(tag) && !ShouldShowWaitingForAcknowledgmentNotification())
+        {
+            _logger.LogDebug("Skipping waiting for acknowledgment notification due to settings: {tag} - {content}", tag, content);
+            return;
+        }
+        
+        // Check if this is an acknowledgment-related message and if acknowledgment popups are disabled
+        if (IsAcknowledgmentMessage(tag) && !ShouldShowAcknowledgmentNotification())
+        {
+            _logger.LogDebug("Skipping acknowledgment notification due to settings: {tag} - {content}", tag, content);
+            return;
+        }
+        
         var notification = new Notification(content, type, title, minimumDuration, respectUiHidden, tag);
         var messageId = $"{tag}_{DateTime.UtcNow.Ticks}";
         
@@ -85,12 +105,12 @@ public class MessageService : IEnumerable<KeyValuePair<string, Notification>>
             _taggedMessages[tag].Add(notification);
         }
 
-        // Send to Dalamud notification system if available
-        if (_notificationManager != null)
+        // Send notification based on settings
+        if (ShouldShowNotificationInLocation(tag))
         {
-            var dalNotification = notification.ToINotification() as Dalamud.Interface.ImGuiNotification.Notification;
-            if (dalNotification != null)
-                _notificationManager.AddNotification(dalNotification);
+
+            
+            SendNotificationBasedOnSettings(notification, tag);
         }
         
         _logger.LogInformation("Added tagged message: {tag} - {content}", tag, content);
@@ -199,5 +219,142 @@ public class MessageService : IEnumerable<KeyValuePair<string, Notification>>
     IEnumerator IEnumerable.GetEnumerator()
     {
         return GetEnumerator();
+    }
+    
+    // Check if a message tag indicates it's acknowledgment-related
+    private bool IsAcknowledgmentMessage(string tag)
+    {
+        return tag.StartsWith("ack_") || 
+               tag.StartsWith("pair_clear_") || 
+               tag.StartsWith("pair_force_clear_") || 
+               tag.StartsWith("build_start_pending") ||
+               tag.Contains("acknowledgment", StringComparison.OrdinalIgnoreCase);
+    }
+    
+    // Check if a message tag indicates it's a "waiting for acknowledgment" message
+    private bool IsWaitingForAcknowledgmentMessage(string tag)
+    {
+        return tag.StartsWith("ack_") && !tag.Contains("success") && !tag.Contains("complete");
+    }
+    
+    // Check if acknowledgment notifications should be shown based on settings
+    private bool ShouldShowAcknowledgmentNotification()
+    {
+        if (_configService?.Current == null)
+            return true; // Default to showing if config is not available
+            
+        return _configService.Current.ShowAcknowledgmentPopups;
+    }
+    
+    // Check if "waiting for acknowledgment" notifications should be shown based on settings
+    private bool ShouldShowWaitingForAcknowledgmentNotification()
+    {
+        if (_configService?.Current == null)
+            return false; // Default to not showing if config is not available
+            
+        return _configService.Current.ShowWaitingForAcknowledgmentPopups;
+    }
+    
+    // Check if notification should be shown in the current location (Toast vs Chat)
+    private bool ShouldShowNotificationInLocation(string tag)
+    {
+        if (!IsAcknowledgmentMessage(tag))
+            return true; // Non-acknowledgment messages always show
+            
+        if (_configService?.Current == null)
+            return true; // Default to showing if config is not available
+            
+        // Check specifically for "waiting for acknowledgment" messages
+        if (IsWaitingForAcknowledgmentMessage(tag) && !_configService.Current.ShowWaitingForAcknowledgmentPopups)
+            return false; // Don't show waiting for acknowledgment notifications if disabled
+            
+        if (!_configService.Current.ShowAcknowledgmentPopups)
+            return false; // Don't show any acknowledgment notifications if disabled
+            
+        var location = _configService.Current.AcknowledgmentNotification;
+        
+        // Show notifications if location is not None
+        return location != NotificationLocation.Nowhere;
+    }
+    
+    // Send notification based on acknowledgment settings
+    private void SendNotificationBasedOnSettings(Notification notification, string tag)
+    {
+        if (!IsAcknowledgmentMessage(tag))
+        {
+            // Non-acknowledgment messages always show as toast
+            if (_notificationManager != null)
+            {
+                var dalNotification = notification.ToINotification() as Dalamud.Interface.ImGuiNotification.Notification;
+                if (dalNotification != null)
+                    _notificationManager.AddNotification(dalNotification);
+            }
+            return;
+        }
+        
+        if (_configService?.Current == null)
+        {
+            // Default to toast if config is not available
+            if (_notificationManager != null)
+            {
+                var dalNotification = notification.ToINotification() as Dalamud.Interface.ImGuiNotification.Notification;
+                if (dalNotification != null)
+                    _notificationManager.AddNotification(dalNotification);
+            }
+            return;
+        }
+        
+        var location = _configService.Current.AcknowledgmentNotification;
+        
+
+            
+        switch (location)
+        {
+            case NotificationLocation.Toast:
+                if (_notificationManager != null)
+                {
+                    var dalNotification = notification.ToINotification() as Dalamud.Interface.ImGuiNotification.Notification;
+                    if (dalNotification != null)
+                        _notificationManager.AddNotification(dalNotification);
+                }
+                break;
+                
+            case NotificationLocation.Chat:
+                if (_mediator != null)
+                {
+                    var notificationMessage = new NotificationMessage(notification.Title ?? "Sphene", notification.Content, notification.Type, notification.MinimumDuration);
+
+                    _mediator.Publish(notificationMessage);
+                }
+                else
+                {
+                    _logger.LogWarning("Cannot send chat notification: SpheneMediator is null");
+                }
+                break;
+                
+            case NotificationLocation.Both:
+                // Send both toast and chat
+                if (_notificationManager != null)
+                {
+                    var dalNotification = notification.ToINotification() as Dalamud.Interface.ImGuiNotification.Notification;
+                    if (dalNotification != null)
+                        _notificationManager.AddNotification(dalNotification);
+                }
+                if (_mediator != null)
+                {
+                    var notificationMessage = new NotificationMessage(notification.Title ?? "Sphene", notification.Content, notification.Type, notification.MinimumDuration);
+
+                    _mediator.Publish(notificationMessage);
+                }
+                else
+                {
+                    _logger.LogWarning("Cannot send chat notification (Both): SpheneMediator is null");
+                }
+                break;
+                
+            case NotificationLocation.Nowhere:
+                // Don't send any notification
+                break;
+        }
     }
 }

@@ -66,6 +66,7 @@ public class SpheneConfig : ISpheneConfiguration
     
     // Acknowledgment System Settings
     public bool ShowAcknowledgmentPopups { get; set; } = true;
+    public bool ShowWaitingForAcknowledgmentPopups { get; set; } = false;
     public bool EnableAcknowledgmentBatching { get; set; } = true;
     public bool EnableAcknowledgmentAutoRetry { get; set; } = true;
     public bool EnableSilentAcknowledgments { get; set; } = true;

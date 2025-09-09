@@ -59,6 +59,8 @@ public class NotificationService : DisposableMediatorSubscriberBase, IHostedServ
 
     private void ShowChat(NotificationMessage msg)
     {
+
+        
         switch (msg.Type)
         {
             case NotificationType.Info:
@@ -72,14 +74,19 @@ public class NotificationService : DisposableMediatorSubscriberBase, IHostedServ
             case NotificationType.Error:
                 PrintErrorChat(msg.Message);
                 break;
+
+            case NotificationType.Success:
+                PrintInfoChat(msg.Message);
+                break;
         }
     }
 
     private void ShowNotification(NotificationMessage msg)
     {
-        Logger.LogInformation("{msg}", msg.ToString());
-
-        if (!_dalamudUtilService.IsLoggedIn) return;
+        if (!_dalamudUtilService.IsLoggedIn) 
+        {
+            return;
+        }
 
         switch (msg.Type)
         {
@@ -93,6 +100,10 @@ public class NotificationService : DisposableMediatorSubscriberBase, IHostedServ
 
             case NotificationType.Error:
                 ShowNotificationLocationBased(msg, _configurationService.Current.ErrorNotification);
+                break;
+
+            case NotificationType.Success:
+                ShowNotificationLocationBased(msg, _configurationService.Current.AcknowledgmentNotification);
                 break;
         }
     }

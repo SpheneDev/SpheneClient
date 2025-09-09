@@ -2082,12 +2082,20 @@ public class SettingsUi : WindowMediatorSubscriberBase
         ImGui.TextColored(ImGuiColors.DalamudYellow, "Popup Settings");
         
         var showPopups = _configService.Current.ShowAcknowledgmentPopups;
-        if (ImGui.Checkbox("Show Acknowledgment Popups", ref showPopups))
+        if (ImGui.Checkbox("Show Acknowledgment Notifications", ref showPopups))
         {
             _configService.Current.ShowAcknowledgmentPopups = showPopups;
             _configService.Save();
         }
-        UiSharedService.AttachToolTip("Enable or disable popup notifications for acknowledgment requests. Disable this to prevent spam when receiving many acknowledgment requests.");
+        UiSharedService.AttachToolTip("Enable or disable notifications for acknowledgment requests. Disable this to prevent spam when receiving many acknowledgment requests.");
+        
+        var showWaitingPopups = _configService.Current.ShowWaitingForAcknowledgmentPopups;
+        if (ImGui.Checkbox("Show 'Waiting for Acknowledgment' Popups", ref showWaitingPopups))
+        {
+            _configService.Current.ShowWaitingForAcknowledgmentPopups = showWaitingPopups;
+            _configService.Save();
+        }
+        UiSharedService.AttachToolTip("Enable or disable 'waiting for acknowledgment' popup notifications specifically. Success notifications will still be shown when disabled.");
         
         if (_configService.Current.ShowAcknowledgmentPopups)
         {
@@ -2164,6 +2172,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         if (ImGui.Button("Reset Acknowledgment Settings to Defaults"))
         {
             _configService.Current.ShowAcknowledgmentPopups = true;
+            _configService.Current.ShowWaitingForAcknowledgmentPopups = false;
             _configService.Current.EnableAcknowledgmentBatching = true;
             _configService.Current.EnableAcknowledgmentAutoRetry = true;
             _configService.Current.EnableSilentAcknowledgments = true;

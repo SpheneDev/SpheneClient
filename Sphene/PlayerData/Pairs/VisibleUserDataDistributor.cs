@@ -1,4 +1,6 @@
 using Sphene.API.Data;
+using Sphene.API.Data.Enum;
+using Sphene.PlayerData.Factories;
 using Sphene.Services;
 using Sphene.Services.Mediator;
 using Sphene.Utils;
@@ -13,6 +15,7 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
     private readonly ApiController _apiController;
     private readonly DalamudUtilService _dalamudUtil;
     private readonly FileUploadManager _fileTransferManager;
+    private readonly GameObjectHandlerFactory _gameObjectHandlerFactory;
     private readonly PairManager _pairManager;
     private readonly SessionAcknowledgmentManager _sessionAcknowledgmentManager;
     private CharacterData? _lastCreatedData;
@@ -28,21 +31,38 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
     private readonly Dictionary<UserData, DateTime> _lastSilentAckPerUser = new();
     private readonly Timer _silentAcknowledgmentTimer;
     private const int SILENT_ACK_INTERVAL_MINUTES = 1;
+    
+    // Delayed push tracking for newly connected users
+    private readonly Dictionary<UserData, DateTime> _delayedPushUsers = new();
+    private readonly Dictionary<UserData, DateTime> _delayedReloadUsers = new();
+    private readonly Timer _delayedPushTimer;
+    private readonly Timer _characterReloadTimer;
+    private const int DELAYED_PUSH_SECONDS = 3;
+    private const int CHARACTER_RELOAD_DELAY_SECONDS = 3;
 
 
     public VisibleUserDataDistributor(ILogger<VisibleUserDataDistributor> logger, ApiController apiController, DalamudUtilService dalamudUtil,
-        PairManager pairManager, SpheneMediator mediator, FileUploadManager fileTransferManager, SessionAcknowledgmentManager sessionAcknowledgmentManager) : base(logger, mediator)
+        PairManager pairManager, SpheneMediator mediator, FileUploadManager fileTransferManager, SessionAcknowledgmentManager sessionAcknowledgmentManager,
+        GameObjectHandlerFactory gameObjectHandlerFactory) : base(logger, mediator)
     {
         _apiController = apiController;
         _dalamudUtil = dalamudUtil;
         _pairManager = pairManager;
         _fileTransferManager = fileTransferManager;
         _sessionAcknowledgmentManager = sessionAcknowledgmentManager;
+        _gameObjectHandlerFactory = gameObjectHandlerFactory;
         
         // Initialize silent acknowledgment timer
         _silentAcknowledgmentTimer = new Timer(SendSilentAcknowledgments, null, 
             TimeSpan.FromMinutes(SILENT_ACK_INTERVAL_MINUTES), 
             TimeSpan.FromMinutes(SILENT_ACK_INTERVAL_MINUTES));
+        
+        // Initialize delayed push timer for newly connected users
+        _delayedPushTimer = new Timer(ProcessDelayedPushes, null, 
+            TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+        
+        // Initialize character reload timer - triggers every second to check for expired reload delays
+        _characterReloadTimer = new Timer(ProcessDelayedReloads, null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
         
         Mediator.Subscribe<DelayedFrameworkUpdateMessage>(this, (_) => FrameworkOnUpdate());
         Mediator.Subscribe<CharacterDataCreatedMessage>(this, (msg) =>
@@ -81,6 +101,9 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
             _runtimeCts.Cancel();
             _runtimeCts.Dispose();
             _silentAcknowledgmentTimer?.Dispose();
+            _delayedPushTimer?.Dispose();
+            _characterReloadTimer?.Dispose();
+            _pushDataSemaphore?.Dispose();
         }
 
         base.Dispose(disposing);
@@ -129,26 +152,16 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
         _previouslyVisiblePlayers.AddRange(allVisibleUsers);
         if (newVisibleUsers.Count == 0) return;
 
-        Logger.LogDebug("New users entered view: {users}. Scheduling data push check.",
+        Logger.LogDebug("New users entered view: {users}. Scheduling delayed data push check.",
             string.Join(", ", newVisibleUsers.Select(k => k.AliasOrUID)));
         
-        // Add new users to push queue - they will get data when CharacterDataCreatedMessage fires
-        // or immediately if we have current data
+        // Add new users to delayed push queue to give them time to stabilize connection
+        var currentTime = DateTime.UtcNow;
         foreach (var user in newVisibleUsers)
         {
-            _usersToPushDataTo.Add(user);
-        }
-        
-        // Only push immediately if we have data to push
-        if (_lastCreatedData != null)
-        {
-            Logger.LogDebug("Pushing existing character data {hash} to new users",
-                _lastCreatedData.DataHash?.Value ?? "null");
-            PushCharacterData();
-        }
-        else
-        {
-            Logger.LogDebug("No character data available yet, users will receive data when it's created");
+            _delayedPushUsers[user] = currentTime;
+            Logger.LogDebug("Added user {user} to delayed push queue - will push in {seconds} seconds", 
+                user.AliasOrUID, DELAYED_PUSH_SECONDS);
         }
     }
 
@@ -276,6 +289,100 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
                     Logger.LogWarning(ex, "Failed to send silent acknowledgments");
                 }
             });
+        }
+    }
+    
+    /// Processes delayed pushes for newly connected users after the stabilization period
+    
+    private void ProcessDelayedPushes(object? state)
+    {
+        if (_delayedPushUsers.Count == 0) return;
+        
+        var currentTime = DateTime.UtcNow;
+        var usersToProcess = new List<UserData>();
+        
+        // Find users whose delay period has expired
+        foreach (var kvp in _delayedPushUsers.ToList())
+        {
+            var user = kvp.Key;
+            var delayStartTime = kvp.Value;
+            
+            if ((currentTime - delayStartTime).TotalSeconds >= DELAYED_PUSH_SECONDS)
+            {
+                usersToProcess.Add(user);
+                _delayedPushUsers.Remove(user);
+                Logger.LogDebug("Delay period expired for user {user} - adding to push queue", user.AliasOrUID);
+            }
+        }
+        
+        // Add users to push queue and trigger push if we have data
+        if (usersToProcess.Count > 0)
+        {
+            foreach (var user in usersToProcess)
+            {
+                _usersToPushDataTo.Add(user);
+                // Schedule character reload after acknowledgment is sent
+                _delayedReloadUsers[user] = DateTime.UtcNow;
+                Logger.LogDebug("Scheduled character reload for user {user} in {seconds} seconds", 
+                    user.AliasOrUID, CHARACTER_RELOAD_DELAY_SECONDS);
+            }
+            
+            // Only push if we have data to push
+            if (_lastCreatedData != null)
+            {
+                Logger.LogDebug("Pushing character data {hash} to {count} delayed users: {users}",
+                    _lastCreatedData.DataHash?.Value ?? "null", usersToProcess.Count,
+                    string.Join(", ", usersToProcess.Select(u => u.AliasOrUID)));
+                PushCharacterData();
+            }
+            else
+            {
+                Logger.LogDebug("No character data available yet for delayed users: {users}",
+                    string.Join(", ", usersToProcess.Select(u => u.AliasOrUID)));
+            }
+        }
+    }
+    
+    /// Processes delayed character reloads after acknowledgment has been sent
+    
+    private async void ProcessDelayedReloads(object? state)
+    {
+        if (_delayedReloadUsers.Count == 0) return;
+        
+        var currentTime = DateTime.UtcNow;
+        var usersToReload = new List<UserData>();
+        
+        // Find users whose reload delay period has expired
+        foreach (var kvp in _delayedReloadUsers.ToList())
+        {
+            var user = kvp.Key;
+            var delayStartTime = kvp.Value;
+            
+            if ((currentTime - delayStartTime).TotalSeconds >= CHARACTER_RELOAD_DELAY_SECONDS)
+            {
+                usersToReload.Add(user);
+                _delayedReloadUsers.Remove(user);
+                Logger.LogDebug("Character reload delay expired for user {user} - triggering reload", user.AliasOrUID);
+            }
+        }
+        
+        // Trigger character reload for users
+        if (usersToReload.Count > 0)
+        {
+            Logger.LogDebug("Triggering character reload for {count} users: {users}",
+                usersToReload.Count, string.Join(", ", usersToReload.Select(u => u.AliasOrUID)));
+            
+            // Trigger character data recreation by creating a temporary handler and sending CreateCacheForObjectMessage
+            try
+            {
+                var tempHandler = await _gameObjectHandlerFactory.Create(ObjectKind.Player, () => _dalamudUtil.GetPlayerPtr(), isWatched: false);
+                Mediator.Publish(new CreateCacheForObjectMessage(tempHandler));
+                tempHandler.Dispose();
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Failed to trigger character reload");
+            }
         }
     }
     

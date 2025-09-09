@@ -169,7 +169,7 @@ public sealed class Plugin : IDalamudPlugin
                 s.GetRequiredService<SpheneMediator>(), s.GetRequiredService<IpcCallerPenumbra>(), s.GetRequiredService<IpcCallerGlamourer>(),
                 s.GetRequiredService<IpcCallerCustomize>(), s.GetRequiredService<IpcCallerHeels>(), s.GetRequiredService<IpcCallerHonorific>(),
                 s.GetRequiredService<IpcCallerMoodles>(), s.GetRequiredService<IpcCallerPetNames>(), s.GetRequiredService<IpcCallerBrio>()));
-            collection.AddSingleton((s) => new MessageService(s.GetRequiredService<ILogger<MessageService>>(), notificationManager));
+            collection.AddSingleton((s) => new MessageService(s.GetRequiredService<ILogger<MessageService>>(), notificationManager, s.GetRequiredService<SpheneConfigService>(), s.GetRequiredService<SpheneMediator>()));
             collection.AddSingleton((s) => new AcknowledgmentBatchingService(
                 s.GetRequiredService<ILogger<AcknowledgmentBatchingService>>(),
                 s.GetRequiredService<SpheneMediator>(),
