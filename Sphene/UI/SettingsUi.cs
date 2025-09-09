@@ -2168,7 +2168,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             _configService.Current.EnableAcknowledgmentAutoRetry = true;
             _configService.Current.EnableSilentAcknowledgments = true;
             _configService.Current.AcknowledgmentTimeoutSeconds = 30;
-            _configService.Current.AcknowledgmentNotification = NotificationLocation.Toast;
+            _configService.Current.AcknowledgmentNotification = NotificationLocation.Chat;
             _configService.Save();
         }
         UiSharedService.AttachToolTip("Reset all acknowledgment settings to their default values.");
