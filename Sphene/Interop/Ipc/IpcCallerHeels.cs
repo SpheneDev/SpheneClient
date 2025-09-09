@@ -16,6 +16,7 @@ public sealed class IpcCallerHeels : IIpcCaller
     private readonly ICallGateSubscriber<string, object?> _heelsOffsetUpdate;
     private readonly ICallGateSubscriber<int, string, object?> _heelsRegisterPlayer;
     private readonly ICallGateSubscriber<int, object?> _heelsUnregisterPlayer;
+    private readonly ICallGateSubscriber<int, string, string?, object?> _heelsTagChanged;
 
     public IpcCallerHeels(ILogger<IpcCallerHeels> logger, IDalamudPluginInterface pi, DalamudUtilService dalamudUtil, SpheneMediator mareMediator)
     {
@@ -27,8 +28,10 @@ public sealed class IpcCallerHeels : IIpcCaller
         _heelsRegisterPlayer = pi.GetIpcSubscriber<int, string, object?>("SimpleHeels.RegisterPlayer");
         _heelsUnregisterPlayer = pi.GetIpcSubscriber<int, object?>("SimpleHeels.UnregisterPlayer");
         _heelsOffsetUpdate = pi.GetIpcSubscriber<string, object?>("SimpleHeels.LocalChanged");
+        _heelsTagChanged = pi.GetIpcSubscriber<int, string, string?, object?>("SimpleHeels.TagChanged");
 
         _heelsOffsetUpdate.Subscribe(HeelsOffsetChange);
+        _heelsTagChanged.Subscribe(HeelsTagChanged);
 
         CheckAPI();
     }
@@ -37,6 +40,13 @@ public sealed class IpcCallerHeels : IIpcCaller
 
     private void HeelsOffsetChange(string offset)
     {
+        _mareMediator.Publish(new HeelsOffsetMessage());
+    }
+
+    private void HeelsTagChanged(int gameObjectIndex, string tag, string? value)
+    {
+        _logger.LogTrace("SimpleHeels tag changed for object {index}: {tag} = {value}", gameObjectIndex, tag, value ?? "null");
+        // Tag changes can affect character appearance, so trigger a heels update
         _mareMediator.Publish(new HeelsOffsetMessage());
     }
 
@@ -78,7 +88,7 @@ public sealed class IpcCallerHeels : IIpcCaller
     {
         try
         {
-            APIAvailable = _heelsGetApiVersion.InvokeFunc() is { Item1: 2, Item2: >= 1 };
+            APIAvailable = _heelsGetApiVersion.InvokeFunc() is { Item1: 2, Item2: >= 4 };
         }
         catch
         {
@@ -89,5 +99,6 @@ public sealed class IpcCallerHeels : IIpcCaller
     public void Dispose()
     {
         _heelsOffsetUpdate.Unsubscribe(HeelsOffsetChange);
+        _heelsTagChanged.Unsubscribe(HeelsTagChanged);
     }
 }
