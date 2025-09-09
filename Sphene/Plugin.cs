@@ -144,7 +144,7 @@ public sealed class Plugin : IDalamudPlugin
             collection.AddSingleton<Lazy<ApiController>>(s => new Lazy<ApiController>(() => s.GetRequiredService<ApiController>()));
             collection.AddSingleton(s => new PairManager(s.GetRequiredService<ILogger<PairManager>>(), s.GetRequiredService<PairFactory>(),
                 s.GetRequiredService<SpheneConfigService>(), s.GetRequiredService<SpheneMediator>(), contextMenu, s.GetRequiredService<ServerConfigurationManager>(),
-                s.GetRequiredService<Lazy<ApiController>>(), s.GetRequiredService<SessionAcknowledgmentManager>()));
+                s.GetRequiredService<Lazy<ApiController>>(), s.GetRequiredService<SessionAcknowledgmentManager>(), s.GetRequiredService<MessageService>()));
             collection.AddSingleton(s => new EnhancedAcknowledgmentManager(s.GetRequiredService<ILogger<EnhancedAcknowledgmentManager>>(),
                 s.GetRequiredService<Lazy<ApiController>>().Value, s.GetRequiredService<SpheneMediator>(), new AcknowledgmentConfiguration(),
                 s.GetRequiredService<SessionAcknowledgmentManager>()));
@@ -169,6 +169,11 @@ public sealed class Plugin : IDalamudPlugin
                 s.GetRequiredService<SpheneMediator>(), s.GetRequiredService<IpcCallerPenumbra>(), s.GetRequiredService<IpcCallerGlamourer>(),
                 s.GetRequiredService<IpcCallerCustomize>(), s.GetRequiredService<IpcCallerHeels>(), s.GetRequiredService<IpcCallerHonorific>(),
                 s.GetRequiredService<IpcCallerMoodles>(), s.GetRequiredService<IpcCallerPetNames>(), s.GetRequiredService<IpcCallerBrio>()));
+            collection.AddSingleton((s) => new MessageService(s.GetRequiredService<ILogger<MessageService>>(), notificationManager));
+            collection.AddSingleton((s) => new AcknowledgmentBatchingService(
+                s.GetRequiredService<ILogger<AcknowledgmentBatchingService>>(),
+                s.GetRequiredService<SpheneMediator>(),
+                s.GetRequiredService<MessageService>()));
             collection.AddSingleton((s) => new NotificationService(s.GetRequiredService<ILogger<NotificationService>>(),
                 s.GetRequiredService<SpheneMediator>(), s.GetRequiredService<DalamudUtilService>(),
                 notificationManager, chatGui, s.GetRequiredService<SpheneConfigService>()));
@@ -244,7 +249,9 @@ public sealed class Plugin : IDalamudPlugin
                 return new SessionAcknowledgmentManager(
                     s.GetRequiredService<ILogger<SessionAcknowledgmentManager>>(),
                     s.GetRequiredService<SpheneMediator>(),
-                    userData => lazyPairManager.Value.GetPairForUser(userData)
+                    userData => lazyPairManager.Value.GetPairForUser(userData),
+                    s.GetRequiredService<MessageService>(),
+                    s.GetRequiredService<AcknowledgmentBatchingService>()
                 );
             });
             

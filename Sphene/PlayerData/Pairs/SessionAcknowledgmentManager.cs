@@ -2,7 +2,12 @@ using Microsoft.Extensions.Logging;
 using Sphene.API.Data;
 using Sphene.API.Data.Comparer;
 using Sphene.Services.Mediator;
+using Sphene.Services;
+using Sphene.Services.Events;
+using Sphene.SpheneConfiguration.Models;
 using System.Collections.Concurrent;
+using Dalamud.Interface.ImGuiNotification;
+using NotificationType = Sphene.SpheneConfiguration.Models.NotificationType;
 
 namespace Sphene.PlayerData.Pairs;
 
@@ -11,6 +16,8 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
 {
     private readonly ILogger<SessionAcknowledgmentManager> _logger;
     private readonly Func<UserData, Pair?> _getPairFunc;
+    private readonly MessageService _messageService;
+    private readonly AcknowledgmentBatchingService _batchingService;
     
     // Thread-safe storage for pending acknowledgments per user session with timestamps
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, PendingAcknowledgmentInfo>> _userSessionAcknowledgments = new();
@@ -34,10 +41,13 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
     // Current session ID for this client instance
     private readonly string _currentSessionId;
     
-    public SessionAcknowledgmentManager(ILogger<SessionAcknowledgmentManager> logger, SpheneMediator mediator, Func<UserData, Pair?> getPairFunc) : base(logger, mediator)
+    public SessionAcknowledgmentManager(ILogger<SessionAcknowledgmentManager> logger, SpheneMediator mediator, 
+        Func<UserData, Pair?> getPairFunc, MessageService messageService, AcknowledgmentBatchingService batchingService) : base(logger, mediator)
     {
         _logger = logger;
         _getPairFunc = getPairFunc;
+        _messageService = messageService;
+        _batchingService = batchingService;
         _currentSessionId = GenerateSessionId();
         
         _logger.LogInformation("SessionAcknowledgmentManager initialized with session ID: {sessionId}", _currentSessionId);
@@ -92,6 +102,24 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
             return;
         }
         
+        // Use batching for multiple recipients to improve performance
+        if (recipients.Count > 1)
+        {
+            var batchKey = $"session_ack_{acknowledgmentId}";
+            foreach (var recipient in recipients)
+            {
+                _batchingService.AddToBatch(batchKey, recipient, acknowledgmentId, ProcessBatchedAcknowledgment);
+            }
+        }
+        else
+        {
+            // Process single recipient immediately
+            ProcessBatchedAcknowledgment(recipients, acknowledgmentId);
+        }
+    }
+    
+    private void ProcessBatchedAcknowledgment(List<UserData> recipients, string acknowledgmentId)
+    {
         var sessionAcks = _userSessionAcknowledgments.GetOrAdd(_currentSessionId, _ => new ConcurrentDictionary<string, PendingAcknowledgmentInfo>());
         
         // Remove ALL older acknowledgments
@@ -106,6 +134,39 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
         
         _logger.LogInformation("Set pending acknowledgment for session {sessionId} with ID {ackId} waiting for {count} recipients: [{recipients}]", 
             _currentSessionId, acknowledgmentId, recipients.Count, string.Join(", ", recipients.Select(r => r.AliasOrUID)));
+        
+        // Add notification for pending acknowledgment
+        var recipientNames = string.Join(", ", recipients.Select(r => r.AliasOrUID));
+        if (recipients.Count == 1)
+        {
+            _messageService.AddTaggedMessage(
+                $"ack_{acknowledgmentId}",
+                $"Waiting for acknowledgment from {recipientNames}",
+                NotificationType.Info,
+                "Acknowledgment Pending",
+                TimeSpan.FromSeconds(5)
+            );
+        }
+        else
+        {
+            _messageService.AddTaggedMessage(
+                $"ack_{acknowledgmentId}",
+                $"Waiting for acknowledgments from {recipients.Count} users: {recipientNames}",
+                NotificationType.Info,
+                "Batch Acknowledgment Pending",
+                TimeSpan.FromSeconds(5)
+            );
+        }
+        
+        // Publish acknowledgment pending events
+        foreach (var recipient in recipients)
+        {
+            Mediator.Publish(new AcknowledgmentPendingMessage(
+                acknowledgmentId,
+                recipient,
+                DateTime.UtcNow
+            ));
+        }
         
         // Publish UI refresh
         Mediator.Publish(new RefreshUiMessage());
@@ -229,6 +290,22 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
         {
             pair.UpdateAcknowledgmentStatus(acknowledgmentId, true, DateTimeOffset.UtcNow);
             _logger.LogInformation("Updated pair acknowledgment status for user {user} - AckId: {ackId}", acknowledgingUser.AliasOrUID, acknowledgmentId);
+            
+            // Add success notification
+            _messageService.AddTaggedMessage(
+                $"ack_success_{acknowledgmentId}_{acknowledgingUser.UID}",
+                $"Acknowledgment received from {acknowledgingUser.AliasOrUID}",
+                NotificationType.Success,
+                "Acknowledgment Received",
+                TimeSpan.FromSeconds(3)
+            );
+            
+            // Publish acknowledgment received event
+            Mediator.Publish(new AcknowledgmentReceivedMessage(
+                acknowledgmentId,
+                acknowledgingUser,
+                DateTime.UtcNow
+            ));
         }
         else
         {
@@ -244,6 +321,26 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
             sessionAcks.TryRemove(acknowledgmentId, out _);
             _logger.LogInformation("All acknowledgments received for ID {ackId}, removed from session {sessionId}", acknowledgmentId, sessionId);
             
+            // Clean up pending acknowledgment notification
+            _messageService.CleanTaggedMessages($"ack_{acknowledgmentId}");
+            
+            // Add completion notification
+            _messageService.AddTaggedMessage(
+                $"ack_complete_{acknowledgmentId}",
+                "All acknowledgments received successfully",
+                NotificationType.Success,
+                "Acknowledgment Complete",
+                TimeSpan.FromSeconds(4)
+            );
+            
+            // Publish batch completion event
+            var allRecipients = sessionAcks.Values.SelectMany(info => info.Recipients).ToList();
+            Mediator.Publish(new AcknowledgmentBatchCompletedMessage(
+                acknowledgmentId,
+                allRecipients,
+                DateTime.UtcNow
+            ));
+            
             // Clean up empty session
             if (sessionAcks.IsEmpty)
             {
@@ -252,9 +349,32 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
             }
         }
         
-        // Publish UI refresh
+        // Publish granular UI refresh for this specific acknowledgment
+        Mediator.Publish(new AcknowledgmentUiRefreshMessage(
+            AcknowledgmentId: acknowledgmentId,
+            User: acknowledgingUser
+        ));
+        
+        // Publish acknowledgment metrics update
+        var totalPending = GetTotalPendingAcknowledgments();
+        Mediator.Publish(new AcknowledgmentMetricsUpdatedMessage(
+            totalPending,
+            1, // One acknowledgment was completed
+            0,
+            DateTime.UtcNow
+        ));
+        
+        // Keep legacy RefreshUiMessage for backward compatibility
         Mediator.Publish(new RefreshUiMessage());
         return true;
+    }
+    
+    // Get total count of pending acknowledgments across all sessions
+    private int GetTotalPendingAcknowledgments()
+    {
+        return _userSessionAcknowledgments.Values
+            .SelectMany(sessionAcks => sessionAcks.Values)
+            .Sum(ackInfo => ackInfo.Recipients.Count);
     }
     
     // Get all pending acknowledgments for current session
@@ -287,7 +407,7 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
             var pair = _getPairFunc(recipient);
             if (pair != null)
             {
-                pair.ClearPendingAcknowledgment(acknowledgmentId);
+                pair.ClearPendingAcknowledgment(acknowledgmentId, _messageService);
                 _logger.LogDebug("Cleared pending acknowledgment {ackId} from pair for user {user}", acknowledgmentId, recipient.AliasOrUID);
             }
             else
@@ -328,8 +448,40 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
             if (_userSessionAcknowledgments.TryGetValue(sessionId, out var sessionAcks) && 
                 sessionAcks.TryRemove(ackId, out _))
             {
+                // Clear the pending acknowledgment from pairs with timeout notification
+                foreach (var recipient in recipients)
+                {
+                    var pair = _getPairFunc(recipient);
+                    if (pair != null && pair.LastAcknowledgmentId == ackId)
+                    {
+                        pair.ClearPendingAcknowledgmentForce(_messageService);
+                    }
+                }
+                
                 ClearPendingStatusFromPairs(recipients, ackId);
                 _logger.LogInformation("Removed old pending acknowledgment {ackId} from session {sessionId}", ackId, sessionId);
+                
+                // Clean up related notifications
+                _messageService.CleanTaggedMessages($"ack_{ackId}");
+                
+                // Add timeout notification
+                _messageService.AddTaggedMessage(
+                    $"ack_timeout_{ackId}",
+                    $"Acknowledgment {ackId} timed out and was removed",
+                    NotificationType.Warning,
+                    "Acknowledgment Timeout",
+                    TimeSpan.FromSeconds(5)
+                );
+                
+                // Publish acknowledgment timeout events
+                foreach (var recipient in recipients)
+                {
+                    Mediator.Publish(new AcknowledgmentTimeoutMessage(
+                        ackId,
+                        recipient,
+                        DateTime.UtcNow
+                    ));
+                }
                 
                 // Clean up empty session
                 if (sessionAcks.IsEmpty)
@@ -343,6 +495,22 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
         if (toRemove.Count > 0)
         {
             _logger.LogInformation("Cleaned up {count} old pending acknowledgments", toRemove.Count);
+            
+            // Publish acknowledgment metrics update
+            var totalPending = GetTotalPendingAcknowledgments();
+            Mediator.Publish(new AcknowledgmentMetricsUpdatedMessage(
+                totalPending,
+                0, // We don't track completed count here
+                toRemove.Count,
+                DateTime.UtcNow
+            ));
+            
+            // Publish granular UI refresh for cleanup
+            Mediator.Publish(new AcknowledgmentUiRefreshMessage(
+                RefreshAll: true
+            ));
+            
+            // Keep legacy RefreshUiMessage for backward compatibility
             Mediator.Publish(new RefreshUiMessage());
         }
     }

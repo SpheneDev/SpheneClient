@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.Http.Connections;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using System.Reflection;
 
 namespace Sphene.WebAPI.SignalR;
 
@@ -79,11 +80,15 @@ public class HubFactory : MediatorSubscriberBase
 
         Logger.LogDebug("Building new HubConnection using transport {transport}", transportType);
 
+        var version = Assembly.GetExecutingAssembly().GetName().Version;
+        var userAgent = $"Sphene/{version!.Major}.{version!.Minor}.{version!.Build}";
+        
         _instance = new HubConnectionBuilder()
             .WithUrl(_serverConfigurationManager.CurrentApiUrl + IMareHub.Path, options =>
             {
                 options.AccessTokenProvider = () => _tokenProvider.GetOrUpdateToken(ct);
                 options.Transports = transportType;
+                options.Headers.Add("User-Agent", userAgent);
             })
             .AddMessagePackProtocol(opt =>
             {

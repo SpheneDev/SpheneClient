@@ -10,10 +10,12 @@ using Sphene.PlayerData.Factories;
 using Sphene.Services.Events;
 using Sphene.Services.Mediator;
 using Sphene.Services.ServerConfiguration;
+using Sphene.Services;
 using Sphene.WebAPI;
 using Sphene.API.Data.Comparer;
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
+using Dalamud.Interface.ImGuiNotification;
 
 namespace Sphene.PlayerData.Pairs;
 
@@ -28,6 +30,7 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
     private readonly PairFactory _pairFactory;
     private readonly ServerConfigurationManager _serverConfigurationManager;
     private readonly Lazy<ApiController> _apiController;
+    private readonly MessageService _messageService;
 
     private Lazy<List<Pair>> _directPairsInternal;
     private Lazy<Dictionary<GroupFullInfoDto, List<Pair>>> _groupPairsInternal;
@@ -36,7 +39,8 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
     public PairManager(ILogger<PairManager> logger, PairFactory pairFactory,
                 SpheneConfigService configurationService, SpheneMediator mediator,
                 IContextMenu dalamudContextMenu, ServerConfigurationManager serverConfigurationManager,
-                Lazy<ApiController> apiController, SessionAcknowledgmentManager sessionAcknowledgmentManager) : base(logger, mediator)
+                Lazy<ApiController> apiController, SessionAcknowledgmentManager sessionAcknowledgmentManager,
+                MessageService messageService) : base(logger, mediator)
     {
         _pairFactory = pairFactory;
         _configurationService = configurationService;
@@ -44,6 +48,7 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         _serverConfigurationManager = serverConfigurationManager;
         _apiController = apiController;
         _sessionAcknowledgmentManager = sessionAcknowledgmentManager;
+        _messageService = messageService;
 
         Mediator.Subscribe<DisconnectedMessage>(this, (_) => ClearPairs());
         Mediator.Subscribe<CutsceneEndMessage>(this, (_) => ReapplyPairData());
@@ -172,7 +177,7 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
             var msg = !string.IsNullOrEmpty(note)
                 ? $"{note} ({pair.UserData.AliasOrUID}) is now online"
                 : $"{pair.UserData.AliasOrUID} is now online";
-            Mediator.Publish(new NotificationMessage("User online", msg, NotificationType.Info, TimeSpan.FromSeconds(5)));
+            Mediator.Publish(new NotificationMessage("User online", msg, SpheneConfiguration.Models.NotificationType.Info, TimeSpan.FromSeconds(5)));
         }
 
         pair.CreateCachedPlayer(dto);
@@ -519,6 +524,29 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
                 Logger.LogDebug("Set pending acknowledgment for user {user} with ID {id}", userData.AliasOrUID, acknowledgmentId);
             }
         }
+        
+        // Add notification for multiple users
+        if (users.Count > 1)
+        {
+            _messageService.AddTaggedMessage(
+                $"ack_users_{acknowledgmentId}",
+                $"Waiting for acknowledgment from {users.Count} users",
+                SpheneConfiguration.Models.NotificationType.Info,
+                "Acknowledgment Pending",
+                TimeSpan.FromSeconds(3)
+            );
+        }
+        else if (users.Count == 1)
+        {
+            _messageService.AddTaggedMessage(
+                $"ack_user_{acknowledgmentId}_{users[0].UID}",
+                $"Waiting for acknowledgment from {users[0].AliasOrUID}",
+                SpheneConfiguration.Models.NotificationType.Info,
+                "Acknowledgment Pending",
+                TimeSpan.FromSeconds(3)
+            );
+        }
+        
         Mediator.Publish(new RefreshUiMessage());
     }
 
@@ -584,6 +612,15 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
             {
                 pair.SetBuildStartPendingStatus();
             }
+            
+            // Add notification for build start
+            _messageService.AddTaggedMessage(
+                "build_start_pending",
+                $"Character data build started - waiting for {visiblePairs.Count} pairs",
+                SpheneConfiguration.Models.NotificationType.Info,
+                "Build Started",
+                TimeSpan.FromSeconds(2)
+            );
             
             Logger.LogInformation("Set build start pending status for {count} visible pairs", visiblePairs.Count);
             Mediator.Publish(new RefreshUiMessage());

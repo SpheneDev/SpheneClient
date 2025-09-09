@@ -7,11 +7,17 @@ using Sphene.API.Dto.User;
 using Sphene.PlayerData.Factories;
 using Sphene.PlayerData.Handlers;
 using Sphene.Services.Mediator;
+using Sphene.Services.Events;
 using Sphene.Services.ServerConfiguration;
 using Sphene.SpheneConfiguration;
+using Sphene.SpheneConfiguration.Models;
 using Sphene.Utils;
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
+using Sphene.Services;
+using NotificationType = Sphene.SpheneConfiguration.Models.NotificationType;
+using Sphene.Services.Events;
+using Dalamud.Interface.ImGuiNotification;
 
 namespace Sphene.PlayerData.Pairs;
 
@@ -337,7 +343,22 @@ public class Pair : DisposableMediatorSubscriberBase
         LastAcknowledgmentTime = timestamp;
         HasPendingAcknowledgment = false;
         
-        // Trigger UI update
+        // Publish specific pair acknowledgment status change event
+        Mediator.Publish(new PairAcknowledgmentStatusChangedMessage(
+            UserData,
+            acknowledgmentId,
+            HasPendingAcknowledgment,
+            LastAcknowledgmentSuccess,
+            LastAcknowledgmentTime
+        ));
+        
+        // Publish granular UI refresh for this specific acknowledgment
+        Mediator.Publish(new AcknowledgmentUiRefreshMessage(
+            AcknowledgmentId: acknowledgmentId,
+            User: UserData
+        ));
+        
+        // Keep legacy RefreshUiMessage for backward compatibility
         Mediator.Publish(new RefreshUiMessage());
     }
 
@@ -348,6 +369,36 @@ public class Pair : DisposableMediatorSubscriberBase
         HasPendingAcknowledgment = true;
         LastAcknowledgmentSuccess = null;
         LastAcknowledgmentTime = null;
+        
+        // Publish specific pair acknowledgment status change event
+        Mediator.Publish(new PairAcknowledgmentStatusChangedMessage(
+            UserData,
+            acknowledgmentId,
+            HasPendingAcknowledgment,
+            LastAcknowledgmentSuccess,
+            LastAcknowledgmentTime
+        ));
+        
+        // Publish acknowledgment pending event
+        Mediator.Publish(new AcknowledgmentPendingMessage(
+            acknowledgmentId,
+            UserData,
+            DateTime.UtcNow
+        ));
+        
+        // Publish granular UI refresh for this specific acknowledgment
+        Mediator.Publish(new AcknowledgmentUiRefreshMessage(
+            AcknowledgmentId: acknowledgmentId,
+            User: UserData
+        ));
+        
+        // Keep legacy acknowledgment status change event for backward compatibility
+        Mediator.Publish(new AcknowledgmentStatusChangedMessage(
+            acknowledgmentId,
+            UserData,
+            AcknowledgmentStatus.Pending,
+            DateTime.UtcNow
+        ));
     }
 
     public void SetBuildStartPendingStatus()
@@ -359,7 +410,7 @@ public class Pair : DisposableMediatorSubscriberBase
         LastAcknowledgmentId = null; // No specific acknowledgment ID for build start
     }
 
-    public void ClearPendingAcknowledgment(string acknowledgmentId)
+    public void ClearPendingAcknowledgment(string acknowledgmentId, MessageService? messageService = null)
     {
         // Only clear if this is the acknowledgment we're waiting for
         if (LastAcknowledgmentId == acknowledgmentId)
@@ -368,7 +419,39 @@ public class Pair : DisposableMediatorSubscriberBase
             HasPendingAcknowledgment = false;
             LastAcknowledgmentId = null;
             
-            // Trigger UI update
+            // Add notification if MessageService is available
+            messageService?.AddTaggedMessage(
+                $"pair_clear_{acknowledgmentId}_{UserData.UID}",
+                $"Cleared pending acknowledgment for {UserData.AliasOrUID}",
+                NotificationType.Info,
+                "Acknowledgment Cleared",
+                TimeSpan.FromSeconds(2)
+            );
+            
+            // Publish specific pair acknowledgment status change event
+            Mediator.Publish(new PairAcknowledgmentStatusChangedMessage(
+                UserData,
+                acknowledgmentId,
+                HasPendingAcknowledgment,
+                LastAcknowledgmentSuccess,
+                LastAcknowledgmentTime
+            ));
+            
+            // Publish granular UI refresh for this specific acknowledgment
+            Mediator.Publish(new AcknowledgmentUiRefreshMessage(
+                AcknowledgmentId: acknowledgmentId,
+                User: UserData
+            ));
+            
+            // Publish acknowledgment status change event
+            Mediator.Publish(new AcknowledgmentStatusChangedMessage(
+                acknowledgmentId,
+                UserData,
+                AcknowledgmentStatus.Received,
+                DateTime.UtcNow
+            ));
+            
+            // Keep legacy RefreshUiMessage for backward compatibility
             Mediator.Publish(new RefreshUiMessage());
         }
         else
@@ -378,13 +461,58 @@ public class Pair : DisposableMediatorSubscriberBase
         }
     }
 
-    public void ClearPendingAcknowledgmentForce()
+    public void ClearPendingAcknowledgmentForce(MessageService? messageService = null)
     {
+        var previousAckId = LastAcknowledgmentId;
         Logger.LogInformation("Force clearing pending acknowledgment for user {user}", UserData.AliasOrUID);
         HasPendingAcknowledgment = false;
         LastAcknowledgmentId = null;
         
-        // Trigger UI update
+        // Add notification if MessageService is available
+        messageService?.AddTaggedMessage(
+            $"pair_force_clear_{previousAckId}_{UserData.UID}",
+            $"Force cleared pending acknowledgment for {UserData.AliasOrUID}",
+            NotificationType.Warning,
+            "Acknowledgment Force Cleared",
+            TimeSpan.FromSeconds(3)
+        );
+        
+        // Publish specific pair acknowledgment status change event
+        Mediator.Publish(new PairAcknowledgmentStatusChangedMessage(
+            UserData,
+            previousAckId,
+            HasPendingAcknowledgment,
+            LastAcknowledgmentSuccess,
+            LastAcknowledgmentTime
+        ));
+        
+        // Publish granular UI refresh for this user
+        if (previousAckId != null)
+        {
+            Mediator.Publish(new AcknowledgmentUiRefreshMessage(
+                AcknowledgmentId: previousAckId,
+                User: UserData
+            ));
+        }
+        else
+        {
+            Mediator.Publish(new AcknowledgmentUiRefreshMessage(
+                User: UserData
+            ));
+        }
+        
+        // Publish acknowledgment status change event if we had a pending acknowledgment
+        if (previousAckId != null)
+        {
+            Mediator.Publish(new AcknowledgmentStatusChangedMessage(
+                previousAckId,
+                UserData,
+                AcknowledgmentStatus.Cancelled,
+                DateTime.UtcNow
+            ));
+        }
+        
+        // Keep legacy RefreshUiMessage for backward compatibility
         Mediator.Publish(new RefreshUiMessage());
     }
 

@@ -63,4 +63,12 @@ public class SpheneConfig : ISpheneConfiguration
     public float IconPositionX { get; set; } = 100f;
     public float IconPositionY { get; set; } = 100f;
     public bool ShowSpheneIcon { get; set; } = true;
+    
+    // Acknowledgment System Settings
+    public bool ShowAcknowledgmentPopups { get; set; } = true;
+    public bool EnableAcknowledgmentBatching { get; set; } = true;
+    public bool EnableAcknowledgmentAutoRetry { get; set; } = true;
+    public bool EnableSilentAcknowledgments { get; set; } = true;
+    public int AcknowledgmentTimeoutSeconds { get; set; } = 30;
+    public NotificationLocation AcknowledgmentNotification { get; set; } = NotificationLocation.Chat;
 }

@@ -2033,6 +2033,12 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 ImGui.EndTabItem();
             }
 
+            if (ImGui.BeginTabItem("Acknowledgment"))
+            {
+                DrawAcknowledgmentSettings();
+                ImGui.EndTabItem();
+            }
+
             if (ImGui.BeginTabItem("Performance"))
             {
                 DrawPerformance();
@@ -2065,6 +2071,107 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
             ImGui.EndTabBar();
         }
+    }
+
+    private void DrawAcknowledgmentSettings()
+    {
+        ImGui.TextUnformatted("Acknowledgment System Configuration");
+        ImGui.Separator();
+        
+        // Popup Settings Section
+        ImGui.TextColored(ImGuiColors.DalamudYellow, "Popup Settings");
+        
+        var showPopups = _configService.Current.ShowAcknowledgmentPopups;
+        if (ImGui.Checkbox("Show Acknowledgment Popups", ref showPopups))
+        {
+            _configService.Current.ShowAcknowledgmentPopups = showPopups;
+            _configService.Save();
+        }
+        UiSharedService.AttachToolTip("Enable or disable popup notifications for acknowledgment requests. Disable this to prevent spam when receiving many acknowledgment requests.");
+        
+        if (_configService.Current.ShowAcknowledgmentPopups)
+        {
+            ImGui.Indent();
+            
+            var notificationLocation = (int)_configService.Current.AcknowledgmentNotification;
+            var notificationOptions = new[] { "None", "Chat", "Toast", "Both" };
+            if (ImGui.Combo("Notification Location", ref notificationLocation, notificationOptions, notificationOptions.Length))
+            {
+                _configService.Current.AcknowledgmentNotification = (NotificationLocation)notificationLocation;
+                _configService.Save();
+            }
+            UiSharedService.AttachToolTip("Choose where acknowledgment notifications should appear.");
+            
+            ImGui.Unindent();
+        }
+        
+        ImGui.Spacing();
+        ImGui.Separator();
+        
+        // Performance Settings Section
+        ImGui.TextColored(ImGuiColors.DalamudYellow, "Performance Settings");
+        
+        var enableBatching = _configService.Current.EnableAcknowledgmentBatching;
+        if (ImGui.Checkbox("Enable Batching", ref enableBatching))
+        {
+            _configService.Current.EnableAcknowledgmentBatching = enableBatching;
+            _configService.Save();
+        }
+        UiSharedService.AttachToolTip("Group multiple acknowledgments together for better performance. Recommended for users with many connections.");
+        
+        var enableAutoRetry = _configService.Current.EnableAcknowledgmentAutoRetry;
+        if (ImGui.Checkbox("Enable Auto Retry", ref enableAutoRetry))
+        {
+            _configService.Current.EnableAcknowledgmentAutoRetry = enableAutoRetry;
+            _configService.Save();
+        }
+        UiSharedService.AttachToolTip("Automatically retry failed acknowledgments to improve reliability.");
+        
+        var enableSilent = _configService.Current.EnableSilentAcknowledgments;
+        if (ImGui.Checkbox("Enable Silent Acknowledgments", ref enableSilent))
+        {
+            _configService.Current.EnableSilentAcknowledgments = enableSilent;
+            _configService.Save();
+        }
+        UiSharedService.AttachToolTip("Send periodic acknowledgments to maintain connection health without user interaction.");
+        
+        ImGui.Spacing();
+        ImGui.Separator();
+        
+        // Timeout Settings Section
+        ImGui.TextColored(ImGuiColors.DalamudYellow, "Timeout Settings");
+        
+        var timeoutSeconds = _configService.Current.AcknowledgmentTimeoutSeconds;
+        if (ImGui.SliderInt("Acknowledgment Timeout (seconds)", ref timeoutSeconds, 5, 120))
+        {
+            _configService.Current.AcknowledgmentTimeoutSeconds = timeoutSeconds;
+            _configService.Save();
+        }
+        UiSharedService.AttachToolTip("How long to wait for acknowledgment responses before timing out.");
+        
+        ImGui.Spacing();
+        ImGui.Separator();
+        
+        // Information Section
+        ImGui.TextColored(ImGuiColors.DalamudGrey3, "Information");
+        UiSharedService.TextWrapped("The acknowledgment system helps maintain synchronization between connected users. " +
+                          "When disabled, popup notifications will not appear, but the system will continue to function in the background. " +
+                          "This is useful when you have many active connections to prevent notification spam.");
+        
+        ImGui.Spacing();
+        
+        // Reset to defaults button
+        if (ImGui.Button("Reset Acknowledgment Settings to Defaults"))
+        {
+            _configService.Current.ShowAcknowledgmentPopups = true;
+            _configService.Current.EnableAcknowledgmentBatching = true;
+            _configService.Current.EnableAcknowledgmentAutoRetry = true;
+            _configService.Current.EnableSilentAcknowledgments = true;
+            _configService.Current.AcknowledgmentTimeoutSeconds = 30;
+            _configService.Current.AcknowledgmentNotification = NotificationLocation.Toast;
+            _configService.Save();
+        }
+        UiSharedService.AttachToolTip("Reset all acknowledgment settings to their default values.");
     }
 
     private void UiSharedService_GposeEnd()

@@ -129,13 +129,13 @@ public class NotificationService : DisposableMediatorSubscriberBase, IHostedServ
             _ => Dalamud.Interface.ImGuiNotification.NotificationType.Info
         };
 
-        _notificationManager.AddNotification(new Notification()
+        _notificationManager.AddNotification(new Dalamud.Interface.ImGuiNotification.Notification()
         {
             Content = msg.Message ?? string.Empty,
-            Title = msg.Title,
             Type = dalamudType,
-            Minimized = false,
-            InitialDuration = msg.TimeShownOnScreen ?? TimeSpan.FromSeconds(3)
+            Title = msg.Title,
+            InitialDuration = msg.TimeShownOnScreen ?? TimeSpan.FromSeconds(3),
+            RespectUiHidden = false
         });
     }
 }
