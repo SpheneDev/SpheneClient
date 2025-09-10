@@ -21,13 +21,13 @@ public class ServerConfigurationManager
     private readonly SpheneConfigService _SpheneConfigService;
     private readonly HttpClient _httpClient;
     private readonly ILogger<ServerConfigurationManager> _logger;
-    private readonly SpheneMediator _mareMediator;
+    private readonly SpheneMediator _spheneMediator;
     private readonly NotesConfigService _notesConfig;
     private readonly ServerTagConfigService _serverTagConfig;
 
     public ServerConfigurationManager(ILogger<ServerConfigurationManager> logger, ServerConfigService configService,
         ServerTagConfigService serverTagConfig, NotesConfigService notesConfig, DalamudUtilService dalamudUtil,
-        SpheneConfigService SpheneConfigService, HttpClient httpClient, SpheneMediator mareMediator)
+        SpheneConfigService SpheneConfigService, HttpClient httpClient, SpheneMediator spheneMediator)
     {
         _logger = logger;
         _configService = configService;
@@ -36,7 +36,7 @@ public class ServerConfigurationManager
         _dalamudUtil = dalamudUtil;
         _SpheneConfigService = SpheneConfigService;
         _httpClient = httpClient;
-        _mareMediator = mareMediator;
+        _spheneMediator = spheneMediator;
         EnsureMainExists();
     }
 
@@ -298,7 +298,7 @@ public class ServerConfigurationManager
     {
         CurrentServerTagStorage().ServerAvailablePairTags.Add(tag);
         _serverTagConfig.Save();
-        _mareMediator.Publish(new RefreshUiMessage());
+        _spheneMediator.Publish(new RefreshUiMessage());
     }
 
     internal void AddTagForUid(string uid, string tagName)
@@ -306,7 +306,7 @@ public class ServerConfigurationManager
         if (CurrentServerTagStorage().UidServerPairedUserTags.TryGetValue(uid, out var tags))
         {
             tags.Add(tagName);
-            _mareMediator.Publish(new RefreshUiMessage());
+            _spheneMediator.Publish(new RefreshUiMessage());
         }
         else
         {
@@ -410,7 +410,7 @@ public class ServerConfigurationManager
             RemoveTagForUid(uid, tag, save: false);
         }
         _serverTagConfig.Save();
-        _mareMediator.Publish(new RefreshUiMessage());
+        _spheneMediator.Publish(new RefreshUiMessage());
     }
 
     internal void RemoveTagForUid(string uid, string tagName, bool save = true)
@@ -422,7 +422,7 @@ public class ServerConfigurationManager
             if (save)
             {
                 _serverTagConfig.Save();
-                _mareMediator.Publish(new RefreshUiMessage());
+                _spheneMediator.Publish(new RefreshUiMessage());
             }
         }
     }
@@ -512,7 +512,7 @@ public class ServerConfigurationManager
         try
         {
             var baseUri = serverUri.Replace("wss://", "https://").Replace("ws://", "http://");
-            var oauthCheckUri = MareAuth.GetUIDsFullPath(new Uri(baseUri));
+            var oauthCheckUri = SpheneAuth.GetUIDsFullPath(new Uri(baseUri));
             _httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
             var response = await _httpClient.GetAsync(oauthCheckUri).ConfigureAwait(false);
             var responseStream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false);
@@ -530,7 +530,7 @@ public class ServerConfigurationManager
         try
         {
             var baseUri = serverUri.Replace("wss://", "https://").Replace("ws://", "http://");
-            var oauthCheckUri = MareAuth.GetDiscordOAuthEndpointFullPath(new Uri(baseUri));
+            var oauthCheckUri = SpheneAuth.GetDiscordOAuthEndpointFullPath(new Uri(baseUri));
             var response = await _httpClient.GetFromJsonAsync<Uri?>(oauthCheckUri).ConfigureAwait(false);
             return response;
         }
@@ -553,7 +553,7 @@ public class ServerConfigurationManager
         try
         {
             var baseUri = serverUri.Replace("wss://", "https://").Replace("ws://", "http://");
-            var oauthCheckUri = MareAuth.GetDiscordOAuthTokenFullPath(new Uri(baseUri), sessionId);
+            var oauthCheckUri = SpheneAuth.GetDiscordOAuthTokenFullPath(new Uri(baseUri), sessionId);
             var response = await _httpClient.GetAsync(oauthCheckUri, linkedCts.Token).ConfigureAwait(false);
             discordToken = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
         }

@@ -10,22 +10,22 @@ namespace Sphene.Interop.Ipc;
 
 public class RedrawManager
 {
-    private readonly SpheneMediator _mareMediator;
+    private readonly SpheneMediator _spheneMediator;
     private readonly DalamudUtilService _dalamudUtil;
     private readonly ConcurrentDictionary<nint, bool> _penumbraRedrawRequests = [];
     private CancellationTokenSource _disposalCts = new();
 
     public SemaphoreSlim RedrawSemaphore { get; init; } = new(2, 2);
 
-    public RedrawManager(SpheneMediator mareMediator, DalamudUtilService dalamudUtil)
+    public RedrawManager(SpheneMediator spheneMediator, DalamudUtilService dalamudUtil)
     {
-        _mareMediator = mareMediator;
+        _spheneMediator = spheneMediator;
         _dalamudUtil = dalamudUtil;
     }
 
     public async Task PenumbraRedrawInternalAsync(ILogger logger, GameObjectHandler handler, Guid applicationId, Action<ICharacter> action, CancellationToken token)
     {
-        _mareMediator.Publish(new PenumbraStartRedrawMessage(handler.Address));
+        _spheneMediator.Publish(new PenumbraStartRedrawMessage(handler.Address));
 
         _penumbraRedrawRequests[handler.Address] = true;
 
@@ -43,7 +43,7 @@ public class RedrawManager
         finally
         {
             _penumbraRedrawRequests[handler.Address] = false;
-            _mareMediator.Publish(new PenumbraEndRedrawMessage(handler.Address));
+            _spheneMediator.Publish(new PenumbraEndRedrawMessage(handler.Address));
         }
     }
 

@@ -38,7 +38,7 @@ public class DrawUserPair
     public DrawUserPair(string id, Pair entry, List<GroupFullInfoDto> syncedGroups,
         GroupFullInfoDto? currentGroup,
         ApiController apiController, IdDisplayHandler uIDDisplayHandler,
-        SpheneMediator mareMediator, SelectTagForPairUi selectTagForPairUi,
+        SpheneMediator spheneMediator, SelectTagForPairUi selectTagForPairUi,
         ServerConfigurationManager serverConfigurationManager,
         UiSharedService uiSharedService, PlayerPerformanceConfigService performanceConfigService,
         CharaDataManager charaDataManager, PairManager pairManager)
@@ -49,7 +49,7 @@ public class DrawUserPair
         _currentGroup = currentGroup;
         _apiController = apiController;
         _displayHandler = uIDDisplayHandler;
-        _mediator = mareMediator;
+        _mediator = spheneMediator;
         _selectTagForPairUi = selectTagForPairUi;
         _serverConfigurationManager = serverConfigurationManager;
         _uiSharedService = uiSharedService;

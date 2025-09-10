@@ -23,7 +23,7 @@ public record SpheneCharaFileHeader(byte Version, SpheneCharaFileData CharaFileD
     public static SpheneCharaFileHeader? FromBinaryReader(string path, BinaryReader reader)
     {
         var chars = new string(reader.ReadChars(4));
-        if (!string.Equals(chars, "MCDF", StringComparison.Ordinal)) throw new InvalidDataException("Not a Mare Chara File");
+        if (!string.Equals(chars, "SCDF", StringComparison.Ordinal)) throw new InvalidDataException("Not a Sphene Chara File");
 
         SpheneCharaFileHeader? decoded = null;
 

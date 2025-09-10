@@ -22,12 +22,12 @@ public class IpcProvider : IHostedService, IMediatorSubscriber
     public SpheneMediator Mediator { get; init; }
 
     public IpcProvider(ILogger<IpcProvider> logger, IDalamudPluginInterface pi,
-        CharaDataManager charaDataManager, SpheneMediator mareMediator)
+        CharaDataManager charaDataManager, SpheneMediator spheneMediator)
     {
         _logger = logger;
         _pi = pi;
         _charaDataManager = charaDataManager;
-        Mediator = mareMediator;
+        Mediator = spheneMediator;
 
         Mediator.Subscribe<GameObjectHandlerCreatedMessage>(this, (msg) =>
         {
@@ -44,11 +44,11 @@ public class IpcProvider : IHostedService, IMediatorSubscriber
     public Task StartAsync(CancellationToken cancellationToken)
     {
         _logger.LogInformation("Starting IpcProviderService");
-        _loadFileProvider = _pi.GetIpcProvider<string, IGameObject, bool>("MareSynchronos.LoadMcdf");
+        _loadFileProvider = _pi.GetIpcProvider<string, IGameObject, bool>("Sphene.LoadMcdf");
         _loadFileProvider.RegisterFunc(LoadMcdf);
-        _loadFileAsyncProvider = _pi.GetIpcProvider<string, IGameObject, Task<bool>>("MareSynchronos.LoadMcdfAsync");
+        _loadFileAsyncProvider = _pi.GetIpcProvider<string, IGameObject, Task<bool>>("Sphene.LoadMcdfAsync");
         _loadFileAsyncProvider.RegisterFunc(LoadMcdfAsync);
-        _handledGameAddresses = _pi.GetIpcProvider<List<nint>>("MareSynchronos.GetHandledAddresses");
+        _handledGameAddresses = _pi.GetIpcProvider<List<nint>>("Sphene.GetHandledAddresses");
         _handledGameAddresses.RegisterFunc(GetHandledAddresses);
         _logger.LogInformation("Started IpcProviderService");
         return Task.CompletedTask;

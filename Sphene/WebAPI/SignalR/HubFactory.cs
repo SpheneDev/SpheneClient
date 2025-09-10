@@ -84,7 +84,7 @@ public class HubFactory : MediatorSubscriberBase
         var userAgent = $"Sphene/{version!.Major}.{version!.Minor}.{version!.Build}";
         
         _instance = new HubConnectionBuilder()
-            .WithUrl(_serverConfigurationManager.CurrentApiUrl + IMareHub.Path, options =>
+            .WithUrl(_serverConfigurationManager.CurrentApiUrl + ISpheneHub.Path, options =>
             {
                 options.AccessTokenProvider = () => _tokenProvider.GetOrUpdateToken(ct);
                 options.Transports = transportType;

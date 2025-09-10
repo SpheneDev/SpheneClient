@@ -16,7 +16,7 @@ public class TopTabMenu
 {
     private readonly ApiController _apiController;
 
-    private readonly SpheneMediator _mareMediator;
+    private readonly SpheneMediator _spheneMediator;
 
     private readonly PairManager _pairManager;
     private readonly UiSharedService _uiSharedService;
@@ -26,9 +26,9 @@ public class TopTabMenu
     private string _pairToAdd = string.Empty;
 
     private SelectedTab _selectedTab = SelectedTab.None;
-    public TopTabMenu(SpheneMediator mareMediator, ApiController apiController, PairManager pairManager, UiSharedService uiSharedService)
+    public TopTabMenu(SpheneMediator spheneMediator, ApiController apiController, PairManager pairManager, UiSharedService uiSharedService)
     {
-        _mareMediator = mareMediator;
+        _spheneMediator = spheneMediator;
         _apiController = apiController;
         _pairManager = pairManager;
         _uiSharedService = uiSharedService;
@@ -50,7 +50,7 @@ public class TopTabMenu
         {
             if (!string.Equals(_filter, value, StringComparison.OrdinalIgnoreCase))
             {
-                _mareMediator.Publish(new RefreshUiMessage());
+                _spheneMediator.Publish(new RefreshUiMessage());
             }
 
             _filter = value;
@@ -469,7 +469,7 @@ public class TopTabMenu
         {
             if (_uiSharedService.IconTextButton(FontAwesomeIcon.Plus, "Create new Syncshell", buttonX))
             {
-                _mareMediator.Publish(new UiToggleMessage(typeof(CreateSyncshellUI)));
+                _spheneMediator.Publish(new UiToggleMessage(typeof(CreateSyncshellUI)));
             }
             ImGui.SameLine();
         }
@@ -478,7 +478,7 @@ public class TopTabMenu
         {
             if (_uiSharedService.IconTextButton(FontAwesomeIcon.Users, "Join existing Syncshell", buttonX))
             {
-                _mareMediator.Publish(new UiToggleMessage(typeof(JoinSyncshellUI)));
+                _spheneMediator.Publish(new UiToggleMessage(typeof(JoinSyncshellUI)));
             }
         }
     }
@@ -488,18 +488,18 @@ public class TopTabMenu
         var buttonX = (availableWidth - spacingX) / 2f;
         if (_uiSharedService.IconTextButton(FontAwesomeIcon.UserCircle, "Edit Sphene Profile", buttonX))
             {
-                _mareMediator.Publish(new UiToggleMessage(typeof(EditProfileUi)));
+                _spheneMediator.Publish(new UiToggleMessage(typeof(EditProfileUi)));
             }
             UiSharedService.AttachToolTip("Edit your Sphene Profile");
         ImGui.SameLine();
         if (_uiSharedService.IconTextButton(FontAwesomeIcon.PersonCircleQuestion, "Chara Data Analysis", buttonX))
         {
-            _mareMediator.Publish(new UiToggleMessage(typeof(DataAnalysisUi)));
+            _spheneMediator.Publish(new UiToggleMessage(typeof(DataAnalysisUi)));
         }
         UiSharedService.AttachToolTip("View and analyze your generated character data");
         if (_uiSharedService.IconTextButton(FontAwesomeIcon.Running, "Character Data Hub", availableWidth))
         {
-            _mareMediator.Publish(new UiToggleMessage(typeof(CharaDataHubUi)));
+            _spheneMediator.Publish(new UiToggleMessage(typeof(CharaDataHubUi)));
         }
     }
 

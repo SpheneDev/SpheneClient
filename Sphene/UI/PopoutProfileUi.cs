@@ -15,7 +15,7 @@ namespace Sphene.UI;
 
 public class PopoutProfileUi : WindowMediatorSubscriberBase
 {
-    private readonly SpheneProfileManager _mareProfileManager;
+    private readonly SpheneProfileManager _spheneProfileManager;
     private readonly PairManager _pairManager;
     private readonly ServerConfigurationManager _serverManager;
     private readonly UiSharedService _uiSharedService;
@@ -33,7 +33,7 @@ public class PopoutProfileUi : WindowMediatorSubscriberBase
     {
         _uiSharedService = uiBuilder;
         _serverManager = serverManager;
-        _mareProfileManager = spheneProfileManager;
+        _spheneProfileManager = spheneProfileManager;
         _pairManager = pairManager;
         Flags = ImGuiWindowFlags.NoDecoration;
 
@@ -85,22 +85,22 @@ public class PopoutProfileUi : WindowMediatorSubscriberBase
         {
             var spacing = ImGui.GetStyle().ItemSpacing;
 
-            var mareProfile = _mareProfileManager.GetMareProfile(_pair.UserData);
+            var spheneProfile = _spheneProfileManager.GetSpheneProfile(_pair.UserData);
 
-            if (_textureWrap == null || !mareProfile.ImageData.Value.SequenceEqual(_lastProfilePicture))
+            if (_textureWrap == null || !spheneProfile.ImageData.Value.SequenceEqual(_lastProfilePicture))
             {
                 _textureWrap?.Dispose();
-                _lastProfilePicture = mareProfile.ImageData.Value;
+                _lastProfilePicture = spheneProfile.ImageData.Value;
                 _textureWrap = _uiSharedService.LoadImage(_lastProfilePicture);
             }
 
-            if (_supporterTextureWrap == null || !mareProfile.SupporterImageData.Value.SequenceEqual(_lastSupporterPicture))
+            if (_supporterTextureWrap == null || !spheneProfile.SupporterImageData.Value.SequenceEqual(_lastSupporterPicture))
             {
                 _supporterTextureWrap?.Dispose();
                 _supporterTextureWrap = null;
-                if (!string.IsNullOrEmpty(mareProfile.Base64SupporterPicture))
+                if (!string.IsNullOrEmpty(spheneProfile.Base64SupporterPicture))
                 {
-                    _lastSupporterPicture = mareProfile.SupporterImageData.Value;
+                    _lastSupporterPicture = spheneProfile.SupporterImageData.Value;
                     _supporterTextureWrap = _uiSharedService.LoadImage(_lastSupporterPicture);
                 }
             }
@@ -158,7 +158,7 @@ public class PopoutProfileUi : WindowMediatorSubscriberBase
             ImGui.Separator();
             var font = _uiSharedService.GameFont.Push();
             var remaining = ImGui.GetWindowContentRegionMax().Y - ImGui.GetCursorPosY();
-            var descText = mareProfile.Description;
+            var descText = spheneProfile.Description;
             var textSize = ImGui.CalcTextSize(descText, wrapWidth: 256f * ImGuiHelpers.GlobalScale);
             bool trimmed = textSize.Y > remaining;
             while (textSize.Y > remaining && descText.Contains(' '))
@@ -166,7 +166,7 @@ public class PopoutProfileUi : WindowMediatorSubscriberBase
                 descText = descText[..descText.LastIndexOf(' ')].TrimEnd();
                 textSize = ImGui.CalcTextSize(descText + $"...{Environment.NewLine}[Open Full Profile for complete description]", wrapWidth: 256f * ImGuiHelpers.GlobalScale);
             }
-            UiSharedService.TextWrapped(trimmed ? descText + $"...{Environment.NewLine}[Open Full Profile for complete description]" : mareProfile.Description);
+            UiSharedService.TextWrapped(trimmed ? descText + $"...{Environment.NewLine}[Open Full Profile for complete description]" : spheneProfile.Description);
             font.Dispose();
 
             var padding = ImGui.GetStyle().WindowPadding.X / 2;

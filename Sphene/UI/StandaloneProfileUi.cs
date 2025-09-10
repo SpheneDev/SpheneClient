@@ -14,7 +14,7 @@ namespace Sphene.UI;
 
 public class StandaloneProfileUi : WindowMediatorSubscriberBase
 {
-    private readonly SpheneProfileManager _mareProfileManager;
+    private readonly SpheneProfileManager _spheneProfileManager;
     private readonly PairManager _pairManager;
     private readonly ServerConfigurationManager _serverManager;
     private readonly UiSharedService _uiSharedService;
@@ -31,7 +31,7 @@ public class StandaloneProfileUi : WindowMediatorSubscriberBase
     {
         _uiSharedService = uiBuilder;
         _serverManager = serverManager;
-        _mareProfileManager = spheneProfileManager;
+        _spheneProfileManager = spheneProfileManager;
         Pair = pair;
         _pairManager = pairManager;
         Flags = ImGuiWindowFlags.NoResize | ImGuiWindowFlags.AlwaysAutoResize;
@@ -51,22 +51,22 @@ public class StandaloneProfileUi : WindowMediatorSubscriberBase
         {
             var spacing = ImGui.GetStyle().ItemSpacing;
 
-            var mareProfile = _mareProfileManager.GetMareProfile(Pair.UserData);
+            var spheneProfile = _spheneProfileManager.GetSpheneProfile(Pair.UserData);
 
-            if (_textureWrap == null || !mareProfile.ImageData.Value.SequenceEqual(_lastProfilePicture))
+            if (_textureWrap == null || !spheneProfile.ImageData.Value.SequenceEqual(_lastProfilePicture))
             {
                 _textureWrap?.Dispose();
-                _lastProfilePicture = mareProfile.ImageData.Value;
+                _lastProfilePicture = spheneProfile.ImageData.Value;
                 _textureWrap = _uiSharedService.LoadImage(_lastProfilePicture);
             }
 
-            if (_supporterTextureWrap == null || !mareProfile.SupporterImageData.Value.SequenceEqual(_lastSupporterPicture))
+            if (_supporterTextureWrap == null || !spheneProfile.SupporterImageData.Value.SequenceEqual(_lastSupporterPicture))
             {
                 _supporterTextureWrap?.Dispose();
                 _supporterTextureWrap = null;
-                if (!string.IsNullOrEmpty(mareProfile.Base64SupporterPicture))
+                if (!string.IsNullOrEmpty(spheneProfile.Base64SupporterPicture))
                 {
-                    _lastSupporterPicture = mareProfile.SupporterImageData.Value;
+                    _lastSupporterPicture = spheneProfile.SupporterImageData.Value;
                     _supporterTextureWrap = _uiSharedService.LoadImage(_lastSupporterPicture);
                 }
             }
@@ -86,7 +86,7 @@ public class StandaloneProfileUi : WindowMediatorSubscriberBase
             ImGuiHelpers.ScaledDummy(new Vector2(256, 256 + spacing.Y));
             var postDummy = ImGui.GetCursorPosY();
             ImGui.SameLine();
-            var descriptionTextSize = ImGui.CalcTextSize(mareProfile.Description, wrapWidth: 256f);
+            var descriptionTextSize = ImGui.CalcTextSize(spheneProfile.Description, wrapWidth: 256f);
             var descriptionChildHeight = rectMax.Y - pos.Y - rectMin.Y - spacing.Y * 2;
             if (descriptionTextSize.Y > descriptionChildHeight && !_adjustedForScrollBars)
             {
@@ -107,7 +107,7 @@ public class StandaloneProfileUi : WindowMediatorSubscriberBase
             if (ImGui.BeginChildFrame(1000, childFrame))
             {
                 using var _ = _uiSharedService.GameFont.Push();
-                ImGui.TextWrapped(mareProfile.Description);
+                ImGui.TextWrapped(spheneProfile.Description);
             }
             ImGui.EndChildFrame();
 

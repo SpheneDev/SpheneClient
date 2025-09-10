@@ -663,21 +663,21 @@ public class SettingsUi : WindowMediatorSubscriberBase
         }
 
         ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("Monitoring Sphene Storage Folder: " + (_cacheMonitor.MareWatcher?.Path ?? "Not monitoring"));
-        if (string.IsNullOrEmpty(_cacheMonitor.MareWatcher?.Path))
+        ImGui.TextUnformatted("Monitoring Sphene Storage Folder: " + (_cacheMonitor.SpheneWatcher?.Path ?? "Not monitoring"));
+        if (string.IsNullOrEmpty(_cacheMonitor.SpheneWatcher?.Path))
         {
             ImGui.SameLine();
-            using var id = ImRaii.PushId("mareMonitor");
+            using var id = ImRaii.PushId("spheneMonitor");
             if (_uiShared.IconTextButton(FontAwesomeIcon.ArrowsToCircle, "Try to reinitialize Monitor"))
             {
-                _cacheMonitor.StartMareWatcher(_configService.Current.CacheFolder);
+                _cacheMonitor.StartSpheneWatcher(_configService.Current.CacheFolder);
             }
         }
-        if (_cacheMonitor.MareWatcher == null || _cacheMonitor.PenumbraWatcher == null)
+        if (_cacheMonitor.SpheneWatcher == null || _cacheMonitor.PenumbraWatcher == null)
         {
             if (_uiShared.IconTextButton(FontAwesomeIcon.Play, "Resume Monitoring"))
             {
-                _cacheMonitor.StartMareWatcher(_configService.Current.CacheFolder);
+                _cacheMonitor.StartSpheneWatcher(_configService.Current.CacheFolder);
                 _cacheMonitor.StartPenumbraWatcher(_ipcManager.Penumbra.ModDirectory);
                 _cacheMonitor.InvokeScan();
             }
@@ -1956,7 +1956,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         }
 
         var baseUri = serverStorage.ServerUri.Replace("wss://", "https://").Replace("ws://", "http://");
-        var oauthCheckUri = MareAuth.GetUIDsBasedOnSecretKeyFullPath(new Uri(baseUri));
+        var oauthCheckUri = SpheneAuth.GetUIDsBasedOnSecretKeyFullPath(new Uri(baseUri));
         var requestContent = JsonContent.Create(secretKeyMapping.Select(k => k.Key).ToList());
         HttpRequestMessage requestMessage = new(HttpMethod.Post, oauthCheckUri);
         requestMessage.Headers.Authorization = new AuthenticationHeaderValue("Bearer", serverStorage.OAuthToken);

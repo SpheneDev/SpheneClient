@@ -29,7 +29,7 @@ public class SpheneIcon : WindowMediatorSubscriberBase, IDisposable
     private bool _isDragging = false;
     private bool _wasClicked = false;
     private Vector2 _clickStartPos;
-    private IDalamudTextureWrap? _mareLogoTexture;
+    private IDalamudTextureWrap? _spheneLogoTexture;
     
     
     
@@ -45,8 +45,8 @@ public class SpheneIcon : WindowMediatorSubscriberBase, IDisposable
         
         LoadIconPositionFromConfig();
         
-        // Load Mare Logo Texture
-        LoadMareLogoTexture();
+        // Load Sphene Logo Texture
+        LoadSpheneLogoTexture();
         
         // Set window flags for a draggable icon
         Flags = ImGuiWindowFlags.NoDecoration | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse |
@@ -84,10 +84,10 @@ public class SpheneIcon : WindowMediatorSubscriberBase, IDisposable
         var iconPos = new Vector2(currentPos.X + padding, currentPos.Y + padding);
         var iconColor = ImGui.ColorConvertFloat4ToU32(SpheneColors.SpheneGold);
         
-        // Draw Mare Logo or fallback
-        if (_mareLogoTexture != null)
+        // Draw Sphene Logo or fallback
+        if (_spheneLogoTexture != null)
         {
-            drawList.AddImage(_mareLogoTexture.Handle, iconPos, iconPos + new Vector2(iconSize, iconSize));
+            drawList.AddImage(_spheneLogoTexture.Handle, iconPos, iconPos + new Vector2(iconSize, iconSize));
         }
         else
         {
@@ -228,19 +228,19 @@ public class SpheneIcon : WindowMediatorSubscriberBase, IDisposable
         _configService.Save();
     }
     
-    private void LoadMareLogoTexture()
+    private void LoadSpheneLogoTexture()
     {
         try
         {
             if (!string.IsNullOrEmpty(SpheneImages.SpheneLogoBase64))
             {
                 var imageData = Convert.FromBase64String(SpheneImages.SpheneLogoBase64);
-                _mareLogoTexture = _uiSharedService.LoadImage(imageData);
+                _spheneLogoTexture = _uiSharedService.LoadImage(imageData);
             }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to load Mare logo texture");
+            _logger.LogError(ex, "Failed to load Sphene logo texture");
         }
     }
     
@@ -315,7 +315,7 @@ public class SpheneIcon : WindowMediatorSubscriberBase, IDisposable
     public void Dispose()
     {
         _configService.ConfigSave -= OnConfigurationChanged;
-        _mareLogoTexture?.Dispose();
+        _spheneLogoTexture?.Dispose();
         _logger.LogDebug("SpheneIcon disposed");
     }
 }

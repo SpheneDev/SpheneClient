@@ -18,7 +18,7 @@ public class EventAggregator : MediatorSubscriberBase, IHostedService
     private string CurrentLogName => $"{DateTime.Now:yyyy-MM-dd}-events.log";
     private DateTime _currentTime;
 
-    public EventAggregator(string configDirectory, ILogger<EventAggregator> logger, SpheneMediator mareMediator) : base(logger, mareMediator)
+    public EventAggregator(string configDirectory, ILogger<EventAggregator> logger, SpheneMediator spheneMediator) : base(logger, spheneMediator)
     {
         Mediator.Subscribe<EventMessage>(this, (msg) =>
         {

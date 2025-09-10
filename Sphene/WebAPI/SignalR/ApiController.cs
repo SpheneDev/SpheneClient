@@ -19,7 +19,7 @@ using System.Reflection;
 namespace Sphene.WebAPI;
 
 #pragma warning disable MA0040
-public sealed partial class ApiController : DisposableMediatorSubscriberBase, IMareHubClient
+public sealed partial class ApiController : DisposableMediatorSubscriberBase, ISpheneHubClient
 {
     public const string MainServer = "Sphene Server";
     public const string MainServiceUri = "ws://sphene.online:6000";
@@ -36,7 +36,7 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IM
     private CancellationTokenSource? _healthCheckTokenSource = new();
     private bool _initialized;
     private string? _lastUsedToken;
-    private HubConnection? _mareHub;
+    private HubConnection? _spheneHub;
     private ServerState _serverState;
     private CensusUpdateMessage? _lastCensus;
 
@@ -54,9 +54,9 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IM
 
         Mediator.Subscribe<DalamudLoginMessage>(this, (_) => DalamudUtilOnLogIn());
         Mediator.Subscribe<DalamudLogoutMessage>(this, (_) => DalamudUtilOnLogOut());
-        Mediator.Subscribe<HubClosedMessage>(this, (msg) => MareHubOnClosed(msg.Exception));
-        Mediator.Subscribe<HubReconnectedMessage>(this, (msg) => _ = MareHubOnReconnectedAsync());
-        Mediator.Subscribe<HubReconnectingMessage>(this, (msg) => MareHubOnReconnecting(msg.Exception));
+        Mediator.Subscribe<HubClosedMessage>(this, (msg) => SpheneHubOnClosed(msg.Exception));
+        Mediator.Subscribe<HubReconnectedMessage>(this, (msg) => _ = SpheneHubOnReconnectedAsync());
+        Mediator.Subscribe<HubReconnectingMessage>(this, (msg) => SpheneHubOnReconnecting(msg.Exception));
         Mediator.Subscribe<CyclePauseMessage>(this, (msg) => _ = CyclePauseAsync(msg.UserData));
         Mediator.Subscribe<CensusUpdateMessage>(this, (msg) => _lastCensus = msg);
         Mediator.Subscribe<PauseMessage>(this, (msg) => _ = PauseAsync(msg.UserData));
@@ -107,7 +107,7 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IM
 
     public async Task<bool> CheckClientHealth()
     {
-        return await _mareHub!.InvokeAsync<bool>(nameof(CheckClientHealth)).ConfigureAwait(false);
+        return await _spheneHub!.InvokeAsync<bool>(nameof(CheckClientHealth)).ConfigureAwait(false);
     }
 
     public async Task CreateConnectionsAsync()
@@ -227,10 +227,10 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IM
 
                 if (token.IsCancellationRequested) break;
 
-                _mareHub = _hubFactory.GetOrCreate(token);
+                _spheneHub = _hubFactory.GetOrCreate(token);
                 InitializeApiHooks();
 
-                await _mareHub.StartAsync(token).ConfigureAwait(false);
+                await _spheneHub.StartAsync(token).ConfigureAwait(false);
 
                 _connectionDto = await GetConnectionDto().ConfigureAwait(false);
 
@@ -238,7 +238,7 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IM
 
                 var currentClientVer = Assembly.GetExecutingAssembly().GetName().Version!;
 
-                if (_connectionDto.ServerVersion != IMareHub.ApiVersion)
+                if (_connectionDto.ServerVersion != ISpheneHub.ApiVersion)
                 {
                     if (_connectionDto.CurrentClientVersion > currentClientVer)
                     {
@@ -366,7 +366,7 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IM
 
     public async Task<ConnectionDto> GetConnectionDtoAsync(bool publishConnected)
     {
-        var dto = await _mareHub!.InvokeAsync<ConnectionDto>(nameof(GetConnectionDto)).ConfigureAwait(false);
+        var dto = await _spheneHub!.InvokeAsync<ConnectionDto>(nameof(GetConnectionDto)).ConfigureAwait(false);
         Logger.LogInformation("[DEBUG] ConnectionDto received - FileServerAddress: {fileServerAddress}, ServerVersion: {serverVersion}, User: {user}", 
             dto.ServerInfo.FileServerAddress, dto.ServerVersion, dto.User.AliasOrUID);
         if (publishConnected) 
@@ -388,7 +388,7 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IM
 
     private async Task ClientHealthCheckAsync(CancellationToken ct)
     {
-        while (!ct.IsCancellationRequested && _mareHub != null)
+        while (!ct.IsCancellationRequested && _spheneHub != null)
         {
             await Task.Delay(TimeSpan.FromSeconds(30), ct).ConfigureAwait(false);
             Logger.LogDebug("Checking Client Health State");
@@ -426,7 +426,7 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IM
 
     private void InitializeApiHooks()
     {
-        if (_mareHub == null) return;
+        if (_spheneHub == null) return;
 
         Logger.LogDebug("Initializing data");
         OnDownloadReady((guid) => _ = Client_DownloadReady(guid));
@@ -501,7 +501,7 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IM
         }
     }
 
-    private void MareHubOnClosed(Exception? arg)
+    private void SpheneHubOnClosed(Exception? arg)
     {
         _healthCheckTokenSource?.Cancel();
         Mediator.Publish(new DisconnectedMessage());
@@ -516,14 +516,14 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IM
         }
     }
 
-    private async Task MareHubOnReconnectedAsync()
+    private async Task SpheneHubOnReconnectedAsync()
     {
         ServerState = ServerState.Reconnecting;
         try
         {
             InitializeApiHooks();
             _connectionDto = await GetConnectionDtoAsync(publishConnected: false).ConfigureAwait(false);
-            if (_connectionDto.ServerVersion != IMareHub.ApiVersion)
+            if (_connectionDto.ServerVersion != ISpheneHub.ApiVersion)
             {
                 await StopConnectionAsync(ServerState.VersionMisMatch).ConfigureAwait(false);
                 return;
@@ -540,7 +540,7 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IM
         }
     }
 
-    private void MareHubOnReconnecting(Exception? arg)
+    private void SpheneHubOnReconnecting(Exception? arg)
     {
         _doNotNotifyOnNextInfo = true;
         _healthCheckTokenSource?.Cancel();
@@ -590,7 +590,7 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IM
         Logger.LogInformation("Stopping existing connection");
         await _hubFactory.DisposeHubAsync().ConfigureAwait(false);
 
-        if (_mareHub is not null)
+        if (_spheneHub is not null)
         {
             Mediator.Publish(new EventMessage(new Services.Events.Event(nameof(ApiController), Services.Events.EventSeverity.Informational,
                 $"Stopping existing connection to {_serverManager.CurrentServer.ServerName}")));
@@ -598,7 +598,7 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IM
             _initialized = false;
             _healthCheckTokenSource?.Cancel();
             Mediator.Publish(new DisconnectedMessage());
-            _mareHub = null;
+            _spheneHub = null;
             _connectionDto = null;
         }
 

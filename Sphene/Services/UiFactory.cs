@@ -17,7 +17,7 @@ public class UiFactory
     private readonly UiSharedService _uiSharedService;
     private readonly PairManager _pairManager;
     private readonly ServerConfigurationManager _serverConfigManager;
-    private readonly SpheneProfileManager _mareProfileManager;
+    private readonly SpheneProfileManager _spheneProfileManager;
     private readonly PerformanceCollectorService _performanceCollectorService;
 
     public UiFactory(ILoggerFactory loggerFactory, SpheneMediator spheneMediator, ApiController apiController,
@@ -30,7 +30,7 @@ public class UiFactory
         _uiSharedService = uiSharedService;
         _pairManager = pairManager;
         _serverConfigManager = serverConfigManager;
-        _mareProfileManager = spheneProfileManager;
+        _spheneProfileManager = spheneProfileManager;
         _performanceCollectorService = performanceCollectorService;
     }
 
@@ -43,7 +43,7 @@ public class UiFactory
     public StandaloneProfileUi CreateStandaloneProfileUi(Pair pair)
     {
         return new StandaloneProfileUi(_loggerFactory.CreateLogger<StandaloneProfileUi>(), _spheneMediator,
-            _uiSharedService, _serverConfigManager, _mareProfileManager, _pairManager, pair, _performanceCollectorService);
+            _uiSharedService, _serverConfigManager, _spheneProfileManager, _pairManager, pair, _performanceCollectorService);
     }
 
     public PermissionWindowUI CreatePermissionPopupUi(Pair pair)

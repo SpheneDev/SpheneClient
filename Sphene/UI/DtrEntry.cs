@@ -21,20 +21,20 @@ public sealed class DtrEntry : IDisposable, IHostedService
     private readonly IDtrBar _dtrBar;
     private readonly Lazy<IDtrBarEntry> _entry;
     private readonly ILogger<DtrEntry> _logger;
-    private readonly SpheneMediator _mareMediator;
+    private readonly SpheneMediator _spheneMediator;
     private readonly PairManager _pairManager;
     private Task? _runTask;
     private string? _text;
     private string? _tooltip;
     private Colors _colors;
 
-    public DtrEntry(ILogger<DtrEntry> logger, IDtrBar dtrBar, ConfigurationServiceBase<SpheneConfig> configService, SpheneMediator mareMediator, PairManager pairManager, ApiController apiController)
+    public DtrEntry(ILogger<DtrEntry> logger, IDtrBar dtrBar, ConfigurationServiceBase<SpheneConfig> configService, SpheneMediator spheneMediator, PairManager pairManager, ApiController apiController)
     {
         _logger = logger;
         _dtrBar = dtrBar;
         _entry = new(CreateEntry);
         _configService = configService;
-        _mareMediator = mareMediator;
+        _spheneMediator = spheneMediator;
         _pairManager = pairManager;
         _apiController = apiController;
     }
@@ -89,7 +89,7 @@ public sealed class DtrEntry : IDisposable, IHostedService
     {
         _logger.LogTrace("Creating new DtrBar entry");
         var entry = _dtrBar.Get("Sphene");
-        entry.OnClick = _ => _mareMediator.Publish(new UiToggleMessage(typeof(CompactUi)));
+        entry.OnClick = _ => _spheneMediator.Publish(new UiToggleMessage(typeof(CompactUi)));
 
         return entry;
     }

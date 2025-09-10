@@ -19,7 +19,7 @@ public class EditProfileUi : WindowMediatorSubscriberBase
 {
     private readonly ApiController _apiController;
     private readonly FileDialogManager _fileDialogManager;
-    private readonly SpheneProfileManager _mareProfileManager;
+    private readonly SpheneProfileManager _spheneProfileManager;
     private readonly UiSharedService _uiSharedService;
     private bool _adjustedForScollBarsLocalProfile = false;
     private bool _adjustedForScollBarsOnlineProfile = false;
@@ -44,7 +44,7 @@ public class EditProfileUi : WindowMediatorSubscriberBase
         _apiController = apiController;
         _uiSharedService = uiSharedService;
         _fileDialogManager = fileDialogManager;
-        _mareProfileManager = spheneProfileManager;
+        _spheneProfileManager = spheneProfileManager;
 
         Mediator.Subscribe<GposeStartMessage>(this, (_) => { _wasOpen = IsOpen; IsOpen = false; });
         Mediator.Subscribe<GposeEndMessage>(this, (_) => IsOpen = _wasOpen);
@@ -63,7 +63,7 @@ public class EditProfileUi : WindowMediatorSubscriberBase
     {
         _uiSharedService.BigText("Current Profile (as saved on server)");
 
-        var profile = _mareProfileManager.GetMareProfile(new UserData(_apiController.UID));
+        var profile = _spheneProfileManager.GetSpheneProfile(new UserData(_apiController.UID));
 
         if (profile.IsFlagged)
         {

@@ -20,13 +20,13 @@ public sealed class TokenProvider : IDisposable, IMediatorSubscriber
     private readonly ServerConfigurationManager _serverManager;
     private readonly ConcurrentDictionary<JwtIdentifier, string> _tokenCache = new();
 
-    public TokenProvider(ILogger<TokenProvider> logger, ServerConfigurationManager serverManager, DalamudUtilService dalamudUtil, SpheneMediator mareMediator, HttpClient httpClient)
+    public TokenProvider(ILogger<TokenProvider> logger, ServerConfigurationManager serverManager, DalamudUtilService dalamudUtil, SpheneMediator spheneMediator, HttpClient httpClient)
     {
         _logger = logger;
         _serverManager = serverManager;
         _dalamudUtil = dalamudUtil;
         var ver = Assembly.GetExecutingAssembly().GetName().Version;
-        Mediator = mareMediator;
+        Mediator = spheneMediator;
         _httpClient = httpClient;
         Mediator.Subscribe<DalamudLogoutMessage>(this, (_) =>
         {
@@ -83,7 +83,7 @@ public sealed class TokenProvider : IDisposable, IMediatorSubscriber
 
                 if (!_serverManager.CurrentServer.UseOAuth2)
                 {
-                    tokenUri = MareAuth.AuthFullPath(GetAuthServiceUrl());
+                    tokenUri = SpheneAuth.AuthFullPath(GetAuthServiceUrl());
                     var secretKey = _serverManager.GetSecretKey(out _)!;
                     var auth = secretKey.GetHash256();
                     _logger.LogInformation("Sending SecretKey Request to server with auth {auth}", string.Join("", identifier.SecretKeyOrOAuth.Take(10)));
@@ -95,7 +95,7 @@ public sealed class TokenProvider : IDisposable, IMediatorSubscriber
                 }
                 else
                 {
-                    tokenUri = MareAuth.AuthWithOauthFullPath(GetAuthServiceUrl());
+                    tokenUri = SpheneAuth.AuthWithOauthFullPath(GetAuthServiceUrl());
                     HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Post, tokenUri.ToString());
                     request.Content = new FormUrlEncodedContent([
                         new KeyValuePair<string, string>("uid", identifier.UID),
@@ -110,7 +110,7 @@ public sealed class TokenProvider : IDisposable, IMediatorSubscriber
             {
                 _logger.LogDebug("GetNewToken: Renewal");
 
-                tokenUri = MareAuth.RenewTokenFullPath(GetAuthServiceUrl());
+                tokenUri = SpheneAuth.RenewTokenFullPath(GetAuthServiceUrl());
                 HttpRequestMessage request = new(HttpMethod.Get, tokenUri.ToString());
                 request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _tokenCache[identifier]);
                 result = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
@@ -267,7 +267,7 @@ public sealed class TokenProvider : IDisposable, IMediatorSubscriber
                 return false;
         }
 
-        var tokenUri = MareAuth.RenewOAuthTokenFullPath(GetAuthServiceUrl());
+        var tokenUri = SpheneAuth.RenewOAuthTokenFullPath(GetAuthServiceUrl());
         HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Post, tokenUri.ToString());
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", oauth2.Value.OAuthToken);
         _logger.LogInformation("Sending Request to server with auth {auth}", string.Join("", oauth2.Value.OAuthToken.Take(10)));

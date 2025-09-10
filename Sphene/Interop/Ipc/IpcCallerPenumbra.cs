@@ -284,7 +284,7 @@ public sealed class IpcCallerPenumbra : DisposableMediatorSubscriberBase, IIpcCa
         await _dalamudUtil.RunOnFrameworkThread(() =>
         {
             logger.LogTrace("[{applicationId}] Manip: {data}", applicationId, manipulationData);
-            var retAdd = _penumbraAddTemporaryMod.Invoke("MareChara_Meta", collId, [], manipulationData, 0);
+            var retAdd = _penumbraAddTemporaryMod.Invoke("SpheneChara_Meta", collId, [], manipulationData, 0);
             logger.LogTrace("[{applicationId}] Setting temp meta mod for {collId}, Success: {ret}", applicationId, collId, retAdd);
         }).ConfigureAwait(false);
     }
@@ -299,9 +299,9 @@ public sealed class IpcCallerPenumbra : DisposableMediatorSubscriberBase, IIpcCa
             {
                 logger.LogTrace("[{applicationId}] Change: {from} => {to}", applicationId, mod.Key, mod.Value);
             }
-            var retRemove = _penumbraRemoveTemporaryMod.Invoke("MareChara_Files", collId, 0);
+            var retRemove = _penumbraRemoveTemporaryMod.Invoke("SpheneChara_Files", collId, 0);
             logger.LogTrace("[{applicationId}] Removing temp files mod for {collId}, Success: {ret}", applicationId, collId, retRemove);
-            var retAdd = _penumbraAddTemporaryMod.Invoke("MareChara_Files", collId, modPaths, string.Empty, 0);
+            var retAdd = _penumbraAddTemporaryMod.Invoke("SpheneChara_Files", collId, modPaths, string.Empty, 0);
             logger.LogTrace("[{applicationId}] Setting temp files mod for {collId}, Success: {ret}", applicationId, collId, retAdd);
         }).ConfigureAwait(false);
     }

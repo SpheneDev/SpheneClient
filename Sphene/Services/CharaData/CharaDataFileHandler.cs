@@ -22,7 +22,7 @@ public sealed class CharaDataFileHandler : IDisposable
     private readonly FileUploadManager _fileUploadManager;
     private readonly GameObjectHandlerFactory _gameObjectHandlerFactory;
     private readonly ILogger<CharaDataFileHandler> _logger;
-    private readonly SpheneCharaFileDataFactory _mareCharaFileDataFactory;
+    private readonly SpheneCharaFileDataFactory _spheneCharaFileDataFactory;
     private readonly PlayerDataFactory _playerDataFactory;
     private int _globalFileCounter = 0;
 
@@ -36,7 +36,7 @@ public sealed class CharaDataFileHandler : IDisposable
         _dalamudUtilService = dalamudUtilService;
         _gameObjectHandlerFactory = gameObjectHandlerFactory;
         _playerDataFactory = playerDataFactory;
-        _mareCharaFileDataFactory = new(fileCacheManager);
+        _spheneCharaFileDataFactory = new(fileCacheManager);
     }
 
     public void ComputeMissingFiles(CharaDataDownloadDto charaDataDownloadDto, out Dictionary<string, string> modPaths, out List<FileReplacementData> missingFiles)
@@ -141,7 +141,7 @@ public sealed class CharaDataFileHandler : IDisposable
             using var reader = new BinaryReader(lz4Stream);
             var loadedCharaFile = SpheneCharaFileHeader.FromBinaryReader(filePath, reader);
 
-            _logger.LogInformation("Read Mare Chara File");
+            _logger.LogInformation("Read Sphene Chara File");
             _logger.LogInformation("Version: {ver}", (loadedCharaFile?.Version ?? -1));
             long expectedLength = 0;
             if (loadedCharaFile != null)
@@ -256,7 +256,7 @@ public sealed class CharaDataFileHandler : IDisposable
             var data = await CreatePlayerData().ConfigureAwait(false);
             if (data == null) return;
 
-            var spheneCharaFileData = _mareCharaFileDataFactory.Create(description, data);
+            var spheneCharaFileData = _spheneCharaFileDataFactory.Create(description, data);
         SpheneCharaFileHeader output = new(SpheneCharaFileHeader.CurrentVersion, spheneCharaFileData);
 
             using var fs = new FileStream(tempFilePath, FileMode.Create, FileAccess.ReadWrite, FileShare.None);
@@ -291,7 +291,7 @@ public sealed class CharaDataFileHandler : IDisposable
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failure Saving Mare Chara File, deleting output");
+            _logger.LogError(ex, "Failure Saving Sphene Chara File, deleting output");
             File.Delete(tempFilePath);
         }
     }

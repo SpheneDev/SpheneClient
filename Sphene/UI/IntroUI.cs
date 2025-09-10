@@ -34,8 +34,8 @@ public partial class IntroUi : WindowMediatorSubscriberBase
     private bool _useLegacyLogin = false;
 
     public IntroUi(ILogger<IntroUi> logger, UiSharedService uiShared, SpheneConfigService configService,
-        CacheMonitor fileCacheManager, ServerConfigurationManager serverConfigurationManager, SpheneMediator mareMediator,
-        PerformanceCollectorService performanceCollectorService, DalamudUtilService dalamudUtilService) : base(logger, mareMediator, "Sphene Setup", performanceCollectorService)
+        CacheMonitor fileCacheManager, ServerConfigurationManager serverConfigurationManager, SpheneMediator spheneMediator,
+        PerformanceCollectorService performanceCollectorService, DalamudUtilService dalamudUtilService) : base(logger, spheneMediator, "Sphene Setup", performanceCollectorService)
     {
         _uiShared = uiShared;
         _configService = configService;

@@ -15,7 +15,7 @@ public sealed class IpcCallerGlamourer : DisposableMediatorSubscriberBase, IIpcC
     private readonly ILogger<IpcCallerGlamourer> _logger;
     private readonly IDalamudPluginInterface _pi;
     private readonly DalamudUtilService _dalamudUtil;
-    private readonly SpheneMediator _mareMediator;
+    private readonly SpheneMediator _spheneMediator;
     private readonly RedrawManager _redrawManager;
 
     private readonly ApiVersion _glamourerApiVersions;
@@ -30,8 +30,8 @@ public sealed class IpcCallerGlamourer : DisposableMediatorSubscriberBase, IIpcC
     private bool _shownGlamourerUnavailable = false;
     private readonly uint LockCode = 0x6D617265;
 
-    public IpcCallerGlamourer(ILogger<IpcCallerGlamourer> logger, IDalamudPluginInterface pi, DalamudUtilService dalamudUtil, SpheneMediator mareMediator,
-        RedrawManager redrawManager) : base(logger, mareMediator)
+    public IpcCallerGlamourer(ILogger<IpcCallerGlamourer> logger, IDalamudPluginInterface pi, DalamudUtilService dalamudUtil, SpheneMediator spheneMediator,
+        RedrawManager redrawManager) : base(logger, spheneMediator)
     {
         _glamourerApiVersions = new ApiVersion(pi);
         _glamourerGetAllCustomization = new GetStateBase64(pi);
@@ -44,7 +44,7 @@ public sealed class IpcCallerGlamourer : DisposableMediatorSubscriberBase, IIpcC
         _logger = logger;
         _pi = pi;
         _dalamudUtil = dalamudUtil;
-        _mareMediator = mareMediator;
+        _spheneMediator = spheneMediator;
         _redrawManager = redrawManager;
         CheckAPI();
 
@@ -97,7 +97,7 @@ public sealed class IpcCallerGlamourer : DisposableMediatorSubscriberBase, IIpcC
             if (!apiAvailable && !_shownGlamourerUnavailable)
             {
                 _shownGlamourerUnavailable = true;
-                _mareMediator.Publish(new NotificationMessage("Glamourer inactive", "Your Glamourer installation is not active or out of date. Update Glamourer to continue to use Sphene. If you just updated Glamourer, ignore this message.",
+                _spheneMediator.Publish(new NotificationMessage("Glamourer inactive", "Your Glamourer installation is not active or out of date. Update Glamourer to continue to use Sphene. If you just updated Glamourer, ignore this message.",
                     NotificationType.Error));
             }
         }
@@ -168,7 +168,7 @@ public sealed class IpcCallerGlamourer : DisposableMediatorSubscriberBase, IIpcC
                     _glamourerRevert.Invoke(chara.ObjectIndex, LockCode);
                     logger.LogDebug("[{appid}] Calling On IPC: PenumbraRedraw", applicationId);
 
-                    _mareMediator.Publish(new PenumbraRedrawCharacterMessage(chara));
+                    _spheneMediator.Publish(new PenumbraRedrawCharacterMessage(chara));
                 }
                 catch (Exception ex)
                 {
@@ -212,6 +212,6 @@ public sealed class IpcCallerGlamourer : DisposableMediatorSubscriberBase, IIpcC
 
     private void GlamourerChanged(nint address)
     {
-        _mareMediator.Publish(new GlamourerChangedMessage(address));
+        _spheneMediator.Publish(new GlamourerChangedMessage(address));
     }
 }

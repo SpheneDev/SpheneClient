@@ -9,7 +9,7 @@ namespace Sphene.Interop.Ipc;
 public sealed class IpcCallerHeels : IIpcCaller
 {
     private readonly ILogger<IpcCallerHeels> _logger;
-    private readonly SpheneMediator _mareMediator;
+    private readonly SpheneMediator _spheneMediator;
     private readonly DalamudUtilService _dalamudUtil;
     private readonly ICallGateSubscriber<(int, int)> _heelsGetApiVersion;
     private readonly ICallGateSubscriber<string> _heelsGetOffset;
@@ -18,10 +18,10 @@ public sealed class IpcCallerHeels : IIpcCaller
     private readonly ICallGateSubscriber<int, object?> _heelsUnregisterPlayer;
     private readonly ICallGateSubscriber<int, string, string?, object?> _heelsTagChanged;
 
-    public IpcCallerHeels(ILogger<IpcCallerHeels> logger, IDalamudPluginInterface pi, DalamudUtilService dalamudUtil, SpheneMediator mareMediator)
+    public IpcCallerHeels(ILogger<IpcCallerHeels> logger, IDalamudPluginInterface pi, DalamudUtilService dalamudUtil, SpheneMediator spheneMediator)
     {
         _logger = logger;
-        _mareMediator = mareMediator;
+        _spheneMediator = spheneMediator;
         _dalamudUtil = dalamudUtil;
         _heelsGetApiVersion = pi.GetIpcSubscriber<(int, int)>("SimpleHeels.ApiVersion");
         _heelsGetOffset = pi.GetIpcSubscriber<string>("SimpleHeels.GetLocalPlayer");
@@ -40,14 +40,14 @@ public sealed class IpcCallerHeels : IIpcCaller
 
     private void HeelsOffsetChange(string offset)
     {
-        _mareMediator.Publish(new HeelsOffsetMessage());
+        _spheneMediator.Publish(new HeelsOffsetMessage());
     }
 
     private void HeelsTagChanged(int gameObjectIndex, string tag, string? value)
     {
         _logger.LogTrace("SimpleHeels tag changed for object {index}: {tag} = {value}", gameObjectIndex, tag, value ?? "null");
         // Tag changes can affect character appearance, so trigger a heels update
-        _mareMediator.Publish(new HeelsOffsetMessage());
+        _spheneMediator.Publish(new HeelsOffsetMessage());
     }
 
     public async Task<string> GetOffsetAsync()
