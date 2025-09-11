@@ -8,6 +8,7 @@ using Sphene.API.Data.Extensions;
 using Sphene.PlayerData.Pairs;
 using Sphene.Services.Mediator;
 using Sphene.WebAPI;
+using Sphene.UI.Components;
 using System.Numerics;
 
 namespace Sphene.UI;
@@ -497,7 +498,7 @@ public class TopTabMenu
             _spheneMediator.Publish(new UiToggleMessage(typeof(DataAnalysisUi)));
         }
         UiSharedService.AttachToolTip("View and analyze your generated character data");
-        if (_uiSharedService.IconTextButton(FontAwesomeIcon.Running, "Character Data Hub", availableWidth))
+        if (_uiSharedService.IconTextButton(FontAwesomeIcon.Running, "Character Data Hub", buttonX))
         {
             _spheneMediator.Publish(new UiToggleMessage(typeof(CharaDataHubUi)));
         }

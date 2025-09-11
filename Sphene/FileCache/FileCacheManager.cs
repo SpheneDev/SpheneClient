@@ -35,6 +35,17 @@ public sealed class FileCacheManager : IHostedService
         _csvPath = Path.Combine(configService.ConfigurationDirectory, "FileCache.csv");
     }
 
+    // Check if a hash exists in the file cache CSV
+    public bool IsHashKnown(string hash)
+    {
+        if (string.IsNullOrEmpty(hash) || hash.Length != 40)
+        {
+            return false;
+        }
+
+        return _fileCaches.Values.SelectMany(list => list).Any(entity => string.Equals(entity.Hash, hash, StringComparison.OrdinalIgnoreCase));
+    }
+
     private string CsvBakPath => _csvPath + ".bak";
 
     public FileCacheEntity? CreateCacheEntry(string path)
@@ -496,7 +507,9 @@ public sealed class FileCacheManager : IHostedService
             }
         }
 
-        _logger.LogInformation("Started FileCacheManager");
+        var totalCacheEntries = _fileCaches.Values.SelectMany(list => list).Count();
+        _logger.LogInformation("Started FileCacheManager with {totalCacheEntries} total cache entries", totalCacheEntries);
+        _logger.LogDebug("FileCacheManager: _fileCaches contains {keyCount} unique hashes", _fileCaches.Keys.Count);
 
         return Task.CompletedTask;
     }

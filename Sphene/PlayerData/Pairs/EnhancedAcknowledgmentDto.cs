@@ -114,6 +114,14 @@ public class BatchAcknowledgmentDto
     public int Count => Acknowledgments.Count;
     
     
+    /// Checks if the batch contains an acknowledgment with the specified ID
+    
+    public bool ContainsAcknowledgment(string acknowledgmentId)
+    {
+        return Acknowledgments.Any(ack => ack.AcknowledgmentId == acknowledgmentId);
+    }
+    
+    
     /// Checks if the batch is ready to be sent based on size or timeout
     
     public bool IsReadyToSend(int maxBatchSize, TimeSpan batchTimeout)

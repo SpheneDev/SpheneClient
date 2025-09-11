@@ -25,6 +25,13 @@ public record AcknowledgmentTimeoutMessage(
     DateTime TimeoutAt
 ) : MessageBase;
 
+// Event message for acknowledgment timeout due to asymmetric visibility
+public record AcknowledgmentAsymmetricVisibilityTimeoutMessage(
+    string AcknowledgmentId,
+    UserData User,
+    DateTime TimeoutAt
+) : MessageBase;
+
 // Event message for acknowledgment batch completed
 public record AcknowledgmentBatchCompletedMessage(
     string BatchId,
@@ -71,4 +78,20 @@ public record PairAcknowledgmentStatusChangedMessage(
     bool HasPendingAcknowledgment,
     bool? LastAcknowledgmentSuccess,
     DateTimeOffset? LastAcknowledgmentTime
+) : MessageBase;
+
+// Event published when a user reload is triggered due to acknowledgment timeout
+public record UserReloadTriggeredMessage(
+    UserData User,
+    string AcknowledgmentId,
+    string Reason,
+    DateTime Timestamp
+) : MessageBase;
+
+// Event published when an automatic confirmation is sent after successful reload
+public record AutomaticConfirmationSentMessage(
+    UserData User,
+    string ConfirmationId,
+    string OriginalAcknowledgmentId,
+    DateTime Timestamp
 ) : MessageBase;

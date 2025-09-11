@@ -2135,13 +2135,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         }
         UiSharedService.AttachToolTip("Automatically retry failed acknowledgments to improve reliability.");
         
-        var enableSilent = _configService.Current.EnableSilentAcknowledgments;
-        if (ImGui.Checkbox("Enable Silent Acknowledgments", ref enableSilent))
-        {
-            _configService.Current.EnableSilentAcknowledgments = enableSilent;
-            _configService.Save();
-        }
-        UiSharedService.AttachToolTip("Send periodic acknowledgments to maintain connection health without user interaction.");
+
         
         ImGui.Spacing();
         ImGui.Separator();
@@ -2171,13 +2165,13 @@ public class SettingsUi : WindowMediatorSubscriberBase
         // Reset to defaults button
         if (ImGui.Button("Reset Acknowledgment Settings to Defaults"))
         {
-            _configService.Current.ShowAcknowledgmentPopups = true;
+            _configService.Current.ShowAcknowledgmentPopups = false;
             _configService.Current.ShowWaitingForAcknowledgmentPopups = false;
             _configService.Current.EnableAcknowledgmentBatching = true;
             _configService.Current.EnableAcknowledgmentAutoRetry = true;
-            _configService.Current.EnableSilentAcknowledgments = true;
+
             _configService.Current.AcknowledgmentTimeoutSeconds = 30;
-            _configService.Current.AcknowledgmentNotification = NotificationLocation.Chat;
+            _configService.Current.AcknowledgmentNotification = NotificationLocation.Toast;
             _configService.Save();
         }
         UiSharedService.AttachToolTip("Reset all acknowledgment settings to their default values.");

@@ -11,31 +11,50 @@ using Sphene.Services.Mediator;
 using System.Numerics;
 using Microsoft.Extensions.Logging;
 using Sphene.WebAPI;
+using Sphene.SpheneConfiguration;
+using Sphene.API.Data;
+using System.Collections.Generic;
+using System.Threading.Tasks;
+using Sphene.FileCache;
 
 namespace Sphene.UI.Components;
 
 // UI component for monitoring and configuring the acknowledgment system
 public class AcknowledgmentMonitorUI : WindowMediatorSubscriberBase
 {
+    private readonly ILogger<AcknowledgmentMonitorUI> _logger;
     private readonly EnhancedAcknowledgmentManager _acknowledgmentManager;
     private readonly SessionAcknowledgmentManager _sessionAcknowledgmentManager;
     private readonly UiSharedService _uiSharedService;
     private readonly ApiController _apiController;
-    private AcknowledgmentConfiguration _config;
+    private readonly AcknowledgmentConfigService _configService;
+    private readonly VisibleUserDataDistributor _visibleUserDataDistributor;
+    private readonly PairManager _pairManager;
+    private readonly CharacterHashTracker _characterHashTracker;
+    private readonly AcknowledgmentRequestSystem _acknowledgmentRequestSystem;
+    private readonly FileCacheManager _fileCacheManager;
     private AcknowledgmentMetrics _metrics;
-    private bool _showAdvancedSettings = false;
+
     private bool _showMetricsDetails = false;
     private bool _showSessionDetails = false;
+
+    private bool _showUserHashMapping = false;
     
     public AcknowledgmentMonitorUI(ILogger<AcknowledgmentMonitorUI> logger, EnhancedAcknowledgmentManager acknowledgmentManager, 
-        SessionAcknowledgmentManager sessionAcknowledgmentManager, UiSharedService uiSharedService, SpheneMediator mediator, PerformanceCollectorService performanceCollectorService, ApiController apiController)
+        SessionAcknowledgmentManager sessionAcknowledgmentManager, UiSharedService uiSharedService, SpheneMediator mediator, PerformanceCollectorService performanceCollectorService, ApiController apiController, AcknowledgmentConfigService configService, VisibleUserDataDistributor visibleUserDataDistributor, PairManager pairManager, CharacterHashTracker characterHashTracker, AcknowledgmentRequestSystem acknowledgmentRequestSystem, FileCacheManager fileCacheManager)
         : base(logger, mediator, "Acknowledgment Monitor###SpheneAckMonitor", performanceCollectorService)
     {
+        _logger = logger;
         _acknowledgmentManager = acknowledgmentManager;
         _sessionAcknowledgmentManager = sessionAcknowledgmentManager;
         _uiSharedService = uiSharedService;
         _apiController = apiController;
-        _config = _acknowledgmentManager.GetConfiguration();
+        _configService = configService;
+        _visibleUserDataDistributor = visibleUserDataDistributor;
+        _pairManager = pairManager;
+        _characterHashTracker = characterHashTracker;
+        _acknowledgmentRequestSystem = acknowledgmentRequestSystem;
+        _fileCacheManager = fileCacheManager;
         _metrics = _acknowledgmentManager.GetMetrics();
         
         SizeConstraints = new()
@@ -66,12 +85,10 @@ public class AcknowledgmentMonitorUI : WindowMediatorSubscriberBase
             ImGui.Separator();
             DrawSessionInformation();
             ImGui.Separator();
+            DrawCharacterHashStatus();
+            ImGui.Separator();
             
-            // Only show configuration to admin users
-            if (_apiController.IsAdmin)
-            {
-                DrawConfiguration();
-            }
+
             
             if (_showMetricsDetails)
             {
@@ -83,6 +100,16 @@ public class AcknowledgmentMonitorUI : WindowMediatorSubscriberBase
             {
                 ImGui.Separator();
                 DrawSessionDetails();
+            }
+            
+
+            
+
+            
+            if (_showUserHashMapping)
+            {
+                ImGui.Separator();
+                DrawUserHashMapping();
             }
         }
     }
@@ -241,171 +268,208 @@ public class AcknowledgmentMonitorUI : WindowMediatorSubscriberBase
         ImGui.Text($"Last Updated: {_metrics.LastUpdated:HH:mm:ss}");
     }
     
-    // Draws the configuration section
-    private void DrawConfiguration()
+
+    
+
+    
+
+    
+
+    
+
+    
+    // Draws character hash status section with yellow indicators for potentially outdated hashes
+    private void DrawCharacterHashStatus()
     {
-        ImGui.Text("Configuration");
+        ImGui.Text("Character Hash Status");
         
-        // Basic settings
-        var enableBatching = _config.EnableBatching;
-        if (ImGui.Checkbox("Enable Batching", ref enableBatching))
+        // Current player hash from VisibleUserDataDistributor (more accurate)
+        var currentHash = _visibleUserDataDistributor.GetMyCurrentCharacterHash();
+        if (!string.IsNullOrEmpty(currentHash))
         {
-            _config.EnableBatching = enableBatching;
-        }
-        UiSharedService.AttachToolTip("Group multiple acknowledgments together for better performance");
-        
-        ImGui.SameLine();
-        var enableAutoRetry = _config.EnableAutoRetry;
-        if (ImGui.Checkbox("Auto Retry", ref enableAutoRetry))
-        {
-            _config.EnableAutoRetry = enableAutoRetry;
-        }
-        UiSharedService.AttachToolTip("Automatically retry failed acknowledgments");
-        
-        ImGui.SameLine();
-        var enableSilentAck = _config.EnableSilentAcknowledgments;
-        if (ImGui.Checkbox("Silent Acks", ref enableSilentAck))
-        {
-            _config.EnableSilentAcknowledgments = enableSilentAck;
-        }
-        UiSharedService.AttachToolTip("Send periodic acknowledgments to maintain connection health");
-        
-        // Timeout settings
-        var defaultTimeout = _config.DefaultTimeoutSeconds;
-        if (ImGui.SliderInt("Default Timeout (s)", ref defaultTimeout, 5, 120))
-        {
-            _config.DefaultTimeoutSeconds = defaultTimeout;
-        }
-        
-        if (_config.EnableBatching)
-        {
-            var maxBatchSize = _config.MaxBatchSize;
-            if (ImGui.SliderInt("Max Batch Size", ref maxBatchSize, 1, 50))
-            {
-                _config.MaxBatchSize = maxBatchSize;
-            }
+            ImGui.Text($"Current Hash: {currentHash[..8]}...");
+            UiSharedService.AttachToolTip($"Full Hash: {currentHash}");
             
-            var batchTimeoutMs = _config.BatchTimeoutMs;
-            if (ImGui.SliderInt("Batch Timeout (ms)", ref batchTimeoutMs, 1000, 30000))
+            // Add button to copy full hash to clipboard
+            ImGui.SameLine();
+            if (ImGui.Button("Copy Full Hash"))
             {
-                _config.BatchTimeoutMs = batchTimeoutMs;
+                ImGui.SetClipboardText(currentHash);
+                _logger.LogInformation("Character data hash copied to clipboard: {hash}", currentHash);
             }
         }
-        
-        // Advanced settings toggle
-        if (ImGui.Button(_showAdvancedSettings ? "Hide Advanced" : "Show Advanced"))
+        else
         {
-            _showAdvancedSettings = !_showAdvancedSettings;
+            ImGui.TextColored(ImGuiColors.DalamudRed, "No hash available");
         }
         
-        if (_showAdvancedSettings)
+        // Hash change detection status
+        var hasChanged = _characterHashTracker.HasHashChanged("current_player", currentHash);
+        var changeColor = hasChanged ? ImGuiColors.DalamudYellow : ImGuiColors.ParsedGreen;
+        ImGui.TextColored(changeColor, $"Hash Changed: {(hasChanged ? "Yes" : "No")}");
+        
+        // Show/hide user hash mapping button
+        ImGui.SameLine();
+        if (ImGui.Button(_showUserHashMapping ? "Hide User Hash Mapping" : "Show User Hash Mapping"))
         {
-            DrawAdvancedSettings();
+            _showUserHashMapping = !_showUserHashMapping;
         }
+        
+        // Acknowledgment request status
+        var pendingRequests = _acknowledgmentRequestSystem.GetPendingRequestCount();
+        var requestColor = pendingRequests > 0 ? ImGuiColors.DalamudYellow : ImGuiColors.ParsedGreen;
+        ImGui.TextColored(requestColor, $"Pending Hash Requests: {pendingRequests}");
+        
+        // Pending visibility requests status
+        var pendingVisibilityRequests = _acknowledgmentRequestSystem.GetPendingVisibilityRequestCount();
+        var visibilityColor = pendingVisibilityRequests > 0 ? ImGuiColors.DalamudOrange : ImGuiColors.ParsedGreen;
+        ImGui.TextColored(visibilityColor, $"Pending Visibility Checks: {pendingVisibilityRequests}");
+        
+
     }
     
-    // Draws the advanced settings section
-    private void DrawAdvancedSettings()
+
+    
+    // Draws user hash mapping information showing which hash each user has for Penumbra collections
+    private void DrawUserHashMapping()
     {
-        ImGui.Separator();
-        ImGui.Text("Advanced Settings");
+        ImGui.Text("User Hash Mapping)");
         
-        // Priority system
-        var enablePriority = _config.EnablePrioritySystem;
-        if (ImGui.Checkbox("Enable Priority System", ref enablePriority))
+        var visibleUsers = _pairManager.GetVisibleUsers();
+        
+        if (visibleUsers.Count == 0)
         {
-            _config.EnablePrioritySystem = enablePriority;
+            ImGui.TextColored(ImGuiColors.DalamudGrey, "No visible users to display hash mapping for");
+            return;
         }
         
-        if (_config.EnablePrioritySystem)
+        if (ImGui.BeginTable("UserHashMapping", 5, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable))
         {
-            ImGui.Indent();
+            ImGui.TableSetupColumn("User", ImGuiTableColumnFlags.WidthFixed, 120);
+            ImGui.TableSetupColumn("Sent Hash", ImGuiTableColumnFlags.WidthFixed, 100);
+            ImGui.TableSetupColumn("Received Hash", ImGuiTableColumnFlags.WidthFixed, 100);
+            ImGui.TableSetupColumn("Last Sent", ImGuiTableColumnFlags.WidthFixed, 100);
+            ImGui.TableSetupColumn("Last Received", ImGuiTableColumnFlags.WidthFixed, 100);
+            ImGui.TableHeadersRow();
             
-            var highTimeout = _config.HighPriorityTimeoutSeconds;
-            if (ImGui.SliderInt("High Priority Timeout (s)", ref highTimeout, 1, 60))
+            foreach (var user in visibleUsers)
             {
-                _config.HighPriorityTimeoutSeconds = highTimeout;
+                ImGui.TableNextRow();
+                ImGui.TableNextColumn();
+                ImGui.Text(user.AliasOrUID);
+                
+                // Sent Hash column
+                ImGui.TableNextColumn();
+                var sentHash = _visibleUserDataDistributor.GetLastSentHashForUser(user);
+                if (!string.IsNullOrEmpty(sentHash))
+                {
+                    ImGui.Text($"{sentHash[..8]}...");
+                    UiSharedService.AttachToolTip($"Full Sent Hash: {sentHash}");
+                }
+                else
+                {
+                    ImGui.TextColored(ImGuiColors.DalamudGrey, "No hash");
+                }
+                
+                // Received Hash column
+                ImGui.TableNextColumn();
+                var receivedHash = _visibleUserDataDistributor.GetLastReceivedHashForUser(user);
+                
+                if (!string.IsNullOrEmpty(receivedHash))
+                {
+                    ImGui.Text($"{receivedHash[..8]}...");
+                    UiSharedService.AttachToolTip($"Full Received Hash: {receivedHash}");
+                }
+                else
+                {
+                    ImGui.TextColored(ImGuiColors.DalamudGrey, "No hash");
+                }
+                
+                
+                // Last Sent column
+                ImGui.TableNextColumn();
+                var lastSentTime = _visibleUserDataDistributor.GetLastSentTimeForUser(user);
+                if (lastSentTime.HasValue)
+                {
+                    var timeDiff = DateTime.UtcNow - lastSentTime.Value;
+                    if (timeDiff.TotalMinutes < 1)
+                    {
+                        ImGui.TextColored(ImGuiColors.ParsedGreen, "Just now");
+                    }
+                    else if (timeDiff.TotalMinutes < 60)
+                    {
+                        ImGui.Text($"{timeDiff.TotalMinutes:F0}m ago");
+                    }
+                    else
+                    {
+                        ImGui.TextColored(ImGuiColors.DalamudYellow, $"{timeDiff.TotalHours:F0}h ago");
+                    }
+                }
+                else
+                {
+                    ImGui.TextColored(ImGuiColors.DalamudGrey, "Never");
+                }
+                
+                // Last Received column
+                ImGui.TableNextColumn();
+                var lastReceivedTime = _visibleUserDataDistributor.GetLastReceivedTimeForUser(user);
+                if (lastReceivedTime.HasValue)
+                {
+                    var timeDiff = DateTime.UtcNow - lastReceivedTime.Value;
+                    if (timeDiff.TotalMinutes < 1)
+                    {
+                        ImGui.TextColored(ImGuiColors.ParsedGreen, "Just now");
+                    }
+                    else if (timeDiff.TotalMinutes < 60)
+                    {
+                        ImGui.Text($"{timeDiff.TotalMinutes:F0}m ago");
+                    }
+                    else
+                    {
+                        ImGui.TextColored(ImGuiColors.DalamudYellow, $"{timeDiff.TotalHours:F0}h ago");
+                    }
+                }
+                else
+                {
+                    ImGui.TextColored(ImGuiColors.DalamudGrey, "Never");
+                }
             }
             
-            var mediumTimeout = _config.MediumPriorityTimeoutSeconds;
-            if (ImGui.SliderInt("Medium Priority Timeout (s)", ref mediumTimeout, 5, 120))
-            {
-                _config.MediumPriorityTimeoutSeconds = mediumTimeout;
-            }
-            
-            var lowTimeout = _config.LowPriorityTimeoutSeconds;
-            if (ImGui.SliderInt("Low Priority Timeout (s)", ref lowTimeout, 10, 300))
-            {
-                _config.LowPriorityTimeoutSeconds = lowTimeout;
-            }
-            
-            ImGui.Unindent();
+            ImGui.EndTable();
         }
         
-        // Retry settings
-        if (_config.EnableAutoRetry)
-        {
-            var maxRetries = _config.MaxRetryAttempts;
-            if (ImGui.SliderInt("Max Retry Attempts", ref maxRetries, 0, 10))
-            {
-                _config.MaxRetryAttempts = maxRetries;
-            }
-            
-            var baseDelay = _config.BaseRetryDelayMs;
-            if (ImGui.SliderInt("Base Retry Delay (ms)", ref baseDelay, 100, 10000))
-            {
-                _config.BaseRetryDelayMs = baseDelay;
-            }
-            
-            var maxDelay = _config.MaxRetryDelayMs;
-            if (ImGui.SliderInt("Max Retry Delay (ms)", ref maxDelay, 1000, 60000))
-            {
-                _config.MaxRetryDelayMs = Math.Max(maxDelay, _config.BaseRetryDelayMs);
-            }
-        }
-        
-        // Cache settings
-        var maxCacheSize = _config.MaxCacheSize;
-        if (ImGui.SliderInt("Max Cache Size", ref maxCacheSize, 100, 10000))
-        {
-            _config.MaxCacheSize = maxCacheSize;
-        }
-        
-        var cacheExpiration = _config.CacheExpirationMinutes;
-        if (ImGui.SliderInt("Cache Expiration (min)", ref cacheExpiration, 5, 180))
-        {
-            _config.CacheExpirationMinutes = cacheExpiration;
-        }
-        
-        // Silent acknowledgment settings
-        if (_config.EnableSilentAcknowledgments)
-        {
-            var silentInterval = _config.SilentAcknowledgmentIntervalMinutes;
-            if (ImGui.SliderInt("Silent Ack Interval (min)", ref silentInterval, 1, 30))
-            {
-                _config.SilentAcknowledgmentIntervalMinutes = silentInterval;
-            }
-        }
-        
-        // Performance settings
-        var maxPending = _config.MaxPendingAcknowledgmentsPerUser;
-        if (ImGui.SliderInt("Max Pending per User", ref maxPending, 10, 1000))
-        {
-            _config.MaxPendingAcknowledgmentsPerUser = maxPending;
-        }
-        
-        var enableMetrics = _config.EnableMetrics;
-        if (ImGui.Checkbox("Enable Metrics Collection", ref enableMetrics))
-        {
-            _config.EnableMetrics = enableMetrics;
-        }
-        
-        // Reset to defaults button
         ImGui.Spacing();
-        if (ImGui.Button("Reset to Defaults"))
+        
+        // Action buttons
+        if (ImGui.Button("Refresh All Hashes"))
         {
-            _config = new AcknowledgmentConfiguration();
+            foreach (var user in visibleUsers)
+            {
+                _ = _acknowledgmentRequestSystem.SendAcknowledgmentRequestAsync(user.UID, _characterHashTracker.GetCurrentPlayerHash());
+            }
         }
-        UiSharedService.AttachToolTip("Reset all settings to their default values");
+        
+        ImGui.SameLine();
+        if (ImGui.Button("Clear Hash Cache"))
+        {
+            _visibleUserDataDistributor.ClearAllUserHashCaches();
+        }
+        
+        ImGui.Spacing();
+        
+        // Debug information for received hashes
+        var allReceivedHashes = _visibleUserDataDistributor.GetAllTrackedReceivedCharacterHashes();
+        ImGui.TextColored(ImGuiColors.DalamudYellow, $"Debug: Total received hashes tracked: {allReceivedHashes.Count}");
+        if (allReceivedHashes.Count > 0)
+        {
+            ImGui.TextColored(ImGuiColors.DalamudGrey, "Received hashes:");
+            foreach (var kvp in allReceivedHashes)
+            {
+                ImGui.TextColored(ImGuiColors.DalamudGrey, $"  {kvp.Key.AliasOrUID}: {kvp.Value[..Math.Min(8, kvp.Value.Length)]}");
+            }
+        }
+        
+        ImGui.Spacing();
+        ImGui.TextColored(ImGuiColors.DalamudGrey, "This shows which character data hash each user has stored for your Penumbra collection.");
     }
 }

@@ -1,10 +1,11 @@
 using System;
+using Sphene.SpheneConfiguration.Configurations;
 
 namespace Sphene.PlayerData.Pairs;
 
 
 /// Configuration class for the acknowledgment system
-public class AcknowledgmentConfiguration
+public class AcknowledgmentConfiguration : ISpheneConfiguration
 {
     
     /// Default timeout for acknowledgments in seconds
@@ -36,10 +37,7 @@ public class AcknowledgmentConfiguration
     
     public int BatchTimeoutMs { get; set; } = 5000;
     
-    
-    /// Interval for silent acknowledgments in minutes
-    
-    public int SilentAcknowledgmentIntervalMinutes { get; set; } = 1;
+
     
     
     /// Maximum number of pending acknowledgments per user
@@ -56,10 +54,7 @@ public class AcknowledgmentConfiguration
     
     public bool EnableAutoRetry { get; set; } = true;
     
-    
-    /// Enable or disable silent acknowledgments
-    
-    public bool EnableSilentAcknowledgments { get; set; } = true;
+
     
     
     /// Enable or disable priority-based acknowledgment processing
@@ -97,6 +92,26 @@ public class AcknowledgmentConfiguration
     public bool EnableMetrics { get; set; } = true;
     
     
+    /// Enable automatic timeout for asymmetric visibility scenarios
+    
+    public bool EnableAsymmetricVisibilityTimeout { get; set; } = true;
+    
+    
+    /// Timeout for pending acknowledgments in asymmetric visibility scenarios (seconds)
+    
+    public int AsymmetricVisibilityTimeoutSeconds { get; set; } = 45;
+    
+    
+    /// Grace period before applying asymmetric visibility timeout (seconds)
+    
+    public int AsymmetricVisibilityGracePeriodSeconds { get; set; } = 15;
+    
+    
+    /// Configuration version for serialization compatibility
+    
+    public int Version { get; set; } = 1;
+    
+    
     /// Validates the configuration and throws an exception if invalid
     
     public void Validate()
@@ -119,8 +134,7 @@ public class AcknowledgmentConfiguration
         if (BatchTimeoutMs <= 0)
             throw new ArgumentException("BatchTimeoutMs must be greater than 0");
             
-        if (SilentAcknowledgmentIntervalMinutes <= 0)
-            throw new ArgumentException("SilentAcknowledgmentIntervalMinutes must be greater than 0");
+
             
         if (MaxPendingAcknowledgmentsPerUser <= 0)
             throw new ArgumentException("MaxPendingAcknowledgmentsPerUser must be greater than 0");
@@ -153,6 +167,30 @@ public class AcknowledgmentConfiguration
             AcknowledgmentPriority.Low => LowPriorityTimeoutSeconds,
             _ => DefaultTimeoutSeconds
         };
+    }
+    
+    // Copy all properties from another configuration instance
+    public void CopyFrom(AcknowledgmentConfiguration other)
+    {
+        DefaultTimeoutSeconds = other.DefaultTimeoutSeconds;
+        MaxRetryAttempts = other.MaxRetryAttempts;
+        BaseRetryDelayMs = other.BaseRetryDelayMs;
+        MaxRetryDelayMs = other.MaxRetryDelayMs;
+        MaxBatchSize = other.MaxBatchSize;
+        BatchTimeoutMs = other.BatchTimeoutMs;
+
+        MaxPendingAcknowledgmentsPerUser = other.MaxPendingAcknowledgmentsPerUser;
+        MaxCacheSize = other.MaxCacheSize;
+        CacheExpirationMinutes = other.CacheExpirationMinutes;
+        HighPriorityTimeoutSeconds = other.HighPriorityTimeoutSeconds;
+        MediumPriorityTimeoutSeconds = other.MediumPriorityTimeoutSeconds;
+        LowPriorityTimeoutSeconds = other.LowPriorityTimeoutSeconds;
+        EnableBatching = other.EnableBatching;
+        EnableAutoRetry = other.EnableAutoRetry;
+        EnablePrioritySystem = other.EnablePrioritySystem;
+
+        EnableMetrics = other.EnableMetrics;
+        Version = other.Version;
     }
 }
 

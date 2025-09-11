@@ -345,7 +345,7 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
             while (pair.UserPair!.OwnPermissions != perm)
             {
                 await Task.Delay(250, cts.Token).ConfigureAwait(false);
-                Logger.LogTrace("Waiting for permissions change for {data}", userData);
+
             }
             perm.SetPaused(paused: false);
             await UserSetPairPermissions(new UserPermissionsDto(userData, perm)).ConfigureAwait(false);
@@ -367,11 +367,8 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
     public async Task<ConnectionDto> GetConnectionDtoAsync(bool publishConnected)
     {
         var dto = await _spheneHub!.InvokeAsync<ConnectionDto>(nameof(GetConnectionDto)).ConfigureAwait(false);
-        Logger.LogInformation("[DEBUG] ConnectionDto received - FileServerAddress: {fileServerAddress}, ServerVersion: {serverVersion}, User: {user}", 
-            dto.ServerInfo.FileServerAddress, dto.ServerVersion, dto.User.AliasOrUID);
         if (publishConnected) 
         {
-            Logger.LogInformation("[DEBUG] Publishing ConnectedMessage with FileServerAddress: {fileServerAddress}", dto.ServerInfo.FileServerAddress);
             Mediator.Publish(new ConnectedMessage(dto));
         }
         return dto;
@@ -391,7 +388,7 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
         while (!ct.IsCancellationRequested && _spheneHub != null)
         {
             await Task.Delay(TimeSpan.FromSeconds(30), ct).ConfigureAwait(false);
-            Logger.LogDebug("Checking Client Health State");
+
 
             bool requireReconnect = await RefreshTokenAsync(ct).ConfigureAwait(false);
 
@@ -408,12 +405,12 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
         var auth = _serverManager.CurrentServer.Authentications.Find(f => string.Equals(f.CharacterName, charaName, StringComparison.Ordinal) && f.WorldId == worldId);
         if (auth?.AutoLogin ?? false)
         {
-            Logger.LogInformation("Logging into {chara}", charaName);
+
             _ = Task.Run(CreateConnectionsAsync);
         }
         else
         {
-            Logger.LogInformation("Not logging into {chara}, auto login disabled", charaName);
+
             _ = Task.Run(async () => await StopConnectionAsync(ServerState.NoAutoLogon).ConfigureAwait(false));
         }
     }
@@ -428,7 +425,7 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
     {
         if (_spheneHub == null) return;
 
-        Logger.LogDebug("Initializing data");
+
         OnDownloadReady((guid) => _ = Client_DownloadReady(guid));
         OnReceiveServerMessage((sev, msg) => _ = Client_ReceiveServerMessage(sev, msg));
         OnUpdateSystemInfo((dto) => _ = Client_UpdateSystemInfo(dto));
@@ -473,13 +470,11 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
     {
         foreach (var entry in await GroupsGetAll().ConfigureAwait(false))
         {
-            Logger.LogDebug("Group: {entry}", entry);
             _pairManager.AddGroup(entry);
         }
 
         foreach (var userPair in await UserGetPairedClients().ConfigureAwait(false))
         {
-            Logger.LogDebug("Individual Pair: {userPair}", userPair);
             _pairManager.AddUserPair(userPair);
         }
     }
@@ -491,12 +486,11 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
         {
             var world = await _dalamudUtil.GetWorldIdAsync().ConfigureAwait(false);
             dto = new((ushort)world, _lastCensus.RaceId, _lastCensus.TribeId, _lastCensus.Gender);
-            Logger.LogDebug("Attaching Census Data: {data}", dto);
+
         }
 
         foreach (var entry in await UserGetOnlinePairs(dto).ConfigureAwait(false))
         {
-            Logger.LogDebug("Pair online: {pair}", entry);
             _pairManager.MarkPairOnline(entry, sendNotif: false);
         }
     }
@@ -559,7 +553,7 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
             var token = await _tokenProvider.GetOrUpdateToken(ct).ConfigureAwait(false);
             if (!string.Equals(token, _lastUsedToken, StringComparison.Ordinal))
             {
-                Logger.LogDebug("Reconnecting due to updated token");
+
 
                 _doNotNotifyOnNextInfo = true;
                 await CreateConnectionsAsync().ConfigureAwait(false);

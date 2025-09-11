@@ -98,6 +98,7 @@ public record GPoseLobbyReceivePoseData(UserData UserData, PoseData PoseData) : 
 public record GPoseLobbyReceiveWorldData(UserData UserData, WorldData WorldData) : MessageBase;
 public record OpenCharaDataHubWithFilterMessage(UserData UserData) : MessageBase;
 public record SendCharacterDataAcknowledgmentMessage(CharacterDataAcknowledgmentDto AcknowledgmentDto) : MessageBase;
+public record CharacterDataReloadRequest(string RequestingSessionId, string TargetUserId, long Timestamp) : MessageBase;
 public record ShowUpdateNotificationMessage(UpdateInfo UpdateInfo) : MessageBase;
 public record CheckForUpdatesMessage : MessageBase;
 #pragma warning restore S2094

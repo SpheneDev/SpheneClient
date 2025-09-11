@@ -17,6 +17,7 @@ using System.Collections.Concurrent;
 using Sphene.Services;
 using NotificationType = Sphene.SpheneConfiguration.Models.NotificationType;
 using Sphene.Services.Events;
+using AcknowledgmentStatus = Sphene.Services.Events.AcknowledgmentStatus;
 using Dalamud.Interface.ImGuiNotification;
 
 namespace Sphene.PlayerData.Pairs;
@@ -27,17 +28,19 @@ public class Pair : DisposableMediatorSubscriberBase
     private readonly SemaphoreSlim _creationSemaphore = new(1);
     private readonly ServerConfigurationManager _serverConfigurationManager;
     private readonly PlayerPerformanceConfigService _playerPerformanceConfigService;
+    private readonly Lazy<VisibleUserDataDistributor> _visibleUserDataDistributor;
     private CancellationTokenSource _applicationCts = new();
     private OnlineUserIdentDto? _onlineUserIdentDto = null;
 
     public Pair(ILogger<Pair> logger, UserFullPairDto userPair, PairHandlerFactory cachedPlayerFactory,
         SpheneMediator mediator, ServerConfigurationManager serverConfigurationManager,
-        PlayerPerformanceConfigService playerPerformanceConfigService) : base(logger, mediator)
+        PlayerPerformanceConfigService playerPerformanceConfigService, Lazy<VisibleUserDataDistributor> visibleUserDataDistributor) : base(logger, mediator)
     {
         UserPair = userPair;
         _cachedPlayerFactory = cachedPlayerFactory;
         _serverConfigurationManager = serverConfigurationManager;
         _playerPerformanceConfigService = playerPerformanceConfigService;
+        _visibleUserDataDistributor = visibleUserDataDistributor;
         
         // Subscribe to character data application completion messages
         Mediator.Subscribe<CharacterDataApplicationCompletedMessage>(this, async (message) => await OnCharacterDataApplicationCompleted(message));
@@ -190,7 +193,7 @@ public class Pair : DisposableMediatorSubscriberBase
                         var dataWithSequence = data.DeepClone();
                         dataWithSequence.SequenceNumber = currentSequence;
                         _pendingAcknowledgmentQueue.Enqueue(dataWithSequence);
-                        Logger.LogInformation("Enqueued pending acknowledgment data for delayed sending (delayed path) - AckId: {acknowledgmentId}, Sequence: {sequence}", data.AcknowledgmentId, currentSequence);
+                        Logger.LogInformation("Enqueued pending acknowledgment data for delayed sending (delayed path)");
                     }
                 }
                 else
@@ -210,7 +213,7 @@ public class Pair : DisposableMediatorSubscriberBase
             var dataWithSequence = data.DeepClone();
             dataWithSequence.SequenceNumber = currentSequence;
             _pendingAcknowledgmentQueue.Enqueue(dataWithSequence);
-            Logger.LogInformation("Enqueued pending acknowledgment data for delayed sending - AckId: {acknowledgmentId}, Sequence: {sequence}, Queue size: {queueSize}", data.AcknowledgmentId, currentSequence, _pendingAcknowledgmentQueue.Count);
+            Logger.LogInformation("Enqueued pending acknowledgment data for delayed sending - Queue size: {queueSize}", _pendingAcknowledgmentQueue.Count);
         }
     }
 
@@ -337,7 +340,7 @@ public class Pair : DisposableMediatorSubscriberBase
 
     public void UpdateAcknowledgmentStatus(string acknowledgmentId, bool success, DateTimeOffset timestamp)
     {
-        Logger.LogInformation("Updating acknowledgment status: {acknowledgmentId} - Success: {success} for user {user}", acknowledgmentId, success, UserData.AliasOrUID);
+        Logger.LogInformation("Updating acknowledgment status - Success: {success} for user {user}", success, UserData.AliasOrUID);
         LastAcknowledgmentId = acknowledgmentId;
         LastAcknowledgmentSuccess = success;
         LastAcknowledgmentTime = timestamp;
@@ -364,7 +367,7 @@ public class Pair : DisposableMediatorSubscriberBase
 
     public void SetPendingAcknowledgment(string acknowledgmentId)
     {
-        Logger.LogInformation("Setting pending acknowledgment: {acknowledgmentId} for user {user}", acknowledgmentId, UserData.AliasOrUID);
+        Logger.LogInformation("Setting pending acknowledgment for user {user}", UserData.AliasOrUID);
         LastAcknowledgmentId = acknowledgmentId;
         HasPendingAcknowledgment = true;
         LastAcknowledgmentSuccess = null;
@@ -415,7 +418,7 @@ public class Pair : DisposableMediatorSubscriberBase
         // Only clear if this is the acknowledgment we're waiting for
         if (LastAcknowledgmentId == acknowledgmentId)
         {
-            Logger.LogInformation("Clearing pending acknowledgment: {acknowledgmentId} for user {user}", acknowledgmentId, UserData.AliasOrUID);
+            Logger.LogInformation("Clearing pending acknowledgment for user {user}", UserData.AliasOrUID);
             HasPendingAcknowledgment = false;
             LastAcknowledgmentId = null;
             
@@ -528,6 +531,18 @@ public class Pair : DisposableMediatorSubscriberBase
             Logger.LogInformation("Skipping acknowledgment - RequiresAcknowledgment: {requires}, AcknowledgmentId null/empty: {empty}", 
                 data.RequiresAcknowledgment, string.IsNullOrEmpty(data.AcknowledgmentId));
             return;
+        }
+
+        // Check if user is waiting for reload confirmation after first-time hash reception
+        var pendingReloadInfo = _visibleUserDataDistributor.Value.GetPendingReloadConfirmation(UserData);
+        if (pendingReloadInfo != null)
+        {
+            Logger.LogInformation("User {user} is waiting for reload confirmation (hash: {hash}, ackId: {ackId}) - delaying acknowledgment", 
+                UserData.AliasOrUID, pendingReloadInfo.Hash, pendingReloadInfo.AcknowledgmentId);
+            
+            // Clear the pending reload since character has now been reloaded and applied
+            _visibleUserDataDistributor.Value.ClearPendingReloadConfirmation(UserData);
+            Logger.LogInformation("Cleared pending reload confirmation for user {user} - proceeding with acknowledgment", UserData.AliasOrUID);
         }
 
         try

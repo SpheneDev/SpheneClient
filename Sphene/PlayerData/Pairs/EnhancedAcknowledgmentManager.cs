@@ -10,6 +10,7 @@ using Sphene.Services.Mediator;
 using Sphene.WebAPI;
 using Sphene.Utils;
 using Sphene.WebAPI;
+using Sphene.SpheneConfiguration;
 
 namespace Sphene.PlayerData.Pairs;
 
@@ -19,7 +20,7 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
 {
     private readonly ApiController _apiController;
     // Removed DalamudUtilService dependency - not needed for acknowledgment management
-    private readonly AcknowledgmentConfiguration _config;
+    private readonly AcknowledgmentConfigService _configService;
     private readonly AcknowledgmentMetrics _metrics = new();
     
     // Priority-based queues
@@ -51,19 +52,19 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
         ApiController apiController, 
         // DalamudUtilService dalamudUtil, // Removed - not needed
         SpheneMediator mediator,
-        AcknowledgmentConfiguration config,
+        AcknowledgmentConfigService configService,
         SessionAcknowledgmentManager sessionManager) : base(logger, mediator)
     {
         _apiController = apiController;
         // _dalamudUtil = dalamudUtil; // Removed - not needed
-        _config = config;
+        _configService = configService;
         _sessionManager = sessionManager;
-        _config.Validate();
+        _configService.Current.Validate();
         
         // Initialize timers
         _batchProcessingTimer = new Timer(ProcessBatches, null, 
-            TimeSpan.FromMilliseconds(_config.BatchTimeoutMs / 2), 
-            TimeSpan.FromMilliseconds(_config.BatchTimeoutMs / 2));
+            TimeSpan.FromMilliseconds(_configService.Current.BatchTimeoutMs / 2), 
+            TimeSpan.FromMilliseconds(_configService.Current.BatchTimeoutMs / 2));
             
         _timeoutCheckTimer = new Timer(CheckTimeouts, null, 
             TimeSpan.FromSeconds(5), 
@@ -74,8 +75,8 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
             TimeSpan.FromSeconds(10));
             
         _cacheCleanupTimer = new Timer(CleanupCache, null, 
-            TimeSpan.FromMinutes(_config.CacheExpirationMinutes / 2), 
-            TimeSpan.FromMinutes(_config.CacheExpirationMinutes / 2));
+            TimeSpan.FromMinutes(_configService.Current.CacheExpirationMinutes / 2), 
+            TimeSpan.FromMinutes(_configService.Current.CacheExpirationMinutes / 2));
             
         // Add cleanup timer for old pending acknowledgments
         var cleanupTimer = new Timer(CleanupOldAcknowledgments, null,
@@ -97,12 +98,11 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
             var cacheKey = $"{acknowledgment.User.UID}_{acknowledgment.AcknowledgmentId}";
             if (_acknowledgmentCache.ContainsKey(cacheKey))
             {
-                Logger.LogDebug("Acknowledgment already processed (cached): {ackId}", acknowledgment.AcknowledgmentId);
                 return true;
             }
             
             // Add to appropriate priority queue
-            if (_config.EnableBatching)
+            if (_configService.Current.EnableBatching)
             {
                 await AddToBatchAsync(acknowledgment);
                 return true;
@@ -114,10 +114,10 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Failed to send acknowledgment {ackId}", acknowledgment.AcknowledgmentId);
+            Logger.LogError(ex, "Failed to send acknowledgment");
             acknowledgment.MarkAsFailed(AcknowledgmentErrorCode.NetworkError, ex.Message);
             
-            if (_config.EnableAutoRetry && acknowledgment.RetryCount < _config.MaxRetryAttempts)
+            if (_configService.Current.EnableAutoRetry && acknowledgment.RetryCount < _configService.Current.MaxRetryAttempts)
             {
                 await ScheduleRetryAsync(acknowledgment);
             }
@@ -140,10 +140,17 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
                 _currentBatches[acknowledgment.Priority] = batch;
             }
             
+            // Check if this acknowledgment is already in the current batch
+            if (batch.ContainsAcknowledgment(acknowledgment.AcknowledgmentId))
+            {
+                return;
+            }
+            
             batch.AddAcknowledgment(acknowledgment);
+
             
             // Check if batch is ready to send
-            if (batch.IsReadyToSend(_config.MaxBatchSize, TimeSpan.FromMilliseconds(_config.BatchTimeoutMs)))
+            if (batch.IsReadyToSend(_configService.Current.MaxBatchSize, TimeSpan.FromMilliseconds(_configService.Current.BatchTimeoutMs)))
             {
                 await ProcessBatchAsync(batch);
                 _currentBatches.TryRemove(acknowledgment.Priority, out _);
@@ -162,7 +169,7 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
     {
         try
         {
-            Logger.LogDebug("Processing batch {batchId} with {count} acknowledgments", batch.BatchId, batch.Count);
+
             
             var tasks = batch.Acknowledgments.Select(SendSingleAcknowledgmentAsync);
             var results = await Task.WhenAll(tasks);
@@ -170,12 +177,11 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
             batch.MarkAsProcessed();
             
             var successCount = results.Count(r => r);
-            Logger.LogInformation("Batch {batchId} processed: {success}/{total} successful", 
-                batch.BatchId, successCount, batch.Count);
+
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Failed to process batch {batchId}", batch.BatchId);
+            Logger.LogError(ex, "Failed to process batch");
         }
     }
     
@@ -185,7 +191,7 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
     private async Task<bool> SendSingleAcknowledgmentAsync(EnhancedAcknowledgmentDto acknowledgment)
     {
         var startTime = DateTime.UtcNow;
-        var timeout = TimeSpan.FromSeconds(_config.GetTimeoutForPriority(acknowledgment.Priority));
+        var timeout = TimeSpan.FromSeconds(_configService.Current.GetTimeoutForPriority(acknowledgment.Priority));
         
         try
         {
@@ -215,14 +221,13 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
             // Remove from pending
             _pendingAcknowledgments.TryRemove(acknowledgment.AcknowledgmentId, out _);
             
-            Logger.LogDebug("Successfully sent acknowledgment {ackId} in {ms}ms", 
-                acknowledgment.AcknowledgmentId, responseTime);
+
             
             return true;
         }
         catch (Exception ex)
         {
-            Logger.LogWarning(ex, "Failed to send acknowledgment {ackId}", acknowledgment.AcknowledgmentId);
+            Logger.LogWarning(ex, "Failed to send acknowledgment");
             
             var errorCode = DetermineErrorCode(ex);
             acknowledgment.MarkAsFailed(errorCode, ex.Message);
@@ -243,8 +248,7 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
         var delay = CalculateRetryDelay(acknowledgment.RetryCount);
         acknowledgment.IncrementRetry(delay);
         
-        Logger.LogInformation("Scheduling retry {retry}/{max} for acknowledgment {ackId} in {delay}ms", 
-            acknowledgment.RetryCount, _config.MaxRetryAttempts, acknowledgment.AcknowledgmentId, delay.TotalMilliseconds);
+
         
         // Add back to appropriate queue for retry
         AddToQueue(acknowledgment);
@@ -257,8 +261,8 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
     private TimeSpan CalculateRetryDelay(int retryCount)
     {
         var delay = Math.Min(
-            _config.BaseRetryDelayMs * Math.Pow(2, retryCount),
-            _config.MaxRetryDelayMs
+            _configService.Current.BaseRetryDelayMs * Math.Pow(2, retryCount),
+            _configService.Current.MaxRetryDelayMs
         );
         
         // Add jitter to prevent thundering herd
@@ -283,6 +287,44 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
                 _lowPriorityQueue.Enqueue(acknowledgment);
                 break;
         }
+    }
+    
+    
+    /// Checks if an acknowledgment is already in any priority queue
+    
+    private bool IsAcknowledgmentInQueues(string acknowledgmentId)
+    {
+        var queues = new[] { _highPriorityQueue, _mediumPriorityQueue, _lowPriorityQueue };
+        
+        foreach (var queue in queues)
+        {
+            // Create a temporary list to check queue contents without dequeuing
+            var tempList = new List<EnhancedAcknowledgmentDto>();
+            var found = false;
+            
+            // Dequeue all items to check them
+            while (queue.TryDequeue(out var item))
+            {
+                tempList.Add(item);
+                if (item.AcknowledgmentId == acknowledgmentId)
+                {
+                    found = true;
+                }
+            }
+            
+            // Re-enqueue all items
+            foreach (var item in tempList)
+            {
+                queue.Enqueue(item);
+            }
+            
+            if (found)
+            {
+                return true;
+            }
+        }
+        
+        return false;
     }
     
     
@@ -316,7 +358,7 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
                     foreach (var kvp in _currentBatches)
                     {
                         var batch = kvp.Value;
-                        if (batch.IsReadyToSend(_config.MaxBatchSize, TimeSpan.FromMilliseconds(_config.BatchTimeoutMs)))
+                        if (batch.IsReadyToSend(_configService.Current.MaxBatchSize, TimeSpan.FromMilliseconds(_configService.Current.BatchTimeoutMs)))
                         {
                             batchesToProcess.Add((kvp.Key, batch));
                         }
@@ -356,7 +398,7 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
                 var sessionMaxAge = TimeSpan.FromMinutes(30);
                 _sessionManager.CleanupOldSessions(sessionMaxAge);
                 
-                Logger.LogDebug("Completed cleanup of old acknowledgments and sessions");
+
             }
             catch (Exception ex)
             {
@@ -388,11 +430,11 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
                 {
                     if (_pendingAcknowledgments.TryRemove(ackId, out var pendingAck))
                     {
-                        Logger.LogWarning("Acknowledgment {ackId} timed out", ackId);
+
                         pendingAck.Acknowledgment.MarkAsFailed(AcknowledgmentErrorCode.Timeout);
                         _metrics.RecordFailure(pendingAck.Acknowledgment.Priority, AcknowledgmentErrorCode.Timeout);
                         
-                        if (_config.EnableAutoRetry && pendingAck.Acknowledgment.RetryCount < _config.MaxRetryAttempts)
+                        if (_configService.Current.EnableAutoRetry && pendingAck.Acknowledgment.RetryCount < _configService.Current.MaxRetryAttempts)
                         {
                             _ = ScheduleRetryAsync(pendingAck.Acknowledgment);
                         }
@@ -458,7 +500,7 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
                 
                 foreach (var kvp in _acknowledgmentCache)
                 {
-                    if (now - kvp.Value.CachedAt > TimeSpan.FromMinutes(_config.CacheExpirationMinutes))
+                    if (now - kvp.Value.CachedAt > TimeSpan.FromMinutes(_configService.Current.CacheExpirationMinutes))
                     {
                         expiredKeys.Add(kvp.Key);
                     }
@@ -470,11 +512,11 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
                 }
                 
                 // Limit cache size
-                if (_acknowledgmentCache.Count > _config.MaxCacheSize)
+                if (_acknowledgmentCache.Count > _configService.Current.MaxCacheSize)
                 {
                     var oldestEntries = _acknowledgmentCache
                         .OrderBy(kvp => kvp.Value.CachedAt)
-                        .Take(_acknowledgmentCache.Count - _config.MaxCacheSize)
+                        .Take(_acknowledgmentCache.Count - _configService.Current.MaxCacheSize)
                         .Select(kvp => kvp.Key)
                         .ToList();
                         
@@ -484,8 +526,7 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
                     }
                 }
                 
-                Logger.LogDebug("Cache cleanup completed. Removed {expired} expired entries. Current size: {size}", 
-                    expiredKeys.Count, _acknowledgmentCache.Count);
+
             }
             catch (Exception ex)
             {
@@ -499,6 +540,30 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
     
     public async Task HandleSendAcknowledgment(SendCharacterDataAcknowledgmentMessage message)
     {
+        var ackId = message.AcknowledgmentDto.AcknowledgmentId;
+        var userUid = message.AcknowledgmentDto.User.UID;
+        
+        // Enhanced duplicate detection - check multiple sources
+        var cacheKey = $"{userUid}_{ackId}";
+        
+        // Check if already cached (successfully processed)
+        if (_acknowledgmentCache.ContainsKey(cacheKey))
+        {
+            return;
+        }
+        
+        // Check if currently pending (being processed)
+        if (_pendingAcknowledgments.ContainsKey(ackId))
+        {
+            return;
+        }
+        
+        // Check if already in any priority queue
+        if (IsAcknowledgmentInQueues(ackId))
+        {
+            return;
+        }
+        
         var enhancedAck = new EnhancedAcknowledgmentDto(
             message.AcknowledgmentDto.User, 
             message.AcknowledgmentDto.AcknowledgmentId)
@@ -507,14 +572,13 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
             AcknowledgedAt = message.AcknowledgmentDto.AcknowledgedAt
         };
         
+
         var success = await SendAcknowledgmentAsync(enhancedAck);
         
         // Publish UI refresh message to update acknowledgment status in UI
         if (success)
         {
             Mediator.Publish(new RefreshUiMessage());
-            Logger.LogDebug("Published UI refresh message after successful acknowledgment {ackId}", 
-                message.AcknowledgmentDto.AcknowledgmentId);
         }
     }
     
@@ -526,7 +590,12 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
     
     /// Gets current configuration
     
-    public AcknowledgmentConfiguration GetConfiguration() => _config;
+    public AcknowledgmentConfiguration GetConfiguration() => _configService.Current;
+    
+    
+    /// Gets the configuration service for persistence
+    
+    public AcknowledgmentConfigService GetConfigurationService() => _configService;
     
     protected override void Dispose(bool disposing)
     {

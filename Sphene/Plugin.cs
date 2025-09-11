@@ -144,9 +144,10 @@ public sealed class Plugin : IDalamudPlugin
             collection.AddSingleton<Lazy<ApiController>>(s => new Lazy<ApiController>(() => s.GetRequiredService<ApiController>()));
             collection.AddSingleton(s => new PairManager(s.GetRequiredService<ILogger<PairManager>>(), s.GetRequiredService<PairFactory>(),
                 s.GetRequiredService<SpheneConfigService>(), s.GetRequiredService<SpheneMediator>(), contextMenu, s.GetRequiredService<ServerConfigurationManager>(),
-                s.GetRequiredService<Lazy<ApiController>>(), s.GetRequiredService<SessionAcknowledgmentManager>(), s.GetRequiredService<MessageService>()));
+                s.GetRequiredService<Lazy<ApiController>>(), s.GetRequiredService<SessionAcknowledgmentManager>(), s.GetRequiredService<MessageService>(),
+                new Lazy<VisibleUserDataDistributor>(() => s.GetRequiredService<VisibleUserDataDistributor>())));
             collection.AddSingleton(s => new EnhancedAcknowledgmentManager(s.GetRequiredService<ILogger<EnhancedAcknowledgmentManager>>(),
-                s.GetRequiredService<Lazy<ApiController>>().Value, s.GetRequiredService<SpheneMediator>(), new AcknowledgmentConfiguration(),
+                s.GetRequiredService<Lazy<ApiController>>().Value, s.GetRequiredService<SpheneMediator>(), s.GetRequiredService<AcknowledgmentConfigService>(),
                 s.GetRequiredService<SessionAcknowledgmentManager>()));
             collection.AddSingleton<RedrawManager>();
             collection.AddSingleton((s) => new IpcCallerPenumbra(s.GetRequiredService<ILogger<IpcCallerPenumbra>>(), pluginInterface,
@@ -192,6 +193,7 @@ public sealed class Plugin : IDalamudPlugin
             collection.AddSingleton((s) => new XivDataStorageService(pluginInterface.ConfigDirectory.FullName));
             collection.AddSingleton((s) => new PlayerPerformanceConfigService(pluginInterface.ConfigDirectory.FullName));
             collection.AddSingleton((s) => new CharaDataConfigService(pluginInterface.ConfigDirectory.FullName));
+            collection.AddSingleton((s) => new AcknowledgmentConfigService(pluginInterface.ConfigDirectory.FullName));
             collection.AddSingleton<IConfigService<ISpheneConfiguration>>(s => s.GetRequiredService<SpheneConfigService>());
             collection.AddSingleton<IConfigService<ISpheneConfiguration>>(s => s.GetRequiredService<ServerConfigService>());
             collection.AddSingleton<IConfigService<ISpheneConfiguration>>(s => s.GetRequiredService<NotesConfigService>());
@@ -200,6 +202,7 @@ public sealed class Plugin : IDalamudPlugin
             collection.AddSingleton<IConfigService<ISpheneConfiguration>>(s => s.GetRequiredService<XivDataStorageService>());
             collection.AddSingleton<IConfigService<ISpheneConfiguration>>(s => s.GetRequiredService<PlayerPerformanceConfigService>());
             collection.AddSingleton<IConfigService<ISpheneConfiguration>>(s => s.GetRequiredService<CharaDataConfigService>());
+            collection.AddSingleton<IConfigService<ISpheneConfiguration>>(s => s.GetRequiredService<AcknowledgmentConfigService>());
             collection.AddSingleton<ConfigurationMigrator>();
             collection.AddSingleton<ConfigurationSaveService>();
 
@@ -237,12 +240,28 @@ public sealed class Plugin : IDalamudPlugin
             collection.AddScoped<IPopupHandler, CensusPopupHandler>();
             collection.AddScoped<CacheCreationService>();
             collection.AddScoped<PlayerDataFactory>();
-            collection.AddScoped<VisibleUserDataDistributor>();
+            collection.AddSingleton<VisibleUserDataDistributor>();
+            collection.AddSingleton<Lazy<VisibleUserDataDistributor>>(s => new Lazy<VisibleUserDataDistributor>(() => s.GetRequiredService<VisibleUserDataDistributor>()));
             
             // Enhanced Acknowledgment System
-            collection.AddSingleton<AcknowledgmentConfiguration>();
-            collection.AddScoped<EnhancedAcknowledgmentManager>();
-            collection.AddScoped<WindowMediatorSubscriberBase, AcknowledgmentMonitorUI>();
+            collection.AddSingleton<EnhancedAcknowledgmentManager>();
+            collection.AddSingleton<CharacterHashTracker>();
+            collection.AddSingleton<VisibilityCheckService>();
+            collection.AddSingleton<AcknowledgmentRequestSystem>();
+            collection.AddScoped<WindowMediatorSubscriberBase, AcknowledgmentMonitorUI>(s => new AcknowledgmentMonitorUI(
+                s.GetRequiredService<ILogger<AcknowledgmentMonitorUI>>(),
+                s.GetRequiredService<EnhancedAcknowledgmentManager>(),
+                s.GetRequiredService<SessionAcknowledgmentManager>(),
+                s.GetRequiredService<UiSharedService>(),
+                s.GetRequiredService<SpheneMediator>(),
+                s.GetRequiredService<PerformanceCollectorService>(),
+                s.GetRequiredService<ApiController>(),
+                s.GetRequiredService<AcknowledgmentConfigService>(),
+                s.GetRequiredService<VisibleUserDataDistributor>(),
+                s.GetRequiredService<PairManager>(),
+                s.GetRequiredService<CharacterHashTracker>(),
+                s.GetRequiredService<AcknowledgmentRequestSystem>(),
+                s.GetRequiredService<FileCacheManager>()));
             collection.AddSingleton<SessionAcknowledgmentManager>(s => 
             {
                 var lazyPairManager = new Lazy<PairManager>(() => s.GetRequiredService<PairManager>());
@@ -251,7 +270,8 @@ public sealed class Plugin : IDalamudPlugin
                     s.GetRequiredService<SpheneMediator>(),
                     userData => lazyPairManager.Value.GetPairForUser(userData),
                     s.GetRequiredService<MessageService>(),
-                    s.GetRequiredService<AcknowledgmentBatchingService>()
+                    s.GetRequiredService<AcknowledgmentBatchingService>(),
+                    s.GetRequiredService<AcknowledgmentConfigService>().Current
                 );
             });
             

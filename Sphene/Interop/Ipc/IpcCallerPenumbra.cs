@@ -52,6 +52,7 @@ public sealed class IpcCallerPenumbra : DisposableMediatorSubscriberBase, IIpcCa
     private readonly GetModDirectory _penumbraResolveModDir;
     private readonly ResolvePlayerPathsAsync _penumbraResolvePaths;
     private readonly GetGameObjectResourcePaths _penumbraResourcePaths;
+    private readonly GetCollectionForObject _penumbraGetCollectionForObject;
 
     public IpcCallerPenumbra(ILogger<IpcCallerPenumbra> logger, IDalamudPluginInterface pi, DalamudUtilService dalamudUtil,
         SpheneMediator spheneMediator, RedrawManager redrawManager) : base(logger, spheneMediator)
@@ -80,6 +81,7 @@ public sealed class IpcCallerPenumbra : DisposableMediatorSubscriberBase, IIpcCa
         });
         _penumbraConvertTextureFile = new ConvertTextureFile(pi);
         _penumbraResourcePaths = new GetGameObjectResourcePaths(pi);
+        _penumbraGetCollectionForObject = new GetCollectionForObject(pi);
 
         _penumbraGameObjectResourcePathResolved = GameObjectResourcePathResolved.Subscriber(pi, ResourceLoaded);
 
@@ -275,6 +277,38 @@ public sealed class IpcCallerPenumbra : DisposableMediatorSubscriberBase, IIpcCa
     public async Task<(string[] forward, string[][] reverse)> ResolvePathsAsync(string[] forward, string[] reverse)
     {
         return await _penumbraResolvePaths.Invoke(forward, reverse).ConfigureAwait(false);
+    }
+
+    public async Task<(bool ObjectValid, bool IndividualSet, (Guid Id, string Name) EffectiveCollection)?> GetCollectionForObjectAsync(ILogger logger, GameObjectHandler handler)
+    {
+        if (!APIAvailable) return null;
+
+        return await _dalamudUtil.RunOnFrameworkThread(() =>
+        {
+            logger.LogInformation("[PENUMBRA DEBUG] Calling On IPC: Penumbra.GetCollectionForObject");
+            var gameObject = handler.GetGameObject();
+            var idx = gameObject?.ObjectIndex;
+            logger.LogInformation("[PENUMBRA DEBUG] GameObject ObjectIndex: {index}, APIAvailable: {available}", idx, APIAvailable);
+            
+            if (idx == null) 
+            {
+                logger.LogInformation("[PENUMBRA DEBUG] ObjectIndex is null, returning null");
+                return ((bool ObjectValid, bool IndividualSet, (Guid Id, string Name) EffectiveCollection)?)null;
+            }
+            
+            try
+            {
+                var result = _penumbraGetCollectionForObject.Invoke(idx.Value);
+                logger.LogInformation("[PENUMBRA DEBUG] Penumbra IPC result: ObjectValid={valid}, IndividualSet={individual}, Collection={collection}", 
+                    result.ObjectValid, result.IndividualSet, result.EffectiveCollection.Name);
+                return result;
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "[PENUMBRA DEBUG] Error calling Penumbra IPC for ObjectIndex {index}", idx.Value);
+                return ((bool ObjectValid, bool IndividualSet, (Guid Id, string Name) EffectiveCollection)?)null;
+            }
+        }).ConfigureAwait(false);
     }
 
     public async Task SetManipulationDataAsync(ILogger logger, Guid applicationId, Guid collId, string manipulationData)
