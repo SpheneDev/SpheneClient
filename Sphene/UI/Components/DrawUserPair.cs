@@ -114,13 +114,13 @@ public class DrawUserPair : IMediatorSubscriber
                     _reloadTimers.Remove(userUID);
                 }
             }
-            // If AckOther is false (yellow eye), start a 15-second timer
+            // If AckOther is false (yellow eye), start a 8-second timer
             else
             {
                 // Only start timer if one doesn't already exist for this user
                 if (!_reloadTimers.ContainsKey(userUID))
                 {
-                    var timer = new System.Threading.Timer(OnReloadTimerElapsed, userUID, TimeSpan.FromSeconds(15), Timeout.InfiniteTimeSpan);
+                    var timer = new System.Threading.Timer(OnReloadTimerElapsed, userUID, TimeSpan.FromSeconds(8), Timeout.InfiniteTimeSpan);
                     _reloadTimers[userUID] = timer;
                 }
             }
