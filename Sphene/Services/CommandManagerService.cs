@@ -44,9 +44,7 @@ public sealed class CommandManagerService : IDisposable
         "\t /sphene toggle on|off - Connects or disconnects to Sphene respectively" + Environment.NewLine +
         "\t /sphene gpose - Opens the Sphene Character Data Hub window" + Environment.NewLine +
         "\t /sphene analyze - Opens the Sphene Character Data Analysis window" + Environment.NewLine +
-        "\t /sphene settings - Opens the Sphene Settings window" + Environment.NewLine +
-        "\t /sphene ack - Opens the Acknowledgment Monitor window" + Environment.NewLine +
-        "\t /sphene updatetest - Opens the Update Test window"
+        "\t /sphene settings - Opens the Sphene Settings window"
         });
     }
 

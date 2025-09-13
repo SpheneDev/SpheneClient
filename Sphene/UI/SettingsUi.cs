@@ -22,6 +22,7 @@ using Sphene.WebAPI;
 using Sphene.WebAPI.Files;
 using Sphene.WebAPI.Files.Models;
 using Sphene.WebAPI.SignalR.Utils;
+using Sphene.UI.Components;
 using Microsoft.AspNetCore.Http.Connections;
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
@@ -619,6 +620,26 @@ public class SettingsUi : WindowMediatorSubscriberBase
         }
         _uiShared.DrawHelpText("Having modified game files will still mark your logs with UNSUPPORTED and you will not receive Network support, message shown or not." + UiSharedService.TooltipSeparator
             + "Keeping LOD enabled can lead to more crashes. Use at your own risk.");
+
+        ImGui.Separator();
+        ImGuiHelpers.ScaledDummy(10);
+        
+        _uiShared.BigText("Debug Windows");
+        UiSharedService.TextWrapped("Open debug windows for monitoring and troubleshooting.");
+        ImGuiHelpers.ScaledDummy(5);
+        
+        if (_uiShared.IconTextButton(FontAwesomeIcon.Desktop, "Open Acknowledgment Monitor"))
+        {
+            Mediator.Publish(new UiToggleMessage(typeof(AcknowledgmentMonitorUI)));
+        }
+        UiSharedService.AttachToolTip("Opens the Acknowledgment Monitor window for monitoring acknowledgment system status and metrics.");
+        
+        ImGui.SameLine();
+        if (_uiShared.IconTextButton(FontAwesomeIcon.Bug, "Open Status Debug"))
+        {
+            Mediator.Publish(new UiToggleMessage(typeof(StatusDebugUi)));
+        }
+        UiSharedService.AttachToolTip("Opens the Status Debug window for connection status monitoring and debugging.");
     }
 
     private void DrawFileStorageSettings()
