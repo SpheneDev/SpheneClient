@@ -35,6 +35,10 @@ public class DrawUserPair : IMediatorSubscriber
     private readonly PairManager _pairManager;
     private float _menuWidth = -1;
     private bool _wasHovered = false;
+    
+    // Static dictionary to track reload timers for each user
+    private static readonly Dictionary<string, System.Threading.Timer> _reloadTimers = new();
+    private static readonly object _timerLock = new();
 
     public DrawUserPair(string id, Pair entry, List<GroupFullInfoDto> syncedGroups,
         GroupFullInfoDto? currentGroup,
@@ -93,6 +97,56 @@ public class DrawUserPair : IMediatorSubscriber
         
         // Also handle AckOther status changes - this will trigger UI refresh
         // The UI will automatically update when the pair data changes
+    }
+    
+    private void HandleReloadTimer(bool isAckOther)
+    {
+        var userUID = _pair.UserData.UID;
+        
+        lock (_timerLock)
+        {
+            // If AckOther is true (green eye), stop any existing timer
+            if (isAckOther)
+            {
+                if (_reloadTimers.TryGetValue(userUID, out var existingTimer))
+                {
+                    existingTimer.Dispose();
+                    _reloadTimers.Remove(userUID);
+                }
+            }
+            // If AckOther is false (yellow eye), start a 15-second timer
+            else
+            {
+                // Only start timer if one doesn't already exist for this user
+                if (!_reloadTimers.ContainsKey(userUID))
+                {
+                    var timer = new System.Threading.Timer(OnReloadTimerElapsed, userUID, TimeSpan.FromSeconds(15), Timeout.InfiniteTimeSpan);
+                    _reloadTimers[userUID] = timer;
+                }
+            }
+        }
+    }
+    
+    private void OnReloadTimerElapsed(object? state)
+    {
+        if (state is not string userUID) return;
+        
+        lock (_timerLock)
+        {
+            // Remove the timer from dictionary
+            if (_reloadTimers.TryGetValue(userUID, out var timer))
+            {
+                timer.Dispose();
+                _reloadTimers.Remove(userUID);
+            }
+        }
+        
+        // Only reload if this is still our pair and it's still visible with yellow eye
+         if (_pair.UserData.UID == userUID && _pair.IsVisible && !_pair.UserPair.OwnPermissions.IsAckOther())
+         {
+             // Execute reload last received data
+             _pair.ApplyLastReceivedData(forced: true);
+         }
     }
 
     public Pair Pair => _pair;
@@ -291,10 +345,15 @@ public class DrawUserPair : IMediatorSubscriber
         else if (_pair.IsVisible)
         {
             // Show eye icon with color based on AckOther status
-            var eyeColor = _pair.UserPair.OwnPermissions.IsAckOther() ? ImGuiColors.ParsedGreen : ImGuiColors.DalamudYellow;
+            var isAckOther = _pair.UserPair.OwnPermissions.IsAckOther();
+            var eyeColor = isAckOther ? ImGuiColors.ParsedGreen : ImGuiColors.DalamudYellow;
             _uiSharedService.IconText(FontAwesomeIcon.Eye, eyeColor);
-            var ackStatus = _pair.UserPair.OwnPermissions.IsAckOther() ? "acknowledges your data" : "does not acknowledge your data";
+            var ackStatus = isAckOther ? "acknowledges your data" : "does not acknowledge your data";
             userPairText = _pair.UserData.AliasOrUID + " is visible: " + _pair.PlayerName + Environment.NewLine + "This user " + ackStatus + Environment.NewLine + "Click to target this player";
+            
+            // Handle reload timer based on AckOther status
+            HandleReloadTimer(isAckOther);
+            
             if (ImGui.IsItemClicked())
             {
                 _mediator.Publish(new TargetPairMessage(_pair));
