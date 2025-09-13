@@ -198,6 +198,15 @@ public partial class ApiController
         return Task.CompletedTask;
     }
 
+    public Task Client_UserAckYouUpdate(UserPermissionsDto dto)
+    {
+        Logger.LogDebug("Client_UserAckYouUpdate: {dto}", dto);
+        ExecuteSafely(() => _pairManager.UpdateSelfPairPermissions(dto));
+        return Task.CompletedTask;
+    }
+
+    // Client_UserAckOtherUpdate method removed - AckOther is controlled by other player's AckYou
+
     public Task Client_GposeLobbyJoin(UserData userData)
     {
         Logger.LogDebug("Client_GposeLobbyJoin: {dto}", userData);
@@ -370,6 +379,14 @@ public partial class ApiController
         if (_initialized) return;
         _spheneHub!.On(nameof(Client_UserUpdateSelfPairPermissions), act);
     }
+
+    public void OnUserAckYouUpdate(Action<UserPermissionsDto> act)
+    {
+        if (_initialized) return;
+        _spheneHub!.On(nameof(Client_UserAckYouUpdate), act);
+    }
+
+    // OnUserAckOtherUpdate method removed - AckOther is controlled by other player's AckYou
 
     public void OnGposeLobbyJoin(Action<UserData> act)
     {

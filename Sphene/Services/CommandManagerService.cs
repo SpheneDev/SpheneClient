@@ -8,6 +8,7 @@ using Sphene.Services.ServerConfiguration;
 using Sphene.UI;
 using Sphene.UI.Components;
 using Sphene.WebAPI;
+using Microsoft.Extensions.Logging;
 using System.Globalization;
 
 namespace Sphene.Services;
@@ -132,6 +133,10 @@ public sealed class CommandManagerService : IDisposable
         else if (string.Equals(splitArgs[0], "updatetest", StringComparison.OrdinalIgnoreCase))
         {
             _mediator.Publish(new UiToggleMessage(typeof(UpdateTestWindow)));
+        }
+        else if (string.Equals(splitArgs[0], "statusdebug", StringComparison.OrdinalIgnoreCase))
+        {
+            _mediator.Publish(new UiToggleMessage(typeof(StatusDebugUi)));
         }
     }
 }

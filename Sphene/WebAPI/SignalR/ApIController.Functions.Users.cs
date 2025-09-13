@@ -109,6 +109,14 @@ public partial class ApiController
         await _spheneHub!.InvokeAsync(nameof(UserUpdateDefaultPermissions), defaultPermissionsDto).ConfigureAwait(false);
     }
 
+    public async Task UserUpdateAckYou(bool ackYou)
+    {
+        CheckConnection();
+        await _spheneHub!.InvokeAsync(nameof(UserUpdateAckYou), ackYou).ConfigureAwait(false);
+    }
+
+    // UserUpdateAckOther method removed - AckOther is controlled by other player's AckYou
+
     public async Task UserSendCharacterDataAcknowledgment(CharacterDataAcknowledgmentDto acknowledgmentDto)
     {
         Logger.LogInformation("UserSendCharacterDataAcknowledgment called - AckId: {acknowledgmentId}, User: {user}, Success: {success}, Connected: {connected}", 

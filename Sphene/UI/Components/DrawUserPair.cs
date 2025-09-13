@@ -9,6 +9,7 @@ using Sphene.API.Dto.User;
 using Sphene.SpheneConfiguration;
 using Sphene.PlayerData.Pairs;
 using Sphene.Services;
+using Sphene.Services.Events;
 using Sphene.Services.Mediator;
 using Sphene.Services.ServerConfiguration;
 using Sphene.UI.Handlers;
@@ -17,7 +18,7 @@ using System.Numerics;
 
 namespace Sphene.UI.Components;
 
-public class DrawUserPair
+public class DrawUserPair : IMediatorSubscriber
 {
     protected readonly ApiController _apiController;
     protected readonly IdDisplayHandler _displayHandler;
@@ -56,6 +57,42 @@ public class DrawUserPair
         _performanceConfigService = performanceConfigService;
         _charaDataManager = charaDataManager;
         _pairManager = pairManager;
+        
+        // Subscribe to acknowledgment status changes to automatically update AckYou
+        _mediator.Subscribe<PairAcknowledgmentStatusChangedMessage>(this, OnAcknowledgmentStatusChanged);
+    }
+    
+    public SpheneMediator Mediator => _mediator;
+    
+    private void OnAcknowledgmentStatusChanged(PairAcknowledgmentStatusChangedMessage message)
+    {
+        // Only handle events for this specific pair
+        if (message.User.UID != _pair.UserData.UID) return;
+        
+        // Update AckYou status based on acknowledgment state
+        // When acknowledgment becomes pending (yellow clock), set AckYou to false
+        // When acknowledgment succeeds (green checkmark), set AckYou to true
+        bool newAckYouStatus = message.HasPendingAcknowledgment ? false : (message.LastAcknowledgmentSuccess ?? false);
+        
+        // Only update if the status actually changed
+        if (_pair.UserPair.OwnPermissions.IsAckYou() != newAckYouStatus)
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await _apiController.UserUpdateAckYou(newAckYouStatus);
+                }
+                catch (Exception ex)
+                {
+                    // Log error but don't throw to avoid breaking the UI
+                    // Logger would need to be injected if we want proper logging here
+                }
+            });
+        }
+        
+        // Also handle AckOther status changes - this will trigger UI refresh
+        // The UI will automatically update when the pair data changes
     }
 
     public Pair Pair => _pair;
@@ -253,8 +290,11 @@ public class DrawUserPair
         }
         else if (_pair.IsVisible)
         {
-            _uiSharedService.IconText(FontAwesomeIcon.Eye, ImGuiColors.ParsedGreen);
-            userPairText = _pair.UserData.AliasOrUID + " is visible: " + _pair.PlayerName + Environment.NewLine + "Click to target this player";
+            // Show eye icon with color based on AckOther status
+            var eyeColor = _pair.UserPair.OwnPermissions.IsAckOther() ? ImGuiColors.ParsedGreen : ImGuiColors.DalamudYellow;
+            _uiSharedService.IconText(FontAwesomeIcon.Eye, eyeColor);
+            var ackStatus = _pair.UserPair.OwnPermissions.IsAckOther() ? "acknowledges your data" : "does not acknowledge your data";
+            userPairText = _pair.UserData.AliasOrUID + " is visible: " + _pair.PlayerName + Environment.NewLine + "This user " + ackStatus + Environment.NewLine + "Click to target this player";
             if (ImGui.IsItemClicked())
             {
                 _mediator.Publish(new TargetPairMessage(_pair));

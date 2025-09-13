@@ -221,6 +221,7 @@ public sealed class Plugin : IDalamudPlugin
             collection.AddScoped<WindowMediatorSubscriberBase, CreateSyncshellUI>();
             collection.AddScoped<WindowMediatorSubscriberBase, EventViewerUI>();
             collection.AddScoped<WindowMediatorSubscriberBase, CharaDataHubUi>();
+            collection.AddScoped<WindowMediatorSubscriberBase, StatusDebugUi>();
             collection.AddSingleton<WindowMediatorSubscriberBase, UpdateNotificationUi>((s) => new UpdateNotificationUi(
                 s.GetRequiredService<ILogger<UpdateNotificationUi>>(),
                 s.GetRequiredService<UiSharedService>(),

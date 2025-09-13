@@ -440,6 +440,7 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
         OnUserSendOnline(dto => _ = Client_UserSendOnline(dto));
         OnUserUpdateOtherPairPermissions(dto => _ = Client_UserUpdateOtherPairPermissions(dto));
         OnUserUpdateSelfPairPermissions(dto => _ = Client_UserUpdateSelfPairPermissions(dto));
+        OnUserAckYouUpdate(dto => _ = Client_UserAckYouUpdate(dto));
         OnUserReceiveUploadStatus(dto => _ = Client_UserReceiveUploadStatus(dto));
         OnUserUpdateProfile(dto => _ = Client_UserUpdateProfile(dto));
         OnUserDefaultPermissionUpdate(dto => _ = Client_UserUpdateDefaultPermissions(dto));
