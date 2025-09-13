@@ -2192,7 +2192,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         // Reset to defaults button
         if (ImGui.Button("Reset Acknowledgment Settings to Defaults"))
         {
-            _configService.Current.ShowAcknowledgmentPopups = true;
+            _configService.Current.ShowAcknowledgmentPopups = false;
             _configService.Current.ShowWaitingForAcknowledgmentPopups = false;
             _configService.Current.EnableAcknowledgmentBatching = true;
             _configService.Current.EnableAcknowledgmentAutoRetry = true;
