@@ -32,9 +32,18 @@ internal sealed class DalamudLogger : ILogger
         if (!IsEnabled(logLevel)) return;
 
         string unsupported = _hasModifiedGameFiles ? "[UNSUPPORTED]" : string.Empty;
+        string logMessage = $"{unsupported}[{_name}]{{{(int)logLevel}}} {state}{(_hasModifiedGameFiles ? "." : string.Empty)}";
 
-        if ((int)logLevel <= (int)LogLevel.Information)
-            _pluginLog.Information($"{unsupported}[{_name}]{{{(int)logLevel}}} {state}{(_hasModifiedGameFiles ? "." : string.Empty)}");
+        if (logLevel == LogLevel.Trace || logLevel == LogLevel.Debug)
+            _pluginLog.Debug(logMessage);
+        else if (logLevel == LogLevel.Information)
+            _pluginLog.Information(logMessage);
+        else if (logLevel == LogLevel.Warning)
+            _pluginLog.Warning(logMessage);
+        else if (logLevel == LogLevel.Error)
+            _pluginLog.Error(logMessage);
+        else if (logLevel == LogLevel.Critical)
+            _pluginLog.Fatal(logMessage);
         else
         {
             StringBuilder sb = new();

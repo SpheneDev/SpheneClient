@@ -39,6 +39,11 @@ public class DrawUserPair : IMediatorSubscriber
     // Static dictionary to track reload timers for each user
     private static readonly Dictionary<string, System.Threading.Timer> _reloadTimers = new();
     private static readonly object _timerLock = new();
+    
+    // Cache acknowledgment status - updated only via events
+    private bool _cachedHasPendingAck = false;
+    private bool _cacheInitialized = false;
+    private bool? _lastSentAckYouStatus = null;
 
     public DrawUserPair(string id, Pair entry, List<GroupFullInfoDto> syncedGroups,
         GroupFullInfoDto? currentGroup,
@@ -64,6 +69,12 @@ public class DrawUserPair : IMediatorSubscriber
         
         // Subscribe to acknowledgment status changes to automatically update AckYou
         _mediator.Subscribe<PairAcknowledgmentStatusChangedMessage>(this, OnAcknowledgmentStatusChanged);
+        _mediator.Subscribe<AcknowledgmentPendingMessage>(this, OnAcknowledgmentPending);
+        _mediator.Subscribe<AcknowledgmentUiRefreshMessage>(this, OnAcknowledgmentUiRefresh);
+        
+        // Initialize cache once during construction to avoid frequent PairManager calls
+        _cachedHasPendingAck = _pairManager.HasPendingAcknowledgmentForUser(_pair.UserData);
+        _cacheInitialized = true;
     }
     
     public SpheneMediator Mediator => _mediator;
@@ -73,14 +84,20 @@ public class DrawUserPair : IMediatorSubscriber
         // Only handle events for this specific pair
         if (message.User.UID != _pair.UserData.UID) return;
         
+        // Update cached acknowledgment status
+        _cachedHasPendingAck = message.HasPendingAcknowledgment;
+        _cacheInitialized = true;
+        
         // Update AckYou status based on acknowledgment state
         // When acknowledgment becomes pending (yellow clock), set AckYou to false
         // When acknowledgment succeeds (green checkmark), set AckYou to true
         bool newAckYouStatus = message.HasPendingAcknowledgment ? false : (message.LastAcknowledgmentSuccess ?? false);
         
-        // Only update if the status actually changed
-        if (_pair.UserPair.OwnPermissions.IsAckYou() != newAckYouStatus)
+        // Only update if the status actually changed AND we haven't already sent this status
+        if (_pair.UserPair.OwnPermissions.IsAckYou() != newAckYouStatus && 
+            _lastSentAckYouStatus != newAckYouStatus)
         {
+            _lastSentAckYouStatus = newAckYouStatus;
             _ = Task.Run(async () =>
             {
                 try
@@ -91,12 +108,36 @@ public class DrawUserPair : IMediatorSubscriber
                 {
                     // Log error but don't throw to avoid breaking the UI
                     // Logger would need to be injected if we want proper logging here
+                    // Reset the last sent status on error so we can retry
+                    _lastSentAckYouStatus = null;
                 }
             });
         }
         
         // Also handle AckOther status changes - this will trigger UI refresh
         // The UI will automatically update when the pair data changes
+    }
+    
+    private void OnAcknowledgmentPending(AcknowledgmentPendingMessage message)
+    {
+        // Only handle events for this specific pair
+        if (message.User.UID != _pair.UserData.UID) return;
+        
+        // Update cached acknowledgment status to pending
+        _cachedHasPendingAck = true;
+        _cacheInitialized = true;
+    }
+    
+    private void OnAcknowledgmentUiRefresh(AcknowledgmentUiRefreshMessage message)
+    {
+        // Handle refresh for this specific pair or global refresh
+        if (message.RefreshAll || 
+            (message.User != null && message.User.UID == _pair.UserData.UID))
+        {
+            // Force cache refresh by querying current status
+            _cachedHasPendingAck = _pairManager.HasPendingAcknowledgmentForUser(_pair.UserData);
+            _cacheInitialized = true;
+        }
     }
     
     private void HandleReloadTimer(bool isAckOther)
@@ -114,7 +155,9 @@ public class DrawUserPair : IMediatorSubscriber
                     _reloadTimers.Remove(userUID);
                 }
             }
+            // 8-second timer temporarily disabled
             // If AckOther is false (yellow eye), start a 8-second timer
+            /*
             else
             {
                 // Only start timer if one doesn't already exist for this user
@@ -124,6 +167,7 @@ public class DrawUserPair : IMediatorSubscriber
                     _reloadTimers[userUID] = timer;
                 }
             }
+            */
         }
     }
     
@@ -432,7 +476,7 @@ public class DrawUserPair : IMediatorSubscriber
         if (_pair.IsOnline && _pair.IsVisible)
         {
             // Only show sync status for real Penumbra changes (with acknowledgment ID), not for build start status
-            if (_pairManager.HasPendingAcknowledgmentForUser(_pair.UserData) && !string.IsNullOrEmpty(_pair.LastAcknowledgmentId))
+            if (GetCachedHasPendingAcknowledgment() && !string.IsNullOrEmpty(_pair.LastAcknowledgmentId))
             {
                 userPairText += UiSharedService.TooltipSeparator + "Data Sync: Waiting for acknowledgment from this user...";
             }
@@ -793,8 +837,13 @@ public class DrawUserPair : IMediatorSubscriber
                 ImGui.CloseCurrentPopup();
                 _ = _apiController.GroupChangeOwnership(new(group.Group, _pair.UserData));
             }
-            UiSharedService.AttachToolTip("Hold CTRL and SHIFT and click to transfer ownership of this Syncshell to "
-                + (_pair.UserData.AliasOrUID) + Environment.NewLine + "WARNING: This action is irreversible.");
         }
+    }
+    
+    private bool GetCachedHasPendingAcknowledgment()
+    {
+        // Return cached value without initializing from PairManager to avoid frequent calls
+        // Cache is updated only through event handlers
+        return _cachedHasPendingAck;
     }
 }
