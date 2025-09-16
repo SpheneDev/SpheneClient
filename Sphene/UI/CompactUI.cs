@@ -614,7 +614,8 @@ public class CompactUi : WindowMediatorSubscriberBase
                     : (u.Key.GetNote() ?? u.Key.UserData.AliasOrUID));
         bool FilterOnlineOrPausedSelf(KeyValuePair<Pair, List<GroupFullInfoDto>> u)
             => (u.Key.IsOnline || (!u.Key.IsOnline && !_configService.Current.ShowOfflineUsersSeparately)
-                    || u.Key.UserPair.OwnPermissions.IsPaused());
+                    || u.Key.UserPair.OwnPermissions.IsPaused())
+                && (!_configService.Current.ShowVisibleUsersSeparately || !u.Key.IsVisible);
         Dictionary<Pair, List<GroupFullInfoDto>> BasicSortedDictionary(IEnumerable<KeyValuePair<Pair, List<GroupFullInfoDto>>> u)
             => u.OrderByDescending(u => u.Key.IsVisible)
                 .ThenByDescending(u => u.Key.IsOnline)

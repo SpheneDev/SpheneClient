@@ -118,7 +118,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                 string text = "User Visibility Changed, now: " + (_isVisible ? "Is Visible" : "Is not Visible");
                 Mediator.Publish(new EventMessage(new Event(PlayerName, Pair.UserData, nameof(PairHandler),
                     EventSeverity.Informational, text)));
-                Mediator.Publish(new RefreshUiMessage());
+                Mediator.Publish(new StructuralRefreshUiMessage());
             }
         }
     }
