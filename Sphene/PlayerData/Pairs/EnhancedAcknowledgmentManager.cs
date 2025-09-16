@@ -79,8 +79,8 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
             
         // Add cleanup timer for old pending acknowledgments
         var cleanupTimer = new Timer(CleanupOldAcknowledgments, null,
-            TimeSpan.FromMinutes(2), // First cleanup after 2 minutes
-            TimeSpan.FromMinutes(5)); // Then every 5 minutes
+            TimeSpan.FromSeconds(30), // First cleanup after 30 seconds
+            TimeSpan.FromSeconds(30)); // Then every 30 seconds
         
         // Subscribe to mediator messages
         Mediator.Subscribe<SendCharacterDataAcknowledgmentMessage>(this, (msg) => _ = HandleSendAcknowledgment(msg));
@@ -208,9 +208,23 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
             _metrics.RecordSuccess(acknowledgment.Priority, responseTime);
             _metrics.RecordSent();
             
-            // Cache the acknowledgment
+            // Remove any existing cache entries for this user (only latest acknowledgment per user)
+            var userPrefix = $"{acknowledgment.User.UID}_";
+            var keysToRemove = _acknowledgmentCache.Keys
+                .Where(key => key.StartsWith(userPrefix) && key != $"{acknowledgment.User.UID}_{acknowledgment.AcknowledgmentId}")
+                .ToList();
+            
+            foreach (var keyToRemove in keysToRemove)
+            {
+                _acknowledgmentCache.TryRemove(keyToRemove, out _);
+                Logger.LogDebug("Removed old cached acknowledgment for user {user}: {key}", acknowledgment.User.AliasOrUID, keyToRemove);
+            }
+            
+            // Cache the latest acknowledgment
             var cacheKey = $"{acknowledgment.User.UID}_{acknowledgment.AcknowledgmentId}";
             _acknowledgmentCache[cacheKey] = new CachedAcknowledgment(acknowledgment, DateTime.UtcNow);
+            
+            Logger.LogDebug("Cached latest acknowledgment for user {user}: {ackId}", acknowledgment.User.AliasOrUID, acknowledgment.AcknowledgmentId);
             
             // Remove from pending
             _pendingAcknowledgments.TryRemove(acknowledgment.AcknowledgmentId, out _);
@@ -348,12 +362,12 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
         {
             try
             {
-                // Cleanup old pending acknowledgments (older than 10 minutes)
-                var maxAge = TimeSpan.FromMinutes(10);
+                // Cleanup old pending acknowledgments (older than 30 seconds)
+                var maxAge = TimeSpan.FromSeconds(30);
                 _sessionManager.CleanupOldPendingAcknowledgments(maxAge);
                 
-                // Cleanup old sessions (older than 30 minutes)
-                var sessionMaxAge = TimeSpan.FromMinutes(30);
+                // Cleanup old sessions (older than 2 minutes)
+                var sessionMaxAge = TimeSpan.FromMinutes(2);
                 _sessionManager.CleanupOldSessions(sessionMaxAge);
                 
                 Logger.LogDebug("Completed cleanup of old acknowledgments and sessions");

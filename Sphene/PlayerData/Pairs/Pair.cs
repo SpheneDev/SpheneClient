@@ -352,6 +352,10 @@ public class Pair : DisposableMediatorSubscriberBase
             LastAcknowledgmentTime
         ));
         
+        // Publish optimized icon update for acknowledgment status
+        var ackData = new AcknowledgmentStatusData(HasPendingAcknowledgment, LastAcknowledgmentSuccess, LastAcknowledgmentTime);
+        Mediator.Publish(new UserPairIconUpdateMessage(UserData, IconUpdateType.AcknowledgmentStatus, ackData));
+        
         // Publish granular UI refresh for this specific acknowledgment
         Mediator.Publish(new AcknowledgmentUiRefreshMessage(
             AcknowledgmentId: acknowledgmentId,
@@ -378,6 +382,10 @@ public class Pair : DisposableMediatorSubscriberBase
             LastAcknowledgmentSuccess,
             LastAcknowledgmentTime
         ));
+        
+        // Publish optimized icon update for acknowledgment status
+        var ackData = new AcknowledgmentStatusData(HasPendingAcknowledgment, LastAcknowledgmentSuccess, LastAcknowledgmentTime);
+        Mediator.Publish(new UserPairIconUpdateMessage(UserData, IconUpdateType.AcknowledgmentStatus, ackData));
         
         // Publish acknowledgment pending event
         Mediator.Publish(new AcknowledgmentPendingMessage(

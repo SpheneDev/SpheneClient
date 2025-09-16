@@ -161,37 +161,20 @@ public class AcknowledgmentMonitorUI : WindowMediatorSubscriberBase
     {
         ImGui.Text("Session Details");
         
-        var pendingAcks = _sessionAcknowledgmentManager.GetPendingAcknowledgments();
+        var acknowledgmentStatuses = _sessionAcknowledgmentManager.GetAcknowledgmentStatuses();
         
-        if (pendingAcks.Any())
+        if (acknowledgmentStatuses.Any())
         {
-            if (ImGui.BeginTable("SessionAcks", 3, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
+            if (ImGui.BeginTable("SessionAcks", 1, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
             {
-                ImGui.TableSetupColumn("Acknowledgment ID");
-                ImGui.TableSetupColumn("Pending Users");
-                ImGui.TableSetupColumn("Count");
+                ImGui.TableSetupColumn("Acknowledgment Status");
                 ImGui.TableHeadersRow();
                 
-                foreach (var ack in pendingAcks)
+                foreach (var status in acknowledgmentStatuses)
                 {
                     ImGui.TableNextRow();
                     ImGui.TableNextColumn();
-                    
-                    // Truncate long acknowledgment IDs for display
-                    var displayId = ack.Key.Length > 30 ? ack.Key.Substring(0, 27) + "..." : ack.Key;
-                    ImGui.Text(displayId);
-                    UiSharedService.AttachToolTip(ack.Key);
-                    
-                    ImGui.TableNextColumn();
-                    var userList = string.Join(", ", ack.Value.Select(u => u.AliasOrUID).Take(3));
-                    if (ack.Value.Count > 3)
-                    {
-                        userList += $" (+{ack.Value.Count - 3} more)";
-                    }
-                    ImGui.Text(userList);
-                    
-                    ImGui.TableNextColumn();
-                    ImGui.Text(ack.Value.Count.ToString());
+                    ImGui.Text(status);
                 }
                 
                 ImGui.EndTable();

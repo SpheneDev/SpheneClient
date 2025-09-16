@@ -24,6 +24,8 @@ using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using System.Globalization;
+using System.IO;
+using System.Linq;
 using System.Numerics;
 using System.Reflection;
 using SixLabors.ImageSharp;
@@ -120,7 +122,7 @@ public class CompactUi : WindowMediatorSubscriberBase
             }
         };
 
-        _drawFolders = GetDrawFolders().ToList();
+        RefreshDrawFolders();
 
 #if DEBUG
         string dev = "Dev Build";
@@ -137,7 +139,8 @@ public class CompactUi : WindowMediatorSubscriberBase
         Mediator.Subscribe<CutsceneEndMessage>(this, (_) => UiSharedService_GposeEnd());
         Mediator.Subscribe<DownloadStartedMessage>(this, (msg) => _currentDownloads[msg.DownloadId] = msg.DownloadStatus);
         Mediator.Subscribe<DownloadFinishedMessage>(this, (msg) => _currentDownloads.TryRemove(msg.DownloadId, out _));
-        Mediator.Subscribe<RefreshUiMessage>(this, (msg) => _drawFolders = GetDrawFolders().ToList());
+        Mediator.Subscribe<RefreshUiMessage>(this, (msg) => RefreshIconsOnly());
+        Mediator.Subscribe<StructuralRefreshUiMessage>(this, (msg) => RefreshDrawFolders());
 
         // Make window practically invisible - no decoration, no background, no borders
         Flags |= ImGuiWindowFlags.NoDocking | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse 
@@ -156,7 +159,14 @@ public class CompactUi : WindowMediatorSubscriberBase
     {
         if (disposing)
         {
-            // No longer need to dispose NSFW icon texture
+            // Dispose all draw folders to clean up event subscriptions
+            if (_drawFolders != null)
+            {
+                foreach (var folder in _drawFolders)
+                {
+                    folder.Dispose();
+                }
+            }
         }
         base.Dispose(disposing);
     }
@@ -164,14 +174,14 @@ public class CompactUi : WindowMediatorSubscriberBase
     public override void PreDraw()
     {
         // Apply any pending window resize before the window is drawn
-        SpheneUIEnhancements.ApplyPendingWindowResize("Sphene Control Panel");
+        SpheneUIEnhancements.ApplyPendingWindowResize(GetControlPanelTitle());
         base.PreDraw();
     }
 
     protected override void DrawInternal()
     {
         
-        _windowContentWidth = UiSharedService.GetWindowContentRegionWidth();
+        _windowContentWidth = UiSharedService.GetWindowContentRegionWidth() - 30f; // Reduce width from right side
         if (!_apiController.IsCurrentVersion)
         {
             var ver = _apiController.CurrentClientVersion;
@@ -217,7 +227,11 @@ public class CompactUi : WindowMediatorSubscriberBase
         }
 
         // Single unified card layout with integrated controls and header buttons
-        SpheneUIEnhancements.DrawSpheneCard("Sphene Control Panel", () => {
+#if DEBUG
+        // Use reddish background for debug builds
+        var debugHeaderBg = ImGui.ColorConvertFloat4ToU32(new Vector4(0.8f, 0.2f, 0.2f, 0.6f)); // Reddish with transparency
+#endif
+        SpheneUIEnhancements.DrawSpheneCard(GetControlPanelTitle(), () => {
             // Network Identity Section
             ImGui.TextColored(SpheneColors.SpheneGold, "Regulator ID");
             ImGui.Separator();
@@ -259,7 +273,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         }, false, null, () => {
             // Settings button
             ImGui.SetCursorPosY(ImGui.GetCursorPosY() - 3.0f);
-            ImGui.SetCursorPosX(ImGui.GetCursorPosX() - 2.0f);
+            ImGui.SetCursorPosX(ImGui.GetCursorPosX() - 12.0f);
             if (_uiSharedService.IconButton(FontAwesomeIcon.Cog))
             {
                 Mediator.Publish(new UiToggleMessage(typeof(SettingsUi)));
@@ -273,8 +287,8 @@ public class CompactUi : WindowMediatorSubscriberBase
             
             // Close button
             ImGui.SameLine();
-            ImGui.SetCursorPosY(ImGui.GetCursorPosY() - 3.0f);
-            ImGui.SetCursorPosX(ImGui.GetCursorPosX() - 2.0f);
+            ImGui.SetCursorPosY(ImGui.GetCursorPosY() + 0.0f);
+            ImGui.SetCursorPosX(ImGui.GetCursorPosX() - 5.0f);
             if (_uiSharedService.IconButton(FontAwesomeIcon.Times))
             {
                 IsOpen = false;
@@ -285,7 +299,13 @@ public class CompactUi : WindowMediatorSubscriberBase
                 ImGui.Text("Close Sphene");
                 ImGui.EndTooltip();
             }
-        }, true, SizeConstraints?.MinimumSize, SizeConstraints?.MaximumSize);
+        }, true, SizeConstraints?.MinimumSize, SizeConstraints?.MaximumSize,
+#if DEBUG
+        debugHeaderBg
+#else
+        0
+#endif
+        );
 
         if (_configService.Current.OpenPopupOnAdd && _pairManager.LastAddedUser != null)
         {
@@ -336,7 +356,7 @@ public class CompactUi : WindowMediatorSubscriberBase
             : (ImGui.GetWindowContentRegionMax().Y - ImGui.GetWindowContentRegionMin().Y
                 + ImGui.GetTextLineHeight() - ImGui.GetStyle().WindowPadding.Y - ImGui.GetStyle().WindowBorderSize) - _transferPartHeight - ImGui.GetCursorPosY();
 
-        ImGui.BeginChild("list", new Vector2(_windowContentWidth, ySize), border: false);
+        ImGui.BeginChild("list", new Vector2(_windowContentWidth, ySize), border: false, ImGuiWindowFlags.NoScrollbar);
 
         foreach (var item in _drawFolders)
         {
@@ -704,6 +724,52 @@ public class CompactUi : WindowMediatorSubscriberBase
             ImmutablePairList(allPairs.Where(u => u.Key.IsOneSidedPair))));
 
         return drawFolders;
+    }
+
+    private string GetControlPanelTitle()
+    {
+#if DEBUG
+        // Get build timestamp from assembly metadata
+        var assembly = System.Reflection.Assembly.GetExecutingAssembly();
+        var buildTimestamp = assembly.GetCustomAttributes<System.Reflection.AssemblyMetadataAttribute>()
+            .FirstOrDefault(attr => attr.Key == "BuildTimestamp")?.Value;
+        
+        if (!string.IsNullOrEmpty(buildTimestamp))
+        {
+            return $"Sphene Control Panel - {buildTimestamp}";
+        }
+        
+        return "Sphene Control Panel - Built: Dev Build";
+#else
+        return "Sphene Control Panel";
+#endif
+    }
+
+    private void RefreshDrawFolders()
+    {
+        // Dispose old draw folders to clean up event subscriptions
+        if (_drawFolders != null)
+        {
+            foreach (var folder in _drawFolders)
+            {
+                folder.Dispose();
+            }
+        }
+        
+        // Create new draw folders
+        _drawFolders = GetDrawFolders().ToList();
+    }
+
+    private void RefreshIconsOnly()
+    {
+        // Only refresh icons without recreating DrawUserPair instances
+        if (_drawFolders != null)
+        {
+            foreach (var folder in _drawFolders)
+            {
+                folder.RefreshIcons();
+            }
+        }
     }
 
     private string GetServerError()

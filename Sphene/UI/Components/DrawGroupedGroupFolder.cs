@@ -32,7 +32,7 @@ public class DrawGroupedGroupFolder : IDrawFolder
         string _id = "__folder_syncshells";
         using var id = ImRaii.PushId(_id);
         var color = ImRaii.PushColor(ImGuiCol.ChildBg, ImGui.GetColorU32(ImGuiCol.FrameBgHovered), _wasHovered);
-        using (ImRaii.Child("folder__" + _id, new System.Numerics.Vector2(UiSharedService.GetWindowContentRegionWidth() - ImGui.GetCursorPosX(), ImGui.GetFrameHeight())))
+        using (ImRaii.Child("folder__" + _id, new System.Numerics.Vector2(295, ImGui.GetFrameHeight())))
         {
             ImGui.Dummy(new Vector2(0f, ImGui.GetFrameHeight()));
             using (ImRaii.PushStyle(ImGuiStyleVar.ItemSpacing, new Vector2(0f, 0f)))
@@ -74,6 +74,23 @@ public class DrawGroupedGroupFolder : IDrawFolder
             {
                 entry.Draw();
             }
+        }
+    }
+
+    public void RefreshIcons()
+    {
+        foreach (var group in _groups)
+        {
+            group.RefreshIcons();
+        }
+    }
+
+    public void Dispose()
+    {
+        // Dispose all nested folders which will dispose their DrawUserPair instances
+        foreach (var group in _groups)
+        {
+            group.Dispose();
         }
     }
 }

@@ -255,6 +255,7 @@ public sealed class Plugin : IDalamudPlugin
                     s.GetRequiredService<AcknowledgmentBatchingService>()
                 );
             });
+            collection.AddSingleton<IconUpdateService>();
             
             collection.AddScoped((s) => new UiService(s.GetRequiredService<ILogger<UiService>>(), pluginInterface.UiBuilder, s.GetRequiredService<SpheneConfigService>(),
                 s.GetRequiredService<WindowSystem>(), s.GetServices<WindowMediatorSubscriberBase>(),

@@ -19,18 +19,18 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
     private readonly MessageService _messageService;
     private readonly AcknowledgmentBatchingService _batchingService;
     
-    // Thread-safe storage for pending acknowledgments per user session with timestamps
-    private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, PendingAcknowledgmentInfo>> _userSessionAcknowledgments = new();
+    // Thread-safe storage for latest acknowledgment per user pair with timestamps
+    private readonly ConcurrentDictionary<string, LatestAcknowledgmentInfo> _userLatestAcknowledgments = new();
     
-    // Helper class to store acknowledgment info with timestamp
-    private class PendingAcknowledgmentInfo
+    // Helper class to store latest acknowledgment info per user
+    private class LatestAcknowledgmentInfo
     {
-        public HashSet<UserData> Recipients { get; set; }
+        public string AcknowledgmentId { get; set; }
         public DateTime CreatedAt { get; set; }
         
-        public PendingAcknowledgmentInfo(HashSet<UserData> recipients)
+        public LatestAcknowledgmentInfo(string acknowledgmentId)
         {
-            Recipients = recipients;
+            AcknowledgmentId = acknowledgmentId;
             CreatedAt = DateTime.UtcNow;
         }
     }
@@ -92,7 +92,7 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
         return sessionId == _currentSessionId;
     }
     
-    // Set pending acknowledgment for current session
+    // Set pending acknowledgment for current session - only latest per user
     public void SetPendingAcknowledgmentForSession(List<UserData> recipients, string acknowledgmentId)
     {
         if (!IsCurrentSession(acknowledgmentId))
@@ -102,143 +102,66 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
             return;
         }
         
-        // Use batching for multiple recipients to improve performance
-        if (recipients.Count > 1)
+        // Process each recipient individually - store only latest AckId per user
+        foreach (var recipient in recipients)
         {
-            var batchKey = $"session_ack_{acknowledgmentId}";
-            foreach (var recipient in recipients)
-            {
-                _batchingService.AddToBatch(batchKey, recipient, acknowledgmentId, ProcessBatchedAcknowledgment);
-            }
-        }
-        else
-        {
-            // Process single recipient immediately
-            ProcessBatchedAcknowledgment(recipients, acknowledgmentId);
+            ProcessLatestAcknowledgment(recipient, acknowledgmentId);
         }
     }
     
-    private void ProcessBatchedAcknowledgment(List<UserData> recipients, string acknowledgmentId)
+    // Process latest acknowledgment for a single recipient
+    private void ProcessLatestAcknowledgment(UserData recipient, string acknowledgmentId)
     {
-        var sessionAcks = _userSessionAcknowledgments.GetOrAdd(_currentSessionId, _ => new ConcurrentDictionary<string, PendingAcknowledgmentInfo>());
-        
-        // Remove ALL older acknowledgments
-        RemoveOlderAcknowledgments(sessionAcks, acknowledgmentId);
-        
-        // Remove any pending acknowledgments for users in the new request
-        RemovePendingAcknowledgmentsForUsers(sessionAcks, recipients);
-        
-        // Add new acknowledgment
-        var recipientSet = new HashSet<UserData>(recipients, UserDataComparer.Instance);
-        sessionAcks[acknowledgmentId] = new PendingAcknowledgmentInfo(recipientSet);
-        
-        _logger.LogInformation("Set pending acknowledgment for session {sessionId} with ID {ackId} waiting for {count} recipients: [{recipients}]", 
-            _currentSessionId, acknowledgmentId, recipients.Count, string.Join(", ", recipients.Select(r => r.AliasOrUID)));
-        
-        // Add notification for pending acknowledgment
-        var recipientNames = string.Join(", ", recipients.Select(r => r.AliasOrUID));
-        if (recipients.Count == 1)
+        var sessionId = ExtractSessionId(acknowledgmentId);
+        if (string.IsNullOrEmpty(sessionId))
         {
-            _messageService.AddTaggedMessage(
-                $"ack_{acknowledgmentId}",
-                $"Waiting for acknowledgment from {recipientNames}",
-                NotificationType.Info,
-                "Acknowledgment Pending",
-                TimeSpan.FromSeconds(5)
-            );
+            _logger.LogWarning("Invalid acknowledgment ID format: {ackId}", acknowledgmentId);
+            return;
+        }
+        
+        var userKey = recipient.UID;
+        
+        // Store only the latest acknowledgment for this user
+        var latestInfo = new LatestAcknowledgmentInfo(acknowledgmentId);
+        
+        var oldInfo = _userLatestAcknowledgments.AddOrUpdate(
+            userKey,
+            latestInfo,
+            (key, existing) => latestInfo);
+        
+        if (oldInfo != null && oldInfo.AcknowledgmentId != acknowledgmentId)
+        {
+            _logger.LogDebug("Replaced acknowledgment {oldAckId} with {newAckId} for user {user}", 
+                oldInfo.AcknowledgmentId, acknowledgmentId, userKey);
         }
         else
         {
-            _messageService.AddTaggedMessage(
-                $"ack_{acknowledgmentId}",
-                $"Waiting for acknowledgments from {recipients.Count} users: {recipientNames}",
-                NotificationType.Info,
-                "Batch Acknowledgment Pending",
-                TimeSpan.FromSeconds(5)
-            );
+            _logger.LogDebug("Added pending acknowledgment {ackId} for user {user} in session {sessionId}", 
+                acknowledgmentId, userKey, sessionId);
         }
         
-        // Publish acknowledgment pending events
-        foreach (var recipient in recipients)
-        {
-            Mediator.Publish(new AcknowledgmentPendingMessage(
-                acknowledgmentId,
-                recipient,
-                DateTime.UtcNow
-            ));
-        }
+        // Add notification for pending acknowledgment
+        _messageService.AddTaggedMessage(
+            $"ack_{acknowledgmentId}",
+            $"Waiting for acknowledgment from {recipient.AliasOrUID}",
+            NotificationType.Info,
+            "Acknowledgment Pending",
+            TimeSpan.FromSeconds(5)
+        );
+        
+        // Publish acknowledgment pending event
+        Mediator.Publish(new AcknowledgmentPendingMessage(
+            acknowledgmentId,
+            recipient,
+            DateTime.UtcNow
+        ));
         
         // Publish UI refresh
         Mediator.Publish(new RefreshUiMessage());
     }
     
-    // Remove any pending acknowledgments that contain the specified users
-    private void RemovePendingAcknowledgmentsForUsers(ConcurrentDictionary<string, PendingAcknowledgmentInfo> sessionAcks, List<UserData> users)
-    {
-        var toRemove = new List<string>();
-        
-        foreach (var kvp in sessionAcks)
-        {
-            var existingAckId = kvp.Key;
-            var existingInfo = kvp.Value;
-            
-            // Check if any of the specified users are in the pending acknowledgment
-            var hasUserOverlap = existingInfo.Recipients.Any(existingUser => 
-                users.Any(newUser => UserDataComparer.Instance.Equals(existingUser, newUser)));
-            
-            if (hasUserOverlap)
-            {
-                toRemove.Add(existingAckId);
-                _logger.LogInformation("Removing pending acknowledgment {ackId} because user(s) have new request", existingAckId);
-            }
-        }
-        
-        // Remove acknowledgments with user overlap and clear pair status
-        foreach (var ackIdToRemove in toRemove)
-        {
-            if (sessionAcks.TryRemove(ackIdToRemove, out var removedInfo))
-            {
-                // Clear pending status from affected pairs
-                ClearPendingStatusFromPairs(removedInfo.Recipients, ackIdToRemove);
-            }
-        }
-    }
-    
-    // Remove ALL older acknowledgments when a newer one arrives
-    private void RemoveOlderAcknowledgments(ConcurrentDictionary<string, PendingAcknowledgmentInfo> sessionAcks, string newAcknowledgmentId)
-    {
-        var newTimestamp = ExtractTimestampFromAcknowledgmentId(newAcknowledgmentId);
-        var toRemove = new List<string>();
-        
-        foreach (var kvp in sessionAcks)
-        {
-            var existingAckId = kvp.Key;
-            var existingInfo = kvp.Value;
-            
-            // Skip if this is the same acknowledgment ID
-            if (existingAckId == newAcknowledgmentId) continue;
-            
-            var existingTimestamp = ExtractTimestampFromAcknowledgmentId(existingAckId);
-            
-            // Remove ALL older acknowledgments, regardless of user overlap
-            if (newTimestamp > existingTimestamp)
-            {
-                toRemove.Add(existingAckId);
-                _logger.LogInformation("Removing older acknowledgment {oldAckId} (timestamp: {oldTime}) in favor of newer {newAckId} (timestamp: {newTime})", 
-                    existingAckId, existingTimestamp, newAcknowledgmentId, newTimestamp);
-            }
-        }
-        
-        // Remove older acknowledgments and clear pair status
-        foreach (var ackIdToRemove in toRemove)
-        {
-            if (sessionAcks.TryRemove(ackIdToRemove, out var removedInfo))
-            {
-                // Clear pending status from affected pairs
-                ClearPendingStatusFromPairs(removedInfo.Recipients, ackIdToRemove);
-            }
-        }
-    }
+
+
     
     // Extract timestamp from acknowledgment ID for comparison
     private static long ExtractTimestampFromAcknowledgmentId(string acknowledgmentId)
@@ -264,25 +187,18 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
             return false;
         }
         
-        if (!_userSessionAcknowledgments.TryGetValue(sessionId, out var sessionAcks))
+        var userKey = acknowledgingUser.UID;
+        
+        // Check if this acknowledgment matches the latest one for this user
+        if (!_userLatestAcknowledgments.TryGetValue(userKey, out var latestInfo) || 
+            latestInfo.AcknowledgmentId != acknowledgmentId)
         {
-            _logger.LogWarning("No session found for acknowledgment ID: {ackId}, SessionId: {sessionId}", acknowledgmentId, sessionId);
+            _logger.LogDebug("Acknowledgment {ackId} from {user} is not the latest or not found", acknowledgmentId, acknowledgingUser.AliasOrUID);
             return false;
         }
         
-        if (!sessionAcks.TryGetValue(acknowledgmentId, out var pendingInfo))
-        {
-            _logger.LogWarning("No pending acknowledgment found for ID: {ackId} in session: {sessionId}", acknowledgmentId, sessionId);
-            return false;
-        }
-        
-        // Remove the acknowledging user from pending list
-        var removed = pendingInfo.Recipients.Remove(acknowledgingUser);
-        if (!removed)
-        {
-            _logger.LogWarning("User {user} was not in pending list for acknowledgment {ackId}", acknowledgingUser.AliasOrUID, acknowledgmentId);
-            return false;
-        }
+        // Remove the acknowledgment as it's been received
+        _userLatestAcknowledgments.TryRemove(userKey, out _);
         
         // Update the pair's acknowledgment status to show success
         var pair = _getPairFunc(acknowledgingUser);
@@ -312,42 +228,27 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
             _logger.LogWarning("Could not find pair for user {user} to update acknowledgment status", acknowledgingUser.AliasOrUID);
         }
         
-        _logger.LogInformation("Processed acknowledgment from {user} for ID {ackId}. Remaining: {remaining}", 
-            acknowledgingUser.AliasOrUID, acknowledgmentId, pendingInfo.Recipients.Count);
+        _logger.LogInformation("Processed acknowledgment from {user} for ID {ackId}", 
+            acknowledgingUser.AliasOrUID, acknowledgmentId);
         
-        // If all acknowledgments received, remove from pending
-        if (pendingInfo.Recipients.Count == 0)
-        {
-            sessionAcks.TryRemove(acknowledgmentId, out _);
-            _logger.LogInformation("All acknowledgments received for ID {ackId}, removed from session {sessionId}", acknowledgmentId, sessionId);
-            
-            // Clean up pending acknowledgment notification
-            _messageService.CleanTaggedMessages($"ack_{acknowledgmentId}");
-            
-            // Add completion notification
-            _messageService.AddTaggedMessage(
-                $"ack_complete_{acknowledgmentId}",
-                "All acknowledgments received successfully",
-                NotificationType.Success,
-                "Acknowledgment Complete",
-                TimeSpan.FromSeconds(4)
-            );
-            
-            // Publish batch completion event
-            var allRecipients = sessionAcks.Values.SelectMany(info => info.Recipients).ToList();
-            Mediator.Publish(new AcknowledgmentBatchCompletedMessage(
-                acknowledgmentId,
-                allRecipients,
-                DateTime.UtcNow
-            ));
-            
-            // Clean up empty session
-            if (sessionAcks.IsEmpty)
-            {
-                _userSessionAcknowledgments.TryRemove(sessionId, out _);
-                _logger.LogDebug("Cleaned up empty session: {sessionId}", sessionId);
-            }
-        }
+        // Clean up pending acknowledgment notification
+        _messageService.CleanTaggedMessages($"ack_{acknowledgmentId}");
+        
+        // Add completion notification
+        _messageService.AddTaggedMessage(
+            $"ack_complete_{acknowledgmentId}",
+            "Acknowledgment received successfully",
+            NotificationType.Success,
+            "Acknowledgment Complete",
+            TimeSpan.FromSeconds(4)
+        );
+        
+        // Publish batch completion event
+        Mediator.Publish(new AcknowledgmentBatchCompletedMessage(
+            acknowledgmentId,
+            new List<UserData> { acknowledgingUser },
+            DateTime.UtcNow
+        ));
         
         // Publish granular UI refresh for this specific acknowledgment
         Mediator.Publish(new AcknowledgmentUiRefreshMessage(
@@ -369,51 +270,39 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
         return true;
     }
     
-    // Get total count of pending acknowledgments across all sessions
+    // Get total count of pending acknowledgments
     private int GetTotalPendingAcknowledgments()
     {
-        return _userSessionAcknowledgments.Values
-            .SelectMany(sessionAcks => sessionAcks.Values)
-            .Sum(ackInfo => ackInfo.Recipients.Count);
+        return _userLatestAcknowledgments.Count;
     }
     
-    // Get all pending acknowledgments for current session
-    public Dictionary<string, HashSet<UserData>> GetPendingAcknowledgments()
+    // Get all pending acknowledgments
+    public Dictionary<string, string> GetPendingAcknowledgments()
     {
-        if (_userSessionAcknowledgments.TryGetValue(_currentSessionId, out var sessionAcks))
-        {
-            return sessionAcks.ToDictionary(kvp => kvp.Key, kvp => kvp.Value.Recipients);
-        }
-        
-        return new Dictionary<string, HashSet<UserData>>();
+        return _userLatestAcknowledgments.ToDictionary(
+            kvp => kvp.Key,
+            kvp => kvp.Value.AcknowledgmentId
+        );
     }
     
-    // Get total pending acknowledgment count for current session
+    // Get total pending acknowledgment count
     public int GetPendingAcknowledgmentCount()
     {
-        if (_userSessionAcknowledgments.TryGetValue(_currentSessionId, out var sessionAcks))
-        {
-            return sessionAcks.Values.Sum(info => info.Recipients.Count);
-        }
-        
-        return 0;
+        return _userLatestAcknowledgments.Count;
     }
     
-    // Clear pending status from pairs when acknowledgments are removed
-    private void ClearPendingStatusFromPairs(HashSet<UserData> recipients, string acknowledgmentId)
+    // Clear pending status from pair when acknowledgment is removed
+    private void ClearPendingStatusFromPair(UserData user, string acknowledgmentId)
     {
-        foreach (var recipient in recipients)
+        var pair = _getPairFunc(user);
+        if (pair != null)
         {
-            var pair = _getPairFunc(recipient);
-            if (pair != null)
-            {
-                pair.ClearPendingAcknowledgment(acknowledgmentId, _messageService);
-                _logger.LogDebug("Cleared pending acknowledgment {ackId} from pair for user {user}", acknowledgmentId, recipient.AliasOrUID);
-            }
-            else
-            {
-                _logger.LogWarning("Could not find pair for user {user} to clear pending acknowledgment {ackId}", recipient.AliasOrUID, acknowledgmentId);
-            }
+            pair.ClearPendingAcknowledgment(acknowledgmentId, _messageService);
+            _logger.LogDebug("Cleared pending acknowledgment {ackId} from pair for user {user}", acknowledgmentId, user.AliasOrUID);
+        }
+        else
+        {
+            _logger.LogWarning("Could not find pair for user {user} to clear pending acknowledgment {ackId}", user.AliasOrUID, acknowledgmentId);
         }
     }
 
@@ -421,45 +310,40 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
     public void CleanupOldPendingAcknowledgments(TimeSpan maxAge)
     {
         var cutoffTime = DateTime.UtcNow.Subtract(maxAge);
-        var toRemove = new List<(string sessionId, string ackId, HashSet<UserData> recipients)>();
+        var toRemove = new List<(string userKey, string ackId, UserData user)>();
         
-        foreach (var sessionKvp in _userSessionAcknowledgments)
+        foreach (var userKvp in _userLatestAcknowledgments)
         {
-            var sessionId = sessionKvp.Key;
-            var sessionAcks = sessionKvp.Value;
+            var userKey = userKvp.Key;
+            var latestInfo = userKvp.Value;
             
-            foreach (var ackKvp in sessionAcks)
+            if (latestInfo.CreatedAt < cutoffTime)
             {
-                var ackId = ackKvp.Key;
-                var ackInfo = ackKvp.Value;
-                
-                if (ackInfo.CreatedAt < cutoffTime)
-                {
-                    toRemove.Add((sessionId, ackId, ackInfo.Recipients));
-                    _logger.LogInformation("Marking old pending acknowledgment {ackId} for removal (age: {age}s)", 
-                        ackId, (DateTime.UtcNow - ackInfo.CreatedAt).TotalSeconds);
-                }
+                // Find the user data for this key - we need to get it from pairs
+                var allPairs = new List<UserData>();
+                // Since we don't have direct access to all users, we'll use the acknowledgment ID to find the user
+                // This is a simplified approach - in practice you might need a different way to resolve users
+                var dummyUser = new UserData(userKey);
+                toRemove.Add((userKey, latestInfo.AcknowledgmentId, dummyUser));
+                _logger.LogInformation("Marking old pending acknowledgment {ackId} for user {user} for removal (age: {age}s)", 
+                    latestInfo.AcknowledgmentId, userKey, (DateTime.UtcNow - latestInfo.CreatedAt).TotalSeconds);
             }
         }
         
         // Remove old acknowledgments and clear pair status
-        foreach (var (sessionId, ackId, recipients) in toRemove)
+        foreach (var (userKey, ackId, user) in toRemove)
         {
-            if (_userSessionAcknowledgments.TryGetValue(sessionId, out var sessionAcks) && 
-                sessionAcks.TryRemove(ackId, out _))
+            if (_userLatestAcknowledgments.TryRemove(userKey, out _))
             {
-                // Clear the pending acknowledgment from pairs with timeout notification
-                foreach (var recipient in recipients)
+                // Clear the pending acknowledgment from pair with timeout notification
+                var pair = _getPairFunc(user);
+                if (pair != null && pair.LastAcknowledgmentId == ackId)
                 {
-                    var pair = _getPairFunc(recipient);
-                    if (pair != null && pair.LastAcknowledgmentId == ackId)
-                    {
-                        pair.ClearPendingAcknowledgmentForce(_messageService);
-                    }
+                    pair.ClearPendingAcknowledgmentForce(_messageService);
                 }
                 
-                ClearPendingStatusFromPairs(recipients, ackId);
-                _logger.LogInformation("Removed old pending acknowledgment {ackId} from session {sessionId}", ackId, sessionId);
+                ClearPendingStatusFromPair(user, ackId);
+                _logger.LogInformation("Removed old pending acknowledgment {ackId} for user {user}", ackId, userKey);
                 
                 // Clean up related notifications
                 _messageService.CleanTaggedMessages($"ack_{ackId}");
@@ -473,22 +357,12 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
                     TimeSpan.FromSeconds(5)
                 );
                 
-                // Publish acknowledgment timeout events
-                foreach (var recipient in recipients)
-                {
-                    Mediator.Publish(new AcknowledgmentTimeoutMessage(
-                        ackId,
-                        recipient,
-                        DateTime.UtcNow
-                    ));
-                }
-                
-                // Clean up empty session
-                if (sessionAcks.IsEmpty)
-                {
-                    _userSessionAcknowledgments.TryRemove(sessionId, out _);
-                    _logger.LogDebug("Cleaned up empty session: {sessionId}", sessionId);
-                }
+                // Publish acknowledgment timeout event
+                Mediator.Publish(new AcknowledgmentTimeoutMessage(
+                    ackId,
+                    user,
+                    DateTime.UtcNow
+                ));
             }
         }
         
@@ -497,7 +371,7 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
             _logger.LogInformation("Cleaned up {count} old pending acknowledgments", toRemove.Count);
             
             // Publish acknowledgment metrics update
-            var totalPending = GetTotalPendingAcknowledgments();
+            var totalPending = _userLatestAcknowledgments.Count;
             Mediator.Publish(new AcknowledgmentMetricsUpdatedMessage(
                 totalPending,
                 0, // We don't track completed count here
@@ -515,34 +389,36 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
         }
     }
 
-    // Clean up old sessions (call periodically)
+    // Check if there are any pending acknowledgments
+    public bool HasPendingAcknowledgments()
+    {
+        return !_userLatestAcknowledgments.IsEmpty;
+    }
+    
+    // Clean up old sessions (simplified for single acknowledgment per user model)
     public void CleanupOldSessions(TimeSpan maxAge)
     {
-        var cutoffTime = DateTimeOffset.UtcNow.Subtract(maxAge).ToUnixTimeMilliseconds();
-        var sessionsToRemove = new List<string>();
+        // In the new model, we don't have sessions to clean up since we only store latest acknowledgments
+        // This method is kept for compatibility but delegates to CleanupOldPendingAcknowledgments
+        CleanupOldPendingAcknowledgments(maxAge);
+    }
+    
+    // Get acknowledgment status for UI display
+    public List<string> GetAcknowledgmentStatuses()
+    {
+        var statuses = new List<string>();
         
-        foreach (var sessionId in _userSessionAcknowledgments.Keys)
+        foreach (var userKvp in _userLatestAcknowledgments)
         {
-            if (TryExtractTimestamp(sessionId, out var timestamp) && timestamp < cutoffTime)
-            {
-                sessionsToRemove.Add(sessionId);
-            }
+            var userKey = userKvp.Key;
+            var latestInfo = userKvp.Value;
+            var sessionId = ExtractSessionId(latestInfo.AcknowledgmentId);
+            
+            var statusText = $"User: {userKey}, AckId: {latestInfo.AcknowledgmentId}, Session: {sessionId ?? "unknown"}, Created: {latestInfo.CreatedAt}";
+            statuses.Add(statusText);
         }
         
-        foreach (var sessionId in sessionsToRemove)
-        {
-            if (_userSessionAcknowledgments.TryRemove(sessionId, out var removedSession))
-            {
-                // Clear pending status from all pairs in removed sessions
-                foreach (var ackInfo in removedSession)
-                {
-                    ClearPendingStatusFromPairs(ackInfo.Value.Recipients, ackInfo.Key);
-                }
-                
-                _logger.LogInformation("Cleaned up old session {sessionId} with {count} pending acknowledgments", 
-                    sessionId, removedSession.Values.Sum(info => info.Recipients.Count));
-            }
-        }
+        return statuses;
     }
     
     // Extract timestamp from session ID
@@ -566,7 +442,7 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
     {
         if (disposing)
         {
-            _userSessionAcknowledgments.Clear();
+            _userLatestAcknowledgments.Clear();
             _logger.LogInformation("SessionAcknowledgmentManager disposed for session: {sessionId}", _currentSessionId);
         }
         

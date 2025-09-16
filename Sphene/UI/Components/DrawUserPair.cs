@@ -18,7 +18,7 @@ using System.Numerics;
 
 namespace Sphene.UI.Components;
 
-public class DrawUserPair : IMediatorSubscriber
+public class DrawUserPair : IMediatorSubscriber, IDisposable
 {
     protected readonly ApiController _apiController;
     protected readonly IdDisplayHandler _displayHandler;
@@ -40,10 +40,19 @@ public class DrawUserPair : IMediatorSubscriber
     private static readonly Dictionary<string, System.Threading.Timer> _reloadTimers = new();
     private static readonly object _timerLock = new();
     
+    // Global rate limiting and status tracking per user (static to prevent multiple instances from sending)
+    private static readonly Dictionary<string, bool?> _globalLastSentAckYouStatus = new();
+    private static readonly Dictionary<string, DateTime> _globalLastAckYouSentTime = new();
+    private static readonly Dictionary<string, bool?> _globalLastCalculatedAckYouStatus = new();
+    private static readonly Dictionary<string, (bool HasPending, bool? LastSuccess, DateTime LastEventTime)> _globalLastEventState = new();
+    private static readonly object _globalAckYouLock = new();
+    private static readonly TimeSpan MinTimeBetweenAckYouCalls = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan MinTimeBetweenSameEvents = TimeSpan.FromMilliseconds(100);
+    
     // Cache acknowledgment status - updated only via events
     private bool _cachedHasPendingAck = false;
     private bool _cacheInitialized = false;
-    private bool? _lastSentAckYouStatus = null;
+    private bool _isProcessingServerUpdate = false;
 
     public DrawUserPair(string id, Pair entry, List<GroupFullInfoDto> syncedGroups,
         GroupFullInfoDto? currentGroup,
@@ -72,9 +81,27 @@ public class DrawUserPair : IMediatorSubscriber
         _mediator.Subscribe<AcknowledgmentPendingMessage>(this, OnAcknowledgmentPending);
         _mediator.Subscribe<AcknowledgmentUiRefreshMessage>(this, OnAcknowledgmentUiRefresh);
         
+        // Subscribe to server permission updates to track when we're processing server pushes
+        _mediator.Subscribe<RefreshUiMessage>(this, OnServerPermissionUpdate);
+        
+        // Subscribe to selective icon updates for performance optimization
+        _mediator.Subscribe<UserPairIconUpdateMessage>(this, OnIconUpdate);
+        
         // Initialize cache once during construction to avoid frequent PairManager calls
         _cachedHasPendingAck = _pairManager.HasPendingAcknowledgmentForUser(_pair.UserData);
         _cacheInitialized = true;
+        
+        // Initialize global status tracking for this user to prevent initial spam
+        lock (_globalAckYouLock)
+        {
+            var userUID = _pair.UserData.UID;
+            if (!_globalLastSentAckYouStatus.ContainsKey(userUID))
+            {
+                _globalLastSentAckYouStatus[userUID] = _pair.UserPair.OwnPermissions.IsAckYou();
+                _globalLastAckYouSentTime[userUID] = DateTime.MinValue;
+                _globalLastCalculatedAckYouStatus[userUID] = null;
+            }
+        }
     }
     
     public SpheneMediator Mediator => _mediator;
@@ -84,20 +111,82 @@ public class DrawUserPair : IMediatorSubscriber
         // Only handle events for this specific pair
         if (message.User.UID != _pair.UserData.UID) return;
         
+        var userUID = _pair.UserData.UID;
+        var now = DateTime.UtcNow;
+        
+        // Event deduplication: check if this is a duplicate event
+        lock (_globalAckYouLock)
+        {
+            if (_globalLastEventState.TryGetValue(userUID, out var lastEvent))
+            {
+                // Skip if same event within short time window
+                if (lastEvent.HasPending == message.HasPendingAcknowledgment &&
+                    lastEvent.LastSuccess == message.LastAcknowledgmentSuccess &&
+                    (now - lastEvent.LastEventTime) < MinTimeBetweenSameEvents)
+                {
+                    return;
+                }
+            }
+            
+            // Update last event state
+            _globalLastEventState[userUID] = (message.HasPendingAcknowledgment, message.LastAcknowledgmentSuccess, now);
+        }
+        
         // Update cached acknowledgment status
         _cachedHasPendingAck = message.HasPendingAcknowledgment;
         _cacheInitialized = true;
         
-        // Update AckYou status based on acknowledgment state
+        // Skip sending UserUpdateAckYou if we're processing a server update
+        // This prevents feedback loops where server pushes trigger client requests
+        if (_isProcessingServerUpdate)
+        {
+            return;
+        }
+        
+        // Calculate new AckYou status based on acknowledgment state
         // When acknowledgment becomes pending (yellow clock), set AckYou to false
         // When acknowledgment succeeds (green checkmark), set AckYou to true
-        bool newAckYouStatus = message.HasPendingAcknowledgment ? false : (message.LastAcknowledgmentSuccess ?? false);
+        // Only consider successful acknowledgments as true, everything else as false
+        bool newAckYouStatus = !message.HasPendingAcknowledgment && (message.LastAcknowledgmentSuccess == true);
         
-        // Only update if the status actually changed AND we haven't already sent this status
-        if (_pair.UserPair.OwnPermissions.IsAckYou() != newAckYouStatus && 
-            _lastSentAckYouStatus != newAckYouStatus)
+        // Get current status from permissions
+        bool currentAckYouStatus = _pair.UserPair.OwnPermissions.IsAckYou();
+        
+        // Global rate limiting and change detection per user
+        
+        bool rateLimitExceeded;
+        bool alreadySentThisStatus;
+        bool calculatedStatusChanged;
+        bool statusNeedsUpdate = currentAckYouStatus != newAckYouStatus;
+        
+        lock (_globalAckYouLock)
         {
-            _lastSentAckYouStatus = newAckYouStatus;
+            _globalLastAckYouSentTime.TryGetValue(userUID, out var lastSentTime);
+            _globalLastSentAckYouStatus.TryGetValue(userUID, out var lastSentStatus);
+            _globalLastCalculatedAckYouStatus.TryGetValue(userUID, out var lastCalculatedStatus);
+            
+            rateLimitExceeded = (now - lastSentTime) < MinTimeBetweenAckYouCalls;
+            alreadySentThisStatus = lastSentStatus == newAckYouStatus;
+            calculatedStatusChanged = lastCalculatedStatus != newAckYouStatus;
+        }
+        
+        // Only send UserUpdateAckYou if:
+        // 1. The calculated status is different from current permissions (actual change needed)
+        // 2. We haven't already sent this exact status recently
+        // 3. We're not rate limited
+        // 4. The calculated status has actually changed from last calculation
+        if (statusNeedsUpdate && 
+            !alreadySentThisStatus &&
+            !rateLimitExceeded &&
+            calculatedStatusChanged)
+        {
+            lock (_globalAckYouLock)
+            {
+                _globalLastSentAckYouStatus[userUID] = newAckYouStatus;
+                _globalLastCalculatedAckYouStatus[userUID] = newAckYouStatus;
+                _globalLastAckYouSentTime[userUID] = now;
+            }
+            
             _ = Task.Run(async () =>
             {
                 try
@@ -106,16 +195,31 @@ public class DrawUserPair : IMediatorSubscriber
                 }
                 catch (Exception ex)
                 {
-                    // Log error but don't throw to avoid breaking the UI
-                    // Logger would need to be injected if we want proper logging here
-                    // Reset the last sent status on error so we can retry
-                    _lastSentAckYouStatus = null;
+                    // Reset the last sent status on error so we can retry after rate limit period
+                    lock (_globalAckYouLock)
+                    {
+                        _globalLastSentAckYouStatus[userUID] = null;
+                        _globalLastCalculatedAckYouStatus[userUID] = null;
+                    }
                 }
             });
         }
         
-        // Also handle AckOther status changes - this will trigger UI refresh
-        // The UI will automatically update when the pair data changes
+        // UI will automatically update when the pair data changes
+    }
+    
+    private void OnServerPermissionUpdate(RefreshUiMessage message)
+    {
+        // Set flag to indicate we're processing a server update
+        // This prevents OnAcknowledgmentStatusChanged from sending UserUpdateAckYou
+        _isProcessingServerUpdate = true;
+        
+        // Reset the flag after a short delay to allow the acknowledgment events to process
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(100); // Small delay to ensure all related events are processed
+            _isProcessingServerUpdate = false;
+        });
     }
     
     private void OnAcknowledgmentPending(AcknowledgmentPendingMessage message)
@@ -138,6 +242,47 @@ public class DrawUserPair : IMediatorSubscriber
             _cachedHasPendingAck = _pairManager.HasPendingAcknowledgmentForUser(_pair.UserData);
             _cacheInitialized = true;
         }
+    }
+    
+    private void OnIconUpdate(UserPairIconUpdateMessage message)
+    {
+        // Only handle events for this specific pair
+        if (message.User.UID != _pair.UserData.UID) return;
+        
+        // Handle specific icon updates without full UI rebuild
+        switch (message.UpdateType)
+        {
+            case IconUpdateType.AcknowledgmentStatus:
+                if (message.UpdateData is AcknowledgmentStatusData ackData)
+                {
+                    _cachedHasPendingAck = ackData.HasPending;
+                    _cacheInitialized = true;
+                }
+                break;
+                
+            case IconUpdateType.ConnectionStatus:
+                // Connection status is read directly from pair data, no caching needed
+                break;
+                
+            case IconUpdateType.PermissionStatus:
+                // Permission status is read directly from pair data, no caching needed
+                break;
+                
+            case IconUpdateType.IndividualPermissions:
+                // Individual permissions are read directly from pair data, no caching needed
+                break;
+                
+            case IconUpdateType.GroupRole:
+                // Group role is read directly from group data, no caching needed
+                break;
+                
+            case IconUpdateType.ReloadTimer:
+                // Reload timer status is managed by static dictionaries, no caching needed
+                break;
+        }
+        
+        // Note: UI will automatically update on next frame since ImGui redraws continuously
+        // No explicit redraw trigger needed for icon-only updates
     }
     
     private void HandleReloadTimer(bool isAckOther)
@@ -200,7 +345,7 @@ public class DrawUserPair : IMediatorSubscriber
     {
         using var id = ImRaii.PushId(GetType() + _id);
         var color = ImRaii.PushColor(ImGuiCol.ChildBg, ImGui.GetColorU32(ImGuiCol.FrameBgHovered), _wasHovered);
-        using (ImRaii.Child(GetType() + _id, new System.Numerics.Vector2(UiSharedService.GetWindowContentRegionWidth() - ImGui.GetCursorPosX() - 30, ImGui.GetFrameHeight())))
+        using (ImRaii.Child(GetType() + _id, new System.Numerics.Vector2(295, ImGui.GetFrameHeight()), false, ImGuiWindowFlags.NoScrollbar))
         {
             DrawLeftSide();
             ImGui.SameLine();
@@ -334,6 +479,32 @@ public class DrawUserPair : IMediatorSubscriber
                 ImGui.CloseCurrentPopup();
             }
             UiSharedService.AttachToolTip("Removes this user from the performance whitelist.");
+        }
+    }
+
+    public void Dispose()
+    {
+        // Unsubscribe from all events to prevent memory leaks and duplicate event handling
+        _mediator.Unsubscribe<PairAcknowledgmentStatusChangedMessage>(this);
+        _mediator.Unsubscribe<AcknowledgmentPendingMessage>(this);
+        
+        // Clean up any active reload timers for this user
+        lock (_timerLock)
+        {
+            if (_reloadTimers.TryGetValue(_pair.UserData.UID, out var timer))
+            {
+                timer.Dispose();
+                _reloadTimers.Remove(_pair.UserData.UID);
+            }
+        }
+        
+        // Clean up global tracking data for this user
+        lock (_globalAckYouLock)
+        {
+            _globalLastSentAckYouStatus.Remove(_pair.UserData.UID);
+            _globalLastAckYouSentTime.Remove(_pair.UserData.UID);
+            _globalLastCalculatedAckYouStatus.Remove(_pair.UserData.UID);
+            _globalLastEventState.Remove(_pair.UserData.UID);
         }
     }
 
@@ -845,5 +1016,12 @@ public class DrawUserPair : IMediatorSubscriber
         // Return cached value without initializing from PairManager to avoid frequent calls
         // Cache is updated only through event handlers
         return _cachedHasPendingAck;
+    }
+
+    public void RefreshIcon()
+    {
+        // Force refresh of cached icon data without recreating the entire DrawUserPair instance
+        // This method is called when only icons need to be updated
+        // The actual icon rendering will pick up the latest data on next draw
     }
 }

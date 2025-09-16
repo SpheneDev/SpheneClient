@@ -7,7 +7,7 @@ using System.Collections.Immutable;
 
 namespace Sphene.UI.Components;
 
-public abstract class DrawFolderBase : IDrawFolder
+public abstract class DrawFolderBase : IDrawFolder, IDisposable
 {
     public IImmutableList<DrawUserPair> DrawPairs { get; init; }
     protected readonly string _id;
@@ -38,7 +38,7 @@ public abstract class DrawFolderBase : IDrawFolder
 
         using var id = ImRaii.PushId("folder_" + _id);
         var color = ImRaii.PushColor(ImGuiCol.ChildBg, ImGui.GetColorU32(ImGuiCol.FrameBgHovered), _wasHovered);
-        using (ImRaii.Child("folder__" + _id, new System.Numerics.Vector2(UiSharedService.GetWindowContentRegionWidth() - ImGui.GetCursorPosX(), ImGui.GetFrameHeight())))
+        using (ImRaii.Child("folder__" + _id, new System.Numerics.Vector2(325, ImGui.GetFrameHeight())))
         {
             // draw opener
             var icon = _tagHandler.IsTagOpen(_id) ? FontAwesomeIcon.CaretDown : FontAwesomeIcon.CaretRight;
@@ -88,6 +88,15 @@ public abstract class DrawFolderBase : IDrawFolder
         }
     }
 
+    public virtual void Dispose()
+    {
+        // Dispose all DrawUserPair instances to clean up event subscriptions
+        foreach (var drawPair in DrawPairs)
+        {
+            drawPair.Dispose();
+        }
+    }
+
     protected abstract float DrawIcon();
 
     protected abstract void DrawMenu(float menuWidth);
@@ -100,7 +109,7 @@ public abstract class DrawFolderBase : IDrawFolder
     {
         var barButtonSize = _uiSharedService.GetIconButtonSize(FontAwesomeIcon.EllipsisV);
         var spacingX = ImGui.GetStyle().ItemSpacing.X;
-        var windowEndX = ImGui.GetWindowContentRegionMin().X + UiSharedService.GetWindowContentRegionWidth();
+        var windowEndX = ImGui.GetWindowContentRegionMin().X + 295;
 
         // Flyout Menu
         var rightSideStart = windowEndX - (RenderMenu ? (barButtonSize.X + spacingX) : spacingX);
@@ -125,5 +134,14 @@ public abstract class DrawFolderBase : IDrawFolder
         }
 
         return DrawRightSide(rightSideStart);
+    }
+
+    public void RefreshIcons()
+    {
+        // Refresh icons for all DrawUserPair instances without recreating them
+        foreach (var drawPair in DrawPairs)
+        {
+            drawPair.RefreshIcon();
+        }
     }
 }

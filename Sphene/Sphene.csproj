@@ -27,10 +27,16 @@
   <PropertyGroup Condition="'$(Configuration)' == 'Debug'">
     <BuildDate>$([System.DateTime]::Now.ToString("ddMM"))</BuildDate>
     <BuildTime>$([System.DateTime]::Now.ToString("HHMM"))</BuildTime>
+    <BuildTimestamp>$([System.DateTime]::Now.ToString("dd-MM-yy HH:mm:ss"))</BuildTimestamp>
     <Version>0.0.16-debug$(BuildDate)$(BuildTime)</Version>
     <AssemblyVersion>0.16.$(BuildDate).$(BuildTime)</AssemblyVersion>
     <FileVersion>0.16.$(BuildDate).$(BuildTime)</FileVersion>
+    <DefineConstants>$(DefineConstants);BUILD_TIMESTAMP</DefineConstants>
   </PropertyGroup>
+  
+  <ItemGroup Condition="'$(Configuration)' == 'Debug'">
+    <AssemblyMetadata Include="BuildTimestamp" Value="$(BuildTimestamp)" />
+  </ItemGroup>
 
   <!-- Release configuration to hide source file paths -->
   <PropertyGroup Condition="'$(Configuration)' == 'Release'">

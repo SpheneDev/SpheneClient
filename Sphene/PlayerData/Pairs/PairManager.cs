@@ -638,6 +638,6 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         _directPairsInternal = DirectPairsLazy();
         _groupPairsInternal = GroupPairsLazy();
         _pairsWithGroupsInternal = PairsWithGroupsLazy();
-        Mediator.Publish(new RefreshUiMessage());
+        Mediator.Publish(new StructuralRefreshUiMessage());
     }
 }

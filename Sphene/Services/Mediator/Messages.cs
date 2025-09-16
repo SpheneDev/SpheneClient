@@ -76,6 +76,7 @@ public record CompactUiChange(Vector2 Size, Vector2 Position) : MessageBase;
 public record ProfileOpenStandaloneMessage(Pair Pair) : MessageBase;
 public record RemoveWindowMessage(WindowMediatorSubscriberBase Window) : MessageBase;
 public record RefreshUiMessage : MessageBase;
+public record StructuralRefreshUiMessage : MessageBase;
 public record OpenBanUserPopupMessage(Pair PairToBan, GroupFullInfoDto GroupFullInfoDto) : MessageBase;
 public record OpenCensusPopupMessage() : MessageBase;
 public record OpenSyncshellAdminPanel(GroupFullInfoDto GroupInfo) : MessageBase;
