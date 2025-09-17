@@ -18,6 +18,7 @@ using Sphene.Services;
 using NotificationType = Sphene.SpheneConfiguration.Models.NotificationType;
 using Sphene.Services.Events;
 using Dalamud.Interface.ImGuiNotification;
+using Sphene.WebAPI;
 
 namespace Sphene.PlayerData.Pairs;
 
@@ -27,17 +28,19 @@ public class Pair : DisposableMediatorSubscriberBase
     private readonly SemaphoreSlim _creationSemaphore = new(1);
     private readonly ServerConfigurationManager _serverConfigurationManager;
     private readonly PlayerPerformanceConfigService _playerPerformanceConfigService;
+    private readonly Lazy<ApiController> _apiController;
     private CancellationTokenSource _applicationCts = new();
     private OnlineUserIdentDto? _onlineUserIdentDto = null;
 
     public Pair(ILogger<Pair> logger, UserFullPairDto userPair, PairHandlerFactory cachedPlayerFactory,
         SpheneMediator mediator, ServerConfigurationManager serverConfigurationManager,
-        PlayerPerformanceConfigService playerPerformanceConfigService) : base(logger, mediator)
+        PlayerPerformanceConfigService playerPerformanceConfigService, Lazy<ApiController> apiController) : base(logger, mediator)
     {
         UserPair = userPair;
         _cachedPlayerFactory = cachedPlayerFactory;
         _serverConfigurationManager = serverConfigurationManager;
         _playerPerformanceConfigService = playerPerformanceConfigService;
+        _apiController = apiController;
         
         // Subscribe to character data application completion messages
         Mediator.Subscribe<CharacterDataApplicationCompletedMessage>(this, async (message) => await OnCharacterDataApplicationCompleted(message));
@@ -335,13 +338,35 @@ public class Pair : DisposableMediatorSubscriberBase
         return data;
     }
 
-    public void UpdateAcknowledgmentStatus(string acknowledgmentId, bool success, DateTimeOffset timestamp)
+    public async Task UpdateAcknowledgmentStatus(string acknowledgmentId, bool success, DateTimeOffset timestamp)
     {
         Logger.LogInformation("Updating acknowledgment status: {acknowledgmentId} - Success: {success} for user {user}", acknowledgmentId, success, UserData.AliasOrUID);
         LastAcknowledgmentId = acknowledgmentId;
         LastAcknowledgmentSuccess = success;
         LastAcknowledgmentTime = timestamp;
         HasPendingAcknowledgment = false;
+        
+        // Update AckYou status based on current icon state
+        // Green checkmark (success) = true, no icon (cleared) = false
+        bool newAckYouStatus = success;
+        
+        // Update local permissions immediately for UI responsiveness
+        var permissions = UserPair.OwnPermissions;
+        permissions.SetAckYou(newAckYouStatus);
+        UserPair.OwnPermissions = permissions;
+        
+        try
+        {
+            await _apiController.Value.UserSetPairPermissions(new(UserData, permissions));
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to update AckYou status for user {user}", UserData.AliasOrUID);
+            // Revert local change if server update failed
+            var revertPermissions = UserPair.OwnPermissions;
+            revertPermissions.SetAckYou(!newAckYouStatus);
+            UserPair.OwnPermissions = revertPermissions;
+        }
         
         // Publish specific pair acknowledgment status change event
         Mediator.Publish(new PairAcknowledgmentStatusChangedMessage(
@@ -361,18 +386,37 @@ public class Pair : DisposableMediatorSubscriberBase
             AcknowledgmentId: acknowledgmentId,
             User: UserData
         ));
-        
-        // Keep legacy RefreshUiMessage for backward compatibility
-        Mediator.Publish(new RefreshUiMessage());
     }
 
-    public void SetPendingAcknowledgment(string acknowledgmentId)
+    public async Task SetPendingAcknowledgment(string acknowledgmentId)
     {
         Logger.LogInformation("Setting pending acknowledgment: {acknowledgmentId} for user {user}", acknowledgmentId, UserData.AliasOrUID);
         LastAcknowledgmentId = acknowledgmentId;
         HasPendingAcknowledgment = true;
         LastAcknowledgmentSuccess = null;
         LastAcknowledgmentTime = null;
+        
+        // Update AckYou status based on current icon state
+        // Yellow clock (pending) = false
+        bool newAckYouStatus = false;
+        
+        // Update local permissions immediately for UI responsiveness
+        var permissions = UserPair.OwnPermissions;
+        permissions.SetAckYou(newAckYouStatus);
+        UserPair.OwnPermissions = permissions;
+        
+        try
+        {
+            await _apiController.Value.UserSetPairPermissions(new(UserData, permissions));
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to update AckYou status for user {user}", UserData.AliasOrUID);
+            // Revert local change if server update failed
+            var revertPermissions = UserPair.OwnPermissions;
+            revertPermissions.SetAckYou(!newAckYouStatus);
+            UserPair.OwnPermissions = revertPermissions;
+        }
         
         // Publish specific pair acknowledgment status change event
         Mediator.Publish(new PairAcknowledgmentStatusChangedMessage(
@@ -418,7 +462,7 @@ public class Pair : DisposableMediatorSubscriberBase
         LastAcknowledgmentId = null; // No specific acknowledgment ID for build start
     }
 
-    public void ClearPendingAcknowledgment(string acknowledgmentId, MessageService? messageService = null)
+    public async Task ClearPendingAcknowledgment(string acknowledgmentId, MessageService? messageService = null)
     {
         // Only clear if this is the acknowledgment we're waiting for
         if (LastAcknowledgmentId == acknowledgmentId)
@@ -426,6 +470,28 @@ public class Pair : DisposableMediatorSubscriberBase
             Logger.LogInformation("Clearing pending acknowledgment: {acknowledgmentId} for user {user}", acknowledgmentId, UserData.AliasOrUID);
             HasPendingAcknowledgment = false;
             LastAcknowledgmentId = null;
+            
+            // Update AckYou status based on current icon state
+            // No icon (cleared) = false
+            bool newAckYouStatus = false;
+            
+            // Update local permissions immediately for UI responsiveness
+            var permissions = UserPair.OwnPermissions;
+            permissions.SetAckYou(newAckYouStatus);
+            UserPair.OwnPermissions = permissions;
+            
+            try
+            {
+                await _apiController.Value.UserSetPairPermissions(new(UserData, permissions));
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Failed to update AckYou status for user {user}", UserData.AliasOrUID);
+                // Revert local change if server update failed
+                var revertPermissions = UserPair.OwnPermissions;
+                revertPermissions.SetAckYou(!newAckYouStatus);
+                UserPair.OwnPermissions = revertPermissions;
+            }
             
             // Add notification if MessageService is available
             messageService?.AddTaggedMessage(
@@ -458,9 +524,6 @@ public class Pair : DisposableMediatorSubscriberBase
                 AcknowledgmentStatus.Received,
                 DateTime.UtcNow
             ));
-            
-            // Keep legacy RefreshUiMessage for backward compatibility
-            Mediator.Publish(new RefreshUiMessage());
         }
         else
         {
@@ -519,17 +582,15 @@ public class Pair : DisposableMediatorSubscriberBase
                 DateTime.UtcNow
             ));
         }
-        
-        // Keep legacy RefreshUiMessage for backward compatibility
-        Mediator.Publish(new RefreshUiMessage());
+
     }
 
 
 
-    private async Task SendAcknowledgmentIfRequired(OnlineUserCharaDataDto data, bool success)
+    private async Task SendAcknowledgmentIfRequired(OnlineUserCharaDataDto data, bool success, bool hashVerificationPassed = true)
     {
-        Logger.LogInformation("SendAcknowledgmentIfRequired called - RequiresAcknowledgment: {requires}, AcknowledgmentId: {id}, Success: {success}", 
-            data.RequiresAcknowledgment, data.AcknowledgmentId, success);
+        Logger.LogInformation("SendAcknowledgmentIfRequired called - RequiresAcknowledgment: {requires}, AcknowledgmentId: {id}, Success: {success}, HashVerification: {hashVerification}", 
+            data.RequiresAcknowledgment, data.AcknowledgmentId, success, hashVerificationPassed);
         
         if (!data.RequiresAcknowledgment || string.IsNullOrEmpty(data.AcknowledgmentId))
         {
@@ -540,14 +601,31 @@ public class Pair : DisposableMediatorSubscriberBase
 
         try
         {
+            var finalSuccess = success && hashVerificationPassed;
+            var errorCode = Sphene.API.Dto.User.AcknowledgmentErrorCode.None;
+            string? errorMessage = null;
+            
+            if (!success)
+            {
+                errorCode = Sphene.API.Dto.User.AcknowledgmentErrorCode.DataCorrupted;
+                errorMessage = "Failed to apply character data";
+            }
+            else if (!hashVerificationPassed)
+            {
+                errorCode = Sphene.API.Dto.User.AcknowledgmentErrorCode.HashVerificationFailed;
+                errorMessage = "Data hash verification failed - data integrity compromised";
+            }
+            
             var acknowledgmentDto = new CharacterDataAcknowledgmentDto(UserData, data.AcknowledgmentId)
             {
-                Success = success,
+                Success = finalSuccess,
+                ErrorCode = errorCode,
+                ErrorMessage = errorMessage,
                 AcknowledgedAt = DateTime.UtcNow
             };
 
-            Logger.LogInformation("Sending acknowledgment to server - AckId: {acknowledgmentId}, User: {user}, Success: {success}", 
-                data.AcknowledgmentId, UserData.AliasOrUID, success);
+            Logger.LogInformation("Sending acknowledgment to server - AckId: {acknowledgmentId}, User: {user}, Success: {success}, ErrorCode: {errorCode}", 
+                data.AcknowledgmentId, UserData.AliasOrUID, finalSuccess, errorCode);
 
             // Send acknowledgment through the mediator
              Mediator.Publish(new SendCharacterDataAcknowledgmentMessage(acknowledgmentDto));
@@ -560,8 +638,7 @@ public class Pair : DisposableMediatorSubscriberBase
     }
     
     
-    /// Handles character data application completion and sends delayed acknowledgment if needed
-    
+    // Handles character data application completion and sends delayed acknowledgment if needed
     private async Task OnCharacterDataApplicationCompleted(CharacterDataApplicationCompletedMessage message)
     {
         // Check if this message is for this pair
@@ -601,12 +678,18 @@ public class Pair : DisposableMediatorSubscriberBase
                 Logger.LogInformation("Processed {processedCount} acknowledgments, discarded {discardedCount}, sending latest with sequence {sequence}", 
                     processedCount, discardedCount, latestAcknowledgment?.SequenceNumber ?? -1);
                 
-                // Send the latest acknowledgment
+                // Send the latest acknowledgment with hash verification
                 if (latestAcknowledgment != null)
                 {
                     try
                     {
-                        await SendAcknowledgmentIfRequired(latestAcknowledgment, message.Success).ConfigureAwait(false);
+                        // Verify that the applied data hash matches the received data hash
+                        var verificationSuccess = VerifyDataHashIntegrity(latestAcknowledgment);
+                        
+                        Logger.LogInformation("Sending acknowledgment - Application success: {appSuccess}, Hash verification: {hashSuccess}", 
+                            message.Success, verificationSuccess);
+                        
+                        await SendAcknowledgmentIfRequired(latestAcknowledgment, message.Success, verificationSuccess).ConfigureAwait(false);
                     }
                     catch (Exception ex)
                     {
@@ -620,4 +703,38 @@ public class Pair : DisposableMediatorSubscriberBase
             }
         }
     }
+
+    private bool VerifyDataHashIntegrity(OnlineUserCharaDataDto acknowledgmentData)
+     {
+         try
+         {
+             if (acknowledgmentData?.CharaData == null)
+             {
+                 Logger.LogWarning("Cannot verify data hash integrity - acknowledgment data or character data is null");
+                 return false;
+             }
+ 
+             if (LastReceivedCharacterData == null)
+             {
+                 Logger.LogWarning("Cannot verify data hash integrity - no last received character data available");
+                 return false;
+             }
+ 
+             // Compare data hashes using the built-in DataHash property
+             var receivedHash = acknowledgmentData.CharaData.DataHash.Value;
+             var appliedHash = LastReceivedCharacterData.DataHash.Value;
+             
+             var hashMatch = string.Equals(receivedHash, appliedHash, StringComparison.Ordinal);
+             
+             Logger.LogInformation("Data hash verification - Received: {receivedHash}, Applied: {appliedHash}, Match: {hashMatch}", 
+                 receivedHash, appliedHash, hashMatch);
+             
+             return hashMatch;
+         }
+         catch (Exception ex)
+         {
+             Logger.LogWarning(ex, "Failed to verify data hash integrity - assuming verification failed");
+             return false;
+         }
+     }
 }

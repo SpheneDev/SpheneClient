@@ -292,12 +292,12 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
     }
     
     // Clear pending status from pair when acknowledgment is removed
-    private void ClearPendingStatusFromPair(UserData user, string acknowledgmentId)
+    private async Task ClearPendingStatusFromPair(UserData user, string acknowledgmentId)
     {
         var pair = _getPairFunc(user);
         if (pair != null)
         {
-            pair.ClearPendingAcknowledgment(acknowledgmentId, _messageService);
+            await pair.ClearPendingAcknowledgment(acknowledgmentId, _messageService);
             _logger.LogDebug("Cleared pending acknowledgment {ackId} from pair for user {user}", acknowledgmentId, user.AliasOrUID);
         }
         else
@@ -307,7 +307,7 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
     }
 
     // Clean up old pending acknowledgments based on age
-    public void CleanupOldPendingAcknowledgments(TimeSpan maxAge)
+    public async Task CleanupOldPendingAcknowledgments(TimeSpan maxAge)
     {
         var cutoffTime = DateTime.UtcNow.Subtract(maxAge);
         var toRemove = new List<(string userKey, string ackId, UserData user)>();
@@ -342,7 +342,7 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
                     pair.ClearPendingAcknowledgmentForce(_messageService);
                 }
                 
-                ClearPendingStatusFromPair(user, ackId);
+                await ClearPendingStatusFromPair(user, ackId);
                 _logger.LogInformation("Removed old pending acknowledgment {ackId} for user {user}", ackId, userKey);
                 
                 // Clean up related notifications
@@ -396,11 +396,11 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
     }
     
     // Clean up old sessions (simplified for single acknowledgment per user model)
-    public void CleanupOldSessions(TimeSpan maxAge)
+    public async Task CleanupOldSessions(TimeSpan maxAge)
     {
         // In the new model, we don't have sessions to clean up since we only store latest acknowledgments
         // This method is kept for compatibility but delegates to CleanupOldPendingAcknowledgments
-        CleanupOldPendingAcknowledgments(maxAge);
+        await CleanupOldPendingAcknowledgments(maxAge);
     }
     
     // Get acknowledgment status for UI display
@@ -437,6 +437,60 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
     }
     
     public string CurrentSessionId => _currentSessionId;
+    // Process timeout acknowledgment - mark as failed and update pair status
+    public void ProcessTimeoutAcknowledgment(string acknowledgmentId)
+    {
+        var sessionId = ExtractSessionId(acknowledgmentId);
+        if (sessionId == null)
+        {
+            _logger.LogWarning("Could not extract session ID from timeout acknowledgment ID: {ackId}", acknowledgmentId);
+            return;
+        }
+        
+        // Find and remove any pending acknowledgments with this ID
+        var timedOutUsers = new List<string>();
+        foreach (var kvp in _userLatestAcknowledgments)
+        {
+            if (kvp.Value.AcknowledgmentId == acknowledgmentId)
+            {
+                timedOutUsers.Add(kvp.Key);
+            }
+        }
+        
+        foreach (var userKey in timedOutUsers)
+        {
+            if (_userLatestAcknowledgments.TryRemove(userKey, out var latestInfo))
+            {
+                // Try to find the user and update pair status
+                var userData = new UserData(userKey, null);
+                var pair = _getPairFunc(userData);
+                if (pair != null)
+                {
+                    pair.UpdateAcknowledgmentStatus(acknowledgmentId, false, DateTimeOffset.UtcNow);
+                    _logger.LogWarning("Updated pair acknowledgment status for timeout - User: {user}, AckId: {ackId}", userKey, acknowledgmentId);
+                    
+                    // Add timeout notification
+                    _messageService.AddTaggedMessage(
+                        $"ack_timeout_{acknowledgmentId}_{userKey}",
+                        $"Acknowledgment timed out for user {userKey}",
+                        NotificationType.Warning,
+                        "Acknowledgment Timeout",
+                        TimeSpan.FromSeconds(5)
+                    );
+                    
+                    // Publish timeout event
+                    Mediator.Publish(new AcknowledgmentTimeoutMessage(
+                        acknowledgmentId,
+                        userData,
+                        DateTime.UtcNow
+                    ));
+                }
+            }
+        }
+        
+        // Publish UI refresh
+        Mediator.Publish(new RefreshUiMessage());
+    }
     
     protected override void Dispose(bool disposing)
     {

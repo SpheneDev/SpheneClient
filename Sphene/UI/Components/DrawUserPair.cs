@@ -43,11 +43,8 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
     // Global rate limiting and status tracking per user (static to prevent multiple instances from sending)
     private static readonly Dictionary<string, bool?> _globalLastSentAckYouStatus = new();
     private static readonly Dictionary<string, DateTime> _globalLastAckYouSentTime = new();
-    private static readonly Dictionary<string, bool?> _globalLastCalculatedAckYouStatus = new();
-    private static readonly Dictionary<string, (bool HasPending, bool? LastSuccess, DateTime LastEventTime)> _globalLastEventState = new();
     private static readonly object _globalAckYouLock = new();
     private static readonly TimeSpan MinTimeBetweenAckYouCalls = TimeSpan.FromSeconds(1);
-    private static readonly TimeSpan MinTimeBetweenSameEvents = TimeSpan.FromMilliseconds(100);
     
     // Cache acknowledgment status - updated only via events
     private bool _cachedHasPendingAck = false;
@@ -99,7 +96,6 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
             {
                 _globalLastSentAckYouStatus[userUID] = _pair.UserPair.OwnPermissions.IsAckYou();
                 _globalLastAckYouSentTime[userUID] = DateTime.MinValue;
-                _globalLastCalculatedAckYouStatus[userUID] = null;
             }
         }
     }
@@ -114,96 +110,16 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         var userUID = _pair.UserData.UID;
         var now = DateTime.UtcNow;
         
-        // Event deduplication: check if this is a duplicate event
-        lock (_globalAckYouLock)
-        {
-            if (_globalLastEventState.TryGetValue(userUID, out var lastEvent))
-            {
-                // Skip if same event within short time window
-                if (lastEvent.HasPending == message.HasPendingAcknowledgment &&
-                    lastEvent.LastSuccess == message.LastAcknowledgmentSuccess &&
-                    (now - lastEvent.LastEventTime) < MinTimeBetweenSameEvents)
-                {
-                    return;
-                }
-            }
-            
-            // Update last event state
-            _globalLastEventState[userUID] = (message.HasPendingAcknowledgment, message.LastAcknowledgmentSuccess, now);
-        }
+        // Calculate current icon status (what the UI shows)
+        // Clock icon (pending): HasPendingAcknowledgment && !string.IsNullOrEmpty(LastAcknowledgmentId)
+        // Checkmark icon (success): !HasPendingAcknowledgment && LastAcknowledgmentSuccess == true
+        bool currentClockVisible = _pair.HasPendingAcknowledgment && !string.IsNullOrEmpty(_pair.LastAcknowledgmentId);
+        bool currentCheckmarkVisible = !_pair.HasPendingAcknowledgment && (_pair.LastAcknowledgmentSuccess == true);
         
+        // Calculate new icon status based on message
         // Update cached acknowledgment status
         _cachedHasPendingAck = message.HasPendingAcknowledgment;
         _cacheInitialized = true;
-        
-        // Skip sending UserUpdateAckYou if we're processing a server update
-        // This prevents feedback loops where server pushes trigger client requests
-        if (_isProcessingServerUpdate)
-        {
-            return;
-        }
-        
-        // Calculate new AckYou status based on acknowledgment state
-        // When acknowledgment becomes pending (yellow clock), set AckYou to false
-        // When acknowledgment succeeds (green checkmark), set AckYou to true
-        // Only consider successful acknowledgments as true, everything else as false
-        bool newAckYouStatus = !message.HasPendingAcknowledgment && (message.LastAcknowledgmentSuccess == true);
-        
-        // Get current status from permissions
-        bool currentAckYouStatus = _pair.UserPair.OwnPermissions.IsAckYou();
-        
-        // Global rate limiting and change detection per user
-        
-        bool rateLimitExceeded;
-        bool alreadySentThisStatus;
-        bool calculatedStatusChanged;
-        bool statusNeedsUpdate = currentAckYouStatus != newAckYouStatus;
-        
-        lock (_globalAckYouLock)
-        {
-            _globalLastAckYouSentTime.TryGetValue(userUID, out var lastSentTime);
-            _globalLastSentAckYouStatus.TryGetValue(userUID, out var lastSentStatus);
-            _globalLastCalculatedAckYouStatus.TryGetValue(userUID, out var lastCalculatedStatus);
-            
-            rateLimitExceeded = (now - lastSentTime) < MinTimeBetweenAckYouCalls;
-            alreadySentThisStatus = lastSentStatus == newAckYouStatus;
-            calculatedStatusChanged = lastCalculatedStatus != newAckYouStatus;
-        }
-        
-        // Only send UserUpdateAckYou if:
-        // 1. The calculated status is different from current permissions (actual change needed)
-        // 2. We haven't already sent this exact status recently
-        // 3. We're not rate limited
-        // 4. The calculated status has actually changed from last calculation
-        if (statusNeedsUpdate && 
-            !alreadySentThisStatus &&
-            !rateLimitExceeded &&
-            calculatedStatusChanged)
-        {
-            lock (_globalAckYouLock)
-            {
-                _globalLastSentAckYouStatus[userUID] = newAckYouStatus;
-                _globalLastCalculatedAckYouStatus[userUID] = newAckYouStatus;
-                _globalLastAckYouSentTime[userUID] = now;
-            }
-            
-            _ = Task.Run(async () =>
-            {
-                try
-                {
-                    await _apiController.UserUpdateAckYou(newAckYouStatus);
-                }
-                catch (Exception ex)
-                {
-                    // Reset the last sent status on error so we can retry after rate limit period
-                    lock (_globalAckYouLock)
-                    {
-                        _globalLastSentAckYouStatus[userUID] = null;
-                        _globalLastCalculatedAckYouStatus[userUID] = null;
-                    }
-                }
-            });
-        }
         
         // UI will automatically update when the pair data changes
     }
@@ -285,14 +201,14 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         // No explicit redraw trigger needed for icon-only updates
     }
     
-    private void HandleReloadTimer(bool isAckOther)
+    private void HandleReloadTimer(bool isAckYou)
     {
         var userUID = _pair.UserData.UID;
         
         lock (_timerLock)
         {
-            // If AckOther is true (green eye), stop any existing timer
-            if (isAckOther)
+            // If AckYou is true (green eye), stop any existing timer
+            if (isAckYou)
             {
                 if (_reloadTimers.TryGetValue(userUID, out var existingTimer))
                 {
@@ -301,7 +217,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
                 }
             }
             // 8-second timer temporarily disabled
-            // If AckOther is false (yellow eye), start a 8-second timer
+            // If AckYou is false (yellow eye), start a 8-second timer
             /*
             else
             {
@@ -331,7 +247,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         }
         
         // Only reload if this is still our pair and it's still visible with yellow eye
-         if (_pair.UserData.UID == userUID && _pair.IsVisible && !_pair.UserPair.OwnPermissions.IsAckOther())
+         if (_pair.UserData.UID == userUID && _pair.IsVisible && !_pair.UserPair.OwnPermissions.IsAckYou())
          {
              // Execute reload last received data
              _pair.ApplyLastReceivedData(forced: true);
@@ -503,8 +419,6 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         {
             _globalLastSentAckYouStatus.Remove(_pair.UserData.UID);
             _globalLastAckYouSentTime.Remove(_pair.UserData.UID);
-            _globalLastCalculatedAckYouStatus.Remove(_pair.UserData.UID);
-            _globalLastEventState.Remove(_pair.UserData.UID);
         }
     }
 
@@ -559,15 +473,15 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         }
         else if (_pair.IsVisible)
         {
-            // Show eye icon with color based on AckOther status
-            var isAckOther = _pair.UserPair.OwnPermissions.IsAckOther();
-            var eyeColor = isAckOther ? ImGuiColors.ParsedGreen : ImGuiColors.DalamudYellow;
+            // Show eye icon with color based on partner's AckYou status
+            var partnerAckYou = _pair.UserPair.OtherPermissions.IsAckYou();
+            var eyeColor = partnerAckYou ? ImGuiColors.ParsedGreen : ImGuiColors.DalamudYellow;
             _uiSharedService.IconText(FontAwesomeIcon.Eye, eyeColor);
-            var ackStatus = isAckOther ? "acknowledges your data" : "does not acknowledge your data";
+            var ackStatus = partnerAckYou ? "acknowledges your data" : "does not acknowledge your data";
             userPairText = _pair.UserData.AliasOrUID + " is visible: " + _pair.PlayerName + Environment.NewLine + "This user " + ackStatus + Environment.NewLine + "Click to target this player";
             
-            // Handle reload timer based on AckOther status
-            HandleReloadTimer(isAckOther);
+            // Handle reload timer based on partner's AckYou status
+            HandleReloadTimer(partnerAckYou);
             
             if (ImGui.IsItemClicked())
             {

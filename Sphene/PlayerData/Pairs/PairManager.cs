@@ -585,8 +585,7 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
             hasIndividualPending = pair.HasPendingAcknowledgment;
         }
         
-        Logger.LogDebug("HasPendingAcknowledgmentForUser {user} - SenderPending: {senderPending}, IndividualPending: {individualPending}", 
-            userData.AliasOrUID, hasSenderPending, hasIndividualPending);
+        // Removed frequent debug log to reduce noise
         
         return hasSenderPending || hasIndividualPending;
     }

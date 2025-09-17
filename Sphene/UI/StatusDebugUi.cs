@@ -85,14 +85,14 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         {
             foreach (var pair in pairs)
             {
-                var ackYouStatus = pair.UserPair.OwnPermissions.IsAckYou() ? "✓" : "✗";
-                var ackOtherStatus = pair.UserPair.OwnPermissions.IsAckOther() ? "✓" : "✗";
+                var myAckYouStatus = pair.UserPair.OwnPermissions.IsAckYou() ? "✓" : "✗";
+                var partnerAckYouStatus = pair.UserPair.OtherPermissions.IsAckYou() ? "✓" : "✗";
                 
                 ImGui.Text($"  {pair.UserData.AliasOrUID} - Status: {pair.IndividualPairStatus}");
                 ImGui.SameLine();
-                UiSharedService.ColorText($" [AckYou: {ackYouStatus}]", pair.UserPair.OwnPermissions.IsAckYou() ? ImGuiColors.HealerGreen : ImGuiColors.DalamudRed);
+                UiSharedService.ColorText($" [My AckYou: {myAckYouStatus}]", pair.UserPair.OwnPermissions.IsAckYou() ? ImGuiColors.HealerGreen : ImGuiColors.DalamudRed);
                 ImGui.SameLine();
-                UiSharedService.ColorText($" [AckOther: {ackOtherStatus}]", pair.UserPair.OwnPermissions.IsAckOther() ? ImGuiColors.HealerGreen : ImGuiColors.DalamudRed);
+                UiSharedService.ColorText($" [Partner AckYou: {partnerAckYouStatus}]", pair.UserPair.OtherPermissions.IsAckYou() ? ImGuiColors.HealerGreen : ImGuiColors.DalamudRed);
                 
                 // Add toggle button for AckYou only
                 ImGui.SameLine();
@@ -101,8 +101,12 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                 if (ImGui.Button($"{ackYouButtonText}##{pair.UserData.UID}"))
                 {
                     var newAckYouValue = !currentAckYou;
-                    LogCommunication($"[DEBUG] Setting my AckYou to {newAckYouValue} (this will update {pair.UserData.AliasOrUID}'s AckOther)");
-                    _apiController.UserUpdateAckYou(newAckYouValue);
+                    LogCommunication($"[DEBUG] Setting my AckYou to {newAckYouValue} for {pair.UserData.AliasOrUID} only");
+                    
+                    // Use pair-specific permission update instead of global update
+                    var permissions = pair.UserPair.OwnPermissions;
+                    permissions.SetAckYou(newAckYouValue);
+                    _ = _apiController.UserSetPairPermissions(new(pair.UserData, permissions));
                 }
             }
         }

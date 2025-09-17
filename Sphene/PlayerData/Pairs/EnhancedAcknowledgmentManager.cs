@@ -358,17 +358,17 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
     // Timer callback to cleanup old pending acknowledgments
     private void CleanupOldAcknowledgments(object? state)
     {
-        _ = Task.Run(() =>
+        _ = Task.Run(async () =>
         {
             try
             {
                 // Cleanup old pending acknowledgments (older than 30 seconds)
                 var maxAge = TimeSpan.FromSeconds(30);
-                _sessionManager.CleanupOldPendingAcknowledgments(maxAge);
+                await _sessionManager.CleanupOldPendingAcknowledgments(maxAge);
                 
                 // Cleanup old sessions (older than 2 minutes)
                 var sessionMaxAge = TimeSpan.FromMinutes(2);
-                _sessionManager.CleanupOldSessions(sessionMaxAge);
+                await _sessionManager.CleanupOldSessions(sessionMaxAge);
                 
                 Logger.LogDebug("Completed cleanup of old acknowledgments and sessions");
             }
@@ -405,6 +405,9 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
                         Logger.LogWarning("Acknowledgment {ackId} timed out", ackId);
                         pendingAck.Acknowledgment.MarkAsFailed(AcknowledgmentErrorCode.Timeout);
                         _metrics.RecordFailure(pendingAck.Acknowledgment.Priority, AcknowledgmentErrorCode.Timeout);
+                        
+                        // Update pair acknowledgment status for timeout
+                        _sessionManager.ProcessTimeoutAcknowledgment(ackId);
                         
                         if (_config.EnableAutoRetry && pendingAck.Acknowledgment.RetryCount < _config.MaxRetryAttempts)
                         {

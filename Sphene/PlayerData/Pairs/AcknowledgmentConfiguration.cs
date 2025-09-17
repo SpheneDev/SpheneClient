@@ -179,5 +179,6 @@ public enum AcknowledgmentErrorCode
     AuthenticationFailed = 7,
     DataCorrupted = 8,
     InsufficientPermissions = 9,
-    ServiceUnavailable = 10
+    ServiceUnavailable = 10,
+    HashVerificationFailed = 11
 }
