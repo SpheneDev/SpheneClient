@@ -2156,13 +2156,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         }
         UiSharedService.AttachToolTip("Automatically retry failed acknowledgments to improve reliability.");
         
-        var enableSilent = _configService.Current.EnableSilentAcknowledgments;
-        if (ImGui.Checkbox("Enable Silent Acknowledgments", ref enableSilent))
-        {
-            _configService.Current.EnableSilentAcknowledgments = enableSilent;
-            _configService.Save();
-        }
-        UiSharedService.AttachToolTip("Send periodic acknowledgments to maintain connection health without user interaction.");
+
         
         ImGui.Spacing();
         ImGui.Separator();
@@ -2196,7 +2190,6 @@ public class SettingsUi : WindowMediatorSubscriberBase
             _configService.Current.ShowWaitingForAcknowledgmentPopups = false;
             _configService.Current.EnableAcknowledgmentBatching = true;
             _configService.Current.EnableAcknowledgmentAutoRetry = true;
-            _configService.Current.EnableSilentAcknowledgments = true;
             _configService.Current.AcknowledgmentTimeoutSeconds = 30;
             _configService.Current.AcknowledgmentNotification = NotificationLocation.Chat;
             _configService.Save();

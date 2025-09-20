@@ -28,9 +28,6 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
     
     // Hash-based acknowledgment tracking
     private readonly Dictionary<UserData, string> _lastSentHashPerUser = new();
-    private readonly Dictionary<UserData, DateTime> _lastSilentAckPerUser = new();
-    private readonly Timer _silentAcknowledgmentTimer;
-    private const int SILENT_ACK_INTERVAL_MINUTES = 1;
     
     // Delayed push tracking for newly connected users
     private readonly Dictionary<UserData, DateTime> _delayedPushUsers = new();
@@ -52,10 +49,7 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
         _sessionAcknowledgmentManager = sessionAcknowledgmentManager;
         _gameObjectHandlerFactory = gameObjectHandlerFactory;
         
-        // Initialize silent acknowledgment timer
-        _silentAcknowledgmentTimer = new Timer(SendSilentAcknowledgments, null, 
-            TimeSpan.FromMinutes(SILENT_ACK_INTERVAL_MINUTES), 
-            TimeSpan.FromMinutes(SILENT_ACK_INTERVAL_MINUTES));
+
         
         // Initialize delayed push timer for newly connected users
         _delayedPushTimer = new Timer(ProcessDelayedPushes, null, 
@@ -90,7 +84,6 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
         {
             _previouslyVisiblePlayers.Clear();
             _lastSentHashPerUser.Clear();
-            _lastSilentAckPerUser.Clear();
         });
     }
 
@@ -100,7 +93,6 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
         {
             _runtimeCts.Cancel();
             _runtimeCts.Dispose();
-            _silentAcknowledgmentTimer?.Dispose();
             _delayedPushTimer?.Dispose();
             _characterReloadTimer?.Dispose();
             _pushDataSemaphore?.Dispose();
@@ -113,6 +105,27 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
     {
         var currentHash = _lastCreatedData?.DataHash.Value;
         if (string.IsNullOrEmpty(currentHash)) return;
+        
+        // Always validate the current hash for the current user to ensure it's stored in the database
+        Task.Run(async () => {
+            try {
+                var currentUserUID = _apiController.UID;
+                if (!string.IsNullOrEmpty(currentUserUID)) {
+                    var response = await _apiController.ValidateCharaDataHash(currentUserUID, currentHash).ConfigureAwait(false);
+                    if (response != null) {
+                        Logger.LogDebug("Validated current user hash: {hash}, IsValid: {isValid}, CurrentHash: {currentHash}", 
+                            currentHash, response.IsValid, response.CurrentHash);
+                    } else {
+                        Logger.LogWarning("Hash validation returned null response for user {userUID} and hash {hash}", 
+                            currentUserUID, currentHash);
+                    }
+                } else {
+                    Logger.LogWarning("Cannot validate hash - current user UID is null or empty");
+                }
+            } catch (Exception ex) {
+                Logger.LogError(ex, "Failed to validate current user hash for {hash}", currentHash);
+            }
+        });
         
         foreach (var user in _pairManager.GetVisibleUsers())
         {
@@ -189,21 +202,51 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
                 {
                     if (_usersToPushDataTo.Count == 0) return;
                     
-                    // Generate session-aware acknowledgment ID and set pending status for all recipients from sender's perspective
-                    var acknowledgmentId = _sessionAcknowledgmentManager.GenerateAcknowledgmentId();
-                    _pairManager.SetPendingAcknowledgmentForSender([.. _usersToPushDataTo], acknowledgmentId);
+                    // Validate hashes before pushing to avoid unnecessary data transfers
+                    var usersNeedingData = new List<UserData>();
+                    var currentHash = dataToSend.DataHash.Value;
+                    
+                    foreach (var user in _usersToPushDataTo.ToList())
+                    {
+                        if (_lastSentHashPerUser.TryGetValue(user, out var lastSentHash) && !forced)
+                        {
+                            // Validate if the hash is still valid on the client side
+                            try {
+                                var validationResponse = await _apiController.ValidateCharaDataHash(user.UID, lastSentHash).ConfigureAwait(false);
+                                if (validationResponse != null && validationResponse.IsValid && lastSentHash == currentHash)
+                                {
+                                    Logger.LogTrace("Hash still valid for user {user}, skipping push", user.AliasOrUID);
+                                    continue;
+                                }
+                            }
+                            catch (Exception ex) {
+                                Logger.LogWarning(ex, "Hash validation failed for user {user}, proceeding with push", user.AliasOrUID);
+                            }
+                        }
+                        
+                        usersNeedingData.Add(user);
+                    }
+                    
+                    if (usersNeedingData.Count == 0)
+                    {
+                        Logger.LogDebug("No users need data push after hash validation");
+                        _usersToPushDataTo.Clear();
+                        return;
+                    }
+                    
+                    // Create hash key for acknowledgment tracking
+                    var hashKey = dataToSend.DataHash.Value;
+                    _pairManager.SetPendingAcknowledgmentForSender([.. usersNeedingData], hashKey);
                     
                     // Track the hash sent to each user
-                    var currentHash = dataToSend.DataHash.Value;
-                    foreach (var user in _usersToPushDataTo)
+                    foreach (var user in usersNeedingData)
                     {
                         _lastSentHashPerUser[user] = currentHash;
-                        _lastSilentAckPerUser[user] = DateTime.UtcNow;
                         Logger.LogTrace("Updated hash tracking for user {user}: {hash}", user.AliasOrUID, currentHash);
                     }
                     
-                    Logger.LogDebug("Pushing {data} to {users} with acknowledgment ID {ackId}", dataToSend.DataHash, string.Join(", ", _usersToPushDataTo.Select(k => k.AliasOrUID)), acknowledgmentId);
-                    await _apiController.PushCharacterData(dataToSend, [.. _usersToPushDataTo], acknowledgmentId).ConfigureAwait(false);
+                    Logger.LogDebug("Pushing {data} to {users} with hash key {hashKey}", dataToSend.DataHash, string.Join(", ", usersNeedingData.Select(k => k.AliasOrUID)), hashKey);
+                    await _apiController.PushCharacterData(dataToSend, [.. usersNeedingData], hashKey).ConfigureAwait(false);
                     _usersToPushDataTo.Clear();
                 }
                 finally
@@ -215,82 +258,7 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
     }
     
     
-    /// Sends silent acknowledgments for users who have the same hash for more than 1 minute
-    /// This maintains connection health without unnecessary data transfers
-    
-    private void SendSilentAcknowledgments(object? state)
-    {
-        // Schedule the actual work on the framework thread to avoid threading issues
-        _ = Task.Run(() =>
-        {
-            try
-            {
-                _dalamudUtil.RunOnFrameworkThread(() =>
-                {
-                    ProcessSilentAcknowledgments();
-                });
-            }
-            catch (Exception ex)
-            {
-                Logger.LogWarning(ex, "Failed to schedule silent acknowledgments on framework thread");
-            }
-        });
-    }
-    
-    
-    /// Processes silent acknowledgments on the framework thread
-    
-    private void ProcessSilentAcknowledgments()
-    {
-        if (!_dalamudUtil.GetIsPlayerPresent() || !_apiController.IsConnected || _lastCreatedData == null)
-            return;
-            
-        var currentTime = DateTime.UtcNow;
-        var currentHash = _lastCreatedData.DataHash.Value;
-        var usersForSilentAck = new List<UserData>();
-        
-        foreach (var user in _pairManager.GetVisibleUsers())
-        {
-            // Check if user has the current hash and hasn't received a silent ack recently
-            if (_lastSentHashPerUser.TryGetValue(user, out var userHash) && 
-                string.Equals(userHash, currentHash, StringComparison.Ordinal))
-            {
-                if (_lastSilentAckPerUser.TryGetValue(user, out var lastSilentAck))
-                {
-                    var timeSinceLastAck = currentTime - lastSilentAck;
-                    if (timeSinceLastAck.TotalMinutes >= SILENT_ACK_INTERVAL_MINUTES)
-                    {
-                        usersForSilentAck.Add(user);
-                    }
-                }
-            }
-        }
-        
-        if (usersForSilentAck.Count > 0)
-        {
-            Logger.LogTrace("Sending silent acknowledgment to {count} users with hash {hash}", 
-                usersForSilentAck.Count, currentHash);
-                
-            _ = Task.Run(async () =>
-            {
-                try
-                {
-                    // Send silent acknowledgment without requiring response
-                    await _apiController.PushCharacterData(_lastCreatedData, usersForSilentAck, null).ConfigureAwait(false);
-                    
-                    // Update silent ack timestamps
-                    foreach (var user in usersForSilentAck)
-                    {
-                        _lastSilentAckPerUser[user] = currentTime;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Logger.LogWarning(ex, "Failed to send silent acknowledgments");
-                }
-            });
-        }
-    }
+
     
     /// Processes delayed pushes for newly connected users after the stabilization period
     

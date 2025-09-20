@@ -37,9 +37,7 @@ public class AcknowledgmentConfiguration
     public int BatchTimeoutMs { get; set; } = 5000;
     
     
-    /// Interval for silent acknowledgments in minutes
-    
-    public int SilentAcknowledgmentIntervalMinutes { get; set; } = 1;
+
     
     
     /// Maximum number of pending acknowledgments per user
@@ -57,9 +55,7 @@ public class AcknowledgmentConfiguration
     public bool EnableAutoRetry { get; set; } = true;
     
     
-    /// Enable or disable silent acknowledgments
-    
-    public bool EnableSilentAcknowledgments { get; set; } = true;
+
     
     
     /// Enable or disable priority-based acknowledgment processing
@@ -119,8 +115,7 @@ public class AcknowledgmentConfiguration
         if (BatchTimeoutMs <= 0)
             throw new ArgumentException("BatchTimeoutMs must be greater than 0");
             
-        if (SilentAcknowledgmentIntervalMinutes <= 0)
-            throw new ArgumentException("SilentAcknowledgmentIntervalMinutes must be greater than 0");
+
             
         if (MaxPendingAcknowledgmentsPerUser <= 0)
             throw new ArgumentException("MaxPendingAcknowledgmentsPerUser must be greater than 0");

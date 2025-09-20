@@ -61,15 +61,7 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
         return $"session_{timestamp}_{counter}";
     }
     
-    // Generate session-aware acknowledgment ID
-    public string GenerateAcknowledgmentId()
-    {
-        var baseId = Guid.NewGuid().ToString();
-        var sessionAwareId = $"{_currentSessionId}_{baseId}";
-        
-        _logger.LogDebug("Generated session-aware acknowledgment ID: {ackId}", sessionAwareId);
-        return sessionAwareId;
-    }
+
     
     // Extract session ID from acknowledgment ID
     public static string? ExtractSessionId(string acknowledgmentId)
@@ -85,64 +77,61 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
         return null;
     }
     
-    // Check if acknowledgment ID belongs to current session
-    public bool IsCurrentSession(string acknowledgmentId)
+    // Check if acknowledgment ID is valid hash+version format
+    public bool IsValidHashVersion(string hashVersionKey)
     {
-        var sessionId = ExtractSessionId(acknowledgmentId);
-        return sessionId == _currentSessionId;
+        return !string.IsNullOrEmpty(hashVersionKey) && hashVersionKey.Contains('_');
     }
     
-    // Set pending acknowledgment for current session - only latest per user
-    public void SetPendingAcknowledgmentForSession(List<UserData> recipients, string acknowledgmentId)
+    // Set pending acknowledgment for hash-based system - only latest per user
+    public void SetPendingAcknowledgmentForHashVersion(List<UserData> recipients, string hashVersionKey)
     {
-        if (!IsCurrentSession(acknowledgmentId))
+        if (string.IsNullOrEmpty(hashVersionKey))
         {
-            _logger.LogWarning("Attempted to set pending acknowledgment for different session. AckId: {ackId}, CurrentSession: {currentSession}", 
-                acknowledgmentId, _currentSessionId);
+            _logger.LogWarning("Invalid hash version key: {hashVersionKey}", hashVersionKey);
             return;
         }
         
-        // Process each recipient individually - store only latest AckId per user
+        // Process each recipient individually - store only latest hash+version per user
         foreach (var recipient in recipients)
         {
-            ProcessLatestAcknowledgment(recipient, acknowledgmentId);
+            ProcessLatestAcknowledgment(recipient, hashVersionKey);
         }
     }
     
     // Process latest acknowledgment for a single recipient
-    private void ProcessLatestAcknowledgment(UserData recipient, string acknowledgmentId)
+    private void ProcessLatestAcknowledgment(UserData recipient, string hashVersionKey)
     {
-        var sessionId = ExtractSessionId(acknowledgmentId);
-        if (string.IsNullOrEmpty(sessionId))
+        if (string.IsNullOrEmpty(hashVersionKey))
         {
-            _logger.LogWarning("Invalid acknowledgment ID format: {ackId}", acknowledgmentId);
+            _logger.LogWarning("Invalid hash version key: {hashVersionKey}", hashVersionKey);
             return;
         }
         
         var userKey = recipient.UID;
         
         // Store only the latest acknowledgment for this user
-        var latestInfo = new LatestAcknowledgmentInfo(acknowledgmentId);
+        var latestInfo = new LatestAcknowledgmentInfo(hashVersionKey);
         
         var oldInfo = _userLatestAcknowledgments.AddOrUpdate(
             userKey,
             latestInfo,
             (key, existing) => latestInfo);
         
-        if (oldInfo != null && oldInfo.AcknowledgmentId != acknowledgmentId)
+        if (oldInfo != null && oldInfo.AcknowledgmentId != hashVersionKey)
         {
-            _logger.LogDebug("Replaced acknowledgment {oldAckId} with {newAckId} for user {user}", 
-                oldInfo.AcknowledgmentId, acknowledgmentId, userKey);
+            _logger.LogDebug("Replaced acknowledgment {oldHashVersion} with {newHashVersion} for user {user}", 
+                oldInfo.AcknowledgmentId, hashVersionKey, userKey);
         }
         else
         {
-            _logger.LogDebug("Added pending acknowledgment {ackId} for user {user} in session {sessionId}", 
-                acknowledgmentId, userKey, sessionId);
+            _logger.LogDebug("Added pending acknowledgment {hashVersionKey} for user {user}", 
+                hashVersionKey, userKey);
         }
         
         // Add notification for pending acknowledgment
         _messageService.AddTaggedMessage(
-            $"ack_{acknowledgmentId}",
+            $"ack_{hashVersionKey}",
             $"Waiting for acknowledgment from {recipient.AliasOrUID}",
             NotificationType.Info,
             "Acknowledgment Pending",
@@ -151,7 +140,7 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
         
         // Publish acknowledgment pending event
         Mediator.Publish(new AcknowledgmentPendingMessage(
-            acknowledgmentId,
+            hashVersionKey,
             recipient,
             DateTime.UtcNow
         ));
@@ -177,13 +166,12 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
         return 0;
     }
     
-    // Process received acknowledgment for any session
-    public bool ProcessReceivedAcknowledgment(string acknowledgmentId, UserData acknowledgingUser)
+    // Process received acknowledgment for hash-based system
+    public bool ProcessReceivedAcknowledgment(string hashVersionKey, UserData acknowledgingUser)
     {
-        var sessionId = ExtractSessionId(acknowledgmentId);
-        if (sessionId == null)
+        if (string.IsNullOrEmpty(hashVersionKey))
         {
-            _logger.LogWarning("Could not extract session ID from acknowledgment ID: {ackId}", acknowledgmentId);
+            _logger.LogWarning("Invalid hash version key: {hashVersionKey}", hashVersionKey);
             return false;
         }
         
@@ -191,9 +179,9 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
         
         // Check if this acknowledgment matches the latest one for this user
         if (!_userLatestAcknowledgments.TryGetValue(userKey, out var latestInfo) || 
-            latestInfo.AcknowledgmentId != acknowledgmentId)
+            latestInfo.AcknowledgmentId != hashVersionKey)
         {
-            _logger.LogDebug("Acknowledgment {ackId} from {user} is not the latest or not found", acknowledgmentId, acknowledgingUser.AliasOrUID);
+            _logger.LogDebug("Acknowledgment {hashVersionKey} from {user} is not the latest or not found", hashVersionKey, acknowledgingUser.AliasOrUID);
             return false;
         }
         
@@ -204,12 +192,12 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
         var pair = _getPairFunc(acknowledgingUser);
         if (pair != null)
         {
-            pair.UpdateAcknowledgmentStatus(acknowledgmentId, true, DateTimeOffset.UtcNow);
-            _logger.LogInformation("Updated pair acknowledgment status for user {user} - AckId: {ackId}", acknowledgingUser.AliasOrUID, acknowledgmentId);
+            pair.UpdateAcknowledgmentStatus(hashVersionKey, true, DateTimeOffset.UtcNow);
+            _logger.LogInformation("Updated pair acknowledgment status for user {user} - HashVersion: {hashVersionKey}", acknowledgingUser.AliasOrUID, hashVersionKey);
             
             // Add success notification
             _messageService.AddTaggedMessage(
-                $"ack_success_{acknowledgmentId}_{acknowledgingUser.UID}",
+                $"ack_success_{hashVersionKey}_{acknowledgingUser.UID}",
                 $"Acknowledgment received from {acknowledgingUser.AliasOrUID}",
                 NotificationType.Success,
                 "Acknowledgment Received",
@@ -218,7 +206,7 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
             
             // Publish acknowledgment received event
             Mediator.Publish(new AcknowledgmentReceivedMessage(
-                acknowledgmentId,
+                hashVersionKey,
                 acknowledgingUser,
                 DateTime.UtcNow
             ));
@@ -228,15 +216,15 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
             _logger.LogWarning("Could not find pair for user {user} to update acknowledgment status", acknowledgingUser.AliasOrUID);
         }
         
-        _logger.LogInformation("Processed acknowledgment from {user} for ID {ackId}", 
-            acknowledgingUser.AliasOrUID, acknowledgmentId);
+        _logger.LogInformation("Processed acknowledgment from {user} for HashVersion {hashVersionKey}", 
+            acknowledgingUser.AliasOrUID, hashVersionKey);
         
         // Clean up pending acknowledgment notification
-        _messageService.CleanTaggedMessages($"ack_{acknowledgmentId}");
+        _messageService.CleanTaggedMessages($"ack_{hashVersionKey}");
         
         // Add completion notification
         _messageService.AddTaggedMessage(
-            $"ack_complete_{acknowledgmentId}",
+            $"ack_complete_{hashVersionKey}",
             "Acknowledgment received successfully",
             NotificationType.Success,
             "Acknowledgment Complete",
@@ -245,14 +233,14 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
         
         // Publish batch completion event
         Mediator.Publish(new AcknowledgmentBatchCompletedMessage(
-            acknowledgmentId,
+            hashVersionKey,
             new List<UserData> { acknowledgingUser },
             DateTime.UtcNow
         ));
         
         // Publish granular UI refresh for this specific acknowledgment
         Mediator.Publish(new AcknowledgmentUiRefreshMessage(
-            AcknowledgmentId: acknowledgmentId,
+            AcknowledgmentId: hashVersionKey,
             User: acknowledgingUser
         ));
         
@@ -412,9 +400,7 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
         {
             var userKey = userKvp.Key;
             var latestInfo = userKvp.Value;
-            var sessionId = ExtractSessionId(latestInfo.AcknowledgmentId);
-            
-            var statusText = $"User: {userKey}, AckId: {latestInfo.AcknowledgmentId}, Session: {sessionId ?? "unknown"}, Created: {latestInfo.CreatedAt}";
+            var statusText = $"User: {userKey}, HashVersion: {latestInfo.AcknowledgmentId}, Created: {latestInfo.CreatedAt}";
             statuses.Add(statusText);
         }
         
@@ -438,20 +424,19 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
     
     public string CurrentSessionId => _currentSessionId;
     // Process timeout acknowledgment - mark as failed and update pair status
-    public void ProcessTimeoutAcknowledgment(string acknowledgmentId)
+    public void ProcessTimeoutAcknowledgment(string hashVersionKey)
     {
-        var sessionId = ExtractSessionId(acknowledgmentId);
-        if (sessionId == null)
+        if (string.IsNullOrEmpty(hashVersionKey))
         {
-            _logger.LogWarning("Could not extract session ID from timeout acknowledgment ID: {ackId}", acknowledgmentId);
+            _logger.LogWarning("Invalid hash version key for timeout: {hashVersionKey}", hashVersionKey);
             return;
         }
         
-        // Find and remove any pending acknowledgments with this ID
+        // Find and remove any pending acknowledgments with this hash+version
         var timedOutUsers = new List<string>();
         foreach (var kvp in _userLatestAcknowledgments)
         {
-            if (kvp.Value.AcknowledgmentId == acknowledgmentId)
+            if (kvp.Value.AcknowledgmentId == hashVersionKey)
             {
                 timedOutUsers.Add(kvp.Key);
             }
@@ -466,12 +451,12 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
                 var pair = _getPairFunc(userData);
                 if (pair != null)
                 {
-                    pair.UpdateAcknowledgmentStatus(acknowledgmentId, false, DateTimeOffset.UtcNow);
-                    _logger.LogWarning("Updated pair acknowledgment status for timeout - User: {user}, AckId: {ackId}", userKey, acknowledgmentId);
+                    pair.UpdateAcknowledgmentStatus(hashVersionKey, false, DateTimeOffset.UtcNow);
+                    _logger.LogWarning("Updated pair acknowledgment status for timeout - User: {user}, HashVersion: {hashVersionKey}", userKey, hashVersionKey);
                     
                     // Add timeout notification
                     _messageService.AddTaggedMessage(
-                        $"ack_timeout_{acknowledgmentId}_{userKey}",
+                        $"ack_timeout_{hashVersionKey}_{userKey}",
                         $"Acknowledgment timed out for user {userKey}",
                         NotificationType.Warning,
                         "Acknowledgment Timeout",
@@ -480,7 +465,7 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
                     
                     // Publish timeout event
                     Mediator.Publish(new AcknowledgmentTimeoutMessage(
-                        acknowledgmentId,
+                        hashVersionKey,
                         userData,
                         DateTime.UtcNow
                     ));

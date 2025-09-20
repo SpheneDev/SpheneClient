@@ -245,13 +245,7 @@ public class AcknowledgmentMonitorUI : WindowMediatorSubscriberBase
         }
         UiSharedService.AttachToolTip("Automatically retry failed acknowledgments");
         
-        ImGui.SameLine();
-        var enableSilentAck = _config.EnableSilentAcknowledgments;
-        if (ImGui.Checkbox("Silent Acks", ref enableSilentAck))
-        {
-            _config.EnableSilentAcknowledgments = enableSilentAck;
-        }
-        UiSharedService.AttachToolTip("Send periodic acknowledgments to maintain connection health");
+
         
         // Timeout settings
         var defaultTimeout = _config.DefaultTimeoutSeconds;
@@ -360,15 +354,7 @@ public class AcknowledgmentMonitorUI : WindowMediatorSubscriberBase
             _config.CacheExpirationMinutes = cacheExpiration;
         }
         
-        // Silent acknowledgment settings
-        if (_config.EnableSilentAcknowledgments)
-        {
-            var silentInterval = _config.SilentAcknowledgmentIntervalMinutes;
-            if (ImGui.SliderInt("Silent Ack Interval (min)", ref silentInterval, 1, 30))
-            {
-                _config.SilentAcknowledgmentIntervalMinutes = silentInterval;
-            }
-        }
+
         
         // Performance settings
         var maxPending = _config.MaxPendingAcknowledgmentsPerUser;

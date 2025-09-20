@@ -113,7 +113,7 @@ public sealed class FileUploadManager : DisposableMediatorSubscriberBase
         if (unverifiedUploads.Any())
         {
             await UploadUnverifiedFiles(unverifiedUploads, visiblePlayers, uploadToken).ConfigureAwait(false);
-            Logger.LogInformation("Upload complete for {hash}", data.DataHash.Value);
+            Logger.LogDebug("Upload complete for {hash}", data.DataHash.Value);
         }
 
         foreach (var kvp in data.FileReplacements)
@@ -132,8 +132,8 @@ public sealed class FileUploadManager : DisposableMediatorSubscriberBase
 
     private async Task<List<UploadFileDto>> FilesSend(List<string> hashes, List<string> uids, CancellationToken ct)
     {
-        Logger.LogInformation("[DEBUG] FilesSend called - IsInitialized: {isInitialized}, FilesCdnUri: {filesCdnUri}", _orchestrator.IsInitialized, _orchestrator.FilesCdnUri);
-        Logger.LogInformation("[DEBUG] Server connection status: {serverState}", _serverManager.CurrentServer?.ServerName ?? "No server");
+        Logger.LogDebug("FilesSend called - IsInitialized: {isInitialized}, FilesCdnUri: {filesCdnUri}", _orchestrator.IsInitialized, _orchestrator.FilesCdnUri);
+        Logger.LogDebug("Server connection status: {serverState}", _serverManager.CurrentServer?.ServerName ?? "No server");
         if (!_orchestrator.IsInitialized) 
         {
             Logger.LogError("[DEBUG] FileTransferManager is not initialized! FilesCdnUri: {filesCdnUri}, Server: {server}", _orchestrator.FilesCdnUri, _serverManager.CurrentServer?.ServerName ?? "No server");

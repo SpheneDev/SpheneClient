@@ -194,7 +194,7 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
             _pendingAcknowledgments[acknowledgment.AcknowledgmentId] = pendingAck;
             
             // Convert to legacy DTO for API compatibility
-            var legacyDto = new CharacterDataAcknowledgmentDto(acknowledgment.User, acknowledgment.AcknowledgmentId)
+            var legacyDto = new CharacterDataAcknowledgmentDto(acknowledgment.User, acknowledgment.DataHash)
             {
                 Success = acknowledgment.Success,
                 AcknowledgedAt = acknowledgment.AcknowledgedAt
@@ -518,7 +518,7 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
     {
         var enhancedAck = new EnhancedAcknowledgmentDto(
             message.AcknowledgmentDto.User, 
-            message.AcknowledgmentDto.AcknowledgmentId)
+            message.AcknowledgmentDto.DataHash)
         {
             Success = message.AcknowledgmentDto.Success,
             AcknowledgedAt = message.AcknowledgmentDto.AcknowledgedAt
@@ -530,8 +530,8 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
         if (success)
         {
             Mediator.Publish(new RefreshUiMessage());
-            Logger.LogDebug("Published UI refresh message after successful acknowledgment {ackId}", 
-                message.AcknowledgmentDto.AcknowledgmentId);
+            Logger.LogDebug("Published UI refresh message after successful acknowledgment Hash: {hash}", 
+                message.AcknowledgmentDto.DataHash[..Math.Min(8, message.AcknowledgmentDto.DataHash.Length)]);
         }
     }
     

@@ -8,7 +8,7 @@ namespace Sphene.PlayerData.Pairs;
 /// Enhanced acknowledgment DTO with priority and error handling
 public class EnhancedAcknowledgmentDto
 {
-    public string AcknowledgmentId { get; set; } = string.Empty;
+    public string DataHash { get; set; } = string.Empty;
     public UserData User { get; set; } = null!;
     public bool Success { get; set; }
     public DateTime AcknowledgedAt { get; set; }
@@ -19,6 +19,9 @@ public class EnhancedAcknowledgmentDto
     public DateTime? NextRetryAt { get; set; }
     public Dictionary<string, object>? Metadata { get; set; }
     
+    // Computed property for backward compatibility
+    public string AcknowledgmentId => DataHash;
+    
     
     /// Creates a new enhanced acknowledgment DTO
     
@@ -27,10 +30,10 @@ public class EnhancedAcknowledgmentDto
     
     /// Creates a new enhanced acknowledgment DTO from existing data
     
-    public EnhancedAcknowledgmentDto(UserData user, string acknowledgmentId, AcknowledgmentPriority priority = AcknowledgmentPriority.Medium)
+    public EnhancedAcknowledgmentDto(UserData user, string dataHash, AcknowledgmentPriority priority = AcknowledgmentPriority.Medium)
     {
         User = user;
-        AcknowledgmentId = acknowledgmentId;
+        DataHash = dataHash;
         Priority = priority;
         AcknowledgedAt = DateTime.UtcNow;
     }

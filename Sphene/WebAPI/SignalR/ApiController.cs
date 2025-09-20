@@ -21,8 +21,14 @@ namespace Sphene.WebAPI;
 #pragma warning disable MA0040
 public sealed partial class ApiController : DisposableMediatorSubscriberBase, ISpheneHubClient
 {
+
+#if DEBUG
+    public const string MainServer = "Sphene Debug Server";
+    public const string MainServiceUri = "ws://sphene.dynip.online:6000";
+#else
     public const string MainServer = "Sphene Server";
     public const string MainServiceUri = "ws://sphene.online:6000";
+#endif
 
     private readonly DalamudUtilService _dalamudUtil;
     private readonly HubFactory _hubFactory;

@@ -135,10 +135,11 @@ public partial class ApiController
 
     public Task Client_UserReceiveCharacterDataAcknowledgment(CharacterDataAcknowledgmentDto acknowledgmentDto)
     {
-        Logger.LogInformation("Client_UserReceiveCharacterDataAcknowledgment received from server - AckId: {acknowledgmentId}, User: {user}, Success: {success}", 
-            acknowledgmentDto.AcknowledgmentId, acknowledgmentDto.User.AliasOrUID, acknowledgmentDto.Success);
+        Logger.LogInformation("Client_UserReceiveCharacterDataAcknowledgment received from server - Hash: {hash}, User: {user}, Success: {success}", 
+            acknowledgmentDto.DataHash[..Math.Min(8, acknowledgmentDto.DataHash.Length)], acknowledgmentDto.User.AliasOrUID, acknowledgmentDto.Success);
         ExecuteSafely(() => _pairManager.ReceiveCharacterDataAcknowledgment(acknowledgmentDto));
-        Logger.LogInformation("Successfully processed acknowledgment callback for AckId: {acknowledgmentId}", acknowledgmentDto.AcknowledgmentId);
+        Logger.LogInformation("Successfully processed acknowledgment callback for Hash: {hash}", 
+            acknowledgmentDto.DataHash[..Math.Min(8, acknowledgmentDto.DataHash.Length)]);
         return Task.CompletedTask;
     }
 

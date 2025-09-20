@@ -1,5 +1,6 @@
 using Sphene.API.Data;
 using Sphene.API.Dto.CharaData;
+using Sphene.API.Dto.User;
 using Sphene.Services.CharaData.Models;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Logging;
@@ -68,6 +69,57 @@ public partial class ApiController
         {
             Logger.LogWarning(ex, "Failed to get meta info for chara data {id}", id);
             return null;
+        }
+    }
+    
+    public async Task<CharacterDataHashValidationResponse?> ValidateCharaDataHash(string userUid, string dataHash)
+    {
+        if (!IsConnected) 
+        {
+            Logger.LogWarning("Cannot validate hash - not connected to server");
+            return new CharacterDataHashValidationResponse
+            {
+                IsValid = true,
+                CurrentHash = dataHash
+            };
+        }
+
+        try
+        {
+            var request = new CharacterDataHashValidationRequest
+            {
+                UserUID = userUid,
+                DataHash = dataHash
+            };
+            
+            Logger.LogDebug("Validating chara data hash for user {userUid}", userUid);
+            Logger.LogDebug("About to call ValidateCharaDataHash hub method with request: UserUID={UserUID}, DataHash={DataHash}", request.UserUID, request.DataHash);
+            var response = await _spheneHub!.InvokeAsync<CharacterDataHashValidationResponse>("ValidateCharaDataHash", request).ConfigureAwait(false);
+            Logger.LogDebug("ValidateCharaDataHash hub method call completed");
+            
+            if (response == null)
+            {
+                Logger.LogWarning("Received null response from server for hash validation");
+                return new CharacterDataHashValidationResponse
+                {
+                    IsValid = true,
+                    CurrentHash = dataHash
+                };
+            }
+            
+            Logger.LogDebug("Hash validation response: IsValid={IsValid}, CurrentHash={CurrentHash}", 
+                response.IsValid, response.CurrentHash);
+            return response;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to validate chara data hash for user {userUid} - Exception Type: {exceptionType}, Message: {message} - returning fallback response", 
+                userUid, ex.GetType().Name, ex.Message);
+            return new CharacterDataHashValidationResponse
+            {
+                IsValid = true,
+                CurrentHash = dataHash
+            };
         }
     }
 
@@ -189,6 +241,8 @@ public partial class ApiController
 
         try
         {
+            // No hash validation here - we'll rely on the VisibleUserDataDistributor to handle this
+            
             Logger.LogDebug("Sending Chara Data to GPose Lobby");
             await _spheneHub!.InvokeAsync(nameof(GposeLobbyPushCharacterData), charaDownloadDto).ConfigureAwait(false);
         }

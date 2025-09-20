@@ -119,23 +119,26 @@ public partial class ApiController
 
     public async Task UserSendCharacterDataAcknowledgment(CharacterDataAcknowledgmentDto acknowledgmentDto)
     {
-        Logger.LogInformation("UserSendCharacterDataAcknowledgment called - AckId: {acknowledgmentId}, User: {user}, Success: {success}, Connected: {connected}", 
-            acknowledgmentDto.AcknowledgmentId, acknowledgmentDto.User.AliasOrUID, acknowledgmentDto.Success, IsConnected);
+        Logger.LogInformation("UserSendCharacterDataAcknowledgment called - Hash: {hash}, User: {user}, Success: {success}, Connected: {connected}", 
+            acknowledgmentDto.DataHash[..Math.Min(8, acknowledgmentDto.DataHash.Length)], acknowledgmentDto.User.AliasOrUID, acknowledgmentDto.Success, IsConnected);
         
         if (!IsConnected) 
         {
-            Logger.LogWarning("Cannot send acknowledgment - not connected to server. AckId: {acknowledgmentId}", acknowledgmentDto.AcknowledgmentId);
+            Logger.LogWarning("Cannot send acknowledgment - not connected to server. Hash: {hash}", 
+                acknowledgmentDto.DataHash[..Math.Min(8, acknowledgmentDto.DataHash.Length)]);
             return;
         }
         
         try
         {
             await _spheneHub!.SendAsync(nameof(UserSendCharacterDataAcknowledgment), acknowledgmentDto).ConfigureAwait(false);
-            Logger.LogInformation("Successfully sent acknowledgment to server - AckId: {acknowledgmentId}", acknowledgmentDto.AcknowledgmentId);
+            Logger.LogInformation("Successfully sent acknowledgment to server - Hash: {hash}", 
+                acknowledgmentDto.DataHash[..Math.Min(8, acknowledgmentDto.DataHash.Length)]);
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Failed to send acknowledgment to server - AckId: {acknowledgmentId}", acknowledgmentDto.AcknowledgmentId);
+            Logger.LogError(ex, "Failed to send acknowledgment to server - Hash: {hash}", 
+                acknowledgmentDto.DataHash[..Math.Min(8, acknowledgmentDto.DataHash.Length)]);
         }
     }
 
@@ -161,7 +164,7 @@ public partial class ApiController
             Logger.LogDebug("Attaching Census Data: {data}", censusDto);
         }
 
-        await UserPushData(new(visibleCharacters, character, censusDto) { AcknowledgmentId = acknowledgmentId }).ConfigureAwait(false);
+        await UserPushData(new(visibleCharacters, character, censusDto)).ConfigureAwait(false);
     }
 }
 #pragma warning restore MA0040

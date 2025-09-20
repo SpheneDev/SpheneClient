@@ -76,6 +76,11 @@ public class Pair : DisposableMediatorSubscriberBase
 
     public UserFullPairDto UserPair { get; set; }
     private PairHandler? CachedPlayer { get; set; }
+    
+    public string? GetCurrentDataHash()
+    {
+        return LastReceivedCharacterData?.DataHash?.Value;
+    }
 
     public void AddContextMenu(IMenuOpenedArgs args)
     {
@@ -187,13 +192,14 @@ public class Pair : DisposableMediatorSubscriberBase
                     ApplyLastReceivedData();
                     
                     // Enqueue acknowledgment data for delayed sending after application completes
-                    if (data.RequiresAcknowledgment && !string.IsNullOrEmpty(data.AcknowledgmentId))
+                    if (data.RequiresAcknowledgment && !string.IsNullOrEmpty(data.DataHash))
                     {
                         // Add sequence number to track order
                         var dataWithSequence = data.DeepClone();
                         dataWithSequence.SequenceNumber = currentSequence;
                         _pendingAcknowledgmentQueue.Enqueue(dataWithSequence);
-                        Logger.LogInformation("Enqueued pending acknowledgment data for delayed sending (delayed path) - AckId: {acknowledgmentId}, Sequence: {sequence}", data.AcknowledgmentId, currentSequence);
+                        Logger.LogInformation("Enqueued pending acknowledgment data for delayed sending (delayed path) - Hash: {hash}, Sequence: {sequence}", 
+                            data.DataHash[..Math.Min(8, data.DataHash.Length)], currentSequence);
                     }
                 }
                 else
@@ -207,13 +213,14 @@ public class Pair : DisposableMediatorSubscriberBase
         ApplyLastReceivedData();
         
         // Enqueue acknowledgment data for delayed sending after application completes
-        if (data.RequiresAcknowledgment && !string.IsNullOrEmpty(data.AcknowledgmentId))
+        if (data.RequiresAcknowledgment && !string.IsNullOrEmpty(data.DataHash))
         {
             // Add sequence number to track order
             var dataWithSequence = data.DeepClone();
             dataWithSequence.SequenceNumber = currentSequence;
             _pendingAcknowledgmentQueue.Enqueue(dataWithSequence);
-            Logger.LogInformation("Enqueued pending acknowledgment data for delayed sending - AckId: {acknowledgmentId}, Sequence: {sequence}, Queue size: {queueSize}", data.AcknowledgmentId, currentSequence, _pendingAcknowledgmentQueue.Count);
+            Logger.LogInformation("Enqueued pending acknowledgment data for delayed sending - Hash: {hash}, Sequence: {sequence}, Queue size: {queueSize}", 
+                data.DataHash[..Math.Min(8, data.DataHash.Length)], currentSequence, _pendingAcknowledgmentQueue.Count);
         }
     }
 
@@ -390,7 +397,7 @@ public class Pair : DisposableMediatorSubscriberBase
 
     public async Task SetPendingAcknowledgment(string acknowledgmentId)
     {
-        Logger.LogInformation("Setting pending acknowledgment: {acknowledgmentId} for user {user}", acknowledgmentId, UserData.AliasOrUID);
+        Logger.LogDebug("Setting pending acknowledgment: {acknowledgmentId} for user {user}", acknowledgmentId, UserData.AliasOrUID);
         LastAcknowledgmentId = acknowledgmentId;
         HasPendingAcknowledgment = true;
         LastAcknowledgmentSuccess = null;
@@ -589,13 +596,13 @@ public class Pair : DisposableMediatorSubscriberBase
 
     private async Task SendAcknowledgmentIfRequired(OnlineUserCharaDataDto data, bool success, bool hashVerificationPassed = true)
     {
-        Logger.LogInformation("SendAcknowledgmentIfRequired called - RequiresAcknowledgment: {requires}, AcknowledgmentId: {id}, Success: {success}, HashVerification: {hashVerification}", 
-            data.RequiresAcknowledgment, data.AcknowledgmentId, success, hashVerificationPassed);
+        Logger.LogInformation("SendAcknowledgmentIfRequired called - RequiresAcknowledgment: {requires}, Hash: {hash}, Success: {success}, HashVerification: {hashVerification}", 
+            data.RequiresAcknowledgment, data.DataHash[..Math.Min(8, data.DataHash.Length)], success, hashVerificationPassed);
         
-        if (!data.RequiresAcknowledgment || string.IsNullOrEmpty(data.AcknowledgmentId))
+        if (!data.RequiresAcknowledgment || string.IsNullOrEmpty(data.DataHash))
         {
-            Logger.LogInformation("Skipping acknowledgment - RequiresAcknowledgment: {requires}, AcknowledgmentId null/empty: {empty}", 
-                data.RequiresAcknowledgment, string.IsNullOrEmpty(data.AcknowledgmentId));
+            Logger.LogInformation("Skipping acknowledgment - RequiresAcknowledgment: {requires}, DataHash null/empty: {empty}", 
+                data.RequiresAcknowledgment, string.IsNullOrEmpty(data.DataHash));
             return;
         }
 
@@ -616,7 +623,7 @@ public class Pair : DisposableMediatorSubscriberBase
                 errorMessage = "Data hash verification failed - data integrity compromised";
             }
             
-            var acknowledgmentDto = new CharacterDataAcknowledgmentDto(UserData, data.AcknowledgmentId)
+            var acknowledgmentDto = new CharacterDataAcknowledgmentDto(UserData, data.DataHash)
             {
                 Success = finalSuccess,
                 ErrorCode = errorCode,
@@ -624,16 +631,18 @@ public class Pair : DisposableMediatorSubscriberBase
                 AcknowledgedAt = DateTime.UtcNow
             };
 
-            Logger.LogInformation("Sending acknowledgment to server - AckId: {acknowledgmentId}, User: {user}, Success: {success}, ErrorCode: {errorCode}", 
-                data.AcknowledgmentId, UserData.AliasOrUID, finalSuccess, errorCode);
+            Logger.LogInformation("Sending acknowledgment to server - Hash: {hash}, User: {user}, Success: {success}, ErrorCode: {errorCode}", 
+                data.DataHash[..Math.Min(8, data.DataHash.Length)], UserData.AliasOrUID, finalSuccess, errorCode);
 
             // Send acknowledgment through the mediator
              Mediator.Publish(new SendCharacterDataAcknowledgmentMessage(acknowledgmentDto));
-            Logger.LogInformation("Successfully published SendCharacterDataAcknowledgmentMessage for {acknowledgmentId}", data.AcknowledgmentId);
+            Logger.LogInformation("Successfully published SendCharacterDataAcknowledgmentMessage for Hash: {hash}", 
+                data.DataHash[..Math.Min(8, data.DataHash.Length)]);
         }
         catch (Exception ex)
         {
-            Logger.LogWarning(ex, "Failed to send character data acknowledgment for {acknowledgmentId}", data.AcknowledgmentId);
+            Logger.LogWarning(ex, "Failed to send character data acknowledgment for Hash: {hash}", 
+                data.DataHash[..Math.Min(8, data.DataHash.Length)]);
         }
     }
     
@@ -662,16 +671,16 @@ public class Pair : DisposableMediatorSubscriberBase
                         if (latestAcknowledgment != null)
                         {
                             discardedCount++;
-                            Logger.LogInformation("Discarding outdated acknowledgment - AckId: {acknowledgmentId}, Sequence: {sequence}", 
-                                latestAcknowledgment.AcknowledgmentId, latestAcknowledgment.SequenceNumber);
+                            Logger.LogInformation("Discarding outdated acknowledgment - Hash: {hash}, Sequence: {sequence}", 
+                                latestAcknowledgment.DataHash[..Math.Min(8, latestAcknowledgment.DataHash.Length)], latestAcknowledgment.SequenceNumber);
                         }
                         latestAcknowledgment = acknowledgmentData;
                     }
                     else
                     {
                         discardedCount++;
-                        Logger.LogInformation("Discarding outdated acknowledgment - AckId: {acknowledgmentId}, Sequence: {sequence}", 
-                            acknowledgmentData.AcknowledgmentId, acknowledgmentData.SequenceNumber);
+                        Logger.LogInformation("Discarding outdated acknowledgment - Hash: {hash}, Sequence: {sequence}", 
+                            acknowledgmentData.DataHash[..Math.Min(8, acknowledgmentData.DataHash.Length)], acknowledgmentData.SequenceNumber);
                     }
                 }
                 

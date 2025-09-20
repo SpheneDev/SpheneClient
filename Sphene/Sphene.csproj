@@ -32,6 +32,7 @@
     <AssemblyVersion>0.16.$(BuildDate).$(BuildTime)</AssemblyVersion>
     <FileVersion>0.16.$(BuildDate).$(BuildTime)</FileVersion>
     <DefineConstants>$(DefineConstants);BUILD_TIMESTAMP</DefineConstants>
+    <AssemblyName>SpheneDebug</AssemblyName>
   </PropertyGroup>
   
   <ItemGroup Condition="'$(Configuration)' == 'Debug'">
