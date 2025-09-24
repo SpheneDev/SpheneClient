@@ -628,7 +628,8 @@ public class Pair : DisposableMediatorSubscriberBase
                 Success = finalSuccess,
                 ErrorCode = errorCode,
                 ErrorMessage = errorMessage,
-                AcknowledgedAt = DateTime.UtcNow
+                AcknowledgedAt = DateTime.UtcNow,
+                SessionId = data.SessionId // Include session ID for batch acknowledgment tracking
             };
 
             Logger.LogInformation("Sending acknowledgment to server - Hash: {hash}, User: {user}, Success: {success}, ErrorCode: {errorCode}", 
