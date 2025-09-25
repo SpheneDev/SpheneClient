@@ -11,6 +11,7 @@ using Sphene.Services;
 using Sphene.Services.Mediator;
 using Sphene.Utils;
 using Microsoft.Extensions.Logging;
+using System.Linq;
 using System.Numerics;
 
 namespace Sphene.UI;
@@ -24,15 +25,27 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
     private readonly PlayerPerformanceConfigService _playerPerformanceConfig;
     private readonly TransientResourceManager _transientResourceManager;
     private readonly TransientConfigService _transientConfigService;
+    private readonly TextureBackupService _textureBackupService;
     private readonly Dictionary<string, string[]> _texturesToConvert = new(StringComparer.Ordinal);
     private Dictionary<ObjectKind, Dictionary<string, CharacterAnalyzer.FileDataEntry>>? _cachedAnalysis;
     private CancellationTokenSource _conversionCancellationTokenSource = new();
     private string _conversionCurrentFileName = string.Empty;
     private int _conversionCurrentFileProgress = 0;
     private Task? _conversionTask;
-    private bool _enableBc7ConversionMode = false;
+    private bool _enableBc7ConversionMode = true;
+    private bool _enableBackupBeforeConversion = true;
     private bool _hasUpdate = false;
     private bool _modalOpen = false;
+    private Task? _backupTask;
+    private readonly Progress<(string, int, int)> _backupProgress = new();
+    private Task? _revertTask;
+    private readonly Progress<(string, int, int)> _revertProgress = new();
+    private CancellationTokenSource _revertCancellationTokenSource = new();
+    private Task<(long totalSize, int fileCount)>? _storageInfoTask;
+    private (long totalSize, int fileCount) _cachedStorageInfo;
+    private DateTime _lastStorageInfoUpdate = DateTime.MinValue;
+    private Dictionary<string, List<string>>? _cachedBackupsForAnalysis;
+    private DateTime _lastBackupAnalysisUpdate = DateTime.MinValue;
     private string _selectedFileTypeTab = string.Empty;
     private string _selectedHash = string.Empty;
     private ObjectKind _selectedObjectTab;
@@ -43,7 +56,7 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
         CharacterAnalyzer characterAnalyzer, IpcManager ipcManager,
         PerformanceCollectorService performanceCollectorService, UiSharedService uiSharedService,
         PlayerPerformanceConfigService playerPerformanceConfig, TransientResourceManager transientResourceManager,
-        TransientConfigService transientConfigService)
+        TransientConfigService transientConfigService, TextureBackupService textureBackupService)
         : base(logger, mediator, "Sphene Character Data Analysis", performanceCollectorService)
     {
         _characterAnalyzer = characterAnalyzer;
@@ -52,6 +65,7 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
         _playerPerformanceConfig = playerPerformanceConfig;
         _transientResourceManager = transientResourceManager;
         _transientConfigService = transientConfigService;
+        _textureBackupService = textureBackupService;
         Mediator.Subscribe<CharacterDataAnalyzedMessage>(this, (_) =>
         {
             _hasUpdate = true;
@@ -100,7 +114,6 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
             _texturesToConvert.Clear();
             _showModal = false;
             _modalOpen = false;
-            _enableBc7ConversionMode = false;
         }
 
         if (_showModal && !_modalOpen)
@@ -112,6 +125,7 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
         if (_hasUpdate)
         {
             _cachedAnalysis = _characterAnalyzer.LastAnalysis.DeepClone();
+            _cachedBackupsForAnalysis = null; // Invalidate backup cache when analysis changes
             _hasUpdate = false;
         }
 
@@ -619,7 +633,6 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                     _selectedHash = string.Empty;
                     _selectedObjectTab = kvp.Key;
                     _selectedFileTypeTab = string.Empty;
-                    _enableBc7ConversionMode = false;
                     _texturesToConvert.Clear();
                 }
 
@@ -647,7 +660,6 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                     {
                         _selectedFileTypeTab = fileGroup.Key;
                         _selectedHash = string.Empty;
-                        _enableBc7ConversionMode = false;
                         _texturesToConvert.Clear();
                     }
 
@@ -668,19 +680,138 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                         ImGui.Checkbox("Enable BC7 Conversion Mode", ref _enableBc7ConversionMode);
                         if (_enableBc7ConversionMode)
                         {
-                            UiSharedService.ColorText("WARNING BC7 CONVERSION:", ImGuiColors.DalamudYellow);
+                            ImGui.Checkbox("Create backup before conversion", ref _enableBackupBeforeConversion);
+                            if (_enableBackupBeforeConversion)
+                            {
+                                UiSharedService.ColorTextWrapped("Backups will be created in the mod folder under 'sphene_backups' before conversion.", ImGuiColors.ParsedGreen);
+                            }
+                            
+                            // Revert functionality
+            ImGui.Separator();
+            ImGui.TextUnformatted("Backup Management:");
+            
+            var availableBackups = GetCachedBackupsForCurrentAnalysis();
+            if (availableBackups.Count > 0)
+            {
+                UiSharedService.ColorTextWrapped($"Found {availableBackups.Count} backed up texture(s) from current analysis that can be restored.", ImGuiColors.ParsedGreen);
+                
+                if (_uiSharedService.IconTextButton(FontAwesomeIcon.Undo, $"Revert current textures ({availableBackups.Count})"))
+                {
+                    StartTextureRevert(availableBackups);
+                }
+                                
+                                ImGui.SameLine();
+                                if (_uiSharedService.IconTextButton(FontAwesomeIcon.FolderOpen, "Open backup folder"))
+                                {
+                                    var backupDirectory = _textureBackupService.GetBackupDirectory();
+                                    if (Directory.Exists(backupDirectory))
+                                    {
+                                        System.Diagnostics.Process.Start("explorer.exe", backupDirectory);
+                                    }
+                                }
+                            }
+                            else
+                            {
+                                UiSharedService.ColorTextWrapped("No texture backups found.", ImGuiColors.DalamudGrey);
+                            }
+                            
+                            // Storage information and cleanup
+                            ImGui.Separator();
+                            ImGui.TextUnformatted("Storage Management:");
+                            
+                            // Update storage info every 5 seconds or if task is null
+                            var now = DateTime.Now;
+                            if (_storageInfoTask == null || (now - _lastStorageInfoUpdate).TotalSeconds > 5)
+                            {
+                                if (_storageInfoTask == null || _storageInfoTask.IsCompleted)
+                                {
+                                    _storageInfoTask = _textureBackupService.GetBackupStorageInfoAsync();
+                                    _lastStorageInfoUpdate = now;
+                                }
+                            }
+                            
+                            // Display storage info
+                            if (_storageInfoTask != null && _storageInfoTask.IsCompleted)
+                            {
+                                _cachedStorageInfo = _storageInfoTask.Result;
+                                var (totalSize, fileCount) = _cachedStorageInfo;
+                                
+                                if (fileCount > 0)
+                                {
+                                    var sizeInMB = totalSize / (1024.0 * 1024.0);
+                                    UiSharedService.ColorTextWrapped($"Total backup storage: {sizeInMB:F2} MB ({fileCount} files)", ImGuiColors.DalamudYellow);
+                                    
+                                    ImGui.SameLine();
+                                    if (_uiSharedService.IconTextButton(FontAwesomeIcon.Broom, "Cleanup old backups (3+ days)"))
+                                    {
+                                        Task.Run(async () =>
+                                        {
+                                            var (deletedCount, freedSpace) = await _textureBackupService.CleanupOldBackupsAsync(3);
+                                            var freedMB = freedSpace / (1024.0 * 1024.0);
+                                            _logger.LogInformation("Backup cleanup completed: {deletedCount} files deleted, {freedMB:F2} MB freed", deletedCount, freedMB);
+                                            
+                                            // Refresh storage info after cleanup
+                                            _storageInfoTask = null;
+                                        });
+                                    }
+                                }
+                                else
+                                {
+                                    UiSharedService.ColorTextWrapped("No backup files found.", ImGuiColors.DalamudGrey);
+                                }
+                            }
+                            else
+                            {
+                                // Show cached info if available, otherwise show loading
+                                if (_cachedStorageInfo.fileCount > 0)
+                                {
+                                    var sizeInMB = _cachedStorageInfo.totalSize / (1024.0 * 1024.0);
+                                    UiSharedService.ColorTextWrapped($"Total backup storage: {sizeInMB:F2} MB ({_cachedStorageInfo.fileCount} files) [Updating...]", ImGuiColors.DalamudGrey);
+                                }
+                                else
+                                {
+                                    UiSharedService.ColorTextWrapped("Calculating storage usage...", ImGuiColors.DalamudGrey);
+                                }
+                            }
+                            
+                            UiSharedService.ColorText("BC7 CONVERSION INFO:", ImGuiColors.DalamudYellow);
                             ImGui.SameLine();
-                            UiSharedService.ColorText("Converting textures to BC7 is irreversible!", ImGuiColors.DalamudRed);
+                            UiSharedService.ColorText("Backups are created automatically for revert functionality!", ImGuiColors.ParsedGreen);
                             UiSharedService.ColorTextWrapped("- Converting textures to BC7 will reduce their size (compressed and uncompressed) drastically. It is recommended to be used for large (4k+) textures." +
                             Environment.NewLine + "- Some textures, especially ones utilizing colorsets, might not be suited for BC7 conversion and might produce visual artifacts." +
-                            Environment.NewLine + "- Before converting textures, make sure to have the original files of the mod you are converting so you can reimport it in case of issues." +
+                            Environment.NewLine + "- Original textures are automatically backed up before conversion and can be restored using the 'Revert current textures' button above." +
                             Environment.NewLine + "- Conversion will convert all found texture duplicates (entries with more than 1 file path) automatically." +
                             Environment.NewLine + "- Converting textures to BC7 is a very expensive operation and, depending on the amount of textures to convert, will take a while to complete."
                                 , ImGuiColors.DalamudYellow);
+                            
+                            // One-click conversion button
+                            var nonBc7Textures = GetNonBc7Textures(fileGroup);
+                            if (nonBc7Textures.Count > 0 && _uiSharedService.IconTextButton(FontAwesomeIcon.Compress, $"Convert all {nonBc7Textures.Count} non-BC7 textures"))
+                            {
+                                _logger.LogDebug("One-click conversion button clicked. Found {Count} non-BC7 textures", nonBc7Textures.Count);
+                                // Add all non-BC7 textures to conversion list without clearing existing selections
+                                foreach (var texture in nonBc7Textures)
+                                {
+                                    // Use the first file path as the primary texture to convert
+                                    var primaryPath = texture.FilePaths.First();
+                                    var duplicatePaths = texture.FilePaths.Skip(1).ToArray();
+                                    _texturesToConvert[primaryPath] = duplicatePaths;
+                                    _logger.LogDebug("Added texture {PrimaryPath} with {DuplicateCount} duplicates to conversion list", primaryPath, duplicatePaths.Length);
+                                }
+                                _logger.LogDebug("Total textures in conversion list: {Count}", _texturesToConvert.Count);
+                            }
+                            
                             if (_texturesToConvert.Count > 0 && _uiSharedService.IconTextButton(FontAwesomeIcon.PlayCircle, "Start conversion of " + _texturesToConvert.Count + " texture(s)"))
                             {
-                                _conversionCancellationTokenSource = _conversionCancellationTokenSource.CancelRecreate();
-                                _conversionTask = _ipcManager.Penumbra.ConvertTextureFiles(_logger, _texturesToConvert, _conversionProgress, _conversionCancellationTokenSource.Token);
+                                if (_enableBackupBeforeConversion)
+                                {
+                                    StartBackupAndConversion();
+                                }
+                                else
+                                {
+                                    _conversionCancellationTokenSource = _conversionCancellationTokenSource.CancelRecreate();
+                                    _conversionTask = _ipcManager.Penumbra.ConvertTextureFiles(_logger, _texturesToConvert, _conversionProgress, _conversionCancellationTokenSource.Token);
+                                }
                             }
                         }
                     }
@@ -733,7 +864,6 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
     {
         _hasUpdate = true;
         _selectedHash = string.Empty;
-        _enableBc7ConversionMode = false;
         _texturesToConvert.Clear();
     }
 
@@ -875,5 +1005,213 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                 if (ImGui.IsItemClicked()) _selectedHash = item.Hash;
             }
         }
+    }
+
+    private List<CharacterAnalyzer.FileDataEntry> GetNonBc7Textures(IGrouping<string, CharacterAnalyzer.FileDataEntry> fileGroup)
+    {
+        return fileGroup.Where(item => !string.Equals(item.Format.Value, "BC7", StringComparison.Ordinal)).ToList();
+    }
+
+    private void StartBackupAndConversion()
+    {
+        _conversionCancellationTokenSource = _conversionCancellationTokenSource.CancelRecreate();
+        
+        _backupTask = Task.Run(async () =>
+        {
+            try
+            {
+                // Create backups first - backup primary paths and all duplicates
+                var allTexturePaths = _texturesToConvert.SelectMany(kvp => new[] { kvp.Key }.Concat(kvp.Value)).ToArray();
+                _logger.LogDebug("Starting backup for {Count} texture paths", allTexturePaths.Length);
+                await _textureBackupService.BackupTexturesAsync(allTexturePaths, _backupProgress, _conversionCancellationTokenSource.Token);
+                
+                // Start conversion after backup is complete
+                _logger.LogDebug("Backup completed, starting texture conversion");
+                _conversionTask = _ipcManager.Penumbra.ConvertTextureFiles(_logger, _texturesToConvert, _conversionProgress, _conversionCancellationTokenSource.Token);
+                
+                try
+                {
+                    await _conversionTask;
+                    _logger.LogDebug("Texture conversion completed successfully");
+                }
+                catch (Exception conversionEx)
+                {
+                    _logger.LogError(conversionEx, "Error during texture conversion: {ErrorMessage}", conversionEx.Message);
+                    _logger.LogDebug("Full exception details: {Exception}", conversionEx.ToString());
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error during backup process");
+            }
+        }, _conversionCancellationTokenSource.Token);
+    }
+
+    private void StartTextureRevert(Dictionary<string, List<string>> availableBackups)
+    {
+        _revertCancellationTokenSource = _revertCancellationTokenSource.CancelRecreate();
+        
+        _revertTask = Task.Run(async () =>
+        {
+            try
+            {
+                // Create mapping of backup files to their target locations
+                var backupToTargetMap = new Dictionary<string, string>();
+                
+                foreach (var kvp in availableBackups)
+                {
+                    var originalFileName = kvp.Key;
+                    var backupFiles = kvp.Value;
+                    
+                    // Use the most recent backup (first in the list since they're ordered by creation time)
+                    if (backupFiles.Count > 0)
+                    {
+                        var mostRecentBackup = backupFiles.First();
+                        
+                        // Try to find the current location of this texture in the loaded data
+                        var targetPath = FindCurrentTextureLocation(originalFileName);
+                        if (!string.IsNullOrEmpty(targetPath))
+                        {
+                            backupToTargetMap[mostRecentBackup] = targetPath;
+                            _logger.LogDebug("Will restore {backup} to {target}", mostRecentBackup, targetPath);
+                        }
+                        else
+                        {
+                            _logger.LogWarning("Could not find current location for texture: {originalFileName}", originalFileName);
+                        }
+                    }
+                }
+                
+                if (backupToTargetMap.Count > 0)
+                {
+                    _logger.LogDebug("Starting selective revert for {count} texture(s) from current analysis", backupToTargetMap.Count);
+                    var results = await _textureBackupService.RestoreTexturesAsync(backupToTargetMap, deleteBackupsAfterRestore: true, _revertProgress, _revertCancellationTokenSource.Token);
+                    
+                    var successCount = results.Values.Count(success => success);
+                    _logger.LogInformation("Selective texture revert completed: {successCount}/{totalCount} textures from current analysis restored successfully. Backup files have been automatically deleted.", successCount, results.Count);
+                    
+                    // Refresh storage information and analysis data after successful restore
+                    if (successCount > 0)
+                    {
+                        _storageInfoTask = null; // Force refresh of storage info
+                        _cachedBackupsForAnalysis = null; // Invalidate backup cache after restore
+                        
+                        // Trigger a new analysis to show updated values
+                        _logger.LogDebug("Refreshing analysis data after successful texture restore");
+                        _hasUpdate = true; // Trigger analysis data refresh
+                    }
+                }
+                else
+                {
+                    _logger.LogWarning("No textures from current analysis could be mapped for restoration");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error during texture revert process");
+            }
+        }, _revertCancellationTokenSource.Token);
+    }
+
+    private Dictionary<string, List<string>> GetCachedBackupsForCurrentAnalysis()
+    {
+        // Cache for 5 seconds to avoid excessive recalculation
+        if (_cachedBackupsForAnalysis != null && 
+            DateTime.Now - _lastBackupAnalysisUpdate < TimeSpan.FromSeconds(5))
+        {
+            return _cachedBackupsForAnalysis;
+        }
+
+        _cachedBackupsForAnalysis = GetBackupsForCurrentAnalysis();
+        _lastBackupAnalysisUpdate = DateTime.Now;
+        return _cachedBackupsForAnalysis;
+    }
+
+    private Dictionary<string, List<string>> GetBackupsForCurrentAnalysis()
+    {
+        try
+        {
+            if (_cachedAnalysis == null) return new Dictionary<string, List<string>>();
+            
+            // Get all available backups
+            var allBackups = _textureBackupService.GetBackupsByOriginalFile();
+            var filteredBackups = new Dictionary<string, List<string>>();
+            
+            // Get all texture filenames from current analysis
+            var currentTextureNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var objectKindData in _cachedAnalysis.Values)
+            {
+                foreach (var fileData in objectKindData.Values)
+                {
+                    if (fileData.FilePaths != null)
+                    {
+                        foreach (var filePath in fileData.FilePaths)
+                        {
+                            var fileName = Path.GetFileName(filePath);
+                            if (!string.IsNullOrEmpty(fileName))
+                            {
+                                currentTextureNames.Add(fileName);
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Filter backups to only include those for currently loaded textures
+            foreach (var backup in allBackups)
+            {
+                if (currentTextureNames.Contains(backup.Key))
+                {
+                    filteredBackups[backup.Key] = backup.Value;
+                }
+            }
+            
+            // Only log when there are actually backups to avoid spam
+            if (filteredBackups.Count > 0)
+            {
+                _logger.LogDebug("Filtered backups: {filteredCount} out of {totalCount} available backups match current analysis", 
+                    filteredBackups.Count, allBackups.Count);
+            }
+            
+            return filteredBackups;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error filtering backups for current analysis");
+            return new Dictionary<string, List<string>>();
+        }
+    }
+
+    private string FindCurrentTextureLocation(string originalFileName)
+    {
+        try
+        {
+            if (_cachedAnalysis == null) return string.Empty;
+            
+            // Search through all loaded texture data to find a file with matching name
+            foreach (var objectKindData in _cachedAnalysis.Values)
+            {
+                foreach (var fileData in objectKindData.Values)
+                {
+                    if (fileData.FilePaths != null)
+                    {
+                        foreach (var filePath in fileData.FilePaths)
+                        {
+                            var fileName = Path.GetFileName(filePath);
+                            if (string.Equals(fileName, originalFileName, StringComparison.OrdinalIgnoreCase))
+                            {
+                                return filePath;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error finding current texture location for {fileName}", originalFileName);
+        }
+        
+        return string.Empty;
     }
 }

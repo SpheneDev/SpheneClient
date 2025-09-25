@@ -124,6 +124,7 @@ public sealed class Plugin : IDalamudPlugin
             collection.AddSingleton<CharaDataCharacterHandler>();
             collection.AddSingleton<CharaDataNearbyManager>();
             collection.AddSingleton<CharaDataGposeTogetherManager>();
+            collection.AddSingleton<TextureBackupService>();
 
             collection.AddSingleton(s => new VfxSpawnManager(s.GetRequiredService<ILogger<VfxSpawnManager>>(),
                 gameInteropProvider, s.GetRequiredService<SpheneMediator>()));
