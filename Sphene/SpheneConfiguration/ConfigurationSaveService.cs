@@ -27,9 +27,9 @@ public class ConfigurationSaveService : IHostedService
 #pragma warning restore S3011 // Reflection should not be used to increase accessibility of classes, methods, or fields
     }
 
-    private void OnConfigurationSave(object? sender, EventArgs e)
+    private async void OnConfigurationSave(object? sender, EventArgs e)
     {
-        _configSaveSemaphore.Wait();
+        await _configSaveSemaphore.WaitAsync().ConfigureAwait(false);
         _configsToSave.Add(sender!);
         _configSaveSemaphore.Release();
     }

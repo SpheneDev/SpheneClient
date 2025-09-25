@@ -174,9 +174,9 @@ public sealed class FileCacheManager : IHostedService
         return validatedCacheEntry;
     }
 
-    public Dictionary<string, FileCacheEntity?> GetFileCachesByPaths(string[] paths)
+    public async Task<Dictionary<string, FileCacheEntity?>> GetFileCachesByPathsAsync(string[] paths)
     {
-        _getCachesByPathsSemaphore.Wait();
+        await _getCachesByPathsSemaphore.WaitAsync().ConfigureAwait(false);
 
         try
         {

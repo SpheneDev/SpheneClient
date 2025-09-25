@@ -311,7 +311,7 @@ public sealed class CacheMonitor : DisposableMediatorSubscriberBase
                 .Concat(remainingEntries)
                 .ToArray();
 
-            _ = _fileDbManager.GetFileCachesByPaths(allChanges);
+            _ = _fileDbManager.GetFileCachesByPathsAsync(allChanges).ConfigureAwait(false);
 
             _fileDbManager.WriteOutFullCsv();
         }

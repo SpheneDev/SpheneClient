@@ -90,7 +90,7 @@ namespace Sphene.WebAPI.Files
         /// <inheritdoc />
         public override int Read(byte[] buffer, int offset, int count)
         {
-            Throttle(count).Wait();
+            ThrottleSync(count);
             return _baseStream.Read(buffer, offset, count);
         }
 
@@ -104,7 +104,7 @@ namespace Sphene.WebAPI.Files
         /// <inheritdoc />
         public override void Write(byte[] buffer, int offset, int count)
         {
-            Throttle(count).Wait();
+            ThrottleSync(count);
             _baseStream.Write(buffer, offset, count);
         }
 
@@ -129,6 +129,21 @@ namespace Sphene.WebAPI.Files
                 // Calculate the time to sleep.
                 _bandwidth.CalculateSpeed(transmissionVolume);
                 await Sleep(_bandwidth.PopSpeedRetrieveTime(), token).ConfigureAwait(false);
+            }
+        }
+
+        private void ThrottleSync(int transmissionVolume)
+        {
+            // Make sure the buffer isn't empty.
+            if (BandwidthLimit > 0 && transmissionVolume > 0)
+            {
+                // Calculate the time to sleep.
+                _bandwidth.CalculateSpeed(transmissionVolume);
+                var sleepTime = _bandwidth.PopSpeedRetrieveTime();
+                if (sleepTime > 0)
+                {
+                    Thread.Sleep(sleepTime);
+                }
             }
         }
 

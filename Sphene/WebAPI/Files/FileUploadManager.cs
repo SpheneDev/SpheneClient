@@ -21,6 +21,7 @@ public sealed class FileUploadManager : DisposableMediatorSubscriberBase
     private readonly ServerConfigurationManager _serverManager;
     private readonly Dictionary<string, DateTime> _verifiedUploadedHashes = new(StringComparer.Ordinal);
     private CancellationTokenSource? _uploadCancellationTokenSource = new();
+    private DateTime _lastHashCleanup = DateTime.UtcNow;
 
     public FileUploadManager(ILogger<FileUploadManager> logger, SpheneMediator mediator,
         SpheneConfigService SpheneConfigService,
@@ -67,6 +68,20 @@ public sealed class FileUploadManager : DisposableMediatorSubscriberBase
     public async Task<List<string>> UploadFiles(List<string> hashesToUpload, IProgress<string> progress, CancellationToken? ct = null)
     {
         Logger.LogDebug("Trying to upload files");
+        
+        // Clean up old verified hashes periodically to prevent memory growth
+        if (DateTime.UtcNow - _lastHashCleanup > TimeSpan.FromHours(1))
+        {
+            var cutoffTime = DateTime.UtcNow.AddHours(-24);
+            var keysToRemove = _verifiedUploadedHashes.Where(kvp => kvp.Value < cutoffTime).Select(kvp => kvp.Key).ToList();
+            foreach (var key in keysToRemove)
+            {
+                _verifiedUploadedHashes.Remove(key);
+            }
+            _lastHashCleanup = DateTime.UtcNow;
+            Logger.LogDebug("Cleaned up {count} old verified upload hashes", keysToRemove.Count);
+        }
+        
         var filesPresentLocally = hashesToUpload.Where(h => _fileDbManager.GetFileCacheByHash(h) != null).ToHashSet(StringComparer.Ordinal);
         var locallyMissingFiles = hashesToUpload.Except(filesPresentLocally, StringComparer.Ordinal).ToList();
         if (locallyMissingFiles.Any())

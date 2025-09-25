@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -7,8 +8,8 @@ public static class Crypto
 {
 #pragma warning disable SYSLIB0021 // Type or member is obsolete
 
-    private static readonly Dictionary<(string, ushort), string> _hashListPlayersSHA256 = new();
-    private static readonly Dictionary<string, string> _hashListSHA256 = new(StringComparer.Ordinal);
+    private static readonly ConcurrentDictionary<(string, ushort), string> _hashListPlayersSHA256 = new();
+    private static readonly ConcurrentDictionary<string, string> _hashListSHA256 = new(StringComparer.Ordinal);
     private static readonly SHA256CryptoServiceProvider _sha256CryptoProvider = new();
 
     public static string GetFileHash(this string filePath)

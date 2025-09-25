@@ -227,7 +227,7 @@ public class PlayerDataFactory
 
         var toCompute = fragment.FileReplacements.Where(f => !f.IsFileSwap).ToArray();
         _logger.LogDebug("Getting Hashes for {amount} Files", toCompute.Length);
-        var computedPaths = _fileCacheManager.GetFileCachesByPaths(toCompute.Select(c => c.ResolvedPath).ToArray());
+        var computedPaths = await _fileCacheManager.GetFileCachesByPathsAsync(toCompute.Select(c => c.ResolvedPath).ToArray()).ConfigureAwait(false);
         foreach (var file in toCompute)
         {
             ct.ThrowIfCancellationRequested();

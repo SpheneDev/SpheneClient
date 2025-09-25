@@ -62,7 +62,18 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         _fileDbManager = fileDbManager;
         _playerPerformanceService = playerPerformanceService;
         _serverConfigManager = serverConfigManager;
-        _penumbraCollection = _ipcManager.Penumbra.CreateTemporaryCollectionAsync(logger, Pair.UserData.UID).ConfigureAwait(false).GetAwaiter().GetResult();
+        // Initialize Penumbra collection asynchronously to avoid blocking constructor
+        _ = Task.Run(async () => 
+        {
+            try
+            {
+                _penumbraCollection = await _ipcManager.Penumbra.CreateTemporaryCollectionAsync(logger, Pair.UserData.UID).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Failed to create Penumbra collection for {uid}", Pair.UserData.UID);
+            }
+        });
 
         Mediator.Subscribe<FrameworkUpdateMessage>(this, (_) => FrameworkUpdate());
         Mediator.Subscribe<ZoneSwitchStartMessage>(this, (_) =>
@@ -71,14 +82,21 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             _charaHandler?.Invalidate();
             IsVisible = false;
         });
-        Mediator.Subscribe<PenumbraInitializedMessage>(this, (_) =>
+        Mediator.Subscribe<PenumbraInitializedMessage>(this, async (_) =>
         {
-            _penumbraCollection = _ipcManager.Penumbra.CreateTemporaryCollectionAsync(logger, Pair.UserData.UID).ConfigureAwait(false).GetAwaiter().GetResult();
-            if (!IsVisible && _charaHandler != null)
+            try
             {
-                PlayerName = string.Empty;
-                _charaHandler.Dispose();
-                _charaHandler = null;
+                _penumbraCollection = await _ipcManager.Penumbra.CreateTemporaryCollectionAsync(logger, Pair.UserData.UID).ConfigureAwait(false);
+                if (!IsVisible && _charaHandler != null)
+                {
+                    PlayerName = string.Empty;
+                    _charaHandler.Dispose();
+                    _charaHandler = null;
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Failed to recreate Penumbra collection for {uid}", Pair.UserData.UID);
             }
         });
         Mediator.Subscribe<ClassJobChangedMessage>(this, (msg) =>

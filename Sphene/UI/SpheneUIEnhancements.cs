@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
@@ -17,7 +18,7 @@ public static class SpheneUIEnhancements
     private static readonly float ShadowOffset = 2.0f;
     
     // Static dictionary to store resize state per window
-    private static readonly Dictionary<string, Vector2> _pendingWindowSizes = new();
+    private static readonly ConcurrentDictionary<string, Vector2> _pendingWindowSizes = new();
     
     /// <summary>
     /// Draws a modern card-style container with Sphene theming
@@ -80,7 +81,7 @@ public static class SpheneUIEnhancements
         if (_pendingWindowSizes.TryGetValue(title, out var pendingSize))
         {
             ImGui.SetNextWindowSize(pendingSize);
-            _pendingWindowSizes.Remove(title);
+            _pendingWindowSizes.TryRemove(title, out _);
         }
         
         var cardBg = SpheneColors.ToImGuiColor(SpheneColors.BackgroundMid);
@@ -719,7 +720,7 @@ public static class SpheneUIEnhancements
         if (_pendingWindowSizes.TryGetValue(windowName, out var newSize))
         {
             ImGui.SetNextWindowSize(newSize);
-            _pendingWindowSizes.Remove(windowName);
+            _pendingWindowSizes.TryRemove(windowName, out _);
         }
     }
     
