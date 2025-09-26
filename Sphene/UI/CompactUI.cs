@@ -1273,10 +1273,44 @@ public class CompactUi : WindowMediatorSubscriberBase
                         System.Diagnostics.Process.Start("explorer.exe", backupDirectory);
                     }
                 }
+                
+                // BC7 conversion option after restore
+                ImGui.Spacing();
+                UiSharedService.ColorText("After Restore Options:", ImGuiColors.DalamudYellow);
+                if (nonBc7Textures.Count > 0)
+                {
+                    UiSharedService.ColorTextWrapped($"After restoring textures, you can convert {nonBc7Textures.Count} non-BC7 textures to reduce size.", ImGuiColors.DalamudGrey);
+                    if (_uiSharedService.IconTextButton(FontAwesomeIcon.FileArchive, $"Convert to BC7 ({nonBc7Textures.Count} textures)"))
+                    {
+                        StartTextureConversion(nonBc7Textures);
+                        _showConversionPopup = false;
+                        _cachedAnalysisForPopup = null;
+                        _showProgressPopup = true;
+                    }
+                }
+                else
+                {
+                    UiSharedService.ColorTextWrapped("All current textures are already BC7 optimized.", ImGuiColors.ParsedGreen);
+                }
             }
             else
             {
                 UiSharedService.ColorTextWrapped("No backups found for current textures.", ImGuiColors.DalamudGrey);
+                
+                // Still show BC7 conversion option even without backups
+                if (nonBc7Textures.Count > 0)
+                {
+                    ImGui.Spacing();
+                    UiSharedService.ColorText("Texture Optimization:", ImGuiColors.DalamudYellow);
+                    UiSharedService.ColorTextWrapped($"You can convert {nonBc7Textures.Count} non-BC7 textures to reduce size.", ImGuiColors.DalamudGrey);
+                    if (_uiSharedService.IconTextButton(FontAwesomeIcon.FileArchive, $"Convert to BC7 ({nonBc7Textures.Count} textures)"))
+                    {
+                        StartTextureConversion(nonBc7Textures);
+                        _showConversionPopup = false;
+                        _cachedAnalysisForPopup = null;
+                        _showProgressPopup = true;
+                    }
+                }
             }
 
             if (nonBc7Textures.Count > 0)
@@ -1525,6 +1559,16 @@ public class CompactUi : WindowMediatorSubscriberBase
                     if (successCount > 0)
                     {
                         _cachedBackupsForAnalysis = null;
+                        
+                        // Trigger character redraw to reload restored textures in Penumbra
+                        try
+                        {
+                            await _ipcManager.Penumbra.RedrawPlayerAsync().ConfigureAwait(false);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Failed to trigger character redraw after texture restore");
+                        }
                     }
                 }
                 else

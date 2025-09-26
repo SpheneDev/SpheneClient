@@ -277,6 +277,20 @@ public sealed class IpcCallerPenumbra : DisposableMediatorSubscriberBase, IIpcCa
         return await _penumbraResolvePaths.Invoke(forward, reverse).ConfigureAwait(false);
     }
 
+    public async Task RedrawPlayerAsync()
+    {
+        if (!APIAvailable || _dalamudUtil.IsZoning) return;
+        
+        await _dalamudUtil.RunOnFrameworkThread(async () =>
+        {
+            var gameObject = await _dalamudUtil.CreateGameObjectAsync(await _dalamudUtil.GetPlayerPointerAsync().ConfigureAwait(false)).ConfigureAwait(false);
+            if (gameObject != null)
+            {
+                _penumbraRedraw.Invoke(gameObject.ObjectIndex, setting: RedrawType.Redraw);
+            }
+        }).ConfigureAwait(false);
+    }
+
     public async Task SetManipulationDataAsync(ILogger logger, Guid applicationId, Guid collId, string manipulationData)
     {
         if (!APIAvailable) return;

@@ -1099,6 +1099,16 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                         // Trigger a new analysis to show updated values
                         _logger.LogDebug("Refreshing analysis data after successful texture restore");
                         _hasUpdate = true; // Trigger analysis data refresh
+                        
+                        // Trigger character redraw to reload restored textures in Penumbra
+                        try
+                        {
+                            await _ipcManager.Penumbra.RedrawPlayerAsync().ConfigureAwait(false);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Failed to trigger character redraw after texture restore");
+                        }
                     }
                 }
                 else
