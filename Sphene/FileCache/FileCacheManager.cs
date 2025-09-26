@@ -190,7 +190,8 @@ public sealed class FileCacheManager : IHostedService
             Dictionary<string, FileCacheEntity?> result = new(StringComparer.OrdinalIgnoreCase);
 
             var dict = _fileCaches.SelectMany(f => f.Value)
-                .ToDictionary(d => d.PrefixedFilePath, d => d, StringComparer.OrdinalIgnoreCase);
+                .GroupBy(d => d.PrefixedFilePath, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
 
             foreach (var entry in cleanedPaths)
             {

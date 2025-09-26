@@ -418,7 +418,7 @@ public sealed class CacheMonitor : DisposableMediatorSubscriberBase
 
                 try
                 {
-                    return _fileCompactor.GetFileSizeOnDisk(f, StorageisNTFS);
+                    return _fileCompactor?.GetFileSizeOnDisk(f, StorageisNTFS) ?? 0;
                 }
                 catch
                 {
@@ -431,11 +431,14 @@ public sealed class CacheMonitor : DisposableMediatorSubscriberBase
         if (FileCacheSize < maxCacheInBytes) return;
 
         var maxCacheBuffer = maxCacheInBytes * 0.05d;
-        while (FileCacheSize > maxCacheInBytes - (long)maxCacheBuffer)
+        while (FileCacheSize > maxCacheInBytes - (long)maxCacheBuffer && files.Count > 0)
         {
             var oldestFile = files[0];
-            FileCacheSize -= _fileCompactor.GetFileSizeOnDisk(oldestFile);
-            File.Delete(oldestFile.FullName);
+            if (oldestFile?.FullName != null && File.Exists(oldestFile.FullName))
+            {
+                FileCacheSize -= _fileCompactor?.GetFileSizeOnDisk(oldestFile) ?? 0;
+                File.Delete(oldestFile.FullName);
+            }
             files.Remove(oldestFile);
         }
     }

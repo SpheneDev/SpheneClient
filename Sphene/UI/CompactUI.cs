@@ -276,7 +276,7 @@ public class CompactUi : WindowMediatorSubscriberBase
             ImGui.Spacing();
             
             // Server Status Section
-            ImGui.TextColored(SpheneColors.SpheneGold, "Server Status");
+            ImGui.TextColored(SpheneColors.SpheneGold, "Server & Character Status");
             ImGui.Separator();
             DrawServerStatusContent();
             
@@ -303,7 +303,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                 ImGui.Separator();
                 using (ImRaii.PushId("pairlist")) DrawPairs();
                 
-                ImGui.Separator();
+
                 float pairlistEnd = ImGui.GetCursorPosY();
                 using (ImRaii.PushId("transfers")) DrawTransfers();
                 _transferPartHeight = ImGui.GetCursorPosY() - pairlistEnd - ImGui.GetTextLineHeight();
@@ -514,36 +514,21 @@ public class CompactUi : WindowMediatorSubscriberBase
         
         UiSharedService.AttachToolTip(tooltipText);
         
-        // Party Status indicator
         ImGui.SameLine();
-        ImGui.AlignTextToFramePadding();
-        if (_dalamudUtilService.IsInParty)
-        {
-            ImGui.PushStyleColor(ImGuiCol.Text, ImGuiColors.ParsedBlue);
-            _uiSharedService.IconText(FontAwesomeIcon.Users);
-            ImGui.PopStyleColor();
-            UiSharedService.AttachToolTip($"In Party ({_dalamudUtilService.PartySize} members)\nLeader: {_dalamudUtilService.PartyLeaderName ?? "Unknown"}");
-        }
-        else
-        {
-            ImGui.PushStyleColor(ImGuiCol.Text, ImGuiColors.DalamudGrey);
-            _uiSharedService.IconText(FontAwesomeIcon.User);
-            ImGui.PopStyleColor();
-            UiSharedService.AttachToolTip("Solo - Not in a party");
-        }
+        ImGui.Dummy(new Vector2(10, 0));
         
-        // Compact Texture Size indicator
-        ImGui.SameLine();
-        ImGui.AlignTextToFramePadding();
-        DrawCompactTextureIndicator();
-        
-        // Texture Conversion Button
+        // One-click Texture Conversion Button
         ImGui.SameLine();
         if (_uiSharedService.IconButton(FontAwesomeIcon.FileArchive, 22f))
         {
             _showConversionPopup = true;
         }
         UiSharedService.AttachToolTip("One-click texture conversion\nConvert all non-BC7 textures to reduce size");
+        
+        // Compact Texture Size indicator
+        ImGui.SameLine();
+        ImGui.AlignTextToFramePadding();
+        DrawCompactTextureIndicator();
         
         if (_apiController.ServerState == ServerState.Connected)
         {
@@ -558,14 +543,15 @@ public class CompactUi : WindowMediatorSubscriberBase
     private void DrawTransfers()
     {
         var currentUploads = _fileTransferManager.CurrentUploads.ToList();
+        var currentDownloads = _currentDownloads.SelectMany(d => d.Value.Values).ToList();
         
-        // Draw Sphene-themed transmission indicators
-        ImGui.AlignTextToFramePadding();
-        _uiSharedService.IconText(FontAwesomeIcon.Upload);
-        ImGui.SameLine(35 * ImGuiHelpers.GlobalScale);
-
+        // Only show upload progress if there are active uploads
         if (currentUploads.Any())
         {
+            ImGui.AlignTextToFramePadding();
+            _uiSharedService.IconText(FontAwesomeIcon.Upload);
+            ImGui.SameLine(35 * ImGuiHelpers.GlobalScale);
+            
             var totalUploads = currentUploads.Count;
             var doneUploads = currentUploads.Count(c => c.IsTransferred);
             var totalUploaded = currentUploads.Sum(c => c.Transferred);
@@ -576,19 +562,14 @@ public class CompactUi : WindowMediatorSubscriberBase
             
             SpheneUIEnhancements.DrawSpheneProgressBar("Transmitting", uploadProgress, uploadText, SpheneColors.TransmissionActive);
         }
-        else
-        {
-            ImGui.AlignTextToFramePadding();
-            ImGui.TextColored(SpheneColors.UITextSecondary, "No transmissions in progress");
-        }
 
-        var currentDownloads = _currentDownloads.SelectMany(d => d.Value.Values).ToList();
-        ImGui.AlignTextToFramePadding();
-        _uiSharedService.IconText(FontAwesomeIcon.Download);
-        ImGui.SameLine(35 * ImGuiHelpers.GlobalScale);
-
+        // Only show download progress if there are active downloads
         if (currentDownloads.Any())
         {
+            ImGui.AlignTextToFramePadding();
+            _uiSharedService.IconText(FontAwesomeIcon.Download);
+            ImGui.SameLine(35 * ImGuiHelpers.GlobalScale);
+            
             var totalDownloads = currentDownloads.Sum(c => c.TotalFiles);
             var doneDownloads = currentDownloads.Sum(c => c.TransferredFiles);
             var totalDownloaded = currentDownloads.Sum(c => c.TransferredBytes);
@@ -598,11 +579,6 @@ public class CompactUi : WindowMediatorSubscriberBase
             var downloadText = $"{doneDownloads}/{totalDownloads} ({UiSharedService.ByteToString(totalDownloaded)}/{UiSharedService.ByteToString(totalToDownload)})";
             
             SpheneUIEnhancements.DrawSpheneProgressBar("Receiving", downloadProgress, downloadText, SpheneColors.ReceptionActive);
-        }
-        else
-        {
-            ImGui.AlignTextToFramePadding();
-            ImGui.TextColored(SpheneColors.UITextSecondary, "No receptions in progress");
         }
     }
 
