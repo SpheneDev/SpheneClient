@@ -72,4 +72,8 @@ public class SpheneConfig : ISpheneConfiguration
 
     public int AcknowledgmentTimeoutSeconds { get; set; } = 30;
     public NotificationLocation AcknowledgmentNotification { get; set; } = NotificationLocation.Toast;
+    
+    // Incognito Mode Settings
+    public bool IsIncognitoModeActive { get; set; } = false;
+    public HashSet<string> PrePausedPairs { get; set; } = new();
 }

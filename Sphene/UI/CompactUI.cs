@@ -59,8 +59,9 @@ public class CompactUi : WindowMediatorSubscriberBase
     private Pair? _lastAddedUser;
     private string _lastAddedUserComment = string.Empty;
     private Vector2 _lastPosition = Vector2.One;
-    private bool _isNsfwModeActive = false;
+    private bool _isIncognitoModeActive = false;
     private DateTime _lastIncognitoButtonClick = DateTime.MinValue;
+    private readonly HashSet<string> _prePausedPairs = new();
     private DateTime _lastReconnectButtonClick = DateTime.MinValue;
     private Vector2 _lastSize = Vector2.One;
     private int _secretKeyIdx = -1;
@@ -119,6 +120,9 @@ public class CompactUi : WindowMediatorSubscriberBase
         };
         _tabMenu = new TopTabMenu(Mediator, _apiController, _pairManager, _uiSharedService);
 
+        // Initialize incognito mode state from configuration
+        _isIncognitoModeActive = _configService.Current.IsIncognitoModeActive;
+        _prePausedPairs = new HashSet<string>(_configService.Current.PrePausedPairs);
 
         AllowPinning = false;
         AllowClickthrough = false;
@@ -456,7 +460,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         }
         UiSharedService.AttachToolTip(reconnectTooltipText);
         
-        // NSFW Mode button next to reconnect
+        // Incognito Mode button next to reconnect
         ImGui.SameLine();
         ImGui.AlignTextToFramePadding();
         
@@ -464,7 +468,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         var timeSinceLastClick = currentTime - _lastIncognitoButtonClick;
         var isButtonDisabled = timeSinceLastClick.TotalSeconds < 5.0;
         
-        if (_isNsfwModeActive)
+        if (_isIncognitoModeActive)
         {
             // Resume mode - use play icon
             var resumeIcon = FontAwesomeIcon.Play;
@@ -477,7 +481,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                 if (ImGui.Button(resumeIcon.ToIconString(), new Vector2(22, 22)))
                 {
                     _lastIncognitoButtonClick = currentTime;
-                    _ = Task.Run(() => HandleNsfwModeToggle());
+                    _ = Task.Run(() => HandleIncognitoModeToggle());
                 }
             }
             
@@ -497,14 +501,14 @@ public class CompactUi : WindowMediatorSubscriberBase
                 if (ImGui.Button(incognitoIcon.ToIconString(), new Vector2(22, 22)))
                 {
                     _lastIncognitoButtonClick = currentTime;
-                    _ = Task.Run(() => HandleNsfwModeToggle());
+                    _ = Task.Run(() => HandleIncognitoModeToggle());
                 }
             }
             
             ImGui.PopFont();
             ImGui.PopStyleColor();
         }
-        var tooltipText = _isNsfwModeActive ? "Resume - Unpause all pairs and reconnect syncshells" : "Incognito Mode - Pause all pairs and syncshells except party members";
+        var tooltipText = _isIncognitoModeActive ? "Resume - Unpause all pairs and reconnect syncshells" : "Incognito Mode - Pause all pairs and syncshells except party members";
         
         if (isButtonDisabled)
         {
@@ -893,62 +897,90 @@ public class CompactUi : WindowMediatorSubscriberBase
         return partyMembers.Contains(playerName, StringComparer.OrdinalIgnoreCase);
     }
 
-    private async Task HandleNsfwModeToggle()
+    private async Task HandleIncognitoModeToggle()
     {
         try
         {
-            _logger.LogInformation("NSFW mode toggle clicked, current state: {state}", _isNsfwModeActive);
+            _logger.LogInformation("Incognito mode toggle clicked, current state: {state}", _isIncognitoModeActive);
             
-            if (_isNsfwModeActive)
+            if (_isIncognitoModeActive)
             {
-                // Resume: Unpause all user pairs that were paused by NSFW mode
+                // Resume: Unpause only user pairs that were paused by incognito mode (not pre-existing paused pairs)
                 var allUserPairs = _pairManager.DirectPairs.ToList();
                 _logger.LogInformation("Resuming {count} user pairs", allUserPairs.Count);
                 foreach (var pair in allUserPairs)
                 {
                     if (pair.UserPair != null && pair.UserPair.OwnPermissions.IsPaused())
                     {
-                        var permissions = pair.UserPair.OwnPermissions;
-                        permissions.SetPaused(false);
-                        await _apiController.UserSetPairPermissions(new(pair.UserData, permissions));
-                        _logger.LogInformation("Unpaused pair: {uid}", pair.UserData.UID);
+                        // Only unpause if this pair was NOT already paused before incognito mode
+                        if (!_prePausedPairs.Contains(pair.UserData.UID))
+                        {
+                            var permissions = pair.UserPair.OwnPermissions;
+                            permissions.SetPaused(false);
+                            await _apiController.UserSetPairPermissions(new(pair.UserData, permissions));
+                            _logger.LogInformation("Unpaused pair (was paused by incognito): {uid}", pair.UserData.UID);
+                        }
+                        else
+                        {
+                            _logger.LogInformation("Keeping pair paused (was already paused before incognito): {uid}", pair.UserData.UID);
+                        }
                     }
                 }
                 
+                // Clear the tracking set for next incognito session
+                _prePausedPairs.Clear();
+                
                 // Note: We don't automatically rejoin syncshells as that would require storing which ones were left
-                _isNsfwModeActive = false;
-                _logger.LogInformation("NSFW mode deactivated");
+                _isIncognitoModeActive = false;
+                _logger.LogInformation("Incognito mode deactivated");
+                
+                // Save configuration
+                _configService.Current.IsIncognitoModeActive = _isIncognitoModeActive;
+                _configService.Current.PrePausedPairs = new HashSet<string>(_prePausedPairs);
+                _configService.Save();
             }
             else
             {
-                // NSFW Mode: Pause user pairs that are NOT in current party
+                // Incognito Mode: Pause user pairs that are NOT in current party
                 var allUserPairs = _pairManager.DirectPairs.ToList();
                 var partyMembers = await _dalamudUtilService.RunOnFrameworkThread(() => _dalamudUtilService.GetPartyMemberNames());
                 _logger.LogInformation("Emergency stop: Checking {count} user pairs against party members: [{members}]", 
                     allUserPairs.Count, string.Join(", ", partyMembers));
                 
+                // Clear previous tracking and record currently paused pairs
+                _prePausedPairs.Clear();
+                
                 foreach (var pair in allUserPairs)
                 {
-                    if (pair.UserPair != null && !pair.UserPair.OwnPermissions.IsPaused())
+                    if (pair.UserPair != null)
                     {
-                        var playerName = pair.PlayerName;
-                        if (!await IsPlayerInCurrentPartyAsync(playerName))
+                        // Track pairs that are already paused before we start incognito mode
+                        if (pair.UserPair.OwnPermissions.IsPaused())
                         {
-                            var permissions = pair.UserPair.OwnPermissions;
-                            permissions.SetPaused(true);
-                            await _apiController.UserSetPairPermissions(new(pair.UserData, permissions));
-                            _logger.LogInformation("Paused pair (not in party): {uid} - {playerName}", pair.UserData.UID, playerName);
+                            _prePausedPairs.Add(pair.UserData.UID);
+                            _logger.LogInformation("Tracked pre-paused pair: {uid}", pair.UserData.UID);
                         }
                         else
                         {
-                            _logger.LogInformation("Skipped pausing pair (in party): {uid} - {playerName}", pair.UserData.UID, playerName);
+                            var playerName = pair.PlayerName;
+                            if (!await IsPlayerInCurrentPartyAsync(playerName))
+                            {
+                                var permissions = pair.UserPair.OwnPermissions;
+                                permissions.SetPaused(true);
+                                await _apiController.UserSetPairPermissions(new(pair.UserData, permissions));
+                                _logger.LogInformation("Paused pair (not in party): {uid} - {playerName}", pair.UserData.UID, playerName);
+                            }
+                            else
+                            {
+                                _logger.LogInformation("Skipped pausing pair (in party): {uid} - {playerName}", pair.UserData.UID, playerName);
+                            }
                         }
                     }
                 }
 
                 // Leave syncshells/groups where no members are in current party
                 var groupPairs = _pairManager.GroupPairs.ToList();
-                _logger.LogInformation("NSFW mode: Checking {count} groups for non-party members", groupPairs.Count);
+                _logger.LogInformation("Incognito mode: Checking {count} groups for non-party members", groupPairs.Count);
                 
                 foreach (var groupPair in groupPairs)
                 {
@@ -977,13 +1009,18 @@ public class CompactUi : WindowMediatorSubscriberBase
                     }
                 }
                 
-                _isNsfwModeActive = true;
-                _logger.LogInformation("NSFW mode activated");
+                _isIncognitoModeActive = true;
+                _logger.LogInformation("Incognito mode activated");
+                
+                // Save configuration
+                _configService.Current.IsIncognitoModeActive = _isIncognitoModeActive;
+                _configService.Current.PrePausedPairs = new HashSet<string>(_prePausedPairs);
+                _configService.Save();
             }
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Error during NSFW mode toggle");
+            _logger.LogWarning(ex, "Error during incognito mode toggle");
         }
     }
 
