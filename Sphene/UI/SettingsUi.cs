@@ -67,6 +67,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
     private CancellationTokenSource? _validationCts;
     private Task<List<FileCacheEntity>>? _validationTask;
     private bool _wasOpen = false;
+    private Vector2 _currentCompactUiSize = new Vector2(370, 400); // Default CompactUI size
 
     public SettingsUi(ILogger<SettingsUi> logger,
         UiSharedService uiShared, SpheneConfigService configService,
@@ -113,6 +114,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         Mediator.Subscribe<CharacterDataCreatedMessage>(this, (msg) => LastCreatedCharacterData = msg.CharacterData);
         Mediator.Subscribe<DownloadStartedMessage>(this, (msg) => _currentDownloads[msg.DownloadId] = msg.DownloadStatus);
         Mediator.Subscribe<DownloadFinishedMessage>(this, (msg) => _currentDownloads.TryRemove(msg.DownloadId, out _));
+        Mediator.Subscribe<CompactUiChange>(this, (msg) => _currentCompactUiSize = msg.Size);
     }
 
     public CharacterData? LastCreatedCharacterData { private get; set; }
@@ -640,6 +642,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
             Mediator.Publish(new UiToggleMessage(typeof(StatusDebugUi)));
         }
         UiSharedService.AttachToolTip("Opens the Status Debug window for connection status monitoring and debugging.");
+        
+
     }
 
     private void DrawFileStorageSettings()
@@ -934,6 +938,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             var groupUpSyncshells = _configService.Current.GroupUpSyncshells;
             var groupInVisible = _configService.Current.ShowSyncshellUsersInVisible;
             var syncshellOfflineSeparate = _configService.Current.ShowSyncshellOfflineUsersSeparately;
+            var isWidthLocked = _configService.Current.IsWidthLocked;
 
             // Basic UI Elements
             _uiShared.BigText("Basic Interface");
@@ -943,6 +948,18 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 _configService.Save();
             }
             _uiShared.DrawHelpText("This will show or hide the Sphene icon that can be used to open the main window.");
+
+            if (ImGui.Checkbox("Lock Window Width", ref isWidthLocked))
+            {
+                _configService.Current.IsWidthLocked = isWidthLocked;
+                if (isWidthLocked)
+                {
+                    // Store current CompactUI window width when locking
+                    _configService.Current.LockedWidth = _currentCompactUiSize.X;
+                }
+                _configService.Save();
+            }
+            _uiShared.DrawHelpText("When enabled, the window width will be locked and only height can be adjusted.");
 
             if (ImGui.Checkbox("Enable Game Right Click Menu Entries", ref enableRightClickMenu))
             {

@@ -12,7 +12,6 @@ public class DrawGroupedGroupFolder : IDrawFolder
     private readonly IEnumerable<IDrawFolder> _groups;
     private readonly TagHandler _tagHandler;
     private readonly UiSharedService _uiSharedService;
-    private bool _wasHovered = false;
 
     public IImmutableList<DrawUserPair> DrawPairs => throw new NotSupportedException();
     public int OnlinePairs => _groups.SelectMany(g => g.DrawPairs).Where(g => g.Pair.IsOnline).DistinctBy(g => g.Pair.UserData.UID).Count();
@@ -31,9 +30,11 @@ public class DrawGroupedGroupFolder : IDrawFolder
 
         string _id = "__folder_syncshells";
         using var id = ImRaii.PushId(_id);
-        var color = ImRaii.PushColor(ImGuiCol.ChildBg, ImGui.GetColorU32(ImGuiCol.FrameBgHovered), _wasHovered);
-        using (ImRaii.Child("folder__" + _id, new System.Numerics.Vector2(295, ImGui.GetFrameHeight())))
+        // Use the same width calculation as DrawFolderBase for consistency
+        var baseFolderWidth = UiSharedService.GetBaseFolderWidth();
+        using (ImRaii.Child("folder__" + _id, new System.Numerics.Vector2(baseFolderWidth, ImGui.GetFrameHeight()), false, ImGuiWindowFlags.NoScrollbar))
         {
+            
             ImGui.Dummy(new Vector2(0f, ImGui.GetFrameHeight()));
             using (ImRaii.PushStyle(ImGuiStyleVar.ItemSpacing, new Vector2(0f, 0f)))
                 ImGui.SameLine();
@@ -62,8 +63,6 @@ public class DrawGroupedGroupFolder : IDrawFolder
             ImGui.AlignTextToFramePadding();
             ImGui.TextUnformatted("All Syncshells");
         }
-        color.Dispose();
-        _wasHovered = ImGui.IsItemHovered();
 
         ImGui.Separator();
 

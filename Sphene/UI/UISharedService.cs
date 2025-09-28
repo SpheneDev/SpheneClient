@@ -328,6 +328,16 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
         return ImGui.GetWindowContentRegionMax().X - ImGui.GetWindowContentRegionMin().X;
     }
 
+    public static float GetBaseFolderWidth(float widthOffset = 0f)
+    {
+        return GetWindowContentRegionWidth() - 32f + widthOffset;
+    }
+
+    public static float GetSyncshellFolderWidth(float widthOffset = 0f)
+    {
+        return GetWindowContentRegionWidth() - 22f + widthOffset; // Separate width calculation for syncshell folders
+    }
+
     public static bool IsDirectoryWritable(string dirPath, bool throwIfFails = false)
     {
         try

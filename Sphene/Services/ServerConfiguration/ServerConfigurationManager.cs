@@ -298,7 +298,7 @@ public class ServerConfigurationManager
     {
         CurrentServerTagStorage().ServerAvailablePairTags.Add(tag);
         _serverTagConfig.Save();
-        _spheneMediator.Publish(new RefreshUiMessage());
+        _spheneMediator.Publish(new StructuralRefreshUiMessage());
     }
 
     internal void AddTagForUid(string uid, string tagName)
@@ -306,7 +306,6 @@ public class ServerConfigurationManager
         if (CurrentServerTagStorage().UidServerPairedUserTags.TryGetValue(uid, out var tags))
         {
             tags.Add(tagName);
-            _spheneMediator.Publish(new RefreshUiMessage());
         }
         else
         {
@@ -314,6 +313,7 @@ public class ServerConfigurationManager
         }
 
         _serverTagConfig.Save();
+        _spheneMediator.Publish(new StructuralRefreshUiMessage());
     }
 
     internal bool ContainsOpenPairTag(string tag)
@@ -410,7 +410,7 @@ public class ServerConfigurationManager
             RemoveTagForUid(uid, tag, save: false);
         }
         _serverTagConfig.Save();
-        _spheneMediator.Publish(new RefreshUiMessage());
+        _spheneMediator.Publish(new StructuralRefreshUiMessage());
     }
 
     internal void RemoveTagForUid(string uid, string tagName, bool save = true)
@@ -422,7 +422,7 @@ public class ServerConfigurationManager
             if (save)
             {
                 _serverTagConfig.Save();
-                _spheneMediator.Publish(new RefreshUiMessage());
+                _spheneMediator.Publish(new StructuralRefreshUiMessage());
             }
         }
     }

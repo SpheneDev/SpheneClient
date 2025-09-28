@@ -14,32 +14,38 @@ public abstract class DrawFolderBase : IDrawFolder, IDisposable
     protected readonly IImmutableList<Pair> _allPairs;
     protected readonly TagHandler _tagHandler;
     protected readonly UiSharedService _uiSharedService;
+    protected readonly float _widthOffset;
+    protected readonly bool _isSyncshellFolder;
     private float _menuWidth = -1;
     public int OnlinePairs => DrawPairs.Count(u => u.Pair.IsOnline);
     public int TotalPairs => _allPairs.Count;
-    private bool _wasHovered = false;
 
     protected DrawFolderBase(string id, IImmutableList<DrawUserPair> drawPairs,
-        IImmutableList<Pair> allPairs, TagHandler tagHandler, UiSharedService uiSharedService)
+        IImmutableList<Pair> allPairs, TagHandler tagHandler, UiSharedService uiSharedService, float widthOffset = 0f, bool isSyncshellFolder = false)
     {
         _id = id;
         DrawPairs = drawPairs;
         _allPairs = allPairs;
         _tagHandler = tagHandler;
         _uiSharedService = uiSharedService;
+        _widthOffset = widthOffset;
+        _isSyncshellFolder = isSyncshellFolder;
     }
 
     protected abstract bool RenderIfEmpty { get; }
     protected abstract bool RenderMenu { get; }
 
-    public void Draw()
+    protected float FolderWidth => _isSyncshellFolder ? UiSharedService.GetSyncshellFolderWidth(_widthOffset) : UiSharedService.GetBaseFolderWidth(_widthOffset);
+
+    public virtual void Draw()
     {
         if (!RenderIfEmpty && !DrawPairs.Any()) return;
 
         using var id = ImRaii.PushId("folder_" + _id);
-        var color = ImRaii.PushColor(ImGuiCol.ChildBg, ImGui.GetColorU32(ImGuiCol.FrameBgHovered), _wasHovered);
-        using (ImRaii.Child("folder__" + _id, new System.Numerics.Vector2(325, ImGui.GetFrameHeight())))
+        var folderWidth = FolderWidth + (_isSyncshellFolder ? 0f : 30f);
+        using (ImRaii.Child("folder__" + _id, new System.Numerics.Vector2(folderWidth, ImGui.GetFrameHeight()), false, ImGuiWindowFlags.NoScrollbar))
         {
+            
             // draw opener
             var icon = _tagHandler.IsTagOpen(_id) ? FontAwesomeIcon.CaretDown : FontAwesomeIcon.CaretRight;
 
@@ -61,10 +67,6 @@ public abstract class DrawFolderBase : IDrawFolder, IDisposable
             ImGui.SameLine(leftSideEnd);
             DrawName(rightSideStart - leftSideEnd);
         }
-
-        _wasHovered = ImGui.IsItemHovered();
-
-        color.Dispose();
 
         ImGui.Separator();
 
@@ -105,18 +107,20 @@ public abstract class DrawFolderBase : IDrawFolder, IDisposable
 
     protected abstract float DrawRightSide(float currentRightSideX);
 
-    private float DrawRightSideInternal()
+    protected float DrawRightSideInternal()
     {
         var barButtonSize = _uiSharedService.GetIconButtonSize(FontAwesomeIcon.EllipsisV);
         var spacingX = ImGui.GetStyle().ItemSpacing.X;
-        var windowEndX = ImGui.GetWindowContentRegionMin().X + 295;
+        // Use container-relative positioning for buttons
+        var containerWidth = ImGui.GetContentRegionAvail().X;
+        var actualWindowEndX = ImGui.GetCursorPosX() + containerWidth;
 
         // Flyout Menu
-        var rightSideStart = windowEndX - (RenderMenu ? (barButtonSize.X + spacingX) : spacingX);
+        var rightSideStart = actualWindowEndX - (RenderMenu ? (barButtonSize.X + spacingX) : spacingX);
 
         if (RenderMenu)
         {
-            ImGui.SameLine(windowEndX - barButtonSize.X);
+            ImGui.SameLine(actualWindowEndX - barButtonSize.X);
             if (_uiSharedService.IconButton(FontAwesomeIcon.EllipsisV))
             {
                 ImGui.OpenPopup("User Flyout Menu");

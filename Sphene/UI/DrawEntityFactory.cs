@@ -23,6 +23,7 @@ public class DrawEntityFactory
     private readonly PlayerPerformanceConfigService _playerPerformanceConfigService;
     private readonly CharaDataManager _charaDataManager;
     private readonly SelectTagForPairUi _selectTagForPairUi;
+    private readonly SpheneConfigService _configService;
     private readonly TagHandler _tagHandler;
     private readonly IdDisplayHandler _uidDisplayHandler;
     private readonly PairManager _pairManager;
@@ -32,7 +33,7 @@ public class DrawEntityFactory
         TagHandler tagHandler, SelectPairForTagUi selectPairForTagUi,
         ServerConfigurationManager serverConfigurationManager, UiSharedService uiSharedService,
         PlayerPerformanceConfigService playerPerformanceConfigService, CharaDataManager charaDataManager,
-        PairManager pairManager)
+        PairManager pairManager, SpheneConfigService configService)
     {
         _logger = logger;
         _apiController = apiController;
@@ -46,15 +47,16 @@ public class DrawEntityFactory
         _playerPerformanceConfigService = playerPerformanceConfigService;
         _charaDataManager = charaDataManager;
         _pairManager = pairManager;
+        _configService = configService;
     }
 
     public DrawFolderGroup CreateDrawGroupFolder(GroupFullInfoDto groupFullInfoDto,
         Dictionary<Pair, List<GroupFullInfoDto>> filteredPairs,
-        IImmutableList<Pair> allPairs)
+        IImmutableList<Pair> allPairs, bool isSyncshellFolder = false)
     {
         return new DrawFolderGroup(groupFullInfoDto.Group.GID, groupFullInfoDto, _apiController,
             filteredPairs.Select(p => CreateDrawPair(groupFullInfoDto.Group.GID + p.Key.UserData.UID, p.Key, p.Value, groupFullInfoDto)).ToImmutableList(),
-            allPairs, _tagHandler, _uidDisplayHandler, _mediator, _uiSharedService);
+            allPairs, _tagHandler, _uidDisplayHandler, _mediator, _uiSharedService, isSyncshellFolder);
     }
 
     public DrawFolderTag CreateDrawTagFolder(string tag,
@@ -69,6 +71,6 @@ public class DrawEntityFactory
     {
         return new DrawUserPair(id + user.UserData.UID, user, groups, currentGroup, _apiController, _uidDisplayHandler,
             _mediator, _selectTagForPairUi, _serverConfigurationManager, _uiSharedService, _playerPerformanceConfigService,
-            _charaDataManager, _pairManager);
+            _charaDataManager, _pairManager, _configService);
     }
 }

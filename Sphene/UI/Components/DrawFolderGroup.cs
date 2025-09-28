@@ -10,6 +10,7 @@ using Sphene.Services.Mediator;
 using Sphene.UI.Handlers;
 using Sphene.WebAPI;
 using System.Collections.Immutable;
+using System.Numerics;
 
 namespace Sphene.UI.Components;
 
@@ -19,11 +20,12 @@ public class DrawFolderGroup : DrawFolderBase
     private readonly GroupFullInfoDto _groupFullInfoDto;
     private readonly IdDisplayHandler _idDisplayHandler;
     private readonly SpheneMediator _spheneMediator;
+    private float _menuWidth;
 
     public DrawFolderGroup(string id, GroupFullInfoDto groupFullInfoDto, ApiController apiController,
         IImmutableList<DrawUserPair> drawPairs, IImmutableList<Pair> allPairs, TagHandler tagHandler, IdDisplayHandler idDisplayHandler,
-        SpheneMediator spheneMediator, UiSharedService uiSharedService) :
-        base(id, drawPairs, allPairs, tagHandler, uiSharedService)
+        SpheneMediator spheneMediator, UiSharedService uiSharedService, bool isSyncshellFolder = false) :
+        base(id, drawPairs, allPairs, tagHandler, uiSharedService, 0f, isSyncshellFolder)
     {
         _groupFullInfoDto = groupFullInfoDto;
         _apiController = apiController;
@@ -32,10 +34,63 @@ public class DrawFolderGroup : DrawFolderBase
     }
 
     protected override bool RenderIfEmpty => true;
-    protected override bool RenderMenu => true;
+    protected override bool RenderMenu => false;
     private bool IsModerator => IsOwner || _groupFullInfoDto.GroupUserInfo.IsModerator();
     private bool IsOwner => string.Equals(_groupFullInfoDto.OwnerUID, _apiController.UID, StringComparison.Ordinal);
     private bool IsPinned => _groupFullInfoDto.GroupUserInfo.IsPinned();
+
+    public override void Draw()
+    {
+        if (!RenderIfEmpty && !DrawPairs.Any()) return;
+
+        using var id = ImRaii.PushId("folder_" + _id);
+        var folderWidth = FolderWidth + 0.0f;
+        using (ImRaii.Child("folder__" + _id, new System.Numerics.Vector2(folderWidth, ImGui.GetFrameHeight()), false, ImGuiWindowFlags.NoScrollbar))
+        {
+            
+            // draw opener
+            var icon = _tagHandler.IsTagOpen(_id) ? FontAwesomeIcon.CaretDown : FontAwesomeIcon.CaretRight;
+
+            ImGui.AlignTextToFramePadding();
+
+            _uiSharedService.IconText(icon);
+            if (ImGui.IsItemClicked())
+            {
+                _tagHandler.SetTagOpen(_id, !_tagHandler.IsTagOpen(_id));
+            }
+
+            ImGui.SameLine();
+            var leftSideEnd = DrawIcon();
+
+            ImGui.SameLine();
+            var rightSideStart = DrawRightSideInternal();
+
+            // draw name
+            ImGui.SameLine(leftSideEnd);
+            DrawName(rightSideStart - leftSideEnd);
+        }
+
+        ImGui.Separator();
+
+        // if opened draw content
+        if (_tagHandler.IsTagOpen(_id))
+        {
+            using var indent = ImRaii.PushIndent(_uiSharedService.GetIconSize(FontAwesomeIcon.EllipsisV).X + ImGui.GetStyle().ItemSpacing.X, false);
+            if (DrawPairs.Any())
+            {
+                foreach (var item in DrawPairs)
+                {
+                    item.DrawPairedClient();
+                }
+            }
+            else
+            {
+                ImGui.TextUnformatted("No users (online)");
+            }
+
+            ImGui.Separator();
+        }
+    }
 
     protected override float DrawIcon()
     {
@@ -170,6 +225,7 @@ public class DrawFolderGroup : DrawFolderBase
 
         FontAwesomeIcon pauseIcon = _groupFullInfoDto.GroupUserPermissions.IsPaused() ? FontAwesomeIcon.Play : FontAwesomeIcon.Pause;
         var pauseButtonSize = _uiSharedService.GetIconButtonSize(pauseIcon);
+        var menuButtonSize = _uiSharedService.GetIconButtonSize(FontAwesomeIcon.EllipsisV);
 
         var userCogButtonSize = _uiSharedService.GetIconSize(FontAwesomeIcon.UsersCog);
 
@@ -177,9 +233,51 @@ public class DrawFolderGroup : DrawFolderBase
         var individualAnimDisabled = _groupFullInfoDto.GroupUserPermissions.IsDisableAnimations();
         var individualVFXDisabled = _groupFullInfoDto.GroupUserPermissions.IsDisableVFX();
 
-        var infoIconPosDist = currentRightSideX - pauseButtonSize.X - spacingX;
+        // Use container-relative positioning for buttons
+        var containerWidth = ImGui.GetContentRegionAvail().X;
+        var actualWindowEndX = ImGui.GetCursorPosX() + containerWidth;
+        
+        var menuButtonOffset = actualWindowEndX - menuButtonSize.X;
+        ImGui.SameLine(menuButtonOffset);
+        
+        using var menuButtonColor = ImRaii.PushColor(ImGuiCol.Button, new Vector4(0.3f, 0.5f, 0.9f, 0.4f));
+        using var menuButtonHoveredColor = ImRaii.PushColor(ImGuiCol.ButtonHovered, new Vector4(0.4f, 0.6f, 1.0f, 0.6f));
+        using var menuButtonActiveColor = ImRaii.PushColor(ImGuiCol.ButtonActive, new Vector4(0.5f, 0.7f, 1.0f, 0.8f));
+        
+        if (_uiSharedService.IconButton(FontAwesomeIcon.EllipsisV))
+        {
+            ImGui.OpenPopup("User Flyout Menu");
+        }
+        if (ImGui.BeginPopup("User Flyout Menu"))
+        {
+            using (ImRaii.PushId($"buttons-{_id}")) DrawMenu(_menuWidth);
+            _menuWidth = ImGui.GetWindowContentRegionMax().X - ImGui.GetWindowContentRegionMin().X;
+            ImGui.EndPopup();
+        }
+        else
+        {
+            _menuWidth = 0;
+        }
 
-        ImGui.SameLine(infoIconPosDist - userCogButtonSize.X);
+        // Calculate pause button position (left of menu button) - MUST match menu button position
+        var pauseButtonOffset = actualWindowEndX - pauseButtonSize.X - spacingX - menuButtonSize.X;
+        ImGui.SameLine(pauseButtonOffset);
+        
+        // Draw pause button with brighter blue color styling
+        using var pauseButtonColor = ImRaii.PushColor(ImGuiCol.Button, new Vector4(0.3f, 0.5f, 0.9f, 0.4f));
+        using var pauseButtonHoveredColor = ImRaii.PushColor(ImGuiCol.ButtonHovered, new Vector4(0.4f, 0.6f, 1.0f, 0.6f));
+        using var pauseButtonActiveColor = ImRaii.PushColor(ImGuiCol.ButtonActive, new Vector4(0.5f, 0.7f, 1.0f, 0.8f));
+        
+        if (_uiSharedService.IconButton(pauseIcon))
+        {
+            var perm = _groupFullInfoDto.GroupUserPermissions;
+            perm.SetPaused(!perm.IsPaused());
+            _ = _apiController.GroupChangeIndividualPermissionState(new GroupPairUserPermissionDto(_groupFullInfoDto.Group, new(_apiController.UID), perm));
+        }
+
+        // Calculate info icon position (left of pause button) - MUST match other button positions
+        var infoIconOffset = actualWindowEndX - userCogButtonSize.X - spacingX - pauseButtonSize.X - spacingX - menuButtonSize.X;
+        ImGui.SameLine(infoIconOffset);
 
         ImGui.AlignTextToFramePadding();
 
@@ -232,13 +330,7 @@ public class DrawFolderGroup : DrawFolderBase
             ImGui.EndTooltip();
         }
 
-        ImGui.SameLine();
-        if (_uiSharedService.IconButton(pauseIcon))
-        {
-            var perm = _groupFullInfoDto.GroupUserPermissions;
-            perm.SetPaused(!perm.IsPaused());
-            _ = _apiController.GroupChangeIndividualPermissionState(new GroupPairUserPermissionDto(_groupFullInfoDto.Group, new(_apiController.UID), perm));
-        }
-        return currentRightSideX;
+        // Return leftmost button position like DrawFolderTag.cs
+        return infoIconOffset;
     }
 }

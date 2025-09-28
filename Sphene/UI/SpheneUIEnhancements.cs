@@ -75,7 +75,7 @@ public static class SpheneUIEnhancements
     }
     
     // Draws a Sphene-themed card container with modern styling, optional header buttons, resize handle, and custom header background
-    public static void DrawSpheneCard(string title, Action content, bool collapsible = false, float? maxHeight = null, Action headerButtons = null, bool withResizeHandle = false, Vector2? minSize = null, Vector2? maxSize = null, uint customHeaderBg = 0)
+    public static void DrawSpheneCard(string title, Action content, bool collapsible = false, float? maxHeight = null, Action headerButtons = null, bool withResizeHandle = false, Vector2? minSize = null, Vector2? maxSize = null, uint customHeaderBg = 0, bool? isWidthLocked = null, Action onLockToggle = null, string lockTooltip = null)
     {
         // Apply pending window size if available
         if (_pendingWindowSizes.TryGetValue(title, out var pendingSize))
@@ -225,6 +225,62 @@ public static class SpheneUIEnhancements
                     var lineEnd = new Vector2(resizeHandlePos.X + resizeHandleSize.X - 4, resizeHandlePos.Y + resizeHandleSize.Y - 4 - offset);
                     drawList.AddLine(lineStart, lineEnd, lineColor, 1.5f);
                 }
+                
+                // Add lock icon next to resize handle if lock functionality is enabled
+                if (isWidthLocked.HasValue && onLockToggle != null)
+                {
+                    var lockIconSize = new Vector2(16, 16);
+                    var padding = new Vector2(4, 4); // Padding around the icon for better clickable area
+                    var buttonSize = lockIconSize + padding * 2;
+                    var lockIconPos = new Vector2(resizeHandlePos.X - buttonSize.X - 4, resizeHandlePos.Y + (resizeHandleSize.Y - buttonSize.Y) / 2);
+                    
+                    ImGui.SetCursorScreenPos(lockIconPos);
+                    
+                    // Use appropriate lock icon based on state
+                    var lockIcon = isWidthLocked.Value ? FontAwesomeIcon.Lock : FontAwesomeIcon.LockOpen;
+                    
+                    // Create invisible button for proper clickable area
+                    ImGui.PushID($"lock_{title}");
+                    bool clicked = ImGui.InvisibleButton("lock_button", buttonSize);
+                    bool isLockHovered = ImGui.IsItemHovered();
+                    ImGui.PopID();
+                    
+                    // Draw rounded background on hover
+                    if (isLockHovered)
+                    {
+                        var buttonMin = lockIconPos;
+                        var buttonMax = lockIconPos + buttonSize;
+                        var backgroundColor = ImGui.GetColorU32(SpheneColors.ToImGuiColor(SpheneColors.WithAlpha(SpheneColors.CrystalBlue, 0.2f)));
+                        drawList.AddRectFilled(buttonMin, buttonMax, backgroundColor, 4.0f); // 4.0f for rounded corners
+                    }
+                    
+                    // Draw the icon centered in the button area
+                    var iconDrawPos = lockIconPos + padding;
+                    ImGui.SetCursorScreenPos(iconDrawPos);
+                    
+                    ImGui.PushFont(UiBuilder.IconFont);
+                    var lockColor = ImGui.GetColorU32(SpheneColors.ToImGuiColor(SpheneColors.CrystalBlue));
+                    ImGui.PushStyleColor(ImGuiCol.Text, lockColor);
+                    
+                    ImGui.Text(lockIcon.ToIconString());
+                    
+                    ImGui.PopStyleColor();
+                    ImGui.PopFont();
+                    
+                    // Handle click
+                    if (clicked)
+                    {
+                        onLockToggle?.Invoke();
+                    }
+                    
+                    // Add tooltip
+                    if (isLockHovered && !string.IsNullOrEmpty(lockTooltip))
+                    {
+                        ImGui.BeginTooltip();
+                        ImGui.Text(lockTooltip);
+                        ImGui.EndTooltip();
+                    }
+                }
             }
         }
         ImGui.EndChild();
@@ -236,141 +292,7 @@ public static class SpheneUIEnhancements
     /// </summary>
     public static void DrawSpheneCard(string title, Action content, bool collapsible = false, float? maxHeight = null, Action headerButtons = null, bool withResizeHandle = false, Vector2? minSize = null, Vector2? maxSize = null)
     {
-        var cardBg = SpheneColors.ToImGuiColor(SpheneColors.BackgroundMid);
-        var borderColor = SpheneColors.ToImGuiColor(SpheneColors.BorderColor);
-        var headerBg = SpheneColors.ToImGuiColor(SpheneColors.WithAlpha(SpheneColors.DeepCrystal, 0.3f));
-        
-        using var cardStyle = ImRaii.PushColor(ImGuiCol.ChildBg, cardBg);
-        using var borderStyle = ImRaii.PushColor(ImGuiCol.Border, borderColor);
-        using var roundingStyle = ImRaii.PushStyle(ImGuiStyleVar.ChildRounding, 12.0f);
-        using var borderSizeStyle = ImRaii.PushStyle(ImGuiStyleVar.ChildBorderSize, 1.5f);
-        using var paddingStyle = ImRaii.PushStyle(ImGuiStyleVar.WindowPadding, new Vector2(16.0f, 12.0f));
-        
-        // Calculate card size - use maxHeight if specified, otherwise auto-size
-        var cardSize = maxHeight.HasValue ? new Vector2(0, maxHeight.Value) : Vector2.Zero;
-        
-        if (ImGui.BeginChild($"##card_{title}", cardSize, true, ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse))
-        {
-            // Modern card header with background
-            var headerHeight = ImGui.GetTextLineHeight() + 16.0f;
-            var drawList = ImGui.GetWindowDrawList();
-            var headerMin = ImGui.GetCursorScreenPos();
-            var headerMax = new Vector2(headerMin.X + ImGui.GetContentRegionAvail().X, headerMin.Y + headerHeight);
-            
-            drawList.AddRectFilled(headerMin, headerMax, headerBg, 12.0f);
-            
-            ImGui.SetCursorPosY(ImGui.GetCursorPosY() + 8.0f);
-            using var headerColor = ImRaii.PushColor(ImGuiCol.Text, SpheneColors.ToImGuiColor(SpheneColors.CrystalBlue));
-            
-            if (collapsible)
-            {
-                if (ImGui.CollapsingHeader(title, ImGuiTreeNodeFlags.DefaultOpen))
-                {
-                    ImGui.Spacing();
-                    content();
-                }
-            }
-            else
-            {
-                // Header layout with title and buttons
-                ImGui.SetCursorPosX(ImGui.GetCursorPosX() + 8.0f);
-                
-                if (headerButtons != null)
-                {
-                    // Draw title on the left
-                    ImGui.TextUnformatted(title);
-                    
-                    // Draw buttons on the right side of the header
-                    ImGui.SameLine(ImGui.GetContentRegionAvail().X - 40.0f);
-                    ImGui.SetCursorPosY(ImGui.GetCursorPosY() - 0.0f);
-                    headerButtons();
-                }
-                else
-                {
-                    ImGui.TextUnformatted(title);
-                }
-                
-                ImGui.SetCursorPosY(ImGui.GetCursorPosY() + 8.0f);
-                
-                ImGui.Spacing();
-                ImGui.Spacing();
-                content();
-            }
-            
-            // Add resize handle if requested
-            if (withResizeHandle)
-            {
-                // Get the main window position and size
-                var mainWindowPos = ImGui.GetWindowPos();
-                var mainWindowSize = ImGui.GetWindowSize();
-                var resizeHandleSize = new Vector2(16, 16);
-                var resizeHandlePos = new Vector2(mainWindowPos.X + mainWindowSize.X - resizeHandleSize.X - 4, mainWindowPos.Y + mainWindowSize.Y - resizeHandleSize.Y - 4);
-                
-                ImGui.SetCursorScreenPos(resizeHandlePos);
-                ImGui.InvisibleButton($"##resize_handle_{title}", resizeHandleSize);
-                
-                var isHovered = ImGui.IsItemHovered();
-                var isActive = ImGui.IsItemActive();
-                
-                if (isActive && ImGui.IsMouseDragging(ImGuiMouseButton.Left))
-                {
-                    var mousePos = ImGui.GetIO().MousePos;
-                    
-                    // Calculate new size based on mouse position relative to window position
-                    var newWidth = mousePos.X - mainWindowPos.X + 8; // Add some padding
-                    var newHeight = mousePos.Y - mainWindowPos.Y + 8; // Add some padding
-                    
-                    // Apply size constraints if provided
-                    if (minSize.HasValue)
-                    {
-                        newWidth = Math.Max(minSize.Value.X, newWidth);
-                        newHeight = Math.Max(minSize.Value.Y, newHeight);
-                    }
-                    if (maxSize.HasValue)
-                    {
-                        newWidth = Math.Min(maxSize.Value.X, newWidth);
-                        newHeight = Math.Min(maxSize.Value.Y, newHeight);
-                    }
-                    
-                    // Store the new size to be applied next frame
-                    _pendingWindowSizes[title] = new Vector2(newWidth, newHeight);
-                }
-                
-                // Draw resize handle visual indicator
-                // Corner triangle indicator
-                var triangleColor = isActive ? SpheneColors.ToImGuiColor(SpheneColors.CrystalBlue) :
-                                   isHovered ? SpheneColors.ToImGuiColor(SpheneColors.WithAlpha(SpheneColors.CrystalBlue, 0.8f)) :
-                                   SpheneColors.ToImGuiColor(SpheneColors.WithAlpha(SpheneColors.BorderColor, 0.6f));
-                
-                // Draw corner triangle (larger and more visible)
-                var p1 = new Vector2(resizeHandlePos.X + resizeHandleSize.X - 1, resizeHandlePos.Y + 1);
-                var p2 = new Vector2(resizeHandlePos.X + resizeHandleSize.X - 1, resizeHandlePos.Y + resizeHandleSize.Y - 1);
-                var p3 = new Vector2(resizeHandlePos.X + 1, resizeHandlePos.Y + resizeHandleSize.Y - 1);
-                
-                drawList.AddTriangleFilled(p1, p2, p3, triangleColor);
-                
-                // Add more prominent grip lines
-                var lineColor = SpheneColors.ToImGuiColor(SpheneColors.WithAlpha(SpheneColors.CrystalWhite, isHovered ? 0.6f : 0.4f));
-                for (int i = 0; i < 4; i++)
-                {
-                    var offset = i * 3;
-                    var lineStart = new Vector2(resizeHandlePos.X + resizeHandleSize.X - 4 - offset, resizeHandlePos.Y + 4 + offset);
-                    var lineEnd = new Vector2(resizeHandlePos.X + resizeHandleSize.X - 4 - offset, resizeHandlePos.Y + resizeHandleSize.Y - 4);
-                    drawList.AddLine(lineStart, lineEnd, lineColor, 1.5f);
-                }
-                
-                // Add horizontal grip lines for better visibility
-                for (int i = 0; i < 4; i++)
-                {
-                    var offset = i * 3;
-                    var lineStart = new Vector2(resizeHandlePos.X + 4 + offset, resizeHandlePos.Y + resizeHandleSize.Y - 4 - offset);
-                    var lineEnd = new Vector2(resizeHandlePos.X + resizeHandleSize.X - 4, resizeHandlePos.Y + resizeHandleSize.Y - 4 - offset);
-                    drawList.AddLine(lineStart, lineEnd, lineColor, 1.5f);
-                }
-            }
-        }
-        ImGui.EndChild();
-        ImGui.Spacing();
+        DrawSpheneCard(title, content, collapsible, maxHeight, headerButtons, withResizeHandle, minSize, maxSize, 0, null, null, null);
     }
     
     /// <summary>

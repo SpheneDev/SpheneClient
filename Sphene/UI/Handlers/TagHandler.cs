@@ -8,6 +8,7 @@ public class TagHandler
     public const string CustomOfflineTag = "Sphene_Offline";
     public const string CustomOfflineSyncshellTag = "Sphene_OfflineSyncshell";
     public const string CustomOnlineTag = "Sphene_Online";
+    public const string CustomPausedTag = "Sphene_Paused";
     public const string CustomUnpairedTag = "Sphene_Unpaired";
     public const string CustomVisibleTag = "Sphene_Visible";
     private readonly ServerConfigurationManager _serverConfigurationManager;

@@ -62,6 +62,7 @@ public class CompactUi : WindowMediatorSubscriberBase
     private bool _isIncognitoModeActive = false;
     private DateTime _lastIncognitoButtonClick = DateTime.MinValue;
     private readonly HashSet<string> _prePausedPairs = new();
+    private readonly HashSet<string> _prePausedSyncshells = new();
     private DateTime _lastReconnectButtonClick = DateTime.MinValue;
     private Vector2 _lastSize = Vector2.One;
     private int _secretKeyIdx = -1;
@@ -123,6 +124,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         // Initialize incognito mode state from configuration
         _isIncognitoModeActive = _configService.Current.IsIncognitoModeActive;
         _prePausedPairs = new HashSet<string>(_configService.Current.PrePausedPairs);
+        _prePausedSyncshells = new HashSet<string>(_configService.Current.PrePausedSyncshells);
 
         AllowPinning = false;
         AllowClickthrough = false;
@@ -185,11 +187,37 @@ public class CompactUi : WindowMediatorSubscriberBase
         Flags |= ImGuiWindowFlags.NoDocking | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse 
                | ImGuiWindowFlags.NoDecoration | ImGuiWindowFlags.NoBackground | ImGuiWindowFlags.NoBringToFrontOnFocus;
 
-        SizeConstraints = new WindowSizeConstraints()
+        UpdateSizeConstraints();
+        
+        // Subscribe to configuration changes to update size constraints when width lock changes
+        _configService.ConfigSave += OnConfigurationChanged;
+    }
+
+    private void UpdateSizeConstraints()
+    {
+        if (_configService.Current.IsWidthLocked)
         {
-            MinimumSize = new Vector2(370, 400),
-            MaximumSize = new Vector2(370, 2000),
-        };
+            // When width is locked, set both min and max width to the locked value
+            SizeConstraints = new WindowSizeConstraints()
+            {
+                MinimumSize = new Vector2(_configService.Current.LockedWidth, 400),
+                MaximumSize = new Vector2(_configService.Current.LockedWidth, 2000),
+            };
+        }
+        else
+        {
+            // Normal size constraints when width is not locked
+            SizeConstraints = new WindowSizeConstraints()
+            {
+                MinimumSize = new Vector2(370, 400),
+                MaximumSize = new Vector2(800, 2000),
+            };
+        }
+    }
+
+    private void OnConfigurationChanged(object? sender, EventArgs e)
+    {
+        UpdateSizeConstraints();
     }
 
     // Removed ConvertSvgBase64ToPng method - no longer needed
@@ -198,6 +226,9 @@ public class CompactUi : WindowMediatorSubscriberBase
     {
         if (disposing)
         {
+            // Unsubscribe from configuration changes
+            _configService.ConfigSave -= OnConfigurationChanged;
+            
             // Dispose all draw folders to clean up event subscriptions
             if (_drawFolders != null)
             {
@@ -220,7 +251,7 @@ public class CompactUi : WindowMediatorSubscriberBase
     protected override void DrawInternal()
     {
         
-        _windowContentWidth = UiSharedService.GetWindowContentRegionWidth() - 30f; // Reduce width from right side
+        _windowContentWidth = UiSharedService.GetBaseFolderWidth(); // Use consistent width calculation
         if (!_apiController.IsCurrentVersion)
         {
             var ver = _apiController.CurrentClientVersion;
@@ -303,7 +334,14 @@ public class CompactUi : WindowMediatorSubscriberBase
                 ImGui.Spacing();
                 
                 // Connected Pairs Section
+                var onlineCount = _pairManager.DirectPairs.Count(p => p.IsOnline);
+                var totalCount = _pairManager.DirectPairs.Count;
+                var onlineText = $"({onlineCount} / {totalCount}) online";
+                var onlineTextSize = ImGui.CalcTextSize(onlineText);
+                
                 ImGui.TextColored(SpheneColors.SpheneGold, "Connected Pairs");
+                ImGui.SameLine(ImGui.GetContentRegionAvail().X - onlineTextSize.X);
+                ImGui.TextColored(SpheneColors.SpheneGold, onlineText);
                 ImGui.Separator();
                 using (ImRaii.PushId("pairlist")) DrawPairs();
                 
@@ -345,10 +383,22 @@ public class CompactUi : WindowMediatorSubscriberBase
             }
         }, true, SizeConstraints?.MinimumSize, SizeConstraints?.MaximumSize,
 #if DEBUG
-        debugHeaderBg
+        debugHeaderBg,
 #else
-        0
+        0,
 #endif
+        _configService.Current.IsWidthLocked, // isWidthLocked
+         () => {
+             _configService.Current.IsWidthLocked = !_configService.Current.IsWidthLocked;
+             if (_configService.Current.IsWidthLocked)
+             {
+                 // Store current CompactUI window width when locking - use _lastSize for consistency
+                 _configService.Current.LockedWidth = _lastSize.X;
+             }
+             _configService.Save();
+             UpdateSizeConstraints();
+         }, // onLockToggle
+         _configService.Current.IsWidthLocked ? "Unlock window width" : "Lock window width" // lockTooltip
         );
 
         if (_configService.Current.OpenPopupOnAdd && _pairManager.LastAddedUser != null)
@@ -392,6 +442,15 @@ public class CompactUi : WindowMediatorSubscriberBase
         {
             _lastSize = size;
             _lastPosition = pos;
+            
+            // If width lock is enabled and width has changed, update the locked width
+            if (_configService.Current.IsWidthLocked && Math.Abs(_lastSize.X - _configService.Current.LockedWidth) > 1f)
+            {
+                _configService.Current.LockedWidth = _lastSize.X;
+                _configService.Save();
+                UpdateSizeConstraints();
+            }
+            
             Mediator.Publish(new CompactUiChange(_lastSize, _lastPosition));
         }
     }
@@ -401,7 +460,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         var ySize = _transferPartHeight == 0
             ? 1
             : (ImGui.GetWindowContentRegionMax().Y - ImGui.GetWindowContentRegionMin().Y
-                + ImGui.GetTextLineHeight() - ImGui.GetStyle().WindowPadding.Y - ImGui.GetStyle().WindowBorderSize) - _transferPartHeight - ImGui.GetCursorPosY();
+                + ImGui.GetTextLineHeight() - ImGui.GetStyle().WindowPadding.Y - ImGui.GetStyle().WindowBorderSize) - _transferPartHeight - ImGui.GetCursorPosY() - 15; // add some Space
 
         ImGui.BeginChild("list", new Vector2(_windowContentWidth, ySize), border: false, ImGuiWindowFlags.NoScrollbar);
 
@@ -649,9 +708,11 @@ public class CompactUi : WindowMediatorSubscriberBase
                     ? (_configService.Current.PreferNotesOverNamesForVisible ? u.Key.GetNote() : u.Key.PlayerName)
                     : (u.Key.GetNote() ?? u.Key.UserData.AliasOrUID));
         bool FilterOnlineOrPausedSelf(KeyValuePair<Pair, List<GroupFullInfoDto>> u)
-            => (u.Key.IsOnline || (!u.Key.IsOnline && !_configService.Current.ShowOfflineUsersSeparately)
-                    || u.Key.UserPair.OwnPermissions.IsPaused())
+            => (u.Key.IsOnline || (!u.Key.IsOnline && !_configService.Current.ShowOfflineUsersSeparately))
+                && !u.Key.UserPair.OwnPermissions.IsPaused()
                 && (!_configService.Current.ShowVisibleUsersSeparately || !u.Key.IsVisible);
+        bool FilterPausedUsers(KeyValuePair<Pair, List<GroupFullInfoDto>> u)
+            => u.Key.UserPair.OwnPermissions.IsPaused();
         Dictionary<Pair, List<GroupFullInfoDto>> BasicSortedDictionary(IEnumerable<KeyValuePair<Pair, List<GroupFullInfoDto>>> u)
             => u.OrderByDescending(u => u.Key.IsVisible)
                 .ThenByDescending(u => u.Key.IsOnline)
@@ -708,7 +769,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                 .ThenBy(AlphabeticalSort, StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(k => k.Key, k => k.Value);
 
-            groupFolders.Add(_drawEntityFactory.CreateDrawGroupFolder(group, filteredGroupPairs, allGroupPairs));
+            groupFolders.Add(_drawEntityFactory.CreateDrawGroupFolder(group, filteredGroupPairs, allGroupPairs, _configService.Current.GroupUpSyncshells));
         }
 
         if (_configService.Current.GroupUpSyncshells)
@@ -734,6 +795,14 @@ public class CompactUi : WindowMediatorSubscriberBase
 
         drawFolders.Add(_drawEntityFactory.CreateDrawTagFolder((_configService.Current.ShowOfflineUsersSeparately ? TagHandler.CustomOnlineTag : TagHandler.CustomAllTag),
             onlineNotTaggedPairs, allOnlineNotTaggedPairs));
+
+        // Add paused users folder
+        var allPausedPairs = ImmutablePairList(allPairs
+            .Where(FilterPausedUsers));
+        var filteredPausedPairs = BasicSortedDictionary(filteredPairs
+            .Where(FilterPausedUsers));
+
+        drawFolders.Add(_drawEntityFactory.CreateDrawTagFolder(TagHandler.CustomPausedTag, filteredPausedPairs, allPausedPairs));
 
         if (_configService.Current.ShowOfflineUsersSeparately)
         {
@@ -930,13 +999,45 @@ public class CompactUi : WindowMediatorSubscriberBase
                 // Clear the tracking set for next incognito session
                 _prePausedPairs.Clear();
                 
-                // Note: We don't automatically rejoin syncshells as that would require storing which ones were left
+                // Unpause syncshells that were paused during incognito mode (but not those that were already paused)
+                var groupPairs = _pairManager.GroupPairs.ToList();
+                var syncshellsToUnpause = new Dictionary<string, Sphene.API.Data.Enum.GroupUserPreferredPermissions>(StringComparer.Ordinal);
+                
+                foreach (var groupPair in groupPairs)
+                {
+                    var group = groupPair.Key;
+                    
+                    // Only unpause if this syncshell was NOT already paused before incognito mode
+                    if (group.GroupUserPermissions.IsPaused() && !_prePausedSyncshells.Contains(group.Group.GID))
+                    {
+                        var unpausedPermissions = group.GroupUserPermissions;
+                        unpausedPermissions.SetPaused(false);
+                        syncshellsToUnpause[group.Group.GID] = unpausedPermissions;
+                        _logger.LogInformation("Will unpause group (was paused by incognito): {gid}", group.Group.GID);
+                    }
+                    else if (_prePausedSyncshells.Contains(group.Group.GID))
+                    {
+                        _logger.LogInformation("Keeping group paused (was already paused before incognito): {gid}", group.Group.GID);
+                    }
+                }
+                
+                // Apply bulk unpause to syncshells
+                if (syncshellsToUnpause.Count > 0)
+                {
+                    await _apiController.SetBulkPermissions(new(new(StringComparer.Ordinal), syncshellsToUnpause));
+                    _logger.LogInformation("Unpaused {count} syncshells after incognito mode", syncshellsToUnpause.Count);
+                }
+                
+                // Clear the tracking set for next incognito session
+                _prePausedSyncshells.Clear();
+                
                 _isIncognitoModeActive = false;
                 _logger.LogInformation("Incognito mode deactivated");
                 
                 // Save configuration
                 _configService.Current.IsIncognitoModeActive = _isIncognitoModeActive;
                 _configService.Current.PrePausedPairs = new HashSet<string>(_prePausedPairs);
+                _configService.Current.PrePausedSyncshells = new HashSet<string>(_prePausedSyncshells);
                 _configService.Save();
             }
             else
@@ -949,6 +1050,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                 
                 // Clear previous tracking and record currently paused pairs
                 _prePausedPairs.Clear();
+                _prePausedSyncshells.Clear();
                 
                 foreach (var pair in allUserPairs)
                 {
@@ -978,9 +1080,11 @@ public class CompactUi : WindowMediatorSubscriberBase
                     }
                 }
 
-                // Leave syncshells/groups where no members are in current party
+                // Pause syncshells/groups where no members are in current party
                 var groupPairs = _pairManager.GroupPairs.ToList();
                 _logger.LogInformation("Incognito mode: Checking {count} groups for non-party members", groupPairs.Count);
+                
+                var syncshellsToPause = new Dictionary<string, Sphene.API.Data.Enum.GroupUserPreferredPermissions>(StringComparer.Ordinal);
                 
                 foreach (var groupPair in groupPairs)
                 {
@@ -1000,13 +1104,27 @@ public class CompactUi : WindowMediatorSubscriberBase
                     
                     if (!hasPartyMember)
                     {
-                        await _apiController.GroupLeave(new GroupDto(group.Group));
-                        _logger.LogInformation("Left group (no party members): {gid}", group.Group.GID);
+                        // Store current pause state and pause the syncshell
+                        if (!group.GroupUserPermissions.IsPaused())
+                        {
+                            _prePausedSyncshells.Add(group.Group.GID);
+                        }
+                        var pausedPermissions = group.GroupUserPermissions;
+                        pausedPermissions.SetPaused(true);
+                        syncshellsToPause[group.Group.GID] = pausedPermissions;
+                        _logger.LogInformation("Will pause group (no party members): {gid}", group.Group.GID);
                     }
                     else
                     {
-                        _logger.LogInformation("Kept group (has party members): {gid}", group.Group.GID);
+                        _logger.LogInformation("Keeping group active (has party members): {gid}", group.Group.GID);
                     }
+                }
+                
+                // Apply bulk pause to syncshells
+                if (syncshellsToPause.Count > 0)
+                {
+                    await _apiController.SetBulkPermissions(new(new(StringComparer.Ordinal), syncshellsToPause));
+                    _logger.LogInformation("Paused {count} syncshells for incognito mode", syncshellsToPause.Count);
                 }
                 
                 _isIncognitoModeActive = true;

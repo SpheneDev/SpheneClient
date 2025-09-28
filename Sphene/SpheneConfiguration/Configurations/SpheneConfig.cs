@@ -64,6 +64,10 @@ public class SpheneConfig : ISpheneConfiguration
     public float IconPositionY { get; set; } = 100f;
     public bool ShowSpheneIcon { get; set; } = true;
     
+    // Width Lock Settings
+    public bool IsWidthLocked { get; set; } = false;
+    public float LockedWidth { get; set; } = 400f;
+    
     // Acknowledgment System Settings
     public bool ShowAcknowledgmentPopups { get; set; } = false;
     public bool ShowWaitingForAcknowledgmentPopups { get; set; } = false;
@@ -76,4 +80,7 @@ public class SpheneConfig : ISpheneConfiguration
     // Incognito Mode Settings
     public bool IsIncognitoModeActive { get; set; } = false;
     public HashSet<string> PrePausedPairs { get; set; } = new();
+    public HashSet<string> PrePausedSyncshells { get; set; } = new();
+    
+
 }

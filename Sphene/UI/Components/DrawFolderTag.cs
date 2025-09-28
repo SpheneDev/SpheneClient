@@ -6,6 +6,7 @@ using Sphene.PlayerData.Pairs;
 using Sphene.UI.Handlers;
 using Sphene.WebAPI;
 using System.Collections.Immutable;
+using System.Numerics;
 
 namespace Sphene.UI.Components;
 
@@ -16,7 +17,7 @@ public class DrawFolderTag : DrawFolderBase
 
     public DrawFolderTag(string id, IImmutableList<DrawUserPair> drawPairs, IImmutableList<Pair> allPairs,
         TagHandler tagHandler, ApiController apiController, SelectPairForTagUi selectPairForTagUi, UiSharedService uiSharedService)
-        : base(id, drawPairs, allPairs, tagHandler, uiSharedService)
+        : base(id, drawPairs, allPairs, tagHandler, uiSharedService, 0f, false) // Consistent width with other containers, not a syncshell folder
     {
         _apiController = apiController;
         _selectPairForTagUi = selectPairForTagUi;
@@ -27,28 +28,74 @@ public class DrawFolderTag : DrawFolderBase
         TagHandler.CustomUnpairedTag => false,
         TagHandler.CustomOnlineTag => false,
         TagHandler.CustomOfflineTag => false,
+        TagHandler.CustomPausedTag => false,
         TagHandler.CustomVisibleTag => false,
         TagHandler.CustomAllTag => true,
         TagHandler.CustomOfflineSyncshellTag => false,
         _ => true,
     };
 
-    protected override bool RenderMenu => _id switch
+    protected override bool RenderMenu => false; // We'll draw the menu manually in DrawRightSide
+
+    public override void Draw()
     {
-        TagHandler.CustomUnpairedTag => false,
-        TagHandler.CustomOnlineTag => false,
-        TagHandler.CustomOfflineTag => false,
-        TagHandler.CustomVisibleTag => false,
-        TagHandler.CustomAllTag => false,
-        TagHandler.CustomOfflineSyncshellTag => false,
-        _ => true,
-    };
+        if (!RenderIfEmpty && !DrawPairs.Any()) return;
+
+        using var id = ImRaii.PushId("folder_" + _id);
+        var folderWidth = FolderWidth + 38.0f;
+        using (ImRaii.Child("folder__" + _id, new System.Numerics.Vector2(folderWidth, ImGui.GetFrameHeight()), false, ImGuiWindowFlags.NoScrollbar))
+        {
+            
+            // draw opener
+            var icon = _tagHandler.IsTagOpen(_id) ? FontAwesomeIcon.CaretDown : FontAwesomeIcon.CaretRight;
+
+            ImGui.AlignTextToFramePadding();
+
+            _uiSharedService.IconText(icon);
+            if (ImGui.IsItemClicked())
+            {
+                _tagHandler.SetTagOpen(_id, !_tagHandler.IsTagOpen(_id));
+            }
+
+            ImGui.SameLine();
+            var leftSideEnd = DrawIcon();
+
+            ImGui.SameLine();
+            var rightSideStart = DrawRightSideInternal();
+
+            // draw name
+            ImGui.SameLine(leftSideEnd);
+            DrawName(rightSideStart - leftSideEnd);
+        }
+
+        ImGui.Separator();
+
+        // if opened draw content
+        if (_tagHandler.IsTagOpen(_id))
+        {
+            using var indent = ImRaii.PushIndent(_uiSharedService.GetIconSize(FontAwesomeIcon.EllipsisV).X + ImGui.GetStyle().ItemSpacing.X, false);
+            if (DrawPairs.Any())
+            {
+                foreach (var item in DrawPairs)
+                {
+                    item.DrawPairedClient();
+                }
+            }
+            else
+            {
+                ImGui.TextUnformatted("No users (online)");
+            }
+
+            ImGui.Separator();
+        }
+    }
 
     private bool RenderPause => _id switch
     {
         TagHandler.CustomUnpairedTag => false,
         TagHandler.CustomOnlineTag => false,
         TagHandler.CustomOfflineTag => false,
+        TagHandler.CustomPausedTag => false,
         TagHandler.CustomVisibleTag => false,
         TagHandler.CustomAllTag => false,
         TagHandler.CustomOfflineSyncshellTag => false,
@@ -60,6 +107,7 @@ public class DrawFolderTag : DrawFolderBase
         TagHandler.CustomUnpairedTag => false,
         TagHandler.CustomOnlineTag => false,
         TagHandler.CustomOfflineTag => false,
+        TagHandler.CustomPausedTag => false,
         TagHandler.CustomVisibleTag => false,
         TagHandler.CustomAllTag => false,
         TagHandler.CustomOfflineSyncshellTag => false,
@@ -73,10 +121,11 @@ public class DrawFolderTag : DrawFolderBase
             TagHandler.CustomUnpairedTag => FontAwesomeIcon.ArrowsLeftRight,
             TagHandler.CustomOnlineTag => FontAwesomeIcon.Link,
             TagHandler.CustomOfflineTag => FontAwesomeIcon.Unlink,
+            TagHandler.CustomPausedTag => FontAwesomeIcon.Pause,
             TagHandler.CustomOfflineSyncshellTag => FontAwesomeIcon.Unlink,
             TagHandler.CustomVisibleTag => FontAwesomeIcon.Eye,
             TagHandler.CustomAllTag => FontAwesomeIcon.User,
-            _ => FontAwesomeIcon.Folder
+            _ => FontAwesomeIcon.UserFriends
         };
 
         ImGui.AlignTextToFramePadding();
@@ -120,8 +169,9 @@ public class DrawFolderTag : DrawFolderBase
         string name = _id switch
         {
             TagHandler.CustomUnpairedTag => "One-sided Individual Pairs",
-            TagHandler.CustomOnlineTag => "Online / Paused by you",
+            TagHandler.CustomOnlineTag => "Online",
             TagHandler.CustomOfflineTag => "Offline / Paused by other",
+            TagHandler.CustomPausedTag => "Paused by you",
             TagHandler.CustomOfflineSyncshellTag => "Offline Syncshell Users",
             TagHandler.CustomVisibleTag => "Visible",
             TagHandler.CustomAllTag => "Users",
@@ -133,14 +183,58 @@ public class DrawFolderTag : DrawFolderBase
 
     protected override float DrawRightSide(float currentRightSideX)
     {
-        if (!RenderPause) return currentRightSideX;
+        var spacingX = ImGui.GetStyle().ItemSpacing.X;
+        // Check if we should render menu for this tag
+        var shouldRenderMenu = _id switch
+        {
+            TagHandler.CustomUnpairedTag => false,
+            TagHandler.CustomOnlineTag => false,
+            TagHandler.CustomOfflineTag => false,
+            TagHandler.CustomPausedTag => false,
+            TagHandler.CustomVisibleTag => false,
+            TagHandler.CustomAllTag => false,
+            TagHandler.CustomOfflineSyncshellTag => false,
+            _ => true,
+        };
+
+        // Draw menu button first (rightmost position)
+        var menuButtonSize = _uiSharedService.GetIconButtonSize(FontAwesomeIcon.EllipsisV);
+        var menuButtonOffset = currentRightSideX - menuButtonSize.X;
+        
+        if (shouldRenderMenu)
+        {
+            ImGui.SameLine(menuButtonOffset);
+            // Apply brighter blue tint to tag buttons for better visibility
+            using var menuButtonColor = ImRaii.PushColor(ImGuiCol.Button, new Vector4(0.3f, 0.5f, 0.9f, 0.4f));
+            using var menuButtonHoveredColor = ImRaii.PushColor(ImGuiCol.ButtonHovered, new Vector4(0.4f, 0.6f, 1.0f, 0.6f));
+            using var menuButtonActiveColor = ImRaii.PushColor(ImGuiCol.ButtonActive, new Vector4(0.5f, 0.7f, 1.0f, 0.8f));
+            
+            if (_uiSharedService.IconButton(FontAwesomeIcon.EllipsisV))
+            {
+                ImGui.OpenPopup("User Flyout Menu");
+            }
+            if (ImGui.BeginPopup("User Flyout Menu"))
+            {
+                using (ImRaii.PushId($"buttons-{_id}")) DrawMenu(200f); // Use fixed width for menu
+                ImGui.EndPopup();
+            }
+        }
+
+        if (!RenderPause) return shouldRenderMenu ? menuButtonOffset : currentRightSideX;
 
         var allArePaused = _allPairs.All(pair => pair.UserPair!.OwnPermissions.IsPaused());
         var pauseButton = allArePaused ? FontAwesomeIcon.Play : FontAwesomeIcon.Pause;
         var pauseButtonX = _uiSharedService.GetIconButtonSize(pauseButton).X;
 
-        var buttonPauseOffset = currentRightSideX - pauseButtonX;
+        // Position pause button to the left of menu button
+        var buttonPauseOffset = (shouldRenderMenu ? menuButtonOffset : currentRightSideX) - pauseButtonX - spacingX;
         ImGui.SameLine(buttonPauseOffset);
+        
+        // Apply brighter blue tint to pause button for better visibility
+        using var pauseButtonColor = ImRaii.PushColor(ImGuiCol.Button, new Vector4(0.3f, 0.5f, 0.9f, 0.4f));
+        using var pauseButtonHoveredColor = ImRaii.PushColor(ImGuiCol.ButtonHovered, new Vector4(0.4f, 0.6f, 1.0f, 0.6f));
+        using var pauseButtonActiveColor = ImRaii.PushColor(ImGuiCol.ButtonActive, new Vector4(0.5f, 0.7f, 1.0f, 0.8f));
+        
         if (_uiSharedService.IconButton(pauseButton))
         {
             if (allArePaused)
@@ -161,7 +255,7 @@ public class DrawFolderTag : DrawFolderBase
             UiSharedService.AttachToolTip($"Pause pairing with all pairs in {_id}");
         }
 
-        return currentRightSideX;
+        return buttonPauseOffset;
     }
 
     private void PauseRemainingPairs(IEnumerable<Pair> availablePairs)

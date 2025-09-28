@@ -12,6 +12,7 @@ using Sphene.Services;
 using Sphene.Services.Events;
 using Sphene.Services.Mediator;
 using Sphene.Services.ServerConfiguration;
+using Sphene.SpheneConfiguration;
 using Sphene.UI.Handlers;
 using Sphene.WebAPI;
 using System.Numerics;
@@ -33,6 +34,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
     private readonly PlayerPerformanceConfigService _performanceConfigService;
     private readonly CharaDataManager _charaDataManager;
     private readonly PairManager _pairManager;
+    private readonly SpheneConfigService _configService;
     private float _menuWidth = -1;
     private bool _wasHovered = false;
     
@@ -57,7 +59,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         SpheneMediator spheneMediator, SelectTagForPairUi selectTagForPairUi,
         ServerConfigurationManager serverConfigurationManager,
         UiSharedService uiSharedService, PlayerPerformanceConfigService performanceConfigService,
-        CharaDataManager charaDataManager, PairManager pairManager)
+        CharaDataManager charaDataManager, PairManager pairManager, SpheneConfigService configService)
     {
         _id = id;
         _pair = entry;
@@ -72,6 +74,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         _performanceConfigService = performanceConfigService;
         _charaDataManager = charaDataManager;
         _pairManager = pairManager;
+        _configService = configService;
         
         // Subscribe to acknowledgment status changes to automatically update AckYou
         _mediator.Subscribe<PairAcknowledgmentStatusChangedMessage>(this, OnAcknowledgmentStatusChanged);
@@ -261,7 +264,8 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
     {
         using var id = ImRaii.PushId(GetType() + _id);
         var color = ImRaii.PushColor(ImGuiCol.ChildBg, ImGui.GetColorU32(ImGuiCol.FrameBgHovered), _wasHovered);
-        using (ImRaii.Child(GetType() + _id, new System.Numerics.Vector2(295, ImGui.GetFrameHeight()), false, ImGuiWindowFlags.NoScrollbar))
+        var baseFolderWidth = UiSharedService.GetBaseFolderWidth() + 9.0f;
+        using (ImRaii.Child(GetType() + _id, new System.Numerics.Vector2(baseFolderWidth, ImGui.GetFrameHeight()), false, ImGuiWindowFlags.NoScrollbar))
         {
             DrawLeftSide();
             ImGui.SameLine();
@@ -473,10 +477,19 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         }
         else if (_pair.IsVisible)
         {
+            // Add syncshell indicator for visible pairs that are NOT directly paired
+            if (_syncedGroups.Any() && _pair.IndividualPairStatus == API.Data.Enum.IndividualPairStatus.None)
+            {
+                using var _ = ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.ParsedGreen);
+                _uiSharedService.IconText(FontAwesomeIcon.Link);
+                ImGui.SameLine();
+            }
+            
             // Show eye icon with color based on partner's AckYou status
             var partnerAckYou = _pair.UserPair.OtherPermissions.IsAckYou();
             var eyeColor = partnerAckYou ? ImGuiColors.ParsedGreen : ImGuiColors.DalamudYellow;
             _uiSharedService.IconText(FontAwesomeIcon.Eye, eyeColor);
+            
             var ackStatus = partnerAckYou ? "acknowledges your data" : "does not acknowledge your data";
             userPairText = _pair.UserData.AliasOrUID + " is visible: " + _pair.PlayerName + Environment.NewLine + "This user " + ackStatus + Environment.NewLine + "Click to target this player";
             
@@ -658,8 +671,10 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         var barButtonSize = _uiSharedService.GetIconButtonSize(FontAwesomeIcon.EllipsisV);
         var reloadButtonSize = _pair.IsVisible ? _uiSharedService.GetIconButtonSize(FontAwesomeIcon.Sync) : Vector2.Zero;
         var spacingX = ImGui.GetStyle().ItemSpacing.X;
-        var windowEndX = ImGui.GetWindowContentRegionMin().X + UiSharedService.GetWindowContentRegionWidth();
-        float currentRightSide = windowEndX - barButtonSize.X;
+        // Use container-relative positioning for buttons
+        var containerWidth = ImGui.GetContentRegionAvail().X;
+        var actualWindowEndX = ImGui.GetCursorPosX() + containerWidth;
+        float currentRightSide = actualWindowEndX - barButtonSize.X;
 
         // Context menu button (rightmost)
         ImGui.SameLine(currentRightSide);
