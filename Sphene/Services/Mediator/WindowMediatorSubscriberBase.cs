@@ -20,7 +20,10 @@ public abstract class WindowMediatorSubscriberBase : Window, IMediatorSubscriber
         {
             if (msg.UiType == GetType())
             {
+                var wasOpen = IsOpen;
+                _logger.LogDebug("UiToggleMessage received for {type}. Toggling window. Previous IsOpen={wasOpen}", GetType().Name, wasOpen);
                 Toggle();
+                _logger.LogDebug("Window toggled for {type}. New IsOpen={isOpen}", GetType().Name, IsOpen);
             }
         });
     }

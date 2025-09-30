@@ -63,6 +63,7 @@ public class CompactUi : WindowMediatorSubscriberBase
     private DateTime _lastIncognitoButtonClick = DateTime.MinValue;
     private readonly HashSet<string> _prePausedPairs = new();
     private readonly HashSet<string> _prePausedSyncshells = new();
+    private Sphene.Services.UpdateInfo? _updateBannerInfo;
     private DateTime _lastReconnectButtonClick = DateTime.MinValue;
     private Vector2 _lastSize = Vector2.One;
     private int _secretKeyIdx = -1;
@@ -174,7 +175,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         WindowName = "Sphene " + ver.Major + "." + ver.Minor + "." + ver.Build + "###SpheneMainUI";
 #endif
         Mediator.Subscribe<SwitchToMainUiMessage>(this, (_) => IsOpen = true);
-        Mediator.Subscribe<SwitchToIntroUiMessage>(this, (_) => IsOpen = false);
+        Mediator.Subscribe<SwitchToIntroUiMessage>(this, (_) => { _logger.LogDebug("SwitchToIntroUiMessage received, closing CompactUI"); IsOpen = false; });
         Mediator.Subscribe<CutsceneStartMessage>(this, (_) => UiSharedService_GposeStart());
         Mediator.Subscribe<CutsceneEndMessage>(this, (_) => UiSharedService_GposeEnd());
         Mediator.Subscribe<DownloadStartedMessage>(this, (msg) => _currentDownloads[msg.DownloadId] = msg.DownloadStatus);
@@ -182,6 +183,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         Mediator.Subscribe<RefreshUiMessage>(this, (msg) => RefreshIconsOnly());
         Mediator.Subscribe<StructuralRefreshUiMessage>(this, (msg) => RefreshDrawFolders());
         Mediator.Subscribe<CharacterDataAnalyzedMessage>(this, (_) => _lastBackupAnalysisUpdate = DateTime.MinValue);
+        Mediator.Subscribe<ShowUpdateNotificationMessage>(this, (msg) => _updateBannerInfo = msg.UpdateInfo);
 
         // Make window practically invisible - no decoration, no background, no borders
         Flags |= ImGuiWindowFlags.NoDocking | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse 
@@ -252,6 +254,8 @@ public class CompactUi : WindowMediatorSubscriberBase
     {
         
         _windowContentWidth = UiSharedService.GetBaseFolderWidth(); // Use consistent width calculation
+
+
         if (!_apiController.IsCurrentVersion)
         {
             var ver = _apiController.CurrentClientVersion;
@@ -373,6 +377,7 @@ public class CompactUi : WindowMediatorSubscriberBase
             ImGui.SetCursorPosX(ImGui.GetCursorPosX() - 5.0f);
             if (_uiSharedService.IconButton(FontAwesomeIcon.Times))
             {
+                _logger.LogDebug("Close button clicked, closing CompactUI");
                 IsOpen = false;
             }
             if (ImGui.IsItemHovered())
@@ -398,7 +403,28 @@ public class CompactUi : WindowMediatorSubscriberBase
              _configService.Save();
              UpdateSizeConstraints();
          }, // onLockToggle
-         _configService.Current.IsWidthLocked ? "Unlock window width" : "Lock window width" // lockTooltip
+         _configService.Current.IsWidthLocked ? "Unlock window width" : "Lock window width", // lockTooltip
+         // bottomOverlay to draw update hint
+         () => {
+             if (_updateBannerInfo?.IsUpdateAvailable == true)
+             {
+                 using (ImRaii.PushId("update-hint-footer"))
+                 {
+                     using (var font = ImRaii.PushFont(UiBuilder.IconFont))
+                     {
+                         ImGui.TextColored(ImGuiColors.DalamudYellow, FontAwesomeIcon.InfoCircle.ToIconString());
+                     }
+                     ImGui.SameLine();
+                     UiSharedService.ColorTextWrapped($"Update available: {_updateBannerInfo.LatestVersion}", ImGuiColors.DalamudYellow);
+                     ImGui.SameLine();
+                     if (_uiSharedService.IconTextButton(FontAwesomeIcon.Download, "Open Update Details"))
+                     {
+                         _logger.LogDebug("Update details button clicked, toggling UpdateNotificationUi");
+                         Mediator.Publish(new UiToggleMessage(typeof(UpdateNotificationUi)));
+                     }
+                 }
+             }
+         }
         );
 
         if (_configService.Current.OpenPopupOnAdd && _pairManager.LastAddedUser != null)
@@ -949,12 +975,14 @@ public class CompactUi : WindowMediatorSubscriberBase
 
     private void UiSharedService_GposeEnd()
     {
+        _logger.LogDebug("Gpose/Cutscene end: restoring CompactUI IsOpen to {state}", _wasOpen);
         IsOpen = _wasOpen;
     }
 
     private void UiSharedService_GposeStart()
     {
         _wasOpen = IsOpen;
+        _logger.LogDebug("Gpose/Cutscene start: closing CompactUI. Previous IsOpen={state}", _wasOpen);
         IsOpen = false;
     }
 

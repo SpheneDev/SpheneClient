@@ -18,7 +18,6 @@ public class UpdateNotificationUi : WindowMediatorSubscriberBase
     private readonly ILogger<UpdateNotificationUi> _logger;
     private readonly ICommandManager _commandManager;
     private UpdateInfo? _updateInfo;
-    private bool _showChangelog = false;
     
     public UpdateNotificationUi(ILogger<UpdateNotificationUi> logger, UiSharedService uiShared, 
         SpheneMediator mediator, PerformanceCollectorService performanceCollectorService,
@@ -41,7 +40,6 @@ public class UpdateNotificationUi : WindowMediatorSubscriberBase
         Mediator.Subscribe<ShowUpdateNotificationMessage>(this, (msg) =>
         {
             _updateInfo = msg.UpdateInfo;
-            IsOpen = true;
         });
     }
     
@@ -89,20 +87,19 @@ public class UpdateNotificationUi : WindowMediatorSubscriberBase
         // Changelog section
         if (!string.IsNullOrEmpty(_updateInfo.Changelog))
         {
-            if (ImGui.CollapsingHeader("What's New?", _showChangelog ? ImGuiTreeNodeFlags.DefaultOpen : ImGuiTreeNodeFlags.None))
+            UiSharedService.ColorText("What's New", ImGuiColors.HealerGreen);
+            ImGui.Spacing();
+
+            using (var child = ImRaii.Child("ChangelogField", new Vector2(-1, 200), true, ImGuiWindowFlags.NoNav | ImGuiWindowFlags.HorizontalScrollbar))
             {
-                _showChangelog = true;
-                using (var child = ImRaii.Child("ChangelogChild", new Vector2(-1, 150), true))
+                if (child)
                 {
-                    if (child)
+                    using (ImRaii.PushStyle(ImGuiStyleVar.FrameRounding, 6f))
+                    using (ImRaii.PushStyle(ImGuiStyleVar.FramePadding, new Vector2(8, 8)))
                     {
                         UiSharedService.TextWrapped(_updateInfo.Changelog);
                     }
                 }
-            }
-            else
-            {
-                _showChangelog = false;
             }
         }
         

@@ -75,7 +75,7 @@ public static class SpheneUIEnhancements
     }
     
     // Draws a Sphene-themed card container with modern styling, optional header buttons, resize handle, and custom header background
-    public static void DrawSpheneCard(string title, Action content, bool collapsible = false, float? maxHeight = null, Action headerButtons = null, bool withResizeHandle = false, Vector2? minSize = null, Vector2? maxSize = null, uint customHeaderBg = 0, bool? isWidthLocked = null, Action onLockToggle = null, string lockTooltip = null)
+    public static void DrawSpheneCard(string title, Action content, bool collapsible = false, float? maxHeight = null, Action headerButtons = null, bool withResizeHandle = false, Vector2? minSize = null, Vector2? maxSize = null, uint customHeaderBg = 0, bool? isWidthLocked = null, Action onLockToggle = null, string lockTooltip = null, Action bottomOverlay = null)
     {
         // Apply pending window size if available
         if (_pendingWindowSizes.TryGetValue(title, out var pendingSize))
@@ -280,6 +280,13 @@ public static class SpheneUIEnhancements
                         ImGui.Text(lockTooltip);
                         ImGui.EndTooltip();
                     }
+                }
+                
+                if (bottomOverlay != null)
+                {
+                    var bottomPos = new Vector2(mainWindowPos.X + 8, mainWindowPos.Y + mainWindowSize.Y - 24);
+                    ImGui.SetCursorScreenPos(bottomPos);
+                    bottomOverlay();
                 }
             }
         }

@@ -233,7 +233,6 @@ public sealed class Plugin : IDalamudPlugin
                 s.GetRequiredService<SpheneMediator>(),
                 s.GetRequiredService<PerformanceCollectorService>(),
                 s.GetRequiredService<ICommandManager>()));
-            collection.AddScoped<WindowMediatorSubscriberBase, UpdateTestWindow>();
 
             collection.AddScoped<WindowMediatorSubscriberBase, EditProfileUi>((s) => new EditProfileUi(s.GetRequiredService<ILogger<EditProfileUi>>(),
                 s.GetRequiredService<SpheneMediator>(), s.GetRequiredService<ApiController>(), s.GetRequiredService<UiSharedService>(), s.GetRequiredService<FileDialogManager>(),

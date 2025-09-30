@@ -72,11 +72,8 @@ public class UpdateCheckService : IHostedService, IDisposable
                     IsUpdateAvailable = true
                 };
                 
-                // Show update notification UI only if not in combat
-                if (!_dalamudUtilService.IsInCombatOrPerforming)
-                {
-                    _mediator.Publish(new ShowUpdateNotificationMessage(updateInfo));
-                }
+                // Publish update info; UI will show a banner and provide a button to open the popup
+                _mediator.Publish(new ShowUpdateNotificationMessage(updateInfo));
                 
                 return updateInfo;
             }
@@ -96,13 +93,7 @@ public class UpdateCheckService : IHostedService, IDisposable
         }
     }
     
-    // Test method to manually trigger update check
-    public async Task TestUpdateCheckAsync()
-    {
-        _logger.LogInformation("Manual update check triggered for testing");
-        await CheckForUpdatesAsync(skipCombatCheck: true); // Skip combat check for manual tests
-    }
-    
+
     private Version GetCurrentVersion()
     {
         var assembly = Assembly.GetExecutingAssembly();

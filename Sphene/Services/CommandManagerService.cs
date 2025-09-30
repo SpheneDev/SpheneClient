@@ -128,10 +128,6 @@ public sealed class CommandManagerService : IDisposable
         {
             _mediator.Publish(new UiToggleMessage(typeof(AcknowledgmentMonitorUI)));
         }
-        else if (string.Equals(splitArgs[0], "updatetest", StringComparison.OrdinalIgnoreCase))
-        {
-            _mediator.Publish(new UiToggleMessage(typeof(UpdateTestWindow)));
-        }
         else if (string.Equals(splitArgs[0], "statusdebug", StringComparison.OrdinalIgnoreCase))
         {
             _mediator.Publish(new UiToggleMessage(typeof(StatusDebugUi)));

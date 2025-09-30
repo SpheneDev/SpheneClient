@@ -13,6 +13,7 @@ using Sphene.WebAPI.SignalR.Utils;
 using System.Numerics;
 using Dalamud.Interface.Textures.TextureWraps;
 using System;
+using Sphene.SpheneConfiguration.Models;
 
 namespace Sphene.UI;
 
@@ -31,6 +32,10 @@ public class SpheneIcon : WindowMediatorSubscriberBase, IDisposable
     private Vector2 _clickStartPos;
     private IDalamudTextureWrap? _spheneLogoTexture;
     
+    // Update indicator state
+    private bool _updateAvailable = false;
+    private UpdateInfo? _updateInfo = null;
+    private bool _updateToastShown = false;
     
     
     public SpheneIcon(ILogger<SpheneIcon> logger, SpheneMediator mediator, 
@@ -63,6 +68,9 @@ public class SpheneIcon : WindowMediatorSubscriberBase, IDisposable
         
         // Subscribe to configuration changes
         _configService.ConfigSave += OnConfigurationChanged;
+        
+        // Subscribe to update availability messages
+        Mediator.Subscribe<ShowUpdateNotificationMessage>(this, OnUpdateAvailable);
         
         _logger.LogDebug("SpheneIcon created at position {Position}", _iconPosition);
     }
@@ -110,6 +118,12 @@ public class SpheneIcon : WindowMediatorSubscriberBase, IDisposable
         
         // Draw status indicator
         DrawStatusIndicator(drawList, iconPos, iconSize);
+        
+        // Draw update indicator if available
+        if (_updateAvailable)
+        {
+            DrawUpdateIndicator(drawList, iconPos, iconSize);
+        }
         
         // Handle dragging and clicking for the entire window
         ImGui.SetCursorPos(new Vector2(0, 0));
@@ -176,6 +190,11 @@ public class SpheneIcon : WindowMediatorSubscriberBase, IDisposable
             ImGui.Text("Click to toggle Sphene | Hold and drag to move");
             ImGui.Separator();
             ImGui.Text($"Server Status: {GetStatusText(_apiController.ServerState)}");
+            if (_updateAvailable && _updateInfo != null)
+            {
+                ImGui.Separator();
+                ImGui.Text($"Update available: {_updateInfo.CurrentVersion} -> {_updateInfo.LatestVersion}");
+            }
             ImGui.EndTooltip();
         }
         
@@ -260,6 +279,49 @@ public class SpheneIcon : WindowMediatorSubscriberBase, IDisposable
         
         // Draw white border around indicator for better visibility
         drawList.AddCircle(indicatorPos, indicatorRadius, ImGui.ColorConvertFloat4ToU32(new Vector4(1, 1, 1, 0.8f)), 0, 1f);
+    }
+
+    // Draw a green arrow overlay indicating an available update
+    private void DrawUpdateIndicator(ImDrawListPtr drawList, Vector2 iconPos, float iconSize)
+    {
+        // Position near bottom-right corner and make it visually prominent
+        var arrowText = FontAwesomeIcon.ArrowCircleUp.ToIconString();
+        ImGui.PushFont(UiBuilder.IconFont);
+
+        // Use a brighter green and add a subtle shadow for better readability
+        var arrowColor = ImGui.ColorConvertFloat4ToU32(ImGuiColors.HealerGreen);
+        var shadowColor = ImGui.ColorConvertFloat4ToU32(new Vector4(0, 0, 0, 0.85f));
+
+        // Anchor near bottom-right of the icon
+        var overlayPos = new Vector2(iconPos.X + iconSize - 14f, iconPos.Y + iconSize - 14f);
+
+        // Draw a semi-transparent dark bubble behind the arrow to improve contrast
+        var bubbleCenter = new Vector2(overlayPos.X + 6f, overlayPos.Y + 8f);
+        drawList.AddCircleFilled(bubbleCenter, 9f, ImGui.ColorConvertFloat4ToU32(new Vector4(0, 0, 0, 0.5f)));
+
+        // Shadow then arrow
+        drawList.AddText(new Vector2(overlayPos.X + 1f, overlayPos.Y + 1f), shadowColor, arrowText);
+        drawList.AddText(overlayPos, arrowColor, arrowText);
+
+        ImGui.PopFont();
+    }
+
+    private void OnUpdateAvailable(ShowUpdateNotificationMessage msg)
+    {
+        _updateInfo = msg.UpdateInfo;
+        _updateAvailable = _updateInfo?.IsUpdateAvailable == true;
+        _logger.LogDebug("Update notification received. Available: {available}, Latest: {latest}", _updateAvailable, _updateInfo?.LatestVersion);
+        
+        if (_updateAvailable && !_updateToastShown)
+        {
+            // Publish a toast notification via NotificationService
+            Mediator.Publish(new NotificationMessage(
+                "Sphene Update",
+                $"Update available: {_updateInfo!.LatestVersion}",
+                NotificationType.Info,
+                TimeShownOnScreen: TimeSpan.FromSeconds(10)));
+            _updateToastShown = true;
+        }
     }
     
     private Vector4 GetStatusColor(ServerState serverState)
