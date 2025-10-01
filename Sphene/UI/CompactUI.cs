@@ -417,7 +417,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                      ImGui.SameLine();
                      UiSharedService.ColorTextWrapped($"Update available: {_updateBannerInfo.LatestVersion}", ImGuiColors.DalamudYellow);
                      ImGui.SameLine();
-                     if (_uiSharedService.IconTextButton(FontAwesomeIcon.Download, "Open Update Details"))
+                     if (_uiSharedService.IconTextButton(FontAwesomeIcon.Download, "Open Details"))
                      {
                          _logger.LogDebug("Update details button clicked, toggling UpdateNotificationUi");
                          Mediator.Publish(new UiToggleMessage(typeof(UpdateNotificationUi)));
