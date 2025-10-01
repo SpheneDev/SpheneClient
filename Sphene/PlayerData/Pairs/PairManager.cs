@@ -613,19 +613,34 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
             foreach (var pair in visiblePairs)
             {
                 pair.SetBuildStartPendingStatus();
+
+                // Immediately set our own AckYou to false so both sides reflect pending state at build start
+                var permissions = pair.UserPair.OwnPermissions;
+                if (permissions.IsAckYou())
+                {
+                    Logger.LogDebug("BuildStart: Setting Own AckYou=false for user {user}", pair.UserData.AliasOrUID);
+                    permissions.SetAckYou(false);
+                    pair.UserPair.OwnPermissions = permissions;
+
+                    try
+                    {
+                        _ = _apiController.Value.UserSetPairPermissions(new(pair.UserData, permissions));
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogDebug(ex, "BuildStart: Failed to send Own AckYou=false for user {user}", pair.UserData.AliasOrUID);
+                    }
+                }
             }
             
             // Add notification for build start
             _messageService.AddTaggedMessage(
                 "build_start_pending",
-                $"Character data build started - waiting for {visiblePairs.Count} pairs",
+                "Character data build started - waiting for acknowledgments",
                 SpheneConfiguration.Models.NotificationType.Info,
                 "Build Started",
-                TimeSpan.FromSeconds(2)
+                TimeSpan.FromSeconds(3)
             );
-            
-            Logger.LogInformation("Set build start pending status for {count} visible pairs", visiblePairs.Count);
-            Mediator.Publish(new RefreshUiMessage());
         }
     }
 

@@ -639,6 +639,24 @@ public class Pair : DisposableMediatorSubscriberBase
              Mediator.Publish(new SendCharacterDataAcknowledgmentMessage(acknowledgmentDto));
             Logger.LogInformation("Successfully published SendCharacterDataAcknowledgmentMessage for Hash: {hash}", 
                 data.DataHash[..Math.Min(8, data.DataHash.Length)]);
+
+            // Update our own AckYou to reflect immediate acknowledgment status and send to server
+            var permissions = UserPair.OwnPermissions;
+            var newAckYouStatus = finalSuccess;
+            if (permissions.IsAckYou() != newAckYouStatus)
+            {
+                Logger.LogDebug("SendAcknowledgmentIfRequired: Setting Own AckYou={status} for user {user}", newAckYouStatus, UserData.AliasOrUID);
+                permissions.SetAckYou(newAckYouStatus);
+                UserPair.OwnPermissions = permissions;
+                try
+                {
+                    await _apiController.Value.UserSetPairPermissions(new(UserData, permissions));
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogDebug(ex, "SendAcknowledgmentIfRequired: Failed to send Own AckYou update for user {user}", UserData.AliasOrUID);
+                }
+            }
         }
         catch (Exception ex)
         {

@@ -98,6 +98,7 @@ public sealed class CacheCreationService : DisposableMediatorSubscriberBase
             if (!default(KeyValuePair<ObjectKind, GameObjectHandler>).Equals(changedType))
             {
                 Logger.LogDebug("Received GlamourerChangedMessage for {kind}", changedType);
+                Mediator.Publish(new CharacterDataBuildStartedMessage());
                 AddCacheToCreate(changedType.Key);
             }
         });

@@ -513,10 +513,8 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         if (_pair.IsOnline && _pair.IsVisible)
         {
             ImGui.SameLine();
-            // Check if sender is waiting for acknowledgment from this specific user
-            // Only show indicator for real Penumbra changes (with acknowledgment ID), not for build start status
-            // Show clock only if the pair itself has a pending acknowledgment (not just any acknowledgment for this user)
-            if (_pair.HasPendingAcknowledgment && !string.IsNullOrEmpty(_pair.LastAcknowledgmentId))
+            // Show clock for any pending acknowledgment (including build start without a specific acknowledgment ID)
+            if (_pair.HasPendingAcknowledgment)
             {
                 using var _ = ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.DalamudYellow);
                 _uiSharedService.IconText(FontAwesomeIcon.Clock);
@@ -540,7 +538,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
                     var timeAgo = _pair.LastAcknowledgmentTime.HasValue 
                         ? $" ({(DateTimeOffset.UtcNow - _pair.LastAcknowledgmentTime.Value).TotalSeconds:F0}s ago)"
                         : string.Empty;
-                    UiSharedService.AttachToolTip($"Data synchronization failed{timeAgo}");
+                    UiSharedService.AttachToolTip($"Synchronization failed{timeAgo}");
                 }
             }
         }
@@ -573,8 +571,8 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         // Add synchronization status information - only show for visible pairs
         if (_pair.IsOnline && _pair.IsVisible)
         {
-            // Only show sync status for real Penumbra changes (with acknowledgment ID), not for build start status
-            if (GetCachedHasPendingAcknowledgment() && !string.IsNullOrEmpty(_pair.LastAcknowledgmentId))
+            // Show sync status for any pending acknowledgment (including build start)
+            if (GetCachedHasPendingAcknowledgment())
             {
                 userPairText += UiSharedService.TooltipSeparator + "Data Sync: Waiting for acknowledgment from this user...";
             }
