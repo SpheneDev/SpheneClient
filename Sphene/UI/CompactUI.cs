@@ -92,6 +92,11 @@ public class CompactUi : WindowMediatorSubscriberBase
     private CancellationTokenSource _restoreCancellationTokenSource = new();
     private Progress<(string fileName, int current, int total)> _restoreProgress = new();
 
+    // Storage info fields for backup management
+    private Task<(long totalSize, int fileCount)>? _storageInfoTask;
+    private DateTime _lastStorageInfoUpdate = DateTime.MinValue;
+    private (long totalSize, int fileCount) _cachedStorageInfo;
+
     public CompactUi(ILogger<CompactUi> logger, UiSharedService uiShared, SpheneConfigService configService, ApiController apiController, PairManager pairManager,
         ServerConfigurationManager serverManager, SpheneMediator mediator, FileUploadManager fileTransferManager,
         TagHandler tagHandler, DrawEntityFactory drawEntityFactory, SelectTagForPairUi selectTagForPairUi, SelectPairForTagUi selectPairForTagUi,
@@ -1418,7 +1423,7 @@ public class CompactUi : WindowMediatorSubscriberBase
             {
                 UiSharedService.ColorTextWrapped($"Found {availableBackups.Count} backup(s) for current textures.", ImGuiColors.ParsedGreen);
                 
-                if (_uiSharedService.IconTextButton(FontAwesomeIcon.Undo, "Restore Textures"))
+                if (_uiSharedService.IconTextButton(FontAwesomeIcon.Undo, "Revert current textures"))
                 {
                     StartTextureRestore(availableBackups);
                 }
@@ -1432,46 +1437,59 @@ public class CompactUi : WindowMediatorSubscriberBase
                         System.Diagnostics.Process.Start("explorer.exe", backupDirectory);
                     }
                 }
-                
-                // BC7 conversion option after restore
-                ImGui.Spacing();
-                UiSharedService.ColorText("After Restore Options:", ImGuiColors.DalamudYellow);
-                if (nonBc7Textures.Count > 0)
-                {
-                    UiSharedService.ColorTextWrapped($"After restoring textures, you can convert {nonBc7Textures.Count} non-BC7 textures to reduce size.", ImGuiColors.DalamudGrey);
-                    if (_uiSharedService.IconTextButton(FontAwesomeIcon.FileArchive, $"Convert to BC7 ({nonBc7Textures.Count} textures)"))
-                    {
-                        StartTextureConversion(nonBc7Textures);
-                        _showConversionPopup = false;
-                        _cachedAnalysisForPopup = null;
-                        _showProgressPopup = true;
-                    }
-                }
-                else
-                {
-                    UiSharedService.ColorTextWrapped("All current textures are already BC7 optimized.", ImGuiColors.ParsedGreen);
-                }
             }
             else
             {
                 UiSharedService.ColorTextWrapped("No backups found for current textures.", ImGuiColors.DalamudGrey);
-                
-                // Still show BC7 conversion option even without backups
-                if (nonBc7Textures.Count > 0)
+            }
+            
+            // Storage information and cleanup
+            ImGui.Separator();
+            ImGui.TextUnformatted("Storage Management:");
+            
+            var now = DateTime.Now;
+            if (_storageInfoTask == null || (now - _lastStorageInfoUpdate).TotalSeconds > 5)
+            {
+                if (_storageInfoTask == null || _storageInfoTask.IsCompleted)
                 {
-                    ImGui.Spacing();
-                    UiSharedService.ColorText("Texture Optimization:", ImGuiColors.DalamudYellow);
-                    UiSharedService.ColorTextWrapped($"You can convert {nonBc7Textures.Count} non-BC7 textures to reduce size.", ImGuiColors.DalamudGrey);
-                    if (_uiSharedService.IconTextButton(FontAwesomeIcon.FileArchive, $"Convert to BC7 ({nonBc7Textures.Count} textures)"))
+                    _storageInfoTask = _textureBackupService.GetBackupStorageInfoAsync();
+                    _lastStorageInfoUpdate = now;
+                }
+            }
+            
+            if (_storageInfoTask != null && _storageInfoTask.IsCompleted)
+            {
+                _cachedStorageInfo = _storageInfoTask.Result;
+                var (totalSize, fileCount) = _cachedStorageInfo;
+                
+                if (fileCount > 0)
+                {
+                    var sizeInMB = totalSize / (1024.0 * 1024.0);
+                    UiSharedService.ColorTextWrapped($"Total backup storage: {sizeInMB:F2} MB ({fileCount} files)", ImGuiColors.DalamudYellow);
+                    
+                    ImGui.SameLine();
+                    if (_uiSharedService.IconTextButton(FontAwesomeIcon.Broom, "Cleanup old backups (3+ days)"))
                     {
-                        StartTextureConversion(nonBc7Textures);
-                        _showConversionPopup = false;
-                        _cachedAnalysisForPopup = null;
-                        _showProgressPopup = true;
+                        Task.Run(async () =>
+                        {
+                            var (deletedCount, freedSpace) = await _textureBackupService.CleanupOldBackupsAsync(3);
+                            var freedMB = freedSpace / (1024.0 * 1024.0);
+                            _logger.LogDebug("Backup cleanup completed: {deletedCount} files deleted, {freedMB:F2} MB freed", deletedCount, freedMB);
+                            _storageInfoTask = null; // Refresh storage info after cleanup
+                        });
                     }
+                }
+                else
+                {
+                    UiSharedService.ColorTextWrapped("No backup files found.", ImGuiColors.DalamudGrey);
                 }
             }
 
+            // Texture conversion controls
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.TextUnformatted("Texture Conversion:");
+            
             if (nonBc7Textures.Count > 0)
             {
                 var totalSizeMB = nonBc7Textures.Sum(t => t.OriginalSize) / (1024.0 * 1024.0);
@@ -1489,9 +1507,6 @@ public class CompactUi : WindowMediatorSubscriberBase
                 UiSharedService.ColorTextWrapped("• BC7 conversion reduces texture size significantly\n• Some textures may show visual artifacts\n• Original textures are backed up for restoration\n• Process may take time depending on texture count", ImGuiColors.DalamudGrey);
 
                 ImGui.Spacing();
-                ImGui.Separator();
-                ImGui.TextUnformatted("Texture Conversion:");
-                
                 if (_uiSharedService.IconTextButton(FontAwesomeIcon.FileArchive, $"Convert {nonBc7Textures.Count} textures to BC7"))
                 {
                     StartTextureConversion(nonBc7Textures);
@@ -1505,12 +1520,12 @@ public class CompactUi : WindowMediatorSubscriberBase
                 ImGui.TextColored(ImGuiColors.ParsedGreen, "All textures are already optimized!");
             }
 
+            ImGui.Spacing();
             if (ImGui.Button("Close"))
             {
                 _showConversionPopup = false;
                 _cachedAnalysisForPopup = null; // Clear cached analysis when popup closes
             }
-
             UiSharedService.SetScaledWindowSize(400);
             ImGui.EndPopup();
         }
