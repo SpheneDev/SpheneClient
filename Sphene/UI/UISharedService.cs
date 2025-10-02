@@ -491,10 +491,11 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
                         }
                     }
                     var dirs = Directory.GetDirectories(path);
-                    if (dirs.Any())
+                    var invalidDirs = dirs.Where(dir => !Path.GetFileName(dir).Equals("texture_backups", StringComparison.OrdinalIgnoreCase)).ToArray();
+                    if (invalidDirs.Any())
                     {
                         _cacheDirectoryHasOtherFilesThanCache = true;
-                        Logger.LogWarning("Found folders in {path} not belonging to Sphene: {dirs}", path, string.Join(", ", dirs));
+                        Logger.LogWarning("Found folders in {path} not belonging to Sphene: {dirs}", path, string.Join(", ", invalidDirs));
                     }
 
                     _isDirectoryWritable = IsDirectoryWritable(path);

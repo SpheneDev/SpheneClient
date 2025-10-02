@@ -68,6 +68,22 @@ public class SettingsUi : WindowMediatorSubscriberBase
     private Task<List<FileCacheEntity>>? _validationTask;
     private bool _wasOpen = false;
     private Vector2 _currentCompactUiSize = new Vector2(370, 400); // Default CompactUI size
+    // New navigation state for redesigned Settings layout
+    private enum SettingsPage
+    {
+        Home,
+        Connectivity,
+        PeopleNotes,
+        Display,
+        Alerts,
+        Performance,
+        Transfers,
+        Storage,
+        Acknowledgment,
+        Debug
+    }
+    private SettingsPage _activeSettingsPage = SettingsPage.Home;
+
 
     public SettingsUi(ILogger<SettingsUi> logger,
         UiSharedService uiShared, SpheneConfigService configService,
@@ -188,9 +204,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
         if (ImGui.BeginTable("TransfersTable", 2, ImGuiTableFlags.SizingStretchProp))
         {
-            ImGui.TableSetupColumn(
-                $"Hash/Filename");
-            ImGui.TableSetupColumn($"Forbidden by");
+            ImGui.TableSetupColumn("Hash/Filename", ImGuiTableColumnFlags.WidthStretch);
+            ImGui.TableSetupColumn("Forbidden by", ImGuiTableColumnFlags.WidthFixed, 120);
 
             ImGui.TableHeadersRow();
 
@@ -215,14 +230,14 @@ public class SettingsUi : WindowMediatorSubscriberBase
     private void DrawCurrentTransfers()
     {
         _lastTab = "Transfers";
-        _uiShared.BigText("Data Transmission Settings");
+        _uiShared.BigText("Transfers & Limits");
 
         int maxParallelDownloads = _configService.Current.ParallelDownloads;
         bool useAlternativeUpload = _configService.Current.UseAlternativeFileUpload;
         int downloadSpeedLimit = _configService.Current.DownloadSpeedLimitInBytes;
 
         ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("Global Data Reception Limit");
+        ImGui.TextUnformatted("Global Receive Limit");
         ImGui.SameLine();
         ImGui.SetNextItemWidth(100 * ImGuiHelpers.GlobalScale);
         if (ImGui.InputInt("###speedlimit", ref downloadSpeedLimit))
@@ -261,10 +276,10 @@ public class SettingsUi : WindowMediatorSubscriberBase
             _configService.Current.UseAlternativeFileUpload = useAlternativeUpload;
             _configService.Save();
         }
-        _uiShared.DrawHelpText("This will attempt to transmit data in one go instead of a stream. Typically not necessary to enable. Use if you have transmission issues.");
+        _uiShared.DrawHelpText("Attempts a single-shot transmission instead of streaming. Not usually required; enable only if you encounter transfer issues.");
 
         ImGui.Separator();
-        _uiShared.BigText("Transmission Interface");
+        _uiShared.BigText("Transfer Monitor");
 
         bool showTransferWindow = _configService.Current.ShowTransferWindow;
         if (ImGui.Checkbox("Show separate transmission monitor", ref showTransferWindow))
@@ -408,11 +423,11 @@ public class SettingsUi : WindowMediatorSubscriberBase
             if (ApiController.ServerState is ServerState.Connected && ImGui.BeginTabItem("Transfers"))
             {
                 ImGui.TextUnformatted("Uploads");
-                if (ImGui.BeginTable("UploadsTable", 3))
+                if (ImGui.BeginTable("UploadsTable", 3, ImGuiTableFlags.SizingStretchProp))
                 {
-                    ImGui.TableSetupColumn("File");
-                    ImGui.TableSetupColumn("Uploaded");
-                    ImGui.TableSetupColumn("Size");
+                    ImGui.TableSetupColumn("File", ImGuiTableColumnFlags.WidthStretch);
+                    ImGui.TableSetupColumn("Uploaded", ImGuiTableColumnFlags.WidthFixed, 80);
+                    ImGui.TableSetupColumn("Size", ImGuiTableColumnFlags.WidthFixed, 80);
                     ImGui.TableHeadersRow();
                     foreach (var transfer in _fileTransferManager.CurrentUploads.ToArray())
                     {
@@ -432,12 +447,12 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 }
                 ImGui.Separator();
                 ImGui.TextUnformatted("Downloads");
-                if (ImGui.BeginTable("DownloadsTable", 4))
+                if (ImGui.BeginTable("DownloadsTable", 4, ImGuiTableFlags.SizingStretchProp))
                 {
-                    ImGui.TableSetupColumn("User");
-                    ImGui.TableSetupColumn("Server");
-                    ImGui.TableSetupColumn("Files");
-                    ImGui.TableSetupColumn("Download");
+                    ImGui.TableSetupColumn("User", ImGuiTableColumnFlags.WidthFixed, 100);
+                    ImGui.TableSetupColumn("Server", ImGuiTableColumnFlags.WidthStretch);
+                    ImGui.TableSetupColumn("Files", ImGuiTableColumnFlags.WidthFixed, 60);
+                    ImGui.TableSetupColumn("Download", ImGuiTableColumnFlags.WidthFixed, 100);
                     ImGui.TableHeadersRow();
 
                     foreach (var transfer in _currentDownloads.ToArray())
@@ -562,7 +577,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
     {
         _lastTab = "Debug";
 
-        _uiShared.BigText("Network Diagnostics");
+        _uiShared.BigText("Debug & Diagnostics");
 #if DEBUG
         if (LastCreatedCharacterData != null && ImGui.TreeNode("Last created character data"))
         {
@@ -592,6 +607,10 @@ public class SettingsUi : WindowMediatorSubscriberBase
             _configService.Current.LogLevel = l;
             _configService.Save();
         }, _configService.Current.LogLevel);
+        _uiShared.DrawHelpText("Controls verbosity of logs written to /xllog and plugin console.");
+
+        ImGuiHelpers.ScaledDummy(5);
+        _uiShared.BigText("Performance Metrics");
 
         bool logPerformance = _configService.Current.LogPerformance;
         if (ImGui.Checkbox("Log Network Performance Metrics", ref logPerformance))
@@ -599,7 +618,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             _configService.Current.LogPerformance = logPerformance;
             _configService.Save();
         }
-        _uiShared.DrawHelpText("Enabling this can incur a (slight) performance impact. Extended monitoring is not recommended.");
+        _uiShared.DrawHelpText("Enabling this can incur a slight performance impact. Extended monitoring is not recommended.");
 
         using (ImRaii.Disabled(!logPerformance))
         {
@@ -669,12 +688,14 @@ public class SettingsUi : WindowMediatorSubscriberBase
         ImGuiHelpers.ScaledDummy(5);
         ImGui.Separator();
 
-        _uiShared.BigText("Storage");
+        _uiShared.BigText("Storage & Cache");
 
         UiSharedService.TextWrapped("Sphene stores downloaded files from paired people permanently. This is to improve loading performance and requiring less downloads. " +
             "The storage governs itself by clearing data beyond the set storage size. Please set the storage size accordingly. It is not necessary to manually clear the storage.");
 
         _uiShared.DrawFileScanState();
+        ImGuiHelpers.ScaledDummy(5);
+        _uiShared.BigText("Monitoring");
         ImGui.AlignTextToFramePadding();
         ImGui.TextUnformatted("Monitoring Penumbra Folder: " + (_cacheMonitor.PenumbraWatcher?.Path ?? "Not monitoring"));
         if (string.IsNullOrEmpty(_cacheMonitor.PenumbraWatcher?.Path))
@@ -706,9 +727,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 _cacheMonitor.StartPenumbraWatcher(_ipcManager.Penumbra.ModDirectory);
                 _cacheMonitor.InvokeScan();
             }
-            UiSharedService.AttachToolTip("Attempts to resume monitoring for both Penumbra and Sphene Storage. "
-                + "Resuming the monitoring will also force a full scan to run." + Environment.NewLine
-                + "If the button remains present after clicking it, consult /xllog for errors");
+            UiSharedService.AttachToolTip("Resumes monitoring for both Penumbra and Sphene Storage. Also triggers a full rescan and index rebuild." + Environment.NewLine
+                + "If the button remains present after clicking, consult /xllog for errors.");
         }
         else
         {
@@ -719,13 +739,13 @@ public class SettingsUi : WindowMediatorSubscriberBase
                     _cacheMonitor.StopMonitoring();
                 }
             }
-            UiSharedService.AttachToolTip("Stops the monitoring for both Penumbra and Sphene Storage. "
-                + "Do not stop the monitoring, unless you plan to move the Penumbra and Sphene Storage folders, to ensure correct functionality of Sphene." + Environment.NewLine
-                + "If you stop the monitoring to move folders around, resume it after you are finished moving the files."
-                + UiSharedService.TooltipSeparator + "Hold CTRL to enable this button");
+            UiSharedService.AttachToolTip("Stops monitoring for both Penumbra and Sphene Storage. "
+                + "Only stop monitoring when moving the Penumbra or Sphene Storage folders to maintain correct functionality." + Environment.NewLine
+                + "Resume monitoring once you finish moving files." + UiSharedService.TooltipSeparator + "Hold CTRL to enable this button.");
         }
 
         _uiShared.DrawCacheDirectorySetting();
+        _uiShared.DrawHelpText("Configure cache location and size. The storage manages itself by clearing old data beyond the set size.");
         ImGui.AlignTextToFramePadding();
         if (_cacheMonitor.FileCacheSize >= 0)
             ImGui.TextUnformatted($"Currently utilized local storage: {UiSharedService.ByteToString(_cacheMonitor.FileCacheSize)}");
@@ -736,7 +756,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         bool isLinux = _dalamudUtilService.IsWine;
         if (!useFileCompactor && !isLinux)
         {
-            UiSharedService.ColorTextWrapped("Hint: To free up space when using Sphene consider enabling the File Compactor", ImGuiColors.DalamudYellow);
+            UiSharedService.ColorTextWrapped("Hint: Consider enabling the File Compactor to reduce disk usage.", ImGuiColors.DalamudYellow);
         }
         if (isLinux || !_cacheMonitor.StorageisNTFS) ImGui.BeginDisabled();
         if (ImGui.Checkbox("Use file compactor", ref useFileCompactor))
@@ -1396,7 +1416,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
     private void DrawServerConfiguration()
     {
-        _lastTab = "Service Settings";
+        _lastTab = "Network Configuration";
         if (ApiController.ServerAlive)
         {
             _uiShared.BigText("Service Actions");
@@ -1523,8 +1543,47 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
         if (ImGui.BeginTabBar("serverTabBar"))
         {
+            // Overview tab: quick status and actions
+            if (ImGui.BeginTabItem("Overview"))
+            {
+                _uiShared.BigText("Network Overview");
+                UiSharedService.TextWrapped($"Service: {selectedServer.ServerName}");
+                UiSharedService.TextWrapped($"URI: {selectedServer.ServerUri}");
+                UiSharedService.TextWrapped($"Status: {_apiController.ServerState}");
+                ImGuiHelpers.ScaledDummy(5f);
+                if (_apiController.IsConnected)
+                {
+                    if (ImGui.Button("Disconnect from Service"))
+                    {
+                        if (_serverConfigurationManager.CurrentServer != null)
+                        {
+                            _serverConfigurationManager.CurrentServer.FullPause = true;
+                            _serverConfigurationManager.Save();
+                            _ = _uiShared.ApiController.CreateConnectionsAsync();
+                        }
+                    }
+                    _uiShared.DrawHelpText("Disconnect the current session from the selected service.");
+                }
+                else
+                {
+                    if (ImGui.Button("Connect to Service"))
+                    {
+                        if (_serverConfigurationManager.CurrentServer != null)
+                        {
+                            _serverConfigurationManager.CurrentServer.FullPause = false;
+                            _serverConfigurationManager.Save();
+                            _ = _uiShared.ApiController.CreateConnectionsAsync();
+                        }
+                    }
+                    _uiShared.DrawHelpText("Establish a connection to the selected service.");
+                }
+
+                ImGui.EndTabItem();
+            }
+
             if (ImGui.BeginTabItem("Character Management"))
             {
+                // Primary authentication & character linking
                 if (selectedServer.SecretKeys.Any() || useOauth)
                 {
                     UiSharedService.ColorTextWrapped("Characters listed here will automatically connect to the selected Sphene service with the settings as provided below." +
@@ -1740,13 +1799,19 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 else
                 {
                     UiSharedService.ColorTextWrapped("You need to add a Secret Key first before adding Characters.", ImGuiColors.DalamudYellow);
+                    UiSharedService.ColorTextWrapped("Please go to the 'Secret Keys' tab to add authentication keys.", ImGuiColors.DalamudYellow);
                 }
 
                 ImGui.EndTabItem();
             }
 
-            if (!useOauth && ImGui.BeginTabItem("Secret Key Management"))
+            // Secret Key management in separate tab (non-OAuth only)
+            if (!useOauth && ImGui.BeginTabItem("Secret Keys"))
             {
+                _uiShared.BigText("Secret Key Management");
+                UiSharedService.ColorTextWrapped("Secret keys are used to authenticate your characters with the Sphene service. Each character must be assigned to a secret key.", ImGuiColors.DalamudYellow);
+                ImGuiHelpers.ScaledDummy(5);
+
                 foreach (var item in selectedServer.SecretKeys.ToList())
                 {
                     using var id = ImRaii.PushId("key" + item.Key);
@@ -1762,6 +1827,20 @@ public class SettingsUi : WindowMediatorSubscriberBase
                         item.Value.Key = key;
                         _serverConfigurationManager.Save();
                     }
+                    
+                    // Show which characters are using this key
+                    var charactersUsingKey = selectedServer.Authentications.Where(a => a.SecretKeyIdx == item.Key).ToList();
+                    if (charactersUsingKey.Any())
+                    {
+                        ImGui.TextUnformatted("Used by characters:");
+                        ImGui.Indent();
+                        foreach (var auth in charactersUsingKey)
+                        {
+                            ImGui.TextUnformatted($"• {auth.CharacterName}@{_dalamudUtilService.WorldData.Value[(ushort)auth.WorldId]}");
+                        }
+                        ImGui.Unindent();
+                    }
+                    
                     if (!selectedServer.Authentications.Exists(p => p.SecretKeyIdx == item.Key))
                     {
                         if (_uiShared.IconTextButton(FontAwesomeIcon.Trash, "Delete Secret Key") && UiSharedService.CtrlPressed())
@@ -1793,7 +1872,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 ImGui.EndTabItem();
             }
 
-            if ((_apiController.IsAdmin || _apiController.IsModerator) && ImGui.BeginTabItem("Service Configuration"))
+            if (ImGui.BeginTabItem("Service Configuration"))
             {
                 var serverName = selectedServer.ServerName;
                 var serverUri = selectedServer.ServerUri;
@@ -2040,84 +2119,469 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
     private void DrawSettingsContent()
     {
-        //if (_apiController.ServerState is ServerState.Connected)
-        //{
-        //    ImGui.TextUnformatted("Service " + _serverConfigurationManager.CurrentServer!.ServerName + ":");
-        //    ImGui.SameLine();
-        //    ImGui.TextColored(ImGuiColors.ParsedGreen, "Available");
-        //    ImGui.SameLine();
-        //    ImGui.TextUnformatted("(");
-        //    ImGui.SameLine();
-        //    ImGui.TextColored(ImGuiColors.ParsedGreen, _apiController.OnlineUsers.ToString(CultureInfo.InvariantCulture));
-        //    ImGui.SameLine();
-        //    ImGui.TextUnformatted("Users Online");
-        //    ImGui.SameLine();
-        //    ImGui.TextUnformatted(")");
-        //}
+        // Split layout: Sidebar navigation + Content pane
+        var available = ImGui.GetContentRegionAvail();
+        
+        // Calculate optimal sidebar width based on longest button text + 32px padding
+        var buttonLabels = new[] { "Home", "Connectivity", "People & Notes", "Appearance", "Notifications", "Performance", "Transfers", "Storage", "Acknowledgment", "Debug" };
+        var maxTextWidth = 0f;
+        foreach (var label in buttonLabels)
+        {
+            var textSize = ImGui.CalcTextSize(label);
+            if (textSize.X > maxTextWidth)
+                maxTextWidth = textSize.X;
+        }
+        var sidebarWidth = (maxTextWidth + 32f) * ImGuiHelpers.GlobalScale;
 
-        ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("Community and Support:");
+        // Sidebar
+        ImGui.BeginChild("settings-sidebar", new Vector2(sidebarWidth, available.Y), true);
+
+        void SidebarButton(string label, SettingsPage page)
+        {
+            var buttonSize = new Vector2(sidebarWidth - 16, 0);
+            var isActive = _activeSettingsPage == page;
+            if (isActive) ImGui.PushStyleColor(ImGuiCol.Button, ImGuiColors.ParsedBlue);
+            if (ImGui.Button(label, buttonSize))
+            {
+                _activeSettingsPage = page;
+            }
+            if (isActive) ImGui.PopStyleColor();
+        }
+
+        SidebarButton("Home", SettingsPage.Home);
+        SidebarButton("Connectivity", SettingsPage.Connectivity);
+        SidebarButton("People & Notes", SettingsPage.PeopleNotes);
+        SidebarButton("Appearance", SettingsPage.Display);
+        SidebarButton("Notifications", SettingsPage.Alerts);
+        SidebarButton("Performance", SettingsPage.Performance);
+        SidebarButton("Transfers", SettingsPage.Transfers);
+        SidebarButton("Storage", SettingsPage.Storage);
+        SidebarButton("Acknowledgment", SettingsPage.Acknowledgment);
+        SidebarButton("Debug", SettingsPage.Debug);
+
+        ImGui.EndChild();
+
         ImGui.SameLine();
-        if (ImGui.Button("Sphene Discord"))
+
+        // Content pane without horizontal scrolling - content should fit within available width
+        ImGui.BeginChild("settings-content", new Vector2(available.X - sidebarWidth - ImGui.GetStyle().ItemSpacing.X, available.Y), false);
+
+        switch (_activeSettingsPage)
+        {
+            case SettingsPage.Home:
+                DrawOverview();
+                break;
+            case SettingsPage.Connectivity:
+                DrawServerConfiguration();
+                break;
+            case SettingsPage.PeopleNotes:
+                DrawGeneralUserManagement();
+                break;
+            case SettingsPage.Display:
+                DrawGeneralUiDisplaySettings();
+                break;
+            case SettingsPage.Alerts:
+                DrawGeneralNotifications();
+                break;
+            case SettingsPage.Performance:
+                DrawPerformance();
+                break;
+            case SettingsPage.Transfers:
+                DrawCurrentTransfers();
+                break;
+            case SettingsPage.Storage:
+                DrawFileStorageSettings();
+                break;
+            case SettingsPage.Acknowledgment:
+                DrawAcknowledgmentSettings();
+                break;
+            case SettingsPage.Debug:
+                DrawDebug();
+                break;
+        }
+
+        ImGui.EndChild();
+    }
+
+    private void DrawOverview()
+    {
+        _lastTab = "Overview";
+        
+        // Plugin Information Section (moved to top)
+        _uiShared.BigText("Sphene Plugin");
+        
+        var assembly = System.Reflection.Assembly.GetExecutingAssembly();
+        var version = assembly.GetName().Version;
+        var versionString = version != null ? $"{version.Major}.{version.Minor}.{version.Build}" : "Unknown";
+        
+        ImGui.TextUnformatted("Version:");
+        ImGui.SameLine();
+        ImGui.TextColored(ImGuiColors.ParsedGreen, versionString);
+        
+#if DEBUG
+        ImGui.SameLine();
+        ImGui.TextColored(ImGuiColors.DalamudYellow, "(Debug Build)");
+#endif
+
+        ImGui.TextUnformatted("Author:");
+        ImGui.SameLine();
+        ImGui.TextUnformatted("Sphene Development Team");
+
+        ImGui.TextUnformatted("Description:");
+        ImGui.SameLine();
+        UiSharedService.TextWrapped("Advanced character synchronization and networking plugin for Final Fantasy XIV");
+
+        // Discord Button
+        ImGui.Spacing();
+        if (ImGui.Button("Join Discord Community"))
         {
             Util.OpenLink("https://discord.gg/GbnwsP2XsF");
         }
+        ImGui.SameLine();
+        UiSharedService.TextWrapped("Get support, updates, and connect with other users");
+
+        // Server Connection Section
         ImGui.Separator();
-        if (ImGui.BeginTabBar("mainTabBar"))
+        _uiShared.BigText("Server Connection");
+        
+        var currentServer = _serverConfigurationManager.CurrentServer;
+        if (currentServer == null)
         {
-            if (ImGui.BeginTabItem("General"))
-            {
-                DrawGeneral();
-                ImGui.EndTabItem();
-            }
+            ImGui.TextColored(ImGuiColors.DalamudRed, "No server configured");
+            ImGui.TextUnformatted("Configure a service under Connectivity to get started.");
+        }
+        else
+        {
+            ImGui.TextUnformatted("Current Service:");
+            ImGui.SameLine();
+            ImGui.TextColored(ImGuiColors.ParsedGreen, currentServer.ServerName);
+            ImGui.SameLine();
+            UiSharedService.TextWrapped("(" + currentServer.ServerUri + ")");
 
-            if (ImGui.BeginTabItem("Acknowledgment"))
+            ImGui.TextUnformatted("Connection State:");
+            ImGui.SameLine();
+            var connectionState = _apiController.ServerState.ToString();
+            var stateColor = _apiController.ServerState switch
             {
-                DrawAcknowledgmentSettings();
-                ImGui.EndTabItem();
-            }
+                WebAPI.SignalR.Utils.ServerState.Connected => ImGuiColors.ParsedGreen,
+                WebAPI.SignalR.Utils.ServerState.Connecting or 
+                WebAPI.SignalR.Utils.ServerState.Reconnecting => ImGuiColors.DalamudYellow,
+                _ => ImGuiColors.DalamudRed
+            };
+            ImGui.TextColored(stateColor, connectionState);
+        }
 
-            if (ImGui.BeginTabItem("Performance"))
+        // Statistics Section
+        ImGui.Separator();
+        _uiShared.BigText("Statistics");
+        
+        var directPairs = _pairManager.DirectPairs.Count();
+        var groupPairs = _pairManager.GroupPairs.SelectMany(g => g.Value).Count();
+        var totalPairs = directPairs + groupPairs;
+        
+        ImGui.TextUnformatted($"Direct Pairs: {directPairs}");
+        ImGui.TextUnformatted($"Group Pairs: {groupPairs}");
+        ImGui.TextUnformatted($"Total Connections: {totalPairs}");
+        
+        var onlinePairs = _pairManager.DirectPairs.Count(p => p.IsOnline) + 
+                         _pairManager.GroupPairs.SelectMany(g => g.Value).Count(p => p.IsOnline);
+        ImGui.TextUnformatted($"Currently Online: {onlinePairs}");
+
+        // Cache Information
+        var cacheSize = _cacheMonitor.FileCacheSize;
+        var cacheSizeFormatted = cacheSize > 0 ? UiSharedService.ByteToString(cacheSize) : "Unknown";
+        ImGui.TextUnformatted($"Cache Size: {cacheSizeFormatted}");
+
+        if (currentServer != null)
+        {
+            ImGui.Spacing();
+            _uiShared.BigText("Quick Actions");
+            var isPaused = currentServer.FullPause;
+            if (!isPaused)
             {
-                DrawPerformance();
-                ImGui.EndTabItem();
+                if (ImGui.Button("Disconnect from Service"))
+                {
+                    currentServer.FullPause = true;
+                    _serverConfigurationManager.Save();
+                    _uiShared.ApiController.CreateConnectionsAsync();
+                }
+                ImGui.TextUnformatted("Temporarily disconnects from the service. Toggle back to reconnect.");
             }
-
-            if (ImGui.BeginTabItem("Storage"))
+            else
             {
-                DrawFileStorageSettings();
-                ImGui.EndTabItem();
+                if (ImGui.Button("Connect to Service"))
+                {
+                    currentServer.FullPause = false;
+                    _serverConfigurationManager.Save();
+                    _uiShared.ApiController.CreateConnectionsAsync();
+                }
+                ImGui.TextUnformatted("Reconnects to the configured service.");
             }
+        }
 
-            if (ImGui.BeginTabItem("Transfers"))
+        ImGui.Separator();
+        _uiShared.BigText("Getting Started");
+        ImGui.TextUnformatted("1. Server Setup:");
+        ImGui.Indent();
+        ImGui.TextUnformatted("Configure your server connection under the 'Connectivity' tab");
+        ImGui.TextUnformatted("Enter your authentication key or set up Discord OAuth");
+        ImGui.Unindent();
+        
+        ImGui.TextUnformatted("2. Customization:");
+        ImGui.Indent();
+        ImGui.TextUnformatted("Adjust appearance settings in the 'Display' section");
+        ImGui.TextUnformatted("Configure notifications and alerts to your preference");
+        ImGui.Unindent();
+        
+        ImGui.TextUnformatted("3. User Management:");
+        ImGui.Indent();
+        ImGui.TextUnformatted("Manage paired users and add personal notes in 'People & Notes'");
+        ImGui.TextUnformatted("Export/import your notes for backup or sharing");
+        ImGui.Unindent();
+        
+        ImGui.TextUnformatted("4. Performance:");
+        ImGui.Indent();
+        ImGui.TextUnformatted("Monitor system performance and adjust settings as needed");
+        ImGui.TextUnformatted("Check file transfers and storage usage regularly");
+        ImGui.Unindent();
+    }
+
+    private void DrawGeneralUserManagement()
+    {
+        _lastTab = "People & Notes";
+        _uiShared.BigText("People & Notes");
+        ImGui.Spacing();
+
+        var currentProfile = _configService.Current;
+        var overwriteExistingLabels = _overwriteExistingLabels;
+        if (ImGui.Button("Export Notes"))
+        {
+            ImGui.SetClipboardText(UiSharedService.GetNotes(
+                _pairManager.DirectPairs.UnionBy(
+                    _pairManager.GroupPairs.SelectMany(p => p.Value),
+                    p => p.UserData,
+                    UserDataComparer.Instance).ToList()));
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Import Notes"))
+        {
+            _notesSuccessfullyApplied = null;
+            var notes = ImGui.GetClipboardText();
+            _notesSuccessfullyApplied = _uiShared.ApplyNotesFromClipboard(notes, overwriteExistingLabels);
+        }
+        ImGui.SameLine();
+        ImGui.Checkbox("Overwrite existing labels", ref overwriteExistingLabels);
+        _overwriteExistingLabels = overwriteExistingLabels;
+
+        if (_notesSuccessfullyApplied is not null)
+        {
+            ImGui.Spacing();
+            if (_notesSuccessfullyApplied!.Value)
+                ImGui.TextColored(ImGuiColors.ParsedGreen, "Notes successfully applied.");
+            else
+                ImGui.TextColored(ImGuiColors.DalamudRed, "Failed to apply notes.");
+        }
+
+        ImGui.Separator();
+        _uiShared.BigText("Labels & Popups");
+        var openPopupOnAddition = currentProfile.OpenPopupOnAdd;
+        if (ImGui.Checkbox("Open Notes Popup on user addition", ref openPopupOnAddition))
+        {
+            currentProfile.OpenPopupOnAdd = openPopupOnAddition;
+            _configService.Save();
+        }
+
+        var autoPopulateNotes = currentProfile.AutoPopulateEmptyNotesFromCharaName;
+        if (ImGui.Checkbox("Automatically populate notes using player names", ref autoPopulateNotes))
+        {
+            currentProfile.AutoPopulateEmptyNotesFromCharaName = autoPopulateNotes;
+            _configService.Save();
+        }
+    }
+
+    private void DrawGeneralUiDisplaySettings()
+    {
+        _lastTab = "Appearance";
+        _uiShared.BigText("Appearance");
+
+        var currentProfile = _configService.Current;
+
+        ImGui.Separator();
+        _uiShared.BigText("Basic Interface");
+        var showSpheneIcon = currentProfile.ShowSpheneIcon;
+        if (ImGui.Checkbox("Show Sphene Icon", ref showSpheneIcon))
+        {
+            currentProfile.ShowSpheneIcon = showSpheneIcon;
+            _configService.Save();
+        }
+        var isWidthLocked = currentProfile.IsWidthLocked;
+        if (ImGui.Checkbox("Lock Window Width", ref isWidthLocked))
+        {
+            currentProfile.IsWidthLocked = isWidthLocked;
+            if (isWidthLocked)
             {
-                DrawCurrentTransfers();
-                ImGui.EndTabItem();
+                currentProfile.LockedWidth = _currentCompactUiSize.X;
             }
+            _configService.Save();
+        }
+        var enableRightClickMenu = currentProfile.EnableRightClickMenus;
+        if (ImGui.Checkbox("Enable game right-click menus", ref enableRightClickMenu))
+        {
+            currentProfile.EnableRightClickMenus = enableRightClickMenu;
+            _configService.Save();
+        }
 
-            if (ImGui.BeginTabItem("Service Settings"))
+        ImGui.Separator();
+        _uiShared.BigText("Server Info Bar");
+        var enableDtrEntry = currentProfile.EnableDtrEntry;
+        if (ImGui.Checkbox("Show status in Server Info Bar", ref enableDtrEntry))
+        {
+            currentProfile.EnableDtrEntry = enableDtrEntry;
+            _configService.Save();
+        }
+        using (ImRaii.Disabled(!enableDtrEntry))
+        {
+            using var indent = ImRaii.PushIndent();
+            var showUidInDtrTooltip = currentProfile.ShowUidInDtrTooltip;
+            if (ImGui.Checkbox("Show UID in tooltip", ref showUidInDtrTooltip))
             {
-                DrawServerConfiguration();
-                ImGui.EndTabItem();
+                currentProfile.ShowUidInDtrTooltip = showUidInDtrTooltip;
+                _configService.Save();
             }
-
-            if (ImGui.BeginTabItem("Debug"))
+            var preferNoteInDtrTooltip = currentProfile.PreferNoteInDtrTooltip;
+            if (ImGui.Checkbox("Prefer notes in tooltip", ref preferNoteInDtrTooltip))
             {
-                DrawDebug();
-                ImGui.EndTabItem();
+                currentProfile.PreferNoteInDtrTooltip = preferNoteInDtrTooltip;
+                _configService.Save();
             }
+            var useColorsInDtr = currentProfile.UseColorsInDtr;
+            if (ImGui.Checkbox("Use status colors", ref useColorsInDtr))
+            {
+                currentProfile.UseColorsInDtr = useColorsInDtr;
+                _configService.Save();
+            }
+        }
 
-            ImGui.EndTabBar();
+        ImGui.Separator();
+        _uiShared.BigText("Display Options");
+        var showNameInsteadOfNotes = currentProfile.ShowCharacterNameInsteadOfNotesForVisible;
+        if (ImGui.Checkbox("Show character name instead of notes", ref showNameInsteadOfNotes))
+        {
+            currentProfile.ShowCharacterNameInsteadOfNotesForVisible = showNameInsteadOfNotes;
+            _configService.Save();
+        }
+        var showVisibleSeparate = currentProfile.ShowVisibleUsersSeparately;
+        if (ImGui.Checkbox("Show visible users separately", ref showVisibleSeparate))
+        {
+            currentProfile.ShowVisibleUsersSeparately = showVisibleSeparate;
+            _configService.Save();
+        }
+        var showOfflineSeparate = currentProfile.ShowOfflineUsersSeparately;
+        if (ImGui.Checkbox("Show offline users separately", ref showOfflineSeparate))
+        {
+            currentProfile.ShowOfflineUsersSeparately = showOfflineSeparate;
+            _configService.Save();
+        }
+
+        ImGui.Separator();
+        _uiShared.BigText("Profiles");
+        var showProfiles = currentProfile.ProfilesShow;
+        if (ImGui.Checkbox("Show profiles", ref showProfiles))
+        {
+            currentProfile.ProfilesShow = showProfiles;
+            _configService.Save();
+        }
+        using (ImRaii.Disabled(!showProfiles))
+        {
+            using var indent = ImRaii.PushIndent();
+            var showNsfwProfiles = currentProfile.ProfilesAllowNsfw;
+            if (ImGui.Checkbox("Allow NSFW profiles", ref showNsfwProfiles))
+            {
+                currentProfile.ProfilesAllowNsfw = showNsfwProfiles;
+                _configService.Save();
+            }
+            var profileDelay = currentProfile.ProfileDelay;
+            ImGui.SetNextItemWidth(200 * ImGuiHelpers.GlobalScale);
+            if (ImGui.SliderFloat("Hover Delay (s)", ref profileDelay, 0.5f, 10f))
+            {
+                currentProfile.ProfileDelay = profileDelay;
+                _configService.Save();
+            }
+            var profileOnRight = currentProfile.ProfilePopoutRight;
+            if (ImGui.Checkbox("Show on right", ref profileOnRight))
+            {
+                currentProfile.ProfilePopoutRight = profileOnRight;
+                _configService.Save();
+            }
+        }
+    }
+
+    private void DrawGeneralNotifications()
+    {
+        _lastTab = "Notifications";
+        _uiShared.BigText("Notifications");
+
+        var currentProfile = _configService.Current;
+
+        _uiShared.DrawCombo("Info Notification Display##settingsUi", (NotificationLocation[])Enum.GetValues(typeof(NotificationLocation)), (i) => i.ToString(),
+        (i) =>
+        {
+            currentProfile.InfoNotification = i;
+            _configService.Save();
+        }, currentProfile.InfoNotification);
+        _uiShared.DrawHelpText("The location where 'Info' notifications will display. Nowhere will not show any Info notifications; Chat prints in chat; Toast shows a toast; Both shows chat and toast.");
+
+        _uiShared.DrawCombo("Warning Notification Display##settingsUi", (NotificationLocation[])Enum.GetValues(typeof(NotificationLocation)), (i) => i.ToString(),
+        (i) =>
+        {
+            currentProfile.WarningNotification = i;
+            _configService.Save();
+        }, currentProfile.WarningNotification);
+        _uiShared.DrawHelpText("The location where 'Warning' notifications will display. Nowhere, Chat, Toast, or Both.");
+
+        _uiShared.DrawCombo("Error Notification Display##settingsUi", (NotificationLocation[])Enum.GetValues(typeof(NotificationLocation)), (i) => i.ToString(),
+        (i) =>
+        {
+            currentProfile.ErrorNotification = i;
+            _configService.Save();
+        }, currentProfile.ErrorNotification);
+        _uiShared.DrawHelpText("The location where 'Error' notifications will display. Nowhere, Chat, Toast, or Both.");
+
+        var disableOptionalPluginWarnings = currentProfile.DisableOptionalPluginWarnings;
+        if (ImGui.Checkbox("Disable optional plugin warnings", ref disableOptionalPluginWarnings))
+        {
+            currentProfile.DisableOptionalPluginWarnings = disableOptionalPluginWarnings;
+            _configService.Save();
+        }
+        _uiShared.DrawHelpText("Suppress 'Warning' messages for missing optional plugins.");
+
+        var onlineNotifs = currentProfile.ShowOnlineNotifications;
+        if (ImGui.Checkbox("Enable online notifications", ref onlineNotifs))
+        {
+            currentProfile.ShowOnlineNotifications = onlineNotifs;
+            _configService.Save();
+        }
+        var onlineNotifsPairsOnly = currentProfile.ShowOnlineNotificationsOnlyForIndividualPairs;
+        if (ImGui.Checkbox("Only for individual pairs", ref onlineNotifsPairsOnly))
+        {
+            currentProfile.ShowOnlineNotificationsOnlyForIndividualPairs = onlineNotifsPairsOnly;
+            _configService.Save();
+        }
+        var onlineNotifsNamedOnly = currentProfile.ShowOnlineNotificationsOnlyForNamedPairs;
+        if (ImGui.Checkbox("Only for named pairs", ref onlineNotifsNamedOnly))
+        {
+            currentProfile.ShowOnlineNotificationsOnlyForNamedPairs = onlineNotifsNamedOnly;
+            _configService.Save();
         }
     }
 
     private void DrawAcknowledgmentSettings()
     {
-        ImGui.TextUnformatted("Acknowledgment System Configuration");
+        _uiShared.BigText("Acknowledgment System");
         ImGui.Separator();
         
         // Popup Settings Section
-        ImGui.TextColored(ImGuiColors.DalamudYellow, "Popup Settings");
+        _uiShared.BigText("Popup Settings");
         
         var showPopups = _configService.Current.ShowAcknowledgmentPopups;
         if (ImGui.Checkbox("Show Acknowledgment Notifications", ref showPopups))
@@ -2125,7 +2589,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             _configService.Current.ShowAcknowledgmentPopups = showPopups;
             _configService.Save();
         }
-        UiSharedService.AttachToolTip("Enable or disable notifications for acknowledgment requests. Disable this to prevent spam when receiving many acknowledgment requests.");
+        _uiShared.DrawHelpText("Enable or disable notifications for acknowledgment requests. Disable to prevent spam when receiving many requests.");
         
         var showWaitingPopups = _configService.Current.ShowWaitingForAcknowledgmentPopups;
         if (ImGui.Checkbox("Show 'Waiting for Acknowledgment' Popups", ref showWaitingPopups))
@@ -2133,7 +2597,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             _configService.Current.ShowWaitingForAcknowledgmentPopups = showWaitingPopups;
             _configService.Save();
         }
-        UiSharedService.AttachToolTip("Enable or disable 'waiting for acknowledgment' popup notifications specifically. Success notifications will still be shown when disabled.");
+        _uiShared.DrawHelpText("Enable or disable 'waiting for acknowledgment' popups. Success notifications show regardless of this setting.");
         
         if (_configService.Current.ShowAcknowledgmentPopups)
         {
@@ -2146,7 +2610,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 _configService.Current.AcknowledgmentNotification = (NotificationLocation)notificationLocation;
                 _configService.Save();
             }
-            UiSharedService.AttachToolTip("Choose where acknowledgment notifications should appear.");
+            _uiShared.DrawHelpText("Choose where acknowledgment notifications should appear.");
             
             ImGui.Unindent();
         }
@@ -2155,7 +2619,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         ImGui.Separator();
         
         // Performance Settings Section
-        ImGui.TextColored(ImGuiColors.DalamudYellow, "Performance Settings");
+        _uiShared.BigText("Performance Settings");
         
         var enableBatching = _configService.Current.EnableAcknowledgmentBatching;
         if (ImGui.Checkbox("Enable Batching", ref enableBatching))
@@ -2163,7 +2627,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             _configService.Current.EnableAcknowledgmentBatching = enableBatching;
             _configService.Save();
         }
-        UiSharedService.AttachToolTip("Group multiple acknowledgments together for better performance. Recommended for users with many connections.");
+        _uiShared.DrawHelpText("Group multiple acknowledgments for better performance. Recommended with many active connections.");
         
         var enableAutoRetry = _configService.Current.EnableAcknowledgmentAutoRetry;
         if (ImGui.Checkbox("Enable Auto Retry", ref enableAutoRetry))
@@ -2171,7 +2635,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             _configService.Current.EnableAcknowledgmentAutoRetry = enableAutoRetry;
             _configService.Save();
         }
-        UiSharedService.AttachToolTip("Automatically retry failed acknowledgments to improve reliability.");
+        _uiShared.DrawHelpText("Automatically retry failed acknowledgments to improve reliability.");
         
 
         
@@ -2179,7 +2643,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         ImGui.Separator();
         
         // Timeout Settings Section
-        ImGui.TextColored(ImGuiColors.DalamudYellow, "Timeout Settings");
+        _uiShared.BigText("Timeout & Reliability");
         
         var timeoutSeconds = _configService.Current.AcknowledgmentTimeoutSeconds;
         if (ImGui.SliderInt("Acknowledgment Timeout (seconds)", ref timeoutSeconds, 5, 120))
@@ -2187,13 +2651,13 @@ public class SettingsUi : WindowMediatorSubscriberBase
             _configService.Current.AcknowledgmentTimeoutSeconds = timeoutSeconds;
             _configService.Save();
         }
-        UiSharedService.AttachToolTip("How long to wait for acknowledgment responses before timing out.");
+        _uiShared.DrawHelpText("How long to wait for acknowledgment responses before timing out.");
         
         ImGui.Spacing();
         ImGui.Separator();
         
         // Information Section
-        ImGui.TextColored(ImGuiColors.DalamudGrey3, "Information");
+        _uiShared.BigText("Information");
         UiSharedService.TextWrapped("The acknowledgment system helps maintain synchronization between connected users. " +
                           "When disabled, popup notifications will not appear, but the system will continue to function in the background. " +
                           "This is useful when you have many active connections to prevent notification spam.");
@@ -2211,7 +2675,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             _configService.Current.AcknowledgmentNotification = NotificationLocation.Chat;
             _configService.Save();
         }
-        UiSharedService.AttachToolTip("Reset all acknowledgment settings to their default values.");
+        _uiShared.DrawHelpText("Reset all acknowledgment settings to their default values.");
     }
 
     private void UiSharedService_GposeEnd()
