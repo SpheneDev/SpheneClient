@@ -58,6 +58,9 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
     private bool _customizePlusExists = false;
     private string _customServerName = "";
     private string _customServerUri = "";
+    private string _editServerName = "";
+    private string _editServerUri = "";
+    private int _editingServerIndex = -1;
     private Task<Uri?>? _discordOAuthCheck;
     private Task<string?>? _discordOAuthGetCode;
     private CancellationTokenSource _discordOAuthGetCts = new();
@@ -881,7 +884,7 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
             }
         }
 
-        if ((_apiController.IsAdmin || _apiController.IsModerator) && ImGui.TreeNode("Add Custom Service"))
+        if (ImGui.TreeNode("Add Custom Service"))
         {
             ImGui.SetNextItemWidth(250);
             ImGui.InputText("Custom Service URI", ref _customServerUri, 255);
@@ -891,9 +894,12 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
                 && !string.IsNullOrEmpty(_customServerUri)
                 && !string.IsNullOrEmpty(_customServerName))
             {
+                // Handle duplicate names by adding a number
+                string finalServerName = GetUniqueServerName(_customServerName);
+                
                 _serverConfigurationManager.AddServer(new ServerStorage()
                 {
-                    ServerName = _customServerName,
+                    ServerName = finalServerName,
                     ServerUri = _customServerUri,
                     UseOAuth2 = true
                 });
@@ -904,7 +910,110 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
             ImGui.TreePop();
         }
 
+        // Server Management Section
+        if (ImGui.TreeNode("Manage Services"))
+        {
+            var servers = _serverConfigurationManager.GetServerNames();
+            
+            for (int i = 0; i < servers.Length; i++)
+            {
+                var server = _serverConfigurationManager.GetServerByIndex(i);
+                
+                // Skip the first two servers (Debug and Main) for editing/deleting
+                if (i == 0 || i == 1)
+                {
+                    string serverType = i == 0 ? "Debug Server" : "Main Server";
+                    ImGui.TextDisabled($"{servers[i]} ({serverType} - Cannot be modified)");
+                    continue;
+                }
+                
+                ImGui.PushID($"server_{i}");
+                
+                // Show server name
+                ImGui.Text(servers[i]);
+                ImGui.SameLine();
+                
+                // Edit button
+                if (IconButton(FontAwesomeIcon.Edit))
+                {
+                    _editingServerIndex = i;
+                    _editServerName = server.ServerName;
+                    _editServerUri = server.ServerUri;
+                }
+                ImGui.SameLine();
+                
+                // Delete button
+                if (IconButton(FontAwesomeIcon.Trash))
+                {
+                    _serverConfigurationManager.DeleteServer(server);
+                    _configService.Save();
+                    break; // Break to avoid index issues after deletion
+                }
+                
+                ImGui.PopID();
+            }
+            
+            // Edit dialog
+            if (_editingServerIndex != -1)
+            {
+                ImGui.Separator();
+                ImGui.Text($"Edit Server: {_serverConfigurationManager.GetServerByIndex(_editingServerIndex).ServerName}");
+                
+                ImGui.SetNextItemWidth(250);
+                ImGui.InputText("Edit Service URI", ref _editServerUri, 255);
+                ImGui.SetNextItemWidth(250);
+                ImGui.InputText("Edit Service Name", ref _editServerName, 255);
+                
+                if (IconTextButton(FontAwesomeIcon.Save, "Save Changes")
+                    && !string.IsNullOrEmpty(_editServerUri)
+                    && !string.IsNullOrEmpty(_editServerName))
+                {
+                    var serverToEdit = _serverConfigurationManager.GetServerByIndex(_editingServerIndex);
+                    
+                    // Handle duplicate names by adding a number (only if name changed)
+                    string finalServerName = _editServerName;
+                    if (!string.Equals(serverToEdit.ServerName, _editServerName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        finalServerName = GetUniqueServerName(_editServerName);
+                    }
+                    
+                    serverToEdit.ServerName = finalServerName;
+                    serverToEdit.ServerUri = _editServerUri;
+                    
+                    _editingServerIndex = -1;
+                    _editServerName = string.Empty;
+                    _editServerUri = string.Empty;
+                    _configService.Save();
+                }
+                ImGui.SameLine();
+                
+                if (IconTextButton(FontAwesomeIcon.Times, "Cancel"))
+                {
+                    _editingServerIndex = -1;
+                    _editServerName = string.Empty;
+                    _editServerUri = string.Empty;
+                }
+            }
+            
+            ImGui.TreePop();
+        }
+
         return _serverSelectionIndex;
+    }
+
+    private string GetUniqueServerName(string baseName)
+    {
+        var existingNames = _serverConfigurationManager.GetServerNames();
+        string uniqueName = baseName;
+        int counter = 1;
+        
+        while (existingNames.Any(name => string.Equals(name, uniqueName, StringComparison.OrdinalIgnoreCase)))
+        {
+            uniqueName = $"{baseName} ({counter})";
+            counter++;
+        }
+        
+        return uniqueName;
     }
 
     public void DrawUIDComboForAuthentication(int indexOffset, Authentication item, string serverUri, ILogger? logger = null)

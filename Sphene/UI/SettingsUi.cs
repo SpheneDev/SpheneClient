@@ -1394,6 +1394,10 @@ public class SettingsUi : WindowMediatorSubscriberBase
                         {
                             displayText = $"{identifier} ({note})";
                         }
+                        else if (!string.IsNullOrEmpty(pair.UserData.Alias))
+                        {
+                            displayText = $"{identifier} ({pair.UserData.Alias})";
+                        }
                     }
                     
                     if (ImGui.Selectable(displayText + "##" + i, shouldBeSelected))
@@ -1514,21 +1518,13 @@ public class SettingsUi : WindowMediatorSubscriberBase
             + "If you do not wish to participate in the statistical census, untick this box and reconnect to the server.");
         ImGuiHelpers.ScaledDummy(new Vector2(10, 10));
 
-        int idx = 0;
-        if (_apiController.IsAdmin || _apiController.IsModerator)
+        int idx = _uiShared.DrawServiceSelection();
+        if (_lastSelectedServerIndex != idx)
         {
-            idx = _uiShared.DrawServiceSelection();
-            if (_lastSelectedServerIndex != idx)
-            {
-                _uiShared.ResetOAuthTasksState();
-                _secretKeysConversionCts = _secretKeysConversionCts.CancelRecreate();
-                _secretKeysConversionTask = null;
-                _lastSelectedServerIndex = idx;
-            }
-        }
-        else
-        {
-            idx = _serverConfigurationManager.CurrentServerIndex;
+            _uiShared.ResetOAuthTasksState();
+            _secretKeysConversionCts = _secretKeysConversionCts.CancelRecreate();
+            _secretKeysConversionTask = null;
+            _lastSelectedServerIndex = idx;
         }
 
         ImGuiHelpers.ScaledDummy(new Vector2(10, 10));
@@ -1876,7 +1872,10 @@ public class SettingsUi : WindowMediatorSubscriberBase
             {
                 var serverName = selectedServer.ServerName;
                 var serverUri = selectedServer.ServerUri;
-                var isMain = string.Equals(serverName, ApiController.MainServer, StringComparison.OrdinalIgnoreCase);
+                var isMain = string.Equals(serverName, ApiController.MainServer, StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(serverName, "Sphene Test Server", StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(serverName, "Sphene Debug Server", StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(serverName, "Sphene Server", StringComparison.OrdinalIgnoreCase);
                 var flags = isMain ? ImGuiInputTextFlags.ReadOnly : ImGuiInputTextFlags.None;
 
                 if (ImGui.InputText("Service URI", ref serverUri, 255, flags))

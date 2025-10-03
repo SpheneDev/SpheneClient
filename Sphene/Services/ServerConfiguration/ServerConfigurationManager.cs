@@ -484,10 +484,95 @@ public class ServerConfigurationManager
 
     private void EnsureMainExists()
     {
-        if (_configService.Current.ServerStorage.Count == 0 || !string.Equals(_configService.Current.ServerStorage[0].ServerUri, ApiController.MainServiceUri, StringComparison.OrdinalIgnoreCase))
+        const string debugServerName = "Sphene Test Server";
+        const string debugServerUri = "ws://sphene.dynip.online:6000";
+        const string mainServerName = "Sphene Server";
+        const string mainServerUri = "ws://sphene.online:6000";
+
+        var servers = _configService.Current.ServerStorage;
+        bool hasDebugServer = false;
+        bool hasMainServer = false;
+        int debugServerIndex = -1;
+        int mainServerIndex = -1;
+
+        // Find existing debug and main servers
+        for (int i = 0; i < servers.Count; i++)
         {
-            _configService.Current.ServerStorage.Insert(0, new ServerStorage() { ServerUri = ApiController.MainServiceUri, ServerName = ApiController.MainServer, UseOAuth2 = false });
+            var server = servers[i];
+            
+            // Check for debug server (also check for old "Debug Server" name)
+            if (string.Equals(server.ServerName, debugServerName, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(server.ServerName, "Sphene Debug Server", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(server.ServerUri, debugServerUri, StringComparison.OrdinalIgnoreCase) ||
+                server.ServerUri.Contains("sphene.dynip.online"))
+            {
+                hasDebugServer = true;
+                debugServerIndex = i;
+                // Update debug server configuration
+                server.ServerName = debugServerName;
+                server.ServerUri = debugServerUri;
+                server.UseOAuth2 = false;
+            }
+            
+            // Check for main server
+            if (string.Equals(server.ServerName, mainServerName, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(server.ServerUri, mainServerUri, StringComparison.OrdinalIgnoreCase) ||
+                (server.ServerUri.Contains("sphene.online") && !server.ServerUri.Contains("dynip")))
+            {
+                hasMainServer = true;
+                mainServerIndex = i;
+                // Update main server configuration
+                server.ServerName = mainServerName;
+                server.ServerUri = mainServerUri;
+                server.UseOAuth2 = false;
+            }
         }
+
+        // Ensure debug server exists at index 0
+        if (!hasDebugServer)
+        {
+            servers.Insert(0, new ServerStorage() { ServerUri = debugServerUri, ServerName = debugServerName, UseOAuth2 = false });
+            // Adjust main server index if it was found
+            if (mainServerIndex >= 0) mainServerIndex++;
+        }
+        else if (debugServerIndex != 0)
+        {
+            // Move debug server to index 0
+            var debugServer = servers[debugServerIndex];
+            servers.RemoveAt(debugServerIndex);
+            servers.Insert(0, debugServer);
+            // Adjust main server index
+            if (mainServerIndex > debugServerIndex) mainServerIndex--;
+            else if (mainServerIndex < debugServerIndex) mainServerIndex++;
+        }
+
+        // Ensure main server exists at index 1
+        if (!hasMainServer)
+        {
+            if (servers.Count < 2)
+            {
+                servers.Add(new ServerStorage() { ServerUri = mainServerUri, ServerName = mainServerName, UseOAuth2 = false });
+            }
+            else
+            {
+                servers.Insert(1, new ServerStorage() { ServerUri = mainServerUri, ServerName = mainServerName, UseOAuth2 = false });
+            }
+        }
+        else if (mainServerIndex != 1)
+        {
+            // Move main server to index 1
+            var mainServer = servers[mainServerIndex];
+            servers.RemoveAt(mainServerIndex);
+            if (servers.Count < 2)
+            {
+                servers.Add(mainServer);
+            }
+            else
+            {
+                servers.Insert(1, mainServer);
+            }
+        }
+
         Save();
     }
 
