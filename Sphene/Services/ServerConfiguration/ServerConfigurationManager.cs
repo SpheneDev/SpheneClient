@@ -485,7 +485,7 @@ public class ServerConfigurationManager
     private void EnsureMainExists()
     {
         const string debugServerName = "Sphene Test Server";
-        const string debugServerUri = "ws://sphene.dynip.online:6000";
+        const string debugServerUri = "ws://test.sphene.online:6000";
         const string mainServerName = "Sphene Server";
         const string mainServerUri = "ws://sphene.online:6000";
 
@@ -517,7 +517,7 @@ public class ServerConfigurationManager
             // Check for main server
             if (string.Equals(server.ServerName, mainServerName, StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(server.ServerUri, mainServerUri, StringComparison.OrdinalIgnoreCase) ||
-                (server.ServerUri.Contains("sphene.online") && !server.ServerUri.Contains("dynip")))
+                (server.ServerUri.Contains("sphene.online") && !server.ServerUri.Contains("test")))
             {
                 hasMainServer = true;
                 mainServerIndex = i;
