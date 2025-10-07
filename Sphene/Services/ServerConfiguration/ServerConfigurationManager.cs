@@ -504,7 +504,7 @@ public class ServerConfigurationManager
             if (string.Equals(server.ServerName, debugServerName, StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(server.ServerName, "Sphene Debug Server", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(server.ServerUri, debugServerUri, StringComparison.OrdinalIgnoreCase) ||
-                server.ServerUri.Contains("sphene.dynip.online"))
+                server.ServerUri.Contains("test.sphene.online"))
             {
                 hasDebugServer = true;
                 debugServerIndex = i;
