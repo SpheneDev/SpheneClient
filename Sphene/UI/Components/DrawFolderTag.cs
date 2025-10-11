@@ -178,7 +178,19 @@ public class DrawFolderTag : DrawFolderBase
             _ => _id
         };
 
-        ImGui.TextUnformatted(name);
+        var textColor = _id switch
+        {
+            TagHandler.CustomOfflineTag => SpheneCustomTheme.CurrentTheme.CompactOfflinePausedText,
+            TagHandler.CustomOfflineSyncshellTag => SpheneCustomTheme.CurrentTheme.CompactOfflineSyncshellText,
+            TagHandler.CustomVisibleTag => SpheneCustomTheme.CurrentTheme.CompactVisibleText,
+            TagHandler.CustomUnpairedTag => SpheneCustomTheme.CurrentTheme.CompactPairsText,
+            TagHandler.CustomOnlineTag => SpheneCustomTheme.CurrentTheme.CompactPairsText,
+            TagHandler.CustomPausedTag => SpheneCustomTheme.CurrentTheme.CompactPairsText,
+            TagHandler.CustomAllTag => SpheneCustomTheme.CurrentTheme.CompactPairsText,
+            _ => SpheneCustomTheme.CurrentTheme.CompactPairsText
+        };
+
+        UiSharedService.ColorText(name, textColor);
     }
 
     protected override float DrawRightSide(float currentRightSideX)
@@ -213,10 +225,13 @@ public class DrawFolderTag : DrawFolderBase
             {
                 ImGui.OpenPopup("User Flyout Menu");
             }
-            if (ImGui.BeginPopup("User Flyout Menu"))
+            using (SpheneCustomTheme.ApplyContextMenuTheme())
             {
-                using (ImRaii.PushId($"buttons-{_id}")) DrawMenu(200f); // Use fixed width for menu
-                ImGui.EndPopup();
+                if (ImGui.BeginPopup("User Flyout Menu"))
+                {
+                    using (ImRaii.PushId($"buttons-{_id}")) DrawMenu(200f); // Use fixed width for menu
+                    ImGui.EndPopup();
+                }
             }
         }
 

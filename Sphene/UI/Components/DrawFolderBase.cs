@@ -125,15 +125,18 @@ public abstract class DrawFolderBase : IDrawFolder, IDisposable
             {
                 ImGui.OpenPopup("User Flyout Menu");
             }
-            if (ImGui.BeginPopup("User Flyout Menu"))
+            using (SpheneCustomTheme.ApplyContextMenuTheme())
             {
-                using (ImRaii.PushId($"buttons-{_id}")) DrawMenu(_menuWidth);
-                _menuWidth = ImGui.GetWindowContentRegionMax().X - ImGui.GetWindowContentRegionMin().X;
-                ImGui.EndPopup();
-            }
-            else
-            {
-                _menuWidth = 0;
+                if (ImGui.BeginPopup("User Flyout Menu"))
+                {
+                    using (ImRaii.PushId($"buttons-{_id}")) DrawMenu(_menuWidth);
+                    _menuWidth = ImGui.GetWindowContentRegionMax().X - ImGui.GetWindowContentRegionMin().X;
+                    ImGui.EndPopup();
+                }
+                else
+                {
+                    _menuWidth = 0;
+                }
             }
         }
 

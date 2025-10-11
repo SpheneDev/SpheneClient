@@ -186,16 +186,19 @@ public class SpheneIcon : WindowMediatorSubscriberBase, IDisposable
         // Show tooltip
         if (ImGui.IsItemHovered())
         {
-            ImGui.BeginTooltip();
-            ImGui.Text("Click to toggle Sphene | Hold and drag to move");
-            ImGui.Separator();
-            ImGui.Text($"Server Status: {GetStatusText(_apiController.ServerState)}");
-            if (_updateAvailable && _updateInfo != null)
+            using (SpheneCustomTheme.ApplyTooltipTheme())
             {
+                ImGui.BeginTooltip();
+                ImGui.Text("Click to toggle Sphene | Hold and drag to move");
                 ImGui.Separator();
-                ImGui.Text($"Update available: {_updateInfo.CurrentVersion} -> {_updateInfo.LatestVersion}");
+                ImGui.Text($"Server Status: {GetStatusText(_apiController.ServerState)}");
+                if (_updateAvailable && _updateInfo != null)
+                {
+                    ImGui.Separator();
+                    ImGui.Text($"Update available: {_updateInfo.CurrentVersion} -> {_updateInfo.LatestVersion}");
+                }
+                ImGui.EndTooltip();
             }
-            ImGui.EndTooltip();
         }
         
         // Update stored position if window was moved

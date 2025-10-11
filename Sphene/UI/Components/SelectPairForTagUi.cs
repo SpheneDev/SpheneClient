@@ -47,6 +47,8 @@ public class SelectPairForTagUi
         ImGui.SetNextWindowSizeConstraints(minSize, maxSize);
         if (ImGui.BeginPopupModal(popupName, ref _show, ImGuiWindowFlags.Popup | ImGuiWindowFlags.Modal))
         {
+            using (SpheneCustomTheme.ApplyContextMenuTheme())
+            {
             ImGui.TextUnformatted($"Select users for group {_tag}");
 
             ImGui.InputTextWithHint("##filter", "Filter", ref _filter, 255, ImGuiInputTextFlags.None);
@@ -69,6 +71,7 @@ public class SelectPairForTagUi
                         _peopleInGroup.Remove(item.UserData.UID);
                     }
                 }
+            }
             }
             ImGui.EndPopup();
         }

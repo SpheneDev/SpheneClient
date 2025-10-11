@@ -6,9 +6,11 @@ using Dalamud.Interface.Utility.Raii;
 using Sphene.API.Data.Extensions;
 using Sphene.API.Dto.Group;
 using Sphene.PlayerData.Pairs;
+using Sphene.Services;
 using Sphene.Services.Mediator;
 using Sphene.UI.Handlers;
 using Sphene.WebAPI;
+using Sphene.SpheneConfiguration;
 using System.Collections.Immutable;
 using System.Numerics;
 
@@ -20,17 +22,21 @@ public class DrawFolderGroup : DrawFolderBase
     private readonly GroupFullInfoDto _groupFullInfoDto;
     private readonly IdDisplayHandler _idDisplayHandler;
     private readonly SpheneMediator _spheneMediator;
+    private readonly AreaBoundSyncshellService _areaBoundSyncshellService;
+    private readonly SpheneConfigService _configService;
     private float _menuWidth;
 
     public DrawFolderGroup(string id, GroupFullInfoDto groupFullInfoDto, ApiController apiController,
         IImmutableList<DrawUserPair> drawPairs, IImmutableList<Pair> allPairs, TagHandler tagHandler, IdDisplayHandler idDisplayHandler,
-        SpheneMediator spheneMediator, UiSharedService uiSharedService, bool isSyncshellFolder = false) :
+        SpheneMediator spheneMediator, UiSharedService uiSharedService, AreaBoundSyncshellService areaBoundSyncshellService, SpheneConfigService configService, bool isSyncshellFolder = false) :
         base(id, drawPairs, allPairs, tagHandler, uiSharedService, 0f, isSyncshellFolder)
     {
         _groupFullInfoDto = groupFullInfoDto;
         _apiController = apiController;
         _idDisplayHandler = idDisplayHandler;
         _spheneMediator = spheneMediator;
+        _areaBoundSyncshellService = areaBoundSyncshellService;
+        _configService = configService;
     }
 
     protected override bool RenderIfEmpty => true;
@@ -130,6 +136,33 @@ public class DrawFolderGroup : DrawFolderBase
             _uiSharedService.IconText(FontAwesomeIcon.Thumbtack);
             UiSharedService.AttachToolTip("You are pinned in " + _groupFullInfoDto.GroupAliasOrGID);
         }
+
+        // Show area-bound indicator
+        if (_areaBoundSyncshellService.IsAreaBoundSyncshell(_groupFullInfoDto.Group.GID))
+        {
+            ImGui.SameLine();
+            ImGui.AlignTextToFramePadding();
+            
+            // Make the area-bound indicator clickable to show welcome message on demand
+            if (_configService.Current.ShowAreaBoundSyncshellWelcomeMessages)
+            {
+                // Normal non-clickable indicator when welcome messages are enabled
+                _uiSharedService.IconText(FontAwesomeIcon.MapMarkerAlt);
+                UiSharedService.AttachToolTip("This is an area-bound syncshell");
+            }
+            else
+            {
+                // Clickable indicator when welcome messages are disabled - looks like normal icon but is clickable
+                _uiSharedService.IconText(FontAwesomeIcon.MapMarkerAlt);
+                if (ImGui.IsItemClicked())
+                {
+                    // Show welcome message on demand
+                    _ = ShowWelcomeMessageOnDemand();
+                }
+                UiSharedService.AttachToolTip("This is an area-bound syncshell\nClick to view welcome message");
+            }
+        }
+
         ImGui.SameLine();
         return ImGui.GetCursorPosX();
     }
@@ -140,21 +173,21 @@ public class DrawFolderGroup : DrawFolderBase
         ImGui.Separator();
 
         ImGui.TextUnformatted("General Syncshell Actions");
-        if (_uiSharedService.IconTextButton(FontAwesomeIcon.Copy, "Copy ID", menuWidth, true))
+        if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.Copy, "Copy ID", menuWidth))
         {
             ImGui.CloseCurrentPopup();
             ImGui.SetClipboardText(_groupFullInfoDto.GroupAliasOrGID);
         }
         UiSharedService.AttachToolTip("Copy Syncshell ID to Clipboard");
 
-        if (_uiSharedService.IconTextButton(FontAwesomeIcon.StickyNote, "Copy Notes", menuWidth, true))
+        if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.StickyNote, "Copy Notes", menuWidth))
         {
             ImGui.CloseCurrentPopup();
             ImGui.SetClipboardText(UiSharedService.GetNotes(DrawPairs.Select(k => k.Pair).ToList()));
         }
         UiSharedService.AttachToolTip("Copies all your notes for all users in this Syncshell to the clipboard." + Environment.NewLine + "They can be imported via Settings -> General -> Notes -> Import notes from clipboard");
 
-        if (_uiSharedService.IconTextButton(FontAwesomeIcon.ArrowCircleLeft, "Leave Syncshell", menuWidth, true) && UiSharedService.CtrlPressed())
+        if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.ArrowCircleLeft, "Leave Syncshell", menuWidth) && UiSharedService.CtrlPressed())
         {
             _ = _apiController.GroupLeave(_groupFullInfoDto);
             ImGui.CloseCurrentPopup();
@@ -172,7 +205,7 @@ public class DrawFolderGroup : DrawFolderBase
         if ((_groupFullInfoDto.GroupPermissions.IsPreferDisableAnimations() != disableAnims
             || _groupFullInfoDto.GroupPermissions.IsPreferDisableSounds() != disableSounds
             || _groupFullInfoDto.GroupPermissions.IsPreferDisableVFX() != disableVfx)
-            && _uiSharedService.IconTextButton(FontAwesomeIcon.Check, "Align with suggested permissions", menuWidth, true))
+            && _uiSharedService.IconTextActionButton(FontAwesomeIcon.Check, "Align with suggested permissions", menuWidth))
         {
             perm.SetDisableVFX(_groupFullInfoDto.GroupPermissions.IsPreferDisableVFX());
             perm.SetDisableSounds(_groupFullInfoDto.GroupPermissions.IsPreferDisableSounds());
@@ -181,21 +214,21 @@ public class DrawFolderGroup : DrawFolderBase
             ImGui.CloseCurrentPopup();
         }
 
-        if (_uiSharedService.IconTextButton(disableSounds ? FontAwesomeIcon.VolumeUp : FontAwesomeIcon.VolumeOff, disableSounds ? "Enable Sound Sync" : "Disable Sound Sync", menuWidth, true))
+        if (_uiSharedService.IconTextActionButton(disableSounds ? FontAwesomeIcon.VolumeUp : FontAwesomeIcon.VolumeOff, disableSounds ? "Enable Sound Sync" : "Disable Sound Sync", menuWidth))
         {
             perm.SetDisableSounds(!disableSounds);
             _ = _apiController.GroupChangeIndividualPermissionState(new(_groupFullInfoDto.Group, new(_apiController.UID), perm));
             ImGui.CloseCurrentPopup();
         }
 
-        if (_uiSharedService.IconTextButton(disableAnims ? FontAwesomeIcon.Running : FontAwesomeIcon.Stop, disableAnims ? "Enable Animation Sync" : "Disable Animation Sync", menuWidth, true))
+        if (_uiSharedService.IconTextActionButton(disableAnims ? FontAwesomeIcon.Running : FontAwesomeIcon.Stop, disableAnims ? "Enable Animation Sync" : "Disable Animation Sync", menuWidth))
         {
             perm.SetDisableAnimations(!disableAnims);
             _ = _apiController.GroupChangeIndividualPermissionState(new(_groupFullInfoDto.Group, new(_apiController.UID), perm));
             ImGui.CloseCurrentPopup();
         }
 
-        if (_uiSharedService.IconTextButton(disableVfx ? FontAwesomeIcon.Sun : FontAwesomeIcon.Circle, disableVfx ? "Enable VFX Sync" : "Disable VFX Sync", menuWidth, true))
+        if (_uiSharedService.IconTextActionButton(disableVfx ? FontAwesomeIcon.Sun : FontAwesomeIcon.Circle, disableVfx ? "Enable VFX Sync" : "Disable VFX Sync", menuWidth))
         {
             perm.SetDisableVFX(!disableVfx);
             _ = _apiController.GroupChangeIndividualPermissionState(new(_groupFullInfoDto.Group, new(_apiController.UID), perm));
@@ -206,7 +239,7 @@ public class DrawFolderGroup : DrawFolderBase
         {
             ImGui.Separator();
             ImGui.TextUnformatted("Syncshell Admin Functions");
-            if (_uiSharedService.IconTextButton(FontAwesomeIcon.Cog, "Open Admin Panel", menuWidth, true))
+            if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.Cog, "Open Admin Panel", menuWidth))
             {
                 ImGui.CloseCurrentPopup();
                 _spheneMediator.Publish(new OpenSyncshellAdminPanel(_groupFullInfoDto));
@@ -240,23 +273,26 @@ public class DrawFolderGroup : DrawFolderBase
         var menuButtonOffset = actualWindowEndX - menuButtonSize.X;
         ImGui.SameLine(menuButtonOffset);
         
-        using var menuButtonColor = ImRaii.PushColor(ImGuiCol.Button, new Vector4(0.3f, 0.5f, 0.9f, 0.4f));
-        using var menuButtonHoveredColor = ImRaii.PushColor(ImGuiCol.ButtonHovered, new Vector4(0.4f, 0.6f, 1.0f, 0.6f));
-        using var menuButtonActiveColor = ImRaii.PushColor(ImGuiCol.ButtonActive, new Vector4(0.5f, 0.7f, 1.0f, 0.8f));
+        using var menuButtonColor = ImRaii.PushColor(ImGuiCol.Button, SpheneCustomTheme.CurrentTheme.CompactSyncshellButton);
+        using var menuButtonHoveredColor = ImRaii.PushColor(ImGuiCol.ButtonHovered, SpheneCustomTheme.CurrentTheme.CompactSyncshellButtonHovered);
+        using var menuButtonActiveColor = ImRaii.PushColor(ImGuiCol.ButtonActive, SpheneCustomTheme.CurrentTheme.CompactSyncshellButtonActive);
         
         if (_uiSharedService.IconButton(FontAwesomeIcon.EllipsisV))
         {
             ImGui.OpenPopup("User Flyout Menu");
         }
-        if (ImGui.BeginPopup("User Flyout Menu"))
+        using (SpheneCustomTheme.ApplyContextMenuTheme())
         {
-            using (ImRaii.PushId($"buttons-{_id}")) DrawMenu(_menuWidth);
-            _menuWidth = ImGui.GetWindowContentRegionMax().X - ImGui.GetWindowContentRegionMin().X;
-            ImGui.EndPopup();
-        }
-        else
-        {
-            _menuWidth = 0;
+            if (ImGui.BeginPopup("User Flyout Menu"))
+            {
+                using (ImRaii.PushId($"buttons-{_id}")) DrawMenu(_menuWidth);
+                _menuWidth = ImGui.GetWindowContentRegionMax().X - ImGui.GetWindowContentRegionMin().X;
+                ImGui.EndPopup();
+            }
+            else
+            {
+                _menuWidth = 0;
+            }
         }
 
         // Calculate pause button position (left of menu button) - MUST match menu button position
@@ -264,9 +300,9 @@ public class DrawFolderGroup : DrawFolderBase
         ImGui.SameLine(pauseButtonOffset);
         
         // Draw pause button with brighter blue color styling
-        using var pauseButtonColor = ImRaii.PushColor(ImGuiCol.Button, new Vector4(0.3f, 0.5f, 0.9f, 0.4f));
-        using var pauseButtonHoveredColor = ImRaii.PushColor(ImGuiCol.ButtonHovered, new Vector4(0.4f, 0.6f, 1.0f, 0.6f));
-        using var pauseButtonActiveColor = ImRaii.PushColor(ImGuiCol.ButtonActive, new Vector4(0.5f, 0.7f, 1.0f, 0.8f));
+        using var pauseButtonColor = ImRaii.PushColor(ImGuiCol.Button, SpheneCustomTheme.CurrentTheme.CompactSyncshellButton);
+        using var pauseButtonHoveredColor = ImRaii.PushColor(ImGuiCol.ButtonHovered, SpheneCustomTheme.CurrentTheme.CompactSyncshellButtonHovered);
+        using var pauseButtonActiveColor = ImRaii.PushColor(ImGuiCol.ButtonActive, SpheneCustomTheme.CurrentTheme.CompactSyncshellButtonActive);
         
         if (_uiSharedService.IconButton(pauseIcon))
         {
@@ -286,51 +322,74 @@ public class DrawFolderGroup : DrawFolderBase
             || _groupFullInfoDto.GroupPermissions.IsPreferDisableVFX() != individualVFXDisabled) ? ImGuiColors.DalamudYellow : null);
         if (ImGui.IsItemHovered())
         {
-            ImGui.BeginTooltip();
+            using (SpheneCustomTheme.ApplyTooltipTheme())
+            {
+                ImGui.BeginTooltip();
 
-            ImGui.TextUnformatted("Syncshell Permissions");
-            ImGuiHelpers.ScaledDummy(2f);
+                ImGui.TextUnformatted("Syncshell Permissions");
+                ImGuiHelpers.ScaledDummy(2f);
 
-            _uiSharedService.BooleanToColoredIcon(!individualSoundsDisabled, inline: false);
-            ImGui.SameLine(40 * ImGuiHelpers.GlobalScale);
-            ImGui.AlignTextToFramePadding();
-            ImGui.TextUnformatted("Sound Sync");
+                _uiSharedService.BooleanToColoredIcon(!individualSoundsDisabled, inline: false);
+                ImGui.SameLine(40 * ImGuiHelpers.GlobalScale);
+                ImGui.AlignTextToFramePadding();
+                ImGui.TextUnformatted("Sound Sync");
 
-            _uiSharedService.BooleanToColoredIcon(!individualAnimDisabled, inline: false);
-            ImGui.SameLine(40 * ImGuiHelpers.GlobalScale);
-            ImGui.AlignTextToFramePadding();
-            ImGui.TextUnformatted("Animation Sync");
+                _uiSharedService.BooleanToColoredIcon(!individualAnimDisabled, inline: false);
+                ImGui.SameLine(40 * ImGuiHelpers.GlobalScale);
+                ImGui.AlignTextToFramePadding();
+                ImGui.TextUnformatted("Animation Sync");
 
-            _uiSharedService.BooleanToColoredIcon(!individualVFXDisabled, inline: false);
-            ImGui.SameLine(40 * ImGuiHelpers.GlobalScale);
-            ImGui.AlignTextToFramePadding();
-            ImGui.TextUnformatted("VFX Sync");
+                _uiSharedService.BooleanToColoredIcon(!individualVFXDisabled, inline: false);
+                ImGui.SameLine(40 * ImGuiHelpers.GlobalScale);
+                ImGui.AlignTextToFramePadding();
+                ImGui.TextUnformatted("VFX Sync");
 
-            ImGui.Separator();
+                ImGui.Separator();
 
-            ImGuiHelpers.ScaledDummy(2f);
-            ImGui.TextUnformatted("Suggested Permissions");
-            ImGuiHelpers.ScaledDummy(2f);
+                ImGuiHelpers.ScaledDummy(2f);
+                ImGui.TextUnformatted("Suggested Permissions");
+                ImGuiHelpers.ScaledDummy(2f);
 
-            _uiSharedService.BooleanToColoredIcon(!_groupFullInfoDto.GroupPermissions.IsPreferDisableSounds(), inline: false);
-            ImGui.SameLine(40 * ImGuiHelpers.GlobalScale);
-            ImGui.AlignTextToFramePadding();
-            ImGui.TextUnformatted("Sound Sync");
+                _uiSharedService.BooleanToColoredIcon(!_groupFullInfoDto.GroupPermissions.IsPreferDisableSounds(), inline: false);
+                ImGui.SameLine(40 * ImGuiHelpers.GlobalScale);
+                ImGui.AlignTextToFramePadding();
+                ImGui.TextUnformatted("Sound Sync");
 
-            _uiSharedService.BooleanToColoredIcon(!_groupFullInfoDto.GroupPermissions.IsPreferDisableAnimations(), inline: false);
-            ImGui.SameLine(40 * ImGuiHelpers.GlobalScale);
-            ImGui.AlignTextToFramePadding();
-            ImGui.TextUnformatted("Animation Sync");
+                _uiSharedService.BooleanToColoredIcon(!_groupFullInfoDto.GroupPermissions.IsPreferDisableAnimations(), inline: false);
+                ImGui.SameLine(40 * ImGuiHelpers.GlobalScale);
+                ImGui.AlignTextToFramePadding();
+                ImGui.TextUnformatted("Animation Sync");
 
-            _uiSharedService.BooleanToColoredIcon(!_groupFullInfoDto.GroupPermissions.IsPreferDisableVFX(), inline: false);
-            ImGui.SameLine(40 * ImGuiHelpers.GlobalScale);
-            ImGui.AlignTextToFramePadding();
-            ImGui.TextUnformatted("VFX Sync");
+                _uiSharedService.BooleanToColoredIcon(!_groupFullInfoDto.GroupPermissions.IsPreferDisableVFX(), inline: false);
+                ImGui.SameLine(40 * ImGuiHelpers.GlobalScale);
+                ImGui.AlignTextToFramePadding();
+                ImGui.TextUnformatted("VFX Sync");
 
-            ImGui.EndTooltip();
+                ImGui.EndTooltip();
+            }
         }
 
         // Return leftmost button position like DrawFolderTag.cs
         return infoIconOffset;
+    }
+
+    private async Task ShowWelcomeMessageOnDemand()
+    {
+        try
+        {
+            // Get the welcome page for this syncshell
+            var welcomePage = await _apiController.GroupGetWelcomePage(new GroupDto(_groupFullInfoDto.Group));
+            
+            if (welcomePage != null && welcomePage.IsEnabled)
+            {
+                // Publish the OpenWelcomePageMessage to show the welcome page
+                _spheneMediator.Publish(new OpenWelcomePageMessage(welcomePage, _groupFullInfoDto));
+            }
+        }
+        catch (Exception ex)
+        {
+            // Log error but don't show to user as this is an optional feature
+            // Could add a subtle notification here if needed
+        }
     }
 }

@@ -2,7 +2,9 @@ using Dalamud.Utility;
 using Sphene.API.Data;
 using Sphene.API.Data.Extensions;
 using Sphene.API.Dto;
+using Sphene.API.Dto.Group;
 using Sphene.API.Dto.User;
+using Sphene.API.Dto.CharaData;
 using Sphene.API.SignalR;
 using Sphene.SpheneConfiguration;
 using Sphene.SpheneConfiguration.Models;
@@ -24,7 +26,7 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
 
 #if DEBUG
     public const string MainServer = "Sphene Debug Server";
-    public const string MainServiceUri = "ws://sphene.dynip.online:6000";
+    public const string MainServiceUri = "ws://test.sphene.online:6000";
 #else
     public const string MainServer = "Sphene Server";
     public const string MainServiceUri = "ws://sphene.online:6000";
@@ -462,6 +464,12 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
         OnGroupSendInfo((dto) => _ = Client_GroupSendInfo(dto));
         OnGroupChangeUserPairPermissions((dto) => _ = Client_GroupChangeUserPairPermissions(dto));
 
+        // Register area-bound syncshell callbacks
+        OnAreaBoundSyncshellBroadcast((dto) => _ = Client_AreaBoundSyncshellBroadcast(dto));
+        OnAreaBoundJoinRequest((dto) => _ = Client_AreaBoundJoinRequest(dto));
+        OnAreaBoundJoinResponse((dto) => _ = Client_AreaBoundJoinResponse(dto));
+        OnAreaBoundSyncshellConfigurationUpdate(() => _ = Client_AreaBoundSyncshellConfigurationUpdate());
+
         OnGposeLobbyJoin((dto) => _ = Client_GposeLobbyJoin(dto));
         OnGposeLobbyLeave((dto) => _ = Client_GposeLobbyLeave(dto));
         OnGposeLobbyPushCharacterData((dto) => _ = Client_GposeLobbyPushCharacterData(dto));
@@ -610,6 +618,69 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
         }
 
         ServerState = state;
+    }
+
+    public void OnAreaBoundSyncshellBroadcast(Action<AreaBoundBroadcastDto> act)
+    {
+        _spheneHub?.On(nameof(Client_AreaBoundSyncshellBroadcast), act);
+    }
+
+    public void OnAreaBoundJoinRequest(Action<AreaBoundJoinRequestDto> act)
+    {
+        _spheneHub?.On(nameof(Client_AreaBoundJoinRequest), act);
+    }
+
+    public void OnAreaBoundJoinResponse(Action<AreaBoundJoinResponseDto> act)
+    {
+        _spheneHub?.On(nameof(Client_AreaBoundJoinResponse), act);
+    }
+
+    public void OnAreaBoundSyncshellConfigurationUpdate(Action act)
+    {
+        _spheneHub?.On(nameof(Client_AreaBoundSyncshellConfigurationUpdate), act);
+    }
+
+    public async Task Client_AreaBoundSyncshellBroadcast(AreaBoundBroadcastDto dto)
+    {
+        await ExecuteSafely(async () =>
+        {
+            Logger.LogDebug("Received area-bound syncshell broadcast for group: {GroupId} ({GroupAlias})", dto.Group.GID, dto.Group.Alias);
+            Logger.LogDebug("Broadcast area: {Area}, Users in area: {UserCount}", dto.Area, dto.UsersInArea.Count);
+            
+            // Create and publish an area-bound syncshell notification message
+            var title = "Area Syncshell Available";
+            var message = $"Area-bound syncshell '{dto.Group.Alias}' is available in this area!";
+            
+            // Get the notification location setting from config
+            var notificationLocation = _SpheneConfigService?.Current?.AreaBoundSyncshellNotification ?? NotificationLocation.Toast;
+            
+            Logger.LogDebug("Creating area-bound notification: {Title} - {Message} (Location: {Location})", title, message, notificationLocation);
+            
+            // Create a custom notification message for area-bound syncshells
+            var notificationMessage = new AreaBoundSyncshellNotificationMessage(title, message, notificationLocation);
+            Mediator.Publish(notificationMessage);
+            
+            Logger.LogDebug("Published area-bound syncshell notification for group: {GroupAlias}", dto.Group.Alias);
+        });
+    }
+
+    public async Task Client_AreaBoundSyncshellConfigurationUpdate()
+    {
+        await ExecuteSafely(async () =>
+        {
+            Logger.LogDebug("Received area-bound syncshell configuration update notification");
+            
+            // Publish a mediator message to notify the AreaBoundSyncshellService
+            Mediator.Publish(new AreaBoundSyncshellConfigurationUpdateMessage());
+            
+            Logger.LogDebug("Published area-bound syncshell configuration update message");
+        });
+    }
+
+    public async Task BroadcastAreaBoundSyncshells(LocationInfo userLocation)
+    {
+        CheckConnection();
+        await _spheneHub!.SendAsync(nameof(BroadcastAreaBoundSyncshells), userLocation).ConfigureAwait(false);
     }
 }
 #pragma warning restore MA0040

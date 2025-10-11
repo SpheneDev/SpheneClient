@@ -1,0 +1,271 @@
+using Dalamud.Bindings.ImGui;
+using Dalamud.Interface.Colors;
+using Dalamud.Interface.Utility;
+using Dalamud.Interface.Utility.Raii;
+using Microsoft.Extensions.Logging;
+using Sphene.API.Dto.Group;
+using Sphene.Services;
+using Sphene.Services.Mediator;
+using System.Numerics;
+
+namespace Sphene.UI;
+
+public class AreaBoundSyncshellSelectionUI : WindowMediatorSubscriberBase
+{
+    private readonly AreaBoundSyncshellService _areaBoundService;
+    private List<AreaBoundSyncshellDto>? _availableSyncshells;
+    private int _selectedIndex = -1;
+    private string _errorMessage = string.Empty;
+
+    public AreaBoundSyncshellSelectionUI(ILogger<AreaBoundSyncshellSelectionUI> logger, 
+        SpheneMediator mediator, 
+        PerformanceCollectorService performanceCollectorService,
+        AreaBoundSyncshellService areaBoundService) 
+        : base(logger, mediator, "Select Area Syncshell###AreaBoundSyncshellSelection", performanceCollectorService)
+    {
+        _areaBoundService = areaBoundService;
+        
+        Size = new Vector2(600, 500);
+        SizeCondition = ImGuiCond.FirstUseEver;
+        Flags = ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoCollapse;
+        
+        Mediator.Subscribe<AreaBoundSyncshellSelectionRequestMessage>(this, OnSelectionRequest);
+    }
+
+    private void OnSelectionRequest(AreaBoundSyncshellSelectionRequestMessage message)
+    {
+        _availableSyncshells = message.AvailableSyncshells;
+        _selectedIndex = -1;
+        _errorMessage = string.Empty;
+        IsOpen = true;
+        _logger.LogDebug("Received selection request for {count} syncshells", message.AvailableSyncshells.Count);
+    }
+
+    protected override void DrawInternal()
+    {
+        if (_availableSyncshells == null || _availableSyncshells.Count == 0) return;
+
+        // Header
+        ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.2f, 0.8f, 1.0f, 1.0f));
+        ImGui.Text($"Multiple Area Syncshells Available ({_availableSyncshells.Count})");
+        ImGui.PopStyleColor();
+        
+        ImGui.Separator();
+        
+        ImGui.TextWrapped("Multiple area-bound syncshells are available in this location. Expand each group to see details and select which one you would like to join:");
+        
+        ImGui.Spacing();
+        
+        // Syncshell list with collapsible groups
+        using var child = ImRaii.Child("SyncshellList", new Vector2(0, 300), true);
+        if (child)
+        {
+            for (int i = 0; i < _availableSyncshells.Count; i++)
+            {
+                var syncshell = _availableSyncshells[i];
+                
+                // Create a collapsible tree node for each syncshell
+                var treeNodeFlags = ImGuiTreeNodeFlags.DefaultOpen | ImGuiTreeNodeFlags.Framed;
+                
+                // Highlight selected syncshell
+                if (_selectedIndex == i)
+                {
+                    ImGui.PushStyleColor(ImGuiCol.Header, new Vector4(0.2f, 0.6f, 1.0f, 0.3f));
+                    ImGui.PushStyleColor(ImGuiCol.HeaderHovered, new Vector4(0.2f, 0.6f, 1.0f, 0.4f));
+                    ImGui.PushStyleColor(ImGuiCol.HeaderActive, new Vector4(0.2f, 0.6f, 1.0f, 0.5f));
+                }
+                
+                bool nodeOpen = ImGui.TreeNodeEx($"##syncshell_tree_{i}", treeNodeFlags, $"{syncshell.Group.AliasOrGID}");
+                
+                if (_selectedIndex == i)
+                {
+                    ImGui.PopStyleColor(3);
+                }
+                
+                // Handle selection when clicking on the tree node
+                if (ImGui.IsItemClicked())
+                {
+                    _selectedIndex = i;
+                }
+                
+                if (nodeOpen)
+                {
+                    ImGui.Indent();
+                    
+                    // Syncshell details
+                    ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.7f, 0.7f, 0.7f, 1.0f));
+                    ImGui.Text($"ID: {syncshell.Group.GID}");
+                    ImGui.PopStyleColor();
+                    
+                    // Rules info
+                    if (syncshell.Settings.RequireRulesAcceptance && !string.IsNullOrEmpty(syncshell.Settings.JoinRules))
+                    {
+                        ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 0.8f, 0.2f, 1.0f));
+                        ImGui.Text("⚠ Requires rules acceptance");
+                        ImGui.PopStyleColor();
+                    }
+                    
+                    // Custom join message
+                    if (!string.IsNullOrEmpty(syncshell.Settings.CustomJoinMessage))
+                    {
+                        ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.8f, 0.8f, 0.8f, 1.0f));
+                        ImGui.TextWrapped(syncshell.Settings.CustomJoinMessage);
+                        ImGui.PopStyleColor();
+                    }
+                    
+                    // Selection button within the expanded node
+                    if (_selectedIndex != i)
+                    {
+                        if (ImGui.Button($"Select##select_{i}"))
+                        {
+                            _selectedIndex = i;
+                        }
+                    }
+                    else
+                    {
+                        ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.2f, 0.8f, 1.0f, 1.0f));
+                        ImGui.Text("✓ Selected");
+                        ImGui.PopStyleColor();
+                    }
+                    
+                    ImGui.Unindent();
+                    ImGui.TreePop();
+                }
+                
+                ImGui.Spacing();
+            }
+        }
+        
+        // Error message
+        if (!string.IsNullOrEmpty(_errorMessage))
+        {
+            ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 0.3f, 0.3f, 1.0f));
+            ImGui.TextWrapped(_errorMessage);
+            ImGui.PopStyleColor();
+        }
+        
+        ImGui.Separator();
+        
+        // Buttons
+        var buttonWidth = (ImGui.GetContentRegionAvail().X - ImGui.GetStyle().ItemSpacing.X * 2) / 3;
+        
+        // Join button
+        bool canJoin = _selectedIndex >= 0 && _selectedIndex < _availableSyncshells.Count;
+        using (ImRaii.Disabled(!canJoin))
+        {
+            if (ImGui.Button("Join Selected", new Vector2(buttonWidth, 0)))
+            {
+                HandleJoin();
+            }
+        }
+        
+        if (!canJoin && ImGui.IsItemHovered())
+        {
+            ImGui.SetTooltip("Please select a syncshell to join");
+        }
+        
+        ImGui.SameLine();
+        
+        // Join All button
+        if (ImGui.Button("Join All", new Vector2(buttonWidth, 0)))
+        {
+            HandleJoinAll();
+        }
+        
+        if (ImGui.IsItemHovered())
+        {
+            ImGui.SetTooltip("Join all available syncshells in this area");
+        }
+        
+        ImGui.SameLine();
+        
+        // Cancel button
+        if (ImGui.Button("Cancel", new Vector2(buttonWidth, 0)))
+        {
+            _logger.LogDebug("User cancelled syncshell selection");
+            _availableSyncshells = null;
+            IsOpen = false;
+        }
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            Mediator.UnsubscribeAll(this);
+        }
+        base.Dispose(disposing);
+    }
+
+    private async void HandleJoin()
+    {
+        if (_selectedIndex < 0 || _selectedIndex >= _availableSyncshells!.Count) return;
+        
+        var selectedSyncshell = _availableSyncshells[_selectedIndex];
+        _logger.LogDebug("User selected syncshell: {syncshellId}", selectedSyncshell.Group.GID);
+        
+        try
+        {
+            // Check if user consent is required
+            bool requiresRulesAcceptance = selectedSyncshell.Settings.RequireRulesAcceptance && 
+                                         !string.IsNullOrEmpty(selectedSyncshell.Settings.JoinRules);
+            
+            if (requiresRulesAcceptance)
+            {
+                // Show consent UI for the selected syncshell
+                var consentMessage = new AreaBoundSyncshellConsentRequestMessage(selectedSyncshell, requiresRulesAcceptance);
+                Mediator.Publish(consentMessage);
+            }
+            else
+            {
+                // Join directly without consent
+                await _areaBoundService.JoinAreaBoundSyncshell(selectedSyncshell.Group.GID, false, 0);
+            }
+            
+            _availableSyncshells = null;
+            IsOpen = false;
+            _errorMessage = string.Empty;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error joining selected area-bound syncshell");
+            _errorMessage = "Failed to join syncshell. Please try again.";
+        }
+    }
+
+    private async void HandleJoinAll()
+    {
+        _logger.LogDebug("User chose to join all {count} syncshells", _availableSyncshells!.Count);
+        
+        try
+        {
+            foreach (var syncshell in _availableSyncshells)
+            {
+                // Check if user consent is required
+                bool requiresRulesAcceptance = syncshell.Settings.RequireRulesAcceptance && 
+                                             !string.IsNullOrEmpty(syncshell.Settings.JoinRules);
+                
+                if (requiresRulesAcceptance)
+                {
+                    // Show consent UI for each syncshell that requires it
+                    var consentMessage = new AreaBoundSyncshellConsentRequestMessage(syncshell, requiresRulesAcceptance);
+                    Mediator.Publish(consentMessage);
+                }
+                else
+                {
+                    // Join directly without consent
+                    await _areaBoundService.JoinAreaBoundSyncshell(syncshell.Group.GID, false, 0);
+                }
+            }
+            
+            _availableSyncshells = null;
+            IsOpen = false;
+            _errorMessage = string.Empty;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error joining all area-bound syncshells");
+            _errorMessage = "Failed to join some syncshells. Please try again.";
+        }
+    }
+}

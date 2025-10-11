@@ -94,6 +94,8 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
             _showModal = true;
             if (ImGui.BeginPopupModal("BC7 Conversion in Progress"))
             {
+                using (SpheneCustomTheme.ApplyContextMenuTheme())
+                {
                 ImGui.TextUnformatted("BC7 Conversion in progress: " + _conversionCurrentFileProgress + "/" + _texturesToConvert.Count);
                 UiSharedService.TextWrapped("Current file: " + _conversionCurrentFileName);
                 if (_uiSharedService.IconTextButton(FontAwesomeIcon.StopCircle, "Cancel conversion"))
@@ -101,6 +103,7 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                     _conversionCancellationTokenSource.Cancel();
                 }
                 UiSharedService.SetScaledWindowSize(500);
+                }
                 ImGui.EndPopup();
             }
             else

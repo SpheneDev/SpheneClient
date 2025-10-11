@@ -1,6 +1,8 @@
 using Sphene.SpheneConfiguration.Models;
 using Sphene.UI;
 using Microsoft.Extensions.Logging;
+using Sphene.API.Data;
+using Sphene.API.Dto.CharaData;
 
 namespace Sphene.SpheneConfiguration.Configurations;
 
@@ -44,6 +46,16 @@ public class SpheneConfig : ISpheneConfiguration
     public bool ShowOnlineNotifications { get; set; } = false;
     public bool ShowOnlineNotificationsOnlyForIndividualPairs { get; set; } = true;
     public bool ShowOnlineNotificationsOnlyForNamedPairs { get; set; } = false;
+    
+    // Area-bound syncshell notification settings
+    public bool ShowAreaBoundSyncshellNotifications { get; set; } = true;
+    public NotificationLocation AreaBoundSyncshellNotification { get; set; } = NotificationLocation.Toast;
+    public bool ShowAreaBoundSyncshellWelcomeMessages { get; set; } = true;
+    
+    // City syncshell settings
+    public bool EnableCitySyncshellJoinRequests { get; set; } = true;
+    public bool HasSeenCitySyncshellExplanation { get; set; } = false;
+    
     public bool ShowTransferBars { get; set; } = true;
     public bool ShowTransferWindow { get; set; } = false;
     public bool ShowUploading { get; set; } = true;
@@ -66,7 +78,6 @@ public class SpheneConfig : ISpheneConfiguration
     
     // Width Lock Settings
     public bool IsWidthLocked { get; set; } = false;
-    public float LockedWidth { get; set; } = 400f;
     
     // Acknowledgment System Settings
     public bool ShowAcknowledgmentPopups { get; set; } = false;
@@ -82,5 +93,13 @@ public class SpheneConfig : ISpheneConfiguration
     public HashSet<string> PrePausedPairs { get; set; } = new();
     public HashSet<string> PrePausedSyncshells { get; set; } = new();
     
+    // Housing Ownership Settings
+    public List<LocationInfo> OwnedHousingProperties { get; set; } = new();
+    public List<VerifiedHousingProperty> VerifiedOwnedHousingProperties { get; set; } = new();
+    
+    // Theme Settings
+    public string SelectedThemeName { get; set; } = "Default Sphene";
+    public string SelectedTheme { get; set; } = "Default Sphene";
+    public bool AutoLoadThemeOnStartup { get; set; } = false;
 
 }

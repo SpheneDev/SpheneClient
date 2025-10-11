@@ -27,13 +27,14 @@ public class DrawEntityFactory
     private readonly TagHandler _tagHandler;
     private readonly IdDisplayHandler _uidDisplayHandler;
     private readonly PairManager _pairManager;
+    private readonly AreaBoundSyncshellService _areaBoundSyncshellService;
 
     public DrawEntityFactory(ILogger<DrawEntityFactory> logger, ApiController apiController, IdDisplayHandler uidDisplayHandler,
         SelectTagForPairUi selectTagForPairUi, SpheneMediator mediator,
         TagHandler tagHandler, SelectPairForTagUi selectPairForTagUi,
         ServerConfigurationManager serverConfigurationManager, UiSharedService uiSharedService,
         PlayerPerformanceConfigService playerPerformanceConfigService, CharaDataManager charaDataManager,
-        PairManager pairManager, SpheneConfigService configService)
+        PairManager pairManager, SpheneConfigService configService, AreaBoundSyncshellService areaBoundSyncshellService)
     {
         _logger = logger;
         _apiController = apiController;
@@ -48,6 +49,7 @@ public class DrawEntityFactory
         _charaDataManager = charaDataManager;
         _pairManager = pairManager;
         _configService = configService;
+        _areaBoundSyncshellService = areaBoundSyncshellService;
     }
 
     public DrawFolderGroup CreateDrawGroupFolder(GroupFullInfoDto groupFullInfoDto,
@@ -56,7 +58,7 @@ public class DrawEntityFactory
     {
         return new DrawFolderGroup(groupFullInfoDto.Group.GID, groupFullInfoDto, _apiController,
             filteredPairs.Select(p => CreateDrawPair(groupFullInfoDto.Group.GID + p.Key.UserData.UID, p.Key, p.Value, groupFullInfoDto)).ToImmutableList(),
-            allPairs, _tagHandler, _uidDisplayHandler, _mediator, _uiSharedService, isSyncshellFolder);
+            allPairs, _tagHandler, _uidDisplayHandler, _mediator, _uiSharedService, _areaBoundSyncshellService, _configService, isSyncshellFolder);
     }
 
     public DrawFolderTag CreateDrawTagFolder(string tag,

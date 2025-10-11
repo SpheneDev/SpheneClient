@@ -17,6 +17,7 @@ using Sphene.Services;
 using Sphene.Services.Mediator;
 using Sphene.Services.ServerConfiguration;
 using Sphene.UI.Styling;
+using Sphene.Configuration;
 using Sphene.Utils;
 using Sphene.WebAPI;
 using Sphene.WebAPI.Files;
@@ -75,6 +76,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         Connectivity,
         PeopleNotes,
         Display,
+        Theme,
         Alerts,
         Performance,
         Transfers,
@@ -158,7 +160,6 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
     protected override void DrawInternal()
     {
-        
         _ = _uiShared.DrawOtherPluginState();
 
         DrawSettingsContent();
@@ -972,11 +973,6 @@ public class SettingsUi : WindowMediatorSubscriberBase
             if (ImGui.Checkbox("Lock Window Width", ref isWidthLocked))
             {
                 _configService.Current.IsWidthLocked = isWidthLocked;
-                if (isWidthLocked)
-                {
-                    // Store current CompactUI window width when locking
-                    _configService.Current.LockedWidth = _currentCompactUiSize.X;
-                }
                 _configService.Save();
             }
             _uiShared.DrawHelpText("When enabled, the window width will be locked and only height can be adjusted.");
@@ -1435,6 +1431,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
             if (ImGui.BeginPopupModal("Delete all your files?", ref _deleteFilesPopupModalShown, UiSharedService.PopupWindowFlags))
             {
+                using (SpheneCustomTheme.ApplyContextMenuTheme())
+                {
                 UiSharedService.TextWrapped(
                     "All your own uploaded files on the service will be deleted.\nThis operation cannot be undone.");
                 ImGui.TextUnformatted("Are you sure you want to continue?");
@@ -1458,6 +1456,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 }
 
                 UiSharedService.SetScaledWindowSize(325);
+                }
                 ImGui.EndPopup();
             }
             ImGui.SameLine();
@@ -1471,6 +1470,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
             if (ImGui.BeginPopupModal("Delete your account?", ref _deleteAccountPopupModalShown, UiSharedService.PopupWindowFlags))
             {
+                using (SpheneCustomTheme.ApplyContextMenuTheme())
+                {
                 UiSharedService.TextWrapped(
                     "Your account and all associated files and data on the service will be deleted.");
                 UiSharedService.TextWrapped("Your UID will be removed from all pairing lists.");
@@ -1496,6 +1497,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 }
 
                 UiSharedService.SetScaledWindowSize(325);
+                }
                 ImGui.EndPopup();
             }
             ImGui.Separator();
@@ -2121,8 +2123,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
         // Split layout: Sidebar navigation + Content pane
         var available = ImGui.GetContentRegionAvail();
         
-        // Calculate optimal sidebar width based on longest button text + 32px padding
-        var buttonLabels = new[] { "Home", "Connectivity", "People & Notes", "Appearance", "Notifications", "Performance", "Transfers", "Storage", "Acknowledgment", "Debug" };
+        // Calculate optimal sidebar width based on longest button text + reduced padding
+        var buttonLabels = new[] { "Home", "Connectivity", "People & Notes", "Appearance", "Theme", "Notifications", "Performance", "Transfers", "Storage", "Acknowledgment", "Debug" };
         var maxTextWidth = 0f;
         foreach (var label in buttonLabels)
         {
@@ -2130,14 +2132,14 @@ public class SettingsUi : WindowMediatorSubscriberBase
             if (textSize.X > maxTextWidth)
                 maxTextWidth = textSize.X;
         }
-        var sidebarWidth = (maxTextWidth + 32f) * ImGuiHelpers.GlobalScale;
+        var sidebarWidth = (maxTextWidth + 16f) * ImGuiHelpers.GlobalScale; // Reduced padding from 32f to 16f
 
         // Sidebar
         ImGui.BeginChild("settings-sidebar", new Vector2(sidebarWidth, available.Y), true);
 
         void SidebarButton(string label, SettingsPage page)
         {
-            var buttonSize = new Vector2(sidebarWidth - 16, 0);
+            var buttonSize = new Vector2(-1, 0); // Use full available width
             var isActive = _activeSettingsPage == page;
             if (isActive) ImGui.PushStyleColor(ImGuiCol.Button, ImGuiColors.ParsedBlue);
             if (ImGui.Button(label, buttonSize))
@@ -2151,6 +2153,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         SidebarButton("Connectivity", SettingsPage.Connectivity);
         SidebarButton("People & Notes", SettingsPage.PeopleNotes);
         SidebarButton("Appearance", SettingsPage.Display);
+        SidebarButton("Theme", SettingsPage.Theme);
         SidebarButton("Notifications", SettingsPage.Alerts);
         SidebarButton("Performance", SettingsPage.Performance);
         SidebarButton("Transfers", SettingsPage.Transfers);
@@ -2178,6 +2181,9 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 break;
             case SettingsPage.Display:
                 DrawGeneralUiDisplaySettings();
+                break;
+            case SettingsPage.Theme:
+                DrawThemeSettings();
                 break;
             case SettingsPage.Alerts:
                 DrawGeneralNotifications();
@@ -2417,10 +2423,6 @@ public class SettingsUi : WindowMediatorSubscriberBase
         if (ImGui.Checkbox("Lock Window Width", ref isWidthLocked))
         {
             currentProfile.IsWidthLocked = isWidthLocked;
-            if (isWidthLocked)
-            {
-                currentProfile.LockedWidth = _currentCompactUiSize.X;
-            }
             _configService.Save();
         }
         var enableRightClickMenu = currentProfile.EnableRightClickMenus;
@@ -2572,6 +2574,49 @@ public class SettingsUi : WindowMediatorSubscriberBase
             currentProfile.ShowOnlineNotificationsOnlyForNamedPairs = onlineNotifsNamedOnly;
             _configService.Save();
         }
+
+        ImGui.Separator();
+        _uiShared.BigText("Area-bound Syncshell Notifications");
+        
+        var areaBoundNotifs = currentProfile.ShowAreaBoundSyncshellNotifications;
+        if (ImGui.Checkbox("Enable area-bound syncshell notifications", ref areaBoundNotifs))
+        {
+            currentProfile.ShowAreaBoundSyncshellNotifications = areaBoundNotifs;
+            _configService.Save();
+        }
+        _uiShared.DrawHelpText("Show notifications when area-bound syncshells become available to join in your current location.");
+
+        if (currentProfile.ShowAreaBoundSyncshellNotifications)
+        {
+            ImGui.Indent();
+            _uiShared.DrawCombo("Area-bound Notification Display##settingsUi", (NotificationLocation[])Enum.GetValues(typeof(NotificationLocation)), (i) => i.ToString(),
+            (i) =>
+            {
+                currentProfile.AreaBoundSyncshellNotification = i;
+                _configService.Save();
+            }, currentProfile.AreaBoundSyncshellNotification);
+            _uiShared.DrawHelpText("Choose where area-bound syncshell notifications should appear. Nowhere, Chat, Toast, or Both.");
+            ImGui.Unindent();
+        }
+        
+        var showWelcomeMessages = currentProfile.ShowAreaBoundSyncshellWelcomeMessages;
+        if (ImGui.Checkbox("Show area-bound syncshell welcome messages", ref showWelcomeMessages))
+        {
+            currentProfile.ShowAreaBoundSyncshellWelcomeMessages = showWelcomeMessages;
+            _configService.Save();
+        }
+        _uiShared.DrawHelpText("Automatically show welcome messages when joining area-bound syncshells. When disabled, you can still view welcome messages by clicking the area-bound indicator next to the syncshell name.");
+        
+        ImGui.Separator();
+        _uiShared.BigText("City Syncshell Settings");
+        
+        var enableCitySyncshellRequests = currentProfile.EnableCitySyncshellJoinRequests;
+        if (ImGui.Checkbox("Enable city syncshell join requests", ref enableCitySyncshellRequests))
+        {
+            currentProfile.EnableCitySyncshellJoinRequests = enableCitySyncshellRequests;
+            _configService.Save();
+        }
+        _uiShared.DrawHelpText("Allow receiving join requests for city syncshells when entering major cities. When disabled, you will not be prompted to join city syncshells.");
     }
 
     private void DrawAcknowledgmentSettings()
@@ -2686,5 +2731,1944 @@ public class SettingsUi : WindowMediatorSubscriberBase
     {
         _wasOpen = IsOpen;
         IsOpen = false;
+    }
+
+    private void DrawThemeSettings()
+    {
+        _uiShared.BigText("Theme Customization");
+        UiSharedService.ColorTextWrapped("Customize the appearance of the Sphene UI with real-time preview. Changes are applied immediately.", ImGuiColors.DalamudGrey);
+        
+        ImGui.Separator();
+        
+        // Theme Selector
+        DrawThemeSelector();
+        
+        ImGui.Separator();
+        
+        if (ImGui.BeginTabBar("ThemeTabBar"))
+        {
+            if (ImGui.BeginTabItem("General Theme"))
+            {
+                DrawGeneralThemeSettings();
+                ImGui.EndTabItem();
+            }
+            
+            if (ImGui.BeginTabItem("Panel Theme"))
+            {
+                DrawCompactUIThemeSettings();
+                ImGui.EndTabItem();
+            }
+            
+            ImGui.EndTabBar();
+        }
+    }
+
+    private void DrawGeneralThemeSettings()
+    {
+        var theme = SpheneCustomTheme.CurrentTheme;
+        bool themeChanged = false;
+        
+        ImGui.Text("General Window Radius Settings");
+        ImGui.Separator();
+        
+        // Rounding Settings
+        var windowRounding = theme.WindowRounding;
+        if (ImGui.SliderFloat("Window Rounding", ref windowRounding, 0.0f, 20.0f, "%.1f"))
+        {
+            theme.WindowRounding = windowRounding;
+            themeChanged = true;
+        }
+        
+        var childRounding = theme.ChildRounding;
+        if (ImGui.SliderFloat("Child Rounding", ref childRounding, 0.0f, 20.0f, "%.1f"))
+        {
+            theme.ChildRounding = childRounding;
+            themeChanged = true;
+        }
+        
+        var popupRounding = theme.PopupRounding;
+        if (ImGui.SliderFloat("Popup Rounding", ref popupRounding, 0.0f, 20.0f, "%.1f"))
+        {
+            theme.PopupRounding = popupRounding;
+            themeChanged = true;
+        }
+        
+        var frameRounding = theme.FrameRounding;
+        if (ImGui.SliderFloat("Frame Rounding", ref frameRounding, 0.0f, 20.0f, "%.1f"))
+        {
+            theme.FrameRounding = frameRounding;
+            themeChanged = true;
+        }
+        
+        var scrollbarRounding = theme.ScrollbarRounding;
+        if (ImGui.SliderFloat("Scrollbar Rounding", ref scrollbarRounding, 0.0f, 20.0f, "%.1f"))
+        {
+            theme.ScrollbarRounding = scrollbarRounding;
+            themeChanged = true;
+        }
+        
+        var grabRounding = theme.GrabRounding;
+        if (ImGui.SliderFloat("Grab Rounding", ref grabRounding, 0.0f, 20.0f, "%.1f"))
+        {
+            theme.GrabRounding = grabRounding;
+            themeChanged = true;
+        }
+        
+        var tabRounding = theme.TabRounding;
+        if (ImGui.SliderFloat("Tab Rounding", ref tabRounding, 0.0f, 20.0f, "%.1f"))
+        {
+            theme.TabRounding = tabRounding;
+            themeChanged = true;
+        }
+        
+        ImGui.Separator();
+        ImGui.Text("Border Settings");
+        
+        var windowBorderSize = theme.WindowBorderSize;
+        if (ImGui.SliderFloat("Window Border", ref windowBorderSize, 0.0f, 5.0f, "%.1f"))
+        {
+            theme.WindowBorderSize = windowBorderSize;
+            themeChanged = true;
+        }
+        
+        var childBorderSize = theme.ChildBorderSize;
+        if (ImGui.SliderFloat("Child Border", ref childBorderSize, 0.0f, 5.0f, "%.1f"))
+        {
+            theme.ChildBorderSize = childBorderSize;
+            themeChanged = true;
+        }
+        
+        var popupBorderSize = theme.PopupBorderSize;
+        if (ImGui.SliderFloat("Popup Border", ref popupBorderSize, 0.0f, 5.0f, "%.1f"))
+        {
+            theme.PopupBorderSize = popupBorderSize;
+            themeChanged = true;
+        }
+        
+        var frameBorderSize = theme.FrameBorderSize;
+        if (ImGui.SliderFloat("Frame Border", ref frameBorderSize, 0.0f, 5.0f, "%.1f"))
+        {
+            theme.FrameBorderSize = frameBorderSize;
+            themeChanged = true;
+        }
+        
+        ImGui.Separator();
+        ImGui.Text("Spacing & Padding Settings");
+        
+        var windowPadding = theme.WindowPadding;
+        if (ImGui.SliderFloat2("Window Padding", ref windowPadding, 0.0f, 50.0f, "%.1f"))
+        {
+            theme.WindowPadding = windowPadding;
+            themeChanged = true;
+        }
+        
+        var framePadding = theme.FramePadding;
+        if (ImGui.SliderFloat2("Frame Padding", ref framePadding, 0.0f, 20.0f, "%.1f"))
+        {
+            theme.FramePadding = framePadding;
+            themeChanged = true;
+        }
+        
+        var itemSpacing = theme.ItemSpacing;
+        if (ImGui.SliderFloat2("Item Spacing", ref itemSpacing, 0.0f, 20.0f, "%.1f"))
+        {
+            theme.ItemSpacing = itemSpacing;
+            themeChanged = true;
+        }
+        
+        var itemInnerSpacing = theme.ItemInnerSpacing;
+        if (ImGui.SliderFloat2("Item Inner Spacing", ref itemInnerSpacing, 0.0f, 20.0f, "%.1f"))
+        {
+            theme.ItemInnerSpacing = itemInnerSpacing;
+            themeChanged = true;
+        }
+        
+        var indentSpacing = theme.IndentSpacing;
+        if (ImGui.SliderFloat("Indent Spacing", ref indentSpacing, 0.0f, 50.0f, "%.1f"))
+        {
+            theme.IndentSpacing = indentSpacing;
+            themeChanged = true;
+        }
+        
+        var scrollbarSize = theme.ScrollbarSize;
+        if (ImGui.SliderFloat("Scrollbar Size", ref scrollbarSize, 5.0f, 30.0f, "%.1f"))
+        {
+            theme.ScrollbarSize = scrollbarSize;
+            themeChanged = true;
+        }
+        
+        var grabMinSize = theme.GrabMinSize;
+        if (ImGui.SliderFloat("Grab Min Size", ref grabMinSize, 5.0f, 30.0f, "%.1f"))
+        {
+            theme.GrabMinSize = grabMinSize;
+            themeChanged = true;
+        }
+        
+        // Apply changes in real-time
+        if (themeChanged)
+        {
+            theme.NotifyThemeChanged();
+        }
+        
+        ImGui.Separator();
+        ImGui.Text("General Theme Colors");
+        ImGui.Separator();
+        
+        if (ImGui.BeginTabBar("GeneralColorTabBar"))
+        {
+            if (ImGui.BeginTabItem("Basic Colors"))
+            {
+                DrawBasicColors(theme, ref themeChanged);
+                ImGui.EndTabItem();
+            }
+            
+            if (ImGui.BeginTabItem("Window Colors"))
+            {
+                DrawWindowColors(theme, ref themeChanged);
+                ImGui.EndTabItem();
+            }
+            
+            if (ImGui.BeginTabItem("Frame & Input Colors"))
+            {
+                DrawFrameInputColors(theme, ref themeChanged);
+                ImGui.EndTabItem();
+            }
+            
+            if (ImGui.BeginTabItem("Button & Header Colors"))
+            {
+                DrawButtonHeaderColors(theme, ref themeChanged);
+                ImGui.EndTabItem();
+            }
+            
+            if (ImGui.BeginTabItem("Menu & Navigation Colors"))
+            {
+                DrawMenuNavigationColors(theme, ref themeChanged);
+                ImGui.EndTabItem();
+            }
+            
+            if (ImGui.BeginTabItem("Scrollbar & Slider Colors"))
+            {
+                DrawScrollbarSliderColors(theme, ref themeChanged);
+                ImGui.EndTabItem();
+            }
+            
+            if (ImGui.BeginTabItem("Table & Tab Colors"))
+            {
+                DrawTableTabColors(theme, ref themeChanged);
+                ImGui.EndTabItem();
+            }
+            
+            ImGui.EndTabBar();
+        }
+        
+        // Apply changes in real-time
+        if (themeChanged)
+        {
+            theme.NotifyThemeChanged();
+        }
+    }
+
+    private void DrawCompactUIThemeSettings()
+    {
+        var theme = SpheneCustomTheme.CurrentTheme;
+        bool themeChanged = false;
+        
+        ImGui.Text("Panel Specific Settings");
+        ImGui.Separator();
+        
+        UiSharedService.ColorTextWrapped("These settings apply only to the Panel window to maintain its distinct appearance.", ImGuiColors.DalamudGrey);
+        ImGui.Spacing();
+        
+        // Panel Header Settings
+        ImGui.Text("Panel Header Options");
+        ImGui.Separator();
+        
+        var compactShowImGuiHeader = theme.CompactShowImGuiHeader;
+        if (ImGui.Checkbox("Show ImGui Header", ref compactShowImGuiHeader))
+        {
+            theme.CompactShowImGuiHeader = compactShowImGuiHeader;
+            themeChanged = true;
+        }
+        UiSharedService.ColorTextWrapped("Enable to show the standard ImGui window header with collapse functionality. Disable to use the custom Sphene header.", ImGuiColors.DalamudGrey);
+        
+        ImGui.Spacing();
+        ImGui.Text("Panel Rounding Settings");
+        ImGui.Separator();
+        var compactWindowRounding = theme.CompactWindowRounding;
+        if (ImGui.SliderFloat("Panel Window Rounding", ref compactWindowRounding, 0.0f, 30.0f, "%.1f"))
+        {
+            theme.CompactWindowRounding = compactWindowRounding;
+            themeChanged = true;
+        }
+        
+        var compactChildRounding = theme.CompactChildRounding;
+        if (ImGui.SliderFloat("Panel Child Rounding", ref compactChildRounding, 0.0f, 30.0f, "%.1f"))
+        {
+            theme.CompactChildRounding = compactChildRounding;
+            themeChanged = true;
+        }
+        
+        var compactPopupRounding = theme.CompactPopupRounding;
+        if (ImGui.SliderFloat("Panel Popup Rounding", ref compactPopupRounding, 0.0f, 30.0f, "%.1f"))
+        {
+            theme.CompactPopupRounding = compactPopupRounding;
+            themeChanged = true;
+        }
+        
+        var compactFrameRounding = theme.CompactFrameRounding;
+        if (ImGui.SliderFloat("Panel Frame Rounding", ref compactFrameRounding, 0.0f, 30.0f, "%.1f"))
+        {
+            theme.CompactFrameRounding = compactFrameRounding;
+            themeChanged = true;
+        }
+        
+        var compactScrollbarRounding = theme.CompactScrollbarRounding;
+        if (ImGui.SliderFloat("Panel Scrollbar Rounding", ref compactScrollbarRounding, 0.0f, 30.0f, "%.1f"))
+        {
+            theme.CompactScrollbarRounding = compactScrollbarRounding;
+            themeChanged = true;
+        }
+        
+        var compactGrabRounding = theme.CompactGrabRounding;
+        if (ImGui.SliderFloat("Panel Grab Rounding", ref compactGrabRounding, 0.0f, 30.0f, "%.1f"))
+        {
+            theme.CompactGrabRounding = compactGrabRounding;
+            themeChanged = true;
+        }
+        
+        var compactTabRounding = theme.CompactTabRounding;
+        if (ImGui.SliderFloat("Panel Tab Rounding", ref compactTabRounding, 0.0f, 30.0f, "%.1f"))
+        {
+            theme.CompactTabRounding = compactTabRounding;
+            themeChanged = true;
+        }
+        
+        var compactHeaderRounding = theme.CompactHeaderRounding;
+        if (ImGui.SliderFloat("Panel Header Rounding", ref compactHeaderRounding, 0.0f, 30.0f, "%.1f"))
+        {
+            theme.CompactHeaderRounding = compactHeaderRounding;
+            themeChanged = true;
+        }
+        
+        ImGui.Spacing();
+        ImGui.Text("Panel Spacing & Sizing");
+        ImGui.Separator();
+        
+        // Panel Spacing Settings
+        var compactWindowPadding = theme.CompactWindowPadding;
+        if (ImGui.SliderFloat2("Panel Window Padding", ref compactWindowPadding, 0.0f, 20.0f, "%.1f"))
+        {
+            theme.CompactWindowPadding = compactWindowPadding;
+            themeChanged = true;
+        }
+        
+        var compactFramePadding = theme.CompactFramePadding;
+        if (ImGui.SliderFloat2("Panel Frame Padding", ref compactFramePadding, 0.0f, 20.0f, "%.1f"))
+        {
+            theme.CompactFramePadding = compactFramePadding;
+            themeChanged = true;
+        }
+        
+        var compactItemSpacing = theme.CompactItemSpacing;
+        if (ImGui.SliderFloat2("Panel Item Spacing", ref compactItemSpacing, 0.0f, 20.0f, "%.1f"))
+        {
+            theme.CompactItemSpacing = compactItemSpacing;
+            themeChanged = true;
+        }
+        
+        var compactItemInnerSpacing = theme.CompactItemInnerSpacing;
+        if (ImGui.SliderFloat2("Panel Item Inner Spacing", ref compactItemInnerSpacing, 0.0f, 20.0f, "%.1f"))
+        {
+            theme.CompactItemInnerSpacing = compactItemInnerSpacing;
+            themeChanged = true;
+        }
+        
+        var compactCellPadding = theme.CompactCellPadding;
+        if (ImGui.SliderFloat2("Panel Cell Padding", ref compactCellPadding, 0.0f, 20.0f, "%.1f"))
+        {
+            theme.CompactCellPadding = compactCellPadding;
+            themeChanged = true;
+        }
+        
+        var compactChildPadding = theme.CompactChildPadding;
+        if (ImGui.SliderFloat2("Panel Child Padding", ref compactChildPadding, 0.0f, 20.0f, "%.1f"))
+        {
+            theme.CompactChildPadding = compactChildPadding;
+            themeChanged = true;
+        }
+        UiSharedService.ColorTextWrapped("Controls padding inside child windows to prevent content squashing when borders are enabled.", ImGuiColors.DalamudGrey);
+        
+        var compactIndentSpacing = theme.CompactIndentSpacing;
+        if (ImGui.SliderFloat("Panel Indent Spacing", ref compactIndentSpacing, 0.0f, 50.0f, "%.1f"))
+        {
+            theme.CompactIndentSpacing = compactIndentSpacing;
+            themeChanged = true;
+        }
+        
+        var compactScrollbarSize = theme.CompactScrollbarSize;
+        if (ImGui.SliderFloat("Panel Scrollbar Size", ref compactScrollbarSize, 1.0f, 30.0f, "%.1f"))
+        {
+            theme.CompactScrollbarSize = compactScrollbarSize;
+            themeChanged = true;
+        }
+        
+        var compactGrabMinSize = theme.CompactGrabMinSize;
+        if (ImGui.SliderFloat("Panel Grab Min Size", ref compactGrabMinSize, 1.0f, 30.0f, "%.1f"))
+        {
+            theme.CompactGrabMinSize = compactGrabMinSize;
+            themeChanged = true;
+        }
+        
+        ImGui.Spacing();
+        ImGui.Text("Panel Text Alignment");
+        ImGui.Separator();
+        
+        var compactButtonTextAlign = theme.CompactButtonTextAlign;
+        if (ImGui.SliderFloat2("Panel Button Text Align", ref compactButtonTextAlign, 0.0f, 1.0f, "%.2f"))
+        {
+            theme.CompactButtonTextAlign = compactButtonTextAlign;
+            themeChanged = true;
+        }
+        
+        var compactSelectableTextAlign = theme.CompactSelectableTextAlign;
+        if (ImGui.SliderFloat2("Panel Selectable Text Align", ref compactSelectableTextAlign, 0.0f, 1.0f, "%.2f"))
+        {
+            theme.CompactSelectableTextAlign = compactSelectableTextAlign;
+            themeChanged = true;
+        }
+        
+        ImGui.Spacing();
+        ImGui.Text("Panel Border Thickness");
+        ImGui.Separator();
+        
+        var compactWindowBorderSize = theme.CompactWindowBorderSize;
+        if (ImGui.SliderFloat("Panel Window Border Size", ref compactWindowBorderSize, 0.0f, 5.0f, "%.1f"))
+        {
+            theme.CompactWindowBorderSize = compactWindowBorderSize;
+            themeChanged = true;
+        }
+        
+        var compactChildBorderSize = theme.CompactChildBorderSize;
+        if (ImGui.SliderFloat("Panel Child Border Size", ref compactChildBorderSize, 0.0f, 5.0f, "%.1f"))
+        {
+            theme.CompactChildBorderSize = compactChildBorderSize;
+            themeChanged = true;
+        }
+        
+        var compactPopupBorderSize = theme.CompactPopupBorderSize;
+        if (ImGui.SliderFloat("Panel Popup Border Size", ref compactPopupBorderSize, 0.0f, 5.0f, "%.1f"))
+        {
+            theme.CompactPopupBorderSize = compactPopupBorderSize;
+            themeChanged = true;
+        }
+        
+        var compactFrameBorderSize = theme.CompactFrameBorderSize;
+        if (ImGui.SliderFloat("Panel Frame Border Size", ref compactFrameBorderSize, 0.0f, 5.0f, "%.1f"))
+        {
+            theme.CompactFrameBorderSize = compactFrameBorderSize;
+            themeChanged = true;
+        }
+        
+        var compactTooltipRounding = theme.CompactTooltipRounding;
+        if (ImGui.SliderFloat("Panel Tooltip Rounding", ref compactTooltipRounding, 0.0f, 30.0f, "%.1f"))
+        {
+            theme.CompactTooltipRounding = compactTooltipRounding;
+            themeChanged = true;
+        }
+        
+        var compactTooltipBorderSize = theme.CompactTooltipBorderSize;
+        if (ImGui.SliderFloat("Panel Tooltip Border Size", ref compactTooltipBorderSize, 0.0f, 5.0f, "%.1f"))
+        {
+            theme.CompactTooltipBorderSize = compactTooltipBorderSize;
+            themeChanged = true;
+        }
+        
+        var compactContextMenuRounding = theme.CompactContextMenuRounding;
+        if (ImGui.SliderFloat("Panel Context Menu Rounding", ref compactContextMenuRounding, 0.0f, 30.0f, "%.1f"))
+        {
+            theme.CompactContextMenuRounding = compactContextMenuRounding;
+            themeChanged = true;
+        }
+        
+        var compactContextMenuBorderSize = theme.CompactContextMenuBorderSize;
+        if (ImGui.SliderFloat("Panel Context Menu Border Size", ref compactContextMenuBorderSize, 0.0f, 5.0f, "%.1f"))
+        {
+            theme.CompactContextMenuBorderSize = compactContextMenuBorderSize;
+            themeChanged = true;
+        }
+        
+        ImGui.Spacing();
+        ImGui.Text("Panel Status Colors");
+        ImGui.Separator();
+        
+        var compactUidColor = theme.CompactUidColor;
+        if (ImGui.ColorEdit4("Panel UID Color", ref compactUidColor))
+        {
+            theme.CompactUidColor = compactUidColor;
+            themeChanged = true;
+        }
+        
+        var compactServerStatusConnected = theme.CompactServerStatusConnected;
+        if (ImGui.ColorEdit4("Panel Server Status Connected", ref compactServerStatusConnected))
+        {
+            theme.CompactServerStatusConnected = compactServerStatusConnected;
+            themeChanged = true;
+        }
+        
+        var compactServerStatusWarning = theme.CompactServerStatusWarning;
+        if (ImGui.ColorEdit4("Panel Server Status Warning", ref compactServerStatusWarning))
+        {
+            theme.CompactServerStatusWarning = compactServerStatusWarning;
+            themeChanged = true;
+        }
+        
+        var compactServerStatusError = theme.CompactServerStatusError;
+        if (ImGui.ColorEdit4("Panel Server Status Error", ref compactServerStatusError))
+        {
+            theme.CompactServerStatusError = compactServerStatusError;
+            themeChanged = true;
+        }
+        
+        ImGui.Spacing();
+        
+        // Apply changes in real-time
+        if (themeChanged)
+        {
+            theme.NotifyThemeChanged();
+        }
+        
+        ImGui.Separator();
+        ImGui.Text("Panel Theme Colors");
+        ImGui.Separator();
+        
+        if (ImGui.BeginTabBar("PanelColorTabBar"))
+        {
+            if (ImGui.BeginTabItem("Panel Colors"))
+            {
+                DrawCompactUIColors(theme, ref themeChanged);
+                ImGui.EndTabItem();
+            }
+            
+            ImGui.EndTabBar();
+        }
+        
+        // Apply changes in real-time
+        if (themeChanged)
+        {
+            theme.NotifyThemeChanged();
+        }
+    }
+
+    private void DrawColorSettings()
+    {
+        var theme = SpheneCustomTheme.CurrentTheme;
+        bool themeChanged = false;
+        
+        ImGui.Text("Color Customization");
+        ImGui.Separator();
+        
+        if (ImGui.BeginTabBar("ColorTabBar"))
+        {
+            if (ImGui.BeginTabItem("Basic Colors"))
+            {
+                DrawBasicColors(theme, ref themeChanged);
+                ImGui.EndTabItem();
+            }
+            
+            if (ImGui.BeginTabItem("Window Colors"))
+            {
+                DrawWindowColors(theme, ref themeChanged);
+                ImGui.EndTabItem();
+            }
+            
+            if (ImGui.BeginTabItem("Frame & Input Colors"))
+            {
+                DrawFrameInputColors(theme, ref themeChanged);
+                ImGui.EndTabItem();
+            }
+            
+            if (ImGui.BeginTabItem("Button & Header Colors"))
+            {
+                DrawButtonHeaderColors(theme, ref themeChanged);
+                ImGui.EndTabItem();
+            }
+            
+            if (ImGui.BeginTabItem("Menu & Navigation Colors"))
+            {
+                DrawMenuNavigationColors(theme, ref themeChanged);
+                ImGui.EndTabItem();
+            }
+            
+            if (ImGui.BeginTabItem("Scrollbar & Slider Colors"))
+            {
+                DrawScrollbarSliderColors(theme, ref themeChanged);
+                ImGui.EndTabItem();
+            }
+            
+            if (ImGui.BeginTabItem("Table & Tab Colors"))
+            {
+                DrawTableTabColors(theme, ref themeChanged);
+                ImGui.EndTabItem();
+            }
+            
+            if (ImGui.BeginTabItem("Panel Colors"))
+            {
+                DrawCompactUIColors(theme, ref themeChanged);
+                ImGui.EndTabItem();
+            }
+            
+            ImGui.EndTabBar();
+        }
+        
+        // Apply changes in real-time
+        if (themeChanged)
+        {
+            theme.NotifyThemeChanged();
+        }
+    }
+    
+    private void DrawBasicColors(ThemeConfiguration theme, ref bool themeChanged)
+    {
+        UiSharedService.ColorTextWrapped("Basic colors form the foundation of your theme. These colors are used throughout the interface for primary elements.", ImGuiColors.DalamudGrey);
+        ImGui.Spacing();
+        
+        // Primary Colors
+        ImGui.Text("Primary Colors");
+        ImGui.Separator();
+        
+        var primaryDark = theme.PrimaryDark;
+        if (ImGui.ColorEdit4("Primary Dark", ref primaryDark))
+        {
+            theme.PrimaryDark = primaryDark;
+            themeChanged = true;
+        }
+        _uiShared.DrawHelpText("Main dark color used for backgrounds and primary interface elements.");
+        
+        var secondaryDark = theme.SecondaryDark;
+        if (ImGui.ColorEdit4("Secondary Dark", ref secondaryDark))
+        {
+            theme.SecondaryDark = secondaryDark;
+            themeChanged = true;
+        }
+        _uiShared.DrawHelpText("Secondary dark color used for contrast and supporting interface elements.");
+        
+        ImGui.Spacing();
+        
+        // Accent Colors
+        ImGui.Text("Accent Colors");
+        ImGui.Separator();
+        
+        var accentBlue = theme.AccentBlue;
+        if (ImGui.ColorEdit4("Accent Blue", ref accentBlue))
+        {
+            theme.AccentBlue = accentBlue;
+            themeChanged = true;
+        }
+        _uiShared.DrawHelpText("Blue accent color used for highlights, links, and important interactive elements.");
+        
+        var accentCyan = theme.AccentCyan;
+        if (ImGui.ColorEdit4("Accent Cyan", ref accentCyan))
+        {
+            theme.AccentCyan = accentCyan;
+            themeChanged = true;
+        }
+        _uiShared.DrawHelpText("Cyan accent color used for secondary highlights and status indicators.");
+        
+        ImGui.Spacing();
+        
+        // Text Colors
+        ImGui.Text("Text Colors");
+        ImGui.Separator();
+        
+        var textPrimary = theme.TextPrimary;
+        if (ImGui.ColorEdit4("Text Primary", ref textPrimary))
+        {
+            theme.TextPrimary = textPrimary;
+            themeChanged = true;
+        }
+        _uiShared.DrawHelpText("Primary text color used for most readable text throughout the interface.");
+        
+        var textSecondary = theme.TextSecondary;
+        if (ImGui.ColorEdit4("Text Secondary", ref textSecondary))
+        {
+            theme.TextSecondary = textSecondary;
+            themeChanged = true;
+        }
+        _uiShared.DrawHelpText("Secondary text color used for less important text and descriptions.");
+        
+        var textDisabled = theme.TextDisabled;
+        if (ImGui.ColorEdit4("Text Disabled", ref textDisabled))
+        {
+            theme.TextDisabled = textDisabled;
+            themeChanged = true;
+        }
+        _uiShared.DrawHelpText("Text color for disabled or inactive elements that cannot be interacted with.");
+        
+        var textSelectedBg = theme.TextSelectedBg;
+        if (ImGui.ColorEdit4("Text Selected Background", ref textSelectedBg))
+        {
+            theme.TextSelectedBg = textSelectedBg;
+            themeChanged = true;
+        }
+        _uiShared.DrawHelpText("Background color for selected text and highlighted text areas.");
+        
+        ImGui.Spacing();
+        
+        // Interactive Colors
+        ImGui.Text("Interactive Colors");
+        ImGui.Separator();
+        
+        var border = theme.Border;
+        if (ImGui.ColorEdit4("Border", ref border))
+        {
+            theme.Border = border;
+            themeChanged = true;
+        }
+        _uiShared.DrawHelpText("Color used for borders around windows, frames, and input fields.");
+        
+        var hover = theme.Hover;
+        if (ImGui.ColorEdit4("Hover", ref hover))
+        {
+            theme.Hover = hover;
+            themeChanged = true;
+        }
+        _uiShared.DrawHelpText("Color used when hovering over interactive elements like buttons and menu items.");
+        
+        var active = theme.Active;
+        if (ImGui.ColorEdit4("Active", ref active))
+        {
+            theme.Active = active;
+            themeChanged = true;
+        }
+        _uiShared.DrawHelpText("Color used when actively clicking or pressing interactive elements.");
+    }
+    
+    private void DrawWindowColors(ThemeConfiguration theme, ref bool themeChanged)
+    {
+        UiSharedService.ColorTextWrapped("Window colors control the appearance of different window types and their backgrounds.", ImGuiColors.DalamudGrey);
+        ImGui.Spacing();
+        
+        ImGui.Text("Window Colors");
+        ImGui.Separator();
+        
+        var windowBg = theme.WindowBg;
+        if (ImGui.ColorEdit4("Window Background", ref windowBg))
+        {
+            theme.WindowBg = windowBg;
+            themeChanged = true;
+        }
+        _uiShared.DrawHelpText("Main background color for all windows and dialogs.");
+        
+        var childBg = theme.ChildBg;
+        if (ImGui.ColorEdit4("Child Background", ref childBg))
+        {
+            theme.ChildBg = childBg;
+            themeChanged = true;
+        }
+        _uiShared.DrawHelpText("Background color for child windows and nested content areas.");
+        
+        var popupBg = theme.PopupBg;
+        if (ImGui.ColorEdit4("Popup Background", ref popupBg))
+        {
+            theme.PopupBg = popupBg;
+            themeChanged = true;
+        }
+        _uiShared.DrawHelpText("Background color for popup windows, tooltips, and context menus.");
+        
+        ImGui.Spacing();
+        ImGui.Text("Title Bar Colors");
+        ImGui.Separator();
+        
+        var titleBg = theme.TitleBg;
+        if (ImGui.ColorEdit4("Title Background", ref titleBg))
+        {
+            theme.TitleBg = titleBg;
+            themeChanged = true;
+        }
+        _uiShared.DrawHelpText("Background color for inactive window title bars.");
+        
+        var titleBgActive = theme.TitleBgActive;
+        if (ImGui.ColorEdit4("Title Background Active", ref titleBgActive))
+        {
+            theme.TitleBgActive = titleBgActive;
+            themeChanged = true;
+        }
+        _uiShared.DrawHelpText("Background color for active (focused) window title bars.");
+        
+        var titleBgCollapsed = theme.TitleBgCollapsed;
+        if (ImGui.ColorEdit4("Title Background Collapsed", ref titleBgCollapsed))
+        {
+            theme.TitleBgCollapsed = titleBgCollapsed;
+            themeChanged = true;
+        }
+        _uiShared.DrawHelpText("Background color for collapsed window title bars.");
+        
+        ImGui.Spacing();
+        ImGui.Text("Modal & Overlay Colors");
+        ImGui.Separator();
+        
+        var modalWindowDimBg = theme.ModalWindowDimBg;
+        if (ImGui.ColorEdit4("Modal Window Dim Background", ref modalWindowDimBg))
+        {
+            theme.ModalWindowDimBg = modalWindowDimBg;
+            themeChanged = true;
+        }
+        _uiShared.DrawHelpText("Dimming overlay color behind modal dialogs and popups.");
+    }
+    
+    private void DrawFrameInputColors(ThemeConfiguration theme, ref bool themeChanged)
+    {
+        UiSharedService.ColorTextWrapped("Frame and input colors control the appearance of input fields, checkboxes, and interactive elements.", ImGuiColors.DalamudGrey);
+        ImGui.Spacing();
+        
+        ImGui.Text("Frame & Input Colors");
+        ImGui.Separator();
+        
+        var frameBg = theme.FrameBg;
+        if (ImGui.ColorEdit4("Frame Background", ref frameBg))
+        {
+            theme.FrameBg = frameBg;
+            themeChanged = true;
+        }
+        _uiShared.DrawHelpText("Background color for input fields, sliders, and other frame elements.");
+        
+        var frameBgHovered = theme.FrameBgHovered;
+        if (ImGui.ColorEdit4("Frame Background Hovered", ref frameBgHovered))
+        {
+            theme.FrameBgHovered = frameBgHovered;
+            themeChanged = true;
+        }
+        _uiShared.DrawHelpText("Background color for frame elements when hovered over.");
+        
+        var frameBgActive = theme.FrameBgActive;
+        if (ImGui.ColorEdit4("Frame Background Active", ref frameBgActive))
+        {
+            theme.FrameBgActive = frameBgActive;
+            themeChanged = true;
+        }
+        _uiShared.DrawHelpText("Background color for frame elements when actively being used.");
+        
+        ImGui.Spacing();
+        ImGui.Text("Interactive Elements");
+        ImGui.Separator();
+        
+        var checkMark = theme.CheckMark;
+        if (ImGui.ColorEdit4("Check Mark", ref checkMark))
+        {
+            theme.CheckMark = checkMark;
+            themeChanged = true;
+        }
+        _uiShared.DrawHelpText("Color for checkmarks in checkboxes and radio buttons.");
+        
+        ImGui.Spacing();
+        ImGui.Text("Window Controls");
+        ImGui.Separator();
+        
+        var resizeGrip = theme.ResizeGrip;
+        if (ImGui.ColorEdit4("Resize Grip", ref resizeGrip))
+        {
+            theme.ResizeGrip = resizeGrip;
+            themeChanged = true;
+        }
+        _uiShared.DrawHelpText("Color for the resize grip in the bottom-right corner of windows.");
+        
+        var resizeGripHovered = theme.ResizeGripHovered;
+        if (ImGui.ColorEdit4("Resize Grip Hovered", ref resizeGripHovered))
+        {
+            theme.ResizeGripHovered = resizeGripHovered;
+            themeChanged = true;
+        }
+        _uiShared.DrawHelpText("Color for the resize grip when hovered over.");
+        
+        var resizeGripActive = theme.ResizeGripActive;
+        if (ImGui.ColorEdit4("Resize Grip Active", ref resizeGripActive))
+        {
+            theme.ResizeGripActive = resizeGripActive;
+            themeChanged = true;
+        }
+        _uiShared.DrawHelpText("Color for the resize grip when actively being dragged.");
+    }
+    
+    private void DrawButtonHeaderColors(ThemeConfiguration theme, ref bool themeChanged)
+    {
+        UiSharedService.ColorTextWrapped("Button and header colors control the appearance of clickable elements and section headers.", ImGuiColors.DalamudGrey);
+        ImGui.Spacing();
+        
+        ImGui.Text("Button Colors");
+        ImGui.Separator();
+        
+        var button = theme.Button;
+        if (ImGui.ColorEdit4("Button", ref button))
+        {
+            theme.Button = button;
+            themeChanged = true;
+        }
+        _uiShared.DrawHelpText("Default background color for buttons.");
+        
+        var buttonHovered = theme.ButtonHovered;
+        if (ImGui.ColorEdit4("Button Hovered", ref buttonHovered))
+        {
+            theme.ButtonHovered = buttonHovered;
+            themeChanged = true;
+        }
+        _uiShared.DrawHelpText("Background color for buttons when hovered over.");
+        
+        var buttonActive = theme.ButtonActive;
+        if (ImGui.ColorEdit4("Button Active", ref buttonActive))
+        {
+            theme.ButtonActive = buttonActive;
+            themeChanged = true;
+        }
+        _uiShared.DrawHelpText("Background color for buttons when clicked or pressed.");
+        
+        ImGui.Spacing();
+        ImGui.Text("Header Colors");
+        ImGui.Separator();
+        
+        var headerBg = theme.HeaderBg;
+        if (ImGui.ColorEdit4("Header Background", ref headerBg))
+        {
+            theme.HeaderBg = headerBg;
+            themeChanged = true;
+        }
+        _uiShared.DrawHelpText("Background color for collapsible headers and section titles.");
+        
+        var headerHovered = theme.HeaderHovered;
+        if (ImGui.ColorEdit4("Header Hovered", ref headerHovered))
+        {
+            theme.HeaderHovered = headerHovered;
+            themeChanged = true;
+        }
+        _uiShared.DrawHelpText("Background color for headers when hovered over.");
+        
+        var headerActive = theme.HeaderActive;
+        if (ImGui.ColorEdit4("Header Active", ref headerActive))
+        {
+            theme.HeaderActive = headerActive;
+            themeChanged = true;
+        }
+        _uiShared.DrawHelpText("Background color for headers when clicked or active.");
+        
+        ImGui.Spacing();
+        ImGui.Text("Separators");
+        ImGui.Separator();
+        
+        var separator = theme.Separator;
+        if (ImGui.ColorEdit4("Separator", ref separator))
+        {
+            theme.Separator = separator;
+            themeChanged = true;
+        }
+        _uiShared.DrawHelpText("Color for separator lines that divide sections.");
+        
+        var separatorHovered = theme.SeparatorHovered;
+        if (ImGui.ColorEdit4("Separator Hovered", ref separatorHovered))
+        {
+            theme.SeparatorHovered = separatorHovered;
+            themeChanged = true;
+        }
+        _uiShared.DrawHelpText("Color for separator lines when hovered over.");
+        
+        var separatorActive = theme.SeparatorActive;
+        if (ImGui.ColorEdit4("Separator Active", ref separatorActive))
+        {
+            theme.SeparatorActive = separatorActive;
+            themeChanged = true;
+        }
+        _uiShared.DrawHelpText("Color for separator lines when being dragged or active.");
+    }
+    
+    private void DrawMenuNavigationColors(ThemeConfiguration theme, ref bool themeChanged)
+    {
+        UiSharedService.ColorTextWrapped("Menu and navigation colors control the appearance of menu bars, navigation highlights, and drag-drop interactions.", ImGuiColors.DalamudGrey);
+        ImGui.Spacing();
+        
+        ImGui.Text("Menu Colors");
+        ImGui.Separator();
+        
+        var menuBarBg = theme.MenuBarBg;
+        if (ImGui.ColorEdit4("Menu Bar Background", ref menuBarBg))
+        {
+            theme.MenuBarBg = menuBarBg;
+            themeChanged = true;
+        }
+        _uiShared.DrawHelpText("Background color for menu bars at the top of windows.");
+        
+        ImGui.Spacing();
+        ImGui.Text("Navigation Colors");
+        ImGui.Separator();
+        
+        var navHighlight = theme.NavHighlight;
+        if (ImGui.ColorEdit4("Navigation Highlight", ref navHighlight))
+        {
+            theme.NavHighlight = navHighlight;
+            themeChanged = true;
+        }
+        _uiShared.DrawHelpText("Color for highlighting the currently focused navigation element.");
+        
+        var navWindowingHighlight = theme.NavWindowingHighlight;
+        if (ImGui.ColorEdit4("Navigation Windowing Highlight", ref navWindowingHighlight))
+        {
+            theme.NavWindowingHighlight = navWindowingHighlight;
+            themeChanged = true;
+        }
+        _uiShared.DrawHelpText("Color for highlighting windows during navigation mode.");
+        
+        var navWindowingDimBg = theme.NavWindowingDimBg;
+        if (ImGui.ColorEdit4("Navigation Windowing Dim Background", ref navWindowingDimBg))
+        {
+            theme.NavWindowingDimBg = navWindowingDimBg;
+            themeChanged = true;
+        }
+        _uiShared.DrawHelpText("Background dimming color during window navigation mode.");
+        
+        ImGui.Spacing();
+        ImGui.Text("Drag & Drop Colors");
+        ImGui.Separator();
+        
+        var dragDropTarget = theme.DragDropTarget;
+        if (ImGui.ColorEdit4("Drag Drop Target", ref dragDropTarget))
+        {
+            theme.DragDropTarget = dragDropTarget;
+            themeChanged = true;
+        }
+        _uiShared.DrawHelpText("Color for highlighting valid drop targets during drag operations.");
+    }
+    
+    private void DrawScrollbarSliderColors(ThemeConfiguration theme, ref bool themeChanged)
+    {
+        UiSharedService.ColorTextWrapped("Scrollbar and slider colors control the appearance of scrollbars and slider controls throughout the interface.", ImGuiColors.DalamudGrey);
+        ImGui.Spacing();
+        
+        ImGui.Text("Scrollbar Colors");
+        ImGui.Separator();
+        
+        var scrollbarBg = theme.ScrollbarBg;
+        if (ImGui.ColorEdit4("Scrollbar Background", ref scrollbarBg))
+        {
+            theme.ScrollbarBg = scrollbarBg;
+            themeChanged = true;
+        }
+        _uiShared.DrawHelpText("Background color for the scrollbar track.");
+        
+        var scrollbarGrab = theme.ScrollbarGrab;
+        if (ImGui.ColorEdit4("Scrollbar Grab", ref scrollbarGrab))
+        {
+            theme.ScrollbarGrab = scrollbarGrab;
+            themeChanged = true;
+        }
+        _uiShared.DrawHelpText("Color for the scrollbar handle that you can drag.");
+        
+        var scrollbarGrabHovered = theme.ScrollbarGrabHovered;
+        if (ImGui.ColorEdit4("Scrollbar Grab Hovered", ref scrollbarGrabHovered))
+        {
+            theme.ScrollbarGrabHovered = scrollbarGrabHovered;
+            themeChanged = true;
+        }
+        _uiShared.DrawHelpText("Color for the scrollbar handle when hovered over.");
+        
+        var scrollbarGrabActive = theme.ScrollbarGrabActive;
+        if (ImGui.ColorEdit4("Scrollbar Grab Active", ref scrollbarGrabActive))
+        {
+            theme.ScrollbarGrabActive = scrollbarGrabActive;
+            themeChanged = true;
+        }
+        _uiShared.DrawHelpText("Color for the scrollbar handle when being dragged.");
+        
+        ImGui.Spacing();
+        ImGui.Text("Slider Colors");
+        ImGui.Separator();
+        
+        var sliderGrab = theme.SliderGrab;
+        if (ImGui.ColorEdit4("Slider Grab", ref sliderGrab))
+        {
+            theme.SliderGrab = sliderGrab;
+            themeChanged = true;
+        }
+        _uiShared.DrawHelpText("Color for slider handles and knobs.");
+        
+        var sliderGrabActive = theme.SliderGrabActive;
+        if (ImGui.ColorEdit4("Slider Grab Active", ref sliderGrabActive))
+        {
+            theme.SliderGrabActive = sliderGrabActive;
+            themeChanged = true;
+        }
+        _uiShared.DrawHelpText("Color for slider handles when being dragged.");
+    }
+    
+    private void DrawTableTabColors(ThemeConfiguration theme, ref bool themeChanged)
+    {
+        UiSharedService.ColorTextWrapped("Table and tab colors control the appearance of data tables and tab navigation elements.", ImGuiColors.DalamudGrey);
+        ImGui.Spacing();
+        
+        ImGui.Text("Table Colors");
+        ImGui.Separator();
+        
+        var tableHeaderBg = theme.TableHeaderBg;
+        if (ImGui.ColorEdit4("Table Header Background", ref tableHeaderBg))
+        {
+            theme.TableHeaderBg = tableHeaderBg;
+            themeChanged = true;
+        }
+        _uiShared.DrawHelpText("Background color for table headers and column titles.");
+        
+        var tableBorderStrong = theme.TableBorderStrong;
+        if (ImGui.ColorEdit4("Table Border Strong", ref tableBorderStrong))
+        {
+            theme.TableBorderStrong = tableBorderStrong;
+            themeChanged = true;
+        }
+        _uiShared.DrawHelpText("Color for strong table borders (outer borders and major divisions).");
+        
+        var tableBorderLight = theme.TableBorderLight;
+        if (ImGui.ColorEdit4("Table Border Light", ref tableBorderLight))
+        {
+            theme.TableBorderLight = tableBorderLight;
+            themeChanged = true;
+        }
+        _uiShared.DrawHelpText("Color for light table borders (inner cell borders).");
+        
+        var tableRowBg = theme.TableRowBg;
+        if (ImGui.ColorEdit4("Table Row Background", ref tableRowBg))
+        {
+            theme.TableRowBg = tableRowBg;
+            themeChanged = true;
+        }
+        _uiShared.DrawHelpText("Background color for table rows.");
+        
+        var tableRowBgAlt = theme.TableRowBgAlt;
+        if (ImGui.ColorEdit4("Table Row Background Alt", ref tableRowBgAlt))
+        {
+            theme.TableRowBgAlt = tableRowBgAlt;
+            themeChanged = true;
+        }
+        _uiShared.DrawHelpText("Alternating background color for table rows (zebra striping).");
+        
+        ImGui.Spacing();
+        ImGui.Text("Tab Colors");
+        ImGui.Separator();
+        
+        var tab = theme.Tab;
+        if (ImGui.ColorEdit4("Tab", ref tab))
+        {
+            theme.Tab = tab;
+            themeChanged = true;
+        }
+        _uiShared.DrawHelpText("Default background color for inactive tabs.");
+        
+        var tabHovered = theme.TabHovered;
+        if (ImGui.ColorEdit4("Tab Hovered", ref tabHovered))
+        {
+            theme.TabHovered = tabHovered;
+            themeChanged = true;
+        }
+        _uiShared.DrawHelpText("Background color for tabs when hovered over.");
+        
+        var tabActive = theme.TabActive;
+        if (ImGui.ColorEdit4("Tab Active", ref tabActive))
+        {
+            theme.TabActive = tabActive;
+            themeChanged = true;
+        }
+        _uiShared.DrawHelpText("Background color for the currently active tab.");
+        
+        var tabUnfocused = theme.TabUnfocused;
+        if (ImGui.ColorEdit4("Tab Unfocused", ref tabUnfocused))
+        {
+            theme.TabUnfocused = tabUnfocused;
+            themeChanged = true;
+        }
+        _uiShared.DrawHelpText("Background color for tabs when the window is not focused.");
+        
+        var tabUnfocusedActive = theme.TabUnfocusedActive;
+        if (ImGui.ColorEdit4("Tab Unfocused Active", ref tabUnfocusedActive))
+        {
+            theme.TabUnfocusedActive = tabUnfocusedActive;
+            themeChanged = true;
+        }
+        _uiShared.DrawHelpText("Background color for the active tab when the window is not focused.");
+    }
+    
+    private void DrawCompactUIColors(ThemeConfiguration theme, ref bool themeChanged)
+    {
+        ImGui.Text("Panel Specific Colors");
+        UiSharedService.ColorTextWrapped("These colors are used specifically for the Panel window when different from normal windows.", ImGuiColors.DalamudGrey);
+        ImGui.Spacing();
+        
+        // Background Colors Section
+        ImGui.Text("Background Colors");
+        ImGui.Separator();
+        
+        var compactWindowBg = theme.CompactWindowBg;
+        if (ImGui.ColorEdit4("Panel Window Background", ref compactWindowBg))
+        {
+            theme.CompactWindowBg = compactWindowBg;
+            themeChanged = true;
+        }
+        
+        var compactTitleBg = theme.CompactTitleBg;
+        if (ImGui.ColorEdit4("Panel Title Background", ref compactTitleBg))
+        {
+            theme.CompactTitleBg = compactTitleBg;
+            themeChanged = true;
+        }
+        
+        var compactTitleBgActive = theme.CompactTitleBgActive;
+        if (ImGui.ColorEdit4("Panel Title Background Active", ref compactTitleBgActive))
+        {
+            theme.CompactTitleBgActive = compactTitleBgActive;
+            themeChanged = true;
+        }
+        
+        var compactFrameBg = theme.CompactFrameBg;
+        if (ImGui.ColorEdit4("Panel Frame Background", ref compactFrameBg))
+        {
+            theme.CompactFrameBg = compactFrameBg;
+            themeChanged = true;
+        }
+        
+        var compactHeaderBg = theme.CompactHeaderBg;
+        if (ImGui.ColorEdit4("Panel Header Background", ref compactHeaderBg))
+        {
+            theme.CompactHeaderBg = compactHeaderBg;
+            themeChanged = true;
+        }
+        
+        ImGui.Spacing();
+        
+        // Button Colors Section
+        ImGui.Text("Button Colors");
+        ImGui.Separator();
+        
+        // Panel Buttons
+        ImGui.Text("Panel Buttons");
+        var compactButton = theme.CompactButton;
+        if (ImGui.ColorEdit4("Panel Button", ref compactButton))
+        {
+            theme.CompactButton = compactButton;
+            themeChanged = true;
+        }
+        
+        var compactButtonHovered = theme.CompactButtonHovered;
+        if (ImGui.ColorEdit4("Panel Button Hovered", ref compactButtonHovered))
+        {
+            theme.CompactButtonHovered = compactButtonHovered;
+            themeChanged = true;
+        }
+        
+        var compactButtonActive = theme.CompactButtonActive;
+        if (ImGui.ColorEdit4("Panel Button Active", ref compactButtonActive))
+        {
+            theme.CompactButtonActive = compactButtonActive;
+            themeChanged = true;
+        }
+        
+        ImGui.Spacing();
+        
+        // Action Buttons
+        ImGui.Text("Action Buttons");
+        var compactActionButton = theme.CompactActionButton;
+        if (ImGui.ColorEdit4("Action Button", ref compactActionButton))
+        {
+            theme.CompactActionButton = compactActionButton;
+            themeChanged = true;
+        }
+        
+        var compactActionButtonHovered = theme.CompactActionButtonHovered;
+        if (ImGui.ColorEdit4("Action Button Hovered", ref compactActionButtonHovered))
+        {
+            theme.CompactActionButtonHovered = compactActionButtonHovered;
+            themeChanged = true;
+        }
+        
+        var compactActionButtonActive = theme.CompactActionButtonActive;
+        if (ImGui.ColorEdit4("Action Button Active", ref compactActionButtonActive))
+        {
+            theme.CompactActionButtonActive = compactActionButtonActive;
+            themeChanged = true;
+        }
+        
+        ImGui.Spacing();
+        
+        // Syncshell Buttons
+        ImGui.Text("Syncshell Buttons");
+        var compactSyncshellButton = theme.CompactSyncshellButton;
+        if (ImGui.ColorEdit4("Syncshell Button", ref compactSyncshellButton))
+        {
+            theme.CompactSyncshellButton = compactSyncshellButton;
+            themeChanged = true;
+        }
+        
+        var compactSyncshellButtonHovered = theme.CompactSyncshellButtonHovered;
+        if (ImGui.ColorEdit4("Syncshell Button Hovered", ref compactSyncshellButtonHovered))
+        {
+            theme.CompactSyncshellButtonHovered = compactSyncshellButtonHovered;
+            themeChanged = true;
+        }
+        
+        var compactSyncshellButtonActive = theme.CompactSyncshellButtonActive;
+        if (ImGui.ColorEdit4("Syncshell Button Active", ref compactSyncshellButtonActive))
+        {
+            theme.CompactSyncshellButtonActive = compactSyncshellButtonActive;
+            themeChanged = true;
+        }
+        
+        ImGui.Spacing();
+        
+        // Text Colors Section
+        ImGui.Text("Text Colors");
+        ImGui.Separator();
+        
+        // Basic Text Colors
+        ImGui.Text("Basic Text");
+        var compactText = theme.CompactText;
+        if (ImGui.ColorEdit4("Panel Text", ref compactText))
+        {
+            theme.CompactText = compactText;
+            themeChanged = true;
+        }
+        
+        var compactTextSecondary = theme.CompactTextSecondary;
+        if (ImGui.ColorEdit4("Panel Secondary Text", ref compactTextSecondary))
+        {
+            theme.CompactTextSecondary = compactTextSecondary;
+            themeChanged = true;
+        }
+        
+        var compactHeaderText = theme.CompactHeaderText;
+        if (ImGui.ColorEdit4("Panel Header Text", ref compactHeaderText))
+        {
+            theme.CompactHeaderText = compactHeaderText;
+            themeChanged = true;
+        }
+        
+        var compactPanelTitleText = theme.CompactPanelTitleText;
+        if (ImGui.ColorEdit4("Panel Title Text", ref compactPanelTitleText))
+        {
+            theme.CompactPanelTitleText = compactPanelTitleText;
+            themeChanged = true;
+        }
+        
+        ImGui.Spacing();
+        
+        // Status Text Colors
+        ImGui.Text("Status Text");
+        var compactConnectedText = theme.CompactConnectedText;
+        if (ImGui.ColorEdit4("Connected Pairs Count Text", ref compactConnectedText))
+        {
+            theme.CompactConnectedText = compactConnectedText;
+            themeChanged = true;
+        }
+        
+        var compactAllSyncshellsText = theme.CompactAllSyncshellsText;
+        if (ImGui.ColorEdit4("All Syncshells Text", ref compactAllSyncshellsText))
+        {
+            theme.CompactAllSyncshellsText = compactAllSyncshellsText;
+            themeChanged = true;
+        }
+        
+        var compactOfflinePausedText = theme.CompactOfflinePausedText;
+        if (ImGui.ColorEdit4("Offline / Paused by other Text", ref compactOfflinePausedText))
+        {
+            theme.CompactOfflinePausedText = compactOfflinePausedText;
+            themeChanged = true;
+        }
+        
+        var compactOfflineSyncshellText = theme.CompactOfflineSyncshellText;
+        if (ImGui.ColorEdit4("Offline Syncshell Users Text", ref compactOfflineSyncshellText))
+        {
+            theme.CompactOfflineSyncshellText = compactOfflineSyncshellText;
+            themeChanged = true;
+        }
+        
+        var compactVisibleText = theme.CompactVisibleText;
+        if (ImGui.ColorEdit4("Visible Text", ref compactVisibleText))
+        {
+            theme.CompactVisibleText = compactVisibleText;
+            themeChanged = true;
+        }
+        
+        var compactPairsText = theme.CompactPairsText;
+        if (ImGui.ColorEdit4("Pairs Text", ref compactPairsText))
+        {
+            theme.CompactPairsText = compactPairsText;
+            themeChanged = true;
+        }
+        
+        ImGui.Spacing();
+        
+        // Other Colors Section
+        ImGui.Text("Other Colors");
+        ImGui.Separator();
+        
+        var compactBorder = theme.CompactBorder;
+        if (ImGui.ColorEdit4("Panel Border", ref compactBorder))
+        {
+            theme.CompactBorder = compactBorder;
+            themeChanged = true;
+        }
+        
+        var compactAccent = theme.CompactAccent;
+        if (ImGui.ColorEdit4("Panel Accent", ref compactAccent))
+        {
+            theme.CompactAccent = compactAccent;
+            themeChanged = true;
+        }
+        
+        var compactHover = theme.CompactHover;
+        if (ImGui.ColorEdit4("Panel Hover", ref compactHover))
+        {
+            theme.CompactHover = compactHover;
+            themeChanged = true;
+        }
+        
+        var compactActive = theme.CompactActive;
+        if (ImGui.ColorEdit4("Panel Active", ref compactActive))
+        {
+            theme.CompactActive = compactActive;
+            themeChanged = true;
+        }
+    }
+
+    private string _saveThemeName = "";
+    private string _selectedThemeToLoad = "";
+    private string[] _availableThemes = Array.Empty<string>();
+    private bool _themesLoaded = false;
+    private string _selectedPresetTheme = "";
+    private string _themeValuesInput = "";
+
+    private void DrawSaveThemePopup()
+    {
+        ImGui.Text("Save Current Theme");
+        ImGui.Separator();
+        
+        ImGui.Text("Theme Name:");
+        ImGui.InputText("##SaveThemeName", ref _saveThemeName, 100);
+        
+        ImGui.Spacing();
+        
+        if (ImGui.Button("Save"))
+        {
+            if (!string.IsNullOrWhiteSpace(_saveThemeName))
+            {
+                // Note: We can't await in this UI context, so we'll fire and forget
+                // The SaveTheme method will handle logging any errors
+                _ = Task.Run(async () =>
+                {
+                    var success = await ThemeManager.SaveTheme(SpheneCustomTheme.CurrentTheme, _saveThemeName);
+                    if (success)
+                    {
+                        // Reset UI state on main thread
+                        _saveThemeName = "";
+                        _themesLoaded = false; // Force refresh of available themes
+                    }
+                });
+                ImGui.CloseCurrentPopup();
+            }
+        }
+        
+        ImGui.SameLine();
+        
+        if (ImGui.Button("Cancel"))
+        {
+            _saveThemeName = "";
+            ImGui.CloseCurrentPopup();
+        }
+    }
+
+    private void DrawLoadThemePopup()
+    {
+        ImGui.Text("Load Theme");
+        ImGui.Separator();
+        
+        // Load available themes if not already loaded
+        if (!_themesLoaded)
+        {
+            _availableThemes = ThemeManager.GetAvailableThemes();
+            _themesLoaded = true;
+        }
+        
+        if (_availableThemes.Length == 0)
+        {
+            ImGui.Text("No saved themes found.");
+        }
+        else
+        {
+            ImGui.Text("Available Themes:");
+            
+            for (int i = 0; i < _availableThemes.Length; i++)
+            {
+                var themeName = _availableThemes[i];
+                
+                if (ImGui.Selectable(themeName, _selectedThemeToLoad == themeName))
+                {
+                    _selectedThemeToLoad = themeName;
+                }
+                
+                // Double-click to load
+                if (ImGui.IsItemHovered() && ImGui.IsMouseDoubleClicked(0))
+                {
+                    LoadSelectedTheme();
+                    return;
+                }
+                
+                // Right-click context menu for delete
+                if (ImGui.BeginPopupContextItem($"ThemeContext_{i}"))
+                {
+                    using (SpheneCustomTheme.ApplyContextMenuTheme())
+                    {
+                        if (ImGui.MenuItem("Delete"))
+                        {
+                            if (ThemeManager.DeleteTheme(themeName))
+                            {
+                                _themesLoaded = false; // Force refresh
+                                _selectedThemeToLoad = "";
+                            }
+                        }
+                    }
+                    ImGui.EndPopup();
+                }
+            }
+        }
+        
+        ImGui.Spacing();
+        
+        if (ImGui.Button("Load") && !string.IsNullOrEmpty(_selectedThemeToLoad))
+        {
+            LoadSelectedTheme();
+        }
+        
+        ImGui.SameLine();
+        
+        if (ImGui.Button("Refresh"))
+        {
+            _themesLoaded = false;
+        }
+        
+        ImGui.SameLine();
+        
+        if (ImGui.Button("Cancel"))
+        {
+            _selectedThemeToLoad = "";
+            ImGui.CloseCurrentPopup();
+        }
+    }
+
+    private void LoadSelectedTheme()
+    {
+        var loadedTheme = ThemeManager.LoadTheme(_selectedThemeToLoad);
+        if (loadedTheme != null)
+        {
+            // Use the CopyThemeProperties method to copy all properties
+            CopyThemeProperties(loadedTheme, SpheneCustomTheme.CurrentTheme);
+            
+            // Notify theme changed to apply immediately
+            SpheneCustomTheme.CurrentTheme.NotifyThemeChanged();
+            
+            _selectedThemeToLoad = "";
+            ImGui.CloseCurrentPopup();
+        }
+    }
+
+    private void DrawThemeSelector()
+    {
+        ImGui.Text("Theme Presets");
+        ImGui.SameLine();
+        _uiShared.DrawHelpText("Select from built-in themes or your custom saved themes. Changes apply immediately.");
+        
+        // Get all available themes (built-in + custom)
+        var builtInThemes = ThemePresets.BuiltInThemes.Keys.ToList();
+        var customThemes = ThemeManager.GetAvailableThemes();
+        var allThemes = new List<string>();
+        
+        // Add built-in themes first
+        allThemes.AddRange(builtInThemes);
+        
+        // Add separator if we have custom themes
+        if (customThemes.Any())
+        {
+            allThemes.Add("--- Custom Themes ---");
+            allThemes.AddRange(customThemes);
+        }
+        
+        // Current selection - load from configuration
+        var savedTheme = ThemeManager.GetSelectedTheme();
+        if (!string.IsNullOrEmpty(savedTheme))
+            _selectedPresetTheme = savedTheme;
+        else if (string.IsNullOrEmpty(_selectedPresetTheme))
+            _selectedPresetTheme = "Default Sphene";
+        
+        var currentIndex = allThemes.IndexOf(_selectedPresetTheme);
+        if (currentIndex == -1) currentIndex = 0;
+        
+        ImGui.SetNextItemWidth(300);
+        if (ImGui.Combo("##ThemeSelector", ref currentIndex, allThemes.ToArray(), allThemes.Count))
+        {
+            var selectedTheme = allThemes[currentIndex];
+            
+            // Skip separator entries
+            if (selectedTheme.StartsWith("---")) return;
+            
+            _selectedPresetTheme = selectedTheme;
+            ApplySelectedPresetTheme(selectedTheme, builtInThemes);
+        }
+        
+        ImGui.SameLine();
+        if (ImGui.Button("Reset to Default"))
+        {
+            _selectedPresetTheme = "Default Sphene";
+            ApplySelectedPresetTheme("Default Sphene", builtInThemes);
+        }
+        
+        // Theme values input section
+        ImGui.Spacing();
+        ImGui.Text("Apply Custom Values");
+        ImGui.SameLine();
+        _uiShared.DrawHelpText("Paste theme values here to apply them directly. Format: PropertyName=Value, one per line.");
+        
+        ImGui.SetNextItemWidth(-1);
+        if (ImGui.InputTextMultiline("##ThemeValues", ref _themeValuesInput, 10000, new Vector2(-1, 100)))
+        {
+            // Input changed, we could auto-apply or wait for button
+        }
+        
+        if (ImGui.Button("Apply Values"))
+        {
+            ApplyThemeFromInput();
+        }
+        
+        ImGui.SameLine();
+        if (ImGui.Button("Get Current Values"))
+        {
+            GetCurrentThemeValues();
+        }
+        
+        // Theme Management Actions
+        ImGui.Spacing();
+        ImGui.Text("Theme Management");
+        
+        if (ImGui.Button("Reset to Defaults"))
+        {
+            SpheneCustomTheme.CurrentTheme.ResetToDefaults();
+            SpheneCustomTheme.CurrentTheme.NotifyThemeChanged();
+        }
+        
+        ImGui.SameLine();
+        
+        if (ImGui.Button("Save Theme"))
+        {
+            ImGui.OpenPopup("SaveThemePopup");
+        }
+        
+        ImGui.SameLine();
+        
+        if (ImGui.Button("Load Theme"))
+        {
+            ImGui.OpenPopup("LoadThemePopup");
+        }
+        
+        // Save Theme Popup
+        if (ImGui.BeginPopup("SaveThemePopup"))
+        {
+            using (SpheneCustomTheme.ApplyContextMenuTheme())
+            {
+                DrawSaveThemePopup();
+            }
+            ImGui.EndPopup();
+        }
+        
+        // Load Theme Popup
+        if (ImGui.BeginPopup("LoadThemePopup"))
+        {
+            using (SpheneCustomTheme.ApplyContextMenuTheme())
+            {
+                DrawLoadThemePopup();
+            }
+            ImGui.EndPopup();
+        }
+    }
+
+    private void ApplySelectedPresetTheme(string themeName, List<string> builtInThemes)
+    {
+        var currentTheme = SpheneCustomTheme.CurrentTheme;
+        
+        if (builtInThemes.Contains(themeName))
+        {
+            // Apply built-in theme
+            var presetTheme = ThemePresets.BuiltInThemes[themeName];
+            CopyThemeProperties(presetTheme, currentTheme);
+        }
+        else
+        {
+            // Apply custom theme
+            var loadedTheme = ThemeManager.LoadTheme(themeName);
+            if (loadedTheme != null)
+            {
+                CopyThemeProperties(loadedTheme, currentTheme);
+            }
+        }
+        
+        // Save selected theme to configuration for persistence
+        ThemeManager.SetSelectedTheme(themeName);
+        
+        currentTheme.NotifyThemeChanged();
+    }
+
+    private void CopyThemeProperties(ThemeConfiguration source, ThemeConfiguration target)
+    {
+        // Use the built-in Clone method to ensure all properties are copied
+        var cloned = source.Clone();
+        
+        // Copy all properties from cloned to target
+        target.WindowRounding = cloned.WindowRounding;
+        target.ChildRounding = cloned.ChildRounding;
+        target.PopupRounding = cloned.PopupRounding;
+        target.FrameRounding = cloned.FrameRounding;
+        target.ScrollbarRounding = cloned.ScrollbarRounding;
+        target.GrabRounding = cloned.GrabRounding;
+        target.TabRounding = cloned.TabRounding;
+        target.CompactWindowRounding = cloned.CompactWindowRounding;
+        target.CompactChildRounding = cloned.CompactChildRounding;
+        target.CompactPopupRounding = cloned.CompactPopupRounding;
+        target.CompactFrameRounding = cloned.CompactFrameRounding;
+        target.CompactScrollbarRounding = cloned.CompactScrollbarRounding;
+        target.CompactGrabRounding = cloned.CompactGrabRounding;
+        target.CompactTabRounding = cloned.CompactTabRounding;
+        target.CompactHeaderRounding = cloned.CompactHeaderRounding;
+        
+        // Spacing Settings
+        target.WindowPadding = cloned.WindowPadding;
+        target.FramePadding = cloned.FramePadding;
+        target.ItemSpacing = cloned.ItemSpacing;
+        target.ItemInnerSpacing = cloned.ItemInnerSpacing;
+        target.IndentSpacing = cloned.IndentSpacing;
+        target.CompactWindowPadding = cloned.CompactWindowPadding;
+        target.CompactFramePadding = cloned.CompactFramePadding;
+        target.CompactItemSpacing = cloned.CompactItemSpacing;
+        target.CompactItemInnerSpacing = cloned.CompactItemInnerSpacing;
+        target.CompactCellPadding = cloned.CompactCellPadding;
+        target.CompactChildPadding = cloned.CompactChildPadding;
+        target.CompactIndentSpacing = cloned.CompactIndentSpacing;
+        target.CompactScrollbarSize = cloned.CompactScrollbarSize;
+        target.CompactGrabMinSize = cloned.CompactGrabMinSize;
+        target.CompactButtonTextAlign = cloned.CompactButtonTextAlign;
+        target.CompactSelectableTextAlign = cloned.CompactSelectableTextAlign;
+        
+        // Border Settings
+        target.WindowBorderSize = cloned.WindowBorderSize;
+        target.ChildBorderSize = cloned.ChildBorderSize;
+        target.PopupBorderSize = cloned.PopupBorderSize;
+        target.FrameBorderSize = cloned.FrameBorderSize;
+        target.CompactWindowBorderSize = cloned.CompactWindowBorderSize;
+        target.CompactChildBorderSize = cloned.CompactChildBorderSize;
+        target.CompactPopupBorderSize = cloned.CompactPopupBorderSize;
+        target.CompactFrameBorderSize = cloned.CompactFrameBorderSize;
+        target.CompactTooltipRounding = cloned.CompactTooltipRounding;
+        target.CompactTooltipBorderSize = cloned.CompactTooltipBorderSize;
+        target.CompactContextMenuRounding = cloned.CompactContextMenuRounding;
+        target.CompactContextMenuBorderSize = cloned.CompactContextMenuBorderSize;
+        target.ScrollbarSize = cloned.ScrollbarSize;
+        target.GrabMinSize = cloned.GrabMinSize;
+        
+        // Color Properties
+        target.PrimaryDark = cloned.PrimaryDark;
+        target.SecondaryDark = cloned.SecondaryDark;
+        target.AccentBlue = cloned.AccentBlue;
+        target.AccentCyan = cloned.AccentCyan;
+        target.TextPrimary = cloned.TextPrimary;
+        target.TextSecondary = cloned.TextSecondary;
+        target.Border = cloned.Border;
+        target.Hover = cloned.Hover;
+        target.Active = cloned.Active;
+        target.HeaderBg = cloned.HeaderBg;
+        
+        // Window Colors
+        target.WindowBg = cloned.WindowBg;
+        target.ChildBg = cloned.ChildBg;
+        target.PopupBg = cloned.PopupBg;
+        target.BorderShadow = cloned.BorderShadow;
+        
+        // Frame Colors
+        target.FrameBg = cloned.FrameBg;
+        target.FrameBgHovered = cloned.FrameBgHovered;
+        target.FrameBgActive = cloned.FrameBgActive;
+        
+        // Title Bar Colors
+        target.TitleBg = cloned.TitleBg;
+        target.TitleBgActive = cloned.TitleBgActive;
+        target.TitleBgCollapsed = cloned.TitleBgCollapsed;
+        
+        // Menu Colors
+        target.MenuBarBg = cloned.MenuBarBg;
+        
+        // Scrollbar Colors
+        target.ScrollbarBg = cloned.ScrollbarBg;
+        target.ScrollbarGrab = cloned.ScrollbarGrab;
+        target.ScrollbarGrabHovered = cloned.ScrollbarGrabHovered;
+        target.ScrollbarGrabActive = cloned.ScrollbarGrabActive;
+        
+        // Check Mark Colors
+        target.CheckMark = cloned.CheckMark;
+        
+        // Slider Colors
+        target.SliderGrab = cloned.SliderGrab;
+        target.SliderGrabActive = cloned.SliderGrabActive;
+        
+        // Button Colors
+        target.Button = cloned.Button;
+        target.ButtonHovered = cloned.ButtonHovered;
+        target.ButtonActive = cloned.ButtonActive;
+        
+        // Header Colors
+        target.Header = cloned.Header;
+        target.HeaderHovered = cloned.HeaderHovered;
+        target.HeaderActive = cloned.HeaderActive;
+        
+        // Separator Colors
+        target.Separator = cloned.Separator;
+        target.SeparatorHovered = cloned.SeparatorHovered;
+        target.SeparatorActive = cloned.SeparatorActive;
+        
+        // Resize Grip Colors
+        target.ResizeGrip = cloned.ResizeGrip;
+        target.ResizeGripHovered = cloned.ResizeGripHovered;
+        target.ResizeGripActive = cloned.ResizeGripActive;
+        
+        // Tab Colors
+        target.Tab = cloned.Tab;
+        target.TabHovered = cloned.TabHovered;
+        target.TabActive = cloned.TabActive;
+        target.TabUnfocused = cloned.TabUnfocused;
+        target.TabUnfocusedActive = cloned.TabUnfocusedActive;
+        
+        // Table Colors
+        target.TableHeaderBg = cloned.TableHeaderBg;
+        target.TableBorderStrong = cloned.TableBorderStrong;
+        target.TableBorderLight = cloned.TableBorderLight;
+        target.TableRowBg = cloned.TableRowBg;
+        target.TableRowBgAlt = cloned.TableRowBgAlt;
+        
+        // Text Colors
+        target.TextDisabled = cloned.TextDisabled;
+        target.TextSelectedBg = cloned.TextSelectedBg;
+        
+        // Drag Drop Colors
+        target.DragDropTarget = cloned.DragDropTarget;
+        
+        // Navigation Colors
+        target.NavHighlight = cloned.NavHighlight;
+        target.NavWindowingHighlight = cloned.NavWindowingHighlight;
+        target.NavWindowingDimBg = cloned.NavWindowingDimBg;
+        
+        // Modal Colors
+        target.ModalWindowDimBg = cloned.ModalWindowDimBg;
+        
+        // CompactUI Specific Colors
+        target.CompactWindowBg = cloned.CompactWindowBg;
+        target.CompactChildBg = cloned.CompactChildBg;
+        target.CompactPopupBg = cloned.CompactPopupBg;
+        target.CompactTitleBg = cloned.CompactTitleBg;
+        target.CompactTitleBgActive = cloned.CompactTitleBgActive;
+        target.CompactFrameBg = cloned.CompactFrameBg;
+        target.CompactButton = cloned.CompactButton;
+        target.CompactButtonHovered = cloned.CompactButtonHovered;
+        target.CompactButtonActive = cloned.CompactButtonActive;
+        target.CompactHeaderBg = cloned.CompactHeaderBg;
+        target.CompactBorder = cloned.CompactBorder;
+        target.CompactText = cloned.CompactText;
+        target.CompactTextSecondary = cloned.CompactTextSecondary;
+        target.CompactAccent = cloned.CompactAccent;
+        target.CompactHover = cloned.CompactHover;
+        target.CompactActive = cloned.CompactActive;
+        target.CompactHeaderText = cloned.CompactHeaderText;
+        target.CompactUidColor = cloned.CompactUidColor;
+        target.CompactServerStatusConnected = cloned.CompactServerStatusConnected;
+        target.CompactServerStatusWarning = cloned.CompactServerStatusWarning;
+        target.CompactServerStatusError = cloned.CompactServerStatusError;
+        target.CompactActionButton = cloned.CompactActionButton;
+        target.CompactActionButtonHovered = cloned.CompactActionButtonHovered;
+        target.CompactActionButtonActive = cloned.CompactActionButtonActive;
+        target.CompactSyncshellButton = cloned.CompactSyncshellButton;
+        target.CompactSyncshellButtonHovered = cloned.CompactSyncshellButtonHovered;
+        target.CompactSyncshellButtonActive = cloned.CompactSyncshellButtonActive;
+        target.CompactPanelTitleText = cloned.CompactPanelTitleText;
+        target.CompactConnectedText = cloned.CompactConnectedText;
+        target.CompactAllSyncshellsText = cloned.CompactAllSyncshellsText;
+        target.CompactOfflinePausedText = cloned.CompactOfflinePausedText;
+        target.CompactOfflineSyncshellText = cloned.CompactOfflineSyncshellText;
+        target.CompactVisibleText = cloned.CompactVisibleText;
+        target.CompactPairsText = cloned.CompactPairsText;
+        target.CompactShowImGuiHeader = cloned.CompactShowImGuiHeader;
+    }
+
+    private void ApplyThemeFromInput()
+    {
+        if (string.IsNullOrWhiteSpace(_themeValuesInput)) return;
+        
+        var values = new Dictionary<string, object>();
+        var lines = _themeValuesInput.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        
+        foreach (var line in lines)
+        {
+            var parts = line.Split('=', 2);
+            if (parts.Length != 2) continue;
+            
+            var key = parts[0].Trim();
+            var valueStr = parts[1].Trim();
+            
+            // Try to parse different value types
+            if (float.TryParse(valueStr, NumberStyles.Float, CultureInfo.InvariantCulture, out float floatValue))
+            {
+                values[key] = floatValue;
+            }
+            else if (bool.TryParse(valueStr, out bool boolValue))
+            {
+                values[key] = boolValue;
+            }
+            else if (valueStr.StartsWith("(") && valueStr.EndsWith(")"))
+            {
+                // Vector parsing: (x,y) or (x,y,z,w)
+                var vectorStr = valueStr.Trim('(', ')');
+                var components = vectorStr.Split(',').Select(s => float.TryParse(s.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out float f) ? f : 0f).ToArray();
+                
+                if (components.Length == 2)
+                    values[key] = new Vector2(components[0], components[1]);
+                else if (components.Length == 4)
+                    values[key] = new Vector4(components[0], components[1], components[2], components[3]);
+            }
+        }
+        
+        if (values.Any())
+        {
+            ThemePresets.ApplyThemeFromValues(SpheneCustomTheme.CurrentTheme, values);
+        }
+    }
+
+    private void GetCurrentThemeValues()
+    {
+        var currentTheme = SpheneCustomTheme.CurrentTheme;
+        var values = ThemePresets.GetThemeValues(currentTheme);
+        
+        var lines = new List<string>();
+        foreach (var kvp in values)
+        {
+            var value = kvp.Value;
+            string valueStr;
+            
+            if (value is Vector2 v2)
+                valueStr = $"({v2.X.ToString("F1", CultureInfo.InvariantCulture)},{v2.Y.ToString("F1", CultureInfo.InvariantCulture)})";
+            else if (value is Vector4 v4)
+                valueStr = $"({v4.X.ToString("F2", CultureInfo.InvariantCulture)},{v4.Y.ToString("F2", CultureInfo.InvariantCulture)},{v4.Z.ToString("F2", CultureInfo.InvariantCulture)},{v4.W.ToString("F2", CultureInfo.InvariantCulture)})";
+            else if (value is bool b)
+                valueStr = b.ToString().ToLower();
+            else if (value is float f)
+                valueStr = f.ToString("F1", CultureInfo.InvariantCulture);
+            else
+                valueStr = value.ToString();
+            
+            lines.Add($"{kvp.Key}={valueStr}");
+        }
+        
+        _themeValuesInput = string.Join("\n", lines);
     }
 }

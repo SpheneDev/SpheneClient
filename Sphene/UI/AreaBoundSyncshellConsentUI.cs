@@ -1,0 +1,149 @@
+using Dalamud.Bindings.ImGui;
+using Dalamud.Interface.Colors;
+using Dalamud.Interface.Utility;
+using Dalamud.Interface.Utility.Raii;
+using Microsoft.Extensions.Logging;
+using Sphene.API.Dto.Group;
+using Sphene.Services;
+using Sphene.Services.Mediator;
+using System.Numerics;
+
+namespace Sphene.UI;
+
+public class AreaBoundSyncshellConsentUI : WindowMediatorSubscriberBase
+{
+    private readonly AreaBoundSyncshellService _areaBoundService;
+    private AreaBoundSyncshellConsentRequestMessage? _currentRequest;
+    private bool _rulesAccepted = false;
+    private string _errorMessage = string.Empty;
+
+    public AreaBoundSyncshellConsentUI(ILogger<AreaBoundSyncshellConsentUI> logger, 
+        SpheneMediator mediator, 
+        PerformanceCollectorService performanceCollectorService,
+        AreaBoundSyncshellService areaBoundService) 
+        : base(logger, mediator, "Area-Bound Syncshell Consent###AreaBoundSyncshellConsent", performanceCollectorService)
+    {
+        _areaBoundService = areaBoundService;
+        
+        Size = new Vector2(500, 400);
+        SizeCondition = ImGuiCond.FirstUseEver;
+        Flags = ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoCollapse;
+        
+        Mediator.Subscribe<AreaBoundSyncshellConsentRequestMessage>(this, OnConsentRequest);
+    }
+
+    private void OnConsentRequest(AreaBoundSyncshellConsentRequestMessage message)
+    {
+        _currentRequest = message;
+        _rulesAccepted = false;
+        _errorMessage = string.Empty;
+        IsOpen = true;
+        _logger.LogDebug("Received consent request for syncshell: {syncshellId}", message.Syncshell.Group.GID);
+    }
+
+    protected override void DrawInternal()
+    {
+        if (_currentRequest == null) return;
+
+        var syncshell = _currentRequest.Syncshell;
+        
+        // Header
+        ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.2f, 0.8f, 1.0f, 1.0f));
+        ImGui.Text($"Join Area-Bound Syncshell");
+        ImGui.PopStyleColor();
+        
+        ImGui.Separator();
+        
+        // Display syncshell information
+        ImGui.Text($"Syncshell: {_currentRequest.Syncshell.Group.AliasOrGID}");
+        ImGui.Text($"ID: {_currentRequest.Syncshell.Group.GID}");
+        
+        // Rules section
+        if (_currentRequest.RequiresRulesAcceptance && !string.IsNullOrEmpty(syncshell.Settings.JoinRules))
+        {
+            ImGui.Separator();
+            ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 0.8f, 0.2f, 1.0f));
+            ImGui.Text("Rules (must be accepted to join):");
+            ImGui.PopStyleColor();
+            
+            // Rules text box
+            using var child = ImRaii.Child("RulesText", new Vector2(0, 100), true);
+            if (child)
+            {
+                ImGui.TextWrapped(syncshell.Settings.JoinRules);
+            }
+            
+            ImGui.Separator();
+            ImGui.Checkbox("I accept the rules and agree to follow them", ref _rulesAccepted);
+        }
+        else
+        {
+            _rulesAccepted = true; // No rules to accept
+        }
+        
+        // Error message
+        if (!string.IsNullOrEmpty(_errorMessage))
+        {
+            ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 0.3f, 0.3f, 1.0f));
+            ImGui.TextWrapped(_errorMessage);
+            ImGui.PopStyleColor();
+        }
+        
+        ImGui.Separator();
+        
+        // Buttons
+        var buttonWidth = (ImGui.GetContentRegionAvail().X - ImGui.GetStyle().ItemSpacing.X) / 2;
+        
+        // Accept button
+        bool canAccept = !_currentRequest.RequiresRulesAcceptance || _rulesAccepted;
+        using (ImRaii.Disabled(!canAccept))
+        {
+            if (ImGui.Button("Accept and Join", new Vector2(buttonWidth, 0)))
+            {
+                HandleAccept();
+            }
+        }
+        
+        if (!canAccept && ImGui.IsItemHovered())
+        {
+            ImGui.SetTooltip("You must accept the rules to join this syncshell");
+        }
+        
+        ImGui.SameLine();
+        
+        // Decline button
+        if (ImGui.Button("Decline", new Vector2(buttonWidth, 0)))
+        {
+            _logger.LogDebug("User declined consent for syncshell: {syncshellId}", _currentRequest.Syncshell.Group.GID);
+            _currentRequest = null;
+            IsOpen = false;
+        }
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            Mediator.UnsubscribeAll(this);
+        }
+        base.Dispose(disposing);
+    }
+
+    private async void HandleAccept()
+    {
+        _logger.LogDebug("User accepted consent for syncshell: {syncshellId}", _currentRequest.Syncshell.Group.GID);
+        
+        try
+        {
+            await _areaBoundService.JoinAreaBoundSyncshell(_currentRequest.Syncshell.Group.GID, _rulesAccepted, _currentRequest.Syncshell.Settings.RulesVersion);
+            _currentRequest = null;
+            IsOpen = false;
+            _errorMessage = string.Empty;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error joining area-bound syncshell");
+            _errorMessage = "Failed to join syncshell. Please try again.";
+        }
+    }
+}

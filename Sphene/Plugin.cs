@@ -91,6 +91,7 @@ public sealed class Plugin : IDalamudPlugin
             collection.AddSingleton<FileDialogManager>();
             collection.AddSingleton(new Dalamud.Localization("Sphene.Localization.", "", useEmbedded: true));
             collection.AddSingleton(commandManager);
+            collection.AddSingleton(framework);
 
             // add sphene related singletons
             collection.AddSingleton<SpheneMediator>();
@@ -125,6 +126,12 @@ public sealed class Plugin : IDalamudPlugin
             collection.AddSingleton<CharaDataNearbyManager>();
             collection.AddSingleton<CharaDataGposeTogetherManager>();
             collection.AddSingleton<TextureBackupService>();
+            collection.AddSingleton(s => new HousingOwnershipService(
+                s.GetRequiredService<ILogger<HousingOwnershipService>>(),
+                s.GetRequiredService<DalamudUtilService>(),
+                s.GetRequiredService<SpheneConfigService>(),
+                s.GetRequiredService<ApiController>(),
+                condition));
 
             collection.AddSingleton(s => new VfxSpawnManager(s.GetRequiredService<ILogger<VfxSpawnManager>>(),
                 gameInteropProvider, s.GetRequiredService<SpheneMediator>()));
@@ -197,6 +204,8 @@ public sealed class Plugin : IDalamudPlugin
             collection.AddSingleton((s) => new XivDataStorageService(pluginInterface.ConfigDirectory.FullName));
             collection.AddSingleton((s) => new PlayerPerformanceConfigService(pluginInterface.ConfigDirectory.FullName));
             collection.AddSingleton((s) => new CharaDataConfigService(pluginInterface.ConfigDirectory.FullName));
+            collection.AddSingleton<AreaBoundSyncshellService>();
+            collection.AddSingleton<CitySyncshellService>();
             collection.AddSingleton<IConfigService<ISpheneConfiguration>>(s => s.GetRequiredService<SpheneConfigService>());
             collection.AddSingleton<IConfigService<ISpheneConfiguration>>(s => s.GetRequiredService<ServerConfigService>());
             collection.AddSingleton<IConfigService<ISpheneConfiguration>>(s => s.GetRequiredService<NotesConfigService>());
@@ -227,6 +236,20 @@ public sealed class Plugin : IDalamudPlugin
             collection.AddScoped<WindowMediatorSubscriberBase, EventViewerUI>();
             collection.AddScoped<WindowMediatorSubscriberBase, CharaDataHubUi>();
             collection.AddScoped<WindowMediatorSubscriberBase, StatusDebugUi>();
+            collection.AddScoped<WindowMediatorSubscriberBase, AreaBoundSyncshellConsentUI>();
+            collection.AddScoped<WindowMediatorSubscriberBase, AreaBoundSyncshellSelectionUI>();
+            collection.AddSingleton<WindowMediatorSubscriberBase, CitySyncshellExplanationUI>((s) =>
+            {
+                var logger = s.GetRequiredService<ILogger<CitySyncshellExplanationUI>>();
+                logger.LogDebug("CitySyncshellExplanationUI factory method called - creating instance");
+                var mediator = s.GetRequiredService<SpheneMediator>();
+                var performanceService = s.GetRequiredService<PerformanceCollectorService>();
+                var configService = s.GetRequiredService<SpheneConfigService>();
+                var instance = new CitySyncshellExplanationUI(logger, mediator, performanceService, configService);
+                logger.LogDebug("CitySyncshellExplanationUI factory method completed - instance created");
+                return instance;
+            });
+            collection.AddScoped<WindowMediatorSubscriberBase, WelcomePageLivePreviewUI>();
             collection.AddSingleton<WindowMediatorSubscriberBase, UpdateNotificationUi>((s) => new UpdateNotificationUi(
                 s.GetRequiredService<ILogger<UpdateNotificationUi>>(),
                 s.GetRequiredService<UiSharedService>(),
@@ -285,6 +308,16 @@ public sealed class Plugin : IDalamudPlugin
             collection.AddHostedService(p => p.GetRequiredService<IpcProvider>());
             collection.AddHostedService(p => p.GetRequiredService<LoginHandler>());
             collection.AddHostedService(p => p.GetRequiredService<UpdateCheckService>());
+            // Initialize CitySyncshellExplanationUI early as hosted service to ensure it's created before CitySyncshellService
+            collection.AddHostedService(p => 
+            {
+                // Force creation of CitySyncshellExplanationUI singleton - get it as WindowMediatorSubscriberBase
+                var windows = p.GetServices<WindowMediatorSubscriberBase>();
+                var citySyncshellUI = windows.OfType<CitySyncshellExplanationUI>().FirstOrDefault();
+                return new DummyHostedService();
+            });
+            collection.AddHostedService(p => p.GetRequiredService<AreaBoundSyncshellService>());
+            collection.AddHostedService(p => p.GetRequiredService<CitySyncshellService>());
             collection.AddHostedService(p => p.GetRequiredService<SphenePlugin>());
         })
         .Build();

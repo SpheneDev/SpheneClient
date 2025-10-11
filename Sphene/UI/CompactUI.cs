@@ -146,9 +146,12 @@ public class CompactUi : WindowMediatorSubscriberBase
                 IconOffset = new(2,1),
                 ShowTooltip = () =>
                 {
-                    ImGui.BeginTooltip();
-                    ImGui.Text("Open Network Configuration");
-                    ImGui.EndTooltip();
+                    using (SpheneCustomTheme.ApplyTooltipTheme())
+                    {
+                        ImGui.BeginTooltip();
+                        ImGui.Text("Open Network Configuration");
+                        ImGui.EndTooltip();
+                    }
                 }
             },
             new TitleBarButton()
@@ -161,9 +164,12 @@ public class CompactUi : WindowMediatorSubscriberBase
                 IconOffset = new(2,1),
                 ShowTooltip = () =>
                 {
-                    ImGui.BeginTooltip();
-                    ImGui.Text("Open Network Event Log");
-                    ImGui.EndTooltip();
+                    using (SpheneCustomTheme.ApplyTooltipTheme())
+                    {
+                        ImGui.BeginTooltip();
+                        ImGui.Text("Open Network Event Log");
+                        ImGui.EndTooltip();
+                    }
                 }
             }
         };
@@ -190,9 +196,8 @@ public class CompactUi : WindowMediatorSubscriberBase
         Mediator.Subscribe<CharacterDataAnalyzedMessage>(this, (_) => _lastBackupAnalysisUpdate = DateTime.MinValue);
         Mediator.Subscribe<ShowUpdateNotificationMessage>(this, (msg) => _updateBannerInfo = msg.UpdateInfo);
 
-        // Make window practically invisible - no decoration, no background, no borders
-        Flags |= ImGuiWindowFlags.NoDocking | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse 
-               | ImGuiWindowFlags.NoDecoration | ImGuiWindowFlags.NoBackground | ImGuiWindowFlags.NoBringToFrontOnFocus;
+        // Configure base window flags
+        Flags |= ImGuiWindowFlags.NoDocking | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse;
 
         UpdateSizeConstraints();
         
@@ -202,24 +207,12 @@ public class CompactUi : WindowMediatorSubscriberBase
 
     private void UpdateSizeConstraints()
     {
-        if (_configService.Current.IsWidthLocked)
+        // Use normal size constraints for all cases since we now handle width locking via resize handler behavior
+        SizeConstraints = new WindowSizeConstraints()
         {
-            // When width is locked, set both min and max width to the locked value
-            SizeConstraints = new WindowSizeConstraints()
-            {
-                MinimumSize = new Vector2(_configService.Current.LockedWidth, 400),
-                MaximumSize = new Vector2(_configService.Current.LockedWidth, 2000),
-            };
-        }
-        else
-        {
-            // Normal size constraints when width is not locked
-            SizeConstraints = new WindowSizeConstraints()
-            {
-                MinimumSize = new Vector2(370, 400),
-                MaximumSize = new Vector2(800, 2000),
-            };
-        }
+            MinimumSize = new Vector2(370 * ImGuiHelpers.GlobalScale, 400 * ImGuiHelpers.GlobalScale),
+            MaximumSize = new Vector2(800 * ImGuiHelpers.GlobalScale, 2000 * ImGuiHelpers.GlobalScale),
+        };
     }
 
     private void OnConfigurationChanged(object? sender, EventArgs e)
@@ -248,15 +241,39 @@ public class CompactUi : WindowMediatorSubscriberBase
         base.Dispose(disposing);
     }
 
+    private IDisposable? _themeScope;
+
     public override void PreDraw()
     {
+        // Apply CompactUI theme before the window is drawn
+        _themeScope = SpheneCustomTheme.ApplyThemeWithOriginalRadius();
+        
+        // Update window flags based on current theme settings
+        if (!SpheneCustomTheme.CurrentTheme.CompactShowImGuiHeader)
+        {
+            Flags |= ImGuiWindowFlags.NoTitleBar;
+        }
+        else
+        {
+            Flags &= ~ImGuiWindowFlags.NoTitleBar;
+        }
+        
         // Apply any pending window resize before the window is drawn
-        SpheneUIEnhancements.ApplyPendingWindowResize(GetControlPanelTitle());
+        UiSharedService.ApplyPendingWindowResize(GetControlPanelTitle());
         base.PreDraw();
+    }
+
+    public override void PostDraw()
+    {
+        // Dispose theme scope after drawing
+        _themeScope?.Dispose();
+        _themeScope = null;
+        base.PostDraw();
     }
 
     protected override void DrawInternal()
     {
+        // Theme is already applied in PreDraw, no need to apply it again here
         
         _windowContentWidth = UiSharedService.GetBaseFolderWidth(); // Use consistent width calculation
 
@@ -270,10 +287,10 @@ public class CompactUi : WindowMediatorSubscriberBase
                 var uidTextSize = ImGui.CalcTextSize(unsupported);
                 ImGui.SetCursorPosX((ImGui.GetWindowContentRegionMax().X + ImGui.GetWindowContentRegionMin().X) / 2 - uidTextSize.X / 2);
                 ImGui.AlignTextToFramePadding();
-                ImGui.TextColored(ImGuiColors.DalamudRed, unsupported);
+                ImGui.TextColored(SpheneCustomTheme.Colors.Error, unsupported);
             }
             UiSharedService.ColorTextWrapped($"Your Network client is outdated, current version is {ver.Major}.{ver.Minor}.{ver.Build}. " +
-            $"Please update your client to maintain Network compatibility. Open /xlplugins and update the plugin.", ImGuiColors.DalamudRed);
+            $"Please update your client to maintain Network compatibility. Open /xlplugins and update the plugin.", SpheneCustomTheme.Colors.Error);
         }
 
         if (!_ipcManager.Initialized)
@@ -285,12 +302,12 @@ public class CompactUi : WindowMediatorSubscriberBase
                 var uidTextSize = ImGui.CalcTextSize(unsupported);
                 ImGui.SetCursorPosX((ImGui.GetWindowContentRegionMax().X + ImGui.GetWindowContentRegionMin().X) / 2 - uidTextSize.X / 2);
                 ImGui.AlignTextToFramePadding();
-                ImGui.TextColored(ImGuiColors.DalamudRed, unsupported);
+                ImGui.TextColored(SpheneCustomTheme.Colors.Error, unsupported);
             }
             var penumAvailable = _ipcManager.Penumbra.APIAvailable;
             var glamAvailable = _ipcManager.Glamourer.APIAvailable;
 
-            UiSharedService.ColorTextWrapped($"One or more components essential for Network operation are unavailable. Enable or update the following:", ImGuiColors.DalamudRed);
+            UiSharedService.ColorTextWrapped($"One or more components essential for Network operation are unavailable. Enable or update the following:", SpheneCustomTheme.Colors.Error);
             using var indent = ImRaii.PushIndent(10f);
             if (!penumAvailable)
             {
@@ -305,132 +322,88 @@ public class CompactUi : WindowMediatorSubscriberBase
             ImGui.Separator();
         }
 
-        // Single unified card layout with integrated controls and header buttons
-#if DEBUG
-        // Use reddish background for debug builds
-        var debugHeaderBg = ImGui.ColorConvertFloat4ToU32(new Vector4(0.8f, 0.2f, 0.2f, 0.6f)); // Reddish with transparency
-#endif
-        SpheneUIEnhancements.DrawSpheneCard(GetControlPanelTitle(), () => {
-            // Network Identity Section
-            ImGui.TextColored(SpheneColors.SpheneGold, "Regulator ID");
-            ImGui.Separator();
-            DrawUIDContent();
-            
+        // Draw window header with title and buttons only if ImGui header is disabled
+        if (!SpheneCustomTheme.CurrentTheme.CompactShowImGuiHeader)
+        {
+            DrawWindowHeader();
+        }
+        
+        // Main content area
+        // Network Identity Section
+        ImGui.Spacing();
+        ImGui.PushStyleColor(ImGuiCol.Text, SpheneCustomTheme.CurrentTheme.CompactHeaderText);
+        ImGui.Text("Regulator ID");
+        ImGui.PopStyleColor();
+        ImGui.Separator();
+        DrawUIDContent();
+        
+        ImGui.Spacing();
+        
+        // Server Status Section
+        ImGui.PushStyleColor(ImGuiCol.Text, SpheneCustomTheme.CurrentTheme.CompactHeaderText);
+        ImGui.Text("Server & Character Status");
+        ImGui.PopStyleColor();
+        ImGui.Separator();
+        DrawServerStatusContent();
+        
+    
+        ImGui.Spacing();
+        
+        if (_apiController.ServerState is ServerState.Connected)
+        {
             ImGui.Spacing();
-            ImGui.Spacing();
-            
-            // Server Status Section
-            ImGui.TextColored(SpheneColors.SpheneGold, "Server & Character Status");
-            ImGui.Separator();
-            DrawServerStatusContent();
-            
-            ImGui.Spacing();
-            ImGui.Spacing();
-            
 
             
-            if (_apiController.ServerState is ServerState.Connected)
-            {
-                ImGui.Spacing();
-                ImGui.Spacing();
-                
-                // Navigation Section
-                ImGui.TextColored(SpheneColors.SpheneGold, "Navigation");
-                ImGui.Separator();
-                _tabMenu.Draw();
-                
-                ImGui.Spacing();
-                ImGui.Spacing();
-                
-                // Connected Pairs Section
-                var onlineCount = _pairManager.DirectPairs.Count(p => p.IsOnline);
-                var totalCount = _pairManager.DirectPairs.Count;
-                var onlineText = $"({onlineCount} / {totalCount}) online";
-                var onlineTextSize = ImGui.CalcTextSize(onlineText);
-                
-                ImGui.TextColored(SpheneColors.SpheneGold, "Connected Pairs");
-                ImGui.SameLine(ImGui.GetContentRegionAvail().X - onlineTextSize.X);
-                ImGui.TextColored(SpheneColors.SpheneGold, onlineText);
-                ImGui.Separator();
-                using (ImRaii.PushId("pairlist")) DrawPairs();
-                
+            // Navigation Section
+            SpheneCustomTheme.DrawStyledText("Navigation", SpheneCustomTheme.CurrentTheme.CompactHeaderText);
+            ImGui.Separator();
+            _tabMenu.Draw();
 
-                float pairlistEnd = ImGui.GetCursorPosY();
-                using (ImRaii.PushId("transfers")) DrawTransfers();
-                _transferPartHeight = ImGui.GetCursorPosY() - pairlistEnd - ImGui.GetTextLineHeight();
-                using (ImRaii.PushId("group-user-popup")) _selectPairsForGroupUi.Draw(_pairManager.DirectPairs);
-                using (ImRaii.PushId("grouping-popup")) _selectGroupForPairUi.Draw();
-            }
-        }, false, null, () => {
-            // Settings button
-            ImGui.SetCursorPosY(ImGui.GetCursorPosY() - 3.0f);
-            ImGui.SetCursorPosX(ImGui.GetCursorPosX() - 12.0f);
-            if (_uiSharedService.IconButton(FontAwesomeIcon.Cog))
-            {
-                Mediator.Publish(new UiToggleMessage(typeof(SettingsUi)));
-            }
-            if (ImGui.IsItemHovered())
-            {
-                ImGui.BeginTooltip();
-                ImGui.Text("Open Network Configuration");
-                ImGui.EndTooltip();
-            }
+            ImGui.Spacing();
+
             
-            // Close button
-            ImGui.SameLine();
-            ImGui.SetCursorPosY(ImGui.GetCursorPosY() + 0.0f);
-            ImGui.SetCursorPosX(ImGui.GetCursorPosX() - 5.0f);
-            if (_uiSharedService.IconButton(FontAwesomeIcon.Times))
+            // Connected Pairs Section
+            var onlineCount = _pairManager.DirectPairs.Count(p => p.IsOnline);
+            var totalCount = _pairManager.DirectPairs.Count;
+            var onlineText = $"({onlineCount} / {totalCount}) online";
+            var onlineTextSize = ImGui.CalcTextSize(onlineText);
+            
+            SpheneCustomTheme.DrawStyledText("Connected Pairs", SpheneCustomTheme.CurrentTheme.CompactHeaderText);
+            ImGui.SameLine(ImGui.GetContentRegionAvail().X - onlineTextSize.X);
+            SpheneCustomTheme.DrawStyledText(onlineText, SpheneCustomTheme.CurrentTheme.CompactConnectedText);
+            ImGui.Separator();
+            using (ImRaii.PushId("pairlist")) DrawPairs();
+            
+            float pairlistEnd = ImGui.GetCursorPosY();
+            using (ImRaii.PushId("transfers")) DrawTransfers();
+            _transferPartHeight = ImGui.GetCursorPosY() - pairlistEnd - ImGui.GetTextLineHeight();
+            using (ImRaii.PushId("group-user-popup")) _selectPairsForGroupUi.Draw(_pairManager.DirectPairs);
+            using (ImRaii.PushId("grouping-popup")) _selectGroupForPairUi.Draw();
+        }
+        
+        // Draw update notification at bottom if available
+        if (_updateBannerInfo?.IsUpdateAvailable == true)
+        {
+            ImGui.Separator();
+            using (ImRaii.PushId("update-hint-footer"))
             {
-                _logger.LogDebug("Close button clicked, closing CompactUI");
-                IsOpen = false;
+                using (var font = ImRaii.PushFont(UiBuilder.IconFont))
+                {
+                    ImGui.TextColored(SpheneCustomTheme.Colors.Warning, FontAwesomeIcon.InfoCircle.ToIconString());
+                }
+                ImGui.SameLine();
+                UiSharedService.ColorTextWrapped($"Update available: {_updateBannerInfo.LatestVersion}", SpheneCustomTheme.Colors.Warning);
+                ImGui.SameLine();
+                if (_uiSharedService.IconTextButton(FontAwesomeIcon.Download, "Open Details"))
+                {
+                    _logger.LogDebug("Update details button clicked, toggling UpdateNotificationUi");
+                    Mediator.Publish(new UiToggleMessage(typeof(UpdateNotificationUi)));
+                }
             }
-            if (ImGui.IsItemHovered())
-            {
-                ImGui.BeginTooltip();
-                ImGui.Text("Close Sphene");
-                ImGui.EndTooltip();
-            }
-        }, true, SizeConstraints?.MinimumSize, SizeConstraints?.MaximumSize,
-#if DEBUG
-        debugHeaderBg,
-#else
-        0,
-#endif
-        _configService.Current.IsWidthLocked, // isWidthLocked
-         () => {
-             _configService.Current.IsWidthLocked = !_configService.Current.IsWidthLocked;
-             if (_configService.Current.IsWidthLocked)
-             {
-                 // Store current CompactUI window width when locking - use _lastSize for consistency
-                 _configService.Current.LockedWidth = _lastSize.X;
-             }
-             _configService.Save();
-             UpdateSizeConstraints();
-         }, // onLockToggle
-         _configService.Current.IsWidthLocked ? "Unlock window width" : "Lock window width", // lockTooltip
-         // bottomOverlay to draw update hint
-         () => {
-             if (_updateBannerInfo?.IsUpdateAvailable == true)
-             {
-                 using (ImRaii.PushId("update-hint-footer"))
-                 {
-                     using (var font = ImRaii.PushFont(UiBuilder.IconFont))
-                     {
-                         ImGui.TextColored(ImGuiColors.DalamudYellow, FontAwesomeIcon.InfoCircle.ToIconString());
-                     }
-                     ImGui.SameLine();
-                     UiSharedService.ColorTextWrapped($"Update available: {_updateBannerInfo.LatestVersion}", ImGuiColors.DalamudYellow);
-                     ImGui.SameLine();
-                     if (_uiSharedService.IconTextButton(FontAwesomeIcon.Download, "Open Details"))
-                     {
-                         _logger.LogDebug("Update details button clicked, toggling UpdateNotificationUi");
-                         Mediator.Publish(new UiToggleMessage(typeof(UpdateNotificationUi)));
-                     }
-                 }
-             }
-         }
-        );
+        }
+        
+        // Draw resize handle
+        DrawResizeHandle();
 
         if (_configService.Current.OpenPopupOnAdd && _pairManager.LastAddedUser != null)
         {
@@ -441,26 +414,29 @@ public class CompactUi : WindowMediatorSubscriberBase
             _lastAddedUserComment = string.Empty;
         }
 
-        if (ImGui.BeginPopupModal("Set Notes for New User", ref _showModalForUserAddition, UiSharedService.PopupWindowFlags))
+        using (SpheneCustomTheme.ApplyContextMenuTheme())
         {
-            if (_lastAddedUser == null)
+            if (ImGui.BeginPopupModal("Set Notes for New User", ref _showModalForUserAddition, UiSharedService.PopupWindowFlags))
             {
-                _showModalForUserAddition = false;
-            }
-            else
-            {
-                UiSharedService.TextWrapped($"You have successfully added {_lastAddedUser.UserData.AliasOrUID}. Set a local note for the user in the field below:");
-                ImGui.InputTextWithHint("##noteforuser", $"Note for {_lastAddedUser.UserData.AliasOrUID}", ref _lastAddedUserComment, 100);
-                if (_uiSharedService.IconTextButton(FontAwesomeIcon.Save, "Save Note"))
+                if (_lastAddedUser == null)
                 {
-                    _serverManager.SetNoteForUid(_lastAddedUser.UserData.UID, _lastAddedUserComment);
-                    _lastAddedUser = null;
-                    _lastAddedUserComment = string.Empty;
                     _showModalForUserAddition = false;
                 }
+                else
+                {
+                    UiSharedService.TextWrapped($"You have successfully added {_lastAddedUser.UserData.AliasOrUID}. Set a local note for the user in the field below:");
+                    ImGui.InputTextWithHint("##noteforuser", $"Note for {_lastAddedUser.UserData.AliasOrUID}", ref _lastAddedUserComment, 100);
+                    if (_uiSharedService.IconTextButton(FontAwesomeIcon.Save, "Save Note"))
+                    {
+                        _serverManager.SetNoteForUid(_lastAddedUser.UserData.UID, _lastAddedUserComment);
+                        _lastAddedUser = null;
+                        _lastAddedUserComment = string.Empty;
+                        _showModalForUserAddition = false;
+                    }
+                }
+                UiSharedService.SetScaledWindowSize(275);
+                ImGui.EndPopup();
             }
-            UiSharedService.SetScaledWindowSize(275);
-            ImGui.EndPopup();
         }
 
         // Texture Conversion Popup
@@ -469,18 +445,15 @@ public class CompactUi : WindowMediatorSubscriberBase
         // Track window size changes for mediator notifications
         var pos = ImGui.GetWindowPos();
         var size = ImGui.GetWindowSize();
-        if (_lastSize != size || _lastPosition != pos)
+        
+        // Separate handling for size and position changes
+        var sizeChanged = _lastSize != size;
+        var positionChanged = _lastPosition != pos;
+        
+        if (sizeChanged || positionChanged)
         {
             _lastSize = size;
             _lastPosition = pos;
-            
-            // If width lock is enabled and width has changed, update the locked width
-            if (_configService.Current.IsWidthLocked && Math.Abs(_lastSize.X - _configService.Current.LockedWidth) > 1f)
-            {
-                _configService.Current.LockedWidth = _lastSize.X;
-                _configService.Save();
-                UpdateSizeConstraints();
-            }
             
             Mediator.Publish(new CompactUiChange(_lastSize, _lastPosition));
         }
@@ -493,7 +466,9 @@ public class CompactUi : WindowMediatorSubscriberBase
             : (ImGui.GetWindowContentRegionMax().Y - ImGui.GetWindowContentRegionMin().Y
                 + ImGui.GetTextLineHeight() - ImGui.GetStyle().WindowPadding.Y - ImGui.GetStyle().WindowBorderSize) - _transferPartHeight - ImGui.GetCursorPosY() - 15; // add some Space
 
-        ImGui.BeginChild("list", new Vector2(_windowContentWidth, ySize), border: false, ImGuiWindowFlags.NoScrollbar);
+        // Use full window content width with equal margins for the drawing area
+        var drawAreaWidth = ImGui.GetWindowContentRegionMax().X - ImGui.GetWindowContentRegionMin().X;
+        ImGui.BeginChild("list", new Vector2(drawAreaWidth, ySize), border: false, ImGuiWindowFlags.NoScrollbar);
 
         foreach (var item in _drawFolders)
         {
@@ -512,11 +487,11 @@ public class CompactUi : WindowMediatorSubscriberBase
         // Draw Sphene-themed status indicator
         var connectionStatus = _apiController.ServerState == ServerState.Connected ? "Connected" : "Disconnected";
         var statusColor = _apiController.ServerState == ServerState.Connected 
-            ? SpheneColors.CrystalBlue 
-            : SpheneColors.NetworkDisconnected;
+            ? SpheneCustomTheme.Colors.AccentCyan
+                : SpheneCustomTheme.Colors.Error;
         
         // Draw Sphene-themed status indicator with proper alignment
-        SpheneUIEnhancements.DrawSpheneStatusIndicator(connectionStatus, _apiController.ServerState == ServerState.Connected);
+        _uiSharedService.DrawThemedStatusIndicator(connectionStatus, _apiController.ServerState == ServerState.Connected);
         
         // Always show reconnect button with proper alignment
         ImGui.SameLine();
@@ -526,20 +501,18 @@ public class CompactUi : WindowMediatorSubscriberBase
         var reconnectTimeSinceLastClick = reconnectCurrentTime - _lastReconnectButtonClick;
         var isReconnectButtonDisabled = reconnectTimeSinceLastClick.TotalSeconds < 5.0;
         
-        var reconnectColor = isReconnectButtonDisabled ? ImGuiColors.DalamudGrey : ImGuiColors.DalamudWhite;
+        var reconnectColor = isReconnectButtonDisabled ? SpheneCustomTheme.CurrentTheme.TextSecondary : SpheneCustomTheme.CurrentTheme.TextPrimary;
         ImGui.PushStyleColor(ImGuiCol.Text, reconnectColor);
-        ImGui.PushFont(UiBuilder.IconFont);
         
         using (ImRaii.Disabled(isReconnectButtonDisabled))
         {
-            if (ImGui.Button(FontAwesomeIcon.Redo.ToIconString(), new Vector2(22, 22)))
+            if (_uiSharedService.IconButton(FontAwesomeIcon.Redo, 22f))
             {
                 _lastReconnectButtonClick = reconnectCurrentTime;
                 _ = Task.Run(() => _apiController.CreateConnectionsAsync());
             }
         }
         
-        ImGui.PopFont();
         ImGui.PopStyleColor();
         
         var reconnectTooltipText = "Reconnect to the Sphene Network";
@@ -561,41 +534,35 @@ public class CompactUi : WindowMediatorSubscriberBase
         if (_isIncognitoModeActive)
         {
             // Resume mode - use play icon
-            var resumeIcon = FontAwesomeIcon.Play;
-            var resumeColor = isButtonDisabled ? ImGuiColors.DalamudGrey : ImGuiColors.ParsedGreen;
+            var resumeColor = isButtonDisabled ? SpheneCustomTheme.CurrentTheme.TextSecondary : SpheneCustomTheme.Colors.Success;
             ImGui.PushStyleColor(ImGuiCol.Text, resumeColor);
-            ImGui.PushFont(UiBuilder.IconFont);
             
             using (ImRaii.Disabled(isButtonDisabled))
             {
-                if (ImGui.Button(resumeIcon.ToIconString(), new Vector2(22, 22)))
+                if (_uiSharedService.IconButton(FontAwesomeIcon.Play, 22f))
                 {
                     _lastIncognitoButtonClick = currentTime;
                     _ = Task.Run(() => HandleIncognitoModeToggle());
                 }
             }
             
-            ImGui.PopFont();
             ImGui.PopStyleColor();
         }
         else
         {
             // Incognito Mode - use red heart icon
-            var incognitoIcon = FontAwesomeIcon.Heart;
-            var incognitoColor = isButtonDisabled ? ImGuiColors.DalamudGrey : ImGuiColors.DalamudRed;
+            var incognitoColor = isButtonDisabled ? SpheneCustomTheme.CurrentTheme.TextSecondary : SpheneCustomTheme.Colors.Error;
             ImGui.PushStyleColor(ImGuiCol.Text, incognitoColor);
-            ImGui.PushFont(UiBuilder.IconFont);
             
             using (ImRaii.Disabled(isButtonDisabled))
             {
-                if (ImGui.Button(incognitoIcon.ToIconString(), new Vector2(22, 22)))
+                if (_uiSharedService.IconButton(FontAwesomeIcon.Heart, 22f))
                 {
                     _lastIncognitoButtonClick = currentTime;
                     _ = Task.Run(() => HandleIncognitoModeToggle());
                 }
             }
             
-            ImGui.PopFont();
             ImGui.PopStyleColor();
         }
         var tooltipText = _isIncognitoModeActive ? "Resume - Unpause all pairs and reconnect syncshells" : "Incognito Mode - Pause all pairs and syncshells except party members";
@@ -654,7 +621,7 @@ public class CompactUi : WindowMediatorSubscriberBase
             var uploadProgress = totalToUpload > 0 ? (float)totalUploaded / totalToUpload : 0f;
             var uploadText = $"{doneUploads}/{totalUploads} ({UiSharedService.ByteToString(totalUploaded)}/{UiSharedService.ByteToString(totalToUpload)})";
             
-            SpheneUIEnhancements.DrawSpheneProgressBar("Transmitting", uploadProgress, uploadText, SpheneColors.TransmissionActive);
+            _uiSharedService.DrawThemedProgressBar("Transmitting", uploadProgress, uploadText, SpheneCustomTheme.Colors.AccentBlue);
         }
 
         // Only show download progress if there are active downloads
@@ -672,7 +639,7 @@ public class CompactUi : WindowMediatorSubscriberBase
             var downloadProgress = totalToDownload > 0 ? (float)totalDownloaded / totalToDownload : 0f;
             var downloadText = $"{doneDownloads}/{totalDownloads} ({UiSharedService.ByteToString(totalDownloaded)}/{UiSharedService.ByteToString(totalToDownload)})";
             
-            SpheneUIEnhancements.DrawSpheneProgressBar("Receiving", downloadProgress, downloadText, SpheneColors.ReceptionActive);
+            _uiSharedService.DrawThemedProgressBar("Receiving", downloadProgress, downloadText, SpheneCustomTheme.Colors.AccentCyan);
         }
     }
 
@@ -689,7 +656,13 @@ public class CompactUi : WindowMediatorSubscriberBase
         {
             var uidTextSize = ImGui.CalcTextSize(uidText);
             ImGui.SetCursorPosX((ImGui.GetWindowContentRegionMax().X - ImGui.GetWindowContentRegionMin().X) / 2 - (uidTextSize.X / 2));
-            ImGui.TextColored(GetUidColor(), uidText);
+            
+            // Use CompactUidColor for connected state, server status colors for other states
+            var uidColor = _apiController.ServerState == ServerState.Connected 
+                ? SpheneCustomTheme.CurrentTheme.CompactUidColor 
+                : GetServerStatusColor();
+            
+            ImGui.TextColored(uidColor, uidText);
         }
 
         if (_apiController.ServerState is ServerState.Connected)
@@ -700,21 +673,12 @@ public class CompactUi : WindowMediatorSubscriberBase
             }
             UiSharedService.AttachToolTip("Click to copy");
 
-            if (!string.Equals(_apiController.DisplayName, _apiController.UID, StringComparison.Ordinal))
-            {
-                var origTextSize = ImGui.CalcTextSize(_apiController.UID);
-                ImGui.SetCursorPosX((ImGui.GetWindowContentRegionMax().X - ImGui.GetWindowContentRegionMin().X) / 2 - (origTextSize.X / 2));
-                ImGui.TextColored(GetUidColor(), _apiController.UID);
-                if (ImGui.IsItemClicked())
-                {
-                    ImGui.SetClipboardText(_apiController.UID);
-                }
-                UiSharedService.AttachToolTip("Click to copy");
-            }
+            // Only show original UID if DisplayName equals UID (no alias available)
+            // When alias is available, we only show the alias and hide the original UID
         }
         else
         {
-            UiSharedService.ColorTextWrapped(GetServerError(), GetUidColor());
+            UiSharedService.ColorTextWrapped(GetServerError(), GetServerStatusColor());
         }
     }
 
@@ -936,21 +900,43 @@ public class CompactUi : WindowMediatorSubscriberBase
     {
         return _apiController.ServerState switch
         {
-            ServerState.Connecting => ImGuiColors.DalamudYellow,
-            ServerState.Reconnecting => ImGuiColors.DalamudRed,
-            ServerState.Connected => ImGuiColors.ParsedGreen,
-            ServerState.Disconnected => ImGuiColors.DalamudYellow,
-            ServerState.Disconnecting => ImGuiColors.DalamudYellow,
-            ServerState.Unauthorized => ImGuiColors.DalamudRed,
-            ServerState.VersionMisMatch => ImGuiColors.DalamudRed,
-            ServerState.Offline => ImGuiColors.DalamudRed,
-            ServerState.RateLimited => ImGuiColors.DalamudYellow,
-            ServerState.NoSecretKey => ImGuiColors.DalamudYellow,
-            ServerState.MultiChara => ImGuiColors.DalamudYellow,
-            ServerState.OAuthMisconfigured => ImGuiColors.DalamudRed,
-            ServerState.OAuthLoginTokenStale => ImGuiColors.DalamudRed,
-            ServerState.NoAutoLogon => ImGuiColors.DalamudYellow,
-            _ => ImGuiColors.DalamudRed
+            ServerState.Connecting => SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning,
+            ServerState.Reconnecting => SpheneCustomTheme.CurrentTheme.CompactServerStatusError,
+            ServerState.Connected => SpheneCustomTheme.CurrentTheme.CompactServerStatusConnected,
+            ServerState.Disconnected => SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning,
+            ServerState.Disconnecting => SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning,
+            ServerState.Unauthorized => SpheneCustomTheme.CurrentTheme.CompactServerStatusError,
+            ServerState.VersionMisMatch => SpheneCustomTheme.CurrentTheme.CompactServerStatusError,
+            ServerState.Offline => SpheneCustomTheme.CurrentTheme.CompactServerStatusError,
+            ServerState.RateLimited => SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning,
+            ServerState.NoSecretKey => SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning,
+            ServerState.MultiChara => SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning,
+            ServerState.OAuthMisconfigured => SpheneCustomTheme.CurrentTheme.CompactServerStatusError,
+            ServerState.OAuthLoginTokenStale => SpheneCustomTheme.CurrentTheme.CompactServerStatusError,
+            ServerState.NoAutoLogon => SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning,
+            _ => SpheneCustomTheme.CurrentTheme.CompactServerStatusError
+        };
+    }
+
+    private Vector4 GetServerStatusColor()
+    {
+        return _apiController.ServerState switch
+        {
+            ServerState.Connecting => SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning,
+            ServerState.Reconnecting => SpheneCustomTheme.CurrentTheme.CompactServerStatusError,
+            ServerState.Connected => SpheneCustomTheme.CurrentTheme.CompactServerStatusConnected,
+            ServerState.Disconnected => SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning,
+            ServerState.Disconnecting => SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning,
+            ServerState.Unauthorized => SpheneCustomTheme.CurrentTheme.CompactServerStatusError,
+            ServerState.VersionMisMatch => SpheneCustomTheme.CurrentTheme.CompactServerStatusError,
+            ServerState.Offline => SpheneCustomTheme.CurrentTheme.CompactServerStatusError,
+            ServerState.RateLimited => SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning,
+            ServerState.NoSecretKey => SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning,
+            ServerState.MultiChara => SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning,
+            ServerState.OAuthMisconfigured => SpheneCustomTheme.CurrentTheme.CompactServerStatusError,
+            ServerState.OAuthLoginTokenStale => SpheneCustomTheme.CurrentTheme.CompactServerStatusError,
+            ServerState.NoAutoLogon => SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning,
+            _ => SpheneCustomTheme.CurrentTheme.CompactServerStatusError
         };
     }
 
@@ -1201,15 +1187,15 @@ public class CompactUi : WindowMediatorSubscriberBase
 
         if (textureSizeMB <= 300)
         {
-            return (ImGuiColors.HealerGreen, $"Texture Size: Optimal ({textureSizeMB:F1} MB)", FontAwesomeIcon.CheckCircle);
+            return (SpheneCustomTheme.Colors.Success, $"Texture Size: Optimal ({textureSizeMB:F1} MB)", FontAwesomeIcon.CheckCircle);
         }
         else if (textureSizeMB <= 600)
         {
-            return (ImGuiColors.DalamudYellow, $"Texture Size: Large ({textureSizeMB:F1} MB)", FontAwesomeIcon.ExclamationTriangle);
+            return (SpheneCustomTheme.Colors.Warning, $"Texture Size: Large ({textureSizeMB:F1} MB)", FontAwesomeIcon.ExclamationTriangle);
         }
         else
         {
-            return (ImGuiColors.DalamudRed, $"Texture Size: Very Large ({textureSizeMB:F1} MB)", FontAwesomeIcon.ExclamationCircle);
+            return (SpheneCustomTheme.Colors.Error, $"Texture Size: Very Large ({textureSizeMB:F1} MB)", FontAwesomeIcon.ExclamationCircle);
         }
     }
 
@@ -1227,19 +1213,22 @@ public class CompactUi : WindowMediatorSubscriberBase
         
         if (ImGui.IsItemHovered())
         {
-            ImGui.BeginTooltip();
-            ImGui.TextColored(SpheneColors.SpheneGold, "Texture Size");
-            ImGui.Separator();
-            ImGui.Text($"Current: {textureSizeMB:F0} MB");
-            ImGui.Spacing();
-            ImGui.TextColored(ImGuiColors.ParsedGreen, "• 0-300 MB: Optimal");
-            ImGui.TextColored(ImGuiColors.DalamudYellow, "• 300-600 MB: Large");
-            ImGui.TextColored(ImGuiColors.DalamudRed, "• 600+ MB: Very Large");
-            ImGui.Spacing();
-            ImGui.Text("Use Data Analysis to optimize textures.");
-            ImGui.Spacing();
-            ImGui.TextColored(SpheneColors.SpheneGold, "💡 Tip: Click the archive button for quick conversion!");
-            ImGui.EndTooltip();
+            using (SpheneCustomTheme.ApplyTooltipTheme())
+            {
+                ImGui.BeginTooltip();
+                ImGui.TextColored(SpheneCustomTheme.Colors.SpheneGold, "Texture Size");
+                ImGui.Separator();
+                ImGui.Text($"Current: {textureSizeMB:F0} MB");
+                ImGui.Spacing();
+                ImGui.TextColored(SpheneCustomTheme.Colors.Success, "• 0-300 MB: Optimal");
+                    ImGui.TextColored(SpheneCustomTheme.Colors.Warning, "• 300-600 MB: Large");
+                    ImGui.TextColored(SpheneCustomTheme.Colors.Error, "• 600+ MB: Very Large");
+                ImGui.Spacing();
+                ImGui.Text("Use Data Analysis to optimize textures.");
+                ImGui.Spacing();
+                ImGui.TextColored(SpheneCustomTheme.Colors.SpheneGold, "💡 Tip: Click the archive button for quick conversion!");
+                ImGui.EndTooltip();
+            }
         }
     }
 
@@ -1260,86 +1249,89 @@ public class CompactUi : WindowMediatorSubscriberBase
         // Conversion progress modal
         if (_conversionTask != null && !_conversionTask.IsCompleted)
         {
-            if (ImGui.BeginPopupModal("BC7 Conversion in Progress", ImGuiWindowFlags.NoResize))
+            using (SpheneCustomTheme.ApplyContextMenuTheme())
             {
-                // Title and overall progress
-                ImGui.TextColored(SpheneColors.SpheneGold, "Converting Textures to BC7 Format");
-                ImGui.Separator();
-                
-                // Progress statistics
-                var totalFiles = _texturesToConvert.Count;
-                var currentFile = _conversionCurrentFileProgress;
-                var progressPercentage = totalFiles > 0 ? (float)currentFile / totalFiles : 0f;
-                var remainingFiles = totalFiles - currentFile;
-                
-                ImGui.Text($"Progress: {currentFile} / {totalFiles} files");
-                ImGui.Text($"Remaining: {remainingFiles} files");
-                ImGui.Text($"Percentage: {progressPercentage * 100:F1}%");
-                
-                // Estimated time remaining
-                if (currentFile > 0 && _conversionStartTime != DateTime.MinValue)
+                if (ImGui.BeginPopupModal("BC7 Conversion in Progress", ImGuiWindowFlags.NoResize))
                 {
-                    var elapsed = DateTime.Now - _conversionStartTime;
-                    var avgTimePerFile = elapsed.TotalSeconds / currentFile;
-                    var estimatedRemainingSeconds = avgTimePerFile * remainingFiles;
-                    var estimatedRemaining = TimeSpan.FromSeconds(estimatedRemainingSeconds);
+                    // Title and overall progress
+                    ImGui.TextColored(SpheneCustomTheme.Colors.SpheneGold, "Converting Textures to BC7 Format");
+                    ImGui.Separator();
                     
-                    ImGui.Text($"Elapsed: {elapsed:mm\\:ss}");
-                    if (remainingFiles > 0)
+                    // Progress statistics
+                    var totalFiles = _texturesToConvert.Count;
+                    var currentFile = _conversionCurrentFileProgress;
+                    var progressPercentage = totalFiles > 0 ? (float)currentFile / totalFiles : 0f;
+                    var remainingFiles = totalFiles - currentFile;
+                    
+                    ImGui.Text($"Progress: {currentFile} / {totalFiles} files");
+                    ImGui.Text($"Remaining: {remainingFiles} files");
+                    ImGui.Text($"Percentage: {progressPercentage * 100:F1}%");
+                    
+                    // Estimated time remaining
+                    if (currentFile > 0 && _conversionStartTime != DateTime.MinValue)
                     {
-                        ImGui.Text($"Estimated remaining: {estimatedRemaining:mm\\:ss}");
-                    }
-                }
-                
-                // Progress bar
-                ImGui.PushStyleColor(ImGuiCol.PlotHistogram, SpheneColors.SpheneGold);
-                ImGui.ProgressBar(progressPercentage, new Vector2(-1, 0), $"{progressPercentage * 100:F1}%");
-                ImGui.PopStyleColor();
-                
-                ImGui.Spacing();
-                
-                // Current file information
-                if (!string.IsNullOrEmpty(_conversionCurrentFileName))
-                {
-                    ImGui.TextColored(ImGuiColors.DalamudGrey3, "Currently processing:");
-                    
-                    // Extract filename from full path
-                    var fileName = Path.GetFileName(_conversionCurrentFileName);
-                    var directory = Path.GetDirectoryName(_conversionCurrentFileName);
-                    
-                    ImGui.Text($"File: {fileName}");
-                    if (!string.IsNullOrEmpty(directory))
-                    {
-                        ImGui.TextColored(ImGuiColors.DalamudGrey, $"Path: {directory}");
-                    }
-                    
-                    // Try to get file size if file exists
-                    try
-                    {
-                        if (File.Exists(_conversionCurrentFileName))
+                        var elapsed = DateTime.Now - _conversionStartTime;
+                        var avgTimePerFile = elapsed.TotalSeconds / currentFile;
+                        var estimatedRemainingSeconds = avgTimePerFile * remainingFiles;
+                        var estimatedRemaining = TimeSpan.FromSeconds(estimatedRemainingSeconds);
+                        
+                        ImGui.Text($"Elapsed: {elapsed:mm\\:ss}");
+                        if (remainingFiles > 0)
                         {
-                            var fileInfo = new FileInfo(_conversionCurrentFileName);
-                            var sizeInMB = fileInfo.Length / (1024.0 * 1024.0);
-                            ImGui.TextColored(ImGuiColors.DalamudGrey, $"Size: {sizeInMB:F2} MB");
+                            ImGui.Text($"Estimated remaining: {estimatedRemaining:mm\\:ss}");
                         }
                     }
-                    catch
+                    
+                    // Progress bar
+                    ImGui.PushStyleColor(ImGuiCol.PlotHistogram, SpheneCustomTheme.Colors.SpheneGold);
+                    ImGui.ProgressBar(progressPercentage, new Vector2(-1, 0), $"{progressPercentage * 100:F1}%");
+                    ImGui.PopStyleColor();
+                    
+                    ImGui.Spacing();
+                    
+                    // Current file information
+                    if (!string.IsNullOrEmpty(_conversionCurrentFileName))
                     {
-                        // Ignore file access errors
+                        ImGui.TextColored(SpheneCustomTheme.CurrentTheme.TextSecondary, "Currently processing:");
+                        
+                        // Extract filename from full path
+                        var fileName = Path.GetFileName(_conversionCurrentFileName);
+                        var directory = Path.GetDirectoryName(_conversionCurrentFileName);
+                        
+                        ImGui.Text($"File: {fileName}");
+                        if (!string.IsNullOrEmpty(directory))
+                        {
+                            ImGui.TextColored(SpheneCustomTheme.CurrentTheme.TextSecondary, $"Path: {directory}");
+                        }
+                        
+                        // Try to get file size if file exists
+                        try
+                        {
+                            if (File.Exists(_conversionCurrentFileName))
+                            {
+                                var fileInfo = new FileInfo(_conversionCurrentFileName);
+                                var sizeInMB = fileInfo.Length / (1024.0 * 1024.0);
+                                ImGui.TextColored(SpheneCustomTheme.CurrentTheme.TextSecondary, $"Size: {sizeInMB:F2} MB");
+                            }
+                        }
+                        catch
+                        {
+                            // Ignore file access errors
+                        }
                     }
+                    
+                    ImGui.Spacing();
+                    ImGui.Separator();
+                    
+                    // Cancel button
+                    if (_uiSharedService.IconTextButton(FontAwesomeIcon.StopCircle, "Cancel Conversion"))
+                    {
+                        _conversionCancellationTokenSource.Cancel();
+                    }
+                    
+                    UiSharedService.SetScaledWindowSize(600);
+                    ImGui.EndPopup();
                 }
-                
-                ImGui.Spacing();
-                ImGui.Separator();
-                
-                // Cancel button
-                if (_uiSharedService.IconTextButton(FontAwesomeIcon.StopCircle, "Cancel Conversion"))
-                {
-                    _conversionCancellationTokenSource.Cancel();
-                }
-                
-                UiSharedService.SetScaledWindowSize(600);
-                ImGui.EndPopup();
             }
         }
         else if (_conversionTask != null && _conversionTask.IsCompleted && _texturesToConvert.Count > 0)
@@ -1351,18 +1343,20 @@ public class CompactUi : WindowMediatorSubscriberBase
         // Main conversion popup
         if (ImGui.BeginPopupModal("Texture Conversion", ref _showConversionPopup, ImGuiWindowFlags.AlwaysAutoResize))
         {
-            // Cache the analysis when popup opens, similar to DataAnalysisUi approach
-            if (_cachedAnalysisForPopup == null)
+            using (SpheneCustomTheme.ApplyContextMenuTheme())
             {
-                _cachedAnalysisForPopup = _characterAnalyzer.LastAnalysis?.DeepClone();
-                _cachedBackupsForAnalysis = null; // Invalidate backup cache when analysis changes
-            }
-            
-            var analysis = _cachedAnalysisForPopup;
+                // Cache the analysis when popup opens, similar to DataAnalysisUi approach
+                if (_cachedAnalysisForPopup == null)
+                {
+                    _cachedAnalysisForPopup = _characterAnalyzer.LastAnalysis?.DeepClone();
+                    _cachedBackupsForAnalysis = null; // Invalidate backup cache when analysis changes
+                }
+                
+                var analysis = _cachedAnalysisForPopup;
             
             if (analysis == null || !analysis.Any())
             {
-                ImGui.TextColored(ImGuiColors.DalamudRed, "No character data available");
+                ImGui.TextColored(SpheneCustomTheme.Colors.Error, "No character data available");
                 ImGui.Text("Please ensure you have a character loaded and analyzed.");
                 
                 // Still show backup management even without analysis
@@ -1374,7 +1368,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                 
                 if (allBackups.Count > 0)
                 {
-                    UiSharedService.ColorTextWrapped($"Found {allBackups.Count} total backup file(s). Note: Without character analysis, all backups are shown.", ImGuiColors.DalamudYellow);
+                    UiSharedService.ColorTextWrapped($"Found {allBackups.Count} total backup file(s). Note: Without character analysis, all backups are shown.", SpheneCustomTheme.Colors.Warning);
                     
                     if (_uiSharedService.IconTextButton(FontAwesomeIcon.FolderOpen, "Open backup folder"))
                     {
@@ -1387,7 +1381,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                 }
                 else
                 {
-                    UiSharedService.ColorTextWrapped("No texture backups found.", ImGuiColors.DalamudGrey);
+                    UiSharedService.ColorTextWrapped("No texture backups found.", SpheneCustomTheme.CurrentTheme.TextSecondary);
                 }
                 
                 if (ImGui.Button("Close"))
@@ -1405,13 +1399,13 @@ public class CompactUi : WindowMediatorSubscriberBase
             var totalTextures = textureData.Count;
             var bc7Textures = totalTextures - nonBc7Textures.Count;
 
-            ImGui.TextColored(SpheneColors.SpheneGold, "Texture Conversion Overview");
+            ImGui.TextColored(SpheneCustomTheme.Colors.SpheneGold, "Texture Conversion Overview");
             ImGui.Separator();
 
             // Statistics
             ImGui.Text($"Total textures: {totalTextures}");
             ImGui.Text($"Already BC7: {bc7Textures}");
-            ImGui.TextColored(ImGuiColors.DalamudYellow, $"Can be converted: {nonBc7Textures.Count}");
+            ImGui.TextColored(SpheneCustomTheme.Colors.Warning, $"Can be converted: {nonBc7Textures.Count}");
 
             // Backup restore functionality - always show regardless of conversion needs
             ImGui.Spacing();
@@ -1421,7 +1415,7 @@ public class CompactUi : WindowMediatorSubscriberBase
             var availableBackups = GetCachedBackupsForCurrentAnalysis();
             if (availableBackups.Count > 0)
             {
-                UiSharedService.ColorTextWrapped($"Found {availableBackups.Count} backup(s) for current textures.", ImGuiColors.ParsedGreen);
+                UiSharedService.ColorTextWrapped($"Found {availableBackups.Count} backup(s) for current textures.", SpheneCustomTheme.Colors.Success);
                 
                 if (_uiSharedService.IconTextButton(FontAwesomeIcon.Undo, "Revert current textures"))
                 {
@@ -1440,7 +1434,7 @@ public class CompactUi : WindowMediatorSubscriberBase
             }
             else
             {
-                UiSharedService.ColorTextWrapped("No backups found for current textures.", ImGuiColors.DalamudGrey);
+                UiSharedService.ColorTextWrapped("No backups found for current textures.", SpheneCustomTheme.CurrentTheme.TextSecondary);
             }
             
             // Storage information and cleanup
@@ -1465,7 +1459,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                 if (fileCount > 0)
                 {
                     var sizeInMB = totalSize / (1024.0 * 1024.0);
-                    UiSharedService.ColorTextWrapped($"Total backup storage: {sizeInMB:F2} MB ({fileCount} files)", ImGuiColors.DalamudYellow);
+                    UiSharedService.ColorTextWrapped($"Total backup storage: {sizeInMB:F2} MB ({fileCount} files)", SpheneCustomTheme.Colors.Warning);
                     
                     ImGui.SameLine();
                     if (_uiSharedService.IconTextButton(FontAwesomeIcon.Broom, "Cleanup old backups (3+ days)"))
@@ -1481,7 +1475,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                 }
                 else
                 {
-                    UiSharedService.ColorTextWrapped("No backup files found.", ImGuiColors.DalamudGrey);
+                    UiSharedService.ColorTextWrapped("No backup files found.", SpheneCustomTheme.CurrentTheme.TextSecondary);
                 }
             }
 
@@ -1499,12 +1493,12 @@ public class CompactUi : WindowMediatorSubscriberBase
                 ImGui.Checkbox("Create backup before conversion", ref _enableBackupBeforeConversion);
                 if (_enableBackupBeforeConversion)
                 {
-                    UiSharedService.ColorTextWrapped("Backups will be created automatically for revert functionality.", ImGuiColors.ParsedGreen);
+                    UiSharedService.ColorTextWrapped("Backups will be created automatically for revert functionality.", SpheneCustomTheme.Colors.Success);
                 }
 
                 ImGui.Spacing();
-                UiSharedService.ColorText("Conversion Info:", ImGuiColors.DalamudYellow);
-                UiSharedService.ColorTextWrapped("• BC7 conversion reduces texture size significantly\n• Some textures may show visual artifacts\n• Original textures are backed up for restoration\n• Process may take time depending on texture count", ImGuiColors.DalamudGrey);
+                UiSharedService.ColorText("Conversion Info:", SpheneCustomTheme.Colors.Warning);
+                UiSharedService.ColorTextWrapped("• BC7 conversion reduces texture size significantly\n• Some textures may show visual artifacts\n• Original textures are backed up for restoration\n• Process may take time depending on texture count", SpheneCustomTheme.CurrentTheme.TextSecondary);
 
                 ImGui.Spacing();
                 if (_uiSharedService.IconTextButton(FontAwesomeIcon.FileArchive, $"Convert {nonBc7Textures.Count} textures to BC7"))
@@ -1517,7 +1511,7 @@ public class CompactUi : WindowMediatorSubscriberBase
             }
             else
             {
-                ImGui.TextColored(ImGuiColors.ParsedGreen, "All textures are already optimized!");
+                ImGui.TextColored(SpheneCustomTheme.Colors.Success, "All textures are already optimized!");
             }
 
             ImGui.Spacing();
@@ -1527,6 +1521,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                 _cachedAnalysisForPopup = null; // Clear cached analysis when popup closes
             }
             UiSharedService.SetScaledWindowSize(400);
+            }
             ImGui.EndPopup();
         }
     }
@@ -1783,6 +1778,155 @@ public class CompactUi : WindowMediatorSubscriberBase
         {
             _logger.LogError(ex, "Failed to find current texture location for {fileName}", originalFileName);
             return string.Empty;
+        }
+    }
+    
+    private void DrawWindowHeader()
+    {
+        // Calculate header dimensions with proper padding
+        var headerPadding = new Vector2(12.0f, 8.0f);
+        var contentStart = ImGui.GetCursorScreenPos();
+        var textHeight = ImGui.GetTextLineHeight();
+        var headerHeight = textHeight + (headerPadding.Y * 2);
+        
+        // Calculate background rectangle coordinates
+        var headerStart = new Vector2(contentStart.X, contentStart.Y);
+        var headerEnd = new Vector2(headerStart.X + ImGui.GetContentRegionAvail().X, headerStart.Y + headerHeight);
+        
+        // Choose background color based on build type
+#if DEBUG
+        var headerBgColor = SpheneColors.WithAlpha(new Vector4(0.8f, 0.2f, 0.2f, 1.0f), 0.3f); // Red for debug
+#else
+        var headerBgColor = SpheneColors.WithAlpha(SpheneColors.CrystalBlue, 0.3f); // Crystal Blue for release
+#endif
+        
+        // Draw the rounded background rectangle
+        var drawList = ImGui.GetWindowDrawList();
+        drawList.AddRectFilled(headerStart, headerEnd, SpheneColors.ToImGuiColor(headerBgColor), SpheneCustomTheme.CurrentTheme.CompactHeaderRounding);
+        
+        // Position content vertically centered within the header
+        var contentY = contentStart.Y + (headerHeight - textHeight) / 2.0f;
+        ImGui.SetCursorScreenPos(new Vector2(contentStart.X + headerPadding.X, contentY));
+        
+        // Window title - vertically centered
+        SpheneCustomTheme.DrawStyledText(GetControlPanelTitle(), SpheneCustomTheme.CurrentTheme.CompactPanelTitleText);
+        
+        // Store the text Y position for button alignment
+        var textY = contentY;
+        
+        // Header buttons on the same line, positioned from the right with padding
+        var buttonSpacing = 8.0f; // Reduced spacing between buttons (was 16.0f)
+        var buttonWidth = 22.0f; // Width of each button
+        var buttonHeight = ImGui.GetFrameHeight(); // Get standard button height
+        
+        // Calculate button Y position to center them vertically in the header
+        var buttonY = contentStart.Y + (headerHeight - buttonHeight) / 2.0f;
+        
+        // Position close button first (rightmost)
+        var closeButtonX = ImGui.GetContentRegionAvail().X - buttonWidth - headerPadding.X;
+        
+        // Position settings button with reduced spacing from close button
+        var settingsButtonX = closeButtonX - buttonWidth - buttonSpacing;
+        
+        // Position settings button centered vertically in header
+        ImGui.SetCursorScreenPos(new Vector2(contentStart.X + settingsButtonX, buttonY));
+        
+        // Settings button with custom styling for better visibility
+        ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.2f, 0.2f, 0.2f, 0.8f)); // Dark background
+        ImGui.PushStyleColor(ImGuiCol.ButtonHovered, new Vector4(0.3f, 0.3f, 0.3f, 0.9f)); // Slightly lighter on hover
+        ImGui.PushStyleColor(ImGuiCol.ButtonActive, new Vector4(0.4f, 0.4f, 0.4f, 1.0f)); // Even lighter when pressed
+        ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 1.0f, 1.0f, 1.0f)); // White text
+        
+        if (_uiSharedService.IconButton(FontAwesomeIcon.Cog))
+        {
+            Mediator.Publish(new UiToggleMessage(typeof(SettingsUi)));
+        }
+        if (ImGui.IsItemHovered())
+        {
+            using (SpheneCustomTheme.ApplyTooltipTheme())
+            {
+                ImGui.BeginTooltip();
+                ImGui.Text("Open Network Configuration");
+                ImGui.EndTooltip();
+            }
+        }
+        
+        ImGui.PopStyleColor(4); // Pop all 4 style colors
+        
+        // Position close button centered vertically in header
+        ImGui.SetCursorScreenPos(new Vector2(contentStart.X + closeButtonX, buttonY));
+        
+        // Close button with custom styling for better visibility
+        ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.6f, 0.2f, 0.2f, 0.8f)); // Dark red background
+        ImGui.PushStyleColor(ImGuiCol.ButtonHovered, new Vector4(0.8f, 0.3f, 0.3f, 0.9f)); // Lighter red on hover
+        ImGui.PushStyleColor(ImGuiCol.ButtonActive, new Vector4(1.0f, 0.4f, 0.4f, 1.0f)); // Even lighter red when pressed
+        ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 1.0f, 1.0f, 1.0f)); // White text
+        
+        if (_uiSharedService.IconButton(FontAwesomeIcon.Times))
+        {
+            _logger.LogDebug("Close button clicked, closing CompactUI");
+            IsOpen = false;
+        }
+        if (ImGui.IsItemHovered())
+        {
+            using (SpheneCustomTheme.ApplyTooltipTheme())
+            {
+                ImGui.BeginTooltip();
+                ImGui.Text("Close Sphene");
+                ImGui.EndTooltip();
+            }
+        }
+        
+        ImGui.PopStyleColor(4); // Pop all 4 style colors
+        
+        // Move cursor to end of header area
+        ImGui.SetCursorScreenPos(new Vector2(contentStart.X, headerEnd.Y));
+    }
+    
+    private void DrawResizeHandle()
+    {
+        if (!_configService.Current.IsWidthLocked)
+        {
+            // Draw resize handle in bottom-right corner
+            var windowPos = ImGui.GetWindowPos();
+            var windowSize = ImGui.GetWindowSize();
+            var handleSize = new Vector2(16.0f, 16.0f);
+            var handlePos = new Vector2(windowPos.X + windowSize.X - handleSize.X, windowPos.Y + windowSize.Y - handleSize.Y);
+            
+            var drawList = ImGui.GetWindowDrawList();
+            var handleColor = ImGui.ColorConvertFloat4ToU32(SpheneColors.CrystalBlue);
+            
+            // Draw resize handle visual
+            drawList.AddRectFilled(handlePos, new Vector2(handlePos.X + handleSize.X, handlePos.Y + handleSize.Y), handleColor);
+            
+            // Handle resize interaction
+            ImGui.SetCursorScreenPos(handlePos);
+            ImGui.InvisibleButton("##resize", handleSize);
+            
+            if (ImGui.IsItemActive() && ImGui.IsMouseDragging(ImGuiMouseButton.Left))
+            {
+                var mouseDelta = ImGui.GetMouseDragDelta(ImGuiMouseButton.Left);
+                var newSize = new Vector2(windowSize.X + mouseDelta.X, windowSize.Y + mouseDelta.Y);
+                
+                // Apply size constraints
+                if (SizeConstraints.HasValue)
+                {
+                    newSize.X = Math.Max(SizeConstraints.Value.MinimumSize.X, newSize.X);
+                    newSize.Y = Math.Max(SizeConstraints.Value.MinimumSize.Y, newSize.Y);
+                    newSize.X = Math.Min(SizeConstraints.Value.MaximumSize.X, newSize.X);
+                    newSize.Y = Math.Min(SizeConstraints.Value.MaximumSize.Y, newSize.Y);
+                }
+                
+                // Apply the new size
+                ImGui.SetWindowSize(newSize);
+                ImGui.ResetMouseDragDelta(ImGuiMouseButton.Left);
+            }
+            
+            // Change cursor when hovering over resize handle
+            if (ImGui.IsItemHovered())
+            {
+                ImGui.SetMouseCursor(ImGuiMouseCursor.ResizeAll);
+            }
         }
     }
 }

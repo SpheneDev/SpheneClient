@@ -61,7 +61,7 @@ public class DrawGroupedGroupFolder : IDrawFolder
                 TotalPairs + " pairs combined in all of your joined syncshells");
             ImGui.SameLine();
             ImGui.AlignTextToFramePadding();
-            ImGui.TextUnformatted("All Syncshells");
+            UiSharedService.ColorText("All Syncshells", SpheneCustomTheme.CurrentTheme.CompactAllSyncshellsText);
         }
 
         ImGui.Separator();

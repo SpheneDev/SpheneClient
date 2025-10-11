@@ -163,6 +163,7 @@ public class DalamudUtilService : IHostedService, IMediatorSubscriber
     public bool IsLoggedIn { get; private set; }
     public bool IsOnFrameworkThread => _framework.IsInFrameworkUpdateThread;
     public bool IsZoning => _condition[ConditionFlag.BetweenAreas] || _condition[ConditionFlag.BetweenAreas51];
+    public bool IsInDuty => _condition[ConditionFlag.BoundByDuty];
     public bool IsInCombatOrPerforming { get; private set; } = false;
     public bool HasModifiedGameFiles => _gameData.HasModifiedGameDataFiles;
     public uint ClassJobId => _classJobId!.Value;
@@ -354,19 +355,23 @@ public class DalamudUtilService : IHostedService, IMediatorSubscriber
         uint wardId = houseMan == null ? 0 : (uint)(houseMan->GetCurrentWard() + 1);
         uint houseId = 0;
         var tempHouseId = houseMan == null ? 0 : (houseMan->GetCurrentPlot());
-        if (!houseMan->IsInside()) tempHouseId = 0;
+        // Don't reset plot ID when outside - we want to detect outdoor plots too
+        // if (!houseMan->IsInside()) tempHouseId = 0;
         if (tempHouseId < -1)
         {
             divisionId = tempHouseId == -127 ? 2 : (uint)1;
             tempHouseId = 100;
         }
         if (tempHouseId == -1) tempHouseId = 0;
-        houseId = (uint)tempHouseId;
+        houseId = tempHouseId > 0 ? (uint)(tempHouseId + 1) : 0;
         if (houseId != 0)
         {
             territoryId = HousingManager.GetOriginalHouseTerritoryTypeId();
         }
         uint roomId = houseMan == null ? 0 : (uint)(houseMan->GetCurrentRoom());
+        
+        // Detect if player is inside a house
+        bool isIndoor = houseMan != null && houseMan->IsInside();
 
         return new LocationInfo()
         {
@@ -376,7 +381,8 @@ public class DalamudUtilService : IHostedService, IMediatorSubscriber
             DivisionId = divisionId,
             WardId = wardId,
             HouseId = houseId,
-            RoomId = roomId
+            RoomId = roomId,
+            IsIndoor = isIndoor
         };
     }
 

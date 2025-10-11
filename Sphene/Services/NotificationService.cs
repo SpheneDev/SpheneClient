@@ -31,6 +31,7 @@ public class NotificationService : DisposableMediatorSubscriberBase, IHostedServ
     public Task StartAsync(CancellationToken cancellationToken)
     {
         Mediator.Subscribe<NotificationMessage>(this, ShowNotification);
+        Mediator.Subscribe<AreaBoundSyncshellNotificationMessage>(this, ShowAreaBoundSyncshellNotification);
         return Task.CompletedTask;
     }
 
@@ -148,5 +149,20 @@ public class NotificationService : DisposableMediatorSubscriberBase, IHostedServ
             InitialDuration = msg.TimeShownOnScreen ?? TimeSpan.FromSeconds(3),
             RespectUiHidden = false
         });
+    }
+
+    private void ShowAreaBoundSyncshellNotification(AreaBoundSyncshellNotificationMessage msg)
+    {
+        Logger.LogDebug("ShowAreaBoundSyncshellNotification called: {Title} - {Message} (Location: {Location})", msg.Title, msg.Message, msg.Location);
+        
+        if (!_dalamudUtilService.IsLoggedIn) 
+        {
+            Logger.LogDebug("User not logged in, skipping area-bound notification");
+            return;
+        }
+
+        Logger.LogDebug("Showing area-bound notification via ShowNotificationLocationBased");
+        // Use the specific location setting for area-bound syncshell notifications
+        ShowNotificationLocationBased(new NotificationMessage(msg.Title, msg.Message, NotificationType.Info), msg.Location);
     }
 }

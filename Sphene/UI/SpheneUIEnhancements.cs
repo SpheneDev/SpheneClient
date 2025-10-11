@@ -111,7 +111,7 @@ public static class SpheneUIEnhancements
             var headerStartY = ImGui.GetCursorPosY();
             var headerCenterY = headerStartY + (headerHeight - ImGui.GetTextLineHeight()) * 0.5f;
             
-            using var headerColor = ImRaii.PushColor(ImGuiCol.Text, SpheneColors.ToImGuiColor(SpheneColors.CrystalBlue));
+            using var textColor = ImRaii.PushColor(ImGuiCol.Text, SpheneColors.ToImGuiColor(SpheneColors.SpheneGold));
             
             if (collapsible)
             {
@@ -178,20 +178,39 @@ public static class SpheneUIEnhancements
                     var newWidth = mousePos.X - mainWindowPos.X + 8; // Add some padding
                     var newHeight = mousePos.Y - mainWindowPos.Y + 8; // Add some padding
                     
-                    // Apply size constraints if provided
-                    if (minSize.HasValue)
+                    // If width is locked, keep the current width and skip width constraints
+                    if (isWidthLocked.HasValue && isWidthLocked.Value)
                     {
-                        newWidth = Math.Max(minSize.Value.X, newWidth);
-                        newHeight = Math.Max(minSize.Value.Y, newHeight);
+                        newWidth = mainWindowSize.X; // Keep current width, completely ignore width constraints
+                        
+                        // Only apply height constraints
+                        if (minSize.HasValue)
+                        {
+                            newHeight = Math.Max(minSize.Value.Y, newHeight);
+                        }
+                        if (maxSize.HasValue)
+                        {
+                            newHeight = Math.Min(maxSize.Value.Y, newHeight);
+                        }
                     }
-                    if (maxSize.HasValue)
+                    else
                     {
-                        newWidth = Math.Min(maxSize.Value.X, newWidth);
-                        newHeight = Math.Min(maxSize.Value.Y, newHeight);
+                        // Apply full size constraints when not locked
+                        if (minSize.HasValue)
+                        {
+                            newWidth = Math.Max(minSize.Value.X, newWidth);
+                            newHeight = Math.Max(minSize.Value.Y, newHeight);
+                        }
+                        if (maxSize.HasValue)
+                        {
+                            newWidth = Math.Min(maxSize.Value.X, newWidth);
+                            newHeight = Math.Min(maxSize.Value.Y, newHeight);
+                        }
                     }
                     
-                    // Store the new size to be applied next frame
-                    _pendingWindowSizes[title] = new Vector2(newWidth, newHeight);
+                    // Store the new size to be applied to the parent window next frame
+                    // Use "CompactUI" as the key since that's what ApplyPendingWindowResize uses
+                    _pendingWindowSizes["CompactUI"] = new Vector2(newWidth, newHeight);
                 }
                 
                 // Draw resize handle visual indicator
@@ -276,9 +295,12 @@ public static class SpheneUIEnhancements
                     // Add tooltip
                     if (isLockHovered && !string.IsNullOrEmpty(lockTooltip))
                     {
-                        ImGui.BeginTooltip();
-                        ImGui.Text(lockTooltip);
-                        ImGui.EndTooltip();
+                        using (SpheneCustomTheme.ApplyTooltipTheme())
+                        {
+                            ImGui.BeginTooltip();
+                            ImGui.Text(lockTooltip);
+                            ImGui.EndTooltip();
+                        }
                     }
                 }
                 
@@ -457,9 +479,10 @@ public static class SpheneUIEnhancements
     /// Applies Sphene theme colors locally using ImRaii (recommended for plugin-only styling)
     /// </summary>
     /// <param name="useGlobalTheme">If true, applies theme globally (affects all Dalamud UI). If false, applies only locally.</param>
-    public static IDisposable ApplySpheneTheme(bool useGlobalTheme = false)
+    /// <param name="transparentChildContainers">If true, makes child containers transparent (except in CompactUI)</param>
+    public static IDisposable ApplySpheneTheme(bool useGlobalTheme = false, bool transparentChildContainers = true)
     {
-        return useGlobalTheme ? ApplySpheneWindowTheme() : ApplySpheneLocalTheme();
+        return useGlobalTheme ? ApplySpheneWindowTheme(transparentChildContainers) : ApplySpheneLocalTheme();
     }
     
     /// <summary>
@@ -474,7 +497,8 @@ public static class SpheneUIEnhancements
     /// <summary>
     /// Applies Sphene theme to the current window
     /// </summary>
-    public static IDisposable ApplySpheneWindowTheme()
+    /// <param name="transparentChildContainers">If true, makes child containers transparent</param>
+    public static IDisposable ApplySpheneWindowTheme(bool transparentChildContainers = true)
     {
         var style = ImGui.GetStyle();
         var colors = style.Colors;
@@ -482,11 +506,14 @@ public static class SpheneUIEnhancements
         // Store original colors for restoration
         var originalColors = new Dictionary<ImGuiCol, Vector4>();
         
+        // Determine child background color based on parameter
+        var childBgColor = transparentChildContainers ? new Vector4(0, 0, 0, 0) : SpheneColors.BackgroundMid;
+        
         // Apply Sphene theme colors
         var themeColors = new Dictionary<ImGuiCol, Vector4>
         {
             { ImGuiCol.WindowBg, SpheneColors.BackgroundDark },
-            { ImGuiCol.ChildBg, SpheneColors.BackgroundMid },
+            { ImGuiCol.ChildBg, childBgColor },
             { ImGuiCol.PopupBg, SpheneColors.BackgroundDark },
             { ImGuiCol.Border, SpheneColors.BorderColor },
             { ImGuiCol.BorderShadow, SpheneColors.WithAlpha(SpheneColors.CrystalBlue, 0.2f) },
@@ -494,7 +521,7 @@ public static class SpheneUIEnhancements
             { ImGuiCol.FrameBgHovered, SpheneColors.HoverBlue },
             { ImGuiCol.FrameBgActive, SpheneColors.SelectionBlue },
             { ImGuiCol.TitleBg, SpheneColors.DeepCrystal },
-            { ImGuiCol.TitleBgActive, SpheneColors.CrystalBlue },
+            { ImGuiCol.TitleBgActive, SpheneColors.WithAlpha(SpheneColors.BackgroundDark, 0.9f) },
             { ImGuiCol.TitleBgCollapsed, SpheneColors.VoidPurple },
             { ImGuiCol.MenuBarBg, SpheneColors.BackgroundMid },
             { ImGuiCol.ScrollbarBg, SpheneColors.BackgroundDark },

@@ -17,6 +17,7 @@ public class CreateSyncshellUI : WindowMediatorSubscriberBase
     private readonly UiSharedService _uiSharedService;
     private bool _errorGroupCreate;
     private GroupJoinDto? _lastCreatedGroup;
+    private string _groupAlias = string.Empty;
 
     public CreateSyncshellUI(ILogger<CreateSyncshellUI> logger, SpheneMediator spheneMediator, ApiController apiController, UiSharedService uiSharedService,
         PerformanceCollectorService performanceCollectorService)
@@ -26,8 +27,8 @@ public class CreateSyncshellUI : WindowMediatorSubscriberBase
         _uiSharedService = uiSharedService;
         SizeConstraints = new()
         {
-            MinimumSize = new(550, 330),
-            MaximumSize = new(550, 330)
+            MinimumSize = new(550, 380),
+            MaximumSize = new(550, 380)
         };
 
         Flags = ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoCollapse;
@@ -42,11 +43,19 @@ public class CreateSyncshellUI : WindowMediatorSubscriberBase
 
         if (_lastCreatedGroup == null)
         {
+            // Alias input field
+            ImGui.TextUnformatted("Syncshell Alias (optional):");
+            ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X);
+            ImGui.InputText("##alias", ref _groupAlias, 50);
+            UiSharedService.AttachToolTip("Optional alias for your Syncshell (3-50 characters). Leave empty to use only the generated ID.");
+            ImGuiHelpers.ScaledDummy(1f);
+            
             if (_uiSharedService.IconTextButton(FontAwesomeIcon.Plus, "Create Syncshell"))
             {
                 try
                 {
-                    _lastCreatedGroup = _apiController.GroupCreate().Result;
+                    var dto = !string.IsNullOrWhiteSpace(_groupAlias) ? new GroupCreateDto(_groupAlias) : null;
+                    _lastCreatedGroup = _apiController.GroupCreate(dto).Result;
                 }
                 catch
                 {
@@ -113,5 +122,6 @@ public class CreateSyncshellUI : WindowMediatorSubscriberBase
     public override void OnOpen()
     {
         _lastCreatedGroup = null;
+        _groupAlias = string.Empty;
     }
 }

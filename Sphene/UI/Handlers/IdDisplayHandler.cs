@@ -93,7 +93,11 @@ public class IdDisplayHandler
         {
             ImGui.AlignTextToFramePadding();
 
-            using (ImRaii.PushFont(UiBuilder.MonoFont, textIsUid)) ImGui.TextUnformatted(playerText);
+            using (ImRaii.PushFont(UiBuilder.MonoFont, textIsUid))
+            using (ImRaii.PushColor(ImGuiCol.Text, SpheneCustomTheme.CurrentTheme.CompactPairsText))
+            {
+                ImGui.TextUnformatted(playerText);
+            }
 
             if (ImGui.IsItemHovered())
             {

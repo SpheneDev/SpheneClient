@@ -1,6 +1,8 @@
 using Sphene.API.Dto.Group;
+using Sphene.API.Dto.CharaData;
 using Sphene.WebAPI.SignalR.Utils;
 using Microsoft.AspNetCore.SignalR.Client;
+using Sphene.API.Data;
 
 namespace Sphene.WebAPI;
 
@@ -39,16 +41,22 @@ public partial class ApiController
         return await _spheneHub!.InvokeAsync<bool>(nameof(GroupChangePassword), groupPassword).ConfigureAwait(false);
     }
 
+    public async Task<bool> GroupSetAlias(GroupAliasDto groupAlias)
+    {
+        CheckConnection();
+        return await _spheneHub!.InvokeAsync<bool>(nameof(GroupSetAlias), groupAlias).ConfigureAwait(false);
+    }
+
     public async Task GroupClear(GroupDto group)
     {
         CheckConnection();
         await _spheneHub!.SendAsync(nameof(GroupClear), group).ConfigureAwait(false);
     }
 
-    public async Task<GroupJoinDto> GroupCreate()
+    public async Task<GroupJoinDto> GroupCreate(GroupCreateDto? dto = null)
     {
         CheckConnection();
-        return await _spheneHub!.InvokeAsync<GroupJoinDto>(nameof(GroupCreate)).ConfigureAwait(false);
+        return await _spheneHub!.InvokeAsync<GroupJoinDto>(nameof(GroupCreate), dto).ConfigureAwait(false);
     }
 
     public async Task<List<string>> GroupCreateTempInvite(GroupDto group, int amount)
@@ -115,6 +123,86 @@ public partial class ApiController
     {
         CheckConnection();
         await _spheneHub!.SendAsync(nameof(GroupUnbanUser), groupPair).ConfigureAwait(false);
+    }
+
+    public async Task AreaBoundJoinRequest(string gid)
+    {
+        CheckConnection();
+        
+        // Create the DTO with current user and location information
+        var currentUser = new UserData(UID);
+        var currentLocation = await _dalamudUtil.GetMapDataAsync();
+        var groupData = new GroupData(gid);
+        
+        var joinRequestDto = new AreaBoundJoinRequestDto(groupData, currentUser, currentLocation);
+        
+        await _spheneHub!.InvokeAsync<bool>(nameof(GroupRequestAreaBoundJoin), joinRequestDto).ConfigureAwait(false);
+    }
+
+    public async Task<List<AreaBoundSyncshellDto>> GetAreaBoundSyncshells()
+    {
+        CheckConnection();
+        return await _spheneHub!.InvokeAsync<List<AreaBoundSyncshellDto>>(nameof(GetAreaBoundSyncshells)).ConfigureAwait(false);
+    }
+
+    public async Task<bool> GroupSetAreaBinding(AreaBoundSyncshellDto areaBoundSyncshell)
+    {
+        CheckConnection();
+        return await _spheneHub!.InvokeAsync<bool>(nameof(GroupSetAreaBinding), areaBoundSyncshell).ConfigureAwait(false);
+    }
+
+    public async Task<bool> GroupRemoveAreaBinding(GroupDto group)
+    {
+        CheckConnection();
+        return await _spheneHub!.InvokeAsync<bool>(nameof(GroupRemoveAreaBinding), group).ConfigureAwait(false);
+    }
+
+    public async Task<List<AreaBoundSyncshellDto>> GroupGetAreaBoundSyncshells()
+    {
+        CheckConnection();
+        return await _spheneHub!.InvokeAsync<List<AreaBoundSyncshellDto>>(nameof(GroupGetAreaBoundSyncshells)).ConfigureAwait(false);
+    }
+
+    public async Task<bool> GroupRequestAreaBoundJoin(AreaBoundJoinRequestDto joinRequest)
+    {
+        CheckConnection();
+        return await _spheneHub!.InvokeAsync<bool>(nameof(GroupRequestAreaBoundJoin), joinRequest).ConfigureAwait(false);
+    }
+
+    public async Task GroupRespondToAreaBoundJoin(AreaBoundJoinResponseDto joinResponse)
+    {
+        CheckConnection();
+        await _spheneHub!.SendAsync(nameof(GroupRespondToAreaBoundJoin), joinResponse).ConfigureAwait(false);
+    }
+
+    public async Task<bool> GroupSetAreaBoundConsent(AreaBoundJoinConsentRequestDto consentRequest)
+    {
+        CheckConnection();
+        return await _spheneHub!.InvokeAsync<bool>(nameof(GroupSetAreaBoundConsent), consentRequest).ConfigureAwait(false);
+    }
+
+    public async Task<bool> GroupCheckAreaBoundConsent(string syncshellGID)
+    {
+        CheckConnection();
+        return await _spheneHub!.InvokeAsync<bool>(nameof(GroupCheckAreaBoundConsent), syncshellGID).ConfigureAwait(false);
+    }
+
+    public async Task<SyncshellWelcomePageDto?> GroupGetWelcomePage(GroupDto group)
+    {
+        CheckConnection();
+        return await _spheneHub!.InvokeAsync<SyncshellWelcomePageDto?>(nameof(GroupGetWelcomePage), group).ConfigureAwait(false);
+    }
+
+    public async Task<bool> GroupSetWelcomePage(SyncshellWelcomePageUpdateDto welcomePageUpdate)
+    {
+        CheckConnection();
+        return await _spheneHub!.InvokeAsync<bool>(nameof(GroupSetWelcomePage), welcomePageUpdate).ConfigureAwait(false);
+    }
+
+    public async Task<bool> GroupDeleteWelcomePage(GroupDto group)
+    {
+        CheckConnection();
+        return await _spheneHub!.InvokeAsync<bool>(nameof(GroupDeleteWelcomePage), group).ConfigureAwait(false);
     }
 
     private void CheckConnection()

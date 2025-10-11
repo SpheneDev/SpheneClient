@@ -19,6 +19,7 @@ using Sphene.PlayerData.Pairs;
 using Sphene.Services;
 using Sphene.Services.Mediator;
 using Sphene.Services.ServerConfiguration;
+using Sphene.UI.Styling;
 using Sphene.Utils;
 using Sphene.WebAPI;
 using Sphene.WebAPI.SignalR;
@@ -28,6 +29,7 @@ using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Collections.Concurrent;
 
 namespace Sphene.UI;
 
@@ -50,6 +52,7 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
     private readonly IDalamudPluginInterface _pluginInterface;
     private readonly Dictionary<string, object?> _selectedComboItems = new(StringComparer.Ordinal);
     private readonly ServerConfigurationManager _serverConfigurationManager;
+    private static readonly ConcurrentDictionary<string, Vector2> _pendingWindowSizes = new();
     private readonly ITextureProvider _textureProvider;
     private readonly TokenProvider _tokenProvider;
     private bool _brioExists = false;
@@ -143,23 +146,26 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
     {
         if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
         {
-            ImGui.BeginTooltip();
-            ImGui.PushTextWrapPos(ImGui.GetFontSize() * 35f);
-            if (text.Contains(TooltipSeparator, StringComparison.Ordinal))
+            using (SpheneCustomTheme.ApplyTooltipTheme())
             {
-                var splitText = text.Split(TooltipSeparator, StringSplitOptions.RemoveEmptyEntries);
-                for (int i = 0; i < splitText.Length; i++)
+                ImGui.BeginTooltip();
+                ImGui.PushTextWrapPos(ImGui.GetFontSize() * 35f);
+                if (text.Contains(TooltipSeparator, StringComparison.Ordinal))
                 {
-                    ImGui.TextUnformatted(splitText[i]);
-                    if (i != splitText.Length - 1) ImGui.Separator();
+                    var splitText = text.Split(TooltipSeparator, StringSplitOptions.RemoveEmptyEntries);
+                    for (int i = 0; i < splitText.Length; i++)
+                    {
+                        ImGui.TextUnformatted(splitText[i]);
+                        if (i != splitText.Length - 1) ImGui.Separator();
+                    }
                 }
+                else
+                {
+                    ImGui.TextUnformatted(text);
+                }
+                ImGui.PopTextWrapPos();
+                ImGui.EndTooltip();
             }
-            else
-            {
-                ImGui.TextUnformatted(text);
-            }
-            ImGui.PopTextWrapPos();
-            ImGui.EndTooltip();
         }
     }
 
@@ -1168,6 +1174,13 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
             width <= 0 ? null : width);
     }
 
+    public bool IconTextActionButton(FontAwesomeIcon icon, string text, float? width = null)
+    {
+        var theme = SpheneCustomTheme.CurrentTheme;
+        return IconTextButtonInternal(icon, text, theme.CompactActionButton, width <= 0 ? null : width,
+            theme.CompactActionButtonHovered, theme.CompactActionButtonActive);
+    }
+
     public IDalamudTextureWrap LoadImage(byte[] imageData)
     {
         return _textureProvider.CreateFromImageAsync(imageData).Result;
@@ -1211,6 +1224,99 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
     {
         var center = ImGui.GetMainViewport().GetCenter();
         ImGui.SetWindowPos(new Vector2(center.X - width / 2, center.Y - height / 2), cond);
+    }
+
+    /// <summary>
+    /// Draws a theme-aware status indicator with proper theming
+    /// </summary>
+    public void DrawThemedStatusIndicator(string label, bool isActive, bool hasWarning = false, bool hasError = false)
+    {
+        var theme = SpheneCustomTheme.CurrentTheme;
+        var statusColor = SpheneColors.GetConnectionStatusColor(isActive, hasWarning, hasError);
+        var drawList = ImGui.GetWindowDrawList();
+        
+        // Align text to frame padding for better vertical centering
+        ImGui.AlignTextToFramePadding();
+        var alignedPos = ImGui.GetCursorScreenPos();
+        
+        // Calculate circle center to align with text baseline
+        var frameHeight = ImGui.GetFrameHeight();
+        var circleCenter = new Vector2(alignedPos.X + 8, alignedPos.Y + frameHeight * 0.5f);
+        
+        // Draw status circle with proper vertical alignment
+        drawList.AddCircleFilled(circleCenter, 6, ImGui.ColorConvertFloat4ToU32(statusColor));
+        drawList.AddCircle(circleCenter, 6, ImGui.ColorConvertFloat4ToU32(theme.TextPrimary), 12, 1.5f);
+        
+        // Add glow effect for active status
+        if (isActive && !hasError)
+        {
+            var glowColor = SpheneColors.WithAlpha(statusColor, 0.4f);
+            drawList.AddCircle(circleCenter, 8, ImGui.ColorConvertFloat4ToU32(glowColor), 12, 2.0f);
+        }
+        
+        ImGui.SetCursorPosX(ImGui.GetCursorPosX() + 20);
+        using var textColor = ImRaii.PushColor(ImGuiCol.Text, ImGui.ColorConvertFloat4ToU32(theme.TextPrimary));
+        ImGui.Text(label);
+    }
+    
+    /// <summary>
+    /// Draws a theme-aware progress bar with crystalline styling
+    /// </summary>
+    public void DrawThemedProgressBar(string label, float progress, string? overlay = null, Vector4? color = null)
+    {
+        // Draw label first
+        ImGui.AlignTextToFramePadding();
+        using var textColor = ImRaii.PushColor(ImGuiCol.Text, ImGui.ColorConvertFloat4ToU32(SpheneCustomTheme.CurrentTheme.TextPrimary));
+        ImGui.TextUnformatted(label);
+        
+        // Use default size and call the main implementation
+        DrawThemedProgressBar(progress, null, overlay, color);
+    }
+    
+    /// <summary>
+    /// Draws a theme-aware progress bar with crystalline styling
+    /// </summary>
+    public void DrawThemedProgressBar(float progress, Vector2? size = null, string? overlay = null, Vector4? color = null)
+    {
+        var theme = SpheneCustomTheme.CurrentTheme;
+        var barSize = size ?? new Vector2(200, 20);
+        var drawList = ImGui.GetWindowDrawList();
+        var pos = ImGui.GetCursorScreenPos();
+        var endPos = new Vector2(pos.X + barSize.X, pos.Y + barSize.Y);
+        var borderRadius = theme.FrameRounding;
+        
+        // Background
+        drawList.AddRectFilled(pos, endPos, ImGui.ColorConvertFloat4ToU32(theme.PrimaryDark), borderRadius);
+        
+        // Progress fill with gradient
+        if (progress > 0)
+        {
+            var progressEnd = new Vector2(pos.X + (barSize.X * progress), pos.Y + barSize.Y);
+            var progressColorStart = color ?? theme.AccentBlue;
+            var progressColorEnd = theme.AccentBlue;
+            
+            drawList.AddRectFilledMultiColor(pos, progressEnd,
+                ImGui.ColorConvertFloat4ToU32(progressColorStart),
+                ImGui.ColorConvertFloat4ToU32(progressColorEnd),
+                ImGui.ColorConvertFloat4ToU32(progressColorEnd),
+                ImGui.ColorConvertFloat4ToU32(progressColorStart));
+        }
+        
+        // Border
+        drawList.AddRect(pos, endPos, ImGui.ColorConvertFloat4ToU32(theme.Border), borderRadius, ImDrawFlags.RoundCornersAll, theme.FrameBorderSize);
+        
+        // Overlay text
+        if (!string.IsNullOrEmpty(overlay))
+        {
+            var textSize = ImGui.CalcTextSize(overlay);
+            var textPos = new Vector2(
+                pos.X + (barSize.X - textSize.X) * 0.5f,
+                pos.Y + (barSize.Y - textSize.Y) * 0.5f
+            );
+            drawList.AddText(textPos, ImGui.ColorConvertFloat4ToU32(theme.TextPrimary), overlay);
+        }
+        
+        ImGui.SetCursorPosY(ImGui.GetCursorPosY() + barSize.Y + ImGui.GetStyle().ItemSpacing.Y);
     }
 
     [GeneratedRegex(@"^(?:[a-zA-Z]:\\[\w\s\-\\]+?|\/(?:[\w\s\-\/])+?)$", RegexOptions.ECMAScript, 5000)]
@@ -1261,6 +1367,68 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
 
         return result;
     }
+
+    private bool IconTextButtonInternal(FontAwesomeIcon icon, string text, Vector4? defaultColor = null, float? width = null, 
+        Vector4? hoveredColor = null, Vector4? activeColor = null)
+    {
+        int num = 0;
+        if (defaultColor.HasValue)
+        {
+            ImGui.PushStyleColor(ImGuiCol.Button, defaultColor.Value);
+            num++;
+        }
+        if (hoveredColor.HasValue)
+        {
+            ImGui.PushStyleColor(ImGuiCol.ButtonHovered, hoveredColor.Value);
+            num++;
+        }
+        if (activeColor.HasValue)
+        {
+            ImGui.PushStyleColor(ImGuiCol.ButtonActive, activeColor.Value);
+            num++;
+        }
+
+        ImGui.PushID(text);
+        Vector2 vector;
+        using (IconFont.Push())
+            vector = ImGui.CalcTextSize(icon.ToIconString());
+        Vector2 vector2 = ImGui.CalcTextSize(text);
+        ImDrawListPtr windowDrawList = ImGui.GetWindowDrawList();
+        Vector2 cursorScreenPos = ImGui.GetCursorScreenPos();
+        float num2 = 3f * ImGuiHelpers.GlobalScale;
+        float x = width ?? vector.X + vector2.X + ImGui.GetStyle().FramePadding.X * 2f + num2;
+        float frameHeight = ImGui.GetFrameHeight();
+        bool result = ImGui.Button(string.Empty, new Vector2(x, frameHeight));
+        Vector2 pos = new Vector2(cursorScreenPos.X + ImGui.GetStyle().FramePadding.X, cursorScreenPos.Y + ImGui.GetStyle().FramePadding.Y);
+        using (IconFont.Push())
+            windowDrawList.AddText(pos, ImGui.GetColorU32(ImGuiCol.Text), icon.ToIconString());
+        Vector2 pos2 = new Vector2(pos.X + vector.X + num2, cursorScreenPos.Y + ImGui.GetStyle().FramePadding.Y);
+        windowDrawList.AddText(pos2, ImGui.GetColorU32(ImGuiCol.Text), text);
+        ImGui.PopID();
+        if (num > 0)
+        {
+            ImGui.PopStyleColor(num);
+        }
+
+        return result;
+    }
+
+    // Apply any pending window resize for the specified window
+    public static void ApplyPendingWindowResize(string windowName)
+    {
+        if (_pendingWindowSizes.TryGetValue(windowName, out var newSize))
+        {
+            ImGui.SetNextWindowSize(newSize);
+            _pendingWindowSizes.TryRemove(windowName, out _);
+        }
+    }
+
+    // Store a pending window size to be applied next frame
+    public static void SetPendingWindowSize(string windowName, Vector2 size)
+    {
+        _pendingWindowSizes[windowName] = size;
+    }
+
     public sealed record IconScaleData(Vector2 IconSize, Vector2 NormalizedIconScale, float OffsetX, float IconScaling);
     private record UIDAliasPair(string? UID, string? Alias);
 }

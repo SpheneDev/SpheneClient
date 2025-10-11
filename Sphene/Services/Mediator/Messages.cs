@@ -1,4 +1,5 @@
 using Dalamud.Game.ClientState.Objects.Types;
+using Dalamud.Interface.Textures.TextureWraps;
 using Sphene.API.Data;
 using Sphene.API.Dto;
 using Sphene.API.Dto.CharaData;
@@ -67,6 +68,8 @@ public record DownloadReadyMessage(Guid RequestId) : MessageBase;
 public record DownloadStartedMessage(GameObjectHandler DownloadId, Dictionary<string, FileDownloadStatus> DownloadStatus) : MessageBase;
 public record DownloadFinishedMessage(GameObjectHandler DownloadId) : MessageBase;
 public record UiToggleMessage(Type UiType) : MessageBase;
+public record OpenWelcomePageLivePreviewMessage(GroupFullInfoDto GroupFullInfo, string WelcomeText, IDalamudTextureWrap? WelcomeImageTexture) : MessageBase;
+public record UpdateWelcomePageLivePreviewMessage(string WelcomeText, IDalamudTextureWrap? WelcomeImageTexture) : MessageBase;
 public record PlayerUploadingMessage(GameObjectHandler Handler, bool IsUploading) : MessageBase;
 public record ClearProfileDataMessage(UserData? UserData = null) : MessageBase;
 public record CyclePauseMessage(UserData UserData) : MessageBase;
@@ -101,5 +104,14 @@ public record OpenCharaDataHubWithFilterMessage(UserData UserData) : MessageBase
 public record SendCharacterDataAcknowledgmentMessage(CharacterDataAcknowledgmentDto AcknowledgmentDto) : MessageBase;
 public record ShowUpdateNotificationMessage(UpdateInfo UpdateInfo) : MessageBase;
 public record CheckForUpdatesMessage : MessageBase;
+
+// Area-bound syncshell messages
+public record AreaBoundJoinRequestMessage(AreaBoundJoinRequestDto JoinRequest) : MessageBase;
+public record AreaBoundJoinResponseMessage(AreaBoundJoinResponseDto JoinResponse) : MessageBase;
+public record AreaBoundLocationChangedMessage(LocationInfo NewLocation, LocationInfo? PreviousLocation) : MessageBase;
+public record AreaBoundSyncshellNotificationMessage(string Title, string Message, NotificationLocation Location) : SameThreadMessage;
+public record AreaBoundSyncshellConfigurationUpdateMessage : MessageBase;
+public record AreaBoundSyncshellConsentRequestMessage(AreaBoundSyncshellDto Syncshell, bool RequiresRulesAcceptance) : SameThreadMessage;
+public record AreaBoundSyncshellSelectionRequestMessage(List<AreaBoundSyncshellDto> AvailableSyncshells) : SameThreadMessage;
 #pragma warning restore S2094
 #pragma warning restore MA0048 // File name must match type name

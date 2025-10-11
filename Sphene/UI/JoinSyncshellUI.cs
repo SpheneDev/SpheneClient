@@ -4,8 +4,11 @@ using Dalamud.Interface.Utility;
 using Dalamud.Interface.Utility.Raii;
 using Sphene.API.Data.Enum;
 using Sphene.API.Data.Extensions;
+using Sphene.API.Data;
+using Sphene.API.Data.Enum;
 using Sphene.API.Dto;
 using Sphene.API.Dto.Group;
+using Sphene.PlayerData.Pairs;
 using Sphene.Services;
 using Sphene.Services.Mediator;
 using Sphene.Utils;
@@ -18,6 +21,7 @@ internal class JoinSyncshellUI : WindowMediatorSubscriberBase
 {
     private readonly ApiController _apiController;
     private readonly UiSharedService _uiSharedService;
+    private readonly PairManager _pairManager;
     private string _desiredSyncshellToJoin = string.Empty;
     private GroupJoinInfoDto? _groupJoinInfo = null;
     private DefaultPermissionsDto _ownPermissions = null!;
@@ -25,11 +29,12 @@ internal class JoinSyncshellUI : WindowMediatorSubscriberBase
     private string _syncshellPassword = string.Empty;
 
     public JoinSyncshellUI(ILogger<JoinSyncshellUI> logger, SpheneMediator mediator,
-        UiSharedService uiSharedService, ApiController apiController, PerformanceCollectorService performanceCollectorService) 
+        UiSharedService uiSharedService, ApiController apiController, PairManager pairManager, PerformanceCollectorService performanceCollectorService) 
         : base(logger, mediator, "Join existing Syncshell###SpheneJoinSyncshell", performanceCollectorService)
     {
         _uiSharedService = uiSharedService;
         _apiController = apiController;
+        _pairManager = pairManager;
         SizeConstraints = new()
         {
             MinimumSize = new(700, 400),
@@ -173,7 +178,48 @@ internal class JoinSyncshellUI : WindowMediatorSubscriberBase
                 joinPermissions.SetDisableSounds(_ownPermissions.DisableGroupSounds);
                 joinPermissions.SetDisableAnimations(_ownPermissions.DisableGroupAnimations);
                 joinPermissions.SetDisableVFX(_ownPermissions.DisableGroupVFX);
-                _ = _apiController.GroupJoinFinalize(new GroupJoinDto(_groupJoinInfo.Group, _previousPassword, joinPermissions));
+                
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        var joinResult = await _apiController.GroupJoinFinalize(new GroupJoinDto(_groupJoinInfo.Group, _previousPassword, joinPermissions));
+                        if (joinResult)
+                        {
+                            // Check if there's a welcome page for this group
+                            var welcomePage = await _apiController.GroupGetWelcomePage(new GroupDto(_groupJoinInfo.Group));
+                            if (welcomePage != null && welcomePage.IsEnabled && welcomePage.ShowOnJoin)
+                            {
+                                // Get current group info from PairManager for up-to-date alias
+                                var groupFullInfo = _pairManager.Groups.Values.FirstOrDefault(g => g.Group.GID == _groupJoinInfo.Group.GID);
+                                if (groupFullInfo != null)
+                                {
+                                    _logger.LogDebug("Publishing OpenWelcomePageMessage with GroupFullInfo: {GroupAliasOrGID}", groupFullInfo.Group.AliasOrGID);
+                                    Mediator.Publish(new OpenWelcomePageMessage(welcomePage, groupFullInfo));
+                                }
+                                else
+                    {
+                        _logger.LogWarning("Could not find GroupFullInfo for GID: {GID}, using fallback", _groupJoinInfo.Group.GID);
+                        // Fallback: create a minimal GroupFullInfoDto from _groupJoinInfo
+                        var fallbackGroupFullInfo = new GroupFullInfoDto(
+                            _groupJoinInfo.Group,
+                            _groupJoinInfo.Owner,
+                            _groupJoinInfo.GroupPermissions,
+                            GroupUserPreferredPermissions.NoneSet, // Default user permissions
+                            new GroupPairUserInfo(), // Empty user info
+                            new Dictionary<string, GroupPairUserInfo>() // Empty pair user infos
+                        );
+                        Mediator.Publish(new OpenWelcomePageMessage(welcomePage, fallbackGroupFullInfo));
+                    }
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Failed to finalize group join");
+                    }
+                });
+                
                 IsOpen = false;
             }
         }

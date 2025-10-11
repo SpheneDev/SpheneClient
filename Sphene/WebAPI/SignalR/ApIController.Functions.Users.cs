@@ -1,6 +1,7 @@
 using Sphene.API.Data;
 using Sphene.API.Dto;
 using Sphene.API.Dto.User;
+using Sphene.API.Dto.CharaData;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Logging;
 using System.Text;
@@ -139,6 +140,60 @@ public partial class ApiController
         {
             Logger.LogError(ex, "Failed to send acknowledgment to server - Hash: {hash}", 
                 acknowledgmentDto.DataHash[..Math.Min(8, acknowledgmentDto.DataHash.Length)]);
+        }
+    }
+
+    public async Task<List<UserHousingPropertyDto>> UserGetHousingProperties()
+    {
+        if (!IsConnected) return new List<UserHousingPropertyDto>();
+        
+        try
+        {
+            return await _spheneHub!.InvokeAsync<List<UserHousingPropertyDto>>(nameof(UserGetHousingProperties)).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to get housing properties from server");
+            return new List<UserHousingPropertyDto>();
+        }
+    }
+
+    public async Task<UserHousingPropertyDto?> UserSetHousingProperty(UserHousingPropertyUpdateDto dto)
+    {
+        Logger.LogDebug("[CLIENT DEBUG] UserSetHousingProperty called with: {location}, IsConnected: {connected}", dto.Location, IsConnected);
+        
+        if (!IsConnected) 
+        {
+            Logger.LogWarning("[CLIENT DEBUG] UserSetHousingProperty: Not connected to server");
+            return null;
+        }
+        
+        try
+        {
+            Logger.LogDebug("[CLIENT DEBUG] UserSetHousingProperty: Invoking hub method");
+            var result = await _spheneHub!.InvokeAsync<UserHousingPropertyDto?>(nameof(UserSetHousingProperty), dto).ConfigureAwait(false);
+            Logger.LogDebug("[CLIENT DEBUG] UserSetHousingProperty: Hub method returned: {result}", result != null ? "SUCCESS" : "NULL");
+            return result;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to set housing property: {location}", dto.Location);
+            return null;
+        }
+    }
+
+    public async Task<bool> UserDeleteHousingProperty(LocationInfo location)
+    {
+        if (!IsConnected) return false;
+        
+        try
+        {
+            return await _spheneHub!.InvokeAsync<bool>(nameof(UserDeleteHousingProperty), location).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to delete housing property: {location}", location);
+            return false;
         }
     }
 

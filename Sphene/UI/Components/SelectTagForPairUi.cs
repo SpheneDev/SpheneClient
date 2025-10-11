@@ -59,18 +59,21 @@ public class SelectTagForPairUi
 
         if (ImGui.BeginPopup(popupName))
         {
-            var tags = _tagHandler.GetAllTagsSorted();
-            var childHeight = tags.Count != 0 ? tags.Count * 25 : 1;
-            var childSize = new Vector2(0, childHeight > 100 ? 100 : childHeight) * ImGuiHelpers.GlobalScale;
-
-            ImGui.TextUnformatted($"Select the groups you want {name} to be in.");
-            if (ImGui.BeginChild(name + "##listGroups", childSize))
+            using (SpheneCustomTheme.ApplyContextMenuTheme())
             {
-                foreach (var tag in tags)
+                var tags = _tagHandler.GetAllTagsSorted();
+                var childHeight = tags.Count != 0 ? tags.Count * 25 : 1;
+                var childSize = new Vector2(0, childHeight > 100 ? 100 : childHeight) * ImGuiHelpers.GlobalScale;
+
+                ImGui.TextUnformatted($"Select the groups you want {name} to be in.");
+                if (ImGui.BeginChild(name + "##listGroups", childSize))
                 {
-                    using (ImRaii.PushId($"groups-pair-{_pair.UserData.UID}-{tag}")) DrawGroupName(_pair, tag);
+                    foreach (var tag in tags)
+                    {
+                        using (ImRaii.PushId($"groups-pair-{_pair.UserData.UID}-{tag}")) DrawGroupName(_pair, tag);
+                    }
+                    ImGui.EndChild();
                 }
-                ImGui.EndChild();
             }
 
             ImGui.Separator();

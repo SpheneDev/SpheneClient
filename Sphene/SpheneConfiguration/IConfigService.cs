@@ -9,4 +9,5 @@ public interface IConfigService<out T> : IDisposable where T : ISpheneConfigurat
     string ConfigurationPath { get; }
     public event EventHandler? ConfigSave;
     void UpdateLastWriteTime();
+    void Save();
 }

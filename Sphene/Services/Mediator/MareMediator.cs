@@ -102,10 +102,16 @@ public sealed class SpheneMediator : IHostedService
         {
             _subscriberDict.TryAdd(typeof(T), []);
 
-            if (!_subscriberDict[typeof(T)].Add(new(subscriber, action)))
+            var subscriberAction = new SubscriberAction(subscriber, action);
+            _logger.LogDebug("Subscribing {subscriber} to {messageType}", subscriber.GetType().Name, typeof(T).Name);
+            
+            if (!_subscriberDict[typeof(T)].Add(subscriberAction))
             {
                 throw new InvalidOperationException("Already subscribed");
             }
+            
+            _logger.LogDebug("Successfully subscribed {subscriber} to {messageType}. Total subscribers for this message: {count}", 
+                subscriber.GetType().Name, typeof(T).Name, _subscriberDict[typeof(T)].Count);
         }
     }
 
@@ -137,7 +143,11 @@ public sealed class SpheneMediator : IHostedService
 
     private void ExecuteMessage(MessageBase message)
     {
-        if (!_subscriberDict.TryGetValue(message.GetType(), out HashSet<SubscriberAction>? subscribers) || subscribers == null || !subscribers.Any()) return;
+        if (!_subscriberDict.TryGetValue(message.GetType(), out HashSet<SubscriberAction>? subscribers) || subscribers == null || !subscribers.Any()) 
+        {
+            _logger.LogDebug("No subscribers found for message type {messageType}", message.GetType().Name);
+            return;
+        }
 
         List<SubscriberAction> subscribersCopy = [];
         lock (_addRemoveLock)

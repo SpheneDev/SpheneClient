@@ -1,5 +1,6 @@
 using Dalamud.Interface.Windowing;
 using Microsoft.Extensions.Logging;
+using System;
 
 namespace Sphene.Services.Mediator;
 

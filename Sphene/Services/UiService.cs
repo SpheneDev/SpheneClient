@@ -38,8 +38,14 @@ public sealed class UiService : DisposableMediatorSubscriberBase
         _uiBuilder.OpenConfigUi += ToggleUi;
         _uiBuilder.OpenMainUi += ToggleMainUi;
 
+        _logger.LogDebug("UiService received {count} WindowMediatorSubscriberBase instances", windows.Count());
         foreach (var window in windows)
         {
+            _logger.LogDebug("Adding window to WindowSystem: {WindowType}", window.GetType().Name);
+            if (window.GetType().Name == "CitySyncshellExplanationUI")
+            {
+                _logger.LogDebug("CitySyncshellExplanationUI instance found and being added to WindowSystem");
+            }
             _windowSystem.AddWindow(window);
         }
 
@@ -82,6 +88,15 @@ public sealed class UiService : DisposableMediatorSubscriberBase
             _createdWindows.Remove(msg.Window);
             msg.Window.Dispose();
         });
+
+        Mediator.Subscribe<OpenWelcomePageMessage>(this, (msg) =>
+        {
+            _logger.LogDebug("Creating welcome page UI with GroupFullInfo: {GroupAliasOrGID}", msg.GroupFullInfo.Group.AliasOrGID);
+            var window = _uiFactory.CreateSyncshellWelcomePageUi(msg.WelcomePage, msg.GroupFullInfo.Group.AliasOrGID);
+            _createdWindows.Add(window);
+            _windowSystem.AddWindow(window);
+            window.IsOpen = true;
+        });
     }
 
     public void ToggleMainUi()
@@ -120,7 +135,11 @@ public sealed class UiService : DisposableMediatorSubscriberBase
 
     private void Draw()
     {
+        // Apply global theme for all windows
+        using var themeScope = SpheneCustomTheme.ApplyThemeForWindow();
+        
         _windowSystem.Draw();
         _fileDialogManager.Draw();
+        MarkdownFormatterPopup.Draw();
     }
 }

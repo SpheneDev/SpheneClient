@@ -158,6 +158,8 @@ public class EditProfileUi : WindowMediatorSubscriberBase
         }
         if (ImGui.BeginPopupModal("Open Image Cropper?", ref _openCropperPopupShown, UiSharedService.PopupWindowFlags))
         {
+            using (SpheneCustomTheme.ApplyContextMenuTheme())
+            {
             UiSharedService.TextWrapped("Open your default browser to the Sphene online image cropper (256x256).");
             ImGui.Spacing();
             ImGui.BulletText("No image data is transmitted to Sphene servers.");
@@ -183,6 +185,7 @@ public class EditProfileUi : WindowMediatorSubscriberBase
             {
                 ImGui.CloseCurrentPopup();
                 _openCropperPopupShown = false;
+            }
             }
             ImGui.EndPopup();
         }

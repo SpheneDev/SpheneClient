@@ -523,32 +523,35 @@ public class TopTabMenu
     {
         if (ImGui.BeginPopup(popupTitle))
         {
-            if (_uiSharedService.IconTextButton(enableIcon, enableText, null, true))
+            using (SpheneCustomTheme.ApplyContextMenuTheme())
             {
-                _ = GlobalControlCountdown(10);
-                var bulkIndividualPairs = _pairManager.PairsWithGroups.Keys
-                    .Where(g => g.IndividualPairStatus == IndividualPairStatus.Bidirectional)
-                    .ToDictionary(g => g.UserPair.User.UID, g =>
-                    {
-                        return actEnable(g.UserPair.OwnPermissions);
-                    }, StringComparer.Ordinal);
+                if (_uiSharedService.IconTextButton(enableIcon, enableText, null, true))
+                {
+                    _ = GlobalControlCountdown(10);
+                    var bulkIndividualPairs = _pairManager.PairsWithGroups.Keys
+                        .Where(g => g.IndividualPairStatus == IndividualPairStatus.Bidirectional)
+                        .ToDictionary(g => g.UserPair.User.UID, g =>
+                        {
+                            return actEnable(g.UserPair.OwnPermissions);
+                        }, StringComparer.Ordinal);
 
-                _ = _apiController.SetBulkPermissions(new(bulkIndividualPairs, new(StringComparer.Ordinal))).ConfigureAwait(false);
-                ImGui.CloseCurrentPopup();
-            }
+                    _ = _apiController.SetBulkPermissions(new(bulkIndividualPairs, new(StringComparer.Ordinal))).ConfigureAwait(false);
+                    ImGui.CloseCurrentPopup();
+                }
 
-            if (_uiSharedService.IconTextButton(disableIcon, disableText, null, true))
-            {
-                _ = GlobalControlCountdown(10);
-                var bulkIndividualPairs = _pairManager.PairsWithGroups.Keys
-                    .Where(g => g.IndividualPairStatus == IndividualPairStatus.Bidirectional)
-                    .ToDictionary(g => g.UserPair.User.UID, g =>
-                    {
-                        return actDisable(g.UserPair.OwnPermissions);
-                    }, StringComparer.Ordinal);
+                if (_uiSharedService.IconTextButton(disableIcon, disableText, null, true))
+                {
+                    _ = GlobalControlCountdown(10);
+                    var bulkIndividualPairs = _pairManager.PairsWithGroups.Keys
+                        .Where(g => g.IndividualPairStatus == IndividualPairStatus.Bidirectional)
+                        .ToDictionary(g => g.UserPair.User.UID, g =>
+                        {
+                            return actDisable(g.UserPair.OwnPermissions);
+                        }, StringComparer.Ordinal);
 
-                _ = _apiController.SetBulkPermissions(new(bulkIndividualPairs, new(StringComparer.Ordinal))).ConfigureAwait(false);
-                ImGui.CloseCurrentPopup();
+                    _ = _apiController.SetBulkPermissions(new(bulkIndividualPairs, new(StringComparer.Ordinal))).ConfigureAwait(false);
+                    ImGui.CloseCurrentPopup();
+                }
             }
             ImGui.EndPopup();
         }
@@ -560,33 +563,35 @@ public class TopTabMenu
     {
         if (ImGui.BeginPopup(popupTitle))
         {
-
-            if (_uiSharedService.IconTextButton(enableIcon, enableText, null, true))
+            using (SpheneCustomTheme.ApplyContextMenuTheme())
             {
-                _ = GlobalControlCountdown(10);
-                var bulkSyncshells = _pairManager.GroupPairs.Keys
-                    .OrderBy(u => u.GroupAliasOrGID, StringComparer.OrdinalIgnoreCase)
-                    .ToDictionary(g => g.Group.GID, g =>
-                    {
-                        return actEnable(g.GroupUserPermissions);
-                    }, StringComparer.Ordinal);
+                if (_uiSharedService.IconTextButton(enableIcon, enableText, null, true))
+                {
+                    _ = GlobalControlCountdown(10);
+                    var bulkSyncshells = _pairManager.GroupPairs.Keys
+                        .OrderBy(u => u.GroupAliasOrGID, StringComparer.OrdinalIgnoreCase)
+                        .ToDictionary(g => g.Group.GID, g =>
+                        {
+                            return actEnable(g.GroupUserPermissions);
+                        }, StringComparer.Ordinal);
 
-                _ = _apiController.SetBulkPermissions(new(new(StringComparer.Ordinal), bulkSyncshells)).ConfigureAwait(false);
-                ImGui.CloseCurrentPopup();
-            }
+                    _ = _apiController.SetBulkPermissions(new(new(StringComparer.Ordinal), bulkSyncshells)).ConfigureAwait(false);
+                    ImGui.CloseCurrentPopup();
+                }
 
-            if (_uiSharedService.IconTextButton(disableIcon, disableText, null, true))
-            {
-                _ = GlobalControlCountdown(10);
-                var bulkSyncshells = _pairManager.GroupPairs.Keys
-                    .OrderBy(u => u.GroupAliasOrGID, StringComparer.OrdinalIgnoreCase)
-                    .ToDictionary(g => g.Group.GID, g =>
-                    {
-                        return actDisable(g.GroupUserPermissions);
-                    }, StringComparer.Ordinal);
+                if (_uiSharedService.IconTextButton(disableIcon, disableText, null, true))
+                {
+                    _ = GlobalControlCountdown(10);
+                    var bulkSyncshells = _pairManager.GroupPairs.Keys
+                        .OrderBy(u => u.GroupAliasOrGID, StringComparer.OrdinalIgnoreCase)
+                        .ToDictionary(g => g.Group.GID, g =>
+                        {
+                            return actDisable(g.GroupUserPermissions);
+                        }, StringComparer.Ordinal);
 
-                _ = _apiController.SetBulkPermissions(new(new(StringComparer.Ordinal), bulkSyncshells)).ConfigureAwait(false);
-                ImGui.CloseCurrentPopup();
+                    _ = _apiController.SetBulkPermissions(new(new(StringComparer.Ordinal), bulkSyncshells)).ConfigureAwait(false);
+                    ImGui.CloseCurrentPopup();
+                }
             }
             ImGui.EndPopup();
         }
