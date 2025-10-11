@@ -75,7 +75,7 @@ public static class SpheneUIEnhancements
     }
     
     // Draws a Sphene-themed card container with modern styling, optional header buttons, resize handle, and custom header background
-    public static void DrawSpheneCard(string title, Action content, bool collapsible = false, float? maxHeight = null, Action headerButtons = null, bool withResizeHandle = false, Vector2? minSize = null, Vector2? maxSize = null, uint customHeaderBg = 0, bool? isWidthLocked = null, Action onLockToggle = null, string lockTooltip = null, Action bottomOverlay = null)
+    public static void DrawSpheneCard(string title, Action content, bool collapsible = false, float? maxHeight = null, Action headerButtons = null, bool withResizeHandle = false, Vector2? minSize = null, Vector2? maxSize = null, uint customHeaderBg = 0, Action bottomOverlay = null)
     {
         // Apply pending window size if available
         if (_pendingWindowSizes.TryGetValue(title, out var pendingSize))
@@ -178,34 +178,16 @@ public static class SpheneUIEnhancements
                     var newWidth = mousePos.X - mainWindowPos.X + 8; // Add some padding
                     var newHeight = mousePos.Y - mainWindowPos.Y + 8; // Add some padding
                     
-                    // If width is locked, keep the current width and skip width constraints
-                    if (isWidthLocked.HasValue && isWidthLocked.Value)
+                    // Apply size constraints
+                    if (minSize.HasValue)
                     {
-                        newWidth = mainWindowSize.X; // Keep current width, completely ignore width constraints
-                        
-                        // Only apply height constraints
-                        if (minSize.HasValue)
-                        {
-                            newHeight = Math.Max(minSize.Value.Y, newHeight);
-                        }
-                        if (maxSize.HasValue)
-                        {
-                            newHeight = Math.Min(maxSize.Value.Y, newHeight);
-                        }
+                        newWidth = Math.Max(minSize.Value.X, newWidth);
+                        newHeight = Math.Max(minSize.Value.Y, newHeight);
                     }
-                    else
+                    if (maxSize.HasValue)
                     {
-                        // Apply full size constraints when not locked
-                        if (minSize.HasValue)
-                        {
-                            newWidth = Math.Max(minSize.Value.X, newWidth);
-                            newHeight = Math.Max(minSize.Value.Y, newHeight);
-                        }
-                        if (maxSize.HasValue)
-                        {
-                            newWidth = Math.Min(maxSize.Value.X, newWidth);
-                            newHeight = Math.Min(maxSize.Value.Y, newHeight);
-                        }
+                        newWidth = Math.Min(maxSize.Value.X, newWidth);
+                        newHeight = Math.Min(maxSize.Value.Y, newHeight);
                     }
                     
                     // Store the new size to be applied to the parent window next frame
@@ -245,64 +227,7 @@ public static class SpheneUIEnhancements
                     drawList.AddLine(lineStart, lineEnd, lineColor, 1.5f);
                 }
                 
-                // Add lock icon next to resize handle if lock functionality is enabled
-                if (isWidthLocked.HasValue && onLockToggle != null)
-                {
-                    var lockIconSize = new Vector2(16, 16);
-                    var padding = new Vector2(4, 4); // Padding around the icon for better clickable area
-                    var buttonSize = lockIconSize + padding * 2;
-                    var lockIconPos = new Vector2(resizeHandlePos.X - buttonSize.X - 4, resizeHandlePos.Y + (resizeHandleSize.Y - buttonSize.Y) / 2);
-                    
-                    ImGui.SetCursorScreenPos(lockIconPos);
-                    
-                    // Use appropriate lock icon based on state
-                    var lockIcon = isWidthLocked.Value ? FontAwesomeIcon.Lock : FontAwesomeIcon.LockOpen;
-                    
-                    // Create invisible button for proper clickable area
-                    ImGui.PushID($"lock_{title}");
-                    bool clicked = ImGui.InvisibleButton("lock_button", buttonSize);
-                    bool isLockHovered = ImGui.IsItemHovered();
-                    ImGui.PopID();
-                    
-                    // Draw rounded background on hover
-                    if (isLockHovered)
-                    {
-                        var buttonMin = lockIconPos;
-                        var buttonMax = lockIconPos + buttonSize;
-                        var backgroundColor = ImGui.GetColorU32(SpheneColors.ToImGuiColor(SpheneColors.WithAlpha(SpheneColors.CrystalBlue, 0.2f)));
-                        drawList.AddRectFilled(buttonMin, buttonMax, backgroundColor, 4.0f); // 4.0f for rounded corners
-                    }
-                    
-                    // Draw the icon centered in the button area
-                    var iconDrawPos = lockIconPos + padding;
-                    ImGui.SetCursorScreenPos(iconDrawPos);
-                    
-                    ImGui.PushFont(UiBuilder.IconFont);
-                    var lockColor = ImGui.GetColorU32(SpheneColors.ToImGuiColor(SpheneColors.CrystalBlue));
-                    ImGui.PushStyleColor(ImGuiCol.Text, lockColor);
-                    
-                    ImGui.Text(lockIcon.ToIconString());
-                    
-                    ImGui.PopStyleColor();
-                    ImGui.PopFont();
-                    
-                    // Handle click
-                    if (clicked)
-                    {
-                        onLockToggle?.Invoke();
-                    }
-                    
-                    // Add tooltip
-                    if (isLockHovered && !string.IsNullOrEmpty(lockTooltip))
-                    {
-                        using (SpheneCustomTheme.ApplyTooltipTheme())
-                        {
-                            ImGui.BeginTooltip();
-                            ImGui.Text(lockTooltip);
-                            ImGui.EndTooltip();
-                        }
-                    }
-                }
+
                 
                 if (bottomOverlay != null)
                 {
@@ -321,7 +246,7 @@ public static class SpheneUIEnhancements
     /// </summary>
     public static void DrawSpheneCard(string title, Action content, bool collapsible = false, float? maxHeight = null, Action headerButtons = null, bool withResizeHandle = false, Vector2? minSize = null, Vector2? maxSize = null)
     {
-        DrawSpheneCard(title, content, collapsible, maxHeight, headerButtons, withResizeHandle, minSize, maxSize, 0, null, null, null);
+        DrawSpheneCard(title, content, collapsible, maxHeight, headerButtons, withResizeHandle, minSize, maxSize, 0, null);
     }
     
     /// <summary>

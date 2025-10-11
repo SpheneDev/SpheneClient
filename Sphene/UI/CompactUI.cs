@@ -200,24 +200,15 @@ public class CompactUi : WindowMediatorSubscriberBase
         Flags |= ImGuiWindowFlags.NoDocking | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse;
 
         UpdateSizeConstraints();
-        
-        // Subscribe to configuration changes to update size constraints when width lock changes
-        _configService.ConfigSave += OnConfigurationChanged;
     }
 
     private void UpdateSizeConstraints()
     {
-        // Use normal size constraints for all cases since we now handle width locking via resize handler behavior
         SizeConstraints = new WindowSizeConstraints()
         {
             MinimumSize = new Vector2(370 * ImGuiHelpers.GlobalScale, 400 * ImGuiHelpers.GlobalScale),
             MaximumSize = new Vector2(800 * ImGuiHelpers.GlobalScale, 2000 * ImGuiHelpers.GlobalScale),
         };
-    }
-
-    private void OnConfigurationChanged(object? sender, EventArgs e)
-    {
-        UpdateSizeConstraints();
     }
 
     // Removed ConvertSvgBase64ToPng method - no longer needed
@@ -226,9 +217,6 @@ public class CompactUi : WindowMediatorSubscriberBase
     {
         if (disposing)
         {
-            // Unsubscribe from configuration changes
-            _configService.ConfigSave -= OnConfigurationChanged;
-            
             // Dispose all draw folders to clean up event subscriptions
             if (_drawFolders != null)
             {
@@ -402,9 +390,6 @@ public class CompactUi : WindowMediatorSubscriberBase
             }
         }
         
-        // Draw resize handle
-        DrawResizeHandle();
-
         if (_configService.Current.OpenPopupOnAdd && _pairManager.LastAddedUser != null)
         {
             _lastAddedUser = _pairManager.LastAddedUser;
@@ -1883,50 +1868,5 @@ public class CompactUi : WindowMediatorSubscriberBase
         ImGui.SetCursorScreenPos(new Vector2(contentStart.X, headerEnd.Y));
     }
     
-    private void DrawResizeHandle()
-    {
-        if (!_configService.Current.IsWidthLocked)
-        {
-            // Draw resize handle in bottom-right corner
-            var windowPos = ImGui.GetWindowPos();
-            var windowSize = ImGui.GetWindowSize();
-            var handleSize = new Vector2(16.0f, 16.0f);
-            var handlePos = new Vector2(windowPos.X + windowSize.X - handleSize.X, windowPos.Y + windowSize.Y - handleSize.Y);
-            
-            var drawList = ImGui.GetWindowDrawList();
-            var handleColor = ImGui.ColorConvertFloat4ToU32(SpheneColors.CrystalBlue);
-            
-            // Draw resize handle visual
-            drawList.AddRectFilled(handlePos, new Vector2(handlePos.X + handleSize.X, handlePos.Y + handleSize.Y), handleColor);
-            
-            // Handle resize interaction
-            ImGui.SetCursorScreenPos(handlePos);
-            ImGui.InvisibleButton("##resize", handleSize);
-            
-            if (ImGui.IsItemActive() && ImGui.IsMouseDragging(ImGuiMouseButton.Left))
-            {
-                var mouseDelta = ImGui.GetMouseDragDelta(ImGuiMouseButton.Left);
-                var newSize = new Vector2(windowSize.X + mouseDelta.X, windowSize.Y + mouseDelta.Y);
-                
-                // Apply size constraints
-                if (SizeConstraints.HasValue)
-                {
-                    newSize.X = Math.Max(SizeConstraints.Value.MinimumSize.X, newSize.X);
-                    newSize.Y = Math.Max(SizeConstraints.Value.MinimumSize.Y, newSize.Y);
-                    newSize.X = Math.Min(SizeConstraints.Value.MaximumSize.X, newSize.X);
-                    newSize.Y = Math.Min(SizeConstraints.Value.MaximumSize.Y, newSize.Y);
-                }
-                
-                // Apply the new size
-                ImGui.SetWindowSize(newSize);
-                ImGui.ResetMouseDragDelta(ImGuiMouseButton.Left);
-            }
-            
-            // Change cursor when hovering over resize handle
-            if (ImGui.IsItemHovered())
-            {
-                ImGui.SetMouseCursor(ImGuiMouseCursor.ResizeAll);
-            }
-        }
-    }
+    
 }

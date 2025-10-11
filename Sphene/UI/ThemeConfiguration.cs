@@ -269,6 +269,8 @@ public class ThemeConfiguration
             CompactContextMenuBorderSize = CompactContextMenuBorderSize,
             ScrollbarSize = ScrollbarSize,
             GrabMinSize = GrabMinSize,
+            
+            // Basic Color Settings
             PrimaryDark = PrimaryDark,
             SecondaryDark = SecondaryDark,
             AccentBlue = AccentBlue,
@@ -279,6 +281,89 @@ public class ThemeConfiguration
             Hover = Hover,
             Active = Active,
             HeaderBg = HeaderBg,
+            
+            // Extended ImGui Color Settings
+            WindowBg = WindowBg,
+            ChildBg = ChildBg,
+            PopupBg = PopupBg,
+            BorderShadow = BorderShadow,
+            
+            // Frame Colors
+            FrameBg = FrameBg,
+            FrameBgHovered = FrameBgHovered,
+            FrameBgActive = FrameBgActive,
+            
+            // Title Bar Colors
+            TitleBg = TitleBg,
+            TitleBgActive = TitleBgActive,
+            TitleBgCollapsed = TitleBgCollapsed,
+            
+            // Menu Colors
+            MenuBarBg = MenuBarBg,
+            
+            // Scrollbar Colors
+            ScrollbarBg = ScrollbarBg,
+            ScrollbarGrab = ScrollbarGrab,
+            ScrollbarGrabHovered = ScrollbarGrabHovered,
+            ScrollbarGrabActive = ScrollbarGrabActive,
+            
+            // Check Mark Colors
+            CheckMark = CheckMark,
+            
+            // Slider Colors
+            SliderGrab = SliderGrab,
+            SliderGrabActive = SliderGrabActive,
+            
+            // Button Colors
+            Button = Button,
+            ButtonHovered = ButtonHovered,
+            ButtonActive = ButtonActive,
+            
+            // Header Colors
+            Header = Header,
+            HeaderHovered = HeaderHovered,
+            HeaderActive = HeaderActive,
+            
+            // Separator Colors
+            Separator = Separator,
+            SeparatorHovered = SeparatorHovered,
+            SeparatorActive = SeparatorActive,
+            
+            // Resize Grip Colors
+            ResizeGrip = ResizeGrip,
+            ResizeGripHovered = ResizeGripHovered,
+            ResizeGripActive = ResizeGripActive,
+            
+            // Tab Colors
+            Tab = Tab,
+            TabHovered = TabHovered,
+            TabActive = TabActive,
+            TabUnfocused = TabUnfocused,
+            TabUnfocusedActive = TabUnfocusedActive,
+            
+            // Table Colors
+            TableHeaderBg = TableHeaderBg,
+            TableBorderStrong = TableBorderStrong,
+            TableBorderLight = TableBorderLight,
+            TableRowBg = TableRowBg,
+            TableRowBgAlt = TableRowBgAlt,
+            
+            // Text Colors
+            TextDisabled = TextDisabled,
+            TextSelectedBg = TextSelectedBg,
+            
+            // Drag Drop Colors
+            DragDropTarget = DragDropTarget,
+            
+            // Navigation Colors
+            NavHighlight = NavHighlight,
+            NavWindowingHighlight = NavWindowingHighlight,
+            NavWindowingDimBg = NavWindowingDimBg,
+            
+            // Modal Colors
+            ModalWindowDimBg = ModalWindowDimBg,
+            
+            // CompactUI Specific Colors
             CompactWindowBg = CompactWindowBg,
             CompactChildBg = CompactChildBg,
             CompactPopupBg = CompactPopupBg,

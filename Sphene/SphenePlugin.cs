@@ -96,7 +96,7 @@ public class SphenePlugin : MediatorSubscriberBase, IHostedService
             $"Starting Sphene {version.Major}.{version.Minor}.{version.Build}")));
 
         // Initialize ThemeManager with configuration service
-        ThemeManager.Initialize(Logger, _SpheneConfigService);
+        ThemeManager.Initialize(Logger, _SpheneConfigService.ConfigurationDirectory, _SpheneConfigService);
         // Load saved theme on startup if auto-load is enabled
         if (ThemeManager.ShouldAutoLoadTheme())
         {

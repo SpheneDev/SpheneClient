@@ -9,22 +9,60 @@ namespace Sphene.UI;
 
 public static class ThemeManager
 {
-    private static readonly string ThemesDirectory = Path.Combine(
+    private static string _themesDirectory = string.Empty;
+    private static readonly string _oldThemesDirectory = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
         "Sphene", "Themes");
 
     private static ILogger? _logger;
     private static IConfigService<SpheneConfiguration.Configurations.SpheneConfig>? _configService;
 
-    public static void Initialize(ILogger logger, IConfigService<SpheneConfiguration.Configurations.SpheneConfig>? configService = null)
+    public static void Initialize(ILogger logger, string configDirectory, IConfigService<SpheneConfiguration.Configurations.SpheneConfig>? configService = null)
     {
         _logger = logger;
         _configService = configService;
+        _themesDirectory = Path.Combine(configDirectory, "Custom_themes");
         
         // Ensure themes directory exists
-        if (!Directory.Exists(ThemesDirectory))
+        if (!Directory.Exists(_themesDirectory))
         {
-            Directory.CreateDirectory(ThemesDirectory);
+            Directory.CreateDirectory(_themesDirectory);
+        }
+        
+        // Migrate existing themes from old location
+        MigrateExistingThemes();
+    }
+
+    private static void MigrateExistingThemes()
+    {
+        try
+        {
+            if (Directory.Exists(_oldThemesDirectory))
+            {
+                var oldThemeFiles = Directory.GetFiles(_oldThemesDirectory, "*.json");
+                if (oldThemeFiles.Length > 0)
+                {
+                    _logger?.LogDebug($"Found {oldThemeFiles.Length} themes to migrate from old location");
+                    
+                    foreach (var oldFile in oldThemeFiles)
+                    {
+                        var fileName = Path.GetFileName(oldFile);
+                        var newFile = Path.Combine(_themesDirectory, fileName);
+                        
+                        if (!File.Exists(newFile))
+                        {
+                            File.Copy(oldFile, newFile);
+                            _logger?.LogDebug($"Migrated theme: {fileName}");
+                        }
+                    }
+                    
+                    _logger?.LogInformation($"Successfully migrated {oldThemeFiles.Length} themes to new location: {_themesDirectory}");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Failed to migrate existing themes from old location");
         }
     }
 
@@ -40,7 +78,7 @@ public static class ThemeManager
 
             // Sanitize filename
             var sanitizedName = SanitizeFileName(themeName);
-            var filePath = Path.Combine(ThemesDirectory, $"{sanitizedName}.json");
+            var filePath = Path.Combine(_themesDirectory, $"{sanitizedName}.json");
 
             var options = new JsonSerializerOptions
             {
@@ -79,7 +117,7 @@ public static class ThemeManager
             }
 
             var sanitizedName = SanitizeFileName(themeName);
-            var filePath = Path.Combine(ThemesDirectory, $"{sanitizedName}.json");
+            var filePath = Path.Combine(_themesDirectory, $"{sanitizedName}.json");
 
             if (!File.Exists(filePath))
             {
@@ -109,10 +147,10 @@ public static class ThemeManager
     {
         try
         {
-            if (!Directory.Exists(ThemesDirectory))
+            if (!Directory.Exists(_themesDirectory))
                 return Array.Empty<string>();
 
-            var files = Directory.GetFiles(ThemesDirectory, "*.json");
+            var files = Directory.GetFiles(_themesDirectory, "*.json");
             var themeNames = new string[files.Length];
 
             for (int i = 0; i < files.Length; i++)
@@ -140,7 +178,7 @@ public static class ThemeManager
             }
 
             var sanitizedName = SanitizeFileName(themeName);
-            var filePath = Path.Combine(ThemesDirectory, $"{sanitizedName}.json");
+            var filePath = Path.Combine(_themesDirectory, $"{sanitizedName}.json");
 
             if (!File.Exists(filePath))
             {

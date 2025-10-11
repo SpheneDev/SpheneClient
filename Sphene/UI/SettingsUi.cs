@@ -959,7 +959,6 @@ public class SettingsUi : WindowMediatorSubscriberBase
             var groupUpSyncshells = _configService.Current.GroupUpSyncshells;
             var groupInVisible = _configService.Current.ShowSyncshellUsersInVisible;
             var syncshellOfflineSeparate = _configService.Current.ShowSyncshellOfflineUsersSeparately;
-            var isWidthLocked = _configService.Current.IsWidthLocked;
 
             // Basic UI Elements
             _uiShared.BigText("Basic Interface");
@@ -969,13 +968,6 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 _configService.Save();
             }
             _uiShared.DrawHelpText("This will show or hide the Sphene icon that can be used to open the main window.");
-
-            if (ImGui.Checkbox("Lock Window Width", ref isWidthLocked))
-            {
-                _configService.Current.IsWidthLocked = isWidthLocked;
-                _configService.Save();
-            }
-            _uiShared.DrawHelpText("When enabled, the window width will be locked and only height can be adjusted.");
 
             if (ImGui.Checkbox("Enable Game Right Click Menu Entries", ref enableRightClickMenu))
             {
@@ -2260,8 +2252,6 @@ public class SettingsUi : WindowMediatorSubscriberBase
             ImGui.TextUnformatted("Current Service:");
             ImGui.SameLine();
             ImGui.TextColored(ImGuiColors.ParsedGreen, currentServer.ServerName);
-            ImGui.SameLine();
-            UiSharedService.TextWrapped("(" + currentServer.ServerUri + ")");
 
             ImGui.TextUnformatted("Connection State:");
             ImGui.SameLine();
@@ -2417,12 +2407,6 @@ public class SettingsUi : WindowMediatorSubscriberBase
         if (ImGui.Checkbox("Show Sphene Icon", ref showSpheneIcon))
         {
             currentProfile.ShowSpheneIcon = showSpheneIcon;
-            _configService.Save();
-        }
-        var isWidthLocked = currentProfile.IsWidthLocked;
-        if (ImGui.Checkbox("Lock Window Width", ref isWidthLocked))
-        {
-            currentProfile.IsWidthLocked = isWidthLocked;
             _configService.Save();
         }
         var enableRightClickMenu = currentProfile.EnableRightClickMenus;

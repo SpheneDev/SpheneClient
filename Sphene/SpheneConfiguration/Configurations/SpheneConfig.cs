@@ -76,9 +76,6 @@ public class SpheneConfig : ISpheneConfiguration
     public float IconPositionY { get; set; } = 100f;
     public bool ShowSpheneIcon { get; set; } = true;
     
-    // Width Lock Settings
-    public bool IsWidthLocked { get; set; } = false;
-    
     // Acknowledgment System Settings
     public bool ShowAcknowledgmentPopups { get; set; } = false;
     public bool ShowWaitingForAcknowledgmentPopups { get; set; } = false;
