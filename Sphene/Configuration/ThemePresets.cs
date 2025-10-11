@@ -17,7 +17,7 @@ public static class ThemePresets
         {
             WindowRounding = 3.6f,
             ChildRounding = 4.2f,
-            PopupRounding = 10.0f,
+            PopupRounding = 4.0f,
             FrameRounding = 3.3f,
             ScrollbarRounding = 3.2f,
             GrabRounding = 2.1f,
@@ -25,7 +25,7 @@ public static class ThemePresets
             
             CompactWindowRounding = 15.0f,
             CompactChildRounding = 15.0f,
-            CompactPopupRounding = 15.0f,
+            CompactPopupRounding = 4.0f,
             CompactFrameRounding = 3.9f,
             CompactScrollbarRounding = 4.0f,
             CompactGrabRounding = 12.0f,

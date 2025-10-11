@@ -92,6 +92,7 @@ public sealed class Plugin : IDalamudPlugin
             collection.AddSingleton(new Dalamud.Localization("Sphene.Localization.", "", useEmbedded: true));
             collection.AddSingleton(commandManager);
             collection.AddSingleton(framework);
+            collection.AddSingleton(pluginInterface);
 
             // add sphene related singletons
             collection.AddSingleton<SpheneMediator>();

@@ -3,6 +3,8 @@ using Dalamud.Interface.Colors;
 using Dalamud.Interface.Utility;
 using Dalamud.Interface.Windowing;
 using Dalamud.Bindings.ImGui;
+using Dalamud.Game.Command;
+using Dalamud.Plugin.Services;
 using Microsoft.Extensions.Logging;
 using Sphene.Services;
 using Sphene.Services.Mediator;
@@ -14,6 +16,8 @@ using System.Numerics;
 using Dalamud.Interface.Textures.TextureWraps;
 using System;
 using Sphene.SpheneConfiguration.Models;
+using Sphene.Interop.Ipc;
+using Dalamud.Plugin;
 
 namespace Sphene.UI;
 
@@ -24,6 +28,9 @@ public class SpheneIcon : WindowMediatorSubscriberBase, IDisposable
     private readonly SpheneConfigService _configService;
     private readonly UiSharedService _uiSharedService;
     private readonly ApiController _apiController;
+    private readonly IpcManager _ipcManager;
+    private readonly IDalamudPluginInterface _pluginInterface;
+    private readonly ICommandManager _commandManager;
     
     private Vector2 _iconPosition = new Vector2(100, 100);
     private bool _hasStoredIconPosition = false;
@@ -32,6 +39,9 @@ public class SpheneIcon : WindowMediatorSubscriberBase, IDisposable
     private Vector2 _clickStartPos;
     private IDalamudTextureWrap? _spheneLogoTexture;
     
+    // Context menu state
+    // Removed _showContextMenu and _contextMenuPosition as they're no longer needed with BeginPopupContextItem
+    
     // Update indicator state
     private bool _updateAvailable = false;
     private UpdateInfo? _updateInfo = null;
@@ -39,7 +49,9 @@ public class SpheneIcon : WindowMediatorSubscriberBase, IDisposable
     
     
     public SpheneIcon(ILogger<SpheneIcon> logger, SpheneMediator mediator, 
-        SpheneConfigService configService, UiSharedService uiSharedService, ApiController apiController, PerformanceCollectorService performanceCollectorService) 
+        SpheneConfigService configService, UiSharedService uiSharedService, ApiController apiController, 
+        PerformanceCollectorService performanceCollectorService, IpcManager ipcManager, IDalamudPluginInterface pluginInterface,
+        ICommandManager commandManager) 
         : base(logger, mediator, "###SpheneIcon", performanceCollectorService)
     {
         _logger = logger;
@@ -47,6 +59,9 @@ public class SpheneIcon : WindowMediatorSubscriberBase, IDisposable
         _configService = configService;
         _uiSharedService = uiSharedService;
         _apiController = apiController;
+        _ipcManager = ipcManager;
+        _pluginInterface = pluginInterface;
+        _commandManager = commandManager;
         
         LoadIconPositionFromConfig();
         
@@ -73,6 +88,180 @@ public class SpheneIcon : WindowMediatorSubscriberBase, IDisposable
         Mediator.Subscribe<ShowUpdateNotificationMessage>(this, OnUpdateAvailable);
         
         _logger.LogDebug("SpheneIcon created at position {Position}", _iconPosition);
+    }
+    
+    private void DrawContextMenu()
+    {
+        // Use BeginPopupContextItem for proper context menu behavior
+        if (ImGui.BeginPopupContextItem("SpheneIconContextMenu"))
+        {
+            ImGui.Text("Quick Access Plugins");
+            ImGui.Separator();
+            
+            // Check available plugins and show them
+            var availablePlugins = GetAvailablePlugins();
+            
+            foreach (var plugin in availablePlugins)
+            {
+                if (ImGui.MenuItem($"Open {plugin.Name}"))
+                {
+                    OpenPlugin(plugin.InternalName);
+                }
+            }
+            
+            if (availablePlugins.Count == 0)
+            {
+                ImGui.TextDisabled("No compatible plugins found");
+            }
+            
+            ImGui.Separator();
+            
+            if (ImGui.MenuItem("Settings"))
+            {
+                // Open Sphene settings
+                _mediator.Publish(new UiToggleMessage(typeof(SettingsUi)));
+            }
+            
+            ImGui.EndPopup();
+        }
+    }
+    
+    private List<PluginInfo> GetAvailablePlugins()
+    {
+        var compatiblePlugins = new List<PluginInfo>();
+        
+        // Check for Penumbra
+        if (_ipcManager.Penumbra.APIAvailable)
+        {
+            var penumbraPlugin = _pluginInterface.InstalledPlugins
+                .FirstOrDefault(p => string.Equals(p.InternalName, "Penumbra", StringComparison.OrdinalIgnoreCase));
+            if (penumbraPlugin != null)
+            {
+                compatiblePlugins.Add(new PluginInfo("Penumbra", "Penumbra"));
+            }
+        }
+        
+        // Check for Glamourer
+        if (_ipcManager.Glamourer.APIAvailable)
+        {
+            var glamourerPlugin = _pluginInterface.InstalledPlugins
+                .FirstOrDefault(p => string.Equals(p.InternalName, "Glamourer", StringComparison.OrdinalIgnoreCase));
+            if (glamourerPlugin != null)
+            {
+                compatiblePlugins.Add(new PluginInfo("Glamourer", "Glamourer"));
+            }
+        }
+        
+        // Check for other compatible plugins
+        if (_ipcManager.CustomizePlus.APIAvailable)
+        {
+            var customizePlusPlugin = _pluginInterface.InstalledPlugins
+                .FirstOrDefault(p => string.Equals(p.InternalName, "CustomizePlus", StringComparison.OrdinalIgnoreCase));
+            if (customizePlusPlugin != null)
+            {
+                compatiblePlugins.Add(new PluginInfo("Customize+", "CustomizePlus"));
+            }
+        }
+        
+        if (_ipcManager.Heels.APIAvailable)
+        {
+            var heelsPlugin = _pluginInterface.InstalledPlugins
+                .FirstOrDefault(p => string.Equals(p.InternalName, "SimpleHeels", StringComparison.OrdinalIgnoreCase));
+            if (heelsPlugin != null)
+            {
+                compatiblePlugins.Add(new PluginInfo("Simple Heels", "SimpleHeels"));
+                // Add Livepose as a sub-feature of Simple Heels
+                compatiblePlugins.Add(new PluginInfo("Livepose", "Livepose"));
+            }
+        }
+        
+        if (_ipcManager.Moodles.APIAvailable)
+        {
+            var moodlesPlugin = _pluginInterface.InstalledPlugins
+                .FirstOrDefault(p => string.Equals(p.InternalName, "Moodles", StringComparison.OrdinalIgnoreCase));
+            if (moodlesPlugin != null)
+            {
+                compatiblePlugins.Add(new PluginInfo("Moodles", "Moodles"));
+            }
+        }
+        
+        if (_ipcManager.Honorific.APIAvailable)
+        {
+            var honorificPlugin = _pluginInterface.InstalledPlugins
+                .FirstOrDefault(p => string.Equals(p.InternalName, "Honorific", StringComparison.OrdinalIgnoreCase));
+            if (honorificPlugin != null)
+            {
+                compatiblePlugins.Add(new PluginInfo("Honorific", "Honorific"));
+            }
+        }
+        
+        if (_ipcManager.PetNames.APIAvailable)
+        {
+            var petNamesPlugin = _pluginInterface.InstalledPlugins
+                .FirstOrDefault(p => string.Equals(p.InternalName, "PetNicknames", StringComparison.OrdinalIgnoreCase));
+            if (petNamesPlugin != null)
+            {
+                compatiblePlugins.Add(new PluginInfo("Pet Nicknames", "PetNicknames"));
+            }
+        }
+        
+        if (_ipcManager.Brio.APIAvailable)
+        {
+            var brioPlugin = _pluginInterface.InstalledPlugins
+                .FirstOrDefault(p => string.Equals(p.InternalName, "Brio", StringComparison.OrdinalIgnoreCase));
+            if (brioPlugin != null)
+            {
+                compatiblePlugins.Add(new PluginInfo("Brio", "Brio"));
+            }
+        }
+        
+        return compatiblePlugins;
+    }
+    
+    private void OpenPlugin(string internalName)
+    {
+        try
+        {
+            // Map specific plugin internal names to their correct commands
+            var command = internalName.ToLower() switch
+            {
+                "customizeplus" => "/customize",
+                "simpleheels" => "/heels",
+                "livepose" => "/heels livepose",
+                _ => $"/{internalName.ToLower()}"
+            };
+            
+            _logger.LogDebug("Attempting to open plugin with command: {Command}", command);
+            
+            // Execute the command using ICommandManager
+            _commandManager.ProcessCommand(command);
+            _logger.LogDebug("Successfully executed command: {Command}", command);
+            
+
+
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to open plugin {PluginName}", internalName);
+            _mediator.Publish(new NotificationMessage(
+                "Plugin Error",
+                $"Failed to open {internalName}: {ex.Message}",
+                NotificationType.Error,
+                TimeSpan.FromSeconds(5)
+            ));
+        }
+    }
+    
+    private class PluginInfo
+    {
+        public string Name { get; }
+        public string InternalName { get; }
+        
+        public PluginInfo(string name, string internalName)
+        {
+            Name = name;
+            InternalName = internalName;
+        }
     }
     
     protected override void DrawInternal()
@@ -156,6 +345,8 @@ public class SpheneIcon : WindowMediatorSubscriberBase, IDisposable
             }
         }
         
+        // Handle right-click for context menu - removed manual handling since BeginPopupContextItem handles this automatically
+        
         // Handle mouse release
         if (ImGui.IsItemDeactivated())
         {
@@ -189,7 +380,7 @@ public class SpheneIcon : WindowMediatorSubscriberBase, IDisposable
             using (SpheneCustomTheme.ApplyTooltipTheme())
             {
                 ImGui.BeginTooltip();
-                ImGui.Text("Click to toggle Sphene | Hold and drag to move");
+                ImGui.Text("Click to toggle Sphene | Hold and drag to move | Right-click for menu");
                 ImGui.Separator();
                 ImGui.Text($"Server Status: {GetStatusText(_apiController.ServerState)}");
                 if (_updateAvailable && _updateInfo != null)
@@ -214,6 +405,9 @@ public class SpheneIcon : WindowMediatorSubscriberBase, IDisposable
                 }
             }
         }
+        
+        // Draw context menu
+        DrawContextMenu();
     }
     
     private void ToggleMainWindow()
