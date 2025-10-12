@@ -234,7 +234,8 @@ public static class ThemePresets
             Border = new Vector4(0.25f, 0.25f, 0.25f, 1.0f),
             Hover = new Vector4(0.35f, 0.35f, 0.35f, 1.0f),
             Active = new Vector4(0.45f, 0.45f, 0.45f, 1.0f),
-            HeaderBg = new Vector4(0.3f, 0.3f, 0.3f, 0.3f)
+            HeaderBg = new Vector4(0.3f, 0.3f, 0.3f, 0.3f),
+            CompactShowImGuiHeader = true
         };
     }
 

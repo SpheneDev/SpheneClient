@@ -1189,7 +1189,6 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
     public void LoadLocalization(string languageCode)
     {
         _localization.SetupWithLangCode(languageCode);
-        Strings.ToS = new Strings.ToSStrings();
     }
 
     internal static void DistanceSeparator()

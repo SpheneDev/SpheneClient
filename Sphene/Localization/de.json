@@ -1,46 +1,46 @@
 {
-  "LanguageLabel": {
-    "message": "Language",
-    "description": "ToSStrings..ctor"
+  "ToS.LanguageLabel": {
+    "message": "Sprache",
+    "description": "Label for language selection"
   },
-  "AgreementLabel": {
-    "message": "Nutzungsbedingungen",
-    "description": "ToSStrings..ctor"
+  "ToS.AgreementLabel": {
+    "message": "     Nutzungsbedingungen",
+    "description": "Terms of Service header"
   },
-  "ReadLabel": {
-    "message": "BITTE LIES DIES SORGFÄLTIG",
-    "description": "ToSStrings..ctor"
+  "ToS.ReadLabel": {
+    "message": "Bitte sorgfältig lesen, bevor Sie fortfahren",
+    "description": "Instruction to read terms carefully"
   },
-  "Paragraph1": {
-    "message": "Alle Moddateien, die aktuell auf deinem Charakter aktiv sind und dein Charakterzustand werden automatisch zu dem Service, an dem du dich registriert hast, hochgeladen. Das Plugin wird ausschließlich die nötigen Moddateien hochladen und nicht die gesamte Modifikation.",
-    "description": "ToSStrings..ctor"
+  "ToS.AgreeLabel": {
+    "message": "Ich akzeptiere & fortfahren",
+    "description": "Accept and continue button"
   },
-  "Paragraph2": {
-    "message": "Falls du mit einer getakteten Internetverbindung verbunden bist, können durch den Datentransfer von Hoch- und Runtergeladenen Moddateien höhere Kosten entstehen. Moddateien werden beim Hoch- und Runterladen komprimiert um Bandbreite zu sparen. Durch unterschiedliche Hoch- und Runterladgeschwindigkeiten ist es möglich, dass Änderungen an Charakteren nicht sofort sichtbar sind. Dateien die bereits auf dem Service existieren, werden nicht nochmals hochgeladen.",
-    "description": "ToSStrings..ctor"
+  "ToS.ButtonWillBeAvailableIn": {
+    "message": "Fortfahren-Button verfügbar in",
+    "description": "Countdown message for continue button"
   },
-  "Paragraph3": {
-    "message": "Die Moddateien die du hochlädst sind vertraulich und werden nicht mit anderen Nutzern geteilt, die nicht die exakt selben Dateien anfordern. Bitte überlege dir sorgfältig mit wem du deinen Identifikationscode teilst, da es unvermeidlich ist, dass die andere Person deine Moddateien erhält und lokal zwischenspeichert. Lokal zwischengespeicherte Dateien haben willkürrliche Namen um vor Versuchen abzuschrecken die originalen Moddateien aus diesen wiederherzustellen.",
-    "description": "ToSStrings..ctor"
+  "ToS.Paragraph1": {
+    "message": "Willkommen im Sphene Network - einem revolutionären Charaktersynchronisationsdienst für Final Fantasy XIV. Durch die Nutzung dieses Dienstes bestätigen Sie, dass Sie die folgenden Geschäftsbedingungen verstehen und akzeptieren.",
+    "description": "First paragraph of terms of service"
   },
-  "Paragraph4": {
-    "message": "Der Ersteller des Plugins hat sein Bestes getan, um deine Sicherheit zu gewährleisten. Es gibt jedoch keine Garantie für 100%ige Sicherheit. Teile deinen Identifikationscode nicht blind mit jedem.",
-    "description": "ToSStrings..ctor"
+  "ToS.Paragraph2": {
+    "message": "Das Sphene Network wird ohne Gewährleistung oder Garantie bereitgestellt. Obwohl wir uns bemühen, einen zuverlässigen Service zu gewährleisten, können wir keine 100%ige Verfügbarkeit oder Datenintegrität garantieren. Nutzen Sie diesen Service nach eigenem Ermessen und erstellen Sie immer lokale Backups wichtiger Charakterdaten.",
+    "description": "Second paragraph about service disclaimers"
   },
-  "Paragraph5": {
-    "message": "Moddateien, die auf dem Service gespeichert sind, verbleiben auf dem Service, solange es Anforderungen für diese Dateien gibt. Nach einer Zeitspanne in der die Dateien nicht verwendet wurden, werden diese automatisch gelöscht. Du hast auch die Möglichkeit manuell alle Dateien auf dem Service zu löschen. Der Service hat keine Informationen welche Moddateien zu welcher Modifikation gehören.",
-    "description": "ToSStrings..ctor"
+  "ToS.Paragraph3": {
+    "message": "Ihre Privatsphäre ist uns wichtig. Charakteraussehen-Daten, die über das Network übertragen werden, sind verschlüsselt und werden nur mit Benutzern geteilt, die Sie ausdrücklich autorisieren. Wir sammeln, speichern oder teilen keine persönlichen Informationen über das hinaus, was für den Betrieb des Services notwendig ist.",
+    "description": "Third paragraph about privacy"
   },
-  "Paragraph6": {
-    "message": "Dieser Dienst wird ohne Gewähr angeboten. Im Falle eines Missbrauchs tretet dem Sphene Discord bei.",
-    "description": "ToSStrings..ctor"
+  "ToS.Paragraph4": {
+    "message": "Sie sind dafür verantwortlich, sicherzustellen, dass alle Mods oder Anpassungen, die Sie teilen, den Nutzungsbedingungen von Final Fantasy XIV und geltendem Recht entsprechen. Das Sphene Network ist nicht verantwortlich für von Benutzern geteilte Inhalte. Unangemessene, illegale oder schädliche Inhalte sind strengstens verboten und können zur Sperrung des Services führen.",
+    "description": "Fourth paragraph about user responsibilities"
   },
-  "AgreeLabel": {
-    "message": "Ich Stimme zu",
-    "description": "ToSStrings..ctor"
+  "ToS.Paragraph5": {
+    "message": "Das Network benötigt die Penumbra- und Glamourer-Plugins, um ordnungsgemäß zu funktionieren. Nur Modifikationen, die über Penumbra geleitet werden, können synchronisiert werden. Stellen Sie sicher, dass alle Ihre Anpassungen ordnungsgemäß über Penumbras Systeme konfiguriert sind, um optimale Synchronisationsergebnisse zu erzielen.",
+    "description": "Fifth paragraph about plugin requirements"
   },
-  "ButtonWillBeAvailableIn": {
-    "message": "\"Ich stimme zu\" Knopf verfügbar in",
-    "description": "ToSStrings..ctor"
+  "ToS.Paragraph6": {
+    "message": "Durch Fortfahren stimmen Sie diesen Bedingungen zu und bestätigen, dass das Sphene Network ein von der Community betriebenes Projekt ist, das kostenlos bereitgestellt wird. Wir behalten uns das Recht vor, diese Bedingungen zu ändern oder den Service jederzeit einzustellen. Vielen Dank, dass Sie Teil der Sphene Network Community sind!",
+    "description": "Sixth paragraph about agreement and community project"
   }
 }

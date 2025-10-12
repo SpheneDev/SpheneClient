@@ -1,4 +1,5 @@
 using Dalamud.Bindings.ImGui;
+using Dalamud.Interface;
 using Dalamud.Interface.Colors;
 using Dalamud.Interface.Utility;
 using Dalamud.Interface.Utility.Raii;
@@ -33,6 +34,13 @@ public partial class IntroUi : WindowMediatorSubscriberBase
     private string[]? _tosParagraphs;
     private bool _useLegacyLogin = false;
 
+    // Modern UI constants - Optimized for reduced scrolling
+    private const float SECTION_SPACING = 12.0f;
+    private const float CARD_PADDING = 12.0f;
+    private const float BUTTON_HEIGHT = 32.0f;
+    private const float HEADER_HEIGHT = 32.0f;
+    private const float BUTTON_AREA_HEIGHT = 80.0f; // Increased to accommodate info boxes and multiple elements
+
     public IntroUi(ILogger<IntroUi> logger, UiSharedService uiShared, SpheneConfigService configService,
         CacheMonitor fileCacheManager, ServerConfigurationManager serverConfigurationManager, SpheneMediator spheneMediator,
         PerformanceCollectorService performanceCollectorService, DalamudUtilService dalamudUtilService) : base(logger, spheneMediator, "Sphene Setup", performanceCollectorService)
@@ -48,8 +56,8 @@ public partial class IntroUi : WindowMediatorSubscriberBase
 
         SizeConstraints = new WindowSizeConstraints()
         {
-            MinimumSize = new Vector2(600, 400),
-            MaximumSize = new Vector2(600, 2000),
+            MinimumSize = new Vector2(700, 500),
+            MaximumSize = new Vector2(700, 2000),
         };
 
         GetToSLocalization();
@@ -68,21 +76,372 @@ public partial class IntroUi : WindowMediatorSubscriberBase
     {
         if (_uiShared.IsInGpose) return;
 
+        // Modern header styling
+        DrawModernHeader();
+
+        // Calculate available content height (window height minus header and button area)
+        var windowHeight = ImGui.GetWindowSize().Y;
+        var headerHeight = HEADER_HEIGHT + 10; // Header + spacing
+        var contentHeight = windowHeight - headerHeight - BUTTON_AREA_HEIGHT - 20; // Extra margin
+
+        // Content area with scrolling
+        using (var contentChild = ImRaii.Child("ContentArea", new Vector2(0, contentHeight), false))
+        {
+            if (contentChild)
+            {
+                if (!_configService.Current.AcceptedAgreement && !_readFirstPage)
+                {
+                    DrawWelcomePageContent();
+                }
+                else if (!_configService.Current.AcceptedAgreement && _readFirstPage)
+                {
+                    DrawAgreementPageContent();
+                }
+                else if (_configService.Current.AcceptedAgreement
+                         && (string.IsNullOrEmpty(_configService.Current.CacheFolder)
+                             || !_configService.Current.InitialScanComplete
+                             || !Directory.Exists(_configService.Current.CacheFolder)))
+                {
+                    DrawCacheSetupPageContent();
+                }
+                else if (_configService.Current.AcceptedAgreement 
+                         && !string.IsNullOrEmpty(_configService.Current.CacheFolder)
+                         && _configService.Current.InitialScanComplete
+                         && Directory.Exists(_configService.Current.CacheFolder)
+                         && !_configService.Current.HasSeenSyncshellSettings)
+                {
+                    DrawSyncshellSettingsPageContent();
+                }
+                else if (!_uiShared.ApiController.ServerAlive)
+                {
+                    DrawNetworkAuthenticationPageContent();
+                }
+                else
+                {
+                    Mediator.Publish(new SwitchToMainUiMessage());
+                    IsOpen = false;
+                    return;
+                }
+            }
+        }
+
+        // Sticky button area at bottom
+        ImGui.Separator();
+        ImGui.Spacing();
+        DrawStickyButtons();
+    }
+
+    private void DrawModernHeader()
+    {
+        var windowWidth = ImGui.GetWindowSize().X;
+        var headerHeight = HEADER_HEIGHT;
+        
+        // Background for header
+        var drawList = ImGui.GetWindowDrawList();
+        var headerStart = ImGui.GetCursorScreenPos();
+        var headerEnd = new Vector2(headerStart.X + windowWidth, headerStart.Y + headerHeight);
+        
+        drawList.AddRectFilled(headerStart, headerEnd, ImGui.GetColorU32(ImGuiCol.FrameBg), 8.0f);
+        
+        // Center the title - reduced padding
+        ImGui.SetCursorPosY(ImGui.GetCursorPosY() + 4);
+        using (_uiShared.UidFont.Push())
+        {
+            var titleText = "Sphene Network Setup";
+            var titleSize = ImGui.CalcTextSize(titleText);
+            ImGui.SetCursorPosX((windowWidth - titleSize.X) * 0.5f);
+            UiSharedService.ColorText(titleText, ImGuiColors.TankBlue);
+        }
+        
+        ImGui.SetCursorPosY(ImGui.GetCursorPosY() + 4);
+        ImGui.Separator();
+        ImGui.Spacing();
+    }
+
+    private void DrawWelcomePageContent()
+    {
+        DrawModernCard(() =>
+        {
+            DrawSectionHeader("Welcome to Sphene Network", Dalamud.Interface.FontAwesomeIcon.Star);
+            
+            UiSharedService.TextWrapped("Experience seamless character synchronization across the realm through the power of Living Memory. " +
+                          "Share your complete appearance and glamour with trusted companions in real-time.");
+            
+            ImGui.Spacing();
+            DrawInfoBox("Prerequisites", "You'll need Penumbra and Glamourer installed to access the Network's full capabilities.", ImGuiColors.HealerGreen);
+            
+            ImGui.Spacing();
+            DrawWarningBox("Important", "Only modifications channeled through Penumbra can be transmitted. " +
+                                 "Ensure all your customizations flow through Penumbra's systems for perfect synchronization.", ImGuiColors.DalamudYellow);
+        });
+
+        if (!_uiShared.DrawOtherPluginState()) return;
+    }
+
+    private void DrawAgreementPageContent()
+    {
+        DrawModernCard(() =>
+        {
+            // Language selector in top right
+            var languageSize = ImGui.CalcTextSize(Strings.ToS.LanguageLabel);
+            ImGui.SetCursorPosX(ImGui.GetWindowContentRegionMax().X - 120);
+            ImGui.TextUnformatted(Strings.ToS.LanguageLabel);
+            ImGui.SameLine();
+            ImGui.SetNextItemWidth(80);
+            if (ImGui.Combo("##language", ref _currentLanguage, _languages.Keys.ToArray(), _languages.Count))
+            {
+                GetToSLocalization(_currentLanguage);
+            }
+            
+            ImGui.SetCursorPosX(0);
+            DrawSectionHeader(Strings.ToS.AgreementLabel); // Removed icon parameter
+            
+            // Prominent warning
+            ImGui.Spacing();
+            var warningText = Strings.ToS.ReadLabel;
+            var warningSize = ImGui.CalcTextSize(warningText);
+            ImGui.SetCursorPosX((ImGui.GetWindowSize().X - warningSize.X) * 0.5f);
+            using (ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.DalamudRed))
+            {
+                ImGui.SetWindowFontScale(1.3f);
+                ImGui.TextUnformatted(warningText);
+                ImGui.SetWindowFontScale(1.0f);
+            }
+            
+            ImGui.Separator();
+            ImGui.Spacing();
+            
+            // Terms content in scrollable area
+            using (var child = ImRaii.Child("TermsContent", new Vector2(0, 300), true))
+            {
+                if (child)
+                {
+                    foreach (var paragraph in _tosParagraphs!)
+                    {
+                        UiSharedService.TextWrapped(paragraph);
+                        ImGui.Spacing();
+                    }
+                }
+            }
+        });
+    }
+
+    private void DrawCacheSetupPageContent()
+    {
+        DrawModernCard(() =>
+        {
+            DrawSectionHeader("Memory Archive Configuration", Dalamud.Interface.FontAwesomeIcon.Database);
+            
+            ImGui.Spacing();
+            if (!_uiShared.HasValidPenumbraModPath)
+            {
+                DrawErrorBox("Penumbra Path Required", "Please configure a valid Penumbra mod directory path before proceeding.", ImGuiColors.DalamudRed);
+            }
+            else
+            {
+                UiSharedService.TextWrapped("The Network requires a local archive to store synchronized character data and must catalog your existing modifications for optimal transmission efficiency.");
+                
+                ImGui.Spacing();
+                DrawWarningBox("Important Notes", 
+                    "• Initial cataloging may take time depending on your modification library\n" +
+                    "• Do not remove FileCache.csv from your Dalamud Plugin Configurations\n" +
+                    "• Ensure your Penumbra directory structure is properly configured", ImGuiColors.DalamudYellow);
+                
+                ImGui.Spacing();
+                _uiShared.DrawCacheDirectorySetting();
+            }
+        });
+
+        if (!_cacheMonitor.IsScanRunning && !string.IsNullOrEmpty(_configService.Current.CacheFolder) && _uiShared.HasValidPenumbraModPath && Directory.Exists(_configService.Current.CacheFolder))
+        {
+            // Scan button will be in sticky area
+        }
+        else
+        {
+            _uiShared.DrawFileScanState();
+        }
+        
+        if (!_dalamudUtilService.IsWine)
+        {
+            ImGui.Spacing();
+            DrawModernCard(() =>
+            {
+                var useFileCompactor = _configService.Current.UseCompactor;
+                if (ImGui.Checkbox("Enable File Compactor", ref useFileCompactor))
+                {
+                    _configService.Current.UseCompactor = useFileCompactor;
+                    _configService.Save();
+                }
+                UiSharedService.AttachToolTip("Saves significant disk space for downloads with minor CPU overhead. Recommended to keep enabled.");
+                
+                ImGui.Spacing();
+                UiSharedService.ColorTextWrapped("The File Compactor reduces storage requirements for downloaded content while providing faster loading times. " +
+                    "This setting can be changed later in Sphene settings.", ImGuiColors.DalamudGrey3);
+            });
+        }
+    }
+
+    private void DrawSyncshellSettingsPageContent()
+    {
+        DrawModernCard(() =>
+        {
+            DrawSectionHeader("Notification Preferences", Dalamud.Interface.FontAwesomeIcon.Bell);
+            
+            ImGui.Spacing();
+            UiSharedService.TextWrapped("Configure how you want to be notified about syncshell activities before connecting to the Network.");
+        });
+
+        ImGui.Spacing();
+        
+        // Area Bound Syncshells
+        DrawModernCard(() =>
+        {
+            DrawSubsectionHeader("Area-Bound Syncshells", Dalamud.Interface.FontAwesomeIcon.MapMarkerAlt);
+            
+            var showAreaBoundNotifications = _configService.Current.ShowAreaBoundSyncshellNotifications;
+            if (ImGui.Checkbox("Show area-bound syncshell notifications", ref showAreaBoundNotifications))
+            {
+                _configService.Current.ShowAreaBoundSyncshellNotifications = showAreaBoundNotifications;
+                _configService.Save();
+            }
+            UiSharedService.AttachToolTip("Receive notifications when area-bound syncshells become available in your current location");
+            
+            var showAreaBoundWelcome = _configService.Current.ShowAreaBoundSyncshellWelcomeMessages;
+            if (ImGui.Checkbox("Show welcome messages", ref showAreaBoundWelcome))
+            {
+                _configService.Current.ShowAreaBoundSyncshellWelcomeMessages = showAreaBoundWelcome;
+                _configService.Save();
+            }
+            UiSharedService.AttachToolTip("Display welcome messages when joining area-bound syncshells");
+        });
+
+        ImGui.Spacing();
+        
+        // City Syncshells
+        DrawModernCard(() =>
+        {
+            DrawSubsectionHeader("Public City Syncshells", Dalamud.Interface.FontAwesomeIcon.City);
+            
+            var enableCitySyncshells = _configService.Current.EnableCitySyncshellJoinRequests;
+            if (ImGui.Checkbox("Enable city syncshell join requests", ref enableCitySyncshells))
+            {
+                _configService.Current.EnableCitySyncshellJoinRequests = enableCitySyncshells;
+                _configService.Save();
+            }
+            UiSharedService.AttachToolTip("Allow automatic joining of public city syncshells when visiting major cities");
+        });
+    }
+
+    private void DrawNetworkAuthenticationPageContent()
+    {
+        DrawModernCard(() =>
+        {
+            DrawSectionHeader("Network Authentication", Dalamud.Interface.FontAwesomeIcon.Shield);
+            
+            ImGui.Spacing();
+            UiSharedService.TextWrapped("Establish your identity within the Sphene Network to access synchronization services.");
+            
+            ImGui.Spacing();
+            DrawInfoBox("Main Server Authentication", 
+                $"For the primary Network node \"{WebAPI.ApiController.MainServer}\", authentication is managed through our Discord community. " +
+                "Join the Discord and follow the authentication protocols in #sphene-registration.", ImGuiColors.HealerGreen);
+        });
+
+        ImGui.Spacing();
+        DrawModernButton("Join Discord Community", Dalamud.Interface.FontAwesomeIcon.Users, () =>
+        {
+            Util.OpenLink("https://discord.gg/GbnwsP2XsF");
+        }, new Vector4(0.44f, 0.47f, 0.78f, 1.0f));
+
+        ImGui.Spacing();
+        
+        // Network Configuration
+        DrawModernCard(() =>
+        {
+            DrawSectionHeader("Network Configuration", Dalamud.Interface.FontAwesomeIcon.Cog);
+            
+            int serverIdx = 0;
+            var selectedServer = _serverConfigurationManager.GetServerByIndex(serverIdx);
+
+            serverIdx = _uiShared.DrawServiceSelection(selectOnChange: true, showConnect: false);
+            if (serverIdx != _prevIdx)
+            {
+                _uiShared.ResetOAuthTasksState();
+                _prevIdx = serverIdx;
+            }
+
+            selectedServer = _serverConfigurationManager.GetServerByIndex(serverIdx);
+            
+            // Force legacy authentication mode by default
+            _useLegacyLogin = true;
+            selectedServer.UseOAuth2 = false;
+            _serverConfigurationManager.Save();
+        });
+
+        ImGui.Spacing();
+        
+        // Authentication Key Input
+        if (_useLegacyLogin)
+        {
+            DrawModernCard(() =>
+            {
+                DrawSubsectionHeader("Authentication Key", Dalamud.Interface.FontAwesomeIcon.Key);
+                
+                ImGui.SetNextItemWidth(-1);
+                ImGui.InputTextWithHint("##secretKey", "Enter your 64-character authentication key...", ref _secretKey, 64);
+                
+                if (_secretKey.Length > 0 && _secretKey.Length != 64)
+                {
+                    ImGui.Spacing();
+                    DrawErrorBox("Invalid Length", "Authentication key must be exactly 64 characters long. Do not use Lodestone credentials.", ImGuiColors.DalamudRed);
+                }
+                else if (_secretKey.Length == 64 && !Base32Regex().IsMatch(_secretKey))
+                {
+                    ImGui.Spacing();
+                    DrawErrorBox("Invalid Format", "Authentication key may only contain letters A-Z and numbers 2-7.", ImGuiColors.DalamudRed);
+                }
+            });
+        }
+        else
+        {
+            // OAuth2 flow (kept for compatibility but not used by default)
+            DrawModernCard(() =>
+            {
+                var selectedServer = _serverConfigurationManager.GetServerByIndex(0);
+                if (string.IsNullOrEmpty(selectedServer.OAuthToken))
+                {
+                    UiSharedService.TextWrapped("Press the button below to verify Network OAuth2 compatibility and authenticate through Discord.");
+                    _uiShared.DrawOAuth(selectedServer);
+                }
+                else
+                {
+                    UiSharedService.ColorTextWrapped($"Network authentication established. Connected as: Discord User {_serverConfigurationManager.GetDiscordUserFromToken(selectedServer)}", ImGuiColors.HealerGreen);
+                    UiSharedService.TextWrapped("Retrieve your Network identifiers to complete the connection process.");
+                    _uiShared.DrawUpdateOAuthUIDsButton(selectedServer);
+                    
+                    var playerName = _dalamudUtilService.GetPlayerName();
+                    var playerWorld = _dalamudUtilService.GetHomeWorldId();
+                    if (!string.IsNullOrEmpty(playerName) && playerWorld != 0)
+                    {
+                        var worldName = _dalamudUtilService.WorldData.Value.TryGetValue((ushort)playerWorld, out var world) ? world : "Unknown";
+                        UiSharedService.TextWrapped($"Current Character: {playerName}@{worldName}");
+                        
+                        if (_uiShared.IconTextButton(FontAwesomeIcon.UserPlus, "Add Current Character"))
+                        {
+                            _serverConfigurationManager.AddCurrentCharacterToServer();
+                        }
+                    }
+                }
+            });
+        }
+    }
+
+    private void DrawStickyButtons()
+    {
         if (!_configService.Current.AcceptedAgreement && !_readFirstPage)
         {
-            _uiShared.BigText("Welcome to the Sphene Network");
-            ImGui.Separator();
-            UiSharedService.TextWrapped("The Sphene Network allows you to synchronize your complete appearance and glamour with other connected souls across the realm. " +
-                              "Through the power of Living Memory, your character's essence can be shared with trusted companions. " +
-                              "Note that you will need Penumbra and Glamourer to channel this ancient technology.");
-            UiSharedService.TextWrapped("Before you can access the Network's capabilities, we must establish the proper connections. Click next to begin the initialization sequence.");
-
-            UiSharedService.ColorTextWrapped("Caution: Only modifications channeled through Penumbra can be transmitted via the Network. " +
-                                 "Appearance data from other sources may cause synchronization errors or incomplete transfers. " +
-                                 "To ensure perfect harmony with the Network, all modifications must flow through Penumbra's systems.", ImGuiColors.DalamudYellow);
-            if (!_uiShared.DrawOtherPluginState()) return;
-            ImGui.Separator();
-            if (ImGui.Button("Next##toAgreement"))
+            // Welcome page button
+            DrawModernButton("Begin Setup", Dalamud.Interface.FontAwesomeIcon.ArrowRight, () =>
             {
                 _readFirstPage = true;
 #if !DEBUG
@@ -97,59 +456,22 @@ public partial class IntroUi : WindowMediatorSubscriberBase
 #else
                 _timeoutTask = Task.CompletedTask;
 #endif
-            }
+            });
         }
         else if (!_configService.Current.AcceptedAgreement && _readFirstPage)
         {
-            Vector2 textSize;
-            using (_uiShared.UidFont.Push())
-            {
-                textSize = ImGui.CalcTextSize(Strings.ToS.LanguageLabel);
-                ImGui.TextUnformatted(Strings.ToS.AgreementLabel);
-            }
-
-            ImGui.SameLine();
-            var languageSize = ImGui.CalcTextSize(Strings.ToS.LanguageLabel);
-            ImGui.SetCursorPosX(ImGui.GetWindowContentRegionMax().X - ImGui.GetWindowContentRegionMin().X - languageSize.X - 80);
-            ImGui.SetCursorPosY(ImGui.GetCursorPosY() + textSize.Y / 2 - languageSize.Y / 2);
-
-            ImGui.TextUnformatted(Strings.ToS.LanguageLabel);
-            ImGui.SameLine();
-            ImGui.SetCursorPosY(ImGui.GetCursorPosY() + textSize.Y / 2 - (languageSize.Y + ImGui.GetStyle().FramePadding.Y) / 2);
-            ImGui.SetNextItemWidth(80);
-            if (ImGui.Combo("", ref _currentLanguage, _languages.Keys.ToArray(), _languages.Count))
-            {
-                GetToSLocalization(_currentLanguage);
-            }
-
-            ImGui.Separator();
-            ImGui.SetWindowFontScale(1.5f);
-            string readThis = Strings.ToS.ReadLabel;
-            textSize = ImGui.CalcTextSize(readThis);
-            ImGui.SetCursorPosX(ImGui.GetWindowSize().X / 2 - textSize.X / 2);
-            UiSharedService.ColorText(readThis, ImGuiColors.DalamudRed);
-            ImGui.SetWindowFontScale(1.0f);
-            ImGui.Separator();
-
-            UiSharedService.TextWrapped(_tosParagraphs![0]);
-            UiSharedService.TextWrapped(_tosParagraphs![1]);
-            UiSharedService.TextWrapped(_tosParagraphs![2]);
-            UiSharedService.TextWrapped(_tosParagraphs![3]);
-            UiSharedService.TextWrapped(_tosParagraphs![4]);
-            UiSharedService.TextWrapped(_tosParagraphs![5]);
-
-            ImGui.Separator();
+            // Agreement page button
             if (_timeoutTask?.IsCompleted ?? true)
             {
-                if (ImGui.Button(Strings.ToS.AgreeLabel + "##toSetup"))
+                DrawModernButton(Strings.ToS.AgreeLabel, Dalamud.Interface.FontAwesomeIcon.Check, () =>
                 {
                     _configService.Current.AcceptedAgreement = true;
                     _configService.Save();
-                }
+                }, ImGuiColors.HealerGreen);
             }
             else
             {
-                UiSharedService.TextWrapped(_timeoutLabel);
+                DrawInfoBox("Please Wait", _timeoutLabel, ImGuiColors.DalamudYellow);
             }
         }
         else if (_configService.Current.AcceptedAgreement
@@ -157,48 +479,13 @@ public partial class IntroUi : WindowMediatorSubscriberBase
                      || !_configService.Current.InitialScanComplete
                      || !Directory.Exists(_configService.Current.CacheFolder)))
         {
-            using (_uiShared.UidFont.Push())
-                ImGui.TextUnformatted("Memory Archive Configuration");
-
-            ImGui.Separator();
-
-            if (!_uiShared.HasValidPenumbraModPath)
-            {
-                UiSharedService.ColorTextWrapped("You do not have a valid Penumbra path set. Open Penumbra and set up a valid path for the mod directory.", ImGuiColors.DalamudRed);
-            }
-            else
-            {
-                UiSharedService.TextWrapped("To optimize data transmission efficiency, the Network must catalog your existing Penumbra modifications. " +
-                           "Additionally, a local archive must be established where the Network will store synchronized character data. " +
-                                     "Once the archive is configured and cataloging complete, you will be guided to Network registration.");
-                UiSharedService.TextWrapped("Note: The initial cataloging process may take time depending on your modification library. Please allow the process to complete.");
-                UiSharedService.ColorTextWrapped("Warning: Do not remove the FileCache.csv from your Dalamud Plugin Configurations after this step. " +
-                                          "Deletion will trigger a complete re-cataloging of the Memory Archive on next startup.", ImGuiColors.DalamudYellow);
-                UiSharedService.ColorTextWrapped("Warning: If cataloging stalls indefinitely, verify that your Penumbra directory structure is properly configured.", ImGuiColors.DalamudYellow);
-                _uiShared.DrawCacheDirectorySetting();
-            }
-
+            // Cache setup page button
             if (!_cacheMonitor.IsScanRunning && !string.IsNullOrEmpty(_configService.Current.CacheFolder) && _uiShared.HasValidPenumbraModPath && Directory.Exists(_configService.Current.CacheFolder))
             {
-                if (ImGui.Button("Start Scan##startScan"))
+                DrawModernButton("Start Archive Scan", Dalamud.Interface.FontAwesomeIcon.Play, () =>
                 {
                     _cacheMonitor.InvokeScan();
-                }
-            }
-            else
-            {
-                _uiShared.DrawFileScanState();
-            }
-            if (!_dalamudUtilService.IsWine)
-            {
-                var useFileCompactor = _configService.Current.UseCompactor;
-                if (ImGui.Checkbox("Use File Compactor", ref useFileCompactor))
-                {
-                    _configService.Current.UseCompactor = useFileCompactor;
-                    _configService.Save();
-                }
-                UiSharedService.ColorTextWrapped("The File Compactor can save a tremendeous amount of space on the hard disk for downloads through Sphene. It will incur a minor CPU penalty on download but can speed up " +
-                    "loading of other characters. It is recommended to keep it enabled. You can change this setting later anytime in the Sphene settings.", ImGuiColors.DalamudYellow);
+                }, ImGuiColors.HealerGreen);
             }
         }
         else if (_configService.Current.AcceptedAgreement 
@@ -207,217 +494,147 @@ public partial class IntroUi : WindowMediatorSubscriberBase
                  && Directory.Exists(_configService.Current.CacheFolder)
                  && !_configService.Current.HasSeenSyncshellSettings)
         {
-            // New syncshell settings page before network authentication
-            using (_uiShared.UidFont.Push())
-                ImGui.TextUnformatted("Syncshell Notification Settings");
-            
-            ImGui.Separator();
-            UiSharedService.TextWrapped("Before connecting to the Network, configure how you want to be notified about syncshell activities. " +
-                                        "These settings control popup notifications and automatic joining behavior for different types of syncshells.");
-            
-            ImGui.Spacing();
-            
-            // Area Bound Syncshells settings
-            ImGui.TextUnformatted("Area Bound Syncshells:");
-            ImGui.Indent();
-            
-            var showAreaBoundNotifications = _configService.Current.ShowAreaBoundSyncshellNotifications;
-            if (ImGui.Checkbox("Show area-bound syncshell notifications", ref showAreaBoundNotifications))
-            {
-                _configService.Current.ShowAreaBoundSyncshellNotifications = showAreaBoundNotifications;
-                _configService.Save();
-            }
-            UiSharedService.AttachToolTip("Enable notifications when area-bound syncshells become available in your current location");
-            
-            var showAreaBoundWelcome = _configService.Current.ShowAreaBoundSyncshellWelcomeMessages;
-            if (ImGui.Checkbox("Show area-bound syncshell welcome messages", ref showAreaBoundWelcome))
-            {
-                _configService.Current.ShowAreaBoundSyncshellWelcomeMessages = showAreaBoundWelcome;
-                _configService.Save();
-            }
-            UiSharedService.AttachToolTip("Display welcome messages when joining area-bound syncshells");
-            
-            ImGui.Unindent();
-            ImGui.Spacing();
-            
-            // City Syncshells settings
-            ImGui.TextUnformatted("Public City Syncshells:");
-            ImGui.Indent();
-            
-            var enableCitySyncshells = _configService.Current.EnableCitySyncshellJoinRequests;
-            if (ImGui.Checkbox("Enable city syncshell join requests", ref enableCitySyncshells))
-            {
-                _configService.Current.EnableCitySyncshellJoinRequests = enableCitySyncshells;
-                _configService.Save();
-            }
-            UiSharedService.AttachToolTip("Allow automatic joining of public city syncshells when visiting major cities");
-            
-            ImGui.Unindent();
-            ImGui.Spacing();
-            
-            // General popup settings
-            ImGui.TextUnformatted("General Popup Settings:");
-            ImGui.Indent();
-            
-            var openPopupOnAdd = _configService.Current.OpenPopupOnAdd;
-            if (ImGui.Checkbox("Open popup when adding new pairs", ref openPopupOnAdd))
-            {
-                _configService.Current.OpenPopupOnAdd = openPopupOnAdd;
-                _configService.Save();
-            }
-            UiSharedService.AttachToolTip("Show a popup window when new pairs are added to your list");
-            
-            ImGui.Unindent();
-            
-            ImGui.Separator();
-            if (ImGui.Button("Continue to Network Authentication##toNetworkAuth"))
+            // Syncshell settings page button
+            DrawModernButton("Continue to Authentication", Dalamud.Interface.FontAwesomeIcon.ArrowRight, () =>
             {
                 _configService.Current.HasSeenSyncshellSettings = true;
                 _configService.Save();
-            }
+            });
         }
         else if (!_uiShared.ApiController.ServerAlive)
         {
-            using (_uiShared.UidFont.Push())
-                ImGui.TextUnformatted("Network Authentication");
-            ImGui.Separator();
-            UiSharedService.TextWrapped("To access the Sphene Network, you must establish your identity within the system.");
-            UiSharedService.TextWrapped("For the primary Network nodes, authentication is managed through the official Sphene Discord community. This ensures the security and integrity of the Network's core infrastructure.");
-            UiSharedService.TextWrapped("To connect to the main server \"" + WebAPI.ApiController.MainServer + "\" join our Discord community and follow the authentication protocols in #sphene-service.");
-
-            if (ImGui.Button("Join the Sphene Network Community"))
+            // Network authentication page button
+            if (_useLegacyLogin && _secretKey.Length == 64 && Base32Regex().IsMatch(_secretKey))
             {
-                Util.OpenLink("https://discord.gg/GbnwsP2XsF");
-            }
-
-            UiSharedService.TextWrapped("For alternative Network nodes, contact the respective node administrators to obtain proper authentication credentials.");
-
-            UiSharedService.DistanceSeparator();
-
-            UiSharedService.TextWrapped("Once authenticated, you can establish your connection to the Network using the interface below.");
-
-            int serverIdx = 0;
-            var selectedServer = _serverConfigurationManager.GetServerByIndex(serverIdx);
-
-            using (var node = ImRaii.TreeNode("Network Configuration", ImGuiTreeNodeFlags.DefaultOpen))
-            {
-                if (node)
+                DrawModernButton("Save Authentication Key", Dalamud.Interface.FontAwesomeIcon.Save, () =>
                 {
-                    serverIdx = _uiShared.DrawServiceSelection(selectOnChange: true, showConnect: false);
-                    if (serverIdx != _prevIdx)
+                    if (_serverConfigurationManager.CurrentServer == null) _serverConfigurationManager.SelectServer(0);
+                    if (!_serverConfigurationManager.CurrentServer!.SecretKeys.Any())
                     {
-                        _uiShared.ResetOAuthTasksState();
-                        _prevIdx = serverIdx;
+                        _serverConfigurationManager.CurrentServer!.SecretKeys.Add(_serverConfigurationManager.CurrentServer.SecretKeys.Select(k => k.Key).LastOrDefault() + 1, new SecretKey()
+                        {
+                            FriendlyName = $"Authentication Key added on Setup ({DateTime.Now:yyyy-MM-dd})",
+                            Key = _secretKey,
+                        });
+                        _serverConfigurationManager.AddCurrentCharacterToServer();
                     }
-
-                    selectedServer = _serverConfigurationManager.GetServerByIndex(serverIdx);
-                    
-                    // Force legacy authentication mode by default
-                    _useLegacyLogin = true;
-                    selectedServer.UseOAuth2 = false;
-                    _serverConfigurationManager.Save();
-                }
-            }
-
-            if (_useLegacyLogin)
-            {
-                var text = "Enter Authentication Key";
-                var buttonText = "Save";
-                var buttonWidth = _secretKey.Length != 64 ? 0 : ImGuiHelpers.GetButtonSize(buttonText).X + ImGui.GetStyle().ItemSpacing.X;
-                var textSize = ImGui.CalcTextSize(text);
-
-                ImGuiHelpers.ScaledDummy(5);
-
-                ImGui.AlignTextToFramePadding();
-                ImGui.TextUnformatted(text);
-                ImGui.SameLine();
-                ImGui.SetNextItemWidth(UiSharedService.GetWindowContentRegionWidth() - ImGui.GetWindowContentRegionMin().X - buttonWidth - textSize.X);
-                ImGui.InputText("", ref _secretKey, 64);
-                if (_secretKey.Length > 0 && _secretKey.Length != 64)
-                {
-                    UiSharedService.ColorTextWrapped("Your authentication key must be exactly 64 characters long. Do not use your Lodestone credentials here.", ImGuiColors.DalamudRed);
-                }
-                else if (_secretKey.Length == 64 && !Base32Regex().IsMatch(_secretKey))
-                {
-                    UiSharedService.ColorTextWrapped("Your authentication key may only contain letters A-Z and numbers 2-7.", ImGuiColors.DalamudRed);
-                }
-                else if (_secretKey.Length == 64)
-                {
-                    ImGui.SameLine();
-                    if (ImGui.Button(buttonText))
+                    else
                     {
-                        if (_serverConfigurationManager.CurrentServer == null) _serverConfigurationManager.SelectServer(0);
-                        if (!_serverConfigurationManager.CurrentServer!.SecretKeys.Any())
+                        _serverConfigurationManager.CurrentServer!.SecretKeys[0] = new SecretKey()
                         {
-                            _serverConfigurationManager.CurrentServer!.SecretKeys.Add(_serverConfigurationManager.CurrentServer.SecretKeys.Select(k => k.Key).LastOrDefault() + 1, new SecretKey()
-                            {
-                                FriendlyName = $"Authentication Key added on Setup ({DateTime.Now:yyyy-MM-dd})",
-                                Key = _secretKey,
-                            });
-                            _serverConfigurationManager.AddCurrentCharacterToServer();
-                        }
-                        else
-                        {
-                            _serverConfigurationManager.CurrentServer!.SecretKeys[0] = new SecretKey()
-                            {
-                                FriendlyName = $"Authentication Key added on Setup ({DateTime.Now:yyyy-MM-dd})",
-                                Key = _secretKey,
-                            };
-                        }
-                        _secretKey = string.Empty;
-                        _ = Task.Run(() => _uiShared.ApiController.CreateConnectionsAsync());
-                    }
-                }
-            }
-            else
-            {
-                if (string.IsNullOrEmpty(selectedServer.OAuthToken))
-                {
-                    UiSharedService.TextWrapped("Press the button below to verify Network OAuth2 compatibility. Then authenticate through Discord in your browser.");
-                    _uiShared.DrawOAuth(selectedServer);
-                }
-                else
-                {
-                    UiSharedService.ColorTextWrapped($"Network authentication established. Connected as: Discord User {_serverConfigurationManager.GetDiscordUserFromToken(selectedServer)}", ImGuiColors.HealerGreen);
-                    UiSharedService.TextWrapped("Now retrieve your Network identifiers to complete the connection process.");
-                    _uiShared.DrawUpdateOAuthUIDsButton(selectedServer);
-                    var playerName = _dalamudUtilService.GetPlayerName();
-                    var playerWorld = _dalamudUtilService.GetHomeWorldId();
-                    UiSharedService.TextWrapped($"Select the Network identifier for your character {_dalamudUtilService.GetPlayerName()}. If no identifiers appear, verify your Discord account connection. " +
-                        $"If needed, use the unlink option below (hold CTRL to disconnect).");
-                    _uiShared.DrawUnlinkOAuthButton(selectedServer);
-
-                    var auth = selectedServer.Authentications.Find(a => string.Equals(a.CharacterName, playerName, StringComparison.Ordinal) && a.WorldId == playerWorld);
-                    if (auth == null)
-                    {
-                        auth = new Authentication()
-                        {
-                            CharacterName = playerName,
-                            WorldId = playerWorld
+                            FriendlyName = $"Authentication Key added on Setup ({DateTime.Now:yyyy-MM-dd})",
+                            Key = _secretKey,
                         };
-                        selectedServer.Authentications.Add(auth);
-                        _serverConfigurationManager.Save();
                     }
-
-                    _uiShared.DrawUIDComboForAuthentication(0, auth, selectedServer.ServerUri);
-
-                    using (ImRaii.Disabled(string.IsNullOrEmpty(auth.UID)))
-                    {
-                        if (_uiShared.IconTextButton(Dalamud.Interface.FontAwesomeIcon.Link, "Connect to Network"))
-                        {
-                            _ = Task.Run(() => _uiShared.ApiController.CreateConnectionsAsync());
-                        }
-                    }
-                    if (string.IsNullOrEmpty(auth.UID))
-                        UiSharedService.AttachToolTip("Select a Network identifier to establish connection");
-                }
+                    _secretKey = string.Empty;
+                    _ = Task.Run(() => _uiShared.ApiController.CreateConnectionsAsync());
+                }, ImGuiColors.HealerGreen);
             }
         }
-        else
+    }
+
+    // Modern UI Helper Methods
+    private void DrawModernCard(Action content)
+    {
+        var drawList = ImGui.GetWindowDrawList();
+        var cardStart = ImGui.GetCursorScreenPos();
+        
+        ImGui.BeginGroup();
+        ImGui.Dummy(new Vector2(CARD_PADDING, CARD_PADDING * 0.5f));
+        ImGui.Indent(CARD_PADDING);
+        
+        content();
+        
+        ImGui.Unindent(CARD_PADDING);
+        ImGui.Dummy(new Vector2(CARD_PADDING, CARD_PADDING * 0.5f));
+        ImGui.EndGroup();
+        
+        var cardEnd = ImGui.GetItemRectMax();
+        drawList.AddRectFilled(cardStart, cardEnd, ImGui.GetColorU32(ImGuiCol.ChildBg), 8.0f);
+        drawList.AddRect(cardStart, cardEnd, ImGui.GetColorU32(ImGuiCol.Border), 8.0f, ImDrawFlags.None, 1.0f);
+    }
+
+    private void DrawSectionHeader(string title, Dalamud.Interface.FontAwesomeIcon? icon = null)
+    {
+        if (icon.HasValue)
         {
-            Mediator.Publish(new SwitchToMainUiMessage());
-            IsOpen = false;
+            _uiShared.IconText(icon.Value);
+            ImGui.SameLine();
         }
+        ImGui.Text(title);
+        ImGui.Separator();
+        ImGui.Spacing();
+    }
+
+    private void DrawSubsectionHeader(string title, Dalamud.Interface.FontAwesomeIcon icon)
+    {
+        _uiShared.IconText(icon);
+        ImGui.SameLine();
+        ImGui.Text(title);
+        ImGui.Spacing();
+    }
+
+    private void DrawModernButton(string text, Dalamud.Interface.FontAwesomeIcon icon, Action onClick, Vector4? color = null)
+    {
+        var buttonWidth = ImGui.GetContentRegionAvail().X;
+        var actualColor = color ?? new Vector4(0.2f, 0.6f, 0.9f, 1.0f);
+        
+        using (ImRaii.PushColor(ImGuiCol.Button, actualColor))
+        using (ImRaii.PushColor(ImGuiCol.ButtonHovered, actualColor * 1.1f))
+        using (ImRaii.PushColor(ImGuiCol.ButtonActive, actualColor * 0.9f))
+        {
+            if (_uiShared.IconTextButton(icon, text, buttonWidth))
+            {
+                onClick();
+            }
+        }
+    }
+
+    private void DrawInfoBox(string title, string content, Vector4 color)
+    {
+        var drawList = ImGui.GetWindowDrawList();
+        var boxStart = ImGui.GetCursorScreenPos();
+        
+        // Reserve consistent height for info boxes
+        var boxHeight = BUTTON_HEIGHT + 12; // Button height + padding
+        
+        ImGui.BeginGroup();
+        ImGui.Dummy(new Vector2(6, 6));
+        ImGui.Indent(10);
+        
+        using (ImRaii.PushColor(ImGuiCol.Text, color))
+        {
+            ImGui.TextUnformatted($"ℹ {title}");
+        }
+        UiSharedService.TextWrapped(content);
+        
+        ImGui.Unindent(10);
+        ImGui.Dummy(new Vector2(6, 6));
+        ImGui.EndGroup();
+        
+        var boxEnd = ImGui.GetItemRectMax();
+        
+        // Ensure minimum height for consistency
+        var actualHeight = boxEnd.Y - boxStart.Y;
+        if (actualHeight < boxHeight)
+        {
+            ImGui.Dummy(new Vector2(0, boxHeight - actualHeight));
+            boxEnd = ImGui.GetItemRectMax();
+        }
+        
+        var bgColor = new Vector4(color.X, color.Y, color.Z, 0.1f);
+        drawList.AddRectFilled(boxStart, boxEnd, ImGui.ColorConvertFloat4ToU32(bgColor), 4.0f);
+        drawList.AddRect(boxStart, boxEnd, ImGui.ColorConvertFloat4ToU32(color), 4.0f, ImDrawFlags.None, 1.0f);
+    }
+
+    private void DrawWarningBox(string title, string content, Vector4 color)
+    {
+        DrawInfoBox($"⚠ {title}", content, color);
+    }
+
+    private void DrawErrorBox(string title, string content, Vector4 color)
+    {
+        DrawInfoBox($"❌ {title}", content, color);
     }
 
     private void GetToSLocalization(int changeLanguageTo = -1)
