@@ -155,6 +155,13 @@ public class SettingsUi : WindowMediatorSubscriberBase
         _speedTestCts?.Dispose();
         _speedTestCts = null;
 
+        // Automatically close progress bar preview when settings are closed
+        if (SpheneCustomTheme.CurrentTheme.ShowProgressBarPreview)
+        {
+            SpheneCustomTheme.CurrentTheme.ShowProgressBarPreview = false;
+            _configService.Save();
+        }
+
         base.OnClose();
     }
 
