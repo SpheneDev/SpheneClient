@@ -925,13 +925,22 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
             {
                 var server = _serverConfigurationManager.GetServerByIndex(i);
                 
-                // Skip the first two servers (Debug and Main) for editing/deleting
+#if DEBUG
+                // In DEBUG builds: Skip the first two servers (Debug and Main) for editing/deleting
                 if (i == 0 || i == 1)
                 {
                     string serverType = i == 0 ? "Debug Server" : "Main Server";
                     ImGui.TextDisabled($"{servers[i]} ({serverType} - Cannot be modified)");
                     continue;
                 }
+#else
+                // In RELEASE builds: Skip only the first server (Main) for editing/deleting
+                if (i == 0)
+                {
+                    ImGui.TextDisabled($"{servers[i]} (Main Server - Cannot be modified)");
+                    continue;
+                }
+#endif
                 
                 ImGui.PushID($"server_{i}");
                 

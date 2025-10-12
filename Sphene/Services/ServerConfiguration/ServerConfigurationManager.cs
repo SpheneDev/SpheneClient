@@ -484,22 +484,31 @@ public class ServerConfigurationManager
 
     private void EnsureMainExists()
     {
-        const string debugServerName = "Sphene Test Server";
-        const string debugServerUri = "ws://test.sphene.online:6000";
+#if DEBUG
+        const string mainServerName = "Sphene Debug Server";
+        const string mainServerUri = "ws://test.sphene.online:6000";
+        const string debugServerName = "Sphene Server";
+        const string debugServerUri = "ws://sphene.online:6000";
+#else
         const string mainServerName = "Sphene Server";
         const string mainServerUri = "ws://sphene.online:6000";
+#endif
 
         var servers = _configService.Current.ServerStorage;
-        bool hasDebugServer = false;
         bool hasMainServer = false;
-        int debugServerIndex = -1;
         int mainServerIndex = -1;
 
-        // Find existing debug and main servers
+#if DEBUG
+        bool hasDebugServer = false;
+        int debugServerIndex = -1;
+#endif
+
+        // Find existing servers
         for (int i = 0; i < servers.Count; i++)
         {
             var server = servers[i];
             
+#if DEBUG
             // Check for debug server (also check for old "Debug Server" name)
             if (string.Equals(server.ServerName, debugServerName, StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(server.ServerName, "Sphene Debug Server", StringComparison.OrdinalIgnoreCase) ||
@@ -513,6 +522,17 @@ public class ServerConfigurationManager
                 server.ServerUri = debugServerUri;
                 server.UseOAuth2 = false;
             }
+#else
+            // In release builds, remove any test servers
+            if (server.ServerUri.Contains("test.sphene.online") ||
+                string.Equals(server.ServerName, "Sphene Test Server", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(server.ServerName, "Sphene Debug Server", StringComparison.OrdinalIgnoreCase))
+            {
+                servers.RemoveAt(i);
+                i--; // Adjust index after removal
+                continue;
+            }
+#endif
             
             // Check for main server
             if (string.Equals(server.ServerName, mainServerName, StringComparison.OrdinalIgnoreCase) ||
@@ -532,8 +552,10 @@ public class ServerConfigurationManager
         if (!hasMainServer)
         {
             servers.Insert(0, new ServerStorage() { ServerUri = mainServerUri, ServerName = mainServerName, UseOAuth2 = false });
+#if DEBUG
             // Adjust debug server index if it was found
             if (debugServerIndex >= 0) debugServerIndex++;
+#endif
         }
         else if (mainServerIndex != 0)
         {
@@ -541,12 +563,15 @@ public class ServerConfigurationManager
             var mainServer = servers[mainServerIndex];
             servers.RemoveAt(mainServerIndex);
             servers.Insert(0, mainServer);
+#if DEBUG
             // Adjust debug server index
             if (debugServerIndex > mainServerIndex) debugServerIndex--;
             else if (debugServerIndex < mainServerIndex) debugServerIndex++;
+#endif
         }
 
-        // Ensure debug server exists at index 1
+#if DEBUG
+        // Ensure debug server exists at index 1 (only in DEBUG builds)
         if (!hasDebugServer)
         {
             if (servers.Count < 2)
@@ -571,6 +596,13 @@ public class ServerConfigurationManager
             {
                 servers.Insert(1, debugServer);
             }
+        }
+#endif
+
+        // Ensure CurrentServerIndex is set to 0 (main server) by default
+        if (_configService.Current.CurrentServer < 0 || _configService.Current.CurrentServer >= servers.Count)
+        {
+            _configService.Current.CurrentServer = 0;
         }
 
         Save();
