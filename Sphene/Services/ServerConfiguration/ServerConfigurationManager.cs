@@ -528,48 +528,48 @@ public class ServerConfigurationManager
             }
         }
 
-        // Ensure debug server exists at index 0
-        if (!hasDebugServer)
-        {
-            servers.Insert(0, new ServerStorage() { ServerUri = debugServerUri, ServerName = debugServerName, UseOAuth2 = false });
-            // Adjust main server index if it was found
-            if (mainServerIndex >= 0) mainServerIndex++;
-        }
-        else if (debugServerIndex != 0)
-        {
-            // Move debug server to index 0
-            var debugServer = servers[debugServerIndex];
-            servers.RemoveAt(debugServerIndex);
-            servers.Insert(0, debugServer);
-            // Adjust main server index
-            if (mainServerIndex > debugServerIndex) mainServerIndex--;
-            else if (mainServerIndex < debugServerIndex) mainServerIndex++;
-        }
-
-        // Ensure main server exists at index 1
+        // Ensure main server exists at index 0 (default selection)
         if (!hasMainServer)
         {
-            if (servers.Count < 2)
-            {
-                servers.Add(new ServerStorage() { ServerUri = mainServerUri, ServerName = mainServerName, UseOAuth2 = false });
-            }
-            else
-            {
-                servers.Insert(1, new ServerStorage() { ServerUri = mainServerUri, ServerName = mainServerName, UseOAuth2 = false });
-            }
+            servers.Insert(0, new ServerStorage() { ServerUri = mainServerUri, ServerName = mainServerName, UseOAuth2 = false });
+            // Adjust debug server index if it was found
+            if (debugServerIndex >= 0) debugServerIndex++;
         }
-        else if (mainServerIndex != 1)
+        else if (mainServerIndex != 0)
         {
-            // Move main server to index 1
+            // Move main server to index 0
             var mainServer = servers[mainServerIndex];
             servers.RemoveAt(mainServerIndex);
+            servers.Insert(0, mainServer);
+            // Adjust debug server index
+            if (debugServerIndex > mainServerIndex) debugServerIndex--;
+            else if (debugServerIndex < mainServerIndex) debugServerIndex++;
+        }
+
+        // Ensure debug server exists at index 1
+        if (!hasDebugServer)
+        {
             if (servers.Count < 2)
             {
-                servers.Add(mainServer);
+                servers.Add(new ServerStorage() { ServerUri = debugServerUri, ServerName = debugServerName, UseOAuth2 = false });
             }
             else
             {
-                servers.Insert(1, mainServer);
+                servers.Insert(1, new ServerStorage() { ServerUri = debugServerUri, ServerName = debugServerName, UseOAuth2 = false });
+            }
+        }
+        else if (debugServerIndex != 1)
+        {
+            // Move debug server to index 1
+            var debugServer = servers[debugServerIndex];
+            servers.RemoveAt(debugServerIndex);
+            if (servers.Count < 2)
+            {
+                servers.Add(debugServer);
+            }
+            else
+            {
+                servers.Insert(1, debugServer);
             }
         }
 

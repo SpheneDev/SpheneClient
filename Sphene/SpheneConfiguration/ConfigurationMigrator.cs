@@ -30,6 +30,15 @@ public class ConfigurationMigrator(ILogger<ConfigurationMigrator> logger, Transi
             serverConfigService.Current.Version = 2;
             serverConfigService.Save();
         }
+
+        if (serverConfigService.Current.Version == 2)
+        {
+            _logger.LogInformation("Migrating Server Config V2 => V3");
+            // Reset CurrentServer to 0 to ensure users get the correct default server after server order fix
+            serverConfigService.Current.CurrentServer = 0;
+            serverConfigService.Current.Version = 3;
+            serverConfigService.Save();
+        }
     }
 
     public Task StartAsync(CancellationToken cancellationToken)

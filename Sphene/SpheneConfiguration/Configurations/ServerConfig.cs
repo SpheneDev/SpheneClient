@@ -16,5 +16,5 @@ public class ServerConfig : ISpheneConfiguration
     public bool SendCensusData { get; set; } = false;
     public bool ShownCensusPopup { get; set; } = false;
 
-    public int Version { get; set; } = 2;
+    public int Version { get; set; } = 3;
 }
