@@ -360,6 +360,17 @@ public class CompactUi : WindowMediatorSubscriberBase
             ImGui.SameLine(ImGui.GetContentRegionAvail().X - onlineTextSize.X);
             SpheneCustomTheme.DrawStyledText(onlineText, SpheneCustomTheme.CurrentTheme.CompactConnectedText);
             ImGui.Separator();
+            
+            // Show preview progress bar if enabled in theme settings
+            if (SpheneCustomTheme.CurrentTheme.ShowProgressBarPreview)
+            {
+                ImGui.Spacing();
+                ImGui.Text("Progress Bar Preview:");
+                var previewProgress = SpheneCustomTheme.CurrentTheme.ProgressBarPreviewFill / 100.0f;
+                _uiSharedService.DrawThemedProgressBar("Preview Progress", previewProgress, $"{SpheneCustomTheme.CurrentTheme.ProgressBarPreviewFill:F1}%");
+                ImGui.Spacing();
+            }
+            
             using (ImRaii.PushId("pairlist")) DrawPairs();
             
             float pairlistEnd = ImGui.GetCursorPosY();
@@ -446,10 +457,13 @@ public class CompactUi : WindowMediatorSubscriberBase
 
     private void DrawPairs()
     {
+        // Reserve additional space for update notification if available
+        var updateNotificationHeight = _updateBannerInfo?.IsUpdateAvailable == true ? 40f : 0f;
+        
         var ySize = _transferPartHeight == 0
             ? 1
             : (ImGui.GetWindowContentRegionMax().Y - ImGui.GetWindowContentRegionMin().Y
-                + ImGui.GetTextLineHeight() - ImGui.GetStyle().WindowPadding.Y - ImGui.GetStyle().WindowBorderSize) - _transferPartHeight - ImGui.GetCursorPosY() - 15; // add some Space
+                + ImGui.GetTextLineHeight() - ImGui.GetStyle().WindowPadding.Y - ImGui.GetStyle().WindowBorderSize) - _transferPartHeight - ImGui.GetCursorPosY() - 15 - updateNotificationHeight; // add some Space and reserve space for update notification
 
         // Use full window content width with equal margins for the drawing area
         var drawAreaWidth = ImGui.GetWindowContentRegionMax().X - ImGui.GetWindowContentRegionMin().X;
@@ -1267,10 +1281,13 @@ public class CompactUi : WindowMediatorSubscriberBase
                         }
                     }
                     
-                    // Progress bar
-                    ImGui.PushStyleColor(ImGuiCol.PlotHistogram, SpheneCustomTheme.Colors.SpheneGold);
-                    ImGui.ProgressBar(progressPercentage, new Vector2(-1, 0), $"{progressPercentage * 100:F1}%");
-                    ImGui.PopStyleColor();
+                    // Progress bar - use theme-configured transmission bar settings
+                    var theme = SpheneCustomTheme.CurrentTheme;
+                    var barSize = new Vector2(theme.CompactTransmissionBarWidth, theme.CompactTransmissionBarHeight);
+                    ImGui.PushStyleColor(ImGuiCol.PlotHistogram, ImGui.ColorConvertFloat4ToU32(theme.CompactTransmissionBarForeground));
+                    ImGui.PushStyleColor(ImGuiCol.FrameBg, ImGui.ColorConvertFloat4ToU32(theme.CompactTransmissionBarBackground));
+                    ImGui.ProgressBar(progressPercentage, barSize, $"{progressPercentage * 100:F1}%");
+                    ImGui.PopStyleColor(2);
                     
                     ImGui.Spacing();
                     

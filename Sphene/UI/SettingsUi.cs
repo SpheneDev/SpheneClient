@@ -3182,6 +3182,131 @@ public class SettingsUi : WindowMediatorSubscriberBase
         }
         
         ImGui.Spacing();
+        ImGui.Text("Panel Progress Bar Settings");
+        ImGui.Separator();
+        
+        // CompactUI Progress Bar Settings
+        var progressBarRounding = theme.ProgressBarRounding;
+        if (ImGui.SliderFloat("Progress Bar Rounding", ref progressBarRounding, 0.0f, 20.0f, "%.1f"))
+        {
+            theme.ProgressBarRounding = progressBarRounding;
+            themeChanged = true;
+        }
+        
+        var compactProgressBarHeight = theme.CompactProgressBarHeight;
+        if (ImGui.SliderFloat("Progress Bar Height", ref compactProgressBarHeight, 5.0f, 50.0f, "%.1f"))
+        {
+            theme.CompactProgressBarHeight = compactProgressBarHeight;
+            themeChanged = true;
+        }
+        
+        var compactProgressBarWidth = theme.CompactProgressBarWidth;
+        if (ImGui.SliderFloat("Progress Bar Width", ref compactProgressBarWidth, 50.0f, 500.0f, "%.1f"))
+        {
+            theme.CompactProgressBarWidth = compactProgressBarWidth;
+            themeChanged = true;
+        }
+        
+        var compactProgressBarBackground = theme.CompactProgressBarBackground;
+        if (ImGui.ColorEdit4("Progress Bar Background", ref compactProgressBarBackground))
+        {
+            theme.CompactProgressBarBackground = compactProgressBarBackground;
+            themeChanged = true;
+        }
+        
+        var compactProgressBarForeground = theme.CompactProgressBarForeground;
+        if (ImGui.ColorEdit4("Progress Bar Foreground", ref compactProgressBarForeground))
+        {
+            theme.CompactProgressBarForeground = compactProgressBarForeground;
+            themeChanged = true;
+        }
+        
+        var compactProgressBarBorder = theme.CompactProgressBarBorder;
+        if (ImGui.ColorEdit4("Progress Bar Border", ref compactProgressBarBorder))
+        {
+            theme.CompactProgressBarBorder = compactProgressBarBorder;
+            themeChanged = true;
+        }
+        
+        // Progress Bar Preview Toggle
+        ImGui.Spacing();
+        var showPreview = theme.ShowProgressBarPreview;
+        if (ImGui.Checkbox("Show Progress Bar Preview in UI", ref showPreview))
+        {
+            theme.ShowProgressBarPreview = showPreview;
+            themeChanged = true;
+        }
+        _uiShared.DrawHelpText("When enabled, shows preview progress bars in the CompactUI and under your character");
+        
+        // Progress Bar Preview Fill Slider
+        if (theme.ShowProgressBarPreview)
+        {
+            var previewFill = theme.ProgressBarPreviewFill;
+            if (ImGui.SliderFloat("Preview Fill Percentage", ref previewFill, 0.0f, 100.0f, "%.1f%%"))
+            {
+                theme.ProgressBarPreviewFill = previewFill;
+                themeChanged = true;
+            }
+            _uiShared.DrawHelpText("Adjusts how full the preview progress bars appear");
+        }
+        
+        // Progress Bar Preview
+        ImGui.Spacing();
+        ImGui.Text("Progress Bar Preview");
+        ImGui.Separator();
+        
+        // Sample progress bars using the preview fill value
+        var previewProgress = theme.ProgressBarPreviewFill / 100.0f;
+        _uiShared.DrawThemedProgressBar("Preview Progress Bar", previewProgress, $"{theme.ProgressBarPreviewFill:F1}%");
+        
+        ImGui.Spacing();
+        ImGui.Text("Panel Transmission Bar Settings (Under Players)");
+        ImGui.Separator();
+        
+        // CompactUI Transmission Progress Bar Settings
+        var transmissionBarRounding = theme.TransmissionBarRounding;
+        if (ImGui.SliderFloat("Transmission Bar Rounding", ref transmissionBarRounding, 0.0f, 15.0f, "%.1f"))
+        {
+            theme.TransmissionBarRounding = transmissionBarRounding;
+            themeChanged = true;
+        }
+        
+        var compactTransmissionBarHeight = theme.CompactTransmissionBarHeight;
+        if (ImGui.SliderFloat("Transmission Bar Height", ref compactTransmissionBarHeight, 2.0f, 30.0f, "%.1f"))
+        {
+            theme.CompactTransmissionBarHeight = compactTransmissionBarHeight;
+            themeChanged = true;
+        }
+        
+        var compactTransmissionBarWidth = theme.CompactTransmissionBarWidth;
+        if (ImGui.SliderFloat("Transmission Bar Width", ref compactTransmissionBarWidth, 30.0f, 300.0f, "%.1f"))
+        {
+            theme.CompactTransmissionBarWidth = compactTransmissionBarWidth;
+            themeChanged = true;
+        }
+        
+        var compactTransmissionBarBackground = theme.CompactTransmissionBarBackground;
+        if (ImGui.ColorEdit4("Transmission Bar Background", ref compactTransmissionBarBackground))
+        {
+            theme.CompactTransmissionBarBackground = compactTransmissionBarBackground;
+            themeChanged = true;
+        }
+        
+        var compactTransmissionBarForeground = theme.CompactTransmissionBarForeground;
+        if (ImGui.ColorEdit4("Transmission Bar Foreground", ref compactTransmissionBarForeground))
+        {
+            theme.CompactTransmissionBarForeground = compactTransmissionBarForeground;
+            themeChanged = true;
+        }
+        
+        var compactTransmissionBarBorder = theme.CompactTransmissionBarBorder;
+        if (ImGui.ColorEdit4("Transmission Bar Border", ref compactTransmissionBarBorder))
+        {
+            theme.CompactTransmissionBarBorder = compactTransmissionBarBorder;
+            themeChanged = true;
+        }
+        
+        ImGui.Spacing();
         ImGui.Text("Panel Status Colors");
         ImGui.Separator();
         
@@ -4583,6 +4708,22 @@ public class SettingsUi : WindowMediatorSubscriberBase
         target.CompactVisibleText = cloned.CompactVisibleText;
         target.CompactPairsText = cloned.CompactPairsText;
         target.CompactShowImGuiHeader = cloned.CompactShowImGuiHeader;
+        
+        // Progress Bar Settings
+        target.ProgressBarRounding = cloned.ProgressBarRounding;
+        target.ProgressBarPreviewFill = cloned.ProgressBarPreviewFill;
+        target.ShowProgressBarPreview = cloned.ShowProgressBarPreview;
+        target.TransmissionBarRounding = cloned.TransmissionBarRounding;
+        target.CompactProgressBarHeight = cloned.CompactProgressBarHeight;
+        target.CompactProgressBarWidth = cloned.CompactProgressBarWidth;
+        target.CompactProgressBarBackground = cloned.CompactProgressBarBackground;
+        target.CompactProgressBarForeground = cloned.CompactProgressBarForeground;
+        target.CompactProgressBarBorder = cloned.CompactProgressBarBorder;
+        target.CompactTransmissionBarHeight = cloned.CompactTransmissionBarHeight;
+        target.CompactTransmissionBarWidth = cloned.CompactTransmissionBarWidth;
+        target.CompactTransmissionBarBackground = cloned.CompactTransmissionBarBackground;
+        target.CompactTransmissionBarForeground = cloned.CompactTransmissionBarForeground;
+        target.CompactTransmissionBarBorder = cloned.CompactTransmissionBarBorder;
     }
 
     private void ApplyThemeFromInput()

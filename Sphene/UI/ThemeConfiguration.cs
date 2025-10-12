@@ -57,6 +57,26 @@ public class ThemeConfiguration
     public float CompactContextMenuRounding { get; set; } = 8.0f;
     public float CompactContextMenuBorderSize { get; set; } = 1.0f;
     
+    // Progress Bar Preview Settings
+    public bool ShowProgressBarPreview { get; set; } = false;
+    public float ProgressBarPreviewFill { get; set; } = 75.0f; // 0-100%
+    
+    // Progress Bar Appearance Settings
+    public float ProgressBarRounding { get; set; } = 4.0f;
+    public float CompactProgressBarHeight { get; set; } = 20.0f;
+    public float CompactProgressBarWidth { get; set; } = 200.0f;
+    public Vector4 CompactProgressBarBackground { get; set; } = new(0.1f, 0.1f, 0.15f, 0.8f);
+    public Vector4 CompactProgressBarForeground { get; set; } = new(0.2f, 0.4f, 0.8f, 1.0f);
+    public Vector4 CompactProgressBarBorder { get; set; } = new(0.3f, 0.3f, 0.4f, 1.0f);
+    
+    // Transmission Progress Bar Settings (bars under players)
+    public float TransmissionBarRounding { get; set; } = 2.0f;
+    public float CompactTransmissionBarHeight { get; set; } = 8.0f;
+    public float CompactTransmissionBarWidth { get; set; } = 120.0f;
+    public Vector4 CompactTransmissionBarBackground { get; set; } = new(0.1f, 0.1f, 0.15f, 0.8f);
+    public Vector4 CompactTransmissionBarForeground { get; set; } = new(0.3f, 0.6f, 0.9f, 1.0f);
+    public Vector4 CompactTransmissionBarBorder { get; set; } = new(0.3f, 0.3f, 0.4f, 1.0f);
+    
     // Border Settings
     public float WindowBorderSize { get; set; } = 1.5f;
     public float ChildBorderSize { get; set; } = 1.5f;
@@ -267,6 +287,23 @@ public class ThemeConfiguration
             CompactTooltipBorderSize = CompactTooltipBorderSize,
             CompactContextMenuRounding = CompactContextMenuRounding,
             CompactContextMenuBorderSize = CompactContextMenuBorderSize,
+            
+            // CompactUI Progress Bar Settings
+            ProgressBarRounding = ProgressBarRounding,
+            CompactProgressBarHeight = CompactProgressBarHeight,
+            CompactProgressBarWidth = CompactProgressBarWidth,
+            CompactProgressBarBackground = CompactProgressBarBackground,
+            CompactProgressBarForeground = CompactProgressBarForeground,
+            CompactProgressBarBorder = CompactProgressBarBorder,
+            
+            // CompactUI Transmission Progress Bar Settings
+            TransmissionBarRounding = TransmissionBarRounding,
+            CompactTransmissionBarHeight = CompactTransmissionBarHeight,
+            CompactTransmissionBarWidth = CompactTransmissionBarWidth,
+            CompactTransmissionBarBackground = CompactTransmissionBarBackground,
+            CompactTransmissionBarForeground = CompactTransmissionBarForeground,
+            CompactTransmissionBarBorder = CompactTransmissionBarBorder,
+            
             ScrollbarSize = ScrollbarSize,
             GrabMinSize = GrabMinSize,
             

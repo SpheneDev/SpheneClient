@@ -60,6 +60,24 @@ public static class ThemePresets
             CompactContextMenuRounding = 4.0f,
             CompactContextMenuBorderSize = 0.1f,
             
+            // CompactUI Progress Bar Settings
+            ProgressBarRounding = 17.4f,
+            CompactProgressBarHeight = 16.2f,
+            CompactProgressBarWidth = 335.0f,
+            CompactProgressBarBackground = new Vector4(0.1f, 0.1f, 0.15f, 0.8f),
+            CompactProgressBarForeground = new Vector4(0.1791981f, 0.12884276f, 0.5568628f, 1.0f),
+            CompactProgressBarBorder = new Vector4(0.3f, 0.3f, 0.4f, 1.0f),
+            ShowProgressBarPreview = false,
+            ProgressBarPreviewFill = 75.0f,
+            
+            // CompactUI Transmission Progress Bar Settings
+            TransmissionBarRounding = 7.5f,
+            CompactTransmissionBarHeight = 15.7f,
+            CompactTransmissionBarWidth = 178.1f,
+            CompactTransmissionBarBackground = new Vector4(0.24603176f, 0.24603176f, 0.24603176f, 0.8f),
+            CompactTransmissionBarForeground = new Vector4(0.43598622f, 0.3607843f, 1.0f, 1.0f),
+            CompactTransmissionBarBorder = new Vector4(0.0f, 0.0f, 0.0f, 1.0f),
+            
             WindowBorderSize = 0.0f,
             ChildBorderSize = 0.1f,
             PopupBorderSize = 0.1f,
@@ -214,6 +232,24 @@ public static class ThemePresets
             CompactTooltipBorderSize = 0.5f,
             CompactContextMenuRounding = 4.0f,
             CompactContextMenuBorderSize = 0.5f,
+            
+            // CompactUI Progress Bar Settings
+            ProgressBarRounding = 4.0f,
+            CompactProgressBarHeight = 20.0f,
+            CompactProgressBarWidth = 200.0f,
+            CompactProgressBarBackground = new Vector4(0.12f, 0.12f, 0.12f, 0.9f),
+            CompactProgressBarForeground = new Vector4(0.3f, 0.3f, 0.3f, 1.0f),
+            CompactProgressBarBorder = new Vector4(0.25f, 0.25f, 0.25f, 1.0f),
+            ShowProgressBarPreview = false,
+            ProgressBarPreviewFill = 75.0f,
+            
+            // CompactUI Transmission Progress Bar Settings
+            TransmissionBarRounding = 2.0f,
+            CompactTransmissionBarHeight = 8.0f,
+            CompactTransmissionBarWidth = 120.0f,
+            CompactTransmissionBarBackground = new Vector4(0.12f, 0.12f, 0.12f, 0.9f),
+            CompactTransmissionBarForeground = new Vector4(0.4f, 0.4f, 0.4f, 1.0f),
+            CompactTransmissionBarBorder = new Vector4(0.25f, 0.25f, 0.25f, 1.0f),
             WindowPadding = new Vector2(12.0f, 8.0f),
             FramePadding = new Vector2(4.0f, 2.0f),
             ItemSpacing = new Vector2(4.0f, 2.0f),

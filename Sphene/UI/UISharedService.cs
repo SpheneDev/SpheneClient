@@ -1277,8 +1277,10 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
         using var textColor = ImRaii.PushColor(ImGuiCol.Text, ImGui.ColorConvertFloat4ToU32(SpheneCustomTheme.CurrentTheme.TextPrimary));
         ImGui.TextUnformatted(label);
         
-        // Use default size and call the main implementation
-        DrawThemedProgressBar(progress, null, overlay, color);
+        // Use theme-configured size and call the main implementation
+        var theme = SpheneCustomTheme.CurrentTheme;
+        var barSize = new Vector2(theme.CompactProgressBarWidth, theme.CompactProgressBarHeight);
+        DrawThemedProgressBar(progress, barSize, overlay, color);
     }
     
     /// <summary>
@@ -1287,31 +1289,27 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
     public void DrawThemedProgressBar(float progress, Vector2? size = null, string? overlay = null, Vector4? color = null)
     {
         var theme = SpheneCustomTheme.CurrentTheme;
-        var barSize = size ?? new Vector2(200, 20);
+        var barSize = size ?? new Vector2(theme.CompactProgressBarWidth, theme.CompactProgressBarHeight);
         var drawList = ImGui.GetWindowDrawList();
         var pos = ImGui.GetCursorScreenPos();
         var endPos = new Vector2(pos.X + barSize.X, pos.Y + barSize.Y);
-        var borderRadius = theme.FrameRounding;
+        var borderRadius = theme.ProgressBarRounding;
         
-        // Background
-        drawList.AddRectFilled(pos, endPos, ImGui.ColorConvertFloat4ToU32(theme.PrimaryDark), borderRadius);
+        // Background - use theme-configured background color
+        drawList.AddRectFilled(pos, endPos, ImGui.ColorConvertFloat4ToU32(theme.CompactProgressBarBackground), borderRadius);
         
         // Progress fill with gradient
         if (progress > 0)
         {
             var progressEnd = new Vector2(pos.X + (barSize.X * progress), pos.Y + barSize.Y);
-            var progressColorStart = color ?? theme.AccentBlue;
-            var progressColorEnd = theme.AccentBlue;
+            var progressColorStart = color ?? theme.CompactProgressBarForeground;
             
-            drawList.AddRectFilledMultiColor(pos, progressEnd,
-                ImGui.ColorConvertFloat4ToU32(progressColorStart),
-                ImGui.ColorConvertFloat4ToU32(progressColorEnd),
-                ImGui.ColorConvertFloat4ToU32(progressColorEnd),
-                ImGui.ColorConvertFloat4ToU32(progressColorStart));
+            // Use AddRectFilled with rounding for the progress fill
+            drawList.AddRectFilled(pos, progressEnd, ImGui.ColorConvertFloat4ToU32(progressColorStart), borderRadius);
         }
-        
-        // Border
-        drawList.AddRect(pos, endPos, ImGui.ColorConvertFloat4ToU32(theme.Border), borderRadius, ImDrawFlags.RoundCornersAll, theme.FrameBorderSize);
+
+        // Border - use theme-configured border color
+        drawList.AddRect(pos, endPos, ImGui.ColorConvertFloat4ToU32(theme.CompactProgressBarBorder), borderRadius, ImDrawFlags.RoundCornersAll, theme.FrameBorderSize);
         
         // Overlay text
         if (!string.IsNullOrEmpty(overlay))

@@ -135,10 +135,57 @@ public class DownloadUi : WindowMediatorSubscriberBase
             }
         }
 
+        // Show preview transmission bar if enabled in theme settings (independent of ShowTransferBars setting)
+        const int transparency = 100;
+        const int dlBarBorder = 3;
+        
+        if (SpheneCustomTheme.CurrentTheme.ShowProgressBarPreview)
+        {
+            var playerScreenPos = _dalamudUtilService.WorldToScreen(_dalamudUtilService.GetPlayerCharacter());
+            if (playerScreenPos != Vector2.Zero)
+            {
+                var theme = SpheneCustomTheme.CurrentTheme;
+                int previewBarHeight = Math.Max((int)theme.CompactTransmissionBarHeight, 10);
+                int previewBarWidth = Math.Max((int)theme.CompactTransmissionBarWidth, 50);
+
+                var previewBarStart = new Vector2(playerScreenPos.X - previewBarWidth / 2f, playerScreenPos.Y - previewBarHeight / 2f);
+                var previewBarEnd = new Vector2(playerScreenPos.X + previewBarWidth / 2f, playerScreenPos.Y + previewBarHeight / 2f);
+                var drawList = ImGui.GetBackgroundDrawList();
+                
+                // Use theme-configured colors with transparency for preview
+                var bgColor = theme.CompactTransmissionBarBackground;
+                var fgColor = theme.CompactTransmissionBarForeground;
+                var borderColor = theme.CompactTransmissionBarBorder;
+                var rounding = theme.TransmissionBarRounding;
+                
+                drawList.AddRectFilled(
+                    previewBarStart with { X = previewBarStart.X - dlBarBorder - 1, Y = previewBarStart.Y - dlBarBorder - 1 },
+                    previewBarEnd with { X = previewBarEnd.X + dlBarBorder + 1, Y = previewBarEnd.Y + dlBarBorder + 1 },
+                    ImGui.ColorConvertFloat4ToU32(new Vector4(0, 0, 0, transparency / 255f)), rounding + 1);
+                drawList.AddRectFilled(previewBarStart with { X = previewBarStart.X - dlBarBorder, Y = previewBarStart.Y - dlBarBorder },
+                    previewBarEnd with { X = previewBarEnd.X + dlBarBorder, Y = previewBarEnd.Y + dlBarBorder },
+                    ImGui.ColorConvertFloat4ToU32(new Vector4(borderColor.X, borderColor.Y, borderColor.Z, transparency / 255f)), rounding);
+                drawList.AddRectFilled(previewBarStart, previewBarEnd,
+                    ImGui.ColorConvertFloat4ToU32(new Vector4(bgColor.X, bgColor.Y, bgColor.Z, transparency / 255f)), rounding);
+                
+                // Use the configurable preview fill percentage
+                var previewProgress = theme.ProgressBarPreviewFill / 100.0f;
+                drawList.AddRectFilled(previewBarStart,
+                    previewBarEnd with { X = previewBarStart.X + (previewProgress * previewBarWidth) },
+                    ImGui.ColorConvertFloat4ToU32(new Vector4(fgColor.X, fgColor.Y, fgColor.Z, transparency / 255f)), rounding);
+
+                // Show preview text with configurable fill percentage (independent of TransferBarsShowText setting for preview)
+                var previewText = $"Preview {theme.ProgressBarPreviewFill:F1}%";
+                var textSize = ImGui.CalcTextSize(previewText);
+                UiSharedService.DrawOutlinedFont(drawList, previewText,
+                    playerScreenPos with { X = playerScreenPos.X - textSize.X / 2f - 1, Y = playerScreenPos.Y - textSize.Y / 2f - 1 },
+                    UiSharedService.Color(255, 255, 255, transparency),
+                    UiSharedService.Color(0, 0, 0, transparency), 1);
+            }
+        }
+
         if (_configService.Current.ShowTransferBars)
         {
-            const int transparency = 100;
-            const int dlBarBorder = 3;
 
             foreach (var transfer in _currentDownloads.ToList())
             {
@@ -151,25 +198,33 @@ public class DownloadUi : WindowMediatorSubscriberBase
                 var maxDlText = $"{UiSharedService.ByteToString(totalBytes, addSuffix: false)}/{UiSharedService.ByteToString(totalBytes)}";
                 var textSize = _configService.Current.TransferBarsShowText ? ImGui.CalcTextSize(maxDlText) : new Vector2(10, 10);
 
-                int dlBarHeight = _configService.Current.TransferBarsHeight > ((int)textSize.Y + 5) ? _configService.Current.TransferBarsHeight : (int)textSize.Y + 5;
-                int dlBarWidth = _configService.Current.TransferBarsWidth > ((int)textSize.X + 10) ? _configService.Current.TransferBarsWidth : (int)textSize.X + 10;
+                // Use theme-configured transmission bar dimensions
+                var theme = SpheneCustomTheme.CurrentTheme;
+                int dlBarHeight = Math.Max((int)theme.CompactTransmissionBarHeight, _configService.Current.TransferBarsShowText ? (int)textSize.Y + 5 : 10);
+                int dlBarWidth = Math.Max((int)theme.CompactTransmissionBarWidth, _configService.Current.TransferBarsShowText ? (int)textSize.X + 10 : 50);
 
                 var dlBarStart = new Vector2(screenPos.X - dlBarWidth / 2f, screenPos.Y - dlBarHeight / 2f);
                 var dlBarEnd = new Vector2(screenPos.X + dlBarWidth / 2f, screenPos.Y + dlBarHeight / 2f);
                 var drawList = ImGui.GetBackgroundDrawList();
+                
+                // Use theme-configured colors with transparency
+                var bgColor = theme.CompactTransmissionBarBackground;
+                var fgColor = theme.CompactTransmissionBarForeground;
+                var borderColor = theme.CompactTransmissionBarBorder;
+                
                 drawList.AddRectFilled(
                     dlBarStart with { X = dlBarStart.X - dlBarBorder - 1, Y = dlBarStart.Y - dlBarBorder - 1 },
                     dlBarEnd with { X = dlBarEnd.X + dlBarBorder + 1, Y = dlBarEnd.Y + dlBarBorder + 1 },
-                    UiSharedService.Color(0, 0, 0, transparency), 1);
+                    ImGui.ColorConvertFloat4ToU32(new Vector4(0, 0, 0, transparency / 255f)), 1);
                 drawList.AddRectFilled(dlBarStart with { X = dlBarStart.X - dlBarBorder, Y = dlBarStart.Y - dlBarBorder },
                     dlBarEnd with { X = dlBarEnd.X + dlBarBorder, Y = dlBarEnd.Y + dlBarBorder },
-                    UiSharedService.Color(220, 220, 220, transparency), 1);
+                    ImGui.ColorConvertFloat4ToU32(new Vector4(borderColor.X, borderColor.Y, borderColor.Z, transparency / 255f)), 1);
                 drawList.AddRectFilled(dlBarStart, dlBarEnd,
-                    UiSharedService.Color(0, 0, 0, transparency), 1);
+                    ImGui.ColorConvertFloat4ToU32(new Vector4(bgColor.X, bgColor.Y, bgColor.Z, transparency / 255f)), 1);
                 var dlProgressPercent = transferredBytes / (double)totalBytes;
                 drawList.AddRectFilled(dlBarStart,
                     dlBarEnd with { X = dlBarStart.X + (float)(dlProgressPercent * dlBarWidth) },
-                    UiSharedService.Color(50, 205, 50, transparency), 1);
+                    ImGui.ColorConvertFloat4ToU32(new Vector4(fgColor.X, fgColor.Y, fgColor.Z, transparency / 255f)), 1);
 
                 if (_configService.Current.TransferBarsShowText)
                 {
@@ -213,6 +268,10 @@ public class DownloadUi : WindowMediatorSubscriberBase
     public override bool DrawConditions()
     {
         if (_uiShared.EditTrackerPosition) return true;
+        
+        // Show preview if enabled in theme settings
+        if (SpheneCustomTheme.CurrentTheme.ShowProgressBarPreview) return true;
+        
         if (!_configService.Current.ShowTransferWindow && !_configService.Current.ShowTransferBars) return false;
         if (!_currentDownloads.Any() && !_fileTransferManager.CurrentUploads.Any() && !_uploadingPlayers.Any()) return false;
         if (!IsOpen) return false;
