@@ -55,6 +55,7 @@ public class SpheneConfig : ISpheneConfiguration
     // City syncshell settings
     public bool EnableCitySyncshellJoinRequests { get; set; } = true;
     public bool HasSeenCitySyncshellExplanation { get; set; } = false;
+    public bool HasSeenSyncshellSettings { get; set; } = false;
     
     public bool ShowTransferBars { get; set; } = true;
     public bool ShowTransferWindow { get; set; } = false;
@@ -97,6 +98,6 @@ public class SpheneConfig : ISpheneConfiguration
     // Theme Settings
     public string SelectedThemeName { get; set; } = "Default Sphene";
     public string SelectedTheme { get; set; } = "Default Sphene";
-    public bool AutoLoadThemeOnStartup { get; set; } = false;
+    public bool AutoLoadThemeOnStartup { get; set; } = true;
 
 }

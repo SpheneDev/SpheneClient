@@ -201,6 +201,81 @@ public partial class IntroUi : WindowMediatorSubscriberBase
                     "loading of other characters. It is recommended to keep it enabled. You can change this setting later anytime in the Sphene settings.", ImGuiColors.DalamudYellow);
             }
         }
+        else if (_configService.Current.AcceptedAgreement 
+                 && !string.IsNullOrEmpty(_configService.Current.CacheFolder)
+                 && _configService.Current.InitialScanComplete
+                 && Directory.Exists(_configService.Current.CacheFolder)
+                 && !_configService.Current.HasSeenSyncshellSettings)
+        {
+            // New syncshell settings page before network authentication
+            using (_uiShared.UidFont.Push())
+                ImGui.TextUnformatted("Syncshell Notification Settings");
+            
+            ImGui.Separator();
+            UiSharedService.TextWrapped("Before connecting to the Network, configure how you want to be notified about syncshell activities. " +
+                                        "These settings control popup notifications and automatic joining behavior for different types of syncshells.");
+            
+            ImGui.Spacing();
+            
+            // Area Bound Syncshells settings
+            ImGui.TextUnformatted("Area Bound Syncshells:");
+            ImGui.Indent();
+            
+            var showAreaBoundNotifications = _configService.Current.ShowAreaBoundSyncshellNotifications;
+            if (ImGui.Checkbox("Show area-bound syncshell notifications", ref showAreaBoundNotifications))
+            {
+                _configService.Current.ShowAreaBoundSyncshellNotifications = showAreaBoundNotifications;
+                _configService.Save();
+            }
+            UiSharedService.AttachToolTip("Enable notifications when area-bound syncshells become available in your current location");
+            
+            var showAreaBoundWelcome = _configService.Current.ShowAreaBoundSyncshellWelcomeMessages;
+            if (ImGui.Checkbox("Show area-bound syncshell welcome messages", ref showAreaBoundWelcome))
+            {
+                _configService.Current.ShowAreaBoundSyncshellWelcomeMessages = showAreaBoundWelcome;
+                _configService.Save();
+            }
+            UiSharedService.AttachToolTip("Display welcome messages when joining area-bound syncshells");
+            
+            ImGui.Unindent();
+            ImGui.Spacing();
+            
+            // City Syncshells settings
+            ImGui.TextUnformatted("Public City Syncshells:");
+            ImGui.Indent();
+            
+            var enableCitySyncshells = _configService.Current.EnableCitySyncshellJoinRequests;
+            if (ImGui.Checkbox("Enable city syncshell join requests", ref enableCitySyncshells))
+            {
+                _configService.Current.EnableCitySyncshellJoinRequests = enableCitySyncshells;
+                _configService.Save();
+            }
+            UiSharedService.AttachToolTip("Allow automatic joining of public city syncshells when visiting major cities");
+            
+            ImGui.Unindent();
+            ImGui.Spacing();
+            
+            // General popup settings
+            ImGui.TextUnformatted("General Popup Settings:");
+            ImGui.Indent();
+            
+            var openPopupOnAdd = _configService.Current.OpenPopupOnAdd;
+            if (ImGui.Checkbox("Open popup when adding new pairs", ref openPopupOnAdd))
+            {
+                _configService.Current.OpenPopupOnAdd = openPopupOnAdd;
+                _configService.Save();
+            }
+            UiSharedService.AttachToolTip("Show a popup window when new pairs are added to your list");
+            
+            ImGui.Unindent();
+            
+            ImGui.Separator();
+            if (ImGui.Button("Continue to Network Authentication##toNetworkAuth"))
+            {
+                _configService.Current.HasSeenSyncshellSettings = true;
+                _configService.Save();
+            }
+        }
         else if (!_uiShared.ApiController.ServerAlive)
         {
             using (_uiShared.UidFont.Push())
@@ -236,13 +311,11 @@ public partial class IntroUi : WindowMediatorSubscriberBase
                     }
 
                     selectedServer = _serverConfigurationManager.GetServerByIndex(serverIdx);
-                    _useLegacyLogin = !selectedServer.UseOAuth2;
-
-                    if (ImGui.Checkbox("Use Legacy Authentication Protocol", ref _useLegacyLogin))
-                    {
-                        _serverConfigurationManager.GetServerByIndex(serverIdx).UseOAuth2 = !_useLegacyLogin;
-                        _serverConfigurationManager.Save();
-                    }
+                    
+                    // Force legacy authentication mode by default
+                    _useLegacyLogin = true;
+                    selectedServer.UseOAuth2 = false;
+                    _serverConfigurationManager.Save();
                 }
             }
 
@@ -253,10 +326,6 @@ public partial class IntroUi : WindowMediatorSubscriberBase
                 var buttonWidth = _secretKey.Length != 64 ? 0 : ImGuiHelpers.GetButtonSize(buttonText).X + ImGui.GetStyle().ItemSpacing.X;
                 var textSize = ImGui.CalcTextSize(text);
 
-                ImGuiHelpers.ScaledDummy(5);
-                UiSharedService.DrawGroupedCenteredColorText("We recommend using the modern OAuth2 authentication protocol when available (supported by the main Network node). " +
-                    "This method provides a streamlined connection process without requiring manual key management. " +
-                    "Since you authenticate through Discord, the OAuth2 protocol offers a more secure and user-friendly experience.", ImGuiColors.DalamudYellow, 500);
                 ImGuiHelpers.ScaledDummy(5);
 
                 ImGui.AlignTextToFramePadding();

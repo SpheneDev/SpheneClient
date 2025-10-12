@@ -16,14 +16,33 @@ public class TextureBackupService
         _configService = configService;
         _backupDirectory = Path.Combine(_configService.Current.CacheFolder, "texture_backups");
         
-        // Ensure backup directory exists
-        Directory.CreateDirectory(_backupDirectory);
+        // Don't create directory in constructor to avoid permission issues
+        // Directory will be created when first needed
+    }
+
+    private void EnsureBackupDirectoryExists()
+    {
+        try
+        {
+            if (!Directory.Exists(_backupDirectory))
+            {
+                Directory.CreateDirectory(_backupDirectory);
+                _logger.LogDebug("Created backup directory: {directory}", _backupDirectory);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to create backup directory: {directory}", _backupDirectory);
+            throw new InvalidOperationException($"Cannot create backup directory at {_backupDirectory}. Please ensure the cache folder is writable or change it in settings.", ex);
+        }
     }
 
     public async Task<bool> BackupTextureAsync(string originalFilePath, CancellationToken cancellationToken = default)
     {
         try
         {
+            EnsureBackupDirectoryExists();
+            
             if (!File.Exists(originalFilePath))
             {
                 _logger.LogWarning("Original texture file does not exist: {path}", originalFilePath);
@@ -74,6 +93,12 @@ public class TextureBackupService
     {
         try
         {
+            if (!Directory.Exists(_backupDirectory))
+            {
+                _logger.LogDebug("Backup directory does not exist, skipping cleanup: {directory}", _backupDirectory);
+                return;
+            }
+            
             var cutoffDate = DateTime.Now - maxAge;
             var backupFiles = Directory.GetFiles(_backupDirectory, "*.tex");
 
@@ -99,6 +124,12 @@ public class TextureBackupService
     {
         try
         {
+            if (!Directory.Exists(_backupDirectory))
+            {
+                _logger.LogDebug("Backup directory does not exist, returning size 0: {directory}", _backupDirectory);
+                return 0;
+            }
+            
             var backupFiles = Directory.GetFiles(_backupDirectory, "*", SearchOption.AllDirectories);
             return backupFiles.Sum(file => new FileInfo(file).Length);
         }
