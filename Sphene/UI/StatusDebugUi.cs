@@ -19,28 +19,20 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
     private readonly UiSharedService _uiSharedService;
     private readonly PairManager _pairManager;
     private readonly ApiController _apiController;
-    private readonly UpdateCheckService _updateCheckService;
     
     private string _communicationLog = "Communication Log:\n";
     private bool _autoScroll = true;
     private Vector2 _logScrollPosition = Vector2.Zero;
     
-    // Update testing fields
-    private string _testCurrentVersion = "1.0.0.0";
-    private string _testDalamudVersion = "1.0.0.0";
-    private bool _isTestingUpdate = false;
-    private string _lastTestResult = "";
-    
     public StatusDebugUi(ILogger<StatusDebugUi> logger, SpheneMediator mediator,
         UiSharedService uiSharedService, PairManager pairManager, ApiController apiController,
-        UpdateCheckService updateCheckService, PerformanceCollectorService performanceCollectorService)
+        PerformanceCollectorService performanceCollectorService)
         : base(logger, mediator, "Sphene Status Debug###SpheneStatusDebug", performanceCollectorService)
     {
         _logger = logger;
         _uiSharedService = uiSharedService;
         _pairManager = pairManager;
         _apiController = apiController;
-        _updateCheckService = updateCheckService;
         
         IsOpen = false;
         SizeConstraints = new()
@@ -61,8 +53,6 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         DrawStatusSection();
         ImGui.Separator();
         DrawControlButtons();
-        ImGui.Separator();
-        DrawUpdateTestingSection();
         ImGui.Separator();
         DrawCommunicationLog();
     }
@@ -176,121 +166,6 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                 
                 ImGui.PopID();
             }
-        }
-    }
-    
-    private void DrawUpdateTestingSection()
-    {
-        ImGui.Text("Update Testing:");
-        ImGui.Spacing();
-        
-        // Current version input
-        ImGui.Text("Test Current Version:");
-        ImGui.SameLine();
-        ImGui.SetNextItemWidth(150);
-        ImGui.InputText("##testCurrentVersion", ref _testCurrentVersion, 20);
-        
-        // Dalamud version input
-        ImGui.Text("Test Dalamud Version:");
-        ImGui.SameLine();
-        ImGui.SetNextItemWidth(150);
-        ImGui.InputText("##testDalamudVersion", ref _testDalamudVersion, 20);
-        
-        ImGui.Spacing();
-        
-        // Test buttons
-        if (ImGui.Button("Test Update Check") && !_isTestingUpdate)
-        {
-            _ = TestUpdateCheckAsync();
-        }
-        
-        ImGui.SameLine();
-        if (ImGui.Button("Test with Current = Dalamud") && !_isTestingUpdate)
-        {
-            _testDalamudVersion = _testCurrentVersion;
-            _ = TestUpdateCheckAsync();
-        }
-        
-        ImGui.SameLine();
-        if (ImGui.Button("Test Current < Dalamud") && !_isTestingUpdate)
-        {
-            if (Version.TryParse(_testCurrentVersion, out var currentVer))
-            {
-                var newVersion = new Version(currentVer.Major, currentVer.Minor, currentVer.Build, currentVer.Revision + 1);
-                _testDalamudVersion = newVersion.ToString();
-                _ = TestUpdateCheckAsync();
-            }
-        }
-        
-        if (_isTestingUpdate)
-        {
-            ImGui.Text("Testing in progress...");
-        }
-        
-        if (!string.IsNullOrEmpty(_lastTestResult))
-        {
-            ImGui.Spacing();
-            ImGui.Text("Last Test Result:");
-            ImGui.TextWrapped(_lastTestResult);
-        }
-        
-        ImGui.Spacing();
-        ImGui.TextColored(ImGuiColors.DalamudGrey, "Use these controls to simulate different version scenarios:");
-        ImGui.TextColored(ImGuiColors.DalamudGrey, "- Current = Dalamud: No update notification (Dalamud already has it)");
-        ImGui.TextColored(ImGuiColors.DalamudGrey, "- Current < Dalamud: Update notification shown (Dalamud has newer version)");
-        ImGui.TextColored(ImGuiColors.DalamudGrey, "- Current > Dalamud: No update notification (Dalamud doesn't have it yet)");
-    }
-    
-    private async Task TestUpdateCheckAsync()
-    {
-        _isTestingUpdate = true;
-        _lastTestResult = "";
-        
-        try
-        {
-            Version? testCurrentVersion = null;
-            Version? testDalamudVersion = null;
-            
-            if (Version.TryParse(_testCurrentVersion, out var currentVer))
-                testCurrentVersion = currentVer;
-            else
-                _lastTestResult += "Invalid current version format. ";
-                
-            if (Version.TryParse(_testDalamudVersion, out var dalamudVer))
-                testDalamudVersion = dalamudVer;
-            else
-                _lastTestResult += "Invalid Dalamud version format. ";
-            
-            if (testCurrentVersion != null && testDalamudVersion != null)
-            {
-                var result = await _updateCheckService.TestUpdateCheckAsync(testCurrentVersion, testDalamudVersion);
-                
-                if (result != null)
-                {
-                    _lastTestResult = $"Test completed successfully!\n" +
-                                    $"Current: {result.CurrentVersion}\n" +
-                                    $"Latest: {result.LatestVersion}\n" +
-                                    $"Update Available: {result.IsUpdateAvailable}\n" +
-                                    $"Would show notification: {result.IsUpdateAvailable}";
-                }
-                else
-                {
-                    _lastTestResult = "Test failed - no result returned (check logs for details)";
-                }
-            }
-            else
-            {
-                _lastTestResult += "Please provide valid version numbers in format: Major.Minor.Build.Revision (e.g., 1.0.0.0)";
-            }
-        }
-        catch (Exception ex)
-        {
-            _lastTestResult = $"Test failed with exception: {ex.Message}";
-            _logger.LogError(ex, "Update test failed");
-        }
-        finally
-        {
-            _isTestingUpdate = false;
         }
     }
     

@@ -112,6 +112,14 @@ public class UpdateNotificationUi : WindowMediatorSubscriberBase
             ImGuiColors.DalamudWhite);
         
         ImGui.Spacing();
+        
+        // Delay warning
+        UiSharedService.ColorTextWrapped(
+            "Note: Dalamud may take 2-3 minutes to show new updates in its repository. " +
+            "If you don't see the update immediately, please wait a moment and check again.", 
+            ImGuiColors.DalamudYellow);
+        
+        ImGui.Spacing();
         ImGui.Separator();
         
         // Buttons
