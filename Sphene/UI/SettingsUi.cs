@@ -142,10 +142,23 @@ public class SettingsUi : WindowMediatorSubscriberBase
     {
         _uiShared.ResetOAuthTasksState();
         _speedTestCts = new();
+        
+        // Store original theme state when opening settings
+        _originalThemeState = SpheneCustomTheme.CurrentTheme.Clone();
+        _currentThemeName = ThemeManager.GetSelectedTheme();
+        _hasUnsavedThemeChanges = false;
     }
 
     public override void OnClose()
     {
+        // Check for unsaved theme changes before closing
+        if (CheckForUnsavedThemeChanges())
+        {
+            // If we need to show a prompt, keep the window open
+            IsOpen = true;
+            return;
+        }
+
         _uiShared.EditTrackerPosition = false;
         _uidToAddForIgnore = string.Empty;
         _secretKeysConversionCts = _secretKeysConversionCts.CancelRecreate();
@@ -170,6 +183,9 @@ public class SettingsUi : WindowMediatorSubscriberBase
         _ = _uiShared.DrawOtherPluginState();
 
         DrawSettingsContent();
+        
+        // Draw theme save prompt if needed
+        DrawThemeSavePrompt();
     }
     private static bool InputDtrColors(string label, ref DtrEntry.Colors colors)
     {
@@ -2738,15 +2754,27 @@ public class SettingsUi : WindowMediatorSubscriberBase
         
         if (ImGui.BeginTabBar("ThemeTabBar"))
         {
+            // Calculate available height for the tab content to fill remaining space
+            var availableRegion = ImGui.GetContentRegionAvail();
+            var tabContentHeight = availableRegion.Y;
+            
             if (ImGui.BeginTabItem("General Theme"))
             {
-                DrawGeneralThemeSettings();
+                if (ImGui.BeginChild("GeneralThemeChild", new Vector2(0, tabContentHeight), true))
+                {
+                    DrawGeneralThemeSettings();
+                    ImGui.EndChild();
+                }
                 ImGui.EndTabItem();
             }
             
             if (ImGui.BeginTabItem("Panel Theme"))
             {
-                DrawCompactUIThemeSettings();
+                if (ImGui.BeginChild("PanelThemeChild", new Vector2(0, tabContentHeight), true))
+                {
+                    DrawCompactUIThemeSettings();
+                    ImGui.EndChild();
+                }
                 ImGui.EndTabItem();
             }
             
@@ -2899,6 +2927,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         if (themeChanged)
         {
             theme.NotifyThemeChanged();
+            _hasUnsavedThemeChanges = true;
         }
         
         ImGui.Separator();
@@ -2956,6 +2985,113 @@ public class SettingsUi : WindowMediatorSubscriberBase
         if (themeChanged)
         {
             theme.NotifyThemeChanged();
+            _hasUnsavedThemeChanges = true;
+        }
+    }
+    
+    private void DrawThemeColorSettings()
+    {
+        var theme = SpheneCustomTheme.CurrentTheme;
+        bool themeChanged = false;
+        
+        ImGui.Text("General Theme Colors");
+        ImGui.Separator();
+        
+        if (ImGui.BeginTabBar("GeneralColorTabBar"))
+        {
+            if (ImGui.BeginTabItem("Basic Colors"))
+            {
+                DrawBasicColors(theme, ref themeChanged);
+                ImGui.EndTabItem();
+            }
+            
+            if (ImGui.BeginTabItem("Window Colors"))
+            {
+                DrawWindowColors(theme, ref themeChanged);
+                ImGui.EndTabItem();
+            }
+            
+            if (ImGui.BeginTabItem("Frame & Input Colors"))
+            {
+                DrawFrameInputColors(theme, ref themeChanged);
+                ImGui.EndTabItem();
+            }
+            
+            if (ImGui.BeginTabItem("Button & Header Colors"))
+            {
+                DrawButtonHeaderColors(theme, ref themeChanged);
+                ImGui.EndTabItem();
+            }
+            
+            if (ImGui.BeginTabItem("Menu & Navigation Colors"))
+            {
+                DrawMenuNavigationColors(theme, ref themeChanged);
+                ImGui.EndTabItem();
+            }
+            
+            if (ImGui.BeginTabItem("Scrollbar & Slider Colors"))
+            {
+                DrawScrollbarSliderColors(theme, ref themeChanged);
+                ImGui.EndTabItem();
+            }
+            
+            if (ImGui.BeginTabItem("Table & Tab Colors"))
+            {
+                DrawTableTabColors(theme, ref themeChanged);
+                ImGui.EndTabItem();
+            }
+            
+            ImGui.EndTabBar();
+        }
+        
+        // Apply changes in real-time
+        if (themeChanged)
+        {
+            theme.NotifyThemeChanged();
+            _hasUnsavedThemeChanges = true;
+        }
+    }
+    
+    private void DrawScrollbarSettings()
+    {
+        var theme = SpheneCustomTheme.CurrentTheme;
+        bool themeChanged = false;
+        
+        ImGui.Text("Scrollbar Settings");
+        ImGui.Separator();
+        
+        var scrollbarRounding = theme.ScrollbarRounding;
+        if (ImGui.SliderFloat("Scrollbar Rounding", ref scrollbarRounding, 0.0f, 20.0f, "%.1f"))
+        {
+            theme.ScrollbarRounding = scrollbarRounding;
+            themeChanged = true;
+        }
+        
+        var grabRounding = theme.GrabRounding;
+        if (ImGui.SliderFloat("Grab Rounding", ref grabRounding, 0.0f, 20.0f, "%.1f"))
+        {
+            theme.GrabRounding = grabRounding;
+            themeChanged = true;
+        }
+        
+        var scrollbarSize = theme.ScrollbarSize;
+        if (ImGui.SliderFloat("Scrollbar Size", ref scrollbarSize, 5.0f, 30.0f, "%.1f"))
+        {
+            theme.ScrollbarSize = scrollbarSize;
+            themeChanged = true;
+        }
+        
+        ImGui.Separator();
+        ImGui.Text("Scrollbar Colors");
+        ImGui.Separator();
+        
+        DrawScrollbarSliderColors(theme, ref themeChanged);
+        
+        // Apply changes in real-time
+        if (themeChanged)
+        {
+            theme.NotifyThemeChanged();
+            _hasUnsavedThemeChanges = true;
         }
     }
 
@@ -4244,6 +4380,13 @@ public class SettingsUi : WindowMediatorSubscriberBase
             theme.CompactActive = compactActive;
             themeChanged = true;
         }
+        
+        // Apply changes in real-time for CompactUI
+        if (themeChanged)
+        {
+            theme.NotifyThemeChanged();
+            _hasUnsavedThemeChanges = true;
+        }
     }
 
     private string _saveThemeName = "";
@@ -4251,7 +4394,12 @@ public class SettingsUi : WindowMediatorSubscriberBase
     private string[] _availableThemes = Array.Empty<string>();
     private bool _themesLoaded = false;
     private string _selectedPresetTheme = "";
-    private string _themeValuesInput = "";
+    
+    // Theme change tracking
+    private bool _hasUnsavedThemeChanges = false;
+    private ThemeConfiguration? _originalThemeState = null;
+    private string _currentThemeName = "";
+    private bool _showThemeSavePrompt = false;
 
     private void DrawSaveThemePopup()
     {
@@ -4381,6 +4529,10 @@ public class SettingsUi : WindowMediatorSubscriberBase
             // Notify theme changed to apply immediately
             SpheneCustomTheme.CurrentTheme.NotifyThemeChanged();
             
+            // Reset change tracking when loading a theme
+            _hasUnsavedThemeChanges = false;
+            _currentThemeName = _selectedThemeToLoad;
+            
             _selectedThemeToLoad = "";
             ImGui.CloseCurrentPopup();
         }
@@ -4430,33 +4582,10 @@ public class SettingsUi : WindowMediatorSubscriberBase
         }
         
         ImGui.SameLine();
-        if (ImGui.Button("Reset to Default"))
+        if (ImGui.Button("Reset to Default Sphene Theme"))
         {
             _selectedPresetTheme = "Default Sphene";
             ApplySelectedPresetTheme("Default Sphene", builtInThemes);
-        }
-        
-        // Theme values input section
-        ImGui.Spacing();
-        ImGui.Text("Apply Custom Values");
-        ImGui.SameLine();
-        _uiShared.DrawHelpText("Paste theme values here to apply them directly. Format: PropertyName=Value, one per line.");
-        
-        ImGui.SetNextItemWidth(-1);
-        if (ImGui.InputTextMultiline("##ThemeValues", ref _themeValuesInput, 10000, new Vector2(-1, 100)))
-        {
-            // Input changed, we could auto-apply or wait for button
-        }
-        
-        if (ImGui.Button("Apply Values"))
-        {
-            ApplyThemeFromInput();
-        }
-        
-        ImGui.SameLine();
-        if (ImGui.Button("Get Current Values"))
-        {
-            GetCurrentThemeValues();
         }
         
         // Theme Management Actions
@@ -4465,8 +4594,20 @@ public class SettingsUi : WindowMediatorSubscriberBase
         
         if (ImGui.Button("Reset to Defaults"))
         {
-            SpheneCustomTheme.CurrentTheme.ResetToDefaults();
+            if (_originalThemeState != null)
+            {
+                // Restore to the original theme state when the settings were opened
+                CopyThemeProperties(_originalThemeState, SpheneCustomTheme.CurrentTheme);
+            }
+            else
+            {
+                // Fallback to system defaults if no original state is available
+                SpheneCustomTheme.CurrentTheme.ResetToDefaults();
+            }
             SpheneCustomTheme.CurrentTheme.NotifyThemeChanged();
+            
+            // Reset change tracking
+            _hasUnsavedThemeChanges = false;
         }
         
         ImGui.SameLine();
@@ -4526,6 +4667,10 @@ public class SettingsUi : WindowMediatorSubscriberBase
         
         // Save selected theme to configuration for persistence
         ThemeManager.SetSelectedTheme(themeName);
+        
+        // Reset change tracking when applying a preset theme
+        _hasUnsavedThemeChanges = false;
+        _currentThemeName = themeName;
         
         currentTheme.NotifyThemeChanged();
     }
@@ -4732,75 +4877,108 @@ public class SettingsUi : WindowMediatorSubscriberBase
         target.CompactTransmissionBarForeground = cloned.CompactTransmissionBarForeground;
         target.CompactTransmissionBarBorder = cloned.CompactTransmissionBarBorder;
     }
-
-    private void ApplyThemeFromInput()
+    
+    private bool CheckForUnsavedThemeChanges()
     {
-        if (string.IsNullOrWhiteSpace(_themeValuesInput)) return;
+        if (_originalThemeState == null || !_hasUnsavedThemeChanges)
+            return false;
+            
+        // Check if current theme is a custom theme (not built-in)
+        var builtInThemes = ThemePresets.BuiltInThemes.Keys.ToList();
+        var isCustomTheme = !builtInThemes.Contains(_currentThemeName);
         
-        var values = new Dictionary<string, object>();
-        var lines = _themeValuesInput.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-        
-        foreach (var line in lines)
+        if (isCustomTheme)
         {
-            var parts = line.Split('=', 2);
-            if (parts.Length != 2) continue;
-            
-            var key = parts[0].Trim();
-            var valueStr = parts[1].Trim();
-            
-            // Try to parse different value types
-            if (float.TryParse(valueStr, NumberStyles.Float, CultureInfo.InvariantCulture, out float floatValue))
+            // Auto-save changes to existing custom theme
+            _ = Task.Run(async () =>
             {
-                values[key] = floatValue;
-            }
-            else if (bool.TryParse(valueStr, out bool boolValue))
-            {
-                values[key] = boolValue;
-            }
-            else if (valueStr.StartsWith("(") && valueStr.EndsWith(")"))
-            {
-                // Vector parsing: (x,y) or (x,y,z,w)
-                var vectorStr = valueStr.Trim('(', ')');
-                var components = vectorStr.Split(',').Select(s => float.TryParse(s.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out float f) ? f : 0f).ToArray();
-                
-                if (components.Length == 2)
-                    values[key] = new Vector2(components[0], components[1]);
-                else if (components.Length == 4)
-                    values[key] = new Vector4(components[0], components[1], components[2], components[3]);
-            }
+                var success = await ThemeManager.SaveTheme(SpheneCustomTheme.CurrentTheme, _currentThemeName);
+                if (success)
+                {
+                    _logger.LogDebug($"Auto-saved changes to custom theme: {_currentThemeName}");
+                }
+            });
+            return false; // Don't show prompt, just auto-save
         }
-        
-        if (values.Any())
+        else
         {
-            ThemePresets.ApplyThemeFromValues(SpheneCustomTheme.CurrentTheme, values);
+            // Show prompt to create new theme for built-in themes
+            _showThemeSavePrompt = true;
+            return true; // Show prompt, keep window open
         }
     }
-
-    private void GetCurrentThemeValues()
+    
+    private void DrawThemeSavePrompt()
     {
-        var currentTheme = SpheneCustomTheme.CurrentTheme;
-        var values = ThemePresets.GetThemeValues(currentTheme);
+        if (!_showThemeSavePrompt)
+            return;
+            
+        ImGui.OpenPopup("Unsaved Theme Changes");
         
-        var lines = new List<string>();
-        foreach (var kvp in values)
+        if (ImGui.BeginPopupModal("Unsaved Theme Changes", ref _showThemeSavePrompt, ImGuiWindowFlags.AlwaysAutoResize))
         {
-            var value = kvp.Value;
-            string valueStr;
-            
-            if (value is Vector2 v2)
-                valueStr = $"({v2.X.ToString("F1", CultureInfo.InvariantCulture)},{v2.Y.ToString("F1", CultureInfo.InvariantCulture)})";
-            else if (value is Vector4 v4)
-                valueStr = $"({v4.X.ToString("F2", CultureInfo.InvariantCulture)},{v4.Y.ToString("F2", CultureInfo.InvariantCulture)},{v4.Z.ToString("F2", CultureInfo.InvariantCulture)},{v4.W.ToString("F2", CultureInfo.InvariantCulture)})";
-            else if (value is bool b)
-                valueStr = b.ToString().ToLower();
-            else if (value is float f)
-                valueStr = f.ToString("F1", CultureInfo.InvariantCulture);
-            else
-                valueStr = value.ToString();
-            
-            lines.Add($"{kvp.Key}={valueStr}");
+            using (SpheneCustomTheme.ApplyContextMenuTheme())
+            {
+                ImGui.Text("You have made changes to the theme settings.");
+                ImGui.Text("Would you like to save these changes as a new custom theme?");
+                ImGui.Spacing();
+                
+                ImGui.Text("Theme Name:");
+                ImGui.InputText("##NewThemeName", ref _saveThemeName, 100);
+                
+                ImGui.Spacing();
+                
+                if (ImGui.Button("Save as New Theme"))
+                {
+                    if (!string.IsNullOrWhiteSpace(_saveThemeName))
+                    {
+                        // Capture the theme name before clearing it
+                        var themeNameToSave = _saveThemeName;
+                        _ = Task.Run(async () =>
+                        {
+                            var success = await ThemeManager.SaveTheme(SpheneCustomTheme.CurrentTheme, themeNameToSave);
+                            if (success)
+                            {
+                                _logger.LogDebug($"Created new custom theme: {themeNameToSave}");
+                                // Update current theme name for future auto-saves
+                                _currentThemeName = themeNameToSave;
+                                ThemeManager.SetSelectedTheme(themeNameToSave);
+                                
+                                // Reset change tracking
+                                _hasUnsavedThemeChanges = false;
+                            }
+                        });
+                        _saveThemeName = "";
+                        _showThemeSavePrompt = false;
+                        ImGui.CloseCurrentPopup();
+                    }
+                }
+                
+                ImGui.SameLine();
+                
+                if (ImGui.Button("Discard Changes"))
+                {
+                    // Restore original theme state
+                    if (_originalThemeState != null)
+                    {
+                        CopyThemeProperties(_originalThemeState, SpheneCustomTheme.CurrentTheme);
+                        SpheneCustomTheme.CurrentTheme.NotifyThemeChanged();
+                    }
+                    _hasUnsavedThemeChanges = false;
+                    _showThemeSavePrompt = false;
+                    ImGui.CloseCurrentPopup();
+                }
+                
+                ImGui.SameLine();
+                
+                if (ImGui.Button("Keep Changes"))
+                {
+                    _hasUnsavedThemeChanges = false;
+                    _showThemeSavePrompt = false;
+                    ImGui.CloseCurrentPopup();
+                }
+            }
+            ImGui.EndPopup();
         }
-        
-        _themeValuesInput = string.Join("\n", lines);
     }
 }

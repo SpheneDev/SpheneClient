@@ -5,6 +5,7 @@ using System.Reflection;
 using Sphene.Services.Mediator;
 using Sphene.UI;
 using Microsoft.Extensions.Hosting;
+using Dalamud.Plugin;
 
 namespace Sphene.Services;
 
@@ -14,16 +15,23 @@ public class UpdateCheckService : IHostedService, IDisposable
     private readonly HttpClient _httpClient;
     private readonly SpheneMediator _mediator;
     private readonly DalamudUtilService _dalamudUtilService;
+    private readonly IDalamudPluginInterface _pluginInterface;
     private Timer? _updateCheckTimer;
     private const string UPDATE_CHECK_URL = "https://raw.githubusercontent.com/SpheneDev/repo/refs/heads/main/plogonmaster.json";
     private const int UPDATE_CHECK_INTERVAL_MINUTES = 5;
     
-    public UpdateCheckService(ILogger<UpdateCheckService> logger, HttpClient httpClient, SpheneMediator mediator, DalamudUtilService dalamudUtilService)
+    // Debug/Testing properties
+    public bool DebugMode { get; set; } = false;
+    public Version? DebugCurrentVersion { get; set; } = null;
+    public Version? DebugDalamudVersion { get; set; } = null;
+    
+    public UpdateCheckService(ILogger<UpdateCheckService> logger, HttpClient httpClient, SpheneMediator mediator, DalamudUtilService dalamudUtilService, IDalamudPluginInterface pluginInterface)
     {
         _logger = logger;
         _httpClient = httpClient;
         _mediator = mediator;
         _dalamudUtilService = dalamudUtilService;
+        _pluginInterface = pluginInterface;
     }
     
     public async Task<UpdateInfo?> CheckForUpdatesAsync(bool skipCombatCheck = false)
@@ -62,6 +70,19 @@ public class UpdateCheckService : IHostedService, IDisposable
             
             if (remoteVersion > currentVersion)
             {
+                // Check if Dalamud has the update available before showing notification
+                var dalamudHasUpdate = CheckDalamudHasUpdate(remoteVersion);
+                if (!dalamudHasUpdate)
+                {
+                    _logger.LogDebug("Update {version} available but not yet available in Dalamud, skipping notification", remoteVersion);
+                    return new UpdateInfo
+                    {
+                        CurrentVersion = currentVersion,
+                        LatestVersion = remoteVersion,
+                        IsUpdateAvailable = false
+                    };
+                }
+                
                 _logger.LogInformation("Update available: {version}", remoteVersion);
                 var updateInfo = new UpdateInfo
                 {
@@ -96,9 +117,50 @@ public class UpdateCheckService : IHostedService, IDisposable
 
     private Version GetCurrentVersion()
     {
+        if (DebugMode && DebugCurrentVersion != null)
+        {
+            _logger.LogDebug("Using debug current version: {version}", DebugCurrentVersion);
+            return DebugCurrentVersion;
+        }
+        
         var assembly = Assembly.GetExecutingAssembly();
         var version = assembly.GetName().Version;
         return version ?? new Version(0, 0, 0, 0);
+    }
+    
+    private bool CheckDalamudHasUpdate(Version remoteVersion)
+    {
+        try
+        {
+            Version dalamudVersion;
+            
+            if (DebugMode && DebugDalamudVersion != null)
+            {
+                dalamudVersion = DebugDalamudVersion;
+                _logger.LogDebug("Using debug Dalamud version: {dalamudVersion}, Remote version: {remoteVersion}", dalamudVersion, remoteVersion);
+            }
+            else
+            {
+                var sphenePlugin = _pluginInterface.InstalledPlugins.FirstOrDefault(p => p.InternalName == "Sphene");
+                if (sphenePlugin == null)
+                {
+                    _logger.LogDebug("Sphene plugin not found in Dalamud's installed plugins list");
+                    return false;
+                }
+                
+                dalamudVersion = sphenePlugin.Version;
+                _logger.LogDebug("Dalamud has Sphene version: {dalamudVersion}, Remote version: {remoteVersion}", dalamudVersion, remoteVersion);
+            }
+            
+            // Only show update if Dalamud has the same or newer version available
+            return dalamudVersion >= remoteVersion;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to check Dalamud plugin version, allowing update notification");
+            // If we can't check Dalamud's version, allow the update notification to prevent blocking legitimate updates
+            return true;
+        }
     }
     
     private async void OnUpdateCheckTimer(object? state)
@@ -114,6 +176,34 @@ public class UpdateCheckService : IHostedService, IDisposable
         }
     }
     
+    // Public method for testing update scenarios
+    public async Task<UpdateInfo?> TestUpdateCheckAsync(Version? testCurrentVersion = null, Version? testDalamudVersion = null)
+    {
+        var originalDebugMode = DebugMode;
+        var originalDebugCurrentVersion = DebugCurrentVersion;
+        var originalDebugDalamudVersion = DebugDalamudVersion;
+        
+        try
+        {
+            DebugMode = true;
+            DebugCurrentVersion = testCurrentVersion;
+            DebugDalamudVersion = testDalamudVersion;
+            
+            _logger.LogInformation("Testing update check with Current: {current}, Dalamud: {dalamud}", 
+                testCurrentVersion?.ToString() ?? "actual", 
+                testDalamudVersion?.ToString() ?? "actual");
+            
+            return await CheckForUpdatesAsync();
+        }
+        finally
+        {
+            // Restore original debug settings
+            DebugMode = originalDebugMode;
+            DebugCurrentVersion = originalDebugCurrentVersion;
+            DebugDalamudVersion = originalDebugDalamudVersion;
+        }
+    }
+
     public Task StartAsync(CancellationToken cancellationToken)
     {
         _logger.LogInformation("UpdateCheckService started - will check for updates every {minutes} minutes", UPDATE_CHECK_INTERVAL_MINUTES);
