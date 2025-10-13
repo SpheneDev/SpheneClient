@@ -333,6 +333,22 @@ public class SphenePlugin : MediatorSubscriberBase, IHostedService
         target.CompactVisibleText = cloned.CompactVisibleText;
         target.CompactPairsText = cloned.CompactPairsText;
         target.CompactShowImGuiHeader = cloned.CompactShowImGuiHeader;
+        
+        // Progress Bar Properties
+        target.ProgressBarRounding = cloned.ProgressBarRounding;
+        target.ProgressBarPreviewFill = cloned.ProgressBarPreviewFill;
+        target.ShowProgressBarPreview = cloned.ShowProgressBarPreview;
+        target.TransmissionBarRounding = cloned.TransmissionBarRounding;
+        target.CompactProgressBarHeight = cloned.CompactProgressBarHeight;
+        target.CompactProgressBarWidth = cloned.CompactProgressBarWidth;
+        target.CompactProgressBarBackground = cloned.CompactProgressBarBackground;
+        target.CompactProgressBarForeground = cloned.CompactProgressBarForeground;
+        target.CompactProgressBarBorder = cloned.CompactProgressBarBorder;
+        target.CompactTransmissionBarHeight = cloned.CompactTransmissionBarHeight;
+        target.CompactTransmissionBarWidth = cloned.CompactTransmissionBarWidth;
+        target.CompactTransmissionBarBackground = cloned.CompactTransmissionBarBackground;
+        target.CompactTransmissionBarForeground = cloned.CompactTransmissionBarForeground;
+        target.CompactTransmissionBarBorder = cloned.CompactTransmissionBarBorder;
     }
 
     public Task StopAsync(CancellationToken cancellationToken)
