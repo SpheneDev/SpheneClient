@@ -56,8 +56,8 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
         _pairManager = pairManager;
         _housingOwnershipService = housingOwnershipService;
         
-        // Check location every 5 seconds
-        _locationCheckTimer = new Timer(CheckLocationChange, null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
+        // Check location every 1 second
+        _locationCheckTimer = new Timer(CheckLocationChange, null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
         
         Mediator.Subscribe<AreaBoundJoinRequestMessage>(this, OnAreaBoundJoinRequest);
         Mediator.Subscribe<AreaBoundJoinResponseMessage>(this, OnAreaBoundJoinResponse);

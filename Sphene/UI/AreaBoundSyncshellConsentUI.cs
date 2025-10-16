@@ -16,6 +16,7 @@ public class AreaBoundSyncshellConsentUI : WindowMediatorSubscriberBase
     private AreaBoundSyncshellConsentRequestMessage? _currentRequest;
     private bool _rulesAccepted = false;
     private string _errorMessage = string.Empty;
+    private DateTime _openedAt;
 
     public AreaBoundSyncshellConsentUI(ILogger<AreaBoundSyncshellConsentUI> logger, 
         SpheneMediator mediator, 
@@ -30,6 +31,7 @@ public class AreaBoundSyncshellConsentUI : WindowMediatorSubscriberBase
         Flags = ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoCollapse;
         
         Mediator.Subscribe<AreaBoundSyncshellConsentRequestMessage>(this, OnConsentRequest);
+        Mediator.Subscribe<AreaBoundLocationChangedMessage>(this, OnLocationChanged);
     }
 
     private void OnConsentRequest(AreaBoundSyncshellConsentRequestMessage message)
@@ -37,6 +39,7 @@ public class AreaBoundSyncshellConsentUI : WindowMediatorSubscriberBase
         _currentRequest = message;
         _rulesAccepted = false;
         _errorMessage = string.Empty;
+        _openedAt = DateTime.UtcNow;
         IsOpen = true;
         _logger.LogDebug("Received consent request for syncshell: {syncshellId}", message.Syncshell.Group.GID);
     }
@@ -144,6 +147,28 @@ public class AreaBoundSyncshellConsentUI : WindowMediatorSubscriberBase
         {
             _logger.LogError(ex, "Error joining area-bound syncshell");
             _errorMessage = "Failed to join syncshell. Please try again.";
+        }
+    }
+
+    private void OnLocationChanged(AreaBoundLocationChangedMessage message)
+    {
+        // Automatically close the popup when the user leaves the area
+        // But only if the UI has been open for at least 1 second to prevent immediate closure
+        if (IsOpen)
+        {
+            var timeSinceOpened = DateTime.UtcNow - _openedAt;
+            if (timeSinceOpened.TotalSeconds >= 1)
+            {
+                _logger.LogDebug("Location changed while consent UI was open, closing popup (open for {seconds}s)", timeSinceOpened.TotalSeconds);
+                IsOpen = false;
+                _currentRequest = null;
+                _rulesAccepted = false;
+                _errorMessage = string.Empty;
+            }
+            else
+            {
+                _logger.LogDebug("Location changed but consent UI was only open for {seconds}s, keeping open", timeSinceOpened.TotalSeconds);
+            }
         }
     }
 }

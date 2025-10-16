@@ -16,6 +16,7 @@ public class AreaBoundSyncshellSelectionUI : WindowMediatorSubscriberBase
     private List<AreaBoundSyncshellDto>? _availableSyncshells;
     private int _selectedIndex = -1;
     private string _errorMessage = string.Empty;
+    private DateTime _openedAt;
 
     public AreaBoundSyncshellSelectionUI(ILogger<AreaBoundSyncshellSelectionUI> logger, 
         SpheneMediator mediator, 
@@ -30,6 +31,7 @@ public class AreaBoundSyncshellSelectionUI : WindowMediatorSubscriberBase
         Flags = ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoCollapse;
         
         Mediator.Subscribe<AreaBoundSyncshellSelectionRequestMessage>(this, OnSelectionRequest);
+        Mediator.Subscribe<AreaBoundLocationChangedMessage>(this, OnLocationChanged);
     }
 
     private void OnSelectionRequest(AreaBoundSyncshellSelectionRequestMessage message)
@@ -37,6 +39,7 @@ public class AreaBoundSyncshellSelectionUI : WindowMediatorSubscriberBase
         _availableSyncshells = message.AvailableSyncshells;
         _selectedIndex = -1;
         _errorMessage = string.Empty;
+        _openedAt = DateTime.UtcNow;
         IsOpen = true;
         _logger.LogDebug("Received selection request for {count} syncshells", message.AvailableSyncshells.Count);
     }
@@ -266,6 +269,28 @@ public class AreaBoundSyncshellSelectionUI : WindowMediatorSubscriberBase
         {
             _logger.LogError(ex, "Error joining all area-bound syncshells");
             _errorMessage = "Failed to join some syncshells. Please try again.";
+        }
+    }
+
+    private void OnLocationChanged(AreaBoundLocationChangedMessage message)
+    {
+        // Automatically close the popup when the user leaves the area
+        // But only if the UI has been open for at least 1 second to prevent immediate closure
+        if (IsOpen)
+        {
+            var timeSinceOpened = DateTime.UtcNow - _openedAt;
+            if (timeSinceOpened.TotalSeconds >= 1)
+            {
+                _logger.LogDebug("Location changed while selection UI was open, closing popup (open for {seconds}s)", timeSinceOpened.TotalSeconds);
+                IsOpen = false;
+                _availableSyncshells = null;
+                _selectedIndex = -1;
+                _errorMessage = string.Empty;
+            }
+            else
+            {
+                _logger.LogDebug("Location changed but selection UI was only open for {seconds}s, keeping open", timeSinceOpened.TotalSeconds);
+            }
         }
     }
 }
