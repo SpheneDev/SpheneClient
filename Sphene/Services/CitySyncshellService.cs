@@ -154,8 +154,8 @@ public class CitySyncshellService : DisposableMediatorSubscriberBase, IHostedSer
     {
         try
         {
-            // Get the city alias that matches the server's naming convention
-            var cityAlias = GetCityAlias(cityName);
+            // Get the city alias that matches the server's naming convention (now includes full server name)
+            var cityAlias = await GetCityAliasAsync(cityName);
             
             // Get all area-bound syncshells to find the city syncshell
             var areaBoundSyncshells = await _apiController.GroupGetAreaBoundSyncshells();
@@ -210,15 +210,23 @@ public class CitySyncshellService : DisposableMediatorSubscriberBase, IHostedSer
         }
     }
     
-    private static string GetCityAlias(string cityName)
+    private async Task<string> GetCityAliasAsync(string cityName)
     {
-        return cityName switch
+        // Get the current world name
+        var worldId = await _dalamudUtilService.GetWorldIdAsync();
+        var worldName = _dalamudUtilService.WorldData.Value.TryGetValue((ushort)worldId, out var name) ? name : $"World{worldId}";
+        
+        // Get the base city alias
+        var baseAlias = cityName switch
         {
             "Limsa Lominsa" => "Limsa",
-            "New Gridania" => "Gridania",
+            "New Gridania" => "Gridania", 
             "Ul'dah" => "Uldah",
             _ => cityName.Substring(0, Math.Min(10, cityName.Length))
         };
+        
+        // Return the full alias with server name (matching server's new naming pattern)
+        return $"{baseAlias} {worldName}";
     }
 
     private static bool LocationsEqual(LocationInfo loc1, LocationInfo loc2)
