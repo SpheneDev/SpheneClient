@@ -6,6 +6,8 @@ using Microsoft.Extensions.Logging;
 using Sphene.API.Dto.Group;
 using Sphene.Services;
 using Sphene.Services.Mediator;
+using Sphene.SpheneConfiguration;
+using Sphene.SpheneConfiguration.Configurations;
 using System.Numerics;
 
 namespace Sphene.UI;
@@ -13,6 +15,7 @@ namespace Sphene.UI;
 public class AreaBoundSyncshellConsentUI : WindowMediatorSubscriberBase
 {
     private readonly AreaBoundSyncshellService _areaBoundService;
+    private readonly SpheneConfigService _configService;
     private AreaBoundSyncshellConsentRequestMessage? _currentRequest;
     private bool _rulesAccepted = false;
     private string _errorMessage = string.Empty;
@@ -21,14 +24,16 @@ public class AreaBoundSyncshellConsentUI : WindowMediatorSubscriberBase
     public AreaBoundSyncshellConsentUI(ILogger<AreaBoundSyncshellConsentUI> logger, 
         SpheneMediator mediator, 
         PerformanceCollectorService performanceCollectorService,
-        AreaBoundSyncshellService areaBoundService) 
+        AreaBoundSyncshellService areaBoundService,
+        SpheneConfigService configService) 
         : base(logger, mediator, "Area-Bound Syncshell Consent###AreaBoundSyncshellConsent", performanceCollectorService)
     {
         _areaBoundService = areaBoundService;
+        _configService = configService;
         
-        Size = new Vector2(500, 400);
+        Size = new Vector2(600, 500);
         SizeCondition = ImGuiCond.FirstUseEver;
-        Flags = ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoCollapse;
+        Flags = ImGuiWindowFlags.NoCollapse;
         
         Mediator.Subscribe<AreaBoundSyncshellConsentRequestMessage>(this, OnConsentRequest);
         Mediator.Subscribe<AreaBoundLocationChangedMessage>(this, OnLocationChanged);
@@ -61,24 +66,30 @@ public class AreaBoundSyncshellConsentUI : WindowMediatorSubscriberBase
         ImGui.Text($"Syncshell: {_currentRequest.Syncshell.Group.AliasOrGID}");
         ImGui.Text($"ID: {_currentRequest.Syncshell.Group.GID}");
         
-        // Calculate space needed for bottom elements
+        // Calculate fixed bottom section height
         var buttonHeight = ImGui.GetFrameHeight();
         var spacing = ImGui.GetStyle().ItemSpacing.Y;
-        var bottomSpace = buttonHeight + spacing * 3; // Buttons + separators + spacing
+        var separatorHeight = 1.0f;
         
-        // Add checkbox height if rules are present
+        // Bottom section: separator + auto-show checkbox + rules checkbox (if needed) + error message + buttons + padding
+        var bottomSectionHeight = separatorHeight + spacing + // separator
+                                 buttonHeight + spacing + // auto-show checkbox
+                                 buttonHeight + spacing + // buttons
+                                 spacing * 2; // extra padding
+        
+        // Add rules checkbox if needed
         if (_currentRequest.RequiresRulesAcceptance && !string.IsNullOrEmpty(syncshell.Settings.JoinRules))
         {
-            bottomSpace += buttonHeight + spacing; // Checkbox
+            bottomSectionHeight += buttonHeight + spacing; // rules checkbox
         }
         
-        // Error message space if present
+        // Add error message space if present
         if (!string.IsNullOrEmpty(_errorMessage))
         {
-            bottomSpace += 30; // Approximate error message height
+            bottomSectionHeight += 40 + spacing; // error message height
         }
         
-        // Rules section - use all remaining space
+        // Rules section - use remaining space but leave room for bottom section
         if (_currentRequest.RequiresRulesAcceptance && !string.IsNullOrEmpty(syncshell.Settings.JoinRules))
         {
             ImGui.Separator();
@@ -86,9 +97,9 @@ public class AreaBoundSyncshellConsentUI : WindowMediatorSubscriberBase
             ImGui.Text("Rules (must be accepted to join):");
             ImGui.PopStyleColor();
             
-            // Use all remaining space for rules text
-            var rulesHeight = ImGui.GetContentRegionAvail().Y - bottomSpace;
-            if (rulesHeight < 100) rulesHeight = 100;
+            // Calculate available height for rules, ensuring bottom section fits
+            var availableHeight = ImGui.GetContentRegionAvail().Y;
+            var rulesHeight = Math.Max(100, availableHeight - bottomSectionHeight);
             
             using var child = ImRaii.Child("RulesText", new Vector2(0, rulesHeight), true);
             if (child)
@@ -101,23 +112,25 @@ public class AreaBoundSyncshellConsentUI : WindowMediatorSubscriberBase
             _rulesAccepted = true; // No rules to accept
         }
         
-        // Push everything to bottom
-        var remainingHeight = ImGui.GetContentRegionAvail().Y - (buttonHeight + spacing * 2);
-        if (!string.IsNullOrEmpty(_errorMessage))
+        // Use remaining space to push bottom section down, but ensure it fits
+        var remainingSpace = ImGui.GetContentRegionAvail().Y - bottomSectionHeight;
+        if (remainingSpace > 0)
         {
-            remainingHeight -= 30;
-        }
-        if (_currentRequest.RequiresRulesAcceptance && !string.IsNullOrEmpty(syncshell.Settings.JoinRules))
-        {
-            remainingHeight -= (buttonHeight + spacing);
+            ImGui.Dummy(new Vector2(0, remainingSpace));
         }
         
-        if (remainingHeight > 0)
+        // Bottom section starts here
+        ImGui.Separator();
+        
+        // Auto-show setting checkbox
+        var autoShowConsent = _configService.Current.AutoShowAreaBoundSyncshellConsent;
+        if (ImGui.Checkbox("Automatically show area syncshell consent dialogs", ref autoShowConsent))
         {
-            ImGui.Dummy(new Vector2(0, remainingHeight));
+            _configService.Current.AutoShowAreaBoundSyncshellConsent = autoShowConsent;
+            _configService.Save();
         }
         
-        // Checkbox at bottom (if rules present)
+        // Rules acceptance checkbox (if rules present)
         if (_currentRequest.RequiresRulesAcceptance && !string.IsNullOrEmpty(syncshell.Settings.JoinRules))
         {
             ImGui.Checkbox("I accept the rules and agree to follow them", ref _rulesAccepted);
@@ -131,9 +144,7 @@ public class AreaBoundSyncshellConsentUI : WindowMediatorSubscriberBase
             ImGui.PopStyleColor();
         }
         
-        ImGui.Separator();
-        
-        // Buttons at very bottom
+        // Buttons
         var buttonWidth = (ImGui.GetContentRegionAvail().X - ImGui.GetStyle().ItemSpacing.X) / 2;
         
         // Accept button

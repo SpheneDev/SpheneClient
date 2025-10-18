@@ -2614,6 +2614,14 @@ public class SettingsUi : WindowMediatorSubscriberBase
         }
         _uiShared.DrawHelpText("Automatically show welcome messages when joining area-bound syncshells. When disabled, you can still view welcome messages by clicking the area-bound indicator next to the syncshell name.");
         
+        var autoShowConsent = currentProfile.AutoShowAreaBoundSyncshellConsent;
+        if (ImGui.Checkbox("Automatically show area-bound syncshell consent", ref autoShowConsent))
+        {
+            currentProfile.AutoShowAreaBoundSyncshellConsent = autoShowConsent;
+            _configService.Save();
+        }
+        _uiShared.DrawHelpText("When enabled, consent dialogs for area-bound syncshells will appear automatically when entering areas. When disabled, you can manually trigger consent using the button in the Compact UI.");
+        
         ImGui.Separator();
         _uiShared.BigText("City Syncshell Settings");
         

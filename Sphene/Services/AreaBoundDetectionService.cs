@@ -245,6 +245,9 @@ public class AreaBoundDetectionService : IDisposable
             _logger.LogDebug("Leaving area-bound syncshell: {gid}", gid);
             // Use regular group leave functionality
             await _apiController.GroupLeave(new GroupDto(new GroupData(gid)));
+            
+            // Publish leave event to notify UI components
+            _mediator.Publish(new AreaBoundSyncshellLeftMessage(gid));
         }
         catch (Exception ex)
         {

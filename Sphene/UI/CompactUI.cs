@@ -55,6 +55,7 @@ public class CompactUi : WindowMediatorSubscriberBase
     private readonly DalamudUtilService _dalamudUtilService;
     private readonly CharacterAnalyzer _characterAnalyzer;
     private readonly TextureBackupService _textureBackupService;
+    private readonly AreaBoundSyncshellService _areaBoundSyncshellService;
     private List<IDrawFolder> _drawFolders;
     private Pair? _lastAddedUser;
     private string _lastAddedUserComment = string.Empty;
@@ -101,7 +102,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         ServerConfigurationManager serverManager, SpheneMediator mediator, FileUploadManager fileTransferManager,
         TagHandler tagHandler, DrawEntityFactory drawEntityFactory, SelectTagForPairUi selectTagForPairUi, SelectPairForTagUi selectPairForTagUi,
         PerformanceCollectorService performanceCollectorService, IpcManager ipcManager, DalamudUtilService dalamudUtilService, CharacterAnalyzer characterAnalyzer,
-        TextureBackupService textureBackupService)
+        TextureBackupService textureBackupService, AreaBoundSyncshellService areaBoundSyncshellService)
         : base(logger, mediator, "###SpheneMainUI", performanceCollectorService)
     {
         _uiSharedService = uiShared;
@@ -118,6 +119,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         _dalamudUtilService = dalamudUtilService;
         _characterAnalyzer = characterAnalyzer;
         _textureBackupService = textureBackupService;
+        _areaBoundSyncshellService = areaBoundSyncshellService;
         
         // Setup conversion progress handler
         _conversionProgress.ProgressChanged += (sender, progress) =>
@@ -195,6 +197,11 @@ public class CompactUi : WindowMediatorSubscriberBase
         Mediator.Subscribe<StructuralRefreshUiMessage>(this, (msg) => RefreshDrawFolders());
         Mediator.Subscribe<CharacterDataAnalyzedMessage>(this, (_) => _lastBackupAnalysisUpdate = DateTime.MinValue);
         Mediator.Subscribe<ShowUpdateNotificationMessage>(this, (msg) => _updateBannerInfo = msg.UpdateInfo);
+        Mediator.Subscribe<AreaBoundSyncshellLeftMessage>(this, (msg) => { 
+            // Force UI refresh when syncshell is left so button visibility updates
+            _logger.LogDebug("Area syncshell left: {SyncshellId}, checking if area syncshells are available: {HasAvailable}", 
+                msg.SyncshellId, _areaBoundSyncshellService.HasAvailableAreaSyncshells());
+        });
 
         // Configure base window flags
         Flags |= ImGuiWindowFlags.NoDocking | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse;
@@ -1829,6 +1836,41 @@ public class CompactUi : WindowMediatorSubscriberBase
         
         // Position settings button with reduced spacing from close button
         var settingsButtonX = closeButtonX - buttonWidth - buttonSpacing;
+        
+        // Position area syncshell button with reduced spacing from settings button
+        var areaSyncshellButtonX = settingsButtonX - buttonWidth - buttonSpacing;
+        
+        // Check if area syncshells are available in current location
+        bool hasAreaSyncshells = _areaBoundSyncshellService.HasAvailableAreaSyncshells();
+        
+        // Area syncshell button (only show if area syncshells are available)
+        if (hasAreaSyncshells)
+        {
+            ImGui.SetCursorScreenPos(new Vector2(contentStart.X + areaSyncshellButtonX, buttonY));
+            
+            // Area syncshell button with custom styling for better visibility
+            ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.2f, 0.4f, 0.6f, 0.8f)); // Blue background
+            ImGui.PushStyleColor(ImGuiCol.ButtonHovered, new Vector4(0.3f, 0.5f, 0.7f, 0.9f)); // Lighter blue on hover
+            ImGui.PushStyleColor(ImGuiCol.ButtonActive, new Vector4(0.4f, 0.6f, 0.8f, 1.0f)); // Even lighter blue when pressed
+            ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 1.0f, 1.0f, 1.0f)); // White text
+            
+            if (_uiSharedService.IconButton(FontAwesomeIcon.MapMarkerAlt))
+            {
+                // Trigger area syncshell selection UI
+                _areaBoundSyncshellService.TriggerAreaSyncshellSelection();
+            }
+            if (ImGui.IsItemHovered())
+            {
+                using (SpheneCustomTheme.ApplyTooltipTheme())
+                {
+                    ImGui.BeginTooltip();
+                    ImGui.Text("Open Area Syncshell Selection");
+                    ImGui.EndTooltip();
+                }
+            }
+            
+            ImGui.PopStyleColor(4); // Pop all 4 style colors
+        }
         
         // Position settings button centered vertically in header
         ImGui.SetCursorScreenPos(new Vector2(contentStart.X + settingsButtonX, buttonY));

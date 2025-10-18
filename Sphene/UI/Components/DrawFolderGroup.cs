@@ -187,13 +187,33 @@ public class DrawFolderGroup : DrawFolderBase
         }
         UiSharedService.AttachToolTip("Copies all your notes for all users in this Syncshell to the clipboard." + Environment.NewLine + "They can be imported via Settings -> General -> Notes -> Import notes from clipboard");
 
-        if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.ArrowCircleLeft, "Leave Syncshell", menuWidth) && UiSharedService.CtrlPressed())
+        // Check if this is an area-bound syncshell to show appropriate leave button
+        bool isAreaBound = _areaBoundSyncshellService.IsAreaBoundSyncshell(_groupFullInfoDto.Group.GID);
+        
+        if (isAreaBound)
         {
-            _ = _apiController.GroupLeave(_groupFullInfoDto);
-            ImGui.CloseCurrentPopup();
+            // Show "Leave Area Syncshell" button for area-bound syncshells
+            if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.MapMarkerAlt, "Leave Area Syncshell", menuWidth) && UiSharedService.CtrlPressed())
+            {
+                _ = LeaveAreaSyncshellWithConsentReset();
+                ImGui.CloseCurrentPopup();
+            }
+            UiSharedService.AttachToolTip("Hold CTRL and click to leave this Area Syncshell" + Environment.NewLine + 
+                "This will reset your consent and you'll need to accept again when re-entering the area." +
+                (!string.Equals(_groupFullInfoDto.OwnerUID, _apiController.UID, StringComparison.Ordinal)
+                    ? string.Empty : Environment.NewLine + "WARNING: This action is irreversible" + Environment.NewLine + "Leaving an owned Syncshell will transfer the ownership to a random person in the Syncshell."));
         }
-        UiSharedService.AttachToolTip("Hold CTRL and click to leave this Syncshell" + (!string.Equals(_groupFullInfoDto.OwnerUID, _apiController.UID, StringComparison.Ordinal)
-            ? string.Empty : Environment.NewLine + "WARNING: This action is irreversible" + Environment.NewLine + "Leaving an owned Syncshell will transfer the ownership to a random person in the Syncshell."));
+        else
+        {
+            // Show regular "Leave Syncshell" button for non-area-bound syncshells
+            if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.ArrowCircleLeft, "Leave Syncshell", menuWidth) && UiSharedService.CtrlPressed())
+            {
+                _ = _apiController.GroupLeave(_groupFullInfoDto);
+                ImGui.CloseCurrentPopup();
+            }
+            UiSharedService.AttachToolTip("Hold CTRL and click to leave this Syncshell" + (!string.Equals(_groupFullInfoDto.OwnerUID, _apiController.UID, StringComparison.Ordinal)
+                ? string.Empty : Environment.NewLine + "WARNING: This action is irreversible" + Environment.NewLine + "Leaving an owned Syncshell will transfer the ownership to a random person in the Syncshell."));
+        }
 
         ImGui.Separator();
         ImGui.TextUnformatted("Permission Settings");
@@ -371,6 +391,23 @@ public class DrawFolderGroup : DrawFolderBase
 
         // Return leftmost button position like DrawFolderTag.cs
         return infoIconOffset;
+    }
+
+    private async Task LeaveAreaSyncshellWithConsentReset()
+    {
+        try
+        {
+            // First reset the consent
+            await _areaBoundSyncshellService.ResetAreaBoundConsent(_groupFullInfoDto.Group.GID);
+            
+            // Then leave the syncshell using the service method to ensure proper cleanup
+            await _areaBoundSyncshellService.LeaveAreaSyncshell(_groupFullInfoDto.Group.GID);
+        }
+        catch (Exception ex)
+        {
+            // Log error but don't show to user as this is a background operation
+            // The UI will handle any error feedback through normal channels
+        }
     }
 
     private async Task ShowWelcomeMessageOnDemand()

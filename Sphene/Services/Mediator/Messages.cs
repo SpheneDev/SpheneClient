@@ -113,5 +113,6 @@ public record AreaBoundSyncshellNotificationMessage(string Title, string Message
 public record AreaBoundSyncshellConfigurationUpdateMessage : MessageBase;
 public record AreaBoundSyncshellConsentRequestMessage(AreaBoundSyncshellDto Syncshell, bool RequiresRulesAcceptance) : SameThreadMessage;
 public record AreaBoundSyncshellSelectionRequestMessage(List<AreaBoundSyncshellDto> AvailableSyncshells) : SameThreadMessage;
+public record AreaBoundSyncshellLeftMessage(string SyncshellId) : MessageBase;
 #pragma warning restore S2094
 #pragma warning restore MA0048 // File name must match type name

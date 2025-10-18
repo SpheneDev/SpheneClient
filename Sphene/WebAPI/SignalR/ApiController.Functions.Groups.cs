@@ -187,6 +187,12 @@ public partial class ApiController
         return await _spheneHub!.InvokeAsync<bool>(nameof(GroupCheckAreaBoundConsent), syncshellGID).ConfigureAwait(false);
     }
 
+    public async Task<bool> GroupResetAreaBoundConsent(string syncshellGID)
+    {
+        CheckConnection();
+        return await _spheneHub!.InvokeAsync<bool>(nameof(GroupResetAreaBoundConsent), syncshellGID).ConfigureAwait(false);
+    }
+
     public async Task<SyncshellWelcomePageDto?> GroupGetWelcomePage(GroupDto group)
     {
         CheckConnection();

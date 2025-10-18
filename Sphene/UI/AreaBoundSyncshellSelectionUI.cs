@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging;
 using Sphene.API.Dto.Group;
 using Sphene.Services;
 using Sphene.Services.Mediator;
+using Sphene.WebAPI;
 using System.Numerics;
 
 namespace Sphene.UI;
@@ -13,6 +14,7 @@ namespace Sphene.UI;
 public class AreaBoundSyncshellSelectionUI : WindowMediatorSubscriberBase
 {
     private readonly AreaBoundSyncshellService _areaBoundService;
+    private readonly ApiController _apiController;
     private List<AreaBoundSyncshellDto>? _availableSyncshells;
     private int _selectedIndex = -1;
     private string _errorMessage = string.Empty;
@@ -21,10 +23,12 @@ public class AreaBoundSyncshellSelectionUI : WindowMediatorSubscriberBase
     public AreaBoundSyncshellSelectionUI(ILogger<AreaBoundSyncshellSelectionUI> logger, 
         SpheneMediator mediator, 
         PerformanceCollectorService performanceCollectorService,
-        AreaBoundSyncshellService areaBoundService) 
+        AreaBoundSyncshellService areaBoundService,
+        ApiController apiController) 
         : base(logger, mediator, "Select Area Syncshell###AreaBoundSyncshellSelection", performanceCollectorService)
     {
         _areaBoundService = areaBoundService;
+        _apiController = apiController;
         
         Size = new Vector2(600, 500);
         SizeCondition = ImGuiCond.FirstUseEver;
@@ -209,20 +213,32 @@ public class AreaBoundSyncshellSelectionUI : WindowMediatorSubscriberBase
         
         try
         {
-            // Check if user consent is required
-            bool requiresRulesAcceptance = selectedSyncshell.Settings.RequireRulesAcceptance && 
-                                         !string.IsNullOrEmpty(selectedSyncshell.Settings.JoinRules);
+            // Always check if user already has valid consent (for auto-rejoin)
+            var hasValidConsent = await _apiController.GroupCheckAreaBoundConsent(selectedSyncshell.Group.GID);
             
-            if (requiresRulesAcceptance)
+            if (hasValidConsent)
             {
-                // Show consent UI for the selected syncshell
-                var consentMessage = new AreaBoundSyncshellConsentRequestMessage(selectedSyncshell, requiresRulesAcceptance);
-                Mediator.Publish(consentMessage);
+                // Auto-join without showing consent UI
+                _logger.LogDebug("User has valid consent for syncshell {SyncshellId}, auto-joining", selectedSyncshell.Group.GID);
+                await _areaBoundService.JoinAreaBoundSyncshell(selectedSyncshell.Group.GID, true, selectedSyncshell.Settings.RulesVersion);
             }
             else
             {
-                // Join directly without consent
-                await _areaBoundService.JoinAreaBoundSyncshell(selectedSyncshell.Group.GID, false, 0);
+                // Check if user consent is required for new users
+                bool requiresRulesAcceptance = selectedSyncshell.Settings.RequireRulesAcceptance && 
+                                             !string.IsNullOrEmpty(selectedSyncshell.Settings.JoinRules);
+                
+                if (requiresRulesAcceptance)
+                {
+                    // Show consent UI for the selected syncshell
+                    var consentMessage = new AreaBoundSyncshellConsentRequestMessage(selectedSyncshell, requiresRulesAcceptance);
+                    Mediator.Publish(consentMessage);
+                }
+                else
+                {
+                    // Join directly without consent
+                    await _areaBoundService.JoinAreaBoundSyncshell(selectedSyncshell.Group.GID, false, 0);
+                }
             }
             
             _availableSyncshells = null;
@@ -244,20 +260,32 @@ public class AreaBoundSyncshellSelectionUI : WindowMediatorSubscriberBase
         {
             foreach (var syncshell in _availableSyncshells)
             {
-                // Check if user consent is required
-                bool requiresRulesAcceptance = syncshell.Settings.RequireRulesAcceptance && 
-                                             !string.IsNullOrEmpty(syncshell.Settings.JoinRules);
+                // Always check if user already has valid consent (for auto-rejoin)
+                var hasValidConsent = await _apiController.GroupCheckAreaBoundConsent(syncshell.Group.GID);
                 
-                if (requiresRulesAcceptance)
+                if (hasValidConsent)
                 {
-                    // Show consent UI for each syncshell that requires it
-                    var consentMessage = new AreaBoundSyncshellConsentRequestMessage(syncshell, requiresRulesAcceptance);
-                    Mediator.Publish(consentMessage);
+                    // Auto-join without showing consent UI
+                    _logger.LogDebug("User has valid consent for syncshell {SyncshellId}, auto-joining", syncshell.Group.GID);
+                    await _areaBoundService.JoinAreaBoundSyncshell(syncshell.Group.GID, true, syncshell.Settings.RulesVersion);
                 }
                 else
                 {
-                    // Join directly without consent
-                    await _areaBoundService.JoinAreaBoundSyncshell(syncshell.Group.GID, false, 0);
+                    // Check if user consent is required for new users
+                    bool requiresRulesAcceptance = syncshell.Settings.RequireRulesAcceptance && 
+                                                 !string.IsNullOrEmpty(syncshell.Settings.JoinRules);
+                    
+                    if (requiresRulesAcceptance)
+                    {
+                        // Show consent UI for each syncshell that requires it
+                        var consentMessage = new AreaBoundSyncshellConsentRequestMessage(syncshell, requiresRulesAcceptance);
+                        Mediator.Publish(consentMessage);
+                    }
+                    else
+                    {
+                        // Join directly without consent
+                        await _areaBoundService.JoinAreaBoundSyncshell(syncshell.Group.GID, false, 0);
+                    }
                 }
             }
             

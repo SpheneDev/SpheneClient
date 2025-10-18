@@ -178,16 +178,58 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
             return; // No syncshells to join
         }
 
-        // Check if multiple syncshells are available
-        if (syncshellsToJoin.Count > 1)
+        // First, automatically join syncshells where user already has consent
+        var syncshellsWithConsent = new List<AreaBoundSyncshellDto>();
+        var syncshellsWithoutConsent = new List<AreaBoundSyncshellDto>();
+        
+        foreach (var syncshell in syncshellsToJoin)
         {
-            // Show selection UI for multiple syncshells
-            _logger.LogDebug("Multiple area syncshells available ({count}), showing selection UI", syncshellsToJoin.Count);
-            var selectionMessage = new AreaBoundSyncshellSelectionRequestMessage(syncshellsToJoin);
-            _mediator.Publish(selectionMessage);
+            try
+            {
+                var hasValidConsent = await _apiController.GroupCheckAreaBoundConsent(syncshell.GID);
+                if (hasValidConsent)
+                {
+                    syncshellsWithConsent.Add(syncshell);
+                }
+                else
+                {
+                    syncshellsWithoutConsent.Add(syncshell);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error checking consent for syncshell {SyncshellId}, treating as no consent", syncshell.GID);
+                syncshellsWithoutConsent.Add(syncshell);
+            }
+        }
+        
+        // Auto-join syncshells with existing consent
+        foreach (var syncshell in syncshellsWithConsent)
+        {
+            try
+            {
+                _logger.LogDebug("User has valid consent for syncshell {SyncshellId}, auto-joining", syncshell.GID);
+                await JoinAreaBoundSyncshell(syncshell.GID, true, syncshell.Settings.RulesVersion);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error auto-joining syncshell {SyncshellId}", syncshell.GID);
+            }
+        }
+        
+        // Handle remaining syncshells without consent
+        if (syncshellsWithoutConsent.Count == 0)
+        {
+            return; // All syncshells were auto-joined
+        }
+
+        // Check if automatic consent UI is enabled
+        if (!_configService.Current.AutoShowAreaBoundSyncshellConsent)
+        {
+            _logger.LogDebug("Auto-show area syncshell consent is disabled, only notifying about available syncshells");
             
-            // Notify about available area-bound syncshells if not already notified
-            foreach (var syncshell in syncshellsToJoin)
+            // Only notify about available syncshells, don't show UI
+            foreach (var syncshell in syncshellsWithoutConsent)
             {
                 if (!_notifiedSyncshells.Contains(syncshell.GID))
                 {
@@ -198,35 +240,34 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
             return;
         }
 
-        // Single syncshell - handle as before
-        var singleSyncshell = syncshellsToJoin[0];
+        // Check if multiple syncshells without consent are available
+        if (syncshellsWithoutConsent.Count > 1)
+        {
+            // Show selection UI for multiple syncshells (only those without consent)
+            _logger.LogDebug("Multiple area syncshells without consent available ({count}), showing selection UI", syncshellsWithoutConsent.Count);
+            var selectionMessage = new AreaBoundSyncshellSelectionRequestMessage(syncshellsWithoutConsent);
+            _mediator.Publish(selectionMessage);
+            
+            // Notify about available area-bound syncshells if not already notified
+            foreach (var syncshell in syncshellsWithoutConsent)
+            {
+                if (!_notifiedSyncshells.Contains(syncshell.GID))
+                {
+                    _notifiedSyncshells.Add(syncshell.GID);
+                    SendAreaBoundNotification(syncshell);
+                }
+            }
+            return;
+        }
+
+        // Single syncshell without consent - handle as before
+        var singleSyncshell = syncshellsWithoutConsent[0];
         
-        // Check if user consent is required
+        // Check if user consent is required for new users
         bool requiresRulesAcceptance = singleSyncshell.Settings.RequireRulesAcceptance && 
                                      !string.IsNullOrEmpty(singleSyncshell.Settings.JoinRules);
         
-        if (requiresRulesAcceptance)
-        {
-            try
-            {
-                // Check if user already has valid consent
-                var hasValidConsent = await _apiController.GroupCheckAreaBoundConsent(singleSyncshell.GID);
-                
-                if (hasValidConsent)
-                {
-                    // Auto-join without showing consent UI
-                    _logger.LogDebug("User has valid consent for syncshell {SyncshellId}, auto-joining", singleSyncshell.GID);
-                    await JoinAreaBoundSyncshell(singleSyncshell.GID, true, singleSyncshell.Settings.RulesVersion);
-                    return;
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error checking consent for syncshell {SyncshellId}", singleSyncshell.GID);
-            }
-        }
-        
-        // Send consent request for new consent or if no rules required
+        // Send consent request for new consent
         var consentMessage = new AreaBoundSyncshellConsentRequestMessage(singleSyncshell, requiresRulesAcceptance);
         _mediator.Publish(consentMessage);
         
@@ -269,13 +310,25 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
         }
     }
 
+    public async Task LeaveAreaSyncshell(string syncshellId)
+    {
+        await LeaveSyncshell(syncshellId);
+    }
+
     private async Task LeaveSyncshell(string syncshellId)
     {
         try
         {
-            _logger.LogDebug("Leaving area-bound syncshell {SyncshellId}", syncshellId);
+            _logger.LogDebug("Leaving area-bound syncshell {SyncshellId}. Currently joined before removal: [{Joined}]", 
+                syncshellId, string.Join(", ", _currentlyJoinedAreaSyncshells));
             await _apiController.GroupLeave(new GroupDto(new GroupData(syncshellId)));
-            _currentlyJoinedAreaSyncshells.Remove(syncshellId);
+            
+            bool removed = _currentlyJoinedAreaSyncshells.Remove(syncshellId);
+            _logger.LogDebug("Removed {SyncshellId} from joined list: {Removed}. Currently joined after removal: [{Joined}]", 
+                syncshellId, removed, string.Join(", ", _currentlyJoinedAreaSyncshells));
+            
+            // Publish leave event to notify UI components
+            _mediator.Publish(new AreaBoundSyncshellLeftMessage(syncshellId));
         }
         catch (Exception ex)
         {
@@ -611,6 +664,20 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
         return _areaBoundSyncshells.ContainsKey(syncshellId);
     }
 
+    public async Task<bool> ResetAreaBoundConsent(string syncshellId)
+    {
+        try
+        {
+            _logger.LogDebug("Resetting area-bound consent for syncshell: {SyncshellId}", syncshellId);
+            return await _apiController.GroupResetAreaBoundConsent(syncshellId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error resetting area-bound consent for syncshell {SyncshellId}: {Message}", syncshellId, ex.Message);
+            return false;
+        }
+    }
+
     protected override void Dispose(bool disposing)
     {
         if (disposing)
@@ -618,6 +685,67 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
             _locationCheckTimer?.Dispose();
         }
         base.Dispose(disposing);
+    }
+
+    public bool HasAvailableAreaSyncshells()
+    {
+        if (_lastLocation == null)
+        {
+            _logger.LogDebug("HasAvailableAreaSyncshells: No location available");
+            return false;
+        }
+
+        // Check if there are any area syncshells available in the current location
+        // that are not already joined
+        var availableSyncshells = _areaBoundSyncshells.Values
+            .Where(syncshell => !_currentlyJoinedAreaSyncshells.Contains(syncshell.GID) && 
+                               IsLocationInBounds(syncshell, _lastLocation.Value))
+            .ToList();
+            
+        _logger.LogDebug("HasAvailableAreaSyncshells: Found {Count} available syncshells. Currently joined: [{Joined}], All syncshells: [{All}]", 
+            availableSyncshells.Count, 
+            string.Join(", ", _currentlyJoinedAreaSyncshells),
+            string.Join(", ", _areaBoundSyncshells.Keys));
+            
+        return availableSyncshells.Any();
+    }
+
+    public void TriggerAreaSyncshellSelection()
+    {
+        if (_lastLocation == null)
+        {
+            _logger.LogDebug("Cannot trigger area syncshell selection - no location available");
+            return;
+        }
+
+        // Get all available syncshells in current location that are not already joined
+        var availableSyncshells = _areaBoundSyncshells.Values
+            .Where(syncshell => !_currentlyJoinedAreaSyncshells.Contains(syncshell.GID) && 
+                               IsLocationInBounds(syncshell, _lastLocation.Value))
+            .ToList();
+
+        if (availableSyncshells.Count == 0)
+        {
+            _logger.LogDebug("No available area syncshells to show selection for");
+            return;
+        }
+
+        if (availableSyncshells.Count == 1)
+        {
+            // Single syncshell - show consent UI
+            var syncshell = availableSyncshells[0];
+            bool requiresRulesAcceptance = syncshell.Settings.RequireRulesAcceptance && 
+                                         !string.IsNullOrEmpty(syncshell.Settings.JoinRules);
+            
+            var consentMessage = new AreaBoundSyncshellConsentRequestMessage(syncshell, requiresRulesAcceptance);
+            _mediator.Publish(consentMessage);
+        }
+        else
+        {
+            // Multiple syncshells - show selection UI
+            var selectionMessage = new AreaBoundSyncshellSelectionRequestMessage(availableSyncshells);
+            _mediator.Publish(selectionMessage);
+        }
     }
 
     private void SendAreaBoundNotification(AreaBoundSyncshellDto syncshell)

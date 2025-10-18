@@ -51,6 +51,7 @@ public class SpheneConfig : ISpheneConfiguration
     public bool ShowAreaBoundSyncshellNotifications { get; set; } = true;
     public NotificationLocation AreaBoundSyncshellNotification { get; set; } = NotificationLocation.Toast;
     public bool ShowAreaBoundSyncshellWelcomeMessages { get; set; } = true;
+    public bool AutoShowAreaBoundSyncshellConsent { get; set; } = true;
     
     // City syncshell settings
     public bool EnableCitySyncshellJoinRequests { get; set; } = true;
