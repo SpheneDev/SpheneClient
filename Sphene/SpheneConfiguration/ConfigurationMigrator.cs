@@ -39,6 +39,14 @@ public class ConfigurationMigrator(ILogger<ConfigurationMigrator> logger, Transi
             serverConfigService.Current.Version = 3;
             serverConfigService.Save();
         }
+
+        if (serverConfigService.Current.Version == 3)
+        {
+            _logger.LogInformation("Migrating Server Config V3 => V4");
+            CleanupDuplicateServers();
+            serverConfigService.Current.Version = 4;
+            serverConfigService.Save();
+        }
     }
 
     public Task StartAsync(CancellationToken cancellationToken)
@@ -50,5 +58,35 @@ public class ConfigurationMigrator(ILogger<ConfigurationMigrator> logger, Transi
     public Task StopAsync(CancellationToken cancellationToken)
     {
         return Task.CompletedTask;
+    }
+
+    private void CleanupDuplicateServers()
+    {
+        var servers = serverConfigService.Current.ServerStorage;
+        var duplicateGroups = servers
+            .GroupBy(s => s.ServerName)
+            .Where(g => g.Count() > 1)
+            .ToList();
+
+        foreach (var group in duplicateGroups)
+        {
+            var duplicates = group.OrderBy(s => s.ServerUri).ToList();
+            _logger.LogInformation($"Found {duplicates.Count} duplicate servers with name '{group.Key}'");
+
+            // Keep the first server (usually the original one) and remove the rest
+            for (int i = 1; i < duplicates.Count; i++)
+            {
+                var serverToRemove = duplicates[i];
+                _logger.LogInformation($"Removing duplicate server: {serverToRemove.ServerName} ({serverToRemove.ServerUri})");
+                servers.Remove(serverToRemove);
+            }
+        }
+
+        // Ensure CurrentServer index is still valid after cleanup
+        if (serverConfigService.Current.CurrentServer >= servers.Count)
+        {
+            _logger.LogInformation($"Adjusting CurrentServer index from {serverConfigService.Current.CurrentServer} to 0 after cleanup");
+            serverConfigService.Current.CurrentServer = 0;
+        }
     }
 }

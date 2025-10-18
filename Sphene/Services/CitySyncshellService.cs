@@ -131,8 +131,8 @@ public class CitySyncshellService : DisposableMediatorSubscriberBase, IHostedSer
                 return; // Don't proceed with join logic until explanation is handled
             }
             
-            // After explanation has been seen, check if user has city syncshell requests enabled
-            if (!_configService.Current.EnableCitySyncshellJoinRequests)
+            // After explanation has been seen, check if user has area syncshell consent popups enabled
+            if (!_configService.Current.AutoShowAreaBoundSyncshellConsent)
             {
                 return;
             }

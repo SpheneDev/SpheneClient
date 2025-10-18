@@ -1963,16 +1963,6 @@ public class SettingsUi : WindowMediatorSubscriberBase
                     }
                 }
 
-                if (!isMain && selectedServer != _serverConfigurationManager.CurrentServer)
-                {
-                    ImGui.Separator();
-                    if (_uiShared.IconTextButton(FontAwesomeIcon.Trash, "Delete Service") && UiSharedService.CtrlPressed())
-                    {
-                        _serverConfigurationManager.DeleteServer(selectedServer);
-                    }
-                    _uiShared.DrawHelpText("Hold CTRL to delete this service");
-                }
-
                 ImGui.EndTabItem();
             }
 
@@ -2620,18 +2610,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             currentProfile.AutoShowAreaBoundSyncshellConsent = autoShowConsent;
             _configService.Save();
         }
-        _uiShared.DrawHelpText("When enabled, consent dialogs for area-bound syncshells will appear automatically when entering areas. When disabled, you can manually trigger consent using the button in the Compact UI.");
-        
-        ImGui.Separator();
-        _uiShared.BigText("City Syncshell Settings");
-        
-        var enableCitySyncshellRequests = currentProfile.EnableCitySyncshellJoinRequests;
-        if (ImGui.Checkbox("Enable city syncshell join requests", ref enableCitySyncshellRequests))
-        {
-            currentProfile.EnableCitySyncshellJoinRequests = enableCitySyncshellRequests;
-            _configService.Save();
-        }
-        _uiShared.DrawHelpText("Allow receiving join requests for city syncshells when entering major cities. When disabled, you will not be prompted to join city syncshells.");
+        _uiShared.DrawHelpText("When enabled, consent dialogs for area-bound syncshells will appear automatically when entering areas. When disabled, you can manually trigger consent using the button in the Compact UI. This setting also controls city syncshell join requests.");
     }
 
     private void DrawAcknowledgmentSettings()

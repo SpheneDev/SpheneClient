@@ -288,12 +288,6 @@ public class ServerConfigurationManager
         _serverTagConfig.Save();
     }
 
-    internal void AddServer(ServerStorage serverStorage)
-    {
-        _configService.Current.ServerStorage.Add(serverStorage);
-        Save();
-    }
-
     internal void AddTag(string tag)
     {
         CurrentServerTagStorage().ServerAvailablePairTags.Add(tag);
@@ -329,18 +323,6 @@ public class ServerConfigurationManager
         }
 
         return false;
-    }
-
-    internal void DeleteServer(ServerStorage selectedServer)
-    {
-        if (Array.IndexOf(_configService.Current.ServerStorage.ToArray(), selectedServer) <
-            _configService.Current.CurrentServer)
-        {
-            _configService.Current.CurrentServer--;
-        }
-
-        _configService.Current.ServerStorage.Remove(selectedServer);
-        Save();
     }
 
     internal string? GetNoteForGid(string gID)
@@ -497,13 +479,15 @@ public class ServerConfigurationManager
         var servers = _configService.Current.ServerStorage;
         bool hasMainServer = false;
         int mainServerIndex = -1;
+        List<int> duplicateMainServerIndices = new();
 
 #if DEBUG
         bool hasDebugServer = false;
         int debugServerIndex = -1;
+        List<int> duplicateDebugServerIndices = new();
 #endif
 
-        // Find existing servers
+        // Find existing servers and collect duplicates
         for (int i = 0; i < servers.Count; i++)
         {
             var server = servers[i];
@@ -515,12 +499,19 @@ public class ServerConfigurationManager
                 string.Equals(server.ServerUri, debugServerUri, StringComparison.OrdinalIgnoreCase) ||
                 server.ServerUri.Contains("test.sphene.online"))
             {
-                hasDebugServer = true;
-                debugServerIndex = i;
-                // Update debug server configuration
-                server.ServerName = debugServerName;
-                server.ServerUri = debugServerUri;
-                server.UseOAuth2 = false;
+                if (!hasDebugServer)
+                {
+                    hasDebugServer = true;
+                    debugServerIndex = i;
+                    // Update debug server configuration
+                    server.ServerName = debugServerName;
+                    server.ServerUri = debugServerUri;
+                    server.UseOAuth2 = false;
+                }
+                else
+                {
+                    duplicateDebugServerIndices.Add(i);
+                }
             }
 #else
             // In release builds, remove any test servers
@@ -534,19 +525,74 @@ public class ServerConfigurationManager
             }
 #endif
             
-            // Check for main server
+            // Check for main server - improved duplicate detection
+            bool isMainServer = false;
+            
+            // Primary identification: exact name or URI match
             if (string.Equals(server.ServerName, mainServerName, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(server.ServerUri, mainServerUri, StringComparison.OrdinalIgnoreCase) ||
-                (server.ServerUri.Contains("sphene.online") && !server.ServerUri.Contains("test")))
+                string.Equals(server.ServerUri, mainServerUri, StringComparison.OrdinalIgnoreCase))
             {
-                hasMainServer = true;
-                mainServerIndex = i;
-                // Update main server configuration
-                server.ServerName = mainServerName;
-                server.ServerUri = mainServerUri;
-                server.UseOAuth2 = false;
+                isMainServer = true;
+            }
+            // Secondary identification: URI contains sphene.online (but not test) and name is similar
+            else if (server.ServerUri.Contains("sphene.online") && !server.ServerUri.Contains("test"))
+            {
+                // Check if the server name is similar to avoid creating duplicates
+                if (server.ServerName.Contains("Sphene") && server.ServerName.Contains("Server") && 
+                    !server.ServerName.Contains("Test") && !server.ServerName.Contains("Debug"))
+                {
+                    isMainServer = true;
+                }
+            }
+            
+            if (isMainServer)
+            {
+                if (!hasMainServer)
+                {
+                    hasMainServer = true;
+                    mainServerIndex = i;
+                    // Update main server configuration to ensure consistency
+                    server.ServerName = mainServerName;
+                    server.ServerUri = mainServerUri;
+                    server.UseOAuth2 = false;
+                }
+                else
+                {
+                    duplicateMainServerIndices.Add(i);
+                }
             }
         }
+
+        // Consolidate SecretKeys and Authentications from duplicate servers
+        ConsolidateServerData(servers, mainServerIndex, duplicateMainServerIndices);
+#if DEBUG
+        ConsolidateServerData(servers, debugServerIndex, duplicateDebugServerIndices);
+#endif
+
+        // Remove duplicate servers (in reverse order to maintain indices)
+        foreach (int duplicateIndex in duplicateMainServerIndices.OrderByDescending(x => x))
+        {
+            servers.RemoveAt(duplicateIndex);
+            // Adjust indices after removal
+            if (mainServerIndex > duplicateIndex) mainServerIndex--;
+#if DEBUG
+            if (debugServerIndex > duplicateIndex) debugServerIndex--;
+            for (int i = 0; i < duplicateDebugServerIndices.Count; i++)
+            {
+                if (duplicateDebugServerIndices[i] > duplicateIndex) duplicateDebugServerIndices[i]--;
+            }
+#endif
+        }
+
+#if DEBUG
+        foreach (int duplicateIndex in duplicateDebugServerIndices.OrderByDescending(x => x))
+        {
+            servers.RemoveAt(duplicateIndex);
+            // Adjust indices after removal
+            if (mainServerIndex > duplicateIndex) mainServerIndex--;
+            if (debugServerIndex > duplicateIndex) debugServerIndex--;
+        }
+#endif
 
         // Ensure main server exists at index 0 (default selection)
         if (!hasMainServer)
@@ -695,5 +741,71 @@ public class ServerConfigurationManager
     {
         CurrentServer.HttpTransportType = httpTransportType;
         Save();
+    }
+
+    private void ConsolidateServerData(List<ServerStorage> servers, int targetServerIndex, List<int> duplicateIndices)
+    {
+        if (targetServerIndex < 0 || targetServerIndex >= servers.Count || duplicateIndices.Count == 0)
+            return;
+
+        var targetServer = servers[targetServerIndex];
+
+        foreach (int duplicateIndex in duplicateIndices)
+        {
+            if (duplicateIndex < 0 || duplicateIndex >= servers.Count)
+                continue;
+
+            var duplicateServer = servers[duplicateIndex];
+
+            // Merge SecretKeys - avoid duplicates by checking existing keys
+            foreach (var secretKeyPair in duplicateServer.SecretKeys)
+            {
+                if (!targetServer.SecretKeys.ContainsKey(secretKeyPair.Key))
+                {
+                    targetServer.SecretKeys[secretKeyPair.Key] = secretKeyPair.Value;
+                }
+                else
+                {
+                    // If key exists, find next available key index
+                    int nextKey = targetServer.SecretKeys.Keys.Count > 0 ? targetServer.SecretKeys.Keys.Max() + 1 : 0;
+                    while (targetServer.SecretKeys.ContainsKey(nextKey))
+                    {
+                        nextKey++;
+                    }
+                    targetServer.SecretKeys[nextKey] = secretKeyPair.Value;
+                }
+            }
+
+            // Merge Authentications - avoid duplicates by checking character name and world ID
+            foreach (var auth in duplicateServer.Authentications)
+            {
+                bool isDuplicate = targetServer.Authentications.Any(existingAuth =>
+                    string.Equals(existingAuth.CharacterName, auth.CharacterName, StringComparison.Ordinal) &&
+                    existingAuth.WorldId == auth.WorldId);
+
+                if (!isDuplicate)
+                {
+                    targetServer.Authentications.Add(auth);
+                }
+            }
+
+            // Merge other relevant properties if they are not set in target
+            if (string.IsNullOrEmpty(targetServer.OAuthToken) && !string.IsNullOrEmpty(duplicateServer.OAuthToken))
+            {
+                targetServer.OAuthToken = duplicateServer.OAuthToken;
+            }
+
+            // Preserve transport settings if target has default values
+            if (targetServer.HttpTransportType == HttpTransportType.WebSockets && 
+                duplicateServer.HttpTransportType != HttpTransportType.WebSockets)
+            {
+                targetServer.HttpTransportType = duplicateServer.HttpTransportType;
+            }
+
+            if (!targetServer.ForceWebSockets && duplicateServer.ForceWebSockets)
+            {
+                targetServer.ForceWebSockets = duplicateServer.ForceWebSockets;
+            }
+        }
     }
 }

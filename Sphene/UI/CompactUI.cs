@@ -336,7 +336,95 @@ public class CompactUi : WindowMediatorSubscriberBase
         
         // Server Status Section
         ImGui.PushStyleColor(ImGuiCol.Text, SpheneCustomTheme.CurrentTheme.CompactHeaderText);
-        ImGui.Text("Server & Character Status");
+        
+        // Calculate connection status text and button positions at the end of the line
+        var connectionStatus = _apiController.ServerState == ServerState.Connected ? "Connected" : "Disconnected";
+        var statusTextSize = ImGui.CalcTextSize(connectionStatus);
+        var availableWidth = ImGui.GetContentRegionAvail().X;
+        var buttonWidth = 22.0f;
+        
+        // Calculate positions from right to left: status indicator + text, disconnect button, reconnect button
+        var statusIndicatorWidth = 25.0f; // Approximate width for status indicator
+        var totalRightContentWidth = statusTextSize.X + statusIndicatorWidth + (buttonWidth * 2) + (ImGui.GetStyle().ItemSpacing.X * 2); // Two buttons with proper spacing
+        
+        ImGui.AlignTextToFramePadding();
+        ImGui.Text("Character Status");
+        
+        // Position disconnect button first (second from right) - move closer to right edge
+        ImGui.SameLine(availableWidth - (buttonWidth * 2) - (ImGui.GetStyle().ItemSpacing.X * 0.5f));
+        
+        // Disconnect/Connect button with custom styling
+        if (_apiController.IsConnected)
+        {
+            // Connected state - show disconnect button in orange/warning colors
+            ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.8f, 0.4f, 0.2f, 0.8f));
+            ImGui.PushStyleColor(ImGuiCol.ButtonHovered, new Vector4(0.9f, 0.5f, 0.3f, 0.9f));
+            ImGui.PushStyleColor(ImGuiCol.ButtonActive, new Vector4(1.0f, 0.6f, 0.4f, 1.0f));
+            ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 1.0f, 1.0f, 1.0f));
+            
+            if (_uiSharedService.IconButton(FontAwesomeIcon.Unlink, 22f))
+            {
+                if (_serverManager.CurrentServer != null)
+                {
+                    _serverManager.CurrentServer.FullPause = true;
+                    _serverManager.Save();
+                    _ = _apiController.CreateConnectionsAsync();
+                }
+            }
+            UiSharedService.AttachToolTip("Disconnect from Server");
+        }
+        else
+        {
+            // Disconnected state - show connect button in green colors
+            ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.2f, 0.6f, 0.2f, 0.8f));
+            ImGui.PushStyleColor(ImGuiCol.ButtonHovered, new Vector4(0.3f, 0.7f, 0.3f, 0.9f));
+            ImGui.PushStyleColor(ImGuiCol.ButtonActive, new Vector4(0.4f, 0.8f, 0.4f, 1.0f));
+            ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 1.0f, 1.0f, 1.0f));
+            
+            if (_uiSharedService.IconButton(FontAwesomeIcon.Link, 22f))
+            {
+                if (_serverManager.CurrentServer != null)
+                {
+                    _serverManager.CurrentServer.FullPause = false;
+                    _serverManager.Save();
+                    _ = _apiController.CreateConnectionsAsync();
+                }
+            }
+            UiSharedService.AttachToolTip("Connect to Server");
+        }
+        ImGui.PopStyleColor(4);
+        
+        // Position reconnect button (rightmost) - use SameLine() for natural spacing
+        ImGui.SameLine();
+        
+        var reconnectCurrentTime = DateTime.Now;
+        var reconnectTimeSinceLastClick = reconnectCurrentTime - _lastReconnectButtonClick;
+        var isReconnectButtonDisabled = reconnectTimeSinceLastClick.TotalSeconds < 5.0;
+        var reconnectColor = isReconnectButtonDisabled ? SpheneCustomTheme.CurrentTheme.TextSecondary : SpheneCustomTheme.CurrentTheme.TextPrimary;
+        
+        ImGui.PushStyleColor(ImGuiCol.Text, reconnectColor);
+        using (ImRaii.Disabled(isReconnectButtonDisabled))
+        {
+            if (_uiSharedService.IconButton(FontAwesomeIcon.Redo, 22f))
+            {
+                _lastReconnectButtonClick = reconnectCurrentTime;
+                _ = Task.Run(() => _apiController.CreateConnectionsAsync());
+            }
+        }
+        ImGui.PopStyleColor();
+        
+        var reconnectTooltipText = "Reconnect to the Sphene Network";
+        if (isReconnectButtonDisabled)
+        {
+            var reconnectRemainingSeconds = Math.Ceiling(5.0 - reconnectTimeSinceLastClick.TotalSeconds);
+            reconnectTooltipText += $"\nCooldown: {reconnectRemainingSeconds} seconds remaining";
+        }
+        UiSharedService.AttachToolTip(reconnectTooltipText);
+        
+        // Position connection status indicator and text (third from right)
+        ImGui.SameLine(availableWidth - totalRightContentWidth);
+        _uiSharedService.DrawThemedStatusIndicator(connectionStatus, _apiController.ServerState == ServerState.Connected);
+        
         ImGui.PopStyleColor();
         ImGui.Separator();
         DrawServerStatusContent();
@@ -490,129 +578,137 @@ public class CompactUi : WindowMediatorSubscriberBase
 
     private void DrawServerStatusContent()
     {
-        // Draw Sphene-themed status indicator
-        var connectionStatus = _apiController.ServerState == ServerState.Connected ? "Connected" : "Disconnected";
-        var statusColor = _apiController.ServerState == ServerState.Connected 
-            ? SpheneCustomTheme.Colors.AccentCyan
-                : SpheneCustomTheme.Colors.Error;
-        
-        // Draw Sphene-themed status indicator with proper alignment
-        _uiSharedService.DrawThemedStatusIndicator(connectionStatus, _apiController.ServerState == ServerState.Connected);
-        
-        // Always show reconnect button with proper alignment
-        ImGui.SameLine();
+        // Create a more intuitive layout with grouped functionality
         ImGui.AlignTextToFramePadding();
         
-        var reconnectCurrentTime = DateTime.Now;
-        var reconnectTimeSinceLastClick = reconnectCurrentTime - _lastReconnectButtonClick;
-        var isReconnectButtonDisabled = reconnectTimeSinceLastClick.TotalSeconds < 5.0;
-        
-        var reconnectColor = isReconnectButtonDisabled ? SpheneCustomTheme.CurrentTheme.TextSecondary : SpheneCustomTheme.CurrentTheme.TextPrimary;
-        ImGui.PushStyleColor(ImGuiCol.Text, reconnectColor);
-        
-        using (ImRaii.Disabled(isReconnectButtonDisabled))
+        // Left side: Mode Controls
+        ImGui.BeginGroup();
         {
-            if (_uiSharedService.IconButton(FontAwesomeIcon.Redo, 22f))
-            {
-                _lastReconnectButtonClick = reconnectCurrentTime;
-                _ = Task.Run(() => _apiController.CreateConnectionsAsync());
-            }
-        }
-        
-        ImGui.PopStyleColor();
-        
-        var reconnectTooltipText = "Reconnect to the Sphene Network";
-        if (isReconnectButtonDisabled)
-        {
-            var reconnectRemainingSeconds = Math.Ceiling(5.0 - reconnectTimeSinceLastClick.TotalSeconds);
-            reconnectTooltipText += $"\nCooldown: {reconnectRemainingSeconds} seconds remaining";
-        }
-        UiSharedService.AttachToolTip(reconnectTooltipText);
-        
-        // Incognito Mode button next to reconnect
-        ImGui.SameLine();
-        ImGui.AlignTextToFramePadding();
-        
-        var currentTime = DateTime.Now;
-        var timeSinceLastClick = currentTime - _lastIncognitoButtonClick;
-        var isButtonDisabled = timeSinceLastClick.TotalSeconds < 5.0;
-        
-        if (_isIncognitoModeActive)
-        {
-            // Resume mode - use play icon
-            var resumeColor = isButtonDisabled ? SpheneCustomTheme.CurrentTheme.TextSecondary : SpheneCustomTheme.Colors.Success;
-            ImGui.PushStyleColor(ImGuiCol.Text, resumeColor);
+            // Incognito Mode section with label
+            ImGui.Text("Mode:");
+            ImGui.SameLine();
             
-            using (ImRaii.Disabled(isButtonDisabled))
+            var currentTime = DateTime.Now;
+            var timeSinceLastClick = currentTime - _lastIncognitoButtonClick;
+            var isButtonDisabled = timeSinceLastClick.TotalSeconds < 5.0;
+            
+            if (_isIncognitoModeActive)
             {
-                if (_uiSharedService.IconButton(FontAwesomeIcon.Play, 22f))
+                // Resume mode - use play icon with default button styling
+                var resumeColor = isButtonDisabled ? SpheneCustomTheme.CurrentTheme.TextSecondary : SpheneCustomTheme.Colors.Success;
+                ImGui.PushStyleColor(ImGuiCol.Text, resumeColor);
+                
+                using (ImRaii.Disabled(isButtonDisabled))
                 {
-                    _lastIncognitoButtonClick = currentTime;
-                    _ = Task.Run(() => HandleIncognitoModeToggle());
+                    if (_uiSharedService.IconButton(FontAwesomeIcon.Play, 22f))
+                    {
+                        _lastIncognitoButtonClick = currentTime;
+                        _ = Task.Run(() => HandleIncognitoModeToggle());
+                    }
                 }
-            }
-            
-            ImGui.PopStyleColor();
-        }
-        else
-        {
-            // Incognito Mode - use red heart icon
-            var incognitoColor = isButtonDisabled ? SpheneCustomTheme.CurrentTheme.TextSecondary : SpheneCustomTheme.Colors.Error;
-            ImGui.PushStyleColor(ImGuiCol.Text, incognitoColor);
-            
-            using (ImRaii.Disabled(isButtonDisabled))
-            {
-                if (_uiSharedService.IconButton(FontAwesomeIcon.Heart, 22f))
+                
+                ImGui.PopStyleColor();
+                
+                if (ImGui.IsItemHovered())
                 {
-                    _lastIncognitoButtonClick = currentTime;
-                    _ = Task.Run(() => HandleIncognitoModeToggle());
+                    var tooltipText = "Resume Normal Mode\nUnpause all pairs and reconnect syncshells";
+                    if (isButtonDisabled)
+                    {
+                        var remainingSeconds = Math.Ceiling(5.0 - timeSinceLastClick.TotalSeconds);
+                        tooltipText += $"\nCooldown: {remainingSeconds} seconds remaining";
+                    }
+                    UiSharedService.AttachToolTip(tooltipText);
                 }
+                
+                ImGui.SameLine();
+                ImGui.TextColored(SpheneCustomTheme.Colors.Success, "Incognito");
+            }
+            else
+            {
+                // Normal mode - use heart icon with red color but default button background
+                var heartColor = isButtonDisabled ? SpheneCustomTheme.CurrentTheme.TextSecondary : SpheneCustomTheme.Colors.Error;
+                ImGui.PushStyleColor(ImGuiCol.Text, heartColor);
+                
+                using (ImRaii.Disabled(isButtonDisabled))
+                {
+                    if (_uiSharedService.IconButton(FontAwesomeIcon.Heart, 22f))
+                    {
+                        _lastIncognitoButtonClick = currentTime;
+                        _ = Task.Run(() => HandleIncognitoModeToggle());
+                    }
+                }
+                
+                ImGui.PopStyleColor();
+                
+                if (ImGui.IsItemHovered())
+                {
+                    var tooltipText = "Enter Incognito Mode\nPause all pairs and syncshells except party members";
+                    if (isButtonDisabled)
+                    {
+                        var remainingSeconds = Math.Ceiling(5.0 - timeSinceLastClick.TotalSeconds);
+                        tooltipText += $"\nCooldown: {remainingSeconds} seconds remaining";
+                    }
+                    UiSharedService.AttachToolTip(tooltipText);
+                }
+                
+                ImGui.SameLine();
+                ImGui.TextColored(SpheneCustomTheme.CurrentTheme.TextPrimary, "Normal");
             }
             
-            ImGui.PopStyleColor();
-        }
-        var tooltipText = _isIncognitoModeActive ? "Resume - Unpause all pairs and reconnect syncshells" : "Incognito Mode - Pause all pairs and syncshells except party members";
-        
-        if (isButtonDisabled)
-        {
-            var remainingSeconds = Math.Ceiling(5.0 - timeSinceLastClick.TotalSeconds);
-            tooltipText += $"\nCooldown: {remainingSeconds} seconds remaining";
-        }
-        
-        UiSharedService.AttachToolTip(tooltipText);
-        
-        // Area Syncshell Selection Button - placed next to incognito button
-        ImGui.SameLine();
-        ImGui.AlignTextToFramePadding();
-        
-        // Check if area syncshells are available in current location
-        bool hasAreaSyncshells = _areaBoundSyncshellService.HasAvailableAreaSyncshells();
-        
-        if (hasAreaSyncshells)
-        {
-            if (_uiSharedService.IconButton(FontAwesomeIcon.MapMarkerAlt, 22f))
+            // Area Syncshell Selection Button - only show if available
+            bool hasAreaSyncshells = _areaBoundSyncshellService.HasAvailableAreaSyncshells();
+            if (hasAreaSyncshells)
             {
-                // Trigger area syncshell selection UI
-                _areaBoundSyncshellService.TriggerAreaSyncshellSelection();
+                ImGui.SameLine();
+                ImGui.Dummy(new Vector2(10, 0));
+                ImGui.SameLine();
+                
+                if (_uiSharedService.IconButton(FontAwesomeIcon.MapMarkerAlt, 22f))
+                {
+                    _areaBoundSyncshellService.TriggerAreaSyncshellSelection();
+                }
+                UiSharedService.AttachToolTip("Open Area Syncshell Selection");
             }
-            UiSharedService.AttachToolTip("Open Area Syncshell Selection");
         }
-
-        ImGui.SameLine();
-        ImGui.Dummy(new Vector2(10, 0));
+        ImGui.EndGroup();
         
-        // One-click Texture Conversion Button
-        ImGui.SameLine();
-        if (_uiSharedService.IconButton(FontAwesomeIcon.FileArchive, 22f))
+        // Right side: Texture Management
+        var availableWidth = ImGui.GetContentRegionAvail().X;
+        var buttonWidth = 22f;
+        var spacing = ImGui.GetStyle().ItemSpacing.X;
+        
+        // Calculate actual width needed for texture section
+        var textureLabelWidth = ImGui.CalcTextSize("Textures:").X;
+        
+        // Calculate texture indicator width dynamically
+        var textureSizeBytes = GetCurrentTextureSize();
+        var textureSizeMB = textureSizeBytes / (1024.0 * 1024.0);
+        var textureIndicatorText = $"{textureSizeMB:F0}MB";
+        var iconWidth = 16f; // Approximate icon width
+        var textWidth = ImGui.CalcTextSize(textureIndicatorText).X;
+        var textureIndicatorWidth = iconWidth + textWidth + 2f; // 2f for spacing between icon and text
+        
+        var totalRightContentWidth = textureLabelWidth + buttonWidth + textureIndicatorWidth + (spacing * 2);
+        
+        // Position texture section flush to the right edge
+        ImGui.SameLine(availableWidth - totalRightContentWidth);
+        ImGui.BeginGroup();
         {
-            _showConversionPopup = true;
+            ImGui.Text("Textures:");
+            ImGui.SameLine();
+            
+            // Styled conversion button with archive icon - use default button styling
+             if (_uiSharedService.IconButton(FontAwesomeIcon.FileArchive, 22f))
+             {
+                 _showConversionPopup = true;
+             }
+             
+             UiSharedService.AttachToolTip("Texture Conversion\nOptimize and convert textures to BC7 format");
+            
+            ImGui.SameLine();
+            DrawCompactTextureIndicator();
         }
-        UiSharedService.AttachToolTip("One-click texture conversion\nConvert all non-BC7 textures to reduce size");
-        
-        // Compact Texture Size indicator
-        ImGui.SameLine();
-        ImGui.AlignTextToFramePadding();
-        DrawCompactTextureIndicator();
+        ImGui.EndGroup();
         
         if (_apiController.ServerState == ServerState.Connected)
         {

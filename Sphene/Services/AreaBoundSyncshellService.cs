@@ -114,10 +114,10 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
             return;
         }
         
-        // Check if city syncshell join requests are disabled - this affects area-bound syncshells too
-        if (!_configService.Current.EnableCitySyncshellJoinRequests)
+        // Check if area syncshell consent popups are disabled - this affects both area-bound and city syncshells
+        if (!_configService.Current.AutoShowAreaBoundSyncshellConsent)
         {
-            _logger.LogDebug("City syncshell join requests are disabled, skipping area-bound syncshell processing");
+            _logger.LogDebug("Area syncshell consent popups are disabled, skipping area-bound syncshell processing");
             return;
         }
         
