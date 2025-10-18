@@ -581,6 +581,23 @@ public class CompactUi : WindowMediatorSubscriberBase
         
         UiSharedService.AttachToolTip(tooltipText);
         
+        // Area Syncshell Selection Button - placed next to incognito button
+        ImGui.SameLine();
+        ImGui.AlignTextToFramePadding();
+        
+        // Check if area syncshells are available in current location
+        bool hasAreaSyncshells = _areaBoundSyncshellService.HasAvailableAreaSyncshells();
+        
+        if (hasAreaSyncshells)
+        {
+            if (_uiSharedService.IconButton(FontAwesomeIcon.MapMarkerAlt, 22f))
+            {
+                // Trigger area syncshell selection UI
+                _areaBoundSyncshellService.TriggerAreaSyncshellSelection();
+            }
+            UiSharedService.AttachToolTip("Open Area Syncshell Selection");
+        }
+
         ImGui.SameLine();
         ImGui.Dummy(new Vector2(10, 0));
         
@@ -1843,34 +1860,6 @@ public class CompactUi : WindowMediatorSubscriberBase
         // Check if area syncshells are available in current location
         bool hasAreaSyncshells = _areaBoundSyncshellService.HasAvailableAreaSyncshells();
         
-        // Area syncshell button (only show if area syncshells are available)
-        if (hasAreaSyncshells)
-        {
-            ImGui.SetCursorScreenPos(new Vector2(contentStart.X + areaSyncshellButtonX, buttonY));
-            
-            // Area syncshell button with custom styling for better visibility
-            ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.2f, 0.4f, 0.6f, 0.8f)); // Blue background
-            ImGui.PushStyleColor(ImGuiCol.ButtonHovered, new Vector4(0.3f, 0.5f, 0.7f, 0.9f)); // Lighter blue on hover
-            ImGui.PushStyleColor(ImGuiCol.ButtonActive, new Vector4(0.4f, 0.6f, 0.8f, 1.0f)); // Even lighter blue when pressed
-            ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 1.0f, 1.0f, 1.0f)); // White text
-            
-            if (_uiSharedService.IconButton(FontAwesomeIcon.MapMarkerAlt))
-            {
-                // Trigger area syncshell selection UI
-                _areaBoundSyncshellService.TriggerAreaSyncshellSelection();
-            }
-            if (ImGui.IsItemHovered())
-            {
-                using (SpheneCustomTheme.ApplyTooltipTheme())
-                {
-                    ImGui.BeginTooltip();
-                    ImGui.Text("Open Area Syncshell Selection");
-                    ImGui.EndTooltip();
-                }
-            }
-            
-            ImGui.PopStyleColor(4); // Pop all 4 style colors
-        }
         
         // Position settings button centered vertically in header
         ImGui.SetCursorScreenPos(new Vector2(contentStart.X + settingsButtonX, buttonY));
