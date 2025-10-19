@@ -246,7 +246,8 @@ public sealed class Plugin : IDalamudPlugin
                 var mediator = s.GetRequiredService<SpheneMediator>();
                 var performanceService = s.GetRequiredService<PerformanceCollectorService>();
                 var configService = s.GetRequiredService<SpheneConfigService>();
-                var instance = new CitySyncshellExplanationUI(logger, mediator, performanceService, configService);
+                var areaBoundSyncshellService = s.GetRequiredService<AreaBoundSyncshellService>();
+                var instance = new CitySyncshellExplanationUI(logger, mediator, performanceService, configService, areaBoundSyncshellService);
                 logger.LogDebug("CitySyncshellExplanationUI factory method completed - instance created");
                 return instance;
             });

@@ -106,8 +106,14 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
 
     private async Task HandleLocationChange(LocationInfo? oldLocation, LocationInfo newLocation)
     {
+        // Only process area-bound syncshells when connected to server
+        if (!_apiController.IsConnected)
+        {
+            _logger.LogDebug("Not connected to server, skipping area-bound syncshell processing");
+            return;
+        }
+        
         // If user hasn't seen the city syncshell explanation yet, don't show any area-bound syncshell UI
-        // The explanation should be shown first by CitySyncshellService
         if (!_configService.Current.HasSeenCitySyncshellExplanation)
         {
             _logger.LogDebug("User hasn't seen city syncshell explanation yet, skipping area-bound syncshell processing");
@@ -712,6 +718,21 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
 
     public void TriggerAreaSyncshellSelection()
     {
+        _logger.LogDebug("TriggerAreaSyncshellSelection called");
+        
+        // Check all the same conditions as HandleLocationChange
+        if (!_apiController.IsConnected)
+        {
+            _logger.LogDebug("Not connected to server, cannot trigger area syncshell selection");
+            return;
+        }
+               
+        if (!_configService.Current.AutoShowAreaBoundSyncshellConsent)
+        {
+            _logger.LogDebug("Area syncshell consent popups are disabled, cannot trigger area syncshell selection");
+            return;
+        }
+        
         if (_lastLocation == null)
         {
             _logger.LogDebug("Cannot trigger area syncshell selection - no location available");
@@ -732,11 +753,12 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
 
         if (availableSyncshells.Count == 1)
         {
-            // Single syncshell - show consent UI
             var syncshell = availableSyncshells[0];
+
             bool requiresRulesAcceptance = syncshell.Settings.RequireRulesAcceptance && 
                                          !string.IsNullOrEmpty(syncshell.Settings.JoinRules);
             
+            // Show consent UI
             var consentMessage = new AreaBoundSyncshellConsentRequestMessage(syncshell, requiresRulesAcceptance);
             _mediator.Publish(consentMessage);
         }

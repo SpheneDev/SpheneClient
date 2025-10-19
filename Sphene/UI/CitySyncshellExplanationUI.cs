@@ -13,16 +13,19 @@ namespace Sphene.UI;
 public class CitySyncshellExplanationUI : WindowMediatorSubscriberBase
 {
     private readonly SpheneConfigService _configService;
+    private readonly AreaBoundSyncshellService _areaBoundSyncshellService;
     private CitySyncshellExplanationRequestMessage? _currentRequest;
     private bool _enableCitySyncshells = true;
 
     public CitySyncshellExplanationUI(ILogger<CitySyncshellExplanationUI> logger, 
         SpheneMediator mediator, 
         PerformanceCollectorService performanceCollectorService,
-        SpheneConfigService configService) 
+        SpheneConfigService configService,
+        AreaBoundSyncshellService areaBoundSyncshellService) 
         : base(logger, mediator, "City Syncshell Service###CitySyncshellExplanation", performanceCollectorService)
     {
         _configService = configService;
+        _areaBoundSyncshellService = areaBoundSyncshellService;
         
         Size = new Vector2(600, 450);
         SizeCondition = ImGuiCond.FirstUseEver;
@@ -156,14 +159,10 @@ public class CitySyncshellExplanationUI : WindowMediatorSubscriberBase
         _configService.Current.HasSeenCitySyncshellExplanation = true;
         _configService.Save();
         
-        // Send response to join
-        if (_currentRequest != null)
-        {
-            Mediator.Publish(new CitySyncshellExplanationResponseMessage(_currentRequest.CityName, true));
-        }
-        
+        // Close the explanation window
         _currentRequest = null;
         IsOpen = false;
+        _areaBoundSyncshellService.TriggerAreaSyncshellSelection();
     }
 
     private void HandleClose()

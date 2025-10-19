@@ -26,6 +26,7 @@ public class CitySyncshellService : DisposableMediatorSubscriberBase, IHostedSer
     private readonly SpheneConfigService _configService;
     private readonly ApiController _apiController;
     private readonly IServiceProvider _serviceProvider;
+    private readonly AreaBoundSyncshellService _areaBoundSyncshellService;
     
     private LocationInfo? _lastLocation;
     private readonly Timer _locationCheckTimer;
@@ -45,15 +46,17 @@ public class CitySyncshellService : DisposableMediatorSubscriberBase, IHostedSer
         IFramework framework,
         SpheneConfigService configService,
         ApiController apiController,
-        IServiceProvider serviceProvider) : base(logger, mediator)
+        IServiceProvider serviceProvider,
+        AreaBoundSyncshellService areaBoundSyncshellService) : base(logger, mediator)
     {
         _logger = logger;
-        _dalamudUtilService = dalamudUtilService;
         _mediator = mediator;
+        _dalamudUtilService = dalamudUtilService;
         _framework = framework;
         _configService = configService;
         _apiController = apiController;
         _serviceProvider = serviceProvider;
+        _areaBoundSyncshellService = areaBoundSyncshellService;
         
         _locationCheckTimer = new Timer(CheckLocationChange, null, Timeout.Infinite, Timeout.Infinite);
         
@@ -111,6 +114,13 @@ public class CitySyncshellService : DisposableMediatorSubscriberBase, IHostedSer
         // Check if we entered a major city
         if (_mainCities.TryGetValue(newLocation.TerritoryId, out var cityName))
         {
+            // Only show city syncshell explanation and join requests when connected to server
+            if (!_apiController.IsConnected)
+            {
+                _logger.LogDebug("Not connected to server, skipping city syncshell processing for {cityName}", cityName);
+                return;
+            }
+            
             // Always show explanation on first city entry, regardless of settings
             if (!_configService.Current.HasSeenCitySyncshellExplanation)
             {
@@ -144,9 +154,14 @@ public class CitySyncshellService : DisposableMediatorSubscriberBase, IHostedSer
 
     private void OnExplanationResponse(CitySyncshellExplanationResponseMessage message)
     {
+        _logger.LogDebug("OnExplanationResponse called for city: {cityName}, ShouldJoin: {shouldJoin}", message.CityName, message.ShouldJoin);
+        
         if (message.ShouldJoin)
         {
-            _ = Task.Run(async () => await HandleCitySyncshellJoin(message.CityName).ConfigureAwait(false));
+            _logger.LogDebug("Calling TriggerAreaSyncshellSelection from CitySyncshellService");
+            // Trigger area syncshell selection instead of directly joining a specific city syncshell
+            _areaBoundSyncshellService.TriggerAreaSyncshellSelection();
+            _logger.LogDebug("TriggerAreaSyncshellSelection call completed");
         }
     }
 
@@ -188,16 +203,22 @@ public class CitySyncshellService : DisposableMediatorSubscriberBase, IHostedSer
                     {
                         _logger.LogError(ex, "Error checking consent for city syncshell {SyncshellId}", citySyncshell.GID);
                     }
+                    
+                    // Show consent UI for rules acceptance
+                    var consentMessage = new AreaBoundSyncshellConsentRequestMessage(citySyncshell, requiresRulesAcceptance);
+                    await _framework.RunOnFrameworkThread(() =>
+                    {
+                        _mediator.Publish(consentMessage);
+                    }).ConfigureAwait(false);
+                    
+                    _logger.LogInformation("Sent consent request for city syncshell {cityName}", cityName);
                 }
-                
-                // Send consent request to show the normal area-bound syncshell UI
-                var consentMessage = new AreaBoundSyncshellConsentRequestMessage(citySyncshell, requiresRulesAcceptance);
-                await _framework.RunOnFrameworkThread(() =>
+                else
                 {
-                    _mediator.Publish(consentMessage);
-                }).ConfigureAwait(false);
-                
-                _logger.LogInformation("Sent consent request for city syncshell {cityName}", cityName);
+                    // No rules acceptance required - join directly
+                    _logger.LogDebug("No rules acceptance required for city syncshell {cityName}, joining directly", cityName);
+                    await _apiController.AreaBoundJoinRequest(citySyncshell.GID);
+                }
             }
             else
             {

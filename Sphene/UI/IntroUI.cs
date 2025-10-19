@@ -306,6 +306,24 @@ public partial class IntroUi : WindowMediatorSubscriberBase
             }
             UiSharedService.AttachToolTip("Receive notifications when area-bound syncshells become available in your current location");
             
+            if (_configService.Current.ShowAreaBoundSyncshellNotifications)
+            {
+                ImGui.Indent();
+                
+                var notificationLocation = _configService.Current.AreaBoundSyncshellNotification;
+                var notificationOptions = new[] { "Nowhere", "Chat", "Toast", "Both" };
+                var currentIndex = (int)notificationLocation;
+                
+                if (ImGui.Combo("Notification Location", ref currentIndex, notificationOptions, notificationOptions.Length))
+                {
+                    _configService.Current.AreaBoundSyncshellNotification = (NotificationLocation)currentIndex;
+                    _configService.Save();
+                }
+                UiSharedService.AttachToolTip("Choose where area-bound syncshell notifications should appear");
+                
+                ImGui.Unindent();
+            }
+            
             var showAreaBoundWelcome = _configService.Current.ShowAreaBoundSyncshellWelcomeMessages;
             if (ImGui.Checkbox("Show welcome messages", ref showAreaBoundWelcome))
             {
@@ -313,23 +331,18 @@ public partial class IntroUi : WindowMediatorSubscriberBase
                 _configService.Save();
             }
             UiSharedService.AttachToolTip("Display welcome messages when joining area-bound syncshells");
+            
+            var autoShowConsent = _configService.Current.AutoShowAreaBoundSyncshellConsent;
+            if (ImGui.Checkbox("Automatically show consent dialogs", ref autoShowConsent))
+            {
+                _configService.Current.AutoShowAreaBoundSyncshellConsent = autoShowConsent;
+                _configService.Save();
+            }
+            UiSharedService.AttachToolTip("When enabled, consent dialogs for area-bound syncshells will appear automatically when entering areas. When disabled, you can manually trigger consent using the button in the Compact UI. This setting also controls city syncshell join requests.");
         });
 
         ImGui.Spacing();
         
-        // City Syncshells
-        DrawModernCard(() =>
-        {
-            DrawSubsectionHeader("Public City Syncshells", Dalamud.Interface.FontAwesomeIcon.City);
-            
-            var enableCitySyncshells = _configService.Current.EnableCitySyncshellJoinRequests;
-            if (ImGui.Checkbox("Enable city syncshell join requests", ref enableCitySyncshells))
-            {
-                _configService.Current.EnableCitySyncshellJoinRequests = enableCitySyncshells;
-                _configService.Save();
-            }
-            UiSharedService.AttachToolTip("Allow automatic joining of public city syncshells when visiting major cities");
-        });
     }
 
     private void DrawNetworkAuthenticationPageContent()
