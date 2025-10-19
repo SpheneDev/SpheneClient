@@ -2119,6 +2119,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         {
             currentProfile.ShowCharacterNameInsteadOfNotesForVisible = showNameInsteadOfNotes;
             _configService.Save();
+            Mediator.Publish(new RefreshUiMessage());
         }
         _uiShared.DrawHelpText("When enabled, visible users will display their character name instead of your custom notes for them.");
         
@@ -2127,6 +2128,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         {
             currentProfile.ShowVisibleUsersSeparately = showVisibleSeparate;
             _configService.Save();
+            Mediator.Publish(new StructuralRefreshUiMessage());
         }
         _uiShared.DrawHelpText("Visible users will appear in a separate 'Visible' group instead of being mixed with other users.");
         var showOfflineSeparate = currentProfile.ShowOfflineUsersSeparately;
@@ -2134,6 +2136,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         {
             currentProfile.ShowOfflineUsersSeparately = showOfflineSeparate;
             _configService.Save();
+            Mediator.Publish(new StructuralRefreshUiMessage());
         }
         _uiShared.DrawHelpText("Directly paired offline users will appear in a separate 'Offline' group. Offline syncshell members remain in their syncshells.");
         
@@ -2142,6 +2145,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         {
             currentProfile.ShowSyncshellOfflineUsersSeparately = showSyncshellOfflineSeparate;
             _configService.Save();
+            Mediator.Publish(new StructuralRefreshUiMessage());
         }
         _uiShared.DrawHelpText("When enabled, offline syncshell members will also appear in a separate 'Offline Syncshell' group instead of remaining in their syncshells.");
         ImGuiHelpers.ScaledDummy(10);
@@ -2151,7 +2155,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         {
             _configService.Current.GroupUpSyncshells = groupUpSyncshells;
             _configService.Save();
-            Mediator.Publish(new RefreshUiMessage());
+            Mediator.Publish(new StructuralRefreshUiMessage());
         }
         _uiShared.DrawHelpText("This will group up all Syncshells in a special 'All Syncshells' folder in the main UI.");
         
