@@ -39,6 +39,7 @@ public class SpheneConfig : ISpheneConfiguration
     public bool ProfilesAllowNsfw { get; set; } = false;
     public bool ProfilesShow { get; set; } = true;
     public bool ShowSyncshellUsersInVisible { get; set; } = true;
+    public bool ShowVisibleSyncshellUsersOnlyInSyncshells { get; set; } = false;
     public bool ShowCharacterNameInsteadOfNotesForVisible { get; set; } = false;
     public bool ShowOfflineUsersSeparately { get; set; } = true;
     public bool ShowSyncshellOfflineUsersSeparately { get; set; } = true;

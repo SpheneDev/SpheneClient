@@ -2131,6 +2131,16 @@ public class SettingsUi : WindowMediatorSubscriberBase
             Mediator.Publish(new StructuralRefreshUiMessage());
         }
         _uiShared.DrawHelpText("Visible users will appear in a separate 'Visible' group instead of being mixed with other users.");
+        
+        var showVisibleSyncshellUsersOnlyInSyncshells = _configService.Current.ShowVisibleSyncshellUsersOnlyInSyncshells;
+        if (ImGui.Checkbox("Show visible Syncshell users only in Syncshells", ref showVisibleSyncshellUsersOnlyInSyncshells))
+        {
+            _configService.Current.ShowVisibleSyncshellUsersOnlyInSyncshells = showVisibleSyncshellUsersOnlyInSyncshells;
+            _configService.Save();
+            Mediator.Publish(new StructuralRefreshUiMessage());
+        }
+        _uiShared.DrawHelpText("When enabled, visible users who are only connected through Syncshells will only appear in their respective Syncshells and not in the separate 'Visible' group.");
+        
         var showOfflineSeparate = currentProfile.ShowOfflineUsersSeparately;
         if (ImGui.Checkbox("Show offline users separately", ref showOfflineSeparate))
         {
