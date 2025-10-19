@@ -1059,8 +1059,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
         
         ImGuiHelpers.ScaledDummy(10);
         
-        // Visibility Groups Settings
-        _uiShared.BigText("Visibility Groups");
+        // User Display Options
+        _uiShared.BigText("User Display Options");
         if (ImGui.Checkbox("Show separate Visible group", ref showVisibleSeparate))
         {
             _configService.Current.ShowVisibleUsersSeparately = showVisibleSeparate;
@@ -1086,17 +1086,18 @@ public class SettingsUi : WindowMediatorSubscriberBase
             _configService.Save();
             Mediator.Publish(new RefreshUiMessage());
         }
-        _uiShared.DrawHelpText("This will show all currently offline users in a special 'Offline' group in the main UI.");
+        _uiShared.DrawHelpText("This will show all currently offline directly paired users in a separate 'Offline' group. Offline syncshell members will remain in their syncshells.");
 
         using (ImRaii.Disabled(!showOfflineSeparate))
         {
             using var indent = ImRaii.PushIndent();
-            if (ImGui.Checkbox("Show separate Offline group for Syncshell users", ref syncshellOfflineSeparate))
+            if (ImGui.Checkbox("Also show offline Syncshell users separately", ref syncshellOfflineSeparate))
             {
                 _configService.Current.ShowSyncshellOfflineUsersSeparately = syncshellOfflineSeparate;
                 _configService.Save();
                 Mediator.Publish(new RefreshUiMessage());
             }
+            _uiShared.DrawHelpText("When enabled, offline syncshell members will also appear in a separate 'Offline Syncshell Users' group.");
         }
 
         ImGuiHelpers.ScaledDummy(10);
@@ -2461,25 +2462,37 @@ public class SettingsUi : WindowMediatorSubscriberBase
         }
 
         ImGui.Separator();
-        _uiShared.BigText("Display Options");
+        _uiShared.BigText("User List Display");
         var showNameInsteadOfNotes = currentProfile.ShowCharacterNameInsteadOfNotesForVisible;
         if (ImGui.Checkbox("Show character name instead of notes", ref showNameInsteadOfNotes))
         {
             currentProfile.ShowCharacterNameInsteadOfNotesForVisible = showNameInsteadOfNotes;
             _configService.Save();
         }
+        _uiShared.DrawHelpText("When enabled, visible users will display their character name instead of your custom notes for them.");
+        
         var showVisibleSeparate = currentProfile.ShowVisibleUsersSeparately;
         if (ImGui.Checkbox("Show visible users separately", ref showVisibleSeparate))
         {
             currentProfile.ShowVisibleUsersSeparately = showVisibleSeparate;
             _configService.Save();
         }
+        _uiShared.DrawHelpText("Visible users will appear in a separate 'Visible' group instead of being mixed with other users.");
         var showOfflineSeparate = currentProfile.ShowOfflineUsersSeparately;
         if (ImGui.Checkbox("Show offline users separately", ref showOfflineSeparate))
         {
             currentProfile.ShowOfflineUsersSeparately = showOfflineSeparate;
             _configService.Save();
         }
+        _uiShared.DrawHelpText("Directly paired offline users will appear in a separate 'Offline' group. Offline syncshell members remain in their syncshells.");
+        
+        var showSyncshellOfflineSeparate = currentProfile.ShowSyncshellOfflineUsersSeparately;
+        if (ImGui.Checkbox("Also show offline Syncshell users separately", ref showSyncshellOfflineSeparate))
+        {
+            currentProfile.ShowSyncshellOfflineUsersSeparately = showSyncshellOfflineSeparate;
+            _configService.Save();
+        }
+        _uiShared.DrawHelpText("When enabled, offline syncshell members will also appear in a separate 'Offline Syncshell' group instead of remaining in their syncshells.");
 
         ImGui.Separator();
         _uiShared.BigText("Profiles");

@@ -32,6 +32,7 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
     private readonly Lazy<ApiController> _apiController;
     private readonly MessageService _messageService;
     private readonly AcknowledgmentTimeoutManager _acknowledgmentTimeoutManager;
+    private readonly Lazy<AreaBoundSyncshellService> _areaBoundSyncshellService;
 
     private Lazy<List<Pair>> _directPairsInternal;
     private Lazy<Dictionary<GroupFullInfoDto, List<Pair>>> _groupPairsInternal;
@@ -41,7 +42,8 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
                 SpheneConfigService configurationService, SpheneMediator mediator,
                 IContextMenu dalamudContextMenu, ServerConfigurationManager serverConfigurationManager,
                 Lazy<ApiController> apiController, SessionAcknowledgmentManager sessionAcknowledgmentManager,
-                MessageService messageService, AcknowledgmentTimeoutManager acknowledgmentTimeoutManager) : base(logger, mediator)
+                MessageService messageService, AcknowledgmentTimeoutManager acknowledgmentTimeoutManager,
+                Lazy<AreaBoundSyncshellService> areaBoundSyncshellService) : base(logger, mediator)
     {
         _pairFactory = pairFactory;
         _configurationService = configurationService;
@@ -51,6 +53,7 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         _sessionAcknowledgmentManager = sessionAcknowledgmentManager;
         _messageService = messageService;
         _acknowledgmentTimeoutManager = acknowledgmentTimeoutManager;
+        _areaBoundSyncshellService = areaBoundSyncshellService;
 
         Mediator.Subscribe<DisconnectedMessage>(this, (_) => ClearPairs());
         Mediator.Subscribe<CutsceneEndMessage>(this, (_) => ReapplyPairData());
@@ -474,7 +477,26 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
             Dictionary<GroupFullInfoDto, List<Pair>> outDict = [];
             foreach (var group in _allGroups)
             {
-                outDict[group.Value] = _allClientPairs.Select(p => p.Value).Where(p => p.UserPair.Groups.Exists(g => GroupDataComparer.Instance.Equals(group.Key, new(g)))).ToList();
+                // Get pairs that are official members of this group
+                var memberPairs = _allClientPairs.Select(p => p.Value).Where(p => p.UserPair.Groups.Exists(g => GroupDataComparer.Instance.Equals(group.Key, new(g)))).ToList();
+                
+                // Also include visible users who are members of this group but not currently in memberPairs
+                // This handles cases where visible users are syncshell members but not showing up
+                var visibleMemberPairs = _allClientPairs.Select(p => p.Value)
+                    .Where(p => p.IsVisible && 
+                               !memberPairs.Contains(p) && 
+                               group.Value.GroupPairUserInfos.ContainsKey(p.UserData.UID))
+                    .ToList();
+                memberPairs.AddRange(visibleMemberPairs);
+                
+                // For area-bound syncshells with no permanent members, also include all visible users
+                if (group.Value.GroupPairUserInfos.Count == 0 && _areaBoundSyncshellService.Value.IsAreaBoundSyncshell(group.Value.Group.GID))
+                {
+                    var areaBoundVisiblePairs = _allClientPairs.Select(p => p.Value).Where(p => p.IsVisible && !memberPairs.Contains(p)).ToList();
+                    memberPairs.AddRange(areaBoundVisiblePairs);
+                }
+                
+                outDict[group.Value] = memberPairs;
             }
             return outDict;
         });
@@ -488,7 +510,26 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
 
             foreach (var pair in _allClientPairs.Select(k => k.Value))
             {
-                outDict[pair] = _allGroups.Where(k => pair.UserPair.Groups.Contains(k.Key.GID, StringComparer.Ordinal)).Select(k => k.Value).ToList();
+                // Get groups this pair is officially a member of
+                var memberGroups = _allGroups.Where(k => pair.UserPair.Groups.Contains(k.Key.GID, StringComparer.Ordinal)).Select(k => k.Value).ToList();
+                
+                // For visible users, also check if they should be included in area-bound syncshells
+                if (pair.IsVisible)
+                {
+                    foreach (var group in _allGroups.Values)
+                    {
+                        // Skip if already a member
+                        if (memberGroups.Contains(group)) continue;
+                        
+                        // Check if this is an area-bound syncshell with no permanent members
+                        if (group.GroupPairUserInfos.Count == 0 && _areaBoundSyncshellService.Value.IsAreaBoundSyncshell(group.Group.GID))
+                        {
+                            memberGroups.Add(group);
+                        }
+                    }
+                }
+                
+                outDict[pair] = memberGroups;
             }
 
             return outDict;

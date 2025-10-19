@@ -152,12 +152,13 @@ public sealed class Plugin : IDalamudPlugin
                 s.GetRequiredService<SpheneMediator>(), s.GetRequiredService<PairManager>(), s.GetRequiredService<ApiController>()));
             collection.AddSingleton<Lazy<ApiController>>(s => new Lazy<ApiController>(() => s.GetRequiredService<ApiController>()));
             collection.AddSingleton<Lazy<PairManager>>(s => new Lazy<PairManager>(() => s.GetRequiredService<PairManager>()));
+            collection.AddSingleton<Lazy<AreaBoundSyncshellService>>(s => new Lazy<AreaBoundSyncshellService>(() => s.GetRequiredService<AreaBoundSyncshellService>()));
             collection.AddSingleton(s => new AcknowledgmentTimeoutManager(s.GetRequiredService<ILogger<AcknowledgmentTimeoutManager>>(),
                 s.GetRequiredService<SpheneMediator>(), s.GetRequiredService<Lazy<ApiController>>(), s.GetRequiredService<Lazy<PairManager>>()));
             collection.AddSingleton(s => new PairManager(s.GetRequiredService<ILogger<PairManager>>(), s.GetRequiredService<PairFactory>(),
                 s.GetRequiredService<SpheneConfigService>(), s.GetRequiredService<SpheneMediator>(), contextMenu, s.GetRequiredService<ServerConfigurationManager>(),
                 s.GetRequiredService<Lazy<ApiController>>(), s.GetRequiredService<SessionAcknowledgmentManager>(), s.GetRequiredService<MessageService>(),
-                s.GetRequiredService<AcknowledgmentTimeoutManager>()));
+                s.GetRequiredService<AcknowledgmentTimeoutManager>(), s.GetRequiredService<Lazy<AreaBoundSyncshellService>>()));
             collection.AddSingleton(s => new EnhancedAcknowledgmentManager(s.GetRequiredService<ILogger<EnhancedAcknowledgmentManager>>(),
                 s.GetRequiredService<Lazy<ApiController>>().Value, s.GetRequiredService<SpheneMediator>(), new AcknowledgmentConfiguration(),
                 s.GetRequiredService<SessionAcknowledgmentManager>()));

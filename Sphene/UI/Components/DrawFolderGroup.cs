@@ -24,11 +24,12 @@ public class DrawFolderGroup : DrawFolderBase
     private readonly SpheneMediator _spheneMediator;
     private readonly AreaBoundSyncshellService _areaBoundSyncshellService;
     private readonly SpheneConfigService _configService;
+    private readonly PairManager _pairManager;
     private float _menuWidth;
 
     public DrawFolderGroup(string id, GroupFullInfoDto groupFullInfoDto, ApiController apiController,
         IImmutableList<DrawUserPair> drawPairs, IImmutableList<Pair> allPairs, TagHandler tagHandler, IdDisplayHandler idDisplayHandler,
-        SpheneMediator spheneMediator, UiSharedService uiSharedService, AreaBoundSyncshellService areaBoundSyncshellService, SpheneConfigService configService, bool isSyncshellFolder = false) :
+        SpheneMediator spheneMediator, UiSharedService uiSharedService, AreaBoundSyncshellService areaBoundSyncshellService, SpheneConfigService configService, PairManager pairManager, bool isSyncshellFolder = false) :
         base(id, drawPairs, allPairs, tagHandler, uiSharedService, 0f, isSyncshellFolder)
     {
         _groupFullInfoDto = groupFullInfoDto;
@@ -37,6 +38,7 @@ public class DrawFolderGroup : DrawFolderBase
         _spheneMediator = spheneMediator;
         _areaBoundSyncshellService = areaBoundSyncshellService;
         _configService = configService;
+        _pairManager = pairManager;
     }
 
     protected override bool RenderIfEmpty => true;
@@ -44,6 +46,73 @@ public class DrawFolderGroup : DrawFolderBase
     private bool IsModerator => IsOwner || _groupFullInfoDto.GroupUserInfo.IsModerator();
     private bool IsOwner => string.Equals(_groupFullInfoDto.OwnerUID, _apiController.UID, StringComparison.Ordinal);
     private bool IsPinned => _groupFullInfoDto.GroupUserInfo.IsPinned();
+
+    // Override OnlinePairs to show total online users in syncshell, including visible pairs
+    public new int OnlinePairs
+    {
+        get
+        {
+            // For area-bound syncshells (like city syncshells), GroupPairUserInfos is empty
+            // because they don't have permanent members - users auto-join based on location
+            if (_groupFullInfoDto.GroupPairUserInfos.Count == 0)
+            {
+                // For area-bound syncshells, only count visible pairs that are online
+                return DrawPairs.Count(u => u.Pair.IsOnline);
+            }
+            
+            // For regular syncshells, count both visible and non-visible online users
+            // Start with visible pairs that are online (from DrawPairs)
+            var visibleOnlineCount = DrawPairs.Count(u => u.Pair.IsOnline);
+            
+            // Get all users in the syncshell from GroupPairUserInfos
+            var allSyncshellUsers = _groupFullInfoDto.GroupPairUserInfos.Keys.ToList();
+            
+            // Count syncshell users that are online but not already counted in visible pairs
+            var visibleUserUIDs = DrawPairs.Select(dp => dp.Pair.UserData.UID).ToHashSet();
+            int additionalOnlineCount = 0;
+            
+            foreach (var userUID in allSyncshellUsers)
+            {
+                // Skip if this user is already counted in visible pairs
+                if (visibleUserUIDs.Contains(userUID))
+                    continue;
+                    
+                var pair = _pairManager.GetPairByUID(userUID);
+                if (pair != null && pair.IsOnline)
+                {
+                    additionalOnlineCount++;
+                }
+            }
+            
+            return visibleOnlineCount + additionalOnlineCount;
+        }
+    }
+
+    // Override TotalPairs to show total users (visible pairs + syncshell members)
+    public new int TotalPairs
+    {
+        get
+        {
+            // For area-bound syncshells (like city syncshells), GroupPairUserInfos is empty
+            // because they don't have permanent members - users auto-join based on location
+            if (_groupFullInfoDto.GroupPairUserInfos.Count == 0)
+            {
+                // For area-bound syncshells, only count visible pairs
+                return DrawPairs.Count;
+            }
+            
+            // For regular syncshells, count both visible and non-visible users
+            // Count visible pairs
+            var visiblePairsCount = DrawPairs.Count;
+            
+            // Count syncshell members not already in visible pairs
+            var visibleUserUIDs = DrawPairs.Select(dp => dp.Pair.UserData.UID).ToHashSet();
+            var additionalSyncshellMembers = _groupFullInfoDto.GroupPairUserInfos.Keys
+                .Count(uid => !visibleUserUIDs.Contains(uid));
+            
+            return visiblePairsCount + additionalSyncshellMembers;
+        }
+    }
 
     public override void Draw()
     {
@@ -91,7 +160,15 @@ public class DrawFolderGroup : DrawFolderBase
             }
             else
             {
-                ImGui.TextUnformatted("No users (online)");
+                // Show more informative message for syncshells
+                if (TotalPairs > 0)
+                {
+                    ImGui.TextUnformatted($"No visible users ({OnlinePairs} online, {TotalPairs} total)");
+                }
+                else
+                {
+                    ImGui.TextUnformatted("No users in syncshell");
+                }
             }
 
             ImGui.Separator();

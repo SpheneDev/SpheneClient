@@ -823,8 +823,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                     : (u.Key.GetNote() ?? u.Key.UserData.AliasOrUID));
         bool FilterOnlineOrPausedSelf(KeyValuePair<Pair, List<GroupFullInfoDto>> u)
             => (u.Key.IsOnline || (!u.Key.IsOnline && !_configService.Current.ShowOfflineUsersSeparately))
-                && !u.Key.UserPair.OwnPermissions.IsPaused()
-                && (!_configService.Current.ShowVisibleUsersSeparately || !u.Key.IsVisible);
+                && !u.Key.UserPair.OwnPermissions.IsPaused();
         bool FilterPausedUsers(KeyValuePair<Pair, List<GroupFullInfoDto>> u)
             => u.Key.UserPair.OwnPermissions.IsPaused();
         Dictionary<Pair, List<GroupFullInfoDto>> BasicSortedDictionary(IEnumerable<KeyValuePair<Pair, List<GroupFullInfoDto>>> u)
@@ -840,13 +839,26 @@ public class CompactUi : WindowMediatorSubscriberBase
         bool FilterTagusers(KeyValuePair<Pair, List<GroupFullInfoDto>> u, string tag)
             => u.Key.IsDirectlyPaired && !u.Key.IsOneSidedPair && _tagHandler.HasTag(u.Key.UserData.UID, tag);
         bool FilterGroupUsers(KeyValuePair<Pair, List<GroupFullInfoDto>> u, GroupFullInfoDto group)
-            => u.Value.Exists(g => string.Equals(g.GID, group.GID, StringComparison.Ordinal));
+        {
+            // Check if user is a member of this group
+            if (u.Value.Exists(g => string.Equals(g.GID, group.GID, StringComparison.Ordinal)))
+                return true;
+            
+            // For visible users, also check if they are actual members of this syncshell
+            if (u.Key.IsVisible && group.GroupPairUserInfos.ContainsKey(u.Key.UserData.UID))
+                return true;
+            
+            // For area-bound syncshells (where GroupPairUserInfos is empty), also include visible users
+            // This allows visible users to be shown in area-bound syncshells even if they're not permanent members
+            if (group.GroupPairUserInfos.Count == 0 && u.Key.IsVisible && _areaBoundSyncshellService.IsAreaBoundSyncshell(group.Group.GID))
+                return true;
+            
+            return false;
+        }
         bool FilterNotTaggedUsers(KeyValuePair<Pair, List<GroupFullInfoDto>> u)
             => u.Key.IsDirectlyPaired && !u.Key.IsOneSidedPair && !_tagHandler.HasAnyTag(u.Key.UserData.UID);
         bool FilterOfflineUsers(KeyValuePair<Pair, List<GroupFullInfoDto>> u)
-            => ((u.Key.IsDirectlyPaired && _configService.Current.ShowSyncshellOfflineUsersSeparately)
-                || !_configService.Current.ShowSyncshellOfflineUsersSeparately)
-                && (!u.Key.IsOneSidedPair || u.Value.Any()) && !u.Key.IsOnline && !u.Key.UserPair.OwnPermissions.IsPaused();
+            => u.Key.IsDirectlyPaired && (!u.Key.IsOneSidedPair || u.Value.Any()) && !u.Key.IsOnline && !u.Key.UserPair.OwnPermissions.IsPaused();
         bool FilterOfflineSyncshellUsers(KeyValuePair<Pair, List<GroupFullInfoDto>> u)
             => (!u.Key.IsDirectlyPaired && !u.Key.IsOnline && !u.Key.UserPair.OwnPermissions.IsPaused());
 
