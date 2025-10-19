@@ -672,7 +672,10 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         // Use container-relative positioning for buttons
         var containerWidth = ImGui.GetContentRegionAvail().X;
         var actualWindowEndX = ImGui.GetCursorPosX() + containerWidth;
-        float currentRightSide = actualWindowEndX - barButtonSize.X;
+        
+        // Adjust button positioning for grouped syncshell folders
+        var buttonOffset = (_currentGroup != null && _configService.Current.GroupUpSyncshells) ? 20f : 0f;
+        float currentRightSide = actualWindowEndX - barButtonSize.X - buttonOffset;
 
         // Context menu button (rightmost)
         ImGui.SameLine(currentRightSide);

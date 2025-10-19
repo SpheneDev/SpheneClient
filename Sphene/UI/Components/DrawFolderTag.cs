@@ -5,6 +5,7 @@ using Sphene.API.Data.Extensions;
 using Sphene.PlayerData.Pairs;
 using Sphene.UI.Handlers;
 using Sphene.WebAPI;
+using Sphene.SpheneConfiguration;
 using System.Collections.Immutable;
 using System.Numerics;
 
@@ -14,13 +15,15 @@ public class DrawFolderTag : DrawFolderBase
 {
     private readonly ApiController _apiController;
     private readonly SelectPairForTagUi _selectPairForTagUi;
+    private readonly SpheneConfigService _configService;
 
     public DrawFolderTag(string id, IImmutableList<DrawUserPair> drawPairs, IImmutableList<Pair> allPairs,
-        TagHandler tagHandler, ApiController apiController, SelectPairForTagUi selectPairForTagUi, UiSharedService uiSharedService)
+        TagHandler tagHandler, ApiController apiController, SelectPairForTagUi selectPairForTagUi, UiSharedService uiSharedService, SpheneConfigService configService)
         : base(id, drawPairs, allPairs, tagHandler, uiSharedService, 0f, false) // Consistent width with other containers, not a syncshell folder
     {
         _apiController = apiController;
         _selectPairForTagUi = selectPairForTagUi;
+        _configService = configService;
     }
 
     protected override bool RenderIfEmpty => _id switch
@@ -73,7 +76,9 @@ public class DrawFolderTag : DrawFolderBase
         // if opened draw content
         if (_tagHandler.IsTagOpen(_id))
         {
-            using var indent = ImRaii.PushIndent(_uiSharedService.GetIconSize(FontAwesomeIcon.EllipsisV).X + ImGui.GetStyle().ItemSpacing.X, false);
+            var baseIndent = _uiSharedService.GetIconSize(FontAwesomeIcon.EllipsisV).X + ImGui.GetStyle().ItemSpacing.X;
+            var indentAmount = baseIndent;
+            using var indent = ImRaii.PushIndent(indentAmount, false);
             if (DrawPairs.Any())
             {
                 foreach (var item in DrawPairs)

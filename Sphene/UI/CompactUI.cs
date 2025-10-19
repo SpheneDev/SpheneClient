@@ -791,9 +791,6 @@ public class CompactUi : WindowMediatorSubscriberBase
                 ImGui.SetClipboardText(_apiController.DisplayName);
             }
             UiSharedService.AttachToolTip("Click to copy");
-
-            // Only show original UID if DisplayName equals UID (no alias available)
-            // When alias is available, we only show the alias and hide the original UID
         }
         else
         {
@@ -825,7 +822,7 @@ public class CompactUi : WindowMediatorSubscriberBase
             => (u.Key.IsOnline || (!u.Key.IsOnline && !_configService.Current.ShowOfflineUsersSeparately))
                 && !u.Key.UserPair.OwnPermissions.IsPaused();
         bool FilterPausedUsers(KeyValuePair<Pair, List<GroupFullInfoDto>> u)
-            => u.Key.UserPair.OwnPermissions.IsPaused();
+            => u.Key.UserPair.OwnPermissions.IsPaused() && !u.Key.IsVisible;
         Dictionary<Pair, List<GroupFullInfoDto>> BasicSortedDictionary(IEnumerable<KeyValuePair<Pair, List<GroupFullInfoDto>>> u)
             => u.OrderByDescending(u => u.Key.IsVisible)
                 .ThenByDescending(u => u.Key.IsOnline)
@@ -837,7 +834,7 @@ public class CompactUi : WindowMediatorSubscriberBase
             => u.Key.IsVisible
                 && (_configService.Current.ShowSyncshellUsersInVisible || !(!_configService.Current.ShowSyncshellUsersInVisible && !u.Key.IsDirectlyPaired));
         bool FilterTagusers(KeyValuePair<Pair, List<GroupFullInfoDto>> u, string tag)
-            => u.Key.IsDirectlyPaired && !u.Key.IsOneSidedPair && _tagHandler.HasTag(u.Key.UserData.UID, tag);
+            => u.Key.IsDirectlyPaired && !u.Key.IsOneSidedPair && _tagHandler.HasTag(u.Key.UserData.UID, tag) && !u.Key.IsVisible;
         bool FilterGroupUsers(KeyValuePair<Pair, List<GroupFullInfoDto>> u, GroupFullInfoDto group)
         {
             // Check if user is a member of this group
@@ -856,9 +853,9 @@ public class CompactUi : WindowMediatorSubscriberBase
             return false;
         }
         bool FilterNotTaggedUsers(KeyValuePair<Pair, List<GroupFullInfoDto>> u)
-            => u.Key.IsDirectlyPaired && !u.Key.IsOneSidedPair && !_tagHandler.HasAnyTag(u.Key.UserData.UID);
+            => u.Key.IsDirectlyPaired && !u.Key.IsOneSidedPair && !_tagHandler.HasAnyTag(u.Key.UserData.UID) && !u.Key.IsVisible;
         bool FilterOfflineUsers(KeyValuePair<Pair, List<GroupFullInfoDto>> u)
-            => u.Key.IsDirectlyPaired && (!u.Key.IsOneSidedPair || u.Value.Any()) && !u.Key.IsOnline && !u.Key.UserPair.OwnPermissions.IsPaused();
+            => u.Key.IsDirectlyPaired && (!u.Key.IsOneSidedPair || u.Value.Any()) && !u.Key.IsOnline && !u.Key.UserPair.OwnPermissions.IsPaused() && !u.Key.IsVisible;
         bool FilterOfflineSyncshellUsers(KeyValuePair<Pair, List<GroupFullInfoDto>> u)
             => (!u.Key.IsDirectlyPaired && !u.Key.IsOnline && !u.Key.UserPair.OwnPermissions.IsPaused());
 

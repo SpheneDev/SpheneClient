@@ -896,366 +896,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         ImGui.Unindent();
     }
 
-    private void DrawGeneral()
-    {
-        if (!string.Equals(_lastTab, "General", StringComparison.OrdinalIgnoreCase))
-        {
-            _notesSuccessfullyApplied = null;
-        }
 
-        _lastTab = "General";
-
-        // User Management Section
-        if (ImGui.CollapsingHeader("User Management", ImGuiTreeNodeFlags.DefaultOpen))
-        {
-            ImGuiHelpers.ScaledDummy(5);
-            
-            _uiShared.BigText("Notes Management");
-            if (_uiShared.IconTextButton(FontAwesomeIcon.StickyNote, "Export all your user notes to clipboard"))
-            {
-                ImGui.SetClipboardText(UiSharedService.GetNotes(_pairManager.DirectPairs.UnionBy(_pairManager.GroupPairs.SelectMany(p => p.Value), p => p.UserData, UserDataComparer.Instance).ToList()));
-            }
-            if (_uiShared.IconTextButton(FontAwesomeIcon.FileImport, "Import notes from clipboard"))
-            {
-                _notesSuccessfullyApplied = null;
-                var notes = ImGui.GetClipboardText();
-                _notesSuccessfullyApplied = _uiShared.ApplyNotesFromClipboard(notes, _overwriteExistingLabels);
-            }
-
-            ImGui.SameLine();
-            ImGui.Checkbox("Overwrite existing notes", ref _overwriteExistingLabels);
-            _uiShared.DrawHelpText("If this option is selected all already existing notes for UIDs will be overwritten by the imported notes.");
-            
-            if (_notesSuccessfullyApplied.HasValue && _notesSuccessfullyApplied.Value)
-            {
-                UiSharedService.ColorTextWrapped("User Notes successfully imported", ImGuiColors.HealerGreen);
-            }
-            else if (_notesSuccessfullyApplied.HasValue && !_notesSuccessfullyApplied.Value)
-            {
-                UiSharedService.ColorTextWrapped("Attempt to import notes from clipboard failed. Check formatting and try again", ImGuiColors.DalamudRed);
-            }
-
-            ImGuiHelpers.ScaledDummy(10);
-            
-            var openPopupOnAddition = _configService.Current.OpenPopupOnAdd;
-            if (ImGui.Checkbox("Open Notes Popup on user addition", ref openPopupOnAddition))
-            {
-                _configService.Current.OpenPopupOnAdd = openPopupOnAddition;
-                _configService.Save();
-            }
-            _uiShared.DrawHelpText("This will open a popup that allows you to set the notes for a user after successfully adding them to your individual pairs.");
-
-            var autoPopulateNotes = _configService.Current.AutoPopulateEmptyNotesFromCharaName;
-            if (ImGui.Checkbox("Automatically populate notes using player names", ref autoPopulateNotes))
-            {
-                _configService.Current.AutoPopulateEmptyNotesFromCharaName = autoPopulateNotes;
-                _configService.Save();
-            }
-            _uiShared.DrawHelpText("This will automatically populate user notes using the first encountered player name if the note was not set prior");
-            
-            ImGuiHelpers.ScaledDummy(10);
-        }
-
-        // UI Display Settings Section
-        if (ImGui.CollapsingHeader("UI Display Settings", ImGuiTreeNodeFlags.DefaultOpen))
-        {
-            ImGuiHelpers.ScaledDummy(5);
-            
-            var showSpheneIcon = _configService.Current.ShowSpheneIcon;
-            var showNameInsteadOfNotes = _configService.Current.ShowCharacterNameInsteadOfNotesForVisible;
-            var showVisibleSeparate = _configService.Current.ShowVisibleUsersSeparately;
-            var showOfflineSeparate = _configService.Current.ShowOfflineUsersSeparately;
-            var showProfiles = _configService.Current.ProfilesShow;
-            var showNsfwProfiles = _configService.Current.ProfilesAllowNsfw;
-            var profileDelay = _configService.Current.ProfileDelay;
-            var profileOnRight = _configService.Current.ProfilePopoutRight;
-            var enableRightClickMenu = _configService.Current.EnableRightClickMenus;
-            var enableDtrEntry = _configService.Current.EnableDtrEntry;
-            var showUidInDtrTooltip = _configService.Current.ShowUidInDtrTooltip;
-            var preferNoteInDtrTooltip = _configService.Current.PreferNoteInDtrTooltip;
-            var useColorsInDtr = _configService.Current.UseColorsInDtr;
-            var dtrColorsDefault = _configService.Current.DtrColorsDefault;
-            var dtrColorsNotConnected = _configService.Current.DtrColorsNotConnected;
-            var dtrColorsPairsInRange = _configService.Current.DtrColorsPairsInRange;
-            var preferNotesInsteadOfName = _configService.Current.PreferNotesOverNamesForVisible;
-            var useFocusTarget = _configService.Current.UseFocusTarget;
-            var groupUpSyncshells = _configService.Current.GroupUpSyncshells;
-            var groupInVisible = _configService.Current.ShowSyncshellUsersInVisible;
-            var syncshellOfflineSeparate = _configService.Current.ShowSyncshellOfflineUsersSeparately;
-
-            // Basic UI Elements
-            _uiShared.BigText("Basic Interface");
-            if (ImGui.Checkbox("Show Sphene Icon", ref showSpheneIcon))
-            {
-                _configService.Current.ShowSpheneIcon = showSpheneIcon;
-                _configService.Save();
-            }
-            _uiShared.DrawHelpText("This will show or hide the Sphene icon that can be used to open the main window.");
-
-            if (ImGui.Checkbox("Enable Game Right Click Menu Entries", ref enableRightClickMenu))
-            {
-                _configService.Current.EnableRightClickMenus = enableRightClickMenu;
-                _configService.Save();
-            }
-            _uiShared.DrawHelpText("This will add Sphene related right click menu entries in the game UI on paired players.");
-            
-            ImGuiHelpers.ScaledDummy(10);
-            
-            // Server Info Bar Settings
-            _uiShared.BigText("Server Info Bar");
-
-        if (ImGui.Checkbox("Display status and visible pair count in Server Info Bar", ref enableDtrEntry))
-        {
-            _configService.Current.EnableDtrEntry = enableDtrEntry;
-            _configService.Save();
-        }
-        _uiShared.DrawHelpText("This will add Sphene connection status and visible pair count in the Server Info Bar.\nYou can further configure this through your Dalamud Settings.");
-
-        using (ImRaii.Disabled(!enableDtrEntry))
-        {
-            using var indent = ImRaii.PushIndent();
-            if (ImGui.Checkbox("Show visible character's UID in tooltip", ref showUidInDtrTooltip))
-            {
-                _configService.Current.ShowUidInDtrTooltip = showUidInDtrTooltip;
-                _configService.Save();
-            }
-
-            if (ImGui.Checkbox("Prefer notes over player names in tooltip", ref preferNoteInDtrTooltip))
-            {
-                _configService.Current.PreferNoteInDtrTooltip = preferNoteInDtrTooltip;
-                _configService.Save();
-            }
-
-            if (ImGui.Checkbox("Color-code the Server Info Bar entry according to status", ref useColorsInDtr))
-            {
-                _configService.Current.UseColorsInDtr = useColorsInDtr;
-                _configService.Save();
-            }
-
-            using (ImRaii.Disabled(!useColorsInDtr))
-            {
-                using var indent2 = ImRaii.PushIndent();
-                if (InputDtrColors("Default", ref dtrColorsDefault))
-                {
-                    _configService.Current.DtrColorsDefault = dtrColorsDefault;
-                    _configService.Save();
-                }
-
-                ImGui.SameLine();
-                if (InputDtrColors("Not Connected", ref dtrColorsNotConnected))
-                {
-                    _configService.Current.DtrColorsNotConnected = dtrColorsNotConnected;
-                    _configService.Save();
-                }
-
-                ImGui.SameLine();
-                if (InputDtrColors("Pairs in Range", ref dtrColorsPairsInRange))
-                {
-                    _configService.Current.DtrColorsPairsInRange = dtrColorsPairsInRange;
-                    _configService.Save();
-                }
-            }
-        }
-        
-        ImGuiHelpers.ScaledDummy(10);
-        
-        // User Display Options
-        _uiShared.BigText("User Display Options");
-        if (ImGui.Checkbox("Show separate Visible group", ref showVisibleSeparate))
-        {
-            _configService.Current.ShowVisibleUsersSeparately = showVisibleSeparate;
-            _configService.Save();
-            Mediator.Publish(new RefreshUiMessage());
-        }
-        _uiShared.DrawHelpText("This will show all currently visible users in a special 'Visible' group in the main UI.");
-
-        using (ImRaii.Disabled(!showVisibleSeparate))
-        {
-            using var indent = ImRaii.PushIndent();
-            if (ImGui.Checkbox("Show Syncshell Users in Visible Group", ref groupInVisible))
-            {
-                _configService.Current.ShowSyncshellUsersInVisible = groupInVisible;
-                _configService.Save();
-                Mediator.Publish(new RefreshUiMessage());
-            }
-        }
-
-        if (ImGui.Checkbox("Show separate Offline group", ref showOfflineSeparate))
-        {
-            _configService.Current.ShowOfflineUsersSeparately = showOfflineSeparate;
-            _configService.Save();
-            Mediator.Publish(new RefreshUiMessage());
-        }
-        _uiShared.DrawHelpText("This will show all currently offline directly paired users in a separate 'Offline' group. Offline syncshell members will remain in their syncshells.");
-
-        using (ImRaii.Disabled(!showOfflineSeparate))
-        {
-            using var indent = ImRaii.PushIndent();
-            if (ImGui.Checkbox("Also show offline Syncshell users separately", ref syncshellOfflineSeparate))
-            {
-                _configService.Current.ShowSyncshellOfflineUsersSeparately = syncshellOfflineSeparate;
-                _configService.Save();
-                Mediator.Publish(new RefreshUiMessage());
-            }
-            _uiShared.DrawHelpText("When enabled, offline syncshell members will also appear in a separate 'Offline Syncshell Users' group.");
-        }
-
-        ImGuiHelpers.ScaledDummy(10);
-        
-        // Syncshell Settings
-        _uiShared.BigText("Syncshell Settings");
-        if (ImGui.Checkbox("Group up all syncshells in one folder", ref groupUpSyncshells))
-        {
-            _configService.Current.GroupUpSyncshells = groupUpSyncshells;
-            _configService.Save();
-            Mediator.Publish(new RefreshUiMessage());
-        }
-        _uiShared.DrawHelpText("This will group up all Syncshells in a special 'All Syncshells' folder in the main UI.");
-        
-        ImGuiHelpers.ScaledDummy(10);
-        
-        // Display Preferences
-        _uiShared.BigText("Display Preferences");
-        if (ImGui.Checkbox("Show player name for visible players", ref showNameInsteadOfNotes))
-        {
-            _configService.Current.ShowCharacterNameInsteadOfNotesForVisible = showNameInsteadOfNotes;
-            _configService.Save();
-            Mediator.Publish(new RefreshUiMessage());
-        }
-        _uiShared.DrawHelpText("This will show the character name instead of custom set note when a character is visible");
-
-        ImGui.Indent();
-        if (!_configService.Current.ShowCharacterNameInsteadOfNotesForVisible) ImGui.BeginDisabled();
-        if (ImGui.Checkbox("Prefer notes over player names for visible players", ref preferNotesInsteadOfName))
-        {
-            _configService.Current.PreferNotesOverNamesForVisible = preferNotesInsteadOfName;
-            _configService.Save();
-            Mediator.Publish(new RefreshUiMessage());
-        }
-        _uiShared.DrawHelpText("If you set a note for a player it will be shown instead of the player name");
-        if (!_configService.Current.ShowCharacterNameInsteadOfNotesForVisible) ImGui.EndDisabled();
-        ImGui.Unindent();
-
-        if (ImGui.Checkbox("Set visible pairs as focus targets when clicking the eye", ref useFocusTarget))
-        {
-            _configService.Current.UseFocusTarget = useFocusTarget;
-            _configService.Save();
-        }
-        
-        ImGuiHelpers.ScaledDummy(10);
-        
-        // Profile Settings
-        _uiShared.BigText("Profile Settings");
-        if (ImGui.Checkbox("Show Sphene Profiles on Hover", ref showProfiles))
-        {
-            Mediator.Publish(new ClearProfileDataMessage());
-            _configService.Current.ProfilesShow = showProfiles;
-            _configService.Save();
-        }
-        _uiShared.DrawHelpText("This will show the configured user profile after a set delay");
-        ImGui.Indent();
-        if (!showProfiles) ImGui.BeginDisabled();
-        if (ImGui.Checkbox("Popout profiles on the right", ref profileOnRight))
-        {
-            _configService.Current.ProfilePopoutRight = profileOnRight;
-            _configService.Save();
-            Mediator.Publish(new CompactUiChange(Vector2.Zero, Vector2.Zero));
-        }
-        _uiShared.DrawHelpText("Will show profiles on the right side of the main UI");
-        if (ImGui.SliderFloat("Hover Delay", ref profileDelay, 1, 10))
-        {
-            _configService.Current.ProfileDelay = profileDelay;
-            _configService.Save();
-        }
-        _uiShared.DrawHelpText("Delay until the profile should be displayed");
-        if (!showProfiles) ImGui.EndDisabled();
-        ImGui.Unindent();
-        if (ImGui.Checkbox("Show profiles marked as NSFW", ref showNsfwProfiles))
-        {
-            Mediator.Publish(new ClearProfileDataMessage());
-            _configService.Current.ProfilesAllowNsfw = showNsfwProfiles;
-            _configService.Save();
-        }
-        _uiShared.DrawHelpText("Will show profiles that have the NSFW tag enabled");
-        }
-        
-        
-        // Notifications Section
-        if (ImGui.CollapsingHeader("Notifications", ImGuiTreeNodeFlags.DefaultOpen))
-        {
-            ImGuiHelpers.ScaledDummy(5);
-            
-            var disableOptionalPluginWarnings = _configService.Current.DisableOptionalPluginWarnings;
-            var onlineNotifs = _configService.Current.ShowOnlineNotifications;
-            var onlineNotifsPairsOnly = _configService.Current.ShowOnlineNotificationsOnlyForIndividualPairs;
-            var onlineNotifsNamedOnly = _configService.Current.ShowOnlineNotificationsOnlyForNamedPairs;
-            
-            _uiShared.BigText("Notification Types");
-
-        _uiShared.DrawCombo("Info Notification Display##settingsUi", (NotificationLocation[])Enum.GetValues(typeof(NotificationLocation)), (i) => i.ToString(),
-        (i) =>
-        {
-            _configService.Current.InfoNotification = i;
-            _configService.Save();
-        }, _configService.Current.InfoNotification);
-        _uiShared.DrawHelpText("The location where \"Info\" notifications will display."
-                      + Environment.NewLine + "'Nowhere' will not show any Info notifications"
-                      + Environment.NewLine + "'Chat' will print Info notifications in chat"
-                      + Environment.NewLine + "'Toast' will show Warning toast notifications in the bottom right corner"
-                      + Environment.NewLine + "'Both' will show chat as well as the toast notification");
-
-        _uiShared.DrawCombo("Warning Notification Display##settingsUi", (NotificationLocation[])Enum.GetValues(typeof(NotificationLocation)), (i) => i.ToString(),
-        (i) =>
-        {
-            _configService.Current.WarningNotification = i;
-            _configService.Save();
-        }, _configService.Current.WarningNotification);
-        _uiShared.DrawHelpText("The location where \"Warning\" notifications will display."
-                              + Environment.NewLine + "'Nowhere' will not show any Warning notifications"
-                              + Environment.NewLine + "'Chat' will print Warning notifications in chat"
-                              + Environment.NewLine + "'Toast' will show Warning toast notifications in the bottom right corner"
-                              + Environment.NewLine + "'Both' will show chat as well as the toast notification");
-
-        _uiShared.DrawCombo("Error Notification Display##settingsUi", (NotificationLocation[])Enum.GetValues(typeof(NotificationLocation)), (i) => i.ToString(),
-        (i) =>
-        {
-            _configService.Current.ErrorNotification = i;
-            _configService.Save();
-        }, _configService.Current.ErrorNotification);
-        _uiShared.DrawHelpText("The location where \"Error\" notifications will display."
-                              + Environment.NewLine + "'Nowhere' will not show any Error notifications"
-                              + Environment.NewLine + "'Chat' will print Error notifications in chat"
-                              + Environment.NewLine + "'Toast' will show Error toast notifications in the bottom right corner"
-                              + Environment.NewLine + "'Both' will show chat as well as the toast notification");
-
-        if (ImGui.Checkbox("Disable optional plugin warnings", ref disableOptionalPluginWarnings))
-        {
-            _configService.Current.DisableOptionalPluginWarnings = disableOptionalPluginWarnings;
-            _configService.Save();
-        }
-        _uiShared.DrawHelpText("Enabling this will not show any \"Warning\" labeled messages for missing optional plugins.");
-        if (ImGui.Checkbox("Enable online notifications", ref onlineNotifs))
-        {
-            _configService.Current.ShowOnlineNotifications = onlineNotifs;
-            _configService.Save();
-        }
-        _uiShared.DrawHelpText("Enabling this will show a small notification (type: Info) in the bottom right corner when pairs go online.");
-
-        using var disabled = ImRaii.Disabled(!onlineNotifs);
-        if (ImGui.Checkbox("Notify only for individual pairs", ref onlineNotifsPairsOnly))
-        {
-            _configService.Current.ShowOnlineNotificationsOnlyForIndividualPairs = onlineNotifsPairsOnly;
-            _configService.Save();
-        }
-        _uiShared.DrawHelpText("Enabling this will only show online notifications (type: Info) for individual pairs.");
-        if (ImGui.Checkbox("Notify only for named pairs", ref onlineNotifsNamedOnly))
-        {
-            _configService.Current.ShowOnlineNotificationsOnlyForNamedPairs = onlineNotifsNamedOnly;
-            _configService.Save();
-        }
-        _uiShared.DrawHelpText("Enabling this will only show online notifications (type: Info) for pairs where you have set an individual note.");
-        }
-    }
 
     private void DrawPerformance()
     {
@@ -2462,7 +2103,17 @@ public class SettingsUi : WindowMediatorSubscriberBase
         }
 
         ImGui.Separator();
-        _uiShared.BigText("User List Display");
+        _uiShared.BigText("User List Options");
+       
+        var useFocusTarget = _configService.Current.UseFocusTarget;
+        if (ImGui.Checkbox("Set visible pairs as focus targets when clicking the eye", ref useFocusTarget))
+        {
+            _configService.Current.UseFocusTarget = useFocusTarget;
+            _configService.Save();
+        }
+        
+        ImGuiHelpers.ScaledDummy(10);
+
         var showNameInsteadOfNotes = currentProfile.ShowCharacterNameInsteadOfNotesForVisible;
         if (ImGui.Checkbox("Show character name instead of notes", ref showNameInsteadOfNotes))
         {
@@ -2493,38 +2144,56 @@ public class SettingsUi : WindowMediatorSubscriberBase
             _configService.Save();
         }
         _uiShared.DrawHelpText("When enabled, offline syncshell members will also appear in a separate 'Offline Syncshell' group instead of remaining in their syncshells.");
+        ImGuiHelpers.ScaledDummy(10);
+       
+        var groupUpSyncshells = _configService.Current.GroupUpSyncshells;
+        if (ImGui.Checkbox("Group up all syncshells in one folder", ref groupUpSyncshells))
+        {
+            _configService.Current.GroupUpSyncshells = groupUpSyncshells;
+            _configService.Save();
+            Mediator.Publish(new RefreshUiMessage());
+        }
+        _uiShared.DrawHelpText("This will group up all Syncshells in a special 'All Syncshells' folder in the main UI.");
+        
 
         ImGui.Separator();
-        _uiShared.BigText("Profiles");
-        var showProfiles = currentProfile.ProfilesShow;
-        if (ImGui.Checkbox("Show profiles", ref showProfiles))
+        // Profile Settings
+        _uiShared.BigText("Profile Settings");
+        var showProfiles = _configService.Current.ProfilesShow;
+        if (ImGui.Checkbox("Show Sphene Profiles on Hover", ref showProfiles))
         {
-            currentProfile.ProfilesShow = showProfiles;
+            Mediator.Publish(new ClearProfileDataMessage());
+            _configService.Current.ProfilesShow = showProfiles;
             _configService.Save();
         }
-        using (ImRaii.Disabled(!showProfiles))
+        _uiShared.DrawHelpText("This will show the configured user profile after a set delay");
+        ImGui.Indent();
+        if (!showProfiles) ImGui.BeginDisabled();
+        var profileOnRight = _configService.Current.ProfilePopoutRight;
+        if (ImGui.Checkbox("Popout profiles on the right", ref profileOnRight))
         {
-            using var indent = ImRaii.PushIndent();
-            var showNsfwProfiles = currentProfile.ProfilesAllowNsfw;
-            if (ImGui.Checkbox("Allow NSFW profiles", ref showNsfwProfiles))
-            {
-                currentProfile.ProfilesAllowNsfw = showNsfwProfiles;
-                _configService.Save();
-            }
-            var profileDelay = currentProfile.ProfileDelay;
-            ImGui.SetNextItemWidth(200 * ImGuiHelpers.GlobalScale);
-            if (ImGui.SliderFloat("Hover Delay (s)", ref profileDelay, 0.5f, 10f))
-            {
-                currentProfile.ProfileDelay = profileDelay;
-                _configService.Save();
-            }
-            var profileOnRight = currentProfile.ProfilePopoutRight;
-            if (ImGui.Checkbox("Show on right", ref profileOnRight))
-            {
-                currentProfile.ProfilePopoutRight = profileOnRight;
-                _configService.Save();
-            }
+            _configService.Current.ProfilePopoutRight = profileOnRight;
+            _configService.Save();
+            Mediator.Publish(new CompactUiChange(Vector2.Zero, Vector2.Zero));
         }
+        _uiShared.DrawHelpText("Will show profiles on the right side of the main UI");
+        var profileDelay = _configService.Current.ProfileDelay;
+        if (ImGui.SliderFloat("Hover Delay", ref profileDelay, 1, 10))
+        {
+            _configService.Current.ProfileDelay = profileDelay;
+            _configService.Save();
+        }
+        _uiShared.DrawHelpText("Delay until the profile should be displayed");
+        if (!showProfiles) ImGui.EndDisabled();
+        ImGui.Unindent();
+        var showNsfwProfiles = _configService.Current.ProfilesAllowNsfw;
+        if (ImGui.Checkbox("Show profiles marked as NSFW", ref showNsfwProfiles))
+        {
+            Mediator.Publish(new ClearProfileDataMessage());
+            _configService.Current.ProfilesAllowNsfw = showNsfwProfiles;
+            _configService.Save();
+        }
+        _uiShared.DrawHelpText("Will show profiles that have the NSFW tag enabled");
     }
 
     private void DrawGeneralNotifications()

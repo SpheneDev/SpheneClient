@@ -113,21 +113,6 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
             return;
         }
         
-        // If user hasn't seen the city syncshell explanation yet, don't show any area-bound syncshell UI
-        if (!_configService.Current.HasSeenCitySyncshellExplanation)
-        {
-            _logger.LogDebug("User hasn't seen city syncshell explanation yet, skipping area-bound syncshell processing");
-            return;
-        }
-        
-        // Check if area syncshell consent popups are disabled - this affects both area-bound and city syncshells
-        if (!_configService.Current.AutoShowAreaBoundSyncshellConsent)
-        {
-            _logger.LogDebug("Area syncshell consent popups are disabled, skipping area-bound syncshell processing");
-            return;
-        }
-        
-        // Leave syncshells that are no longer applicable
         if (oldLocation != null)
         {
             var syncshellsToLeave = new List<string>();
@@ -171,6 +156,13 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
                 // Remove from notified list when leaving so we can notify again if we re-enter
                 _notifiedSyncshells.Remove(syncshellId);
             }
+        }
+        
+        // If user hasn't seen the city syncshell explanation yet, don't show any area-bound syncshell UI
+        if (!_configService.Current.HasSeenCitySyncshellExplanation)
+        {
+            _logger.LogDebug("User hasn't seen city syncshell explanation yet, skipping area-bound syncshell join processing");
+            return;
         }
 
         // Join syncshells that are now applicable
