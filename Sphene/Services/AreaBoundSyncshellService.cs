@@ -720,16 +720,10 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
     {
         _logger.LogDebug("TriggerAreaSyncshellSelection called");
         
-        // Check all the same conditions as HandleLocationChange
+        // Check basic connection and location requirements
         if (!_apiController.IsConnected)
         {
             _logger.LogDebug("Not connected to server, cannot trigger area syncshell selection");
-            return;
-        }
-               
-        if (!_configService.Current.AutoShowAreaBoundSyncshellConsent)
-        {
-            _logger.LogDebug("Area syncshell consent popups are disabled, cannot trigger area syncshell selection");
             return;
         }
         
