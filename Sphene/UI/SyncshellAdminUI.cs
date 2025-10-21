@@ -98,6 +98,9 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
     private readonly HousingOwnershipService _housingOwnershipService;
     
     // UI-only state for property preferences - immediate UI updates
+    
+    // Tab switching control
+    private bool _shouldSelectAreaBindingTab = false;
     private readonly Dictionary<string, (bool AllowOutdoor, bool AllowIndoor)> _uiPropertyStates = new();
     
     // Track properties that have been deleted in the UI (to hide them until server confirms)
@@ -231,6 +234,49 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
             var inviteTab = ImRaii.TabItem("Invites");
             if (inviteTab)
             {
+                 
+                // Area Binding Feature Highlight (only for owners)
+                if (_isOwner)
+                {
+                    ImGui.PushStyleColor(ImGuiCol.Header, new Vector4(0.2f, 0.6f, 0.9f, 0.3f));
+                    ImGui.PushStyleColor(ImGuiCol.HeaderHovered, new Vector4(0.2f, 0.6f, 0.9f, 0.4f));
+                    ImGui.PushStyleColor(ImGuiCol.HeaderActive, new Vector4(0.2f, 0.6f, 0.9f, 0.5f));
+                    
+                    if (ImGui.CollapsingHeader("Area Bound Syncshells - Auto-Join Feature", ImGuiTreeNodeFlags.DefaultOpen))
+                    {
+                        ImGui.PopStyleColor(3);
+                        ImGuiHelpers.ScaledDummy(2f);
+                        
+                        ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.3f, 0.8f, 1.0f, 1.0f));
+                        _uiSharedService.IconText(FontAwesomeIcon.Lightbulb);
+                        ImGui.SameLine();
+                        ImGui.TextUnformatted("Did you know?");
+                        ImGui.PopStyleColor();
+                        
+                        UiSharedService.TextWrapped("You can bind this syncshell to housing areas (houses, apartments, rooms) so users automatically join when they enter the area! This is perfect for:");
+                        
+                        ImGui.Bullet(); ImGui.SameLine(); ImGui.TextUnformatted("House parties and events");
+                        ImGui.Bullet(); ImGui.SameLine(); ImGui.TextUnformatted("FC house coordination");
+                        ImGui.Bullet(); ImGui.SameLine(); ImGui.TextUnformatted("Apartment building communities");
+                        ImGui.Bullet(); ImGui.SameLine(); ImGui.TextUnformatted("Venue management");
+                        
+                        ImGuiHelpers.ScaledDummy(1f);
+                        
+                        if (_uiSharedService.IconTextButton(FontAwesomeIcon.MapMarkerAlt, "Configure Area Binding"))
+                        {
+                            // Switch to Area Binding tab
+                            _shouldSelectAreaBindingTab = true;
+                        }
+                        UiSharedService.AttachToolTip("Click to go to the 'Area Binding' tab to set up auto-join for your housing areas");
+                        
+                        ImGuiHelpers.ScaledDummy(2f);
+                    }
+                    else
+                    {
+                        ImGui.PopStyleColor(3);
+                    }
+                }
+                
                 // Syncshell Status Section
                 if (ImGui.CollapsingHeader("Syncshell Status", ImGuiTreeNodeFlags.DefaultOpen))
                 {
@@ -827,38 +873,8 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
                      ImGuiHelpers.ScaledDummy(2f);
                  }
                  
-                 // Area Binding Section
-                 if (ImGui.CollapsingHeader("Area Binding", ImGuiTreeNodeFlags.DefaultOpen))
-                 {
-                     ImGuiHelpers.ScaledDummy(2f);
-                     
-                     UiSharedService.TextWrapped("Bind this syncshell to a specific location. Users will automatically join when entering the area.");
-                     ImGuiHelpers.ScaledDummy(3f);
-                     
-                     if (_isLoadingAreaBinding)
-                     {
-                         ImGui.TextUnformatted("Loading area binding settings...");
-                     }
-                     else
-                     {
-                         DrawAreaBindingControls();
-                     }
 
-                     ImGuiHelpers.ScaledDummy(2f);
-                 }
                  
-                 // Owned Properties Section
-                 if (ImGui.CollapsingHeader("Owned Properties", ImGuiTreeNodeFlags.DefaultOpen))
-                 {
-                     ImGuiHelpers.ScaledDummy(2f);
-                     
-                     UiSharedService.TextWrapped("Manage your owned housing properties. Only properties in this list can be used for area syncshells.");
-                     ImGuiHelpers.ScaledDummy(3f);
-                     
-                     DrawOwnedPropertiesControls();
-
-                     ImGuiHelpers.ScaledDummy(2f);
-                 }
                 }
                 ownerTab.Dispose();
                 
@@ -869,6 +885,95 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
                     DrawWelcomePageControls();
                 }
                 welcomePageTab.Dispose();
+                
+                // Area Binding Tab (only for owners)
+                var areaBindingTab = ImRaii.TabItem("Area Binding", _shouldSelectAreaBindingTab ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None);
+                if (areaBindingTab)
+                {
+                    // Reset the flag after the tab is selected
+                    _shouldSelectAreaBindingTab = false;
+                    // Area Binding Section
+                    if (ImGui.CollapsingHeader("Area Binding Configuration", ImGuiTreeNodeFlags.DefaultOpen))
+                    {
+                        ImGuiHelpers.ScaledDummy(2f);
+                        
+                        ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.3f, 0.8f, 1.0f, 1.0f));
+                        ImGui.TextUnformatted("About Area Binding:");
+                        ImGui.PopStyleColor();
+                        
+                        UiSharedService.TextWrapped("Area Binding allows users to automatically join this syncshell when they enter bound housing areas. Users will see a notification and can choose to join or decline. This feature is perfect for creating location-based communities!");
+                        
+                        ImGuiHelpers.ScaledDummy(2f);
+                        
+                        // Check if current location is verified as owned
+                        var currentLocation = _dalamudUtilService.GetMapData();
+                        var isCurrentLocationVerified = _housingOwnershipService.IsLocationVerifiedAndAllowed(currentLocation);
+                        var isInHousingArea = _housingOwnershipService.IsHousingArea(currentLocation);
+                        
+                        if (!isInHousingArea)
+                        {
+                            ImGui.PushStyleColor(ImGuiCol.Text, ImGuiColors.DalamudRed);
+                            _uiSharedService.IconText(FontAwesomeIcon.ExclamationTriangle);
+                            ImGui.SameLine();
+                            ImGui.TextUnformatted("Area Binding is only available in housing areas");
+                            ImGui.PopStyleColor();
+                            UiSharedService.TextWrapped("Please go to a housing area (plot, house, or room) to configure Area Binding.");
+                        }
+                        else if (!isCurrentLocationVerified)
+                        {
+                            ImGui.PushStyleColor(ImGuiCol.Text, ImGuiColors.DalamudOrange);
+                            _uiSharedService.IconText(FontAwesomeIcon.Lock);
+                            ImGui.SameLine();
+                            ImGui.TextUnformatted("Property ownership verification required");
+                            ImGui.PopStyleColor();
+                            UiSharedService.TextWrapped("To configure Area Binding, you must first verify ownership of this property in the 'Owned Properties Management' section below.");
+                            ImGuiHelpers.ScaledDummy(1f);
+                        }
+                        else
+                        {
+                            // Show Area Binding controls only if location is verified
+                            if (_isLoadingAreaBinding)
+                            {
+                                ImGui.TextUnformatted("Loading area binding settings...");
+                            }
+                            else
+                            {
+                                DrawAreaBindingControls();
+                            }
+                        }
+
+                        ImGuiHelpers.ScaledDummy(2f);
+                    }
+                    
+                    // Owned Properties Section
+                    if (ImGui.CollapsingHeader("Owned Properties Management", ImGuiTreeNodeFlags.DefaultOpen))
+                    {
+                        ImGuiHelpers.ScaledDummy(2f);
+                        
+                        ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.3f, 0.8f, 1.0f, 1.0f));
+                        ImGui.TextUnformatted("Property Verification:");
+                        ImGui.PopStyleColor();
+                        
+                        UiSharedService.TextWrapped("To use Area Binding, you must first verify ownership of your housing properties. This is a one-time security step that prevents unauthorized use of other players' housing areas. Once verified, you can configure Area Binding for that property above.");
+                        
+                        ImGuiHelpers.ScaledDummy(1f);
+                        
+                        ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 0.8f, 0.2f, 1.0f));
+                        _uiSharedService.IconText(FontAwesomeIcon.InfoCircle);
+                        ImGui.SameLine();
+                        ImGui.TextUnformatted("How to verify:");
+                        ImGui.PopStyleColor();
+                        ImGui.TextUnformatted("1. Go to your housing area.");
+                        ImGui.TextUnformatted("2. Enter the housing building Menu.");
+                        ImGui.TextUnformatted("3. Click 'Verify Ownership' below while the menu is open.");
+                        ImGuiHelpers.ScaledDummy(2f);
+                        
+                        DrawOwnedPropertiesControls();
+
+                        ImGuiHelpers.ScaledDummy(2f);
+                    }
+                }
+                areaBindingTab.Dispose();
             }
         }
     }
@@ -879,12 +984,10 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
         var currentMapLocation = _dalamudUtilService.GetMapData();
         
         ImGui.TextUnformatted("Current Location:");
-        ImGui.SameLine();
         var loc = currentMapLocation;
-        
+
         // Get names for display
         var serverName = _dalamudUtilService.WorldData.Value.TryGetValue((ushort)loc.ServerId, out var sName) ? sName : $"Server {loc.ServerId}";
-        
         // For territory, get only the region name (first part before " - ")
         var territoryName = "Territory " + loc.TerritoryId;
         if (_dalamudUtilService.TerritoryData.Value.TryGetValue(loc.TerritoryId, out var tName))
@@ -892,7 +995,7 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
             var regionName = tName.Split(" - ")[0]; // Take only the region part
             territoryName = regionName;
         }
-        
+
         // For map, get the specific location name (everything after the region)
         var mapName = "Map " + loc.MapId;
         if (_dalamudUtilService.MapData.Value.TryGetValue(loc.MapId, out var mData))
@@ -909,13 +1012,12 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
                 mapName = fullMapName;
             }
         }
-        
-        ImGui.TextColored(ImGuiColors.DalamudYellow, $"Server: {serverName}");
-        ImGui.TextColored(ImGuiColors.DalamudYellow, $"Territory: {territoryName}");
-        ImGui.TextColored(ImGuiColors.DalamudYellow, $"Map: {mapName}");
+        ImGui.TextColored(ImGuiColors.DalamudYellow, $"Server: {serverName}, Territory: {territoryName}, Map: {mapName}, ");
+        ImGui.SameLine();
         if (loc.WardId > 0)
         {
-            ImGui.TextColored(ImGuiColors.DalamudYellow, $"Ward: {loc.WardId}");
+            ImGui.TextColored(ImGuiColors.DalamudYellow, $"Ward: {loc.WardId}, ");
+            ImGui.SameLine();
         }
         if (loc.HouseId > 0)
         {
@@ -927,10 +1029,32 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
         // Area binding toggle
         var isInHousingArea = _housingOwnershipService.IsHousingArea(loc);
         
+        // Status indicator for area binding
+        if (_areaBindingEnabled && _currentAreaBinding != null)
+        {
+            ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.2f, 0.8f, 0.2f, 1.0f));
+            _uiSharedService.IconText(FontAwesomeIcon.CheckCircle);
+            ImGui.SameLine();
+            ImGui.TextUnformatted("Area Binding is ACTIVE for this location");
+            ImGui.PopStyleColor();
+            ImGuiHelpers.ScaledDummy(1f);
+        }
+        else if (_areaBindingEnabled)
+        {
+            ImGui.PushStyleColor(ImGuiCol.Text, ImGuiColors.DalamudOrange);
+            _uiSharedService.IconText(FontAwesomeIcon.Clock);
+            ImGui.SameLine();
+            ImGui.TextUnformatted("Area Binding is enabled but not yet configured");
+            ImGui.PopStyleColor();
+            ImGuiHelpers.ScaledDummy(1f);
+        }
+        
         if (!isInHousingArea)
         {
             ImGui.PushStyleColor(ImGuiCol.Text, ImGuiColors.DalamudRed);
-            ImGui.TextUnformatted("⚠ Area syncshells are only available in housing areas (plots, houses, or rooms)");
+            _uiSharedService.IconText(FontAwesomeIcon.ExclamationTriangle);
+            ImGui.SameLine();
+            ImGui.TextUnformatted("Area syncshells are only available in housing areas (plots, houses, or rooms)");
             ImGui.PopStyleColor();
             ImGuiHelpers.ScaledDummy(1f);
         }
@@ -1093,35 +1217,6 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
             ImGui.Separator();
             ImGui.TextUnformatted("Add New Location:");
             
-            // Matching mode for new location
-            var availableMatchingModes = GetAvailableMatchingModes(currentMapLocation);
-            
-            var currentModeIndex = (int)_newLocationMatchingMode;
-            // Ensure current mode is available, otherwise reset to first available
-            if (!availableMatchingModes.Contains(_newLocationMatchingMode))
-            {
-                _newLocationMatchingMode = availableMatchingModes.First();
-                currentModeIndex = (int)_newLocationMatchingMode;
-            }
-            
-            var matchingModeNames = availableMatchingModes.Select(mode => GetMatchingModeDisplayName(mode)).ToArray();
-            var availableModeIndices = availableMatchingModes.Select(mode => (int)mode).ToArray();
-            
-            // Find the index in the filtered array
-            var displayIndex = Array.IndexOf(availableModeIndices, currentModeIndex);
-            if (displayIndex == -1) displayIndex = 0;
-            
-            ImGui.SetNextItemWidth(400);
-            if (ImGui.Combo("Matching Mode", ref displayIndex, matchingModeNames, matchingModeNames.Length))
-            {
-                _newLocationMatchingMode = (AreaMatchingMode)availableModeIndices[displayIndex];
-            }
-            UiSharedService.AttachToolTip("Choose how precisely the location should match for users to auto-join:\n" +
-                                        "• Exact Match: Users must be in the exact same location\n" +
-                                        "• Territory Only: Users can be anywhere in the same zone\n" +
-                                        "• Server & Territory: Same server and zone (for cross-world compatibility)\n" +
-                                        "• Housing options: Various levels of housing area matching");
-            
             // Optional location name
             ImGui.SetNextItemWidth(200);
             ImGui.InputTextWithHint("Location Name", "Optional name for this location", ref _newLocationName, 100);
@@ -1136,9 +1231,10 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
             
             // Add current location button
             bool isInDuty = _dalamudUtilService.IsInDuty;
+            bool isLocationAlreadyBound = IsLocationAlreadyBound(currentMapLocation);
             
-            // Disable button and show different tooltip when in duty
-            if (isInDuty)
+            // Disable button and show different tooltip when in duty or location already bound
+            if (isInDuty || isLocationAlreadyBound)
             {
                 ImGui.BeginDisabled();
             }
@@ -1156,10 +1252,17 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
                 }
             }
             
-            if (isInDuty)
+            if (isInDuty || isLocationAlreadyBound)
             {
                 ImGui.EndDisabled();
-                UiSharedService.AttachToolTip("Cannot add locations while in duties or instances");
+                if (isInDuty)
+                {
+                    UiSharedService.AttachToolTip("Cannot add locations while in duties or instances");
+                }
+                else if (isLocationAlreadyBound)
+                {
+                    UiSharedService.AttachToolTip("This location is already bound to this syncshell");
+                }
             }
             else
             {
@@ -1174,38 +1277,125 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
                 ImGui.Separator();
                 ImGui.TextUnformatted("Current Bound Locations:");
                 
-                for (int i = 0; i < _boundAreas.Count; i++)
+                // Create table for bound locations
+                if (ImGui.BeginTable("BoundLocationsTable", 8, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable))
                 {
-                    var boundArea = _boundAreas[i];
-                    var location = boundArea.Location;
+                    // Setup columns
+                    ImGui.TableSetupColumn("Server", ImGuiTableColumnFlags.WidthStretch, 0.15f);
+                    ImGui.TableSetupColumn("Territory", ImGuiTableColumnFlags.WidthStretch, 0.18f);
+                    ImGui.TableSetupColumn("Map", ImGuiTableColumnFlags.WidthStretch, 0.20f);
+                    ImGui.TableSetupColumn("Ward", ImGuiTableColumnFlags.WidthStretch, 0.08f);
+                    ImGui.TableSetupColumn("Plot", ImGuiTableColumnFlags.WidthStretch, 0.08f);
+                    ImGui.TableSetupColumn("Room", ImGuiTableColumnFlags.WidthStretch, 0.08f);
+                    ImGui.TableSetupColumn("Name", ImGuiTableColumnFlags.WidthStretch, 0.15f);
+                    ImGui.TableSetupColumn("Actions", ImGuiTableColumnFlags.WidthStretch, 0.08f);
+                    ImGui.TableHeadersRow();
                     
-                    ImGui.PushID(i);
-                    
-                    // Location info
-                    var locationText = LocationDisplayService.GetLocationDisplayTextWithNames(location, _dalamudUtilService);
-                    
-                    ImGui.TextColored(ImGuiColors.ParsedGreen, locationText);
-                    
-                    // Location name and matching mode
-                    ImGui.SameLine();
-                    var descriptiveName = LocationDisplayService.GetLocationDescriptiveName(location, boundArea.MatchingMode);
-                    ImGui.TextColored(ImGuiColors.DalamudGrey, $"({descriptiveName})");
-                    
-                    if (!string.IsNullOrEmpty(boundArea.LocationName))
+                    for (int i = 0; i < _boundAreas.Count; i++)
                     {
-                        ImGui.SameLine();
-                        ImGui.TextColored(ImGuiColors.DalamudYellow, $"[{boundArea.LocationName}]");
+                        var boundArea = _boundAreas[i];
+                        var location = boundArea.Location;
+                        
+                        ImGui.PushID(i);
+                        ImGui.TableNextRow();
+                        
+                        // Server column
+                        ImGui.TableNextColumn();
+                        var boundServerName = _dalamudUtilService.WorldData.Value.TryGetValue((ushort)location.ServerId, out var boundSName) ? boundSName : $"Server {location.ServerId}";
+                        ImGui.TextColored(ImGuiColors.ParsedGreen, boundServerName);
+                        
+                        // Territory column
+                        ImGui.TableNextColumn();
+                        var boundTerritoryName = "Territory " + location.TerritoryId;
+                        if (_dalamudUtilService.TerritoryData.Value.TryGetValue(location.TerritoryId, out var boundTName))
+                        {
+                            var regionName = boundTName.Split(" - ")[0]; // Take only the region part
+                            boundTerritoryName = regionName;
+                        }
+                        ImGui.TextColored(ImGuiColors.ParsedBlue, boundTerritoryName);
+                        
+                        // Map column
+                        ImGui.TableNextColumn();
+                        var boundMapName = "Map " + location.MapId;
+                        if (_dalamudUtilService.MapData.Value.TryGetValue(location.MapId, out var boundMData))
+                        {
+                            var fullMapName = boundMData.MapName;
+                            var parts = fullMapName.Split(" - ");
+                            if (parts.Length > 1)
+                            {
+                                // Skip the region part and join the rest
+                                boundMapName = string.Join(" - ", parts.Skip(1));
+                            }
+                            else
+                            {
+                                boundMapName = fullMapName;
+                            }
+                        }
+                        ImGui.TextColored(ImGuiColors.ParsedPurple, boundMapName);
+                        
+                        // Ward column
+                        ImGui.TableNextColumn();
+                        if (location.WardId > 0)
+                        {
+                            ImGui.TextUnformatted(location.WardId.ToString());
+                        }
+                        else
+                        {
+                            ImGui.TextColored(ImGuiColors.DalamudGrey, "-");
+                        }
+                        
+                        // Plot/House column
+                        ImGui.TableNextColumn();
+                        if (location.HouseId > 0)
+                        {
+                            var plotText = location.HouseId == 100 ? "Apt" : location.HouseId.ToString();
+                            ImGui.TextUnformatted(plotText);
+                        }
+                        else
+                        {
+                            ImGui.TextColored(ImGuiColors.DalamudGrey, "-");
+                        }
+                        
+                        // Room column
+                        ImGui.TableNextColumn();
+                        if (location.RoomId > 0)
+                        {
+                            ImGui.TextUnformatted(location.RoomId.ToString());
+                        }
+                        else
+                        {
+                            ImGui.TextColored(ImGuiColors.DalamudGrey, "-");
+                        }
+                        
+                        // Name column
+                        ImGui.TableNextColumn();
+                        if (!string.IsNullOrEmpty(boundArea.LocationName))
+                        {
+                            ImGui.TextColored(ImGuiColors.DalamudYellow, boundArea.LocationName);
+                        }
+                        else
+                        {
+                            var descriptiveName = LocationDisplayService.GetLocationDescriptiveName(location, boundArea.MatchingMode);
+                            ImGui.TextColored(ImGuiColors.DalamudGrey, descriptiveName);
+                        }
+                        
+                        // Actions column
+                        ImGui.TableNextColumn();
+                        var availableWidth = ImGui.GetContentRegionAvail().X;
+                        var buttonWidth = ImGui.GetFrameHeight();
+                        var rightPadding = 3.0f; // 3 pixel padding from right edge
+                        ImGui.SetCursorPosX(ImGui.GetCursorPosX() + availableWidth - buttonWidth - rightPadding);
+
+                        if (_uiSharedService.IconButton(FontAwesomeIcon.Trash))
+                        {
+                            _ = RemoveLocationBinding(i);
+                        }
+                        UiSharedService.AttachToolTip("Remove this location binding");
+                        
+                        ImGui.PopID();
                     }
                     
-                    // Remove button
-                    ImGui.SameLine();
-                    if (_uiSharedService.IconButton(FontAwesomeIcon.Trash))
-                    {
-                        _ = RemoveLocationBinding(i);
-                    }
-                    UiSharedService.AttachToolTip("Remove this location binding");
-                    
-                    ImGui.PopID();
+                    ImGui.EndTable();
                 }
                 
                 ImGuiHelpers.ScaledDummy(2f);
@@ -1223,6 +1413,15 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
     {
         try
         {
+            // Check if location already exists in bound areas
+            if (IsLocationAlreadyBound(location))
+            {
+                var message = "This location is already bound to this syncshell.";
+                _logger.LogWarning("Attempted to add duplicate location binding: {Location}", location);
+                Mediator.Publish(new NotificationMessage("Duplicate Location", message, NotificationType.Warning));
+                return;
+            }
+            
             // Check if location is a housing area first
             if (!_housingOwnershipService.IsHousingArea(location))
             {
@@ -1807,10 +2006,6 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
         var ownedProperties = _housingOwnershipService.GetOwnedProperties();
         var verifiedProperties = GetCachedVerifiedProperties();
         
-        // Current location display
-        ImGui.TextUnformatted("Current Location:");
-        var locationText = LocationDisplayService.GetLocationDisplayTextWithNames(currentLocation, _dalamudUtilService);
-        ImGui.TextColored(ImGuiColors.DalamudYellow, locationText);
         
         ImGuiHelpers.ScaledDummy(2f);
         
@@ -1867,125 +2062,13 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
         if (verifiedProperties.Count > 0)
         {
             ImGui.Separator();
+            
+            // Header with Clear All button
             ImGui.TextUnformatted("Your Verified Properties:");
+            ImGui.SameLine();
+            ImGui.SetCursorPosX(ImGui.GetWindowWidth() - 200); // Position button on the right
             
-            for (int i = 0; i < verifiedProperties.Count; i++)
-            {
-                var property = verifiedProperties[i];
-                
-                ImGui.PushID($"verified_property_{i}");
-                
-                // Property info
-                var propertyText = LocationDisplayService.GetLocationDisplayTextWithNames(property.Location, _dalamudUtilService);
-                ImGui.TextColored(ImGuiColors.ParsedGreen, propertyText);
-                
-                // Show outdoor/indoor preferences
-                ImGui.SameLine();
-                var preferencesText = "";
-                if (property.AllowOutdoor && property.AllowIndoor)
-                    preferencesText = "(Outdoor & Indoor)";
-                else if (property.AllowOutdoor)
-                    preferencesText = "(Outdoor Only)";
-                else if (property.AllowIndoor)
-                    preferencesText = "(Indoor Only)";
-                else
-                    preferencesText = "(None - Invalid)";
-                    
-                ImGui.TextColored(ImGuiColors.DalamudGrey, preferencesText);
-                
-                // Edit preferences button - only show for plots, not for rooms (rooms are always indoor)
-                if (!property.Location.IsIndoor)
-                {
-                    ImGui.SameLine();
-                    if (_uiSharedService.IconButton(FontAwesomeIcon.Edit))
-                    {
-                        // Toggle edit mode for this property
-                        // For now, we'll just show a simple toggle
-                        bool newAllowOutdoor = property.AllowOutdoor;
-                        bool newAllowIndoor = property.AllowIndoor;
-                        
-                        // Simple toggle logic - cycle through combinations
-                        if (property.AllowOutdoor && property.AllowIndoor)
-                        {
-                            newAllowOutdoor = true;
-                            newAllowIndoor = false;
-                        }
-                        else if (property.AllowOutdoor && !property.AllowIndoor)
-                        {
-                            newAllowOutdoor = false;
-                            newAllowIndoor = true;
-                        }
-                        else if (!property.AllowOutdoor && property.AllowIndoor)
-                        {
-                            newAllowOutdoor = true;
-                            newAllowIndoor = true;
-                        }
-                        
-                        // Update UI state immediately for instant visual feedback
-                        var key = $"{property.Location.TerritoryId}_{property.Location.WardId}_{property.Location.HouseId}";
-                        _uiPropertyStates[key] = (newAllowOutdoor, newAllowIndoor);
-                        
-                        // Send update to server in background (fire and forget)
-                        Task.Run(() =>
-                        {
-                            try
-                            {
-                                _housingOwnershipService.UpdateVerifiedPropertyPreferences(
-                                    property.Location, 
-                                    newAllowOutdoor, 
-                                    newAllowIndoor, 
-                                    property.PreferOutdoorSyncshells, 
-                                    property.PreferIndoorSyncshells);
-                                _logger.LogDebug("Property preferences updated on server for {Location}", property.Location);
-                             }
-                             catch (Exception ex)
-                             {
-                                 _logger.LogError(ex, "Failed to update property preferences on server for {Location}", property.Location);
-                            }
-                        });
-                    }
-                    UiSharedService.AttachToolTip("Click to cycle through outdoor/indoor preferences: Both → Outdoor Only → Indoor Only → Both");
-                }
-                
-                // Remove button - requires Ctrl key to prevent accidental deletion
-                ImGui.SameLine();
-                if (_uiSharedService.IconButton(FontAwesomeIcon.Trash))
-                {
-                    if (ImGui.GetIO().KeyCtrl)
-                    {
-                        // Mark property as deleted in UI immediately (hide it)
-                        var key = $"{property.Location.TerritoryId}_{property.Location.WardId}_{property.Location.HouseId}";
-                        _deletedPropertyKeys.Add(key);
-                        _uiPropertyStates.Remove(key);
-                        
-                        // Send removal to server in background
-                        Task.Run(() =>
-                        {
-                            try
-                            {
-                                _housingOwnershipService.RemoveVerifiedOwnedProperty(property.Location);
-                                _logger.LogDebug("Property removed from server for {Location}", property.Location);
-                             }
-                             catch (Exception ex)
-                             {
-                                 _logger.LogError(ex, "Failed to remove property from server for {Location}", property.Location);
-                            }
-                        });
-                    }
-                    else
-                    {
-                        // Show warning that Ctrl is required
-                        Mediator.Publish(new NotificationMessage("Ctrl Required", "Hold Ctrl while clicking to delete this property", NotificationType.Warning));
-                    }
-                }
-                UiSharedService.AttachToolTip("Hold Ctrl and click to remove this property from your verified properties list");
-                
-                ImGui.PopID();
-            }
-            
-            ImGuiHelpers.ScaledDummy(2f);
-            
-            if (_uiSharedService.IconTextButton(FontAwesomeIcon.Broom, "Clear All Verified Properties"))
+            if (_uiSharedService.IconTextButton(FontAwesomeIcon.Broom, "Clear All"))
             {
                 if (ImGui.GetIO().KeyCtrl)
                 {
@@ -2019,6 +2102,233 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
                 }
             }
             UiSharedService.AttachToolTip("Hold Ctrl and click to remove all properties from your verified properties list");
+            
+            ImGuiHelpers.ScaledDummy(1f);
+            
+            // Create detailed table with separate columns for each location component
+            using var table = ImRaii.Table("VerifiedPropertiesTable", 8, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp);
+            if (table)
+            {
+                // Setup columns with responsive widths that fit within window
+                ImGui.TableSetupColumn("Server", ImGuiTableColumnFlags.WidthStretch, 0.15f);
+                ImGui.TableSetupColumn("Territory", ImGuiTableColumnFlags.WidthStretch, 0.18f);
+                ImGui.TableSetupColumn("Map", ImGuiTableColumnFlags.WidthStretch, 0.20f);
+                ImGui.TableSetupColumn("Ward", ImGuiTableColumnFlags.WidthStretch, 0.08f);
+                ImGui.TableSetupColumn("Plot", ImGuiTableColumnFlags.WidthStretch, 0.08f);
+                ImGui.TableSetupColumn("Room", ImGuiTableColumnFlags.WidthStretch, 0.08f);
+                ImGui.TableSetupColumn("Type", ImGuiTableColumnFlags.WidthStretch, 0.15f);
+                ImGui.TableSetupColumn("Actions", ImGuiTableColumnFlags.WidthStretch, 0.08f);
+                ImGui.TableHeadersRow();
+                
+                for (int i = 0; i < verifiedProperties.Count; i++)
+                {
+                    var property = verifiedProperties[i];
+                    var location = property.Location;
+                    
+                    ImGui.PushID($"verified_property_{i}");
+                    ImGui.TableNextRow();
+                    
+                    // Server column
+                    ImGui.TableNextColumn();
+                    var serverName = _dalamudUtilService.WorldData.Value.TryGetValue((ushort)location.ServerId, out var sName) ? sName : $"Server {location.ServerId}";
+                    ImGui.TextColored(ImGuiColors.ParsedGreen, serverName);
+                    
+                    // Territory column
+                    ImGui.TableNextColumn();
+                    var territoryName = "Territory " + location.TerritoryId;
+                    if (_dalamudUtilService.TerritoryData.Value.TryGetValue(location.TerritoryId, out var tName))
+                    {
+                        var regionName = tName.Split(" - ")[0]; // Take only the region part
+                        territoryName = regionName;
+                    }
+                    ImGui.TextColored(ImGuiColors.ParsedBlue, territoryName);
+                    
+                    // Map column
+                    ImGui.TableNextColumn();
+                    var mapName = "Map " + location.MapId;
+                    if (_dalamudUtilService.MapData.Value.TryGetValue(location.MapId, out var mData))
+                    {
+                        var fullMapName = mData.MapName;
+                        var parts = fullMapName.Split(" - ");
+                        if (parts.Length > 1)
+                        {
+                            // Skip the region part and join the rest
+                            mapName = string.Join(" - ", parts.Skip(1));
+                        }
+                        else
+                        {
+                            mapName = fullMapName;
+                        }
+                    }
+                    ImGui.TextColored(ImGuiColors.ParsedPurple, mapName);
+                    
+                    // Ward column
+                    ImGui.TableNextColumn();
+                    if (location.WardId > 0)
+                    {
+                        ImGui.TextUnformatted(location.WardId.ToString());
+                    }
+                    else
+                    {
+                        ImGui.TextColored(ImGuiColors.DalamudGrey, "-");
+                    }
+                    
+                    // Plot/House column
+                    ImGui.TableNextColumn();
+                    if (location.HouseId > 0)
+                    {
+                        var plotText = location.HouseId == 100 ? "Apt" : location.HouseId.ToString();
+                        ImGui.TextUnformatted(plotText);
+                    }
+                    else
+                    {
+                        ImGui.TextColored(ImGuiColors.DalamudGrey, "-");
+                    }
+                    
+                    // Room column
+                    ImGui.TableNextColumn();
+                    if (location.RoomId > 0)
+                    {
+                        ImGui.TextUnformatted(location.RoomId.ToString());
+                    }
+                    else
+                    {
+                        ImGui.TextColored(ImGuiColors.DalamudGrey, "-");
+                    }
+                    
+                    // Type/Preferences column - only show for houses, not rooms
+                    ImGui.TableNextColumn();
+                    if (!location.IsIndoor) // Only show for houses (outdoor plots)
+                    {
+                        var preferencesText = "";
+                        if (property.AllowOutdoor && property.AllowIndoor)
+                            preferencesText = "Outdoor & Indoor";
+                        else if (property.AllowOutdoor)
+                            preferencesText = "Outdoor Only";
+                        else if (property.AllowIndoor)
+                            preferencesText = "Indoor Only";
+                        else
+                            preferencesText = "None - Invalid";
+                            
+                        ImGui.TextColored(ImGuiColors.DalamudGrey, preferencesText);
+                    }
+                    else
+                    {
+                        // For rooms, just show "Room" without outdoor/indoor preferences
+                        ImGui.TextColored(ImGuiColors.DalamudGrey, "Room");
+                    }
+                    
+                    // Actions column
+                    ImGui.TableNextColumn();
+                    
+                    // Calculate available width and button sizes
+                    var availableWidth = ImGui.GetContentRegionAvail().X;
+                    var buttonWidth = ImGui.GetFrameHeight();
+                    var spacing = ImGui.GetStyle().ItemSpacing.X;
+                    var rightPadding = 3.0f; // 3 pixel padding from right edge
+                    
+                    // For houses (not rooms): draw edit button first, then delete button with SameLine
+                    if (!location.IsIndoor)
+                    {
+
+                        var deleteButtonPos = availableWidth - buttonWidth - rightPadding;
+                        var editButtonPos = deleteButtonPos - buttonWidth - spacing - 4.0f;
+                    
+                        var currentX = ImGui.GetCursorPosX();
+                        ImGui.SetCursorPosX(currentX + editButtonPos);
+                        if (_uiSharedService.IconButton(FontAwesomeIcon.Edit))
+                        {
+                            // Toggle edit mode for this property
+                            // For now, we'll just show a simple toggle
+                            bool newAllowOutdoor = property.AllowOutdoor;
+                            bool newAllowIndoor = property.AllowIndoor;
+                            
+                            // Simple toggle logic - cycle through combinations
+                            if (property.AllowOutdoor && property.AllowIndoor)
+                            {
+                                newAllowOutdoor = true;
+                                newAllowIndoor = false;
+                            }
+                            else if (property.AllowOutdoor && !property.AllowIndoor)
+                            {
+                                newAllowOutdoor = false;
+                                newAllowIndoor = true;
+                            }
+                            else if (!property.AllowOutdoor && property.AllowIndoor)
+                            {
+                                newAllowOutdoor = true;
+                                newAllowIndoor = true;
+                            }
+                            
+                            // Update UI state immediately for instant visual feedback
+                            var key = $"{location.TerritoryId}_{location.WardId}_{location.HouseId}";
+                            _uiPropertyStates[key] = (newAllowOutdoor, newAllowIndoor);
+                            
+                            // Send update to server in background (fire and forget)
+                            Task.Run(() =>
+                            {
+                                try
+                                {
+                                    _housingOwnershipService.UpdateVerifiedPropertyPreferences(
+                                        location, 
+                                        newAllowOutdoor, 
+                                        newAllowIndoor, 
+                                        property.PreferOutdoorSyncshells, 
+                                        property.PreferIndoorSyncshells);
+                                    _logger.LogDebug("Property preferences updated on server for {Location}", location);
+                                 }
+                                 catch (Exception ex)
+                                 {
+                                     _logger.LogError(ex, "Failed to update property preferences on server for {Location}", location);
+                                }
+                            });
+                        }
+                        UiSharedService.AttachToolTip("Click to cycle through outdoor/indoor preferences: Both → Outdoor Only → Indoor Only → Both");
+                        
+                        ImGui.SameLine(0, spacing);
+                    }
+                    else
+                    {
+                        var deleteButtonPos = availableWidth - buttonWidth - rightPadding;
+                        var currentX = ImGui.GetCursorPosX();
+                        ImGui.SetCursorPosX(currentX + deleteButtonPos);
+                    }
+                    
+                    // Remove button - requires Ctrl key to prevent accidental deletion
+                    if (_uiSharedService.IconButton(FontAwesomeIcon.Trash))
+                    {
+                        if (ImGui.GetIO().KeyCtrl)
+                        {
+                            // Mark property as deleted in UI immediately (hide it)
+                            var key = $"{location.TerritoryId}_{location.WardId}_{location.HouseId}";
+                            _deletedPropertyKeys.Add(key);
+                            _uiPropertyStates.Remove(key);
+                            
+                            // Send removal to server in background
+                            Task.Run(() =>
+                            {
+                                try
+                                {
+                                    _housingOwnershipService.RemoveVerifiedOwnedProperty(location);
+                                    _logger.LogDebug("Property removed from server for {Location}", location);
+                                 }
+                                 catch (Exception ex)
+                                 {
+                                     _logger.LogError(ex, "Failed to remove property from server for {Location}", location);
+                                }
+                            });
+                        }
+                        else
+                        {
+                            // Show warning that Ctrl is required
+                            Mediator.Publish(new NotificationMessage("Ctrl Required", "Hold Ctrl while clicking to delete this property", NotificationType.Warning));
+                        }
+                    }
+                    UiSharedService.AttachToolTip("Hold Ctrl and click to remove this property from your verified properties list");
+                    
+                    ImGui.PopID();
+                }
+            }
         }
         else
         {
@@ -2181,6 +2491,17 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
                 _uiPropertyStates[key] = (property.AllowOutdoor, property.AllowIndoor);
             }
         }
+    }
+    
+    private bool IsLocationAlreadyBound(LocationInfo location)
+    {
+        return _boundAreas.Any(boundArea => 
+            boundArea.Location.ServerId == location.ServerId &&
+            boundArea.Location.TerritoryId == location.TerritoryId &&
+            boundArea.Location.MapId == location.MapId &&
+            boundArea.Location.WardId == location.WardId &&
+            boundArea.Location.HouseId == location.HouseId &&
+            boundArea.Location.RoomId == location.RoomId);
     }
 
 }
