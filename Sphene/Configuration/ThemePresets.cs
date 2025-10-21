@@ -43,7 +43,7 @@ public static class ThemePresets
             CompactItemSpacing = new Vector2(5.3f, 6.0f),
             CompactItemInnerSpacing = new Vector2(5.9f, 4.0f),
             CompactCellPadding = new Vector2(6.0f, 3.0f),
-            CompactChildPadding = new Vector2(20.0f, 11.5f),
+            CompactChildPadding = new Vector2(11.5f, 11.5f),
             CompactIndentSpacing = 23.4f,
             CompactScrollbarSize = 16.9f,
             CompactGrabMinSize = 14.0f,
@@ -165,7 +165,7 @@ public static class ThemePresets
             CompactText = new Vector4(0.90f, 0.90f, 0.90f, 1.00f),
             CompactTextSecondary = new Vector4(0.70f, 0.70f, 0.70f, 1.00f),
             CompactAccent = new Vector4(0.20f, 0.40f, 0.80f, 1.00f),
-            CompactHover = new Vector4(0.30f, 0.50f, 0.90f, 0.80f),
+            CompactHover = new Vector4(0.30f, 0.50f, 0.90f, 0.20f),
             CompactActive = new Vector4(0.40f, 0.60f, 1.00f, 0.90f),
             CompactHeaderText = new Vector4(0.80f, 0.60f, 0.20f, 1.00f),
             

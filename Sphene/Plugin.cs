@@ -148,6 +148,8 @@ public sealed class Plugin : IDalamudPlugin
                 clientState, objectTable, framework, gameGui, condition, gameData, targetManager, gameConfig, partyList,
                 s.GetRequiredService<BlockedCharacterHandler>(), s.GetRequiredService<SpheneMediator>(), s.GetRequiredService<PerformanceCollectorService>(),
                 s.GetRequiredService<SpheneConfigService>()));
+            collection.AddSingleton((s) => new CharacterStatusService(s.GetRequiredService<ILogger<CharacterStatusService>>(),
+                clientState, condition, gameData, s.GetRequiredService<SpheneMediator>()));
             collection.AddSingleton((s) => new DtrEntry(s.GetRequiredService<ILogger<DtrEntry>>(), dtrBar, s.GetRequiredService<SpheneConfigService>(),
                 s.GetRequiredService<SpheneMediator>(), s.GetRequiredService<PairManager>(), s.GetRequiredService<ApiController>()));
             collection.AddSingleton<Lazy<ApiController>>(s => new Lazy<ApiController>(() => s.GetRequiredService<ApiController>()));
@@ -238,6 +240,7 @@ public sealed class Plugin : IDalamudPlugin
             collection.AddScoped<WindowMediatorSubscriberBase, EventViewerUI>();
             collection.AddScoped<WindowMediatorSubscriberBase, CharaDataHubUi>();
             collection.AddScoped<WindowMediatorSubscriberBase, StatusDebugUi>();
+
             collection.AddScoped<WindowMediatorSubscriberBase, AreaBoundSyncshellConsentUI>();
             collection.AddScoped<WindowMediatorSubscriberBase, AreaBoundSyncshellSelectionUI>();
             collection.AddSingleton<WindowMediatorSubscriberBase, CitySyncshellExplanationUI>((s) =>
@@ -305,6 +308,7 @@ public sealed class Plugin : IDalamudPlugin
             collection.AddHostedService(p => p.GetRequiredService<FileCacheManager>());
             collection.AddHostedService(p => p.GetRequiredService<ConfigurationMigrator>());
             collection.AddHostedService(p => p.GetRequiredService<DalamudUtilService>());
+            collection.AddHostedService(p => p.GetRequiredService<CharacterStatusService>());
             collection.AddHostedService(p => p.GetRequiredService<PerformanceCollectorService>());
             collection.AddHostedService(p => p.GetRequiredService<DtrEntry>());
             collection.AddHostedService(p => p.GetRequiredService<EventAggregator>());
