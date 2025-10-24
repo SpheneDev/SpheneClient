@@ -7,6 +7,7 @@ using Sphene.PlayerData.Data;
 using Sphene.PlayerData.Handlers;
 using Sphene.Services;
 using Sphene.Services.Mediator;
+using Sphene.Utils;
 using Microsoft.Extensions.Logging;
 using CharacterData = Sphene.PlayerData.Data.CharacterData;
 
@@ -136,6 +137,7 @@ public class PlayerDataFactory
 
         ct.ThrowIfCancellationRequested();
 
+        // Create initial FileReplacements from resolved paths
         fragment.FileReplacements =
                 new HashSet<FileReplacement>(resolvedPaths.Select(c => new FileReplacement([.. c.Value], c.Key)), FileReplacementComparer.Instance)
                 .Where(p => p.HasFileReplacement).ToHashSet();
@@ -275,12 +277,17 @@ public class PlayerDataFactory
         if (boneIndices.All(u => u.Value.Count == 0)) return;
 
         int noValidationFailed = 0;
+        var failedAnimations = new List<(string path, int animationBones, int playerBones)>();
+        int maxPlayerBones = boneIndices.SelectMany(b => b.Value).Max();
+        
         foreach (var file in fragment.FileReplacements.Where(f => !f.IsFileSwap && f.GamePaths.First().EndsWith("pap", StringComparison.OrdinalIgnoreCase)).ToList())
         {
             ct.ThrowIfCancellationRequested();
 
             var skeletonIndices = await _dalamudUtil.RunOnFrameworkThread(() => _modelAnalyzer.GetBoneIndicesFromPap(file.Hash)).ConfigureAwait(false);
             bool validationFailed = false;
+            int maxAnimationBones = 0;
+            
             if (skeletonIndices != null)
             {
                 // 105 is the maximum vanilla skellington spoopy bone index
@@ -294,12 +301,12 @@ public class PlayerDataFactory
 
                 foreach (var boneCount in skeletonIndices.Select(k => k).ToList())
                 {
-                    if (boneCount.Value.Max() > boneIndices.SelectMany(b => b.Value).Max())
+                    maxAnimationBones = Math.Max(maxAnimationBones, boneCount.Value.Max());
+                    if (boneCount.Value.Max() > maxPlayerBones)
                     {
                         _logger.LogWarning("Found more bone indices on the animation {path} skeleton {skl} (max indice {idx}) than on any player related skeleton (max indice {idx2})",
-                            file.ResolvedPath, boneCount.Key, boneCount.Value.Max(), boneIndices.SelectMany(b => b.Value).Max());
+                            file.ResolvedPath, boneCount.Key, boneCount.Value.Max(), maxPlayerBones);
                         validationFailed = true;
-                        break;
                     }
                 }
             }
@@ -307,6 +314,7 @@ public class PlayerDataFactory
             if (validationFailed)
             {
                 noValidationFailed++;
+                failedAnimations.Add((Path.GetFileName(file.ResolvedPath), maxAnimationBones, maxPlayerBones));
                 _logger.LogDebug("Removing {file} from sent file replacements and transient data", file.ResolvedPath);
                 fragment.FileReplacements.Remove(file);
                 foreach (var gamePath in file.GamePaths)
@@ -319,10 +327,19 @@ public class PlayerDataFactory
 
         if (noValidationFailed > 0)
         {
-            _spheneMediator.Publish(new NotificationMessage("Invalid Skeleton Setup",
-                $"Your client is attempting to send {noValidationFailed} animation files with invalid bone data. Those animation files have been removed from your sent data. " +
-                $"Verify that you are using the correct skeleton for those animation files (Check /xllog for more information).",
-                NotificationType.Warning, TimeSpan.FromSeconds(10)));
+            var firstFailedAnimation = failedAnimations.First();
+            string detailedMessage = $"Animation skeleton mismatch detected! The animation requires {firstFailedAnimation.animationBones} bones, " +
+                $"but your current player skeleton only supports {firstFailedAnimation.playerBones} bones.\n\n" +
+                $"This suggests an incorrect skeleton is loaded. Try the following:\n" +
+                $"1. Open Penumbra\n" +
+                $"2. Search the right skeleton and click on 'Self'\n" +
+                $"3. Also, check for conflicts with other mods.\n" +
+                $"(Check /xllog for more information)\n" +
+                $"({noValidationFailed} animation{(noValidationFailed == 1 ? " was" : "s were")} affected and removed from sync data)";
+
+            _spheneMediator.Publish(new NotificationMessage("Skeleton Bone Count Mismatch",
+                detailedMessage,
+                NotificationType.Warning, TimeSpan.FromSeconds(15)));
         }
     }
 
@@ -373,4 +390,6 @@ public class PlayerDataFactory
 
         return pathsToResolve;
     }
+
+
 }

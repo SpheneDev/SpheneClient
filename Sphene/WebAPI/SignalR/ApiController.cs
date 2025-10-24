@@ -38,6 +38,8 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
     private readonly ServerConfigurationManager _serverManager;
     private readonly TokenProvider _tokenProvider;
     private readonly SpheneConfigService _SpheneConfigService;
+    private readonly ConnectionHealthMonitor _healthMonitor;
+    private readonly CircuitBreakerService _circuitBreaker;
     private CancellationTokenSource _connectionCancellationTokenSource;
     private ConnectionDto? _connectionDto;
     private bool _doNotNotifyOnNextInfo = false;
@@ -50,7 +52,8 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
 
     public ApiController(ILogger<ApiController> logger, HubFactory hubFactory, DalamudUtilService dalamudUtil,
         PairManager pairManager, ServerConfigurationManager serverManager, SpheneMediator mediator,
-        TokenProvider tokenProvider, SpheneConfigService SpheneConfigService) : base(logger, mediator)
+        TokenProvider tokenProvider, SpheneConfigService SpheneConfigService, 
+        ConnectionHealthMonitor healthMonitor, CircuitBreakerService circuitBreaker) : base(logger, mediator)
     {
         _hubFactory = hubFactory;
         _dalamudUtil = dalamudUtil;
@@ -58,6 +61,8 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
         _serverManager = serverManager;
         _tokenProvider = tokenProvider;
         _SpheneConfigService = SpheneConfigService;
+        _healthMonitor = healthMonitor;
+        _circuitBreaker = circuitBreaker;
         _connectionCancellationTokenSource = new CancellationTokenSource();
 
         Mediator.Subscribe<DalamudLoginMessage>(this, (_) => DalamudUtilOnLogIn());
@@ -243,6 +248,7 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
                 _connectionDto = await GetConnectionDto().ConfigureAwait(false);
 
                 ServerState = ServerState.Connected;
+                _healthMonitor.RecordSuccessfulConnection();
 
                 var currentClientVer = Assembly.GetExecutingAssembly().GetName().Version!;
 
@@ -310,6 +316,7 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
             catch (HttpRequestException ex)
             {
                 Logger.LogWarning(ex, "HttpRequestException on Connection");
+                _healthMonitor.RecordConnectionFailure(ex);
 
                 if (ex.StatusCode == System.Net.HttpStatusCode.Unauthorized)
                 {
@@ -319,20 +326,28 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
 
                 ServerState = ServerState.Reconnecting;
                 Logger.LogInformation("Failed to establish connection, retrying");
-                await Task.Delay(TimeSpan.FromSeconds(new Random().Next(5, 20)), token).ConfigureAwait(false);
+                
+                // Use exponential backoff instead of random delay
+                var delay = CalculateRetryDelay(_healthMonitor.ConsecutiveFailures);
+                await Task.Delay(delay, token).ConfigureAwait(false);
             }
             catch (InvalidOperationException ex)
             {
                 Logger.LogWarning(ex, "InvalidOperationException on connection");
+                _healthMonitor.RecordConnectionFailure(ex);
                 await StopConnectionAsync(ServerState.Disconnected).ConfigureAwait(false);
                 return;
             }
             catch (Exception ex)
             {
                 Logger.LogWarning(ex, "Exception on Connection");
+                _healthMonitor.RecordConnectionFailure(ex);
 
                 Logger.LogInformation("Failed to establish connection, retrying");
-                await Task.Delay(TimeSpan.FromSeconds(new Random().Next(5, 20)), token).ConfigureAwait(false);
+                
+                // Use exponential backoff instead of random delay
+                var delay = CalculateRetryDelay(_healthMonitor.ConsecutiveFailures);
+                await Task.Delay(delay, token).ConfigureAwait(false);
             }
         }
     }
@@ -387,6 +402,12 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
 
     protected override void Dispose(bool disposing)
     {
+        if (disposing)
+        {
+            _healthMonitor?.Dispose();
+            _circuitBreaker?.Dispose();
+        }
+        
         base.Dispose(disposing);
 
         _healthCheckTokenSource?.Cancel();
@@ -405,7 +426,20 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
 
             if (requireReconnect) break;
 
-            _ = await CheckClientHealth().ConfigureAwait(false);
+            try
+            {
+                var healthCheckResult = await CheckClientHealth().ConfigureAwait(false);
+                Logger.LogDebug("Health check completed with result: {result}", healthCheckResult);
+                
+                // Record successful health check regardless of server response
+                // The fact that we can communicate with the server means the connection is healthy
+                _healthMonitor.RecordSuccessfulConnection();
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "Health check failed");
+                _healthMonitor.RecordConnectionFailure(ex);
+            }
         }
     }
 
@@ -681,6 +715,21 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
     {
         CheckConnection();
         await _spheneHub!.SendAsync(nameof(BroadcastAreaBoundSyncshells), userLocation).ConfigureAwait(false);
+    }
+
+    private TimeSpan CalculateRetryDelay(int failureCount)
+    {
+        // Exponential backoff with jitter
+        var baseDelaySeconds = 2;
+        var maxDelaySeconds = 60;
+        var jitterFactor = 0.1;
+        
+        var exponentialDelay = Math.Min(baseDelaySeconds * Math.Pow(2, failureCount), maxDelaySeconds);
+        var jitter = exponentialDelay * jitterFactor * (new Random().NextDouble() * 2 - 1);
+        var finalDelay = exponentialDelay + jitter;
+        
+        Logger.LogDebug("Calculated retry delay: {delay}s (failure count: {count})", finalDelay, failureCount);
+        return TimeSpan.FromSeconds(Math.Max(1, finalDelay));
     }
 }
 #pragma warning restore MA0040

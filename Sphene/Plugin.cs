@@ -22,6 +22,7 @@ using Sphene.UI.Handlers;
 using Sphene.WebAPI;
 using Sphene.WebAPI.Files;
 using Sphene.WebAPI.SignalR;
+using Sphene.WebAPI.SignalR.Utils;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -222,6 +223,10 @@ public sealed class Plugin : IDalamudPlugin
             collection.AddSingleton<ConfigurationSaveService>();
 
             collection.AddSingleton<HubFactory>();
+            
+            // Add reliability services
+            collection.AddSingleton<ConnectionHealthMonitor>();
+            collection.AddSingleton<CircuitBreakerService>();
 
             // add scoped services
             collection.AddScoped<DrawEntityFactory>();

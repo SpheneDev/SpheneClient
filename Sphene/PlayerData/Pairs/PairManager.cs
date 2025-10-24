@@ -12,7 +12,7 @@ using Sphene.Services.Mediator;
 using Sphene.Services.ServerConfiguration;
 using Sphene.Services;
 using Sphene.WebAPI;
-using Sphene.API.Data.Comparer;
+using System.Globalization;
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
 using Dalamud.Interface.ImGuiNotification;
@@ -206,10 +206,60 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         pair.ApplyData(dto);
     }
 
+    // Track processed acknowledgments to prevent duplicates
+    private readonly ConcurrentDictionary<string, DateTime> _processedAcknowledgments = new();
+    private readonly TimeSpan _acknowledgmentCacheTimeout = TimeSpan.FromMinutes(5);
+
     public void ReceiveCharacterDataAcknowledgment(CharacterDataAcknowledgmentDto acknowledgmentDto)
     {
         Logger.LogInformation("ReceiveCharacterDataAcknowledgment called - Hash: {hash}, User: {user}, Success: {success}", 
             acknowledgmentDto.DataHash[..Math.Min(8, acknowledgmentDto.DataHash.Length)], acknowledgmentDto.User.AliasOrUID, acknowledgmentDto.Success);
+        
+        // Create unique key for deduplication (hash + user + precise timestamp)
+        var preciseTimestamp = acknowledgmentDto.AcknowledgedAt.ToString("yyyy-MM-dd HH:mm:ss.fff");
+        var deduplicationKey = $"{acknowledgmentDto.DataHash}_{acknowledgmentDto.User.UID}_{preciseTimestamp}";
+        
+        // Check for duplicate acknowledgment (exact same hash, user, and millisecond timestamp)
+        if (_processedAcknowledgments.ContainsKey(deduplicationKey))
+        {
+            Logger.LogWarning("Duplicate acknowledgment detected and ignored - Hash: {hash}, User: {user}, Timestamp: {timestamp}", 
+                acknowledgmentDto.DataHash[..Math.Min(8, acknowledgmentDto.DataHash.Length)], 
+                acknowledgmentDto.User.AliasOrUID, 
+                preciseTimestamp);
+            return;
+        }
+        
+        // Also check for any acknowledgment from the same user within the last 100ms to handle rapid changes
+        var recentCutoff = acknowledgmentDto.AcknowledgedAt.AddMilliseconds(-100);
+        var hasRecentAcknowledgment = _processedAcknowledgments.Keys.Any(key => 
+        {
+            var parts = key.Split('_');
+            if (parts.Length >= 3 && parts[1] == acknowledgmentDto.User.UID)
+            {
+                var keyTimestampStr = string.Join("_", parts.Skip(2));
+                if (DateTime.TryParseExact(keyTimestampStr, "yyyy-MM-dd HH:mm:ss.fff", null, DateTimeStyles.None, out var keyTimestamp))
+                {
+                    return keyTimestamp > recentCutoff && keyTimestamp < acknowledgmentDto.AcknowledgedAt;
+                }
+            }
+            return false;
+        });
+        
+        if (hasRecentAcknowledgment)
+        {
+            Logger.LogDebug("Recent acknowledgment from same user detected - allowing new hash: {hash}, User: {user}", 
+                acknowledgmentDto.DataHash[..Math.Min(8, acknowledgmentDto.DataHash.Length)], 
+                acknowledgmentDto.User.AliasOrUID);
+        }
+        
+        // Add to processed acknowledgments cache
+        _processedAcknowledgments[deduplicationKey] = DateTime.UtcNow;
+        
+        // Clean up old entries periodically (every 100 acknowledgments)
+        if (_processedAcknowledgments.Count % 100 == 0)
+        {
+            CleanupOldAcknowledgments();
+        }
         
         // Check if the acknowledging user is the sender themselves (self-acknowledgment)
         var currentUserUID = _apiController.Value.UID;
@@ -585,6 +635,25 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         }
         
         Mediator.Publish(new RefreshUiMessage());
+    }
+    
+    private void CleanupOldAcknowledgments()
+    {
+        var cutoffTime = DateTime.UtcNow - _acknowledgmentCacheTimeout;
+        var keysToRemove = _processedAcknowledgments
+            .Where(kvp => kvp.Value < cutoffTime)
+            .Select(kvp => kvp.Key)
+            .ToList();
+            
+        foreach (var key in keysToRemove)
+        {
+            _processedAcknowledgments.TryRemove(key, out _);
+        }
+        
+        if (keysToRemove.Count > 0)
+        {
+            Logger.LogDebug("Cleaned up {count} old acknowledgment entries", keysToRemove.Count);
+        }
     }
 
     public void SetPendingAcknowledgmentForSender(List<UserData> recipients, string acknowledgmentId)

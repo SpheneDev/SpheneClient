@@ -390,7 +390,7 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
             {
                 // Area-bound syncshells should auto-join without property verification
                 // Property verification is only needed for ownership-based features
-                _logger.LogDebug("[SpheneDebug] [AreaBoundSyncshellService] Location {Location} matches area-bound syncshell {SyncshellId}, allowing auto-join", location, syncshell.GID);
+                //_logger.LogDebug("[SpheneDebug] [AreaBoundSyncshellService] Location {Location} matches area-bound syncshell {SyncshellId}, allowing auto-join", location, syncshell.GID);
                 return true;
             }
         }
@@ -699,12 +699,14 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
             .Where(syncshell => !_currentlyJoinedAreaSyncshells.Contains(syncshell.GID) && 
                                IsLocationInBounds(syncshell, _lastLocation.Value))
             .ToList();
-            
-        _logger.LogDebug("HasAvailableAreaSyncshells: Found {Count} available syncshells. Currently joined: [{Joined}], All syncshells: [{All}]", 
-            availableSyncshells.Count, 
-            string.Join(", ", _currentlyJoinedAreaSyncshells),
-            string.Join(", ", _areaBoundSyncshells.Keys));
-            
+
+        // **** Commented Out due to much spam    
+        //_logger.LogDebug("HasAvailableAreaSyncshells: Found {Count} available syncshells. Currently joined: [{Joined}], All syncshells: [{All}]", 
+        //    availableSyncshells.Count, 
+        //    string.Join(", ", _currentlyJoinedAreaSyncshells),
+        //    string.Join(", ", _areaBoundSyncshells.Keys));
+        // **** Commented Out due to much spam
+
         return availableSyncshells.Any();
     }
 

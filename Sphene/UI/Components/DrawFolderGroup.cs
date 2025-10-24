@@ -181,10 +181,39 @@ public class DrawFolderGroup : DrawFolderBase
     {
         ImGui.AlignTextToFramePadding();
 
-        _uiSharedService.IconText(_groupFullInfoDto.GroupPermissions.IsDisableInvites() ? FontAwesomeIcon.Lock : FontAwesomeIcon.Users);
-        if (_groupFullInfoDto.GroupPermissions.IsDisableInvites())
+        // Check if this is an area-bound syncshell to determine display order
+        bool isAreaBound = _areaBoundSyncshellService.IsAreaBoundSyncshell(_groupFullInfoDto.Group.GID);
+        
+        if (isAreaBound)
         {
-            UiSharedService.AttachToolTip("Syncshell " + _groupFullInfoDto.GroupAliasOrGID + " is closed for invites");
+            // For Area Syncshells: Location emoji first, then count, then owner indicator
+            // Make the area-bound indicator clickable to show welcome message on demand
+            if (_configService.Current.ShowAreaBoundSyncshellWelcomeMessages)
+            {
+                // Normal non-clickable indicator when welcome messages are enabled
+                _uiSharedService.IconText(FontAwesomeIcon.MapMarkerAlt);
+                UiSharedService.AttachToolTip("This is an area-bound syncshell");
+            }
+            else
+            {
+                // Clickable indicator when welcome messages are disabled - looks like normal icon but is clickable
+                _uiSharedService.IconText(FontAwesomeIcon.MapMarkerAlt);
+                if (ImGui.IsItemClicked())
+                {
+                    // Show welcome message on demand
+                    _ = ShowWelcomeMessageOnDemand();
+                }
+                UiSharedService.AttachToolTip("This is an area-bound syncshell\nClick to view welcome message");
+            }
+        }
+        else
+        {
+            // For normal Syncshells: Keep original order with group emoji first
+            _uiSharedService.IconText(_groupFullInfoDto.GroupPermissions.IsDisableInvites() ? FontAwesomeIcon.Lock : FontAwesomeIcon.Users);
+            if (_groupFullInfoDto.GroupPermissions.IsDisableInvites())
+            {
+                UiSharedService.AttachToolTip("Syncshell " + _groupFullInfoDto.GroupAliasOrGID + " is closed for invites");
+            }
         }
 
         using (ImRaii.PushStyle(ImGuiStyleVar.ItemSpacing, ImGui.GetStyle().ItemSpacing with { X = ImGui.GetStyle().ItemSpacing.X / 2f }))
@@ -216,8 +245,8 @@ public class DrawFolderGroup : DrawFolderBase
             UiSharedService.AttachToolTip("You are pinned in " + _groupFullInfoDto.GroupAliasOrGID);
         }
 
-        // Show area-bound indicator
-        if (_areaBoundSyncshellService.IsAreaBoundSyncshell(_groupFullInfoDto.Group.GID))
+        // For normal syncshells, show area-bound indicator at the end (if somehow it's area-bound but not detected above)
+        if (!isAreaBound && _areaBoundSyncshellService.IsAreaBoundSyncshell(_groupFullInfoDto.Group.GID))
         {
             ImGui.SameLine();
             ImGui.AlignTextToFramePadding();

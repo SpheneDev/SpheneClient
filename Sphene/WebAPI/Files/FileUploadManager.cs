@@ -288,22 +288,37 @@ public sealed class FileUploadManager : DisposableMediatorSubscriberBase
 
         var totalSize = CurrentUploads.Sum(c => c.Total);
         Logger.LogDebug("Compressing and uploading files");
-        Task uploadTask = Task.CompletedTask;
+        var uploadTasks = new List<Task>();
+        var maxParallelUploads = _SpheneConfigService.Current.ParallelDownloads; // Reuse the parallel downloads setting
+        using var semaphore = new SemaphoreSlim(maxParallelUploads, maxParallelUploads);
+        
         foreach (var file in CurrentUploads.Where(f => f.CanBeTransferred && !f.IsTransferred).ToList())
         {
-            Logger.LogDebug("[{hash}] Compressing", file);
-            var data = await _fileDbManager.GetCompressedFileData(file.Hash, uploadToken).ConfigureAwait(false);
-            var uploadItem = CurrentUploads.FirstOrDefault(e => string.Equals(e.Hash, data.Item1, StringComparison.Ordinal));
-            if (uploadItem != null) uploadItem.Total = data.Item2.Length;
-            Logger.LogDebug("[{hash}] Starting upload for {filePath}", data.Item1, _fileDbManager.GetFileCacheByHash(data.Item1)!.ResolvedFilepath);
-            await uploadTask.ConfigureAwait(false);
-            uploadTask = UploadFile(data.Item2, file.Hash, true, uploadToken);
-            uploadToken.ThrowIfCancellationRequested();
+            var uploadTask = Task.Run(async () =>
+            {
+                await semaphore.WaitAsync(uploadToken).ConfigureAwait(false);
+                try
+                {
+                    Logger.LogDebug("[{hash}] Compressing", file);
+                    var data = await _fileDbManager.GetCompressedFileData(file.Hash, uploadToken).ConfigureAwait(false);
+                    var uploadItem = CurrentUploads.FirstOrDefault(e => string.Equals(e.Hash, data.Item1, StringComparison.Ordinal));
+                    if (uploadItem != null) uploadItem.Total = data.Item2.Length;
+                    Logger.LogDebug("[{hash}] Starting upload for {filePath}", data.Item1, _fileDbManager.GetFileCacheByHash(data.Item1)!.ResolvedFilepath);
+                    await UploadFile(data.Item2, file.Hash, true, uploadToken).ConfigureAwait(false);
+                    uploadToken.ThrowIfCancellationRequested();
+                }
+                finally
+                {
+                    semaphore.Release();
+                }
+            }, uploadToken);
+            
+            uploadTasks.Add(uploadTask);
         }
 
-        if (CurrentUploads.Any())
+        if (uploadTasks.Any())
         {
-            await uploadTask.ConfigureAwait(false);
+            await Task.WhenAll(uploadTasks).ConfigureAwait(false);
 
             var compressedSize = CurrentUploads.Sum(c => c.Total);
             Logger.LogDebug("Upload complete, compressed {size} to {compressed}", UiSharedService.ByteToString(totalSize), UiSharedService.ByteToString(compressedSize));

@@ -37,7 +37,29 @@ public class AcknowledgmentConfiguration
     public int BatchTimeoutMs { get; set; } = 5000;
     
     
-
+    /// Enable adaptive timeout based on network conditions
+    
+    public bool EnableAdaptiveTimeout { get; set; } = true;
+    
+    
+    /// Minimum timeout for adaptive timeout in seconds
+    
+    public int MinAdaptiveTimeoutSeconds { get; set; } = 10;
+    
+    
+    /// Maximum timeout for adaptive timeout in seconds
+    
+    public int MaxAdaptiveTimeoutSeconds { get; set; } = 120;
+    
+    
+    /// Network latency threshold for timeout adjustment in milliseconds
+    
+    public int NetworkLatencyThresholdMs { get; set; } = 500;
+    
+    
+    /// Timeout multiplier for high latency connections
+    
+    public double HighLatencyTimeoutMultiplier { get; set; } = 2.0;
     
     
     /// Maximum number of pending acknowledgments per user

@@ -137,9 +137,25 @@ public partial class ApiController
     {
         Logger.LogInformation("Client_UserReceiveCharacterDataAcknowledgment received from server - Hash: {hash}, User: {user}, Success: {success}", 
             acknowledgmentDto.DataHash[..Math.Min(8, acknowledgmentDto.DataHash.Length)], acknowledgmentDto.User.AliasOrUID, acknowledgmentDto.Success);
-        ExecuteSafely(() => _pairManager.ReceiveCharacterDataAcknowledgment(acknowledgmentDto));
-        Logger.LogInformation("Successfully processed acknowledgment callback for Hash: {hash}", 
-            acknowledgmentDto.DataHash[..Math.Min(8, acknowledgmentDto.DataHash.Length)]);
+        
+        var processed = false;
+        ExecuteSafely(() => 
+        {
+            _pairManager.ReceiveCharacterDataAcknowledgment(acknowledgmentDto);
+            processed = true;
+        });
+        
+        if (processed)
+        {
+            Logger.LogInformation("Successfully processed acknowledgment callback for Hash: {hash}", 
+                acknowledgmentDto.DataHash[..Math.Min(8, acknowledgmentDto.DataHash.Length)]);
+        }
+        else
+        {
+            Logger.LogWarning("Failed to process acknowledgment callback for Hash: {hash}", 
+                acknowledgmentDto.DataHash[..Math.Min(8, acknowledgmentDto.DataHash.Length)]);
+        }
+        
         return Task.CompletedTask;
     }
 

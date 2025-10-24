@@ -2,6 +2,7 @@ using Sphene.SpheneConfiguration;
 using Sphene.Services;
 using Microsoft.Extensions.Logging;
 using System.Runtime.InteropServices;
+using System.Collections.Concurrent;
 
 namespace Sphene.FileCache;
 
@@ -10,7 +11,9 @@ public sealed class FileCompactor
     public const uint FSCTL_DELETE_EXTERNAL_BACKING = 0x90314U;
     public const ulong WOF_PROVIDER_FILE = 2UL;
 
-    private readonly Dictionary<string, int> _clusterSizes;
+    private readonly ConcurrentDictionary<string, int> _clusterSizes;
+    private readonly ConcurrentDictionary<string, bool> _driveNTFSCache;
+    private readonly SemaphoreSlim _parallelSemaphore;
 
     private readonly WOF_FILE_COMPRESSION_INFO_V1 _efInfo;
     private readonly ILogger<FileCompactor> _logger;
@@ -21,6 +24,8 @@ public sealed class FileCompactor
     public FileCompactor(ILogger<FileCompactor> logger, SpheneConfigService SpheneConfigService, DalamudUtilService dalamudUtilService)
     {
         _clusterSizes = new(StringComparer.Ordinal);
+        _driveNTFSCache = new(StringComparer.OrdinalIgnoreCase);
+        _parallelSemaphore = new SemaphoreSlim(Environment.ProcessorCount, Environment.ProcessorCount);
         _logger = logger;
         _SpheneConfigService = SpheneConfigService;
         _dalamudUtilService = dalamudUtilService;
@@ -45,29 +50,68 @@ public sealed class FileCompactor
 
     public string Progress { get; private set; } = string.Empty;
 
-    public void CompactStorage(bool compress)
+    public async Task CompactStorageAsync(bool compress, CancellationToken cancellationToken = default)
     {
         MassCompactRunning = true;
 
-        int currentFile = 1;
-        var allFiles = Directory.EnumerateFiles(_SpheneConfigService.Current.CacheFolder).ToList();
-        int allFilesCount = allFiles.Count;
-        foreach (var file in allFiles)
+        try
         {
-            Progress = $"{currentFile}/{allFilesCount}";
+            var allFiles = Directory.EnumerateFiles(_SpheneConfigService.Current.CacheFolder).ToList();
+            
+            // Sort by file size descending for better compression gains first
             if (compress)
-                CompactFile(file);
-            else
-                DecompressFile(file);
-            currentFile++;
-        }
+            {
+                allFiles = allFiles
+                    .Select(f => new FileInfo(f))
+                    .OrderByDescending(fi => fi.Length)
+                    .Select(fi => fi.FullName)
+                    .ToList();
+            }
 
-        MassCompactRunning = false;
+            int totalFiles = allFiles.Count;
+            int processedFiles = 0;
+
+            await Parallel.ForEachAsync(allFiles, 
+                new ParallelOptions 
+                { 
+                    MaxDegreeOfParallelism = Environment.ProcessorCount,
+                    CancellationToken = cancellationToken
+                },
+                async (file, ct) =>
+                {
+                    await _parallelSemaphore.WaitAsync(ct);
+                    try
+                    {
+                        if (compress)
+                            await CompactFileAsync(file, ct);
+                        else
+                            await DecompressFileAsync(file, ct);
+
+                        var current = Interlocked.Increment(ref processedFiles);
+                        Progress = $"{current}/{totalFiles}";
+                    }
+                    finally
+                    {
+                        _parallelSemaphore.Release();
+                    }
+                });
+        }
+        finally
+        {
+            MassCompactRunning = false;
+        }
+    }
+
+    // Keep the old synchronous method for backward compatibility
+    public void CompactStorage(bool compress)
+    {
+        CompactStorageAsync(compress).GetAwaiter().GetResult();
     }
 
     public long GetFileSizeOnDisk(FileInfo fileInfo, bool? isNTFS = null)
     {
-        bool ntfs = isNTFS ?? string.Equals(new DriveInfo(fileInfo.Directory!.Root.FullName).DriveFormat, "NTFS", StringComparison.OrdinalIgnoreCase);
+        var root = fileInfo.Directory?.Root.FullName ?? string.Empty;
+        bool ntfs = isNTFS ?? GetOrCacheNTFSStatus(root);
 
         if (_dalamudUtilService.IsWine || !ntfs) return fileInfo.Length;
 
@@ -76,6 +120,24 @@ public sealed class FileCompactor
         var losize = GetCompressedFileSizeW(fileInfo.FullName, out uint hosize);
         var size = (long)hosize << 32 | losize;
         return ((size + clusterSize - 1) / clusterSize) * clusterSize;
+    }
+
+    private bool GetOrCacheNTFSStatus(string rootPath)
+    {
+        if (string.IsNullOrEmpty(rootPath)) return false;
+        
+        return _driveNTFSCache.GetOrAdd(rootPath, path =>
+        {
+            try
+            {
+                var driveInfo = new DriveInfo(path);
+                return string.Equals(driveInfo.DriveFormat, "NTFS", StringComparison.OrdinalIgnoreCase);
+            }
+            catch
+            {
+                return false;
+            }
+        });
     }
 
     public async Task WriteAllBytesAsync(string filePath, byte[] decompressedFile, CancellationToken token)
@@ -87,7 +149,7 @@ public sealed class FileCompactor
             return;
         }
 
-        CompactFile(filePath);
+        await CompactFileAsync(filePath, token);
     }
 
     [DllImport("kernel32.dll")]
@@ -108,10 +170,21 @@ public sealed class FileCompactor
     [DllImport("WofUtil.dll")]
     private static extern int WofSetFileDataLocation(IntPtr FileHandle, ulong Provider, IntPtr ExternalFileInfo, ulong Length);
 
+    private async Task CompactFileAsync(string filePath, CancellationToken cancellationToken = default)
+    {
+        await Task.Run(() => CompactFile(filePath), cancellationToken);
+    }
+
+    private async Task DecompressFileAsync(string filePath, CancellationToken cancellationToken = default)
+    {
+        await Task.Run(() => DecompressFile(filePath), cancellationToken);
+    }
+
     private void CompactFile(string filePath)
     {
-        var fs = new DriveInfo(new FileInfo(filePath).Directory!.Root.FullName);
-        bool isNTFS = string.Equals(fs.DriveFormat, "NTFS", StringComparison.OrdinalIgnoreCase);
+        var root = new FileInfo(filePath).Directory?.Root.FullName ?? string.Empty;
+        bool isNTFS = GetOrCacheNTFSStatus(root);
+        
         if (!isNTFS)
         {
             _logger.LogWarning("Drive for file {file} is not NTFS", filePath);

@@ -419,9 +419,16 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             {
                 await DownloadAndApplyCharacterAsync(applicationBase, charaData, updatedData, updateModdedPaths, updateManip, downloadToken).ConfigureAwait(false);
             }
+            catch (OperationCanceledException)
+            {
+                Logger.LogDebug("DownloadAndApplyCharacterAsync was cancelled for {obj}", this);
+            }
             catch (Exception ex)
             {
-                Logger.LogWarning(ex, "Error in DownloadAndApplyCharacterAsync for {obj}", this);
+                Logger.LogWarning(ex, "Error in DownloadAndApplyCharacterAsync for {obj}: {message}", this, ex.Message);
+                
+                // Publish failure message to notify other components
+                Mediator.Publish(new CharacterDataApplicationCompletedMessage(PlayerName ?? string.Empty, Pair.UserData.UID, applicationBase, false));
             }
         });
     }
@@ -710,55 +717,198 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         moddedDictionary = [];
         ConcurrentDictionary<(string GamePath, string? Hash), string> outputDict = new();
         bool hasMigrationChanges = false;
+        bool cancellationRequested = false;
+
+        // Check for cancellation at the start
+        if (token.IsCancellationRequested)
+        {
+            Logger.LogDebug("[BASE-{appBase}] Calculation cancelled before starting", applicationBase);
+            return [.. missingFiles];
+        }
 
         try
         {
-            var replacementList = charaData.FileReplacements.SelectMany(k => k.Value.Where(v => string.IsNullOrEmpty(v.FileSwapPath))).ToList();
-            Parallel.ForEach(replacementList, new ParallelOptions()
+            // Validate input data before processing
+            if (charaData?.FileReplacements == null)
             {
-                CancellationToken = token,
-                MaxDegreeOfParallelism = 4
-            },
-            (item) =>
-            {
-                token.ThrowIfCancellationRequested();
-                var fileCache = _fileDbManager.GetFileCacheByHash(item.Hash);
-                if (fileCache != null)
-                {
-                    if (string.IsNullOrEmpty(new FileInfo(fileCache.ResolvedFilepath).Extension))
-                    {
-                        hasMigrationChanges = true;
-                        fileCache = _fileDbManager.MigrateFileHashToExtension(fileCache, item.GamePaths[0].Split(".")[^1]);
-                    }
+                Logger.LogWarning("[BASE-{appBase}] CharacterData or FileReplacements is null", applicationBase);
+                return [.. missingFiles];
+            }
 
-                    foreach (var gamePath in item.GamePaths)
-                    {
-                        outputDict[(gamePath, item.Hash)] = fileCache.ResolvedFilepath;
-                    }
-                }
-                else
+            var replacementList = charaData.FileReplacements.SelectMany(k => k.Value.Where(v => string.IsNullOrEmpty(v.FileSwapPath))).ToList();
+            
+            if (replacementList.Count == 0)
+            {
+                Logger.LogDebug("[BASE-{appBase}] No file replacements to process", applicationBase);
+                return [.. missingFiles];
+            }
+
+            try
+            {
+                Parallel.ForEach(replacementList, new ParallelOptions()
                 {
-                    Logger.LogTrace("Missing file: {hash}", item.Hash);
-                    missingFiles.Add(item);
-                }
-            });
+                    CancellationToken = token,
+                    MaxDegreeOfParallelism = 4
+                },
+                (item) =>
+                {
+                    try
+                    {
+                        // Check for cancellation without throwing
+                        if (token.IsCancellationRequested)
+                        {
+                            cancellationRequested = true;
+                            return;
+                        }
+                        
+                        // Validate item data
+                        if (item == null || string.IsNullOrEmpty(item.Hash) || item.GamePaths == null || item.GamePaths.Length == 0)
+                        {
+                            Logger.LogWarning("[BASE-{appBase}] Invalid FileReplacementData item: Hash={hash}, GamePaths={paths}", 
+                                applicationBase, item?.Hash ?? "null", item?.GamePaths?.Length ?? 0);
+                            return;
+                        }
+
+                        var fileCache = _fileDbManager.GetFileCacheByHash(item.Hash);
+                        if (fileCache != null)
+                        {
+                            // Validate file cache data
+                            if (string.IsNullOrEmpty(fileCache.ResolvedFilepath))
+                            {
+                                Logger.LogWarning("[BASE-{appBase}] FileCache has empty ResolvedFilepath for hash {hash}", applicationBase, item.Hash);
+                                return;
+                            }
+
+                            // Check if file actually exists before processing
+                            if (!File.Exists(fileCache.ResolvedFilepath))
+                            {
+                                Logger.LogWarning("[BASE-{appBase}] FileCache points to non-existent file: {path} for hash {hash}", 
+                                    applicationBase, fileCache.ResolvedFilepath, item.Hash);
+                                missingFiles.Add(item);
+                                return;
+                            }
+
+                            if (string.IsNullOrEmpty(new FileInfo(fileCache.ResolvedFilepath).Extension))
+                            {
+                                hasMigrationChanges = true;
+                                // Validate game path before splitting
+                                var firstGamePath = item.GamePaths[0];
+                                if (string.IsNullOrEmpty(firstGamePath) || !firstGamePath.Contains('.'))
+                                {
+                                    Logger.LogWarning("[BASE-{appBase}] Invalid game path for extension extraction: {path}", applicationBase, firstGamePath);
+                                    return;
+                                }
+                                
+                                try
+                                {
+                                    fileCache = _fileDbManager.MigrateFileHashToExtension(fileCache, firstGamePath.Split(".")[^1]);
+                                }
+                                catch (Exception migrationEx)
+                                {
+                                    Logger.LogWarning(migrationEx, "[BASE-{appBase}] Failed to migrate file hash to extension for hash {hash}", applicationBase, item.Hash);
+                                    return;
+                                }
+                            }
+
+                            foreach (var gamePath in item.GamePaths)
+                            {
+                                if (!string.IsNullOrEmpty(gamePath))
+                                {
+                                    outputDict[(gamePath, item.Hash)] = fileCache.ResolvedFilepath;
+                                }
+                            }
+                        }
+                        else
+                        {
+                            Logger.LogTrace("Missing file: {hash}", item.Hash);
+                            missingFiles.Add(item);
+                        }
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        cancellationRequested = true;
+                        return;
+                    }
+                    catch (Exception itemEx)
+                    {
+                        Logger.LogWarning(itemEx, "[BASE-{appBase}] Error processing FileReplacementData item with hash {hash}. Exception: {exceptionType} - {message}. GamePaths count: {pathCount}", 
+                            applicationBase, item?.Hash ?? "unknown", itemEx.GetType().Name, itemEx.Message, item?.GamePaths?.Length ?? 0);
+                        
+                        // Log additional details for debugging
+                        if (item != null)
+                        {
+                            Logger.LogDebug("[BASE-{appBase}] Failed item details - Hash: {hash}, GamePaths: [{paths}]", 
+                                applicationBase, item.Hash, item.GamePaths != null ? string.Join(", ", item.GamePaths) : "null");
+                        }
+                    }
+                });
+            }
+            catch (OperationCanceledException)
+            {
+                cancellationRequested = true;
+            }
+
+            if (cancellationRequested || token.IsCancellationRequested)
+            {
+                Logger.LogDebug("[BASE-{appBase}] Replacement calculation was cancelled. Processed items: {count}", applicationBase, outputDict.Count);
+                return [.. missingFiles];
+            }
 
             moddedDictionary = outputDict.ToDictionary(k => k.Key, k => k.Value);
 
-            foreach (var item in charaData.FileReplacements.SelectMany(k => k.Value.Where(v => !string.IsNullOrEmpty(v.FileSwapPath))).ToList())
+            // Process file swaps with additional validation
+            var fileSwapItems = charaData.FileReplacements.SelectMany(k => k.Value.Where(v => !string.IsNullOrEmpty(v.FileSwapPath))).ToList();
+            foreach (var item in fileSwapItems)
             {
-                foreach (var gamePath in item.GamePaths)
+                if (token.IsCancellationRequested)
                 {
-                    Logger.LogTrace("[BASE-{appBase}] Adding file swap for {path}: {fileSwap}", applicationBase, gamePath, item.FileSwapPath);
-                    moddedDictionary[(gamePath, null)] = item.FileSwapPath;
+                    Logger.LogDebug("[BASE-{appBase}] Cancellation requested during file swap processing", applicationBase);
+                    break;
+                }
+
+                if (item?.GamePaths != null && !string.IsNullOrEmpty(item.FileSwapPath))
+                {
+                    foreach (var gamePath in item.GamePaths)
+                    {
+                        if (!string.IsNullOrEmpty(gamePath))
+                        {
+                            Logger.LogTrace("[BASE-{appBase}] Adding file swap for {path}: {fileSwap}", applicationBase, gamePath, item.FileSwapPath);
+                            moddedDictionary[(gamePath, null)] = item.FileSwapPath;
+                        }
+                    }
                 }
             }
         }
+        catch (OperationCanceledException)
+        {
+            Logger.LogDebug("[BASE-{appBase}] Replacement calculation was cancelled. Processed items: {count}", applicationBase, outputDict.Count);
+            return [.. missingFiles];
+        }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "[BASE-{appBase}] Something went wrong during calculation replacements", applicationBase);
+            Logger.LogError(ex, "[BASE-{appBase}] Something went wrong during calculation replacements. Exception: {exceptionType} - {message}. Processed items: {processedCount}", 
+                applicationBase, ex.GetType().Name, ex.Message, outputDict.Count);
+            
+            // Log stack trace for debugging
+            Logger.LogDebug("[BASE-{appBase}] Full exception details: {stackTrace}", applicationBase, ex.ToString());
+            
+            // Return empty collections to prevent further errors
+            moddedDictionary = [];
+            return [];
         }
-        if (hasMigrationChanges) _fileDbManager.WriteOutFullCsv();
+        
+        if (hasMigrationChanges) 
+        {
+            try
+            {
+                _fileDbManager.WriteOutFullCsv();
+            }
+            catch (Exception csvEx)
+            {
+                Logger.LogWarning(csvEx, "[BASE-{appBase}] Failed to write CSV after migration changes", applicationBase);
+            }
+        }
+        
         st.Stop();
         Logger.LogDebug("[BASE-{appBase}] ModdedPaths calculated in {time}ms, missing files: {count}, total files: {total}", applicationBase, st.ElapsedMilliseconds, missingFiles.Count, moddedDictionary.Keys.Count);
         return [.. missingFiles];
