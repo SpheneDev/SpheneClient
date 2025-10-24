@@ -73,6 +73,9 @@ public class CompactUi : WindowMediatorSubscriberBase
     private bool _wasOpen;
     private float _windowContentWidth;
     
+    // Halloween background texture
+    private IDalamudTextureWrap? _halloweenBackgroundTexture;
+    
     // Texture conversion fields
     private bool _showConversionPopup = false;
     private bool _showProgressPopup = false;
@@ -207,6 +210,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         Flags |= ImGuiWindowFlags.NoDocking | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse;
 
         UpdateSizeConstraints();
+        LoadHalloweenBackgroundTexture();
     }
 
     private void UpdateSizeConstraints()
@@ -232,6 +236,9 @@ public class CompactUi : WindowMediatorSubscriberBase
                     folder.Dispose();
                 }
             }
+            
+            // Dispose Halloween background texture
+            _halloweenBackgroundTexture?.Dispose();
         }
         base.Dispose(disposing);
     }
@@ -269,6 +276,9 @@ public class CompactUi : WindowMediatorSubscriberBase
     protected override void DrawInternal()
     {
         // Theme is already applied in PreDraw, no need to apply it again here
+        
+        // Draw Halloween background first (behind all content)
+        DrawHalloweenBackground();
         
         _windowContentWidth = UiSharedService.GetBaseFolderWidth(); // Use consistent width calculation
 
@@ -2020,6 +2030,47 @@ public class CompactUi : WindowMediatorSubscriberBase
         
         // Move cursor to end of header area
         ImGui.SetCursorScreenPos(new Vector2(contentStart.X, headerEnd.Y));
+    }
+    
+    private void LoadHalloweenBackgroundTexture()
+    {
+        try
+        {
+            if (!string.IsNullOrEmpty(SpheneImages.SpheneHelloweenBgBase64))
+            {
+                var imageData = Convert.FromBase64String(SpheneImages.SpheneHelloweenBgBase64);
+                _halloweenBackgroundTexture = _uiSharedService.LoadImage(imageData);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to load Halloween background texture");
+        }
+    }
+    
+    private void DrawHalloweenBackground()
+    {
+        if (_halloweenBackgroundTexture == null) return;
+        
+        // Check if it's Halloween season (October 25-31)
+        var now = DateTime.Now;
+        bool isHalloweenSeason = now.Month == 10 && now.Day >= 15 && now.Day <= 31;
+        
+        if (!isHalloweenSeason) return;
+        
+        var drawList = ImGui.GetWindowDrawList();
+        var windowPos = ImGui.GetWindowPos();
+        var windowSize = ImGui.GetWindowSize();
+        
+        // Calculate background position and size to cover the entire window
+        var backgroundPos = windowPos;
+        var backgroundSize = windowSize;
+        
+        // Draw the Halloween background with transparency (0.15 alpha for subtle effect)
+        var tintColor = new Vector4(1.0f, 1.0f, 1.0f, 0.30f);
+        drawList.AddImage(_halloweenBackgroundTexture.Handle, backgroundPos, 
+            new Vector2(backgroundPos.X + backgroundSize.X, backgroundPos.Y + backgroundSize.Y), 
+            Vector2.Zero, Vector2.One, ImGui.ColorConvertFloat4ToU32(tintColor));
     }
     
     

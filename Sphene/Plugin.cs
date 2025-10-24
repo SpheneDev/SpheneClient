@@ -294,6 +294,7 @@ public sealed class Plugin : IDalamudPlugin
                 );
             });
             collection.AddSingleton<IconUpdateService>();
+            collection.AddSingleton<HalloweenEasterEggService>();
             
             collection.AddScoped((s) => new UiService(s.GetRequiredService<ILogger<UiService>>(), pluginInterface.UiBuilder, s.GetRequiredService<SpheneConfigService>(),
                 s.GetRequiredService<WindowSystem>(), s.GetServices<WindowMediatorSubscriberBase>(),
@@ -330,6 +331,7 @@ public sealed class Plugin : IDalamudPlugin
             });
             collection.AddHostedService(p => p.GetRequiredService<AreaBoundSyncshellService>());
             collection.AddHostedService(p => p.GetRequiredService<CitySyncshellService>());
+            collection.AddHostedService(p => p.GetRequiredService<HalloweenEasterEggService>());
             collection.AddHostedService(p => p.GetRequiredService<SphenePlugin>());
         })
         .Build();
