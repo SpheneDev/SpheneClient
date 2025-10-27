@@ -1088,7 +1088,3 @@ public record OpenDeathrollGameMessage(string? GameId) : MessageBase;
 
 // Message to open the Deathroll Lobby UI, optionally selecting tabs
 public record OpenDeathrollLobbyMessage(bool SelectCurrentLobbyTab = false, bool SelectGameTab = false) : MessageBase;
-
-
-
-
