@@ -79,6 +79,7 @@ public class DeathrollService : DisposableMediatorSubscriberBase
     private readonly PairManager _pairManager;
     
     private DeathrollGame? _currentGame;
+    private DeathrollTournamentStateDto? _tournamentState;
     private string? _autoOpenAttemptForGameId; // Prevent repeated auto-open attempts
     private readonly Dictionary<string, DateTime> _lastInviteTime = new();
     private readonly TimeSpan _inviteCooldown = TimeSpan.FromSeconds(30);
@@ -107,6 +108,11 @@ public class DeathrollService : DisposableMediatorSubscriberBase
         Mediator.Subscribe<DeathrollInvitePairMessage>(this, async msg => await InvitePlayerToLobbyAsync(msg.PlayerName));
         Mediator.Subscribe<DeathrollPlayerReadyMessage>(this, OnPlayerReadyChanged);
         Mediator.Subscribe<DeathrollLobbyLeaveMessage>(this, OnLobbyLeave);
+        Mediator.Subscribe<DeathrollTournamentStateUpdateMessage>(this, msg =>
+        {
+            _tournamentState = msg.TournamentState;
+            _logger.LogDebug("Updated local tournament state: round {round}, matches {count}", _tournamentState.CurrentRound, _tournamentState.Matches?.Count ?? 0);
+        });
  
         _logger.LogDebug("DeathrollService initialized with API support");
     }
@@ -225,6 +231,7 @@ public class DeathrollService : DisposableMediatorSubscriberBase
         {
             GameId = _currentGame.GameId,
             State = Sphene.API.Dto.DeathrollGameState.LobbyCreated,
+            GameMode = _currentGame.GameMode,
             Players = _currentGame.Players.Select(p => new UserData(string.Empty, p.Name)).ToList(),
             ReadyPlayers = _currentGame.Players.Where(p => p.IsReady).Select(p => new UserData(string.Empty, p.Name)).ToList(),
             LobbyName = _currentGame.LobbyName,
@@ -275,6 +282,7 @@ public class DeathrollService : DisposableMediatorSubscriberBase
             {
                 GameId = _currentGame.GameId,
                 State = Sphene.API.Dto.DeathrollGameState.WaitingForPlayers,
+                GameMode = _currentGame.GameMode,
                 Players = _currentGame.Players.Select(p => new UserData(string.Empty, p.Name)).ToList(),
                 ReadyPlayers = _currentGame.Players.Where(p => p.IsReady).Select(p => new UserData(string.Empty, p.Name)).ToList(),
                 LobbyName = _currentGame.LobbyName,
@@ -574,6 +582,7 @@ public class DeathrollService : DisposableMediatorSubscriberBase
             {
                 GameId = _currentGame.GameId,
                 State = Sphene.API.Dto.DeathrollGameState.WaitingForPlayers,
+                GameMode = _currentGame.GameMode,
                 Players = _currentGame.Players.Select(p => new UserData(string.Empty, p.Name)).ToList(),
                 ReadyPlayers = _currentGame.Players.Where(p => p.IsReady).Select(p => new UserData(string.Empty, p.Name)).ToList(),
                 LobbyName = _currentGame.LobbyName,
@@ -632,6 +641,7 @@ public class DeathrollService : DisposableMediatorSubscriberBase
             {
                 GameId = _currentGame.GameId,
                 State = Sphene.API.Dto.DeathrollGameState.Finished,
+                GameMode = _currentGame.GameMode,
                 Players = _currentGame.Players.Select(p => new UserData(string.Empty, p.Name)).ToList(),
                 CurrentPlayer = null,
                 CurrentRollMax = _currentGame.CurrentRollMax,
@@ -840,6 +850,148 @@ public class DeathrollService : DisposableMediatorSubscriberBase
         }
     }
 
+    // Tournament helpers
+    private DeathrollTournamentStateDto BuildInitialTournamentState(List<UserData> participants, string gameId)
+    {
+        // Ensure deterministic ordering
+        var ordered = participants.OrderBy(u => u.AliasOrUID).ToList();
+        var matches = new List<DeathrollTournamentMatchDto>();
+        for (int i = 0; i < ordered.Count; i += 2)
+        {
+            var a = ordered[i];
+            var b = i + 1 < ordered.Count ? ordered[i + 1] : null;
+            var match = new DeathrollTournamentMatchDto
+            {
+                MatchId = $"{gameId}-R1M{(i / 2) + 1}",
+                Round = 1,
+                PlayerA = a,
+                PlayerB = b,
+                Winner = null,
+                Loser = null,
+                IsCompleted = false
+            };
+            // Auto-complete byes
+            if (b == null)
+            {
+                match.Winner = a;
+                match.IsCompleted = true;
+            }
+            matches.Add(match);
+        }
+
+        var dto = new DeathrollTournamentStateDto
+        {
+            GameId = gameId,
+            TournamentId = $"{gameId}-tournament",
+            Stage = DeathrollTournamentStage.InProgress,
+            CurrentRound = 1,
+            Participants = ordered,
+            Matches = matches,
+            Champion = null
+        };
+
+        // If round 1 is fully complete due to byes, cascade to next rounds
+        EnsureNextRoundIfReady(dto, 1);
+        return dto;
+    }
+
+    private void EnsureNextRoundIfReady(DeathrollTournamentStateDto state, int round)
+    {
+        // Get matches of the given round
+        var roundMatches = state.Matches.Where(m => m.Round == round).ToList();
+        if (roundMatches.Count == 0) return;
+
+        // If any match incomplete, the current round stands
+        if (roundMatches.Any(m => !m.IsCompleted))
+        {
+            state.CurrentRound = round;
+            return;
+        }
+
+        // Winners of the completed round
+        var winners = roundMatches.Where(m => m.Winner != null).Select(m => m.Winner!).ToList();
+        if (winners.Count <= 1)
+        {
+            // We have a champion
+            state.Stage = DeathrollTournamentStage.Completed;
+            state.Champion = winners.FirstOrDefault();
+            state.CurrentRound = round;
+            return;
+        }
+
+        // Build next round matches
+        var nextRound = round + 1;
+        var nextMatches = new List<DeathrollTournamentMatchDto>();
+        for (int i = 0; i < winners.Count; i += 2)
+        {
+            var a = winners[i];
+            var b = i + 1 < winners.Count ? winners[i + 1] : null;
+            var match = new DeathrollTournamentMatchDto
+            {
+                MatchId = $"{state.GameId}-R{nextRound}M{(i / 2) + 1}",
+                Round = nextRound,
+                PlayerA = a,
+                PlayerB = b,
+                Winner = null,
+                Loser = null,
+                IsCompleted = false
+            };
+            if (b == null)
+            {
+                match.Winner = a;
+                match.IsCompleted = true;
+            }
+            nextMatches.Add(match);
+        }
+        state.Matches.AddRange(nextMatches);
+
+        // If the newly created round auto-completed due to byes, continue cascading
+        EnsureNextRoundIfReady(state, nextRound);
+    }
+
+    private bool TryAdvanceTournamentWithResult(string winnerName, string? loserName)
+    {
+        if (_tournamentState == null) return false;
+        // Normalize names for lookup
+        Func<UserData?, bool> isWinner = u => u != null && string.Equals(u.AliasOrUID, winnerName, StringComparison.OrdinalIgnoreCase);
+        Func<UserData?, bool> isLoser = u => !string.IsNullOrEmpty(loserName) && u != null && string.Equals(u.AliasOrUID, loserName, StringComparison.OrdinalIgnoreCase);
+
+        // Prefer current round, otherwise find earliest round with an incomplete eligible match
+        var targetMatch = _tournamentState.Matches
+            .Where(m => !m.IsCompleted)
+            .OrderBy(m => m.Round)
+            .ThenBy(m => m.MatchId)
+            .FirstOrDefault(m => isWinner(m.PlayerA) || isWinner(m.PlayerB) || isLoser(m.PlayerA) || isLoser(m.PlayerB));
+
+        if (targetMatch == null)
+        {
+            // Fall back to first incomplete match of current round
+            targetMatch = _tournamentState.Matches
+                .Where(m => m.Round == _tournamentState.CurrentRound && !m.IsCompleted)
+                .OrderBy(m => m.MatchId)
+                .FirstOrDefault();
+        }
+
+        if (targetMatch == null) return false;
+
+        // Set winner/loser and complete the match
+        var aName = targetMatch.PlayerA?.AliasOrUID;
+        var bName = targetMatch.PlayerB?.AliasOrUID;
+        var winner = _tournamentState.Participants.FirstOrDefault(p => string.Equals(p.AliasOrUID, winnerName, StringComparison.OrdinalIgnoreCase))
+                     ?? new UserData(string.Empty, winnerName);
+        UserData? loser = string.IsNullOrEmpty(loserName)
+            ? null
+            : _tournamentState.Participants.FirstOrDefault(p => string.Equals(p.AliasOrUID, loserName, StringComparison.OrdinalIgnoreCase))
+              ?? new UserData(string.Empty, loserName!);
+        targetMatch.Winner = winner;
+        targetMatch.Loser = loser;
+        targetMatch.IsCompleted = true;
+
+        // After completing a match, check if the round is ready to advance
+        EnsureNextRoundIfReady(_tournamentState, targetMatch.Round);
+        return true;
+    }
+
     // Keep the old method for backward compatibility but mark as obsolete
     [Obsolete("Use CreateLobbyAsync and StartGameFromLobbyAsync instead")]
     public async Task<bool> StartNewGameAsync(List<string> nearbyPlayers)
@@ -1014,6 +1166,7 @@ public class DeathrollService : DisposableMediatorSubscriberBase
             {
                 GameId = gameState.GameId,
                 State = mappedState,
+                GameMode = gameState.GameMode,
                 LobbyName = gameState.LobbyName ?? string.Empty,
                 HostName = gameState.Host?.AliasOrUID ?? string.Empty,
                 MaxPlayers = gameState.MaxPlayers,
@@ -1028,6 +1181,7 @@ public class DeathrollService : DisposableMediatorSubscriberBase
         else
         {
             _currentGame.State = mappedState;
+            _currentGame.GameMode = gameState.GameMode;
             if (!string.IsNullOrEmpty(gameState.LobbyName)) _currentGame.LobbyName = gameState.LobbyName;
             if (gameState.Host != null) _currentGame.HostName = gameState.Host.AliasOrUID;
             if (gameState.MaxPlayers > 0) _currentGame.MaxPlayers = gameState.MaxPlayers;
@@ -1222,6 +1376,7 @@ public class DeathrollService : DisposableMediatorSubscriberBase
                                     DeathrollGameState.ReadyToStart => Sphene.API.Dto.DeathrollGameState.ReadyToStart,
                                     _ => Sphene.API.Dto.DeathrollGameState.WaitingForPlayers
                                 },
+                                GameMode = _currentGame.GameMode,
                                 Players = _currentGame.Players.Select(p => new UserData(string.Empty, p.Name)).ToList(),
                                 ReadyPlayers = _currentGame.Players.Where(p => p.IsReady).Select(p => new UserData(string.Empty, p.Name)).ToList(),
                                 LobbyName = _currentGame.LobbyName,
@@ -1273,6 +1428,7 @@ public class DeathrollService : DisposableMediatorSubscriberBase
                     DeathrollGameState.Finished => Sphene.API.Dto.DeathrollGameState.Finished,
                     _ => Sphene.API.Dto.DeathrollGameState.LobbyCreated
                 },
+                GameMode = _currentGame.GameMode,
                 Players = _currentGame.Players.Select(p => new UserData(string.Empty, p.Name)).ToList(),
                 ReadyPlayers = _currentGame.Players.Where(p => p.IsReady).Select(p => new UserData(string.Empty, p.Name)).ToList(),
                 LobbyName = _currentGame.LobbyName,
@@ -1322,6 +1478,7 @@ public class DeathrollService : DisposableMediatorSubscriberBase
                             {
                                 GameId = _currentGame.GameId,
                                 State = Sphene.API.Dto.DeathrollGameState.ReadyToStart,
+                                GameMode = _currentGame.GameMode,
                                 Players = _currentGame.Players.Select(p => new UserData(string.Empty, p.Name)).ToList(),
                                 ReadyPlayers = _currentGame.Players.Where(p => p.IsReady).Select(p => new UserData(string.Empty, p.Name)).ToList(),
                                 LobbyName = _currentGame.LobbyName,
@@ -1393,6 +1550,7 @@ public class DeathrollService : DisposableMediatorSubscriberBase
                 {
                     GameId = _currentGame.GameId,
                     State = Sphene.API.Dto.DeathrollGameState.Finished,
+                    GameMode = _currentGame.GameMode,
                     Players = _currentGame.Players.Select(p => new UserData(string.Empty, p.Name)).ToList(),
                     ReadyPlayers = _currentGame.Players.Where(p => p.IsReady).Select(p => new UserData(string.Empty, p.Name)).ToList(),
                     CurrentPlayer = null,
@@ -1422,6 +1580,41 @@ public class DeathrollService : DisposableMediatorSubscriberBase
                 _logger.LogError(ex, "Error broadcasting finished game state for {gameId}", _currentGame.GameId);
             }
 
+            // For tournament mode, advance the bracket with the match result
+            try
+            {
+                if (_currentGame.GameMode == DeathrollGameMode.Tournament)
+                {
+                    var winnerName = _currentGame.Winner;
+                    var loserName = _currentGame.Loser;
+                    if (!string.IsNullOrEmpty(winnerName))
+                    {
+                        var advanced = TryAdvanceTournamentWithResult(winnerName!, loserName);
+                        if (!advanced)
+                        {
+                            _logger.LogWarning("Could not apply tournament result to a match for {gameId}", _currentGame.GameId);
+                        }
+
+                        if (_tournamentState != null)
+                        {
+                            var tourSent = await _apiController.DeathrollUpdateTournamentState(_tournamentState);
+                            if (tourSent)
+                            {
+                                _logger.LogDebug("Broadcasted tournament update after match completion for {gameId}", _currentGame.GameId);
+                            }
+                            else
+                            {
+                                _logger.LogWarning("Failed to broadcast tournament update after match completion for {gameId}", _currentGame.GameId);
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error advancing tournament bracket for {gameId}", _currentGame.GameId);
+            }
+
             return true;
         }
 
@@ -1446,6 +1639,7 @@ public class DeathrollService : DisposableMediatorSubscriberBase
         {
             GameId = _currentGame.GameId,
             State = Sphene.API.Dto.DeathrollGameState.InProgress,
+            GameMode = _currentGame.GameMode,
             Players = _currentGame.Players.Select(p => new UserData(string.Empty, p.Name)).ToList(),
             ReadyPlayers = _currentGame.Players.Where(p => p.IsReady).Select(p => new UserData(string.Empty, p.Name)).ToList(),
             CurrentPlayer = new UserData(string.Empty, _currentGame.CurrentPlayerName),
@@ -1500,6 +1694,7 @@ public class DeathrollService : DisposableMediatorSubscriberBase
         {
             GameId = _currentGame.GameId,
             State = Sphene.API.Dto.DeathrollGameState.InProgress,
+            GameMode = _currentGame.GameMode,
             Players = _currentGame.Players.Select(p => new UserData(string.Empty, p.Name)).ToList(),
             ReadyPlayers = _currentGame.Players.Where(p => p.IsReady).Select(p => new UserData(string.Empty, p.Name)).ToList(),
             CurrentPlayer = new UserData(string.Empty, _currentGame.CurrentPlayerName),
@@ -1524,6 +1719,30 @@ public class DeathrollService : DisposableMediatorSubscriberBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error broadcasting game start state for {gameId}", _currentGame.GameId);
+        }
+        
+        // If tournament mode, broadcast initial bracket state (multi-round with byes)
+        try
+        {
+            if (_currentGame.GameMode == DeathrollGameMode.Tournament)
+            {
+                var participants = _currentGame.Players.Select(p => new UserData(string.Empty, p.Name)).ToList();
+                _tournamentState = BuildInitialTournamentState(participants, _currentGame.GameId);
+
+                var tourSent = await _apiController.DeathrollUpdateTournamentState(_tournamentState);
+                if (tourSent)
+                {
+                    _logger.LogDebug("Broadcasted initial multi-round tournament bracket for {gameId}", _currentGame.GameId);
+                }
+                else
+                {
+                    _logger.LogWarning("Failed to broadcast initial tournament bracket for {gameId}", _currentGame.GameId);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error broadcasting initial tournament bracket for {gameId}", _currentGame.GameId);
         }
         
         return true;

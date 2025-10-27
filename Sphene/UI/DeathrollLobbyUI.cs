@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
@@ -25,6 +25,8 @@ public class DeathrollLobbyUI : WindowMediatorSubscriberBase
     
     private List<DeathrollInvitationDto> _pendingInvitations = new();
     private List<DeathrollLobbyEntry> _activeLobbies = new();
+    private string _activeGamesSearch = string.Empty;
+    private int _activeGamesStatusIndex = 0; // 0=All, 1=Available, 2=WaitingForPlayers, 3=InProgress
     private string _statusMessage = "";
     private bool _showCreateGameSection = false;
     private DateTime _lastCurrentLobbyRefreshUtc = DateTime.MinValue;
@@ -32,6 +34,9 @@ public class DeathrollLobbyUI : WindowMediatorSubscriberBase
     private bool _selectCurrentLobbyTabNext = false;
     private bool _selectGameTabNext = false;
     private readonly DeathrollGameView _gameView;
+    private readonly TournamentBracketView _tournamentBracketView;
+    private DeathrollTournamentStateDto? _tournamentState = null;
+    private bool _dismissFinishedGameView = false;
     
     // New lobby creation fields
     private string _newLobbyName = "";
@@ -55,6 +60,7 @@ public class DeathrollLobbyUI : WindowMediatorSubscriberBase
         Size = new Vector2(600, 400);
         SizeCondition = ImGuiCond.FirstUseEver;
         _gameView = new DeathrollGameView(_deathrollService, _dalamudUtilService, _logger);
+        _tournamentBracketView = new TournamentBracketView(_logger);
         
         // Subscribe to relevant messages
         Mediator.Subscribe<DeathrollInvitationReceivedMessage>(this, OnInvitationReceived);
@@ -63,6 +69,7 @@ public class DeathrollLobbyUI : WindowMediatorSubscriberBase
         Mediator.Subscribe<DeathrollLobbyAnnouncementMessage>(this, OnLobbyAnnouncement);
         Mediator.Subscribe<DeathrollLobbyJoinRequestMessage>(this, OnLobbyJoinRequest);
         Mediator.Subscribe<DeathrollLobbyCanceledMessage>(this, OnLobbyCanceled);
+        Mediator.Subscribe<DeathrollTournamentStateUpdateMessage>(this, OnTournamentUpdate);
         Mediator.Subscribe<OpenDeathrollLobbyMessage>(this, (msg) =>
         {
             IsOpen = true;
@@ -108,7 +115,7 @@ public class DeathrollLobbyUI : WindowMediatorSubscriberBase
                     && currentGameForTabs.Players.Any(p => string.Equals(p.Name, currentPlayerNameForTabs, StringComparison.OrdinalIgnoreCase));
                 var showCurrentLobby = currentGameForTabs != null
                    && _deathrollService.IsLobbyActive;
-                var onlyShowGameTab = _deathrollService.IsGameActive;
+                var onlyShowGameTab = _deathrollService.IsGameActive || (currentGameForTabs?.State == Services.DeathrollGameState.Finished && !_dismissFinishedGameView);
 
                 if (showCurrentLobby && !onlyShowGameTab)
                 {
@@ -138,14 +145,69 @@ public class DeathrollLobbyUI : WindowMediatorSubscriberBase
                     }
                 }
 
+                if (onlyShowGameTab)
+{
                 using (var gameTab = ImRaii.TabItem("Game", _selectGameTabNext ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None))
                 {
                     if (gameTab)
                     {
                         if (_selectGameTabNext)
                             _selectGameTabNext = false;
-                        _gameView.Draw(embedded: true);
+                        // Show a close button when results are visible to return to other tabs
+                        var isFinished = (currentGameForTabs?.State == Services.DeathrollGameState.Finished);
+                        if (isFinished)
+                        {
+                            if (ImGui.Button("Close Results"))
+                            {
+                                _dismissFinishedGameView = true;
+                                _selectGameTabNext = false;
+                            }
+                            ImGui.Separator();
+                        }
+                        var isTournamentMode = (currentGameForTabs?.GameMode == DeathrollGameMode.Tournament) || _tournamentState != null;
+                        if (isTournamentMode)
+                        {
+                            if (ImGui.BeginTabBar("DeathrollGameSubTabs"))
+                            {
+                                using (var matchTab = ImRaii.TabItem("Current Match", ImGuiTabItemFlags.None))
+                                {
+                                    if (matchTab)
+                                    {
+                                        _gameView.Draw(embedded: true);
+                                    }
+                                }
+
+                                using (var bracketTab = ImRaii.TabItem("Bracket"))
+                                {
+                                    if (bracketTab)
+                                    {
+                                        if (_tournamentState != null)
+                                        {
+                                            _tournamentBracketView.Draw(_tournamentState);
+                                        }
+                                        else
+                                        {
+                                            ImGui.Text("No tournament info yet.");
+                                        }
+                                    }
+                                }
+
+                                ImGui.EndTabBar();
+                            }
+                        }
+                        else
+                        {
+                            _gameView.Draw(embedded: true);
+                        }
                     }
+                }
+                
+                }
+                else
+                {
+                    // Clear pending selection if Game tab is hidden
+                    if (_selectGameTabNext)
+                        _selectGameTabNext = false;
                 }
                 
                 // Show Create Lobby first and hide it when a lobby is active
@@ -358,11 +420,30 @@ public class DeathrollLobbyUI : WindowMediatorSubscriberBase
     {
         ImGui.Text("Active Game Lobbies:");
         ImGui.Separator();
+
+        // Filters
+        ImGui.InputText("Search Host", ref _activeGamesSearch, 64);
+        ImGui.SameLine();
+        string[] statusItems = { "All", "Available", "WaitingForPlayers", "InProgress" };
+        ImGui.Combo("Status", ref _activeGamesStatusIndex, statusItems, statusItems.Length);
+        ImGui.Separator();
         
         if (_activeLobbies.Count == 0)
         {
             ImGui.Text("No active game lobbies.");
             return;
+        }
+
+        // Apply filtering
+        IEnumerable<DeathrollLobbyEntry> filtered = _activeLobbies;
+        if (!string.IsNullOrEmpty(_activeGamesSearch))
+        {
+            filtered = filtered.Where(l => l.Host.Contains(_activeGamesSearch, StringComparison.OrdinalIgnoreCase));
+        }
+        if (_activeGamesStatusIndex > 0)
+        {
+            var selectedStatus = statusItems[_activeGamesStatusIndex];
+            filtered = filtered.Where(l => string.Equals(l.Status, selectedStatus, StringComparison.OrdinalIgnoreCase));
         }
 
         using var table = ImRaii.Table("DR_ActiveLobbies", 5, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchSame);
@@ -375,7 +456,7 @@ public class DeathrollLobbyUI : WindowMediatorSubscriberBase
             ImGui.TableSetupColumn("Action");
             ImGui.TableHeadersRow();
 
-            foreach (var lobby in _activeLobbies)
+            foreach (var lobby in filtered)
             {
                 ImGui.TableNextRow();
                 ImGui.TableNextColumn();
@@ -625,6 +706,10 @@ public class DeathrollLobbyUI : WindowMediatorSubscriberBase
         _logger.LogDebug("Lobby received game state update for game {gameId}, state: {state}", 
             message.GameState.GameId, message.GameState.State);
         
+        if (message.GameState.State != Sphene.API.Dto.DeathrollGameState.Finished)
+        {
+            _dismissFinishedGameView = false;
+        }
         // Update or create lobby entry based on game state
         var existingLobby = _activeLobbies.FirstOrDefault(l => l.GameId == message.GameState.GameId);
         
@@ -651,6 +736,24 @@ public class DeathrollLobbyUI : WindowMediatorSubscriberBase
             _statusMessage = $"Game {message.GameState.GameId[..8]}... finished!";
             // Remove from active lobbies after showing the message
             _activeLobbies.RemoveAll(l => l.GameId == message.GameState.GameId);
+        }
+    }
+
+    private void OnTournamentUpdate(DeathrollTournamentStateUpdateMessage message)
+    {
+        try
+        {
+            _logger.LogDebug("Lobby received tournament update for game {gameId}, round {round}, stage {stage}",
+                message.TournamentState.GameId, message.TournamentState.CurrentRound, message.TournamentState.Stage);
+
+            _tournamentState = message.TournamentState;
+            // Ensure the Game tab is visible when updates arrive
+            IsOpen = true;
+            _selectGameTabNext = true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Error handling tournament update message");
         }
     }
  
@@ -985,3 +1088,7 @@ public record OpenDeathrollGameMessage(string? GameId) : MessageBase;
 
 // Message to open the Deathroll Lobby UI, optionally selecting tabs
 public record OpenDeathrollLobbyMessage(bool SelectCurrentLobbyTab = false, bool SelectGameTab = false) : MessageBase;
+
+
+
+

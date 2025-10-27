@@ -39,6 +39,7 @@ public class TopTabMenu
         None,
         Individual,
         Syncshell,
+        Game,
         Filter,
         UserConfig
     }
@@ -72,7 +73,8 @@ public class TopTabMenu
     {
         var availableWidth = ImGui.GetWindowContentRegionMax().X - ImGui.GetWindowContentRegionMin().X;
         var spacing = ImGui.GetStyle().ItemSpacing;
-        var buttonX = (availableWidth - (spacing.X * 3)) / 4f;
+        // We render 5 top buttons now: Individual, Syncshell, Game, Filter, UserConfig
+        var buttonX = (availableWidth - (spacing.X * 4)) / 5f;
         var buttonY = _uiSharedService.GetIconButtonSize(FontAwesomeIcon.Pause).Y;
         var buttonSize = new Vector2(buttonX, buttonY);
         var drawList = ImGui.GetWindowDrawList();
@@ -112,6 +114,23 @@ public class TopTabMenu
                     underlineColor, 2);
         }
         UiSharedService.AttachToolTip("Syncshell Menu");
+
+        ImGui.SameLine();
+        using (ImRaii.PushFont(UiBuilder.IconFont))
+        {
+            var x = ImGui.GetCursorScreenPos();
+            if (ImGui.Button(FontAwesomeIcon.Dice.ToIconString(), buttonSize))
+            {
+                TabSelection = TabSelection == SelectedTab.Game ? SelectedTab.None : SelectedTab.Game;
+            }
+            ImGui.SameLine();
+            var xAfter = ImGui.GetCursorScreenPos();
+            if (TabSelection == SelectedTab.Game)
+                drawList.AddLine(x with { Y = x.Y + buttonSize.Y + spacing.Y },
+                    xAfter with { Y = xAfter.Y + buttonSize.Y + spacing.Y, X = xAfter.X - spacing.X },
+                    underlineColor, 2);
+        }
+        UiSharedService.AttachToolTip("Game Menu");
 
         ImGui.SameLine();
         using (ImRaii.PushFont(UiBuilder.IconFont))
@@ -167,6 +186,10 @@ public class TopTabMenu
         else if (TabSelection == SelectedTab.Filter)
         {
             DrawFilter(availableWidth, spacing.X);
+        }
+        else if (TabSelection == SelectedTab.Game)
+        {
+            DrawGameMenu(availableWidth, spacing.X);
         }
         else if (TabSelection == SelectedTab.UserConfig)
         {
@@ -501,6 +524,16 @@ public class TopTabMenu
         {
             _spheneMediator.Publish(new UiToggleMessage(typeof(CharaDataHubUi)));
         }
+    }
+
+    private void DrawGameMenu(float availableWidth, float spacingX)
+    {
+        // First entry for games: Deathroll
+        if (_uiSharedService.IconTextButton(FontAwesomeIcon.Dice, "Deathroll", availableWidth))
+        {
+            _spheneMediator.Publish(new UiToggleMessage(typeof(DeathrollLobbyUI)));
+        }
+        UiSharedService.AttachToolTip("Open Deathroll lobby and game window");
     }
 
     private async Task GlobalControlCountdown(int countdown)

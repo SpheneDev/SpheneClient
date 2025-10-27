@@ -48,9 +48,33 @@ public class DeathrollGameView
 
     private void DrawGameStatus()
     {
-        ImGui.TextColored(new Vector4(0.8f, 0.9f, 1.0f, 1.0f), "Deathroll Game Status");
+        ImGui.TextColored(new Vector4(0.8f, 0.9f, 1.0f, 1.0f), "Deathroll Game");
         var status = _deathrollService.GetGameStatus();
-        ImGui.Text(status);
+
+        var game = _deathrollService.CurrentGame;
+        if (game != null)
+        {
+            var playersInfo = $"Players: {game.Players.Count}/{game.MaxPlayers}";
+            var modeInfo = $"Mode: {game.GameMode}";
+            var lobbyInfo = !string.IsNullOrEmpty(game.LobbyName) ? $"Lobby: {game.LobbyName}" : "";
+            var turnInfo = game.State == Sphene.Services.DeathrollGameState.InProgress ? $" | Turn: {game.CurrentPlayerName}" : string.Empty;
+
+            var durationText = string.Empty;
+            if (game.State == Sphene.Services.DeathrollGameState.InProgress && game.GameStartTime.HasValue)
+                durationText = $" | Time: {(DateTime.UtcNow - game.GameStartTime.Value):mm\\:ss}";
+            else if (game.State == Sphene.Services.DeathrollGameState.Finished && game.GameStartTime.HasValue && game.GameEndTime.HasValue)
+                durationText = $" | Time: {(game.GameEndTime.Value - game.GameStartTime.Value):mm\\:ss}";
+
+            var info = string.Join("  |  ", new[] { lobbyInfo, modeInfo, playersInfo }.Where(s => !string.IsNullOrEmpty(s)));
+            if (!string.IsNullOrEmpty(info))
+                ImGui.Text(info + turnInfo + durationText);
+
+            ImGui.Text($"Status: {status}");
+        }
+        else
+        {
+            ImGui.Text($"Status: {status}");
+        }
     }
 
     private void DrawActiveGameSection()
