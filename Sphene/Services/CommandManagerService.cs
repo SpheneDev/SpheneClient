@@ -44,7 +44,9 @@ public sealed class CommandManagerService : IDisposable
         "\t /sphene toggle on|off - Connects or disconnects to Sphene respectively" + Environment.NewLine +
         "\t /sphene gpose - Opens the Sphene Character Data Hub window" + Environment.NewLine +
         "\t /sphene analyze - Opens the Sphene Character Data Analysis window" + Environment.NewLine +
-        "\t /sphene settings - Opens the Sphene Settings window"
+        "\t /sphene settings - Opens the Sphene Settings window" + Environment.NewLine +
+        "\t /sphene deathroll - Opens the Deathroll Lobby window" + Environment.NewLine +
+            "\t /sphene lobby - Opens the Deathroll Lobby window"
         });
     }
 
@@ -131,6 +133,14 @@ public sealed class CommandManagerService : IDisposable
         else if (string.Equals(splitArgs[0], "statusdebug", StringComparison.OrdinalIgnoreCase))
         {
             _mediator.Publish(new UiToggleMessage(typeof(StatusDebugUi)));
+        }
+        else if (string.Equals(splitArgs[0], "deathroll", StringComparison.OrdinalIgnoreCase))
+        {
+            _mediator.Publish(new UiToggleMessage(typeof(DeathrollLobbyUI)));
+        }
+        else if (string.Equals(splitArgs[0], "lobby", StringComparison.OrdinalIgnoreCase))
+        {
+            _mediator.Publish(new UiToggleMessage(typeof(DeathrollLobbyUI)));
         }
     }
 }

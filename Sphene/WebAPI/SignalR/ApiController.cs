@@ -14,6 +14,7 @@ using Sphene.Services.Mediator;
 using Sphene.Services.ServerConfiguration;
 using Sphene.WebAPI.SignalR;
 using Sphene.WebAPI.SignalR.Utils;
+using Sphene.UI;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Logging;
 using System.Reflection;
@@ -23,14 +24,9 @@ namespace Sphene.WebAPI;
 #pragma warning disable MA0040
 public sealed partial class ApiController : DisposableMediatorSubscriberBase, ISpheneHubClient
 {
-
-#if DEBUG
-    public const string MainServer = "Sphene Debug Server";
-    public const string MainServiceUri = "ws://test.sphene.online:6000";
-#else
     public const string MainServer = "Sphene Server";
     public const string MainServiceUri = "ws://sphene.online:6000";
-#endif
+
 
     private readonly DalamudUtilService _dalamudUtil;
     private readonly HubFactory _hubFactory;
@@ -510,6 +506,16 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
         OnGposeLobbyPushPoseData((dto, data) => _ = Client_GposeLobbyPushPoseData(dto, data));
         OnGposeLobbyPushWorldData((dto, data) => _ = Client_GposeLobbyPushWorldData(dto, data));
 
+        // Register deathroll SignalR methods directly like other methods
+        _spheneHub?.On(nameof(Client_DeathrollInvitationReceived), (DeathrollInvitationDto dto) => _ = Client_DeathrollInvitationReceived(dto));
+        _spheneHub?.On(nameof(Client_DeathrollInvitationResponse), (DeathrollInvitationResponseDto dto) => _ = Client_DeathrollInvitationResponse(dto));
+        _spheneHub?.On(nameof(Client_DeathrollGameStateUpdate), (DeathrollGameStateDto dto) => _ = Client_DeathrollGameStateUpdate(dto));
+        _spheneHub?.On(nameof(Client_DeathrollLobbyAnnouncement), (DeathrollLobbyAnnouncementDto dto) => _ = Client_DeathrollLobbyAnnouncement(dto));
+        _spheneHub?.On(nameof(Client_DeathrollLobbyJoinRequest), (DeathrollJoinLobbyDto dto) => _ = Client_DeathrollLobbyJoinRequest(dto));
+        _spheneHub?.On(nameof(Client_DeathrollLobbyLeave), (DeathrollLeaveLobbyDto dto) => _ = Client_DeathrollLobbyLeave(dto));
+        _spheneHub?.On(nameof(Client_DeathrollPlayerReady), (string gameId, string playerId, bool isReady) => _ = Client_DeathrollPlayerReady(gameId, playerId, isReady));
+        _spheneHub?.On(nameof(Client_DeathrollTournamentUpdate), (DeathrollTournamentStateDto dto) => _ = Client_DeathrollTournamentUpdate(dto));
+
         _healthCheckTokenSource?.Cancel();
         _healthCheckTokenSource?.Dispose();
         _healthCheckTokenSource = new CancellationTokenSource();
@@ -567,19 +573,34 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
 
     private async Task SpheneHubOnReconnectedAsync()
     {
+        Logger.LogInformation("SpheneHub reconnection started - Previous ServerState: {0}", ServerState);
         ServerState = ServerState.Reconnecting;
         try
         {
+            Logger.LogDebug("Initializing API hooks after reconnection");
             InitializeApiHooks();
+            
+            Logger.LogDebug("Getting connection DTO after reconnection");
             _connectionDto = await GetConnectionDtoAsync(publishConnected: false).ConfigureAwait(false);
+            
             if (_connectionDto.ServerVersion != ISpheneHub.ApiVersion)
             {
+                Logger.LogWarning("Version mismatch after reconnection - Server: {0}, Client: {1}", 
+                    _connectionDto.ServerVersion, ISpheneHub.ApiVersion);
                 await StopConnectionAsync(ServerState.VersionMisMatch).ConfigureAwait(false);
                 return;
             }
+            
+            Logger.LogInformation("Reconnection successful - Setting ServerState to Connected");
             ServerState = ServerState.Connected;
+            
+            Logger.LogDebug("Loading initial pairs after reconnection");
             await LoadIninitialPairsAsync().ConfigureAwait(false);
+            
+            Logger.LogDebug("Loading online pairs after reconnection");
             await LoadOnlinePairsAsync().ConfigureAwait(false);
+            
+            Logger.LogInformation("Reconnection completed successfully - Publishing ConnectedMessage");
             Mediator.Publish(new ConnectedMessage(_connectionDto));
         }
         catch (Exception ex)
@@ -713,8 +734,474 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
 
     public async Task BroadcastAreaBoundSyncshells(LocationInfo userLocation)
     {
+        try
+        {
+            Logger.LogInformation("ApiController.BroadcastAreaBoundSyncshells called - Location: {0}", userLocation.ToString());
+            
+            Logger.LogDebug("Current ServerState: {0}, HubConnection State: {1}", ServerState, _spheneHub?.State);
+            
+            CheckConnection();
+            
+            Logger.LogDebug("Connection check passed, ServerState: {0}, HubConnection State: {1}, sending SignalR message", 
+                ServerState, _spheneHub?.State);
+            
+            await _spheneHub!.SendAsync(nameof(BroadcastAreaBoundSyncshells), userLocation).ConfigureAwait(false);
+            
+            Logger.LogInformation("Successfully sent BroadcastAreaBoundSyncshells SignalR message for location: {0}", 
+                userLocation.ToString());
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to send BroadcastAreaBoundSyncshells via SignalR - Location: {0}", 
+                userLocation.ToString());
+        }
+    }
+
+    // Deathroll SignalR Methods
+    public async Task<bool> DeathrollSendInvitation(DeathrollInvitationDto invitation)
+    {
+        try
+        {
+            Logger.LogInformation("ApiController.DeathrollSendInvitation called - Sender: {0}, Recipient: {1}, InvitationId: {2}", 
+                invitation.Sender.AliasOrUID, invitation.Recipient.AliasOrUID, invitation.InvitationId);
+            
+            Logger.LogDebug("Current ServerState: {0}, HubConnection State: {1}", ServerState, _spheneHub?.State);
+            
+            Logger.LogDebug("About to call CheckConnection() - ServerState: {0}", ServerState);
+            CheckConnection();
+            Logger.LogDebug("CheckConnection() completed successfully");
+            
+            Logger.LogDebug("Connection check passed, ServerState: {0}, HubConnection State: {1}, sending SignalR message", 
+                ServerState, _spheneHub?.State);
+            
+            await _spheneHub!.SendAsync(nameof(DeathrollSendInvitation), invitation).ConfigureAwait(false);
+            
+            Logger.LogInformation("Successfully sent DeathrollSendInvitation SignalR message for {0} -> {1}", 
+                invitation.Sender.AliasOrUID, invitation.Recipient.AliasOrUID);
+            
+            return true;
+        }
+        catch (InvalidDataException ex)
+        {
+            Logger.LogError(ex, "Connection check failed in DeathrollSendInvitation - ServerState: {0}, Expected: Connected/Connecting/Reconnecting", ServerState);
+            return false;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to send deathroll invitation via SignalR - Sender: {0}, Recipient: {1}. Exception Type: {2}, Message: {3}, StackTrace: {4}", 
+                invitation?.Sender?.AliasOrUID ?? "unknown", invitation?.Recipient?.AliasOrUID ?? "unknown", 
+                ex.GetType().Name, ex.Message, ex.StackTrace);
+            return false;
+        }
+    }
+
+    public async Task<bool> DeathrollRespondToInvitation(DeathrollInvitationResponseDto response)
+    {
         CheckConnection();
-        await _spheneHub!.SendAsync(nameof(BroadcastAreaBoundSyncshells), userLocation).ConfigureAwait(false);
+        await _spheneHub!.SendAsync(nameof(DeathrollRespondToInvitation), response).ConfigureAwait(false);
+        return true;
+    }
+
+    public async Task<bool> DeathrollUpdateGameState(DeathrollGameStateDto gameState)
+    {
+        try
+        {
+            Logger.LogDebug("DEATHROLL DEBUG: Sending game state update to server via SignalR for game {gameId}", gameState.GameId);
+            
+            if (_spheneHub == null)
+            {
+                Logger.LogWarning("DEATHROLL DEBUG: SpheneHub is null, cannot send game state update");
+                return false;
+            }
+            
+            await _spheneHub!.SendAsync("DeathrollUpdateGameState", gameState);
+            Logger.LogDebug("DEATHROLL DEBUG: Successfully sent game state update to server via SignalR for game {gameId}", gameState.GameId);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "DEATHROLL DEBUG: Error sending game state update to server for game {gameId}", gameState.GameId);
+            return false;
+        }
+    }
+
+    public async Task<bool> DeathrollUpdateLobbyState(DeathrollGameStateDto lobbyState)
+    {
+        try
+        {
+            Logger.LogDebug("DEATHROLL DEBUG: Sending lobby state update to server via SignalR for lobby {gameId}", lobbyState.GameId);
+            
+            if (_spheneHub == null)
+            {
+                Logger.LogWarning("DEATHROLL DEBUG: SpheneHub is null, cannot send lobby state update");
+                return false;
+            }
+            
+            await _spheneHub!.SendAsync(nameof(DeathrollUpdateLobbyState), lobbyState);
+            Logger.LogDebug("DEATHROLL DEBUG: Successfully sent lobby state update to server via SignalR for lobby {gameId}", lobbyState.GameId);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "DEATHROLL DEBUG: Error sending lobby state update to server for lobby {gameId}", lobbyState.GameId);
+            return false;
+        }
+    }
+
+    public async Task<bool> DeathrollCreateLobby(DeathrollCreateLobbyDto lobbyData)
+    {
+        try
+        {
+            Logger.LogDebug("Creating deathroll lobby: {lobbyName} by host: {host}", lobbyData.LobbyName, lobbyData.Host?.AliasOrUID);
+            CheckConnection();
+            await _spheneHub!.SendAsync(nameof(DeathrollCreateLobby), lobbyData).ConfigureAwait(false);
+            Logger.LogDebug("Successfully created deathroll lobby: {lobbyName}", lobbyData.LobbyName);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to create deathroll lobby: {lobbyName}", lobbyData.LobbyName);
+            return false;
+        }
+    }
+
+    public async Task<bool> DeathrollJoinLobby(DeathrollJoinLobbyDto joinData)
+    {
+        try
+        {
+            Logger.LogDebug("Joining deathroll lobby: {gameId} as player: {player}", joinData.GameId, joinData.PlayerName);
+            CheckConnection();
+            await _spheneHub!.SendAsync(nameof(DeathrollJoinLobby), joinData).ConfigureAwait(false);
+            Logger.LogDebug("Successfully joined deathroll lobby: {gameId}", joinData.GameId);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to join deathroll lobby: {gameId}", joinData.GameId);
+            return false;
+        }
+    }
+
+    public async Task<bool> DeathrollLeaveLobby(DeathrollLeaveLobbyDto leaveData)
+    {
+        try
+        {
+            Logger.LogDebug("Leaving deathroll lobby: {gameId} as player: {player}", leaveData.GameId, leaveData.PlayerName);
+            CheckConnection();
+            await _spheneHub!.SendAsync(nameof(DeathrollLeaveLobby), leaveData).ConfigureAwait(false);
+            Logger.LogDebug("Successfully sent leave for deathroll lobby: {gameId}", leaveData.GameId);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to leave deathroll lobby: {gameId}", leaveData.GameId);
+            return false;
+        }
+    }
+
+    public async Task<bool> DeathrollOpenCloseLobby(string gameId, bool isOpen)
+    {
+        try
+        {
+            Logger.LogDebug("Setting deathroll lobby {gameId} open status to: {isOpen}", gameId, isOpen);
+            CheckConnection();
+            await _spheneHub!.SendAsync(nameof(DeathrollOpenCloseLobby), gameId, isOpen).ConfigureAwait(false);
+            Logger.LogDebug("Successfully updated lobby open status for: {gameId}", gameId);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to update lobby open status for: {gameId}", gameId);
+            return false;
+        }
+    }
+
+    public async Task<bool> DeathrollStartGameFromLobby(string gameId)
+    {
+        try
+        {
+            Logger.LogDebug("Starting deathroll game from lobby: {gameId}", gameId);
+            CheckConnection();
+            await _spheneHub!.SendAsync(nameof(DeathrollStartGameFromLobby), gameId).ConfigureAwait(false);
+            Logger.LogDebug("Successfully started game from lobby: {gameId}", gameId);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to start game from lobby: {gameId}", gameId);
+            return false;
+        }
+    }
+
+    public async Task<bool> DeathrollCancelLobby(string gameId)
+    {
+        try
+        {
+            Logger.LogDebug("Canceling deathroll lobby: {gameId}", gameId);
+            CheckConnection();
+            await _spheneHub!.SendAsync(nameof(DeathrollCancelLobby), gameId).ConfigureAwait(false);
+            Logger.LogDebug("Successfully canceled lobby: {gameId}", gameId);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to cancel lobby: {gameId}", gameId);
+            return false;
+        }
+    }
+
+    public async Task<bool> DeathrollSetPlayerReady(string gameId, string playerId, bool isReady)
+    {
+        try
+        {
+            Logger.LogDebug("Setting player ready status in lobby {gameId} for player {playerId} to: {isReady}", gameId, playerId, isReady);
+            CheckConnection();
+            await _spheneHub!.SendAsync(nameof(DeathrollSetPlayerReady), gameId, playerId, isReady).ConfigureAwait(false);
+            Logger.LogDebug("Successfully updated player ready status in lobby: {gameId}", gameId);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to update player ready status in lobby: {gameId}", gameId);
+            return false;
+        }
+    }
+
+    public async Task<bool> DeathrollAnnounceLobby(DeathrollLobbyAnnouncementDto announcement)
+    {
+        try
+        {
+            Logger.LogInformation("Announcing deathroll lobby: {gameId} ({lobbyName}) via SignalR", announcement.GameId, announcement.LobbyName);
+            CheckConnection();
+            await _spheneHub!.SendAsync(nameof(DeathrollAnnounceLobby), announcement).ConfigureAwait(false);
+            Logger.LogInformation("Successfully announced lobby: {gameId} ({lobbyName}) via SignalR", announcement.GameId, announcement.LobbyName);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to announce lobby: {gameId} ({lobbyName}) via SignalR", announcement.GameId, announcement.LobbyName);
+            return false;
+        }
+    }
+
+    public async Task<bool> DeathrollUpdateTournamentState(DeathrollTournamentStateDto dto)
+    {
+        try
+        {
+            Logger.LogDebug("Sending deathroll tournament state update: GameId={gameId}, TournamentId={tid}, Stage={stage}", dto.GameId, dto.TournamentId, dto.Stage);
+            CheckConnection();
+            await _spheneHub!.SendAsync(nameof(DeathrollUpdateTournamentState), dto).ConfigureAwait(false);
+            Logger.LogDebug("Successfully sent deathroll tournament state update: GameId={gameId}", dto.GameId);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to send deathroll tournament state update: GameId={gameId}", dto.GameId);
+            return false;
+        }
+    }
+
+    public async Task Client_DeathrollInvitationReceived(DeathrollInvitationDto invitation)
+    {
+        await ExecuteSafely(async () =>
+        {
+            Logger.LogDebug("Received deathroll invitation from {sender} - InvitationId: {invitationId}", 
+                invitation.Sender.AliasOrUID, invitation.InvitationId);
+            
+            // Create and publish a deathroll invitation received message
+            var message = new DeathrollInvitationReceivedMessage(invitation);
+            Mediator.Publish(message);
+            
+            Logger.LogDebug("Published deathroll invitation received message for invitation: {invitationId}", invitation.InvitationId);
+        });
+    }
+
+    public async Task Client_DeathrollInvitationResponse(DeathrollInvitationResponseDto response)
+    {
+        await ExecuteSafely(async () =>
+        {
+            Logger.LogDebug("Received deathroll invitation response from {responder}: {accepted}", 
+                response.Responder.AliasOrUID, response.Accepted);
+            
+            // Create and publish a deathroll invitation response message
+            var message = new DeathrollInvitationResponseMessage(response);
+            Mediator.Publish(message);
+            
+            Logger.LogDebug("Published deathroll invitation response message for invitation: {invitationId}", response.InvitationId);
+        });
+    }
+
+    public async Task Client_DeathrollGameStateUpdate(DeathrollGameStateDto gameState)
+    {
+        Logger.LogDebug("DEATHROLL DEBUG: Received game state update from server for game {gameId}, state: {state}, players: {playerCount}", 
+            gameState.GameId, gameState.State, gameState.Players?.Count ?? 0);
+        
+        if (gameState.CurrentPlayer != null)
+        {
+            Logger.LogDebug("DEATHROLL DEBUG: Current player in received state: {currentPlayer}", gameState.CurrentPlayer.AliasOrUID);
+        }
+        
+        var message = new DeathrollGameStateUpdateMessage(gameState);
+        Logger.LogDebug("DEATHROLL DEBUG: Publishing DeathrollGameStateUpdateMessage via Mediator");
+        Mediator.Publish(message);
+        Logger.LogDebug("DEATHROLL DEBUG: Published DeathrollGameStateUpdateMessage via Mediator");
+    }
+
+    public async Task Client_DeathrollLobbyJoinRequest(DeathrollJoinLobbyDto joinRequest)
+    {
+        await ExecuteSafely(async () =>
+        {
+            Logger.LogDebug("Received deathroll lobby join request for game {gameId} from player {player}", 
+                joinRequest.GameId, joinRequest.PlayerName);
+            
+            // Create and publish a lobby join request message
+            var message = new DeathrollLobbyJoinRequestMessage(joinRequest.GameId, joinRequest.PlayerName);
+            Mediator.Publish(message);
+            
+            Logger.LogDebug("Published deathroll lobby join request message for game: {gameId}", joinRequest.GameId);
+        });
+    }
+
+    public async Task Client_DeathrollLobbyOpenClose(string gameId, bool isOpen)
+    {
+        await ExecuteSafely(async () =>
+        {
+            Logger.LogDebug("Received deathroll lobby open/close notification for game {gameId}: {isOpen}", gameId, isOpen);
+            
+            // Create and publish a lobby open/close message
+            var message = new DeathrollLobbyOpenCloseMessage(gameId, isOpen);
+            Mediator.Publish(message);
+            
+            Logger.LogDebug("Published deathroll lobby open/close message for game: {gameId}", gameId);
+        });
+    }
+
+    public async Task Client_DeathrollLobbyLeave(DeathrollLeaveLobbyDto leaveInfo)
+    {
+        await ExecuteSafely(async () =>
+        {
+            Logger.LogDebug("Received deathroll lobby leave for game {gameId} from player {player}", leaveInfo.GameId, leaveInfo.PlayerName);
+            var message = new DeathrollLobbyLeaveMessage(leaveInfo.GameId, leaveInfo.PlayerName);
+            Mediator.Publish(message);
+            Logger.LogDebug("Published deathroll lobby leave message for game: {gameId}", leaveInfo.GameId);
+        });
+    }
+
+    public async Task Client_DeathrollGameStart(string gameId)
+    {
+        await ExecuteSafely(async () =>
+        {
+            Logger.LogDebug("Received deathroll game start notification for game {gameId}", gameId);
+            
+            // Create and publish a game start message
+            var message = new DeathrollGameStartMessage(gameId);
+            Mediator.Publish(message);
+            
+            Logger.LogDebug("Published deathroll game start message for game: {gameId}", gameId);
+        });
+    }
+
+    public async Task Client_DeathrollLobbyCanceled(string gameId)
+    {
+        await ExecuteSafely(async () =>
+        {
+            Logger.LogDebug("Received deathroll lobby canceled notification for game {gameId}", gameId);
+            
+            // Create and publish a lobby canceled message
+            var message = new DeathrollLobbyCanceledMessage(gameId);
+            Mediator.Publish(message);
+            
+            Logger.LogDebug("Published deathroll lobby canceled message for game: {gameId}", gameId);
+        });
+    }
+
+    public async Task Client_DeathrollPlayerReady(string gameId, string playerId, bool isReady)
+    {
+        await ExecuteSafely(async () =>
+        {
+            Logger.LogDebug("Received deathroll player ready notification for game {gameId}, player {playerId}: {isReady}", 
+                gameId, playerId, isReady);
+            
+            // Create and publish a player ready message
+            var message = new DeathrollPlayerReadyMessage(gameId, playerId, isReady);
+            Mediator.Publish(message);
+            
+            Logger.LogDebug("Published deathroll player ready message for game: {gameId}", gameId);
+        });
+    }
+
+    public async Task Client_DeathrollLobbyAnnouncement(DeathrollLobbyAnnouncementDto announcement)
+    {
+        await ExecuteSafely(async () =>
+        {
+            Logger.LogInformation("RECEIVED deathroll lobby announcement for game {gameId}: {lobbyName} from host {host}", 
+                announcement.GameId, announcement.LobbyName, announcement.Host?.AliasOrUID);
+            
+            try
+            {
+                // Don't process announcements from ourselves - use async version to run on framework thread
+                var currentPlayerName = await _dalamudUtil.GetPlayerNameAsync();
+                Logger.LogInformation("Current player name retrieved: {currentPlayer}", currentPlayerName);
+                
+                if (announcement.Host?.AliasOrUID == currentPlayerName)
+                {
+                    Logger.LogInformation("Ignoring lobby announcement from self (current player: {currentPlayer})", currentPlayerName);
+                    return;
+                }
+                
+                Logger.LogInformation("Processing lobby announcement from {host} for game {gameId}", announcement.Host?.AliasOrUID, announcement.GameId);
+                
+                // Create and publish a lobby announcement message using LobbyName as the message
+                var message = new DeathrollLobbyAnnouncementMessage(announcement.GameId, announcement.LobbyName, announcement.Host?.AliasOrUID);
+                Logger.LogInformation("Created DeathrollLobbyAnnouncementMessage for game: {gameId}", announcement.GameId);
+                
+                Mediator.Publish(message);
+                Logger.LogInformation("Published deathroll lobby announcement message for game: {gameId}", announcement.GameId);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogCritical(ex, "Error in Client_DeathrollLobbyAnnouncement processing for game {gameId}", announcement.GameId);
+                throw;
+            }
+        });
+    }
+
+    // Deathroll callback management - implementing interface methods
+    public void OnDeathrollInvitationReceived(Action<DeathrollInvitationDto> act)
+    {
+        _spheneHub?.On(nameof(Client_DeathrollInvitationReceived), act);
+    }
+
+    public void OnDeathrollInvitationResponse(Action<DeathrollInvitationResponseDto> act)
+    {
+        _spheneHub?.On(nameof(Client_DeathrollInvitationResponse), act);
+    }
+
+    public void OnDeathrollGameStateUpdate(Action<DeathrollGameStateDto> act)
+    {
+        _spheneHub?.On(nameof(Client_DeathrollGameStateUpdate), act);
+    }
+
+    public async Task Client_DeathrollTournamentUpdate(DeathrollTournamentStateDto tournamentState)
+    {
+        try
+        {
+            Logger.LogDebug("Received deathroll tournament update: GameId={gameId}, TournamentId={tid}, Stage={stage}, Round={round}",
+                tournamentState.GameId, tournamentState.TournamentId, tournamentState.Stage, tournamentState.CurrentRound);
+
+            var message = new DeathrollTournamentStateUpdateMessage(tournamentState);
+            Mediator.Publish(message);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error processing Client_DeathrollTournamentUpdate for GameId={gameId}", tournamentState.GameId);
+        }
+        await Task.CompletedTask;
+    }
+
+    public void OnDeathrollTournamentUpdate(Action<DeathrollTournamentStateDto> act)
+    {
+        _spheneHub?.On(nameof(Client_DeathrollTournamentUpdate), act);
     }
 
     private TimeSpan CalculateRetryDelay(int failureCount)

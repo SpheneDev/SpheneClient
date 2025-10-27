@@ -2,6 +2,7 @@ using Sphene.API.Dto.Group;
 using Sphene.API.Dto.CharaData;
 using Sphene.WebAPI.SignalR.Utils;
 using Microsoft.AspNetCore.SignalR.Client;
+using Microsoft.Extensions.Logging;
 using Sphene.API.Data;
 
 namespace Sphene.WebAPI;
@@ -213,6 +214,12 @@ public partial class ApiController
 
     private void CheckConnection()
     {
-        if (ServerState is not (ServerState.Connected or ServerState.Connecting or ServerState.Reconnecting)) throw new InvalidDataException("Not connected");
+        Logger.LogDebug("CheckConnection called - Current ServerState: {0}", ServerState);
+        if (ServerState is not (ServerState.Connected or ServerState.Connecting or ServerState.Reconnecting)) 
+        {
+            Logger.LogWarning("Connection check failed - ServerState is {0}, expected Connected/Connecting/Reconnecting", ServerState);
+            throw new InvalidDataException($"Not connected - ServerState: {ServerState}");
+        }
+        Logger.LogDebug("Connection check passed - ServerState: {0}", ServerState);
     }
 }

@@ -16,6 +16,7 @@ using Sphene.SpheneConfiguration;
 using Sphene.UI.Handlers;
 using Sphene.WebAPI;
 using System.Numerics;
+using Sphene.UI; // for Deathroll messages
 
 namespace Sphene.UI.Components;
 
@@ -53,6 +54,9 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
     private bool _cacheInitialized = false;
     private bool _isProcessingServerUpdate = false;
 
+    // Track whether our own Deathroll lobby is open (hosted by me)
+    private static bool _deathrollLobbyOpenForMe = false;
+
     public DrawUserPair(string id, Pair entry, List<GroupFullInfoDto> syncedGroups,
         GroupFullInfoDto? currentGroup,
         ApiController apiController, IdDisplayHandler uIDDisplayHandler,
@@ -86,6 +90,9 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         
         // Subscribe to selective icon updates for performance optimization
         _mediator.Subscribe<UserPairIconUpdateMessage>(this, OnIconUpdate);
+
+        // Subscribe to Deathroll game state updates to track my hosted lobby state
+        _mediator.Subscribe<DeathrollGameStateUpdateMessage>(this, OnDeathrollGameStateUpdate);
         
         // Initialize cache once during construction to avoid frequent PairManager calls
         _cachedHasPendingAck = _pairManager.HasPendingAcknowledgmentForUser(_pair.UserData);
@@ -104,7 +111,17 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
     }
     
     public SpheneMediator Mediator => _mediator;
-    
+
+    private void OnDeathrollGameStateUpdate(DeathrollGameStateUpdateMessage message)
+    {
+        // Only consider lobbies hosted by me
+        var isHostMe = string.Equals(message.GameState.Host?.UID, _apiController.UID, StringComparison.Ordinal);
+        if (!isHostMe) return;
+        
+        // Invite is shown only when lobby is OPEN (WaitingForPlayers)
+        _deathrollLobbyOpenForMe = message.GameState.State == Sphene.API.Dto.DeathrollGameState.WaitingForPlayers;
+    }
+
     private void OnAcknowledgmentStatusChanged(PairAcknowledgmentStatusChangedMessage message)
     {
         // Only handle events for this specific pair
@@ -296,6 +313,20 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
                 ImGui.CloseCurrentPopup();
             }
             UiSharedService.AttachToolTip("This reapplies the last received character data to this character");
+            
+            // Invite visible player to Deathroll lobby (only when my lobby is open)
+            if (_deathrollLobbyOpenForMe)
+            {
+                if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.Users, "Invite to Deathroll Lobby", _menuWidth))
+                {
+                    var targetKey = !string.IsNullOrEmpty(_pair.UserData.UID)
+                        ? _pair.UserData.UID
+                        : (string.IsNullOrEmpty(_pair.PlayerName) ? _pair.UserData.AliasOrUID : _pair.PlayerName);
+                    _mediator.Publish(new DeathrollInvitePairMessage(targetKey));
+                    ImGui.CloseCurrentPopup();
+                }
+                UiSharedService.AttachToolTip("Send a Deathroll lobby invitation to this visible player");
+            }
         }
 
         if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.PlayCircle, "Cycle pause state", _menuWidth))
@@ -407,6 +438,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         // Unsubscribe from all events to prevent memory leaks and duplicate event handling
         _mediator.Unsubscribe<PairAcknowledgmentStatusChangedMessage>(this);
         _mediator.Unsubscribe<AcknowledgmentPendingMessage>(this);
+        _mediator.Unsubscribe<DeathrollGameStateUpdateMessage>(this);
         
         // Clean up any active reload timers for this user
         lock (_timerLock)

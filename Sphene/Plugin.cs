@@ -94,6 +94,7 @@ public sealed class Plugin : IDalamudPlugin
             collection.AddSingleton(commandManager);
             collection.AddSingleton(framework);
             collection.AddSingleton(pluginInterface);
+            collection.AddSingleton(chatGui);
 
             // add sphene related singletons
             collection.AddSingleton<SpheneMediator>();
@@ -194,6 +195,9 @@ public sealed class Plugin : IDalamudPlugin
             collection.AddSingleton((s) => new NotificationService(s.GetRequiredService<ILogger<NotificationService>>(),
                 s.GetRequiredService<SpheneMediator>(), s.GetRequiredService<DalamudUtilService>(),
                 notificationManager, chatGui, s.GetRequiredService<SpheneConfigService>()));
+            collection.AddSingleton<IChatSender>((s) => new ChatSender(chatGui, s.GetRequiredService<ILogger<ChatSender>>()));
+            collection.AddSingleton<DeathrollService>();
+            collection.AddSingleton<DeathrollChatHandler>();
             collection.AddSingleton((s) =>
             {
                 var httpClient = new HttpClient();
@@ -245,6 +249,8 @@ public sealed class Plugin : IDalamudPlugin
             collection.AddScoped<WindowMediatorSubscriberBase, EventViewerUI>();
             collection.AddScoped<WindowMediatorSubscriberBase, CharaDataHubUi>();
             collection.AddScoped<WindowMediatorSubscriberBase, StatusDebugUi>();
+            collection.AddScoped<WindowMediatorSubscriberBase, DeathrollInvitationUI>();
+            collection.AddScoped<WindowMediatorSubscriberBase, DeathrollLobbyUI>();
 
             collection.AddScoped<WindowMediatorSubscriberBase, AreaBoundSyncshellConsentUI>();
             collection.AddScoped<WindowMediatorSubscriberBase, AreaBoundSyncshellSelectionUI>();
@@ -311,6 +317,7 @@ public sealed class Plugin : IDalamudPlugin
             collection.AddHostedService(p => p.GetRequiredService<ConfigurationSaveService>());
             collection.AddHostedService(p => p.GetRequiredService<SpheneMediator>());
             collection.AddHostedService(p => p.GetRequiredService<NotificationService>());
+            collection.AddHostedService(p => p.GetRequiredService<DeathrollChatHandler>());
             collection.AddHostedService(p => p.GetRequiredService<FileCacheManager>());
             collection.AddHostedService(p => p.GetRequiredService<ConfigurationMigrator>());
             collection.AddHostedService(p => p.GetRequiredService<DalamudUtilService>());

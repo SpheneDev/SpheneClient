@@ -229,6 +229,23 @@ public class DalamudUtilService : IHostedService, IMediatorSubscriber
         return _objectTable.Where(o => o.ObjectIndex > 200 && o.ObjectKind == Dalamud.Game.ClientState.Objects.Enums.ObjectKind.Player).Cast<ICharacter>();
     }
 
+    public IEnumerable<ICharacter?> GetAllPlayersFromObjectTable()
+    {
+        EnsureIsOnFramework();
+        try
+        {
+            var allObjects = _objectTable.ToList();
+            var playerObjects = allObjects.Where(o => o != null && o.ObjectKind == Dalamud.Game.ClientState.Objects.Enums.ObjectKind.Player);
+            var players = playerObjects.Cast<ICharacter>();
+            return players;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting players from object table");
+            return Enumerable.Empty<ICharacter>();
+        }
+    }
+
     public bool GetIsPlayerPresent()
     {
         EnsureIsOnFramework();

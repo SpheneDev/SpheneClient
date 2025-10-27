@@ -105,6 +105,9 @@ public record SendCharacterDataAcknowledgmentMessage(CharacterDataAcknowledgment
 public record ShowUpdateNotificationMessage(UpdateInfo UpdateInfo) : MessageBase;
 public record CheckForUpdatesMessage : MessageBase;
 
+// Game: Deathroll - invite visible player to current private lobby
+public record DeathrollInvitePairMessage(string PlayerName) : MessageBase;
+
 // Area-bound syncshell messages
 public record AreaBoundJoinRequestMessage(AreaBoundJoinRequestDto JoinRequest) : MessageBase;
 public record AreaBoundJoinResponseMessage(AreaBoundJoinResponseDto JoinResponse) : MessageBase;

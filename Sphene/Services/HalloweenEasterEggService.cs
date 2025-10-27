@@ -47,7 +47,7 @@ public class HalloweenEasterEggService : DisposableMediatorSubscriberBase, IHost
     {
         var now = DateTime.Now;
         
-        // Check if it's Halloween (October 31st) or Halloween season (October 25-31)
+        // Check if it's Halloween (October 31st) or Halloween season (October 15-31)
         bool isHalloweenSeason = now.Month == 10 && now.Day >= 15 && now.Day <= 31;
         bool isHalloween = now.Month == 10 && now.Day == 31;
         

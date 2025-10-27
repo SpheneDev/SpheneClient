@@ -19,6 +19,7 @@ using NotificationType = Sphene.SpheneConfiguration.Models.NotificationType;
 using Sphene.Services.Events;
 using Dalamud.Interface.ImGuiNotification;
 using Sphene.WebAPI;
+using Sphene.UI;
 
 namespace Sphene.PlayerData.Pairs;
 
@@ -32,6 +33,9 @@ public class Pair : DisposableMediatorSubscriberBase
     private CancellationTokenSource _applicationCts = new();
     private OnlineUserIdentDto? _onlineUserIdentDto = null;
 
+    private static bool _deathrollLobbyOpenForMe = false;
+    private static string _myDeathrollLobbyId = string.Empty;
+
     public Pair(ILogger<Pair> logger, UserFullPairDto userPair, PairHandlerFactory cachedPlayerFactory,
         SpheneMediator mediator, ServerConfigurationManager serverConfigurationManager,
         PlayerPerformanceConfigService playerPerformanceConfigService, Lazy<ApiController> apiController) : base(logger, mediator)
@@ -44,6 +48,74 @@ public class Pair : DisposableMediatorSubscriberBase
         
         // Subscribe to character data application completion messages
         Mediator.Subscribe<CharacterDataApplicationCompletedMessage>(this, async (message) => await OnCharacterDataApplicationCompleted(message));
+        // Track my hosted Deathroll lobby state for gating invite menu
+        Mediator.Subscribe<DeathrollGameStateUpdateMessage>(this, OnDeathrollGameStateUpdate);
+        Mediator.Subscribe<DeathrollLobbyOpenCloseMessage>(this, OnDeathrollLobbyOpenClose);
+        Mediator.Subscribe<DeathrollLobbyCanceledMessage>(this, OnDeathrollLobbyCanceled);
+        Mediator.Subscribe<DeathrollGameStartMessage>(this, OnDeathrollGameStart);
+    }
+    
+    private void OnDeathrollGameStateUpdate(DeathrollGameStateUpdateMessage message)
+    {
+        var myUid = _apiController.Value.UID;
+        var myName = _serverConfigurationManager.CurrentServer.Authentications
+            .FirstOrDefault(a => string.Equals(a.UID, myUid, StringComparison.Ordinal))?.CharacterName ?? string.Empty;
+
+        var isHostMe = string.Equals(message.GameState.Host?.UID, myUid, StringComparison.Ordinal)
+                       || (!string.IsNullOrEmpty(myName) && string.Equals(message.GameState.Host?.AliasOrUID, myName, StringComparison.OrdinalIgnoreCase));
+        if (!isHostMe) return;
+
+        _myDeathrollLobbyId = message.GameState.GameId;
+        // Allow invites in both LobbyCreated and WaitingForPlayers
+        _deathrollLobbyOpenForMe = message.GameState.State == Sphene.API.Dto.DeathrollGameState.WaitingForPlayers
+                                   || message.GameState.State == Sphene.API.Dto.DeathrollGameState.LobbyCreated;
+        if (message.GameState.State == Sphene.API.Dto.DeathrollGameState.InProgress
+            || message.GameState.State == Sphene.API.Dto.DeathrollGameState.Finished)
+        {
+            _deathrollLobbyOpenForMe = false;
+        }
+    }
+
+    private void OnDeathrollLobbyOpenClose(DeathrollLobbyOpenCloseMessage message)
+    {
+        if (!string.IsNullOrEmpty(_myDeathrollLobbyId) && message.LobbyId == _myDeathrollLobbyId)
+        {
+            _deathrollLobbyOpenForMe = message.IsOpen;
+            return;
+        }
+        // Fallback: adopt first open/close when lobby id unknown
+        if (string.IsNullOrEmpty(_myDeathrollLobbyId))
+        {
+            _myDeathrollLobbyId = message.LobbyId;
+            _deathrollLobbyOpenForMe = message.IsOpen;
+        }
+    }
+
+    private void OnDeathrollLobbyCanceled(DeathrollLobbyCanceledMessage message)
+    {
+        if (!string.IsNullOrEmpty(_myDeathrollLobbyId) && message.LobbyId == _myDeathrollLobbyId)
+        {
+            _deathrollLobbyOpenForMe = false;
+            _myDeathrollLobbyId = string.Empty;
+            return;
+        }
+        if (string.IsNullOrEmpty(_myDeathrollLobbyId))
+        {
+            _deathrollLobbyOpenForMe = false;
+        }
+    }
+
+    private void OnDeathrollGameStart(DeathrollGameStartMessage message)
+    {
+        if (!string.IsNullOrEmpty(_myDeathrollLobbyId) && message.LobbyId == _myDeathrollLobbyId)
+        {
+            _deathrollLobbyOpenForMe = false;
+            return;
+        }
+        if (string.IsNullOrEmpty(_myDeathrollLobbyId))
+        {
+            _deathrollLobbyOpenForMe = false;
+        }
     }
 
     public bool HasCachedPlayer => CachedPlayer != null && !string.IsNullOrEmpty(CachedPlayer.PlayerName) && _onlineUserIdentDto != null;
@@ -121,6 +193,7 @@ public class Pair : DisposableMediatorSubscriberBase
             PrefixColor = 500
         });
 
+        // Change Permissions
         args.AddMenuItem(new MenuItem()
         {
             Name = changePermissions,
@@ -130,6 +203,7 @@ public class Pair : DisposableMediatorSubscriberBase
             PrefixColor = 500
         });
 
+        // Cycle pause state
         args.AddMenuItem(new MenuItem()
         {
             Name = cyclePauseState,
@@ -162,6 +236,26 @@ public class Pair : DisposableMediatorSubscriberBase
             PrefixChar = 'S',
             PrefixColor = 500
         });
+        
+        // Deathroll: invite visible player to current private lobby (only when my lobby is open)
+        if (_deathrollLobbyOpenForMe)
+        {
+            SeStringBuilder seStringBuilder6 = new();
+            var inviteSeString = seStringBuilder6.AddText("Invite to Deathroll Lobby").Build();
+            args.AddMenuItem(new MenuItem()
+            {
+                Name = inviteSeString,
+                OnClicked = (a) => {
+                    var targetKey = !string.IsNullOrEmpty(UserData.UID)
+                        ? UserData.UID
+                        : (PlayerName ?? UserData.AliasOrUID);
+                    Mediator.Publish(new DeathrollInvitePairMessage(targetKey));
+                },
+                UseDefaultPrefix = false,
+                PrefixChar = 'S',
+                PrefixColor = 500
+            });
+        }
     }
 
     public void ApplyData(OnlineUserCharaDataDto data)
