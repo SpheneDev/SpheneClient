@@ -37,6 +37,10 @@ public class SpheneIcon : WindowMediatorSubscriberBase, IDisposable
     private bool _isDragging = false;
     private bool _wasClicked = false;
     private Vector2 _clickStartPos;
+    private Vector2 _dragStartMousePos;
+    private Vector2 _dragStartIconPos;
+    private DateTime _mouseDownAt;
+    private const int DragStartDelayMs = 100; // delay (ms) before drag begins on hold
     private IDalamudTextureWrap? _spheneLogoTexture;
     
     // Context menu state
@@ -112,6 +116,16 @@ public class SpheneIcon : WindowMediatorSubscriberBase, IDisposable
             if (availablePlugins.Count == 0)
             {
                 ImGui.TextDisabled("No compatible plugins found");
+            }
+
+            ImGui.Separator();
+
+            // Toggle icon lock state
+            var locked = _configService.Current.LockSpheneIcon;
+            if (ImGui.MenuItem("Lock Icon Position", string.Empty, locked, true))
+            {
+                _configService.Current.LockSpheneIcon = !locked;
+                _configService.Save();
             }
             
             ImGui.Separator();
@@ -269,6 +283,7 @@ public class SpheneIcon : WindowMediatorSubscriberBase, IDisposable
         var iconSize = 32f;
         var padding = 4f;
         var windowSize = iconSize + padding * 2;
+        var iconLocked = _configService.Current.LockSpheneIcon;
         
         // Set window size to fit the icon with padding
         ImGui.SetWindowSize(new Vector2(windowSize, windowSize), ImGuiCond.Always);
@@ -318,30 +333,43 @@ public class SpheneIcon : WindowMediatorSubscriberBase, IDisposable
         ImGui.SetCursorPos(new Vector2(0, 0));
         ImGui.InvisibleButton("##sphene_icon_window", new Vector2(windowSize, windowSize));
         
-        // Handle mouse interactions
-        if (ImGui.IsItemActive())
+        // Handle mouse interactions (press-and-hold before dragging)
+        // Start tracking on left-press over the icon
+        if (ImGui.IsItemActivated() && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
         {
-            if (ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+            _wasClicked = true;
+            _isDragging = false;
+            _clickStartPos = ImGui.GetMousePos();
+            _dragStartMousePos = _clickStartPos; // initial reference; will be updated on drag start
+            _dragStartIconPos = ImGui.GetWindowPos();
+            _mouseDownAt = DateTime.UtcNow;
+        }
+
+        // While holding, only begin dragging after a short hold delay (if not locked)
+        if (!iconLocked && ImGui.IsItemActive() && ImGui.IsMouseDown(ImGuiMouseButton.Left))
+        {
+            var elapsedMs = (DateTime.UtcNow - _mouseDownAt).TotalMilliseconds;
+            var currentMouse = ImGui.GetMousePos();
+
+            if (!_isDragging)
             {
-                _wasClicked = true;
-                _clickStartPos = ImGui.GetMousePos();
-            }
-            
-            // Check if mouse is being dragged
-            if (ImGui.IsMouseDragging(ImGuiMouseButton.Left, 3.0f)) // 3 pixel threshold for drag
-            {
-                if (!_isDragging)
+                // Do not start dragging until the hold delay passes
+                if (elapsedMs >= DragStartDelayMs)
                 {
                     _isDragging = true;
-                    _wasClicked = false; // Cancel click if we start dragging
-                    _iconPosition = ImGui.GetWindowPos(); // Update current position when drag starts
+                    _wasClicked = false; // prevent click action when we start dragging
+                    // Re-anchor drag start to current positions to avoid a position jump
+                    _dragStartMousePos = currentMouse;
+                    _dragStartIconPos = ImGui.GetWindowPos();
                 }
-                
-                var mouseDelta = ImGui.GetMouseDragDelta(ImGuiMouseButton.Left);
-                var newPos = new Vector2(_iconPosition.X + mouseDelta.X, _iconPosition.Y + mouseDelta.Y);
+            }
+
+            if (_isDragging)
+            {
+                var delta = new Vector2(currentMouse.X - _dragStartMousePos.X, currentMouse.Y - _dragStartMousePos.Y);
+                var newPos = new Vector2(_dragStartIconPos.X + delta.X, _dragStartIconPos.Y + delta.Y);
                 ImGui.SetWindowPos(newPos);
-                _iconPosition = newPos; // Update stored position during drag
-                ImGui.ResetMouseDragDelta(ImGuiMouseButton.Left);
+                _iconPosition = newPos;
             }
         }
         
@@ -380,7 +408,8 @@ public class SpheneIcon : WindowMediatorSubscriberBase, IDisposable
             using (SpheneCustomTheme.ApplyTooltipTheme())
             {
                 ImGui.BeginTooltip();
-                ImGui.Text("Click to toggle Sphene | Hold and drag to move | Right-click for menu");
+                var dragHint = iconLocked ? "Drag is locked" : "Hold and drag to move";
+                ImGui.Text($"Click to toggle Sphene | {dragHint} | Right-click for menu");
                 ImGui.Separator();
                 ImGui.Text($"Server Status: {GetStatusText(_apiController.ServerState)}");
                 if (_updateAvailable && _updateInfo != null)

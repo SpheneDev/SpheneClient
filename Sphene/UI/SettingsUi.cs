@@ -2064,6 +2064,12 @@ public class SettingsUi : WindowMediatorSubscriberBase
             currentProfile.ShowSpheneIcon = showSpheneIcon;
             _configService.Save();
         }
+        var lockSpheneIcon = currentProfile.LockSpheneIcon;
+        if (ImGui.Checkbox("Lock Sphene Icon position", ref lockSpheneIcon))
+        {
+            currentProfile.LockSpheneIcon = lockSpheneIcon;
+            _configService.Save();
+        }
         var enableRightClickMenu = currentProfile.EnableRightClickMenus;
         if (ImGui.Checkbox("Enable game right-click menus", ref enableRightClickMenu))
         {
