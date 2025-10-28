@@ -34,6 +34,10 @@ public class TopTabMenu
         _uiSharedService = uiSharedService;
     }
 
+    // Anchor for sidebar popup positioning (screen coordinates of last clicked button)
+    public Vector2? SidebarPopupAnchorMin { get; private set; }
+    public Vector2? SidebarPopupAnchorMax { get; private set; }
+
     private enum SelectedTab
     {
         None,
@@ -69,135 +73,211 @@ public class TopTabMenu
             _selectedTab = value;
         }
     }
-    public void Draw()
+    public void Draw(bool wideButtons)
     {
-        var availableWidth = ImGui.GetWindowContentRegionMax().X - ImGui.GetWindowContentRegionMin().X;
+        DrawTopNav(wideButtons);
+        DrawSelectedContent();
+    }
+
+    public void DrawTopNav(bool fullWidthIcons)
+    {
         var spacing = ImGui.GetStyle().ItemSpacing;
-        // We render 5 top buttons now: Individual, Syncshell, Game, Filter, UserConfig
-        var buttonX = (availableWidth - (spacing.X * 4)) / 5f;
         var buttonY = _uiSharedService.GetIconButtonSize(FontAwesomeIcon.Pause).Y;
-        var buttonSize = new Vector2(buttonX, buttonY);
+        var buttonSize = new Vector2(0f, buttonY);
         var drawList = ImGui.GetWindowDrawList();
         var underlineColor = ImGui.GetColorU32(ImGuiCol.Separator);
         var btncolor = ImRaii.PushColor(ImGuiCol.Button, ImGui.ColorConvertFloat4ToU32(new(0, 0, 0, 0)));
 
         ImGuiHelpers.ScaledDummy(spacing.Y / 2f);
 
-        using (ImRaii.PushFont(UiBuilder.IconFont))
+        // Use actual current window content width instead of potential available width
+        float avail = ImGui.GetWindowContentRegionMax().X - ImGui.GetWindowContentRegionMin().X;
+        int per = 5;
+        float fullWidth = MathF.Max(50f * ImGuiHelpers.GlobalScale, (avail - spacing.X * (per - 1)) / per);
+
+        bool DrawTopButton(FontAwesomeIcon icon, string label, SelectedTab tab)
         {
-            var x = ImGui.GetCursorScreenPos();
-            if (ImGui.Button(FontAwesomeIcon.User.ToIconString(), buttonSize))
+            bool clicked = false;
+            float btnWidth = fullWidth; // Always use available width per button
+            using (ImRaii.PushFont(UiBuilder.IconFont))
             {
-                TabSelection = TabSelection == SelectedTab.Individual ? SelectedTab.None : SelectedTab.Individual;
+                ImGui.PushStyleVar(ImGuiStyleVar.ButtonTextAlign, new Vector2(0.5f, 0.5f));
+                clicked = ImGui.Button(icon.ToIconString(), new Vector2(btnWidth, buttonY));
+                ImGui.PopStyleVar();
             }
-            ImGui.SameLine();
-            var xAfter = ImGui.GetCursorScreenPos();
-            if (TabSelection == SelectedTab.Individual)
-                drawList.AddLine(x with { Y = x.Y + buttonSize.Y + spacing.Y },
-                    xAfter with { Y = xAfter.Y + buttonSize.Y + spacing.Y, X = xAfter.X - spacing.X },
-                    underlineColor, 2);
+            if (clicked)
+            {
+                TabSelection = TabSelection == tab ? SelectedTab.None : tab;
+            }
+            return clicked;
         }
+
+        var x = ImGui.GetCursorScreenPos();
+        var clicked1 = DrawTopButton(FontAwesomeIcon.User, "Individual", SelectedTab.Individual);
         UiSharedService.AttachToolTip("Individual Pair Menu");
+        ImGui.SameLine();
+        var xAfter = ImGui.GetCursorScreenPos();
+        if (TabSelection == SelectedTab.Individual)
+            drawList.AddLine(x with { Y = x.Y + buttonSize.Y + spacing.Y },
+                xAfter with { Y = xAfter.Y + buttonSize.Y + spacing.Y, X = xAfter.X - spacing.X },
+                underlineColor, 2);
 
-        using (ImRaii.PushFont(UiBuilder.IconFont))
-        {
-            var x = ImGui.GetCursorScreenPos();
-            if (ImGui.Button(FontAwesomeIcon.Users.ToIconString(), buttonSize))
-            {
-                TabSelection = TabSelection == SelectedTab.Syncshell ? SelectedTab.None : SelectedTab.Syncshell;
-            }
-            ImGui.SameLine();
-            var xAfter = ImGui.GetCursorScreenPos();
-            if (TabSelection == SelectedTab.Syncshell)
-                drawList.AddLine(x with { Y = x.Y + buttonSize.Y + spacing.Y },
-                    xAfter with { Y = xAfter.Y + buttonSize.Y + spacing.Y, X = xAfter.X - spacing.X },
-                    underlineColor, 2);
-        }
+        var x2 = ImGui.GetCursorScreenPos();
+        var clicked2 = DrawTopButton(FontAwesomeIcon.Users, "Syncshell", SelectedTab.Syncshell);
         UiSharedService.AttachToolTip("Syncshell Menu");
+        ImGui.SameLine();
+        var x2After = ImGui.GetCursorScreenPos();
+        if (TabSelection == SelectedTab.Syncshell)
+            drawList.AddLine(x2 with { Y = x2.Y + buttonSize.Y + spacing.Y },
+                x2After with { Y = x2After.Y + buttonSize.Y + spacing.Y, X = x2After.X - spacing.X },
+                underlineColor, 2);
 
         ImGui.SameLine();
-        using (ImRaii.PushFont(UiBuilder.IconFont))
-        {
-            var x = ImGui.GetCursorScreenPos();
-            if (ImGui.Button(FontAwesomeIcon.Dice.ToIconString(), buttonSize))
-            {
-                TabSelection = TabSelection == SelectedTab.Game ? SelectedTab.None : SelectedTab.Game;
-            }
-            ImGui.SameLine();
-            var xAfter = ImGui.GetCursorScreenPos();
-            if (TabSelection == SelectedTab.Game)
-                drawList.AddLine(x with { Y = x.Y + buttonSize.Y + spacing.Y },
-                    xAfter with { Y = xAfter.Y + buttonSize.Y + spacing.Y, X = xAfter.X - spacing.X },
-                    underlineColor, 2);
-        }
+        var x3 = ImGui.GetCursorScreenPos();
+        var clicked3 = DrawTopButton(FontAwesomeIcon.Dice, "Game", SelectedTab.Game);
         UiSharedService.AttachToolTip("Game Menu");
+        ImGui.SameLine();
+        var x3After = ImGui.GetCursorScreenPos();
+        if (TabSelection == SelectedTab.Game)
+            drawList.AddLine(x3 with { Y = x3.Y + buttonSize.Y + spacing.Y },
+                x3After with { Y = x3After.Y + buttonSize.Y + spacing.Y, X = x3After.X - spacing.X },
+                underlineColor, 2);
 
         ImGui.SameLine();
-        using (ImRaii.PushFont(UiBuilder.IconFont))
-        {
-            var x = ImGui.GetCursorScreenPos();
-            if (ImGui.Button(FontAwesomeIcon.Filter.ToIconString(), buttonSize))
-            {
-                TabSelection = TabSelection == SelectedTab.Filter ? SelectedTab.None : SelectedTab.Filter;
-            }
-
-            ImGui.SameLine();
-            var xAfter = ImGui.GetCursorScreenPos();
-            if (TabSelection == SelectedTab.Filter)
-                drawList.AddLine(x with { Y = x.Y + buttonSize.Y + spacing.Y },
-                    xAfter with { Y = xAfter.Y + buttonSize.Y + spacing.Y, X = xAfter.X - spacing.X },
-                    underlineColor, 2);
-        }
+        var x4 = ImGui.GetCursorScreenPos();
+        var clicked4 = DrawTopButton(FontAwesomeIcon.Filter, "Filter", SelectedTab.Filter);
         UiSharedService.AttachToolTip("Filter");
+        ImGui.SameLine();
+        var x4After = ImGui.GetCursorScreenPos();
+        if (TabSelection == SelectedTab.Filter)
+            drawList.AddLine(x4 with { Y = x4.Y + buttonSize.Y + spacing.Y },
+                x4After with { Y = x4After.Y + buttonSize.Y + spacing.Y, X = x4After.X - spacing.X },
+                underlineColor, 2);
 
         ImGui.SameLine();
-        using (ImRaii.PushFont(UiBuilder.IconFont))
-        {
-            var x = ImGui.GetCursorScreenPos();
-            if (ImGui.Button(FontAwesomeIcon.UserCog.ToIconString(), buttonSize))
-            {
-                TabSelection = TabSelection == SelectedTab.UserConfig ? SelectedTab.None : SelectedTab.UserConfig;
-            }
-
-            ImGui.SameLine();
-            var xAfter = ImGui.GetCursorScreenPos();
-            if (TabSelection == SelectedTab.UserConfig)
-                drawList.AddLine(x with { Y = x.Y + buttonSize.Y + spacing.Y },
-                    xAfter with { Y = xAfter.Y + buttonSize.Y + spacing.Y, X = xAfter.X - spacing.X },
-                    underlineColor, 2);
-        }
+        var x5 = ImGui.GetCursorScreenPos();
+        var clicked5 = DrawTopButton(FontAwesomeIcon.UserCog, "User Config", SelectedTab.UserConfig);
         UiSharedService.AttachToolTip("Your User Menu");
+        ImGui.SameLine();
+        var x5After = ImGui.GetCursorScreenPos();
+        if (TabSelection == SelectedTab.UserConfig)
+            drawList.AddLine(x5 with { Y = x5.Y + buttonSize.Y + spacing.Y },
+                x5After with { Y = x5After.Y + buttonSize.Y + spacing.Y, X = x5After.X - spacing.X },
+                underlineColor, 2);
 
         ImGui.NewLine();
         btncolor.Dispose();
 
         ImGuiHelpers.ScaledDummy(spacing);
+    }
+
+    public void DrawSelectedContent()
+    {
+        var availableWidth = ImGui.GetWindowContentRegionMax().X - ImGui.GetWindowContentRegionMin().X;
+        var spacingX = ImGui.GetStyle().ItemSpacing.X;
 
         if (TabSelection == SelectedTab.Individual)
         {
-            DrawAddPair(availableWidth, spacing.X);
-            DrawGlobalIndividualButtons(availableWidth, spacing.X);
+            DrawAddPair(availableWidth, spacingX);
+            DrawGlobalIndividualButtons(availableWidth, spacingX);
         }
         else if (TabSelection == SelectedTab.Syncshell)
         {
-            DrawSyncshellMenu(availableWidth, spacing.X);
-            DrawGlobalSyncshellButtons(availableWidth, spacing.X);
+            DrawSyncshellMenu(availableWidth, spacingX);
+            DrawGlobalSyncshellButtons(availableWidth, spacingX);
         }
         else if (TabSelection == SelectedTab.Filter)
         {
-            DrawFilter(availableWidth, spacing.X);
+            DrawFilter(availableWidth, spacingX);
         }
         else if (TabSelection == SelectedTab.Game)
         {
-            DrawGameMenu(availableWidth, spacing.X);
+            DrawGameMenu(availableWidth, spacingX);
         }
         else if (TabSelection == SelectedTab.UserConfig)
         {
-            DrawUserConfig(availableWidth, spacing.X);
+            DrawUserConfig(availableWidth, spacingX);
         }
 
         if (TabSelection != SelectedTab.None) ImGuiHelpers.ScaledDummy(3f);
         ImGui.Separator();
+    }
+
+    public void DrawSidebar(bool expanded, float sidebarWidth)
+    {
+        var spacing = ImGui.GetStyle().ItemSpacing;
+        var frame = ImGui.GetStyle().FramePadding;
+        var buttonY = _uiSharedService.GetIconButtonSize(FontAwesomeIcon.Pause).Y;
+        var contentWidth = ImGui.GetWindowContentRegionMax().X - ImGui.GetWindowContentRegionMin().X;
+
+        void SidebarEntry(FontAwesomeIcon icon, string label, SelectedTab tab)
+        {
+            bool clicked = false;
+            if (expanded)
+            {
+                // In expanded mode, use full-width icon+text buttons
+                if (_uiSharedService.IconTextButton(icon, label, contentWidth))
+                {
+                    clicked = true;
+                }
+                // Keep anchor updated every frame for the selected tab so the context tracks window movement
+                if (TabSelection == tab)
+                {
+                    SidebarPopupAnchorMin = ImGui.GetItemRectMin();
+                    SidebarPopupAnchorMax = ImGui.GetItemRectMax();
+                }
+                using (SpheneCustomTheme.ApplyTooltipTheme())
+                {
+                    UiSharedService.AttachToolTip(label);
+                }
+            }
+            else
+            {
+                using (ImRaii.PushFont(UiBuilder.IconFont))
+                {
+                    var iconBtnWidth = buttonY + frame.X * 2f; // square-ish icon-only button
+                    if (ImGui.Button(icon.ToIconString(), new Vector2(iconBtnWidth, buttonY)))
+                    {
+                        clicked = true;
+                    }
+                    // Keep anchor updated every frame for the selected tab so the context tracks window movement
+                    if (TabSelection == tab)
+                    {
+                        SidebarPopupAnchorMin = ImGui.GetItemRectMin();
+                        SidebarPopupAnchorMax = ImGui.GetItemRectMax();
+                    }
+                }
+                using (SpheneCustomTheme.ApplyTooltipTheme())
+                {
+                    UiSharedService.AttachToolTip(label);
+                }
+            }
+
+            if (clicked)
+            {
+                // Ensure any existing popup closes so the new one opens immediately on single click
+                ImGui.CloseCurrentPopup();
+                // Remember the clicked button rectangle to anchor the popup next to it
+                SidebarPopupAnchorMin = ImGui.GetItemRectMin();
+                SidebarPopupAnchorMax = ImGui.GetItemRectMax();
+                TabSelection = tab;
+                ImGui.OpenPopup("compact-tab-popup");
+            }
+            ImGuiHelpers.ScaledDummy(spacing.Y * 0.5f);
+        }
+
+        SidebarEntry(FontAwesomeIcon.User, "Individual", SelectedTab.Individual);
+        SidebarEntry(FontAwesomeIcon.Users, "Syncshell", SelectedTab.Syncshell);
+        SidebarEntry(FontAwesomeIcon.Dice, "Game", SelectedTab.Game);
+        SidebarEntry(FontAwesomeIcon.Filter, "Filter", SelectedTab.Filter);
+        SidebarEntry(FontAwesomeIcon.UserCog, "User Config", SelectedTab.UserConfig);
+    }
+
+    public void CloseContext()
+    {
+        SidebarPopupAnchorMin = null;
+        SidebarPopupAnchorMax = null;
+        TabSelection = SelectedTab.None;
     }
 
     private void DrawAddPair(float availableXWidth, float spacingX)

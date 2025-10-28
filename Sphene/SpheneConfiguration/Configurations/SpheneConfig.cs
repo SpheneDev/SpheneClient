@@ -79,6 +79,8 @@ public class SpheneConfig : ISpheneConfiguration
     public float IconPositionY { get; set; } = 100f;
     public bool ShowSpheneIcon { get; set; } = true;
     public bool LockSpheneIcon { get; set; } = false;
+    public bool CompactUiSidebarEnabled { get; set; } = false;
+    public bool CompactUiSidebarExpanded { get; set; } = false;
     
     // Acknowledgment System Settings
     public bool ShowAcknowledgmentPopups { get; set; } = false;

@@ -303,7 +303,6 @@ public static class SpheneCustomTheme
             ImGui.PushStyleVar(styleVar, value);
             _stylesPushed++;
         }
-        
         private void PushStyleVar(ImGuiStyleVar styleVar, Vector2 value)
         {
             ImGui.PushStyleVar(styleVar, value);
@@ -438,7 +437,6 @@ public static class SpheneCustomTheme
             ImGui.PushStyleVar(styleVar, value);
             _stylesPushed++;
         }
-        
         private void PushStyleVar(ImGuiStyleVar styleVar, Vector2 value)
         {
             ImGui.PushStyleVar(styleVar, value);
@@ -635,9 +633,18 @@ public static class SpheneCustomTheme
             
             // Also apply frame rounding for menu items within the context menu
             PushStyleVar(ImGuiStyleVar.FrameRounding, SpheneCustomTheme.CurrentTheme.CompactFrameRounding);
+
+            // Increase padding for context menu popups to match Compact UI theme
+            PushStyleVar(ImGuiStyleVar.WindowPadding, SpheneCustomTheme.CurrentTheme.CompactChildPadding);
+            PushStyleVar(ImGuiStyleVar.FramePadding, SpheneCustomTheme.CurrentTheme.CompactFramePadding);
         }
         
         private void PushStyleVar(ImGuiStyleVar styleVar, float value)
+        {
+            ImGui.PushStyleVar(styleVar, value);
+            _stylesPushed++;
+        }
+        private void PushStyleVar(ImGuiStyleVar styleVar, Vector2 value)
         {
             ImGui.PushStyleVar(styleVar, value);
             _stylesPushed++;
@@ -672,9 +679,18 @@ public static class SpheneCustomTheme
             
             // Also push PopupRounding to ensure consistency (though tooltips primarily use WindowRounding)
             PushStyleVar(ImGuiStyleVar.PopupRounding, SpheneCustomTheme.CurrentTheme.CompactTooltipRounding);
+
+            // Increase tooltip padding to match Compact UI theme spacing
+            PushStyleVar(ImGuiStyleVar.WindowPadding, SpheneCustomTheme.CurrentTheme.CompactChildPadding);
+            PushStyleVar(ImGuiStyleVar.FramePadding, SpheneCustomTheme.CurrentTheme.CompactFramePadding);
         }
         
         private void PushStyleVar(ImGuiStyleVar styleVar, float value)
+        {
+            ImGui.PushStyleVar(styleVar, value);
+            _stylesPushed++;
+        }
+        private void PushStyleVar(ImGuiStyleVar styleVar, Vector2 value)
         {
             ImGui.PushStyleVar(styleVar, value);
             _stylesPushed++;

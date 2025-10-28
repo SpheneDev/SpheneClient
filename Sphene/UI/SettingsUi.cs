@@ -2077,6 +2077,14 @@ public class SettingsUi : WindowMediatorSubscriberBase
             _configService.Save();
         }
 
+        var compactSidebarEnabled = currentProfile.CompactUiSidebarEnabled;
+        if (ImGui.Checkbox("Enable Compact UI sidebar", ref compactSidebarEnabled))
+        {
+            currentProfile.CompactUiSidebarEnabled = compactSidebarEnabled;
+            _configService.Save();
+        }
+        
+
         ImGui.Separator();
         _uiShared.BigText("Server Info Bar");
         var enableDtrEntry = currentProfile.EnableDtrEntry;

@@ -56,6 +56,10 @@ public class CompactUi : WindowMediatorSubscriberBase
     private readonly CharacterAnalyzer _characterAnalyzer;
     private readonly TextureBackupService _textureBackupService;
     private readonly AreaBoundSyncshellService _areaBoundSyncshellService;
+    private bool _sidebarEnabled = false;
+    private bool _sidebarExpanded = false;
+    private bool _sidebarVisible = true;
+    private bool _sidebarVisibilityInitialized = false;
     private List<IDrawFolder> _drawFolders;
     private Pair? _lastAddedUser;
     private string _lastAddedUserComment = string.Empty;
@@ -446,43 +450,160 @@ public class CompactUi : WindowMediatorSubscriberBase
         {
             ImGui.Spacing();
 
-            
-            // Navigation Section
-            SpheneCustomTheme.DrawStyledText("Navigation", SpheneCustomTheme.CurrentTheme.CompactHeaderText);
-            ImGui.Separator();
-            _tabMenu.Draw();
+            var cfg = _configService.Current;
+            _sidebarEnabled = cfg.CompactUiSidebarEnabled;
+            _sidebarExpanded = cfg.CompactUiSidebarExpanded;
+            _sidebarVisible = _sidebarEnabled;
+            _sidebarVisibilityInitialized = true;
 
-            ImGui.Spacing();
-
-            
-            // Connected Pairs Section
-            var onlineCount = _pairManager.DirectPairs.Count(p => p.IsOnline);
-            var totalCount = _pairManager.DirectPairs.Count;
-            var onlineText = $"({onlineCount} / {totalCount}) online";
-            var onlineTextSize = ImGui.CalcTextSize(onlineText);
-            
-            SpheneCustomTheme.DrawStyledText("Connected Pairs", SpheneCustomTheme.CurrentTheme.CompactHeaderText);
-            ImGui.SameLine(ImGui.GetContentRegionAvail().X - onlineTextSize.X);
-            SpheneCustomTheme.DrawStyledText(onlineText, SpheneCustomTheme.CurrentTheme.CompactConnectedText);
-            ImGui.Separator();
-            
-            // Show preview progress bar if enabled in theme settings
-            if (SpheneCustomTheme.CurrentTheme.ShowProgressBarPreview)
+            if (!_sidebarEnabled)
             {
+                // Navigation in top row (legacy layout)
+                SpheneCustomTheme.DrawStyledText("Navigation", SpheneCustomTheme.CurrentTheme.CompactHeaderText);
+                ImGui.Separator();
+                _tabMenu.DrawTopNav(true);
+                _tabMenu.DrawSelectedContent();
+
                 ImGui.Spacing();
-                ImGui.Text("Progress Bar Preview:");
-                var previewProgress = SpheneCustomTheme.CurrentTheme.ProgressBarPreviewFill / 100.0f;
-                _uiSharedService.DrawThemedProgressBar("Preview Progress", previewProgress, $"{SpheneCustomTheme.CurrentTheme.ProgressBarPreviewFill:F1}%");
-                ImGui.Spacing();
+
+                // Connected Pairs below navigation
+                var onlineCount = _pairManager.DirectPairs.Count(p => p.IsOnline);
+                var totalCount = _pairManager.DirectPairs.Count;
+                var onlineText = $"({onlineCount} / {totalCount}) online";
+                var onlineTextSize = ImGui.CalcTextSize(onlineText);
+
+                SpheneCustomTheme.DrawStyledText("Connected Pairs", SpheneCustomTheme.CurrentTheme.CompactHeaderText);
+                ImGui.SameLine(ImGui.GetContentRegionAvail().X - onlineTextSize.X);
+                SpheneCustomTheme.DrawStyledText(onlineText, SpheneCustomTheme.CurrentTheme.CompactConnectedText);
+                ImGui.Separator();
+
+                if (SpheneCustomTheme.CurrentTheme.ShowProgressBarPreview)
+                {
+                    ImGui.Spacing();
+                    ImGui.Text("Progress Bar Preview:");
+                    var previewProgress = SpheneCustomTheme.CurrentTheme.ProgressBarPreviewFill / 100.0f;
+                    _uiSharedService.DrawThemedProgressBar("Preview Progress", previewProgress, $"{SpheneCustomTheme.CurrentTheme.ProgressBarPreviewFill:F1}%");
+                    ImGui.Spacing();
+                }
+
+                using (ImRaii.PushId("pairlist")) DrawPairs();
+
+                float pairlistEnd = ImGui.GetCursorPosY();
+                using (ImRaii.PushId("transfers")) DrawTransfers();
+                _transferPartHeight = ImGui.GetCursorPosY() - pairlistEnd - ImGui.GetTextLineHeight();
+                using (ImRaii.PushId("group-user-popup")) _selectPairsForGroupUi.Draw(_pairManager.DirectPairs);
+                using (ImRaii.PushId("grouping-popup")) _selectGroupForPairUi.Draw();
             }
-            
-            using (ImRaii.PushId("pairlist")) DrawPairs();
-            
-            float pairlistEnd = ImGui.GetCursorPosY();
-            using (ImRaii.PushId("transfers")) DrawTransfers();
-            _transferPartHeight = ImGui.GetCursorPosY() - pairlistEnd - ImGui.GetTextLineHeight();
-            using (ImRaii.PushId("group-user-popup")) _selectPairsForGroupUi.Draw(_pairManager.DirectPairs);
-            using (ImRaii.PushId("grouping-popup")) _selectGroupForPairUi.Draw();
+            else
+            {
+                // Sidebar-enabled layout: overlay window positioned to the right of Compact UI
+                var mainPos = ImGui.GetWindowPos();
+                var mainSize = ImGui.GetWindowSize();
+                // Make sidebar only as wide as the current icon buttons
+                var frame = ImGui.GetStyle().FramePadding;
+                var spacing = ImGui.GetStyle().ItemSpacing;
+                var buttonY = _uiSharedService.GetIconButtonSize(FontAwesomeIcon.Pause).Y;
+                var iconBtnWidth = buttonY + frame.X * 2f; // same width used in DrawSidebar
+                float sidebarWidth = iconBtnWidth;
+
+                // Prefer left docking; fallback to right if not enough space
+                var canDockLeft = (mainPos.X - sidebarWidth) >= 0f;
+                // Place just outside the Compact UI with a small gap (no overlap)
+                float gapOutsideUi = MathF.Max(8f, ImGui.GetStyle().ItemSpacing.X) * ImGuiHelpers.GlobalScale;
+                var leftPosX = MathF.Max(0f, mainPos.X - sidebarWidth - gapOutsideUi);
+                var rightPosX = mainPos.X + mainSize.X + gapOutsideUi;
+                var sidebarPosX = canDockLeft ? leftPosX : rightPosX;
+                // Move buttons further down for better alignment
+                float sidebarYOffset = MathF.Max(12f, ImGui.GetStyle().ItemSpacing.Y * 2f) * ImGuiHelpers.GlobalScale;
+                ImGui.SetNextWindowPos(new Vector2(sidebarPosX, mainPos.Y + sidebarYOffset));
+                ImGui.SetNextWindowSizeConstraints(new Vector2(sidebarWidth, 0f), new Vector2(sidebarWidth, float.MaxValue));
+
+                var flags = ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoSavedSettings | ImGuiWindowFlags.NoDocking | ImGuiWindowFlags.AlwaysAutoResize | ImGuiWindowFlags.NoBringToFrontOnFocus | ImGuiWindowFlags.NoNavFocus | ImGuiWindowFlags.NoFocusOnAppearing | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse;
+                if (_sidebarVisible)
+                {
+                    // Make the overlay visually invisible except for its contents
+                    ImGui.PushStyleColor(ImGuiCol.WindowBg, new Vector4(0f, 0f, 0f, 0f));
+                    ImGui.PushStyleVar(ImGuiStyleVar.WindowBorderSize, 0f);
+                    ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, Vector2.Zero);
+                    if (ImGui.Begin("Compact UI Sidebar", flags))
+                    {
+                        _tabMenu.DrawSidebar(_sidebarExpanded, sidebarWidth);
+
+                        // Draw context popup INSIDE the sidebar window so OpenPopup matches
+                        // Anchor popup next to the clicked sidebar button and make it non-movable
+                        var anchorMin = _tabMenu.SidebarPopupAnchorMin ?? Vector2.Zero;
+                        var anchorMax = _tabMenu.SidebarPopupAnchorMax ?? Vector2.Zero;
+                        var popupWidth = 300f * ImGuiHelpers.GlobalScale;
+                        var gap = MathF.Max(8f, ImGui.GetStyle().ItemSpacing.X) * ImGuiHelpers.GlobalScale;
+                        var popupPos = canDockLeft
+                            ? new Vector2(anchorMax.X + gap, anchorMin.Y)
+                            : new Vector2(anchorMin.X - popupWidth - gap, anchorMin.Y);
+                        ImGui.SetNextWindowPos(popupPos, ImGuiCond.Always);
+                        ImGui.SetNextWindowSizeConstraints(new Vector2(popupWidth, 0f), new Vector2(popupWidth, float.MaxValue));
+                        using (SpheneCustomTheme.ApplyContextMenuTheme())
+                        {
+                            // Draw anchored non-modal popup next to the clicked sidebar button
+                            if (_tabMenu.SidebarPopupAnchorMin.HasValue && _tabMenu.SidebarPopupAnchorMax.HasValue)
+                            {
+                                popupWidth = 300f * ImGuiHelpers.GlobalScale;
+                                gap = MathF.Max(8f, ImGui.GetStyle().ItemSpacing.X) * ImGuiHelpers.GlobalScale;
+                                anchorMin = _tabMenu.SidebarPopupAnchorMin.Value;
+                                anchorMax = _tabMenu.SidebarPopupAnchorMax.Value;
+                                popupPos = canDockLeft
+                                    ? new Vector2(anchorMax.X + gap, anchorMin.Y)
+                                    : new Vector2(anchorMin.X - popupWidth - gap, anchorMin.Y);
+
+                                ImGui.SetNextWindowPos(popupPos, ImGuiCond.Always);
+                                ImGui.SetNextWindowSizeConstraints(new Vector2(popupWidth, 0f), new Vector2(popupWidth, float.MaxValue));
+
+                                // Visuals like a standard context menu and ensure it's non-movable/non-resizable
+                                var popupFlags = ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoSavedSettings | ImGuiWindowFlags.NoNavFocus | ImGuiWindowFlags.AlwaysAutoResize;
+                                if (ImGui.BeginPopup("compact-tab-popup", popupFlags))
+                                {
+                                    _tabMenu.DrawSelectedContent();
+                                    ImGui.EndPopup();
+                                }
+                            }
+                        }
+
+                        ImGui.End();
+                    }
+                    ImGui.PopStyleVar(2);
+                    ImGui.PopStyleColor();
+                }
+
+                
+
+                // Popup handled inside the sidebar window to ensure proper opening
+
+                // Connected Pairs below in main Compact UI, unaffected by the sidebar
+                var onlineCount = _pairManager.DirectPairs.Count(p => p.IsOnline);
+                var totalCount = _pairManager.DirectPairs.Count;
+                var onlineText = $"({onlineCount} / {totalCount}) online";
+                var onlineTextSize = ImGui.CalcTextSize(onlineText);
+
+                SpheneCustomTheme.DrawStyledText("Connected Pairs", SpheneCustomTheme.CurrentTheme.CompactHeaderText);
+                ImGui.SameLine(ImGui.GetContentRegionAvail().X - onlineTextSize.X);
+                SpheneCustomTheme.DrawStyledText(onlineText, SpheneCustomTheme.CurrentTheme.CompactConnectedText);
+                ImGui.Separator();
+
+                if (SpheneCustomTheme.CurrentTheme.ShowProgressBarPreview)
+                {
+                    ImGui.Spacing();
+                    ImGui.Text("Progress Bar Preview:");
+                    var previewProgress = SpheneCustomTheme.CurrentTheme.ProgressBarPreviewFill / 100.0f;
+                    _uiSharedService.DrawThemedProgressBar("Preview Progress", previewProgress, $"{SpheneCustomTheme.CurrentTheme.ProgressBarPreviewFill:F1}%");
+                    ImGui.Spacing();
+                }
+
+                using (ImRaii.PushId("pairlist")) DrawPairs();
+
+                float pairlistEnd = ImGui.GetCursorPosY();
+                using (ImRaii.PushId("transfers")) DrawTransfers();
+                _transferPartHeight = ImGui.GetCursorPosY() - pairlistEnd - ImGui.GetTextLineHeight();
+                using (ImRaii.PushId("group-user-popup")) _selectPairsForGroupUi.Draw(_pairManager.DirectPairs);
+                using (ImRaii.PushId("grouping-popup")) _selectGroupForPairUi.Draw();
+            }
         }
         
         // Draw update notification at bottom if available
@@ -806,6 +927,22 @@ public class CompactUi : WindowMediatorSubscriberBase
         {
             UiSharedService.ColorTextWrapped(GetServerError(), GetServerStatusColor());
         }
+    }
+
+    private void DrawSidebarHeader()
+    {
+        var cfg = _configService.Current;
+        var icon = _sidebarExpanded ? FontAwesomeIcon.AngleDoubleLeft : FontAwesomeIcon.AngleDoubleRight;
+        var label = _sidebarExpanded ? "Collapse" : "Expand";
+        var clicked = _uiSharedService.IconTextButton(icon, label);
+        UiSharedService.AttachToolTip("Toggle sidebar expansion");
+        if (clicked)
+        {
+            _sidebarExpanded = !_sidebarExpanded;
+            cfg.CompactUiSidebarExpanded = _sidebarExpanded;
+            _configService.Save();
+        }
+        ImGui.Separator();
     }
 
     private IEnumerable<IDrawFolder> GetDrawFolders()
