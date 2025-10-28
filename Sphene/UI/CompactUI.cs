@@ -60,6 +60,7 @@ public class CompactUi : WindowMediatorSubscriberBase
     private bool _sidebarExpanded = false;
     private bool _sidebarVisible = true;
     private bool _sidebarVisibilityInitialized = false;
+    private bool _sidebarInitialRefreshSent = false;
     private List<IDrawFolder> _drawFolders;
     private Pair? _lastAddedUser;
     private string _lastAddedUserComment = string.Empty;
@@ -527,7 +528,16 @@ public class CompactUi : WindowMediatorSubscriberBase
                     ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, Vector2.Zero);
                     if (ImGui.Begin("Compact UI Sidebar", flags))
                     {
+                        // Track anchor for default popup without visually selecting a tab
+                        _tabMenu.TrackDefaultPopupAnchor = true;
                         _tabMenu.DrawSidebar(_sidebarExpanded, sidebarWidth);
+
+                        // Send a silent refresh once to settle layout without opening any popup
+                        if (!_sidebarInitialRefreshSent)
+                        {
+                            Mediator.Publish(new RefreshUiMessage());
+                            _sidebarInitialRefreshSent = true;
+                        }
 
                         // Draw context popup INSIDE the sidebar window so OpenPopup matches
                         // Anchor popup next to the clicked sidebar button and make it non-movable
@@ -540,22 +550,22 @@ public class CompactUi : WindowMediatorSubscriberBase
                             : new Vector2(anchorMin.X - popupWidth - gap, anchorMin.Y);
                         ImGui.SetNextWindowPos(popupPos, ImGuiCond.Always);
                         ImGui.SetNextWindowSizeConstraints(new Vector2(popupWidth, 0f), new Vector2(popupWidth, float.MaxValue));
-                        using (SpheneCustomTheme.ApplyContextMenuTheme())
+                        // Draw anchored non-modal popup next to the clicked sidebar button
+                        if (_tabMenu.SidebarPopupAnchorMin.HasValue && _tabMenu.SidebarPopupAnchorMax.HasValue)
                         {
-                            // Draw anchored non-modal popup next to the clicked sidebar button
-                            if (_tabMenu.SidebarPopupAnchorMin.HasValue && _tabMenu.SidebarPopupAnchorMax.HasValue)
+                            popupWidth = 300f * ImGuiHelpers.GlobalScale;
+                            gap = MathF.Max(8f, ImGui.GetStyle().ItemSpacing.X) * ImGuiHelpers.GlobalScale;
+                            anchorMin = _tabMenu.SidebarPopupAnchorMin.Value;
+                            anchorMax = _tabMenu.SidebarPopupAnchorMax.Value;
+                            popupPos = canDockLeft
+                                ? new Vector2(anchorMax.X + gap, anchorMin.Y)
+                                : new Vector2(anchorMin.X - popupWidth - gap, anchorMin.Y);
+
+                            ImGui.SetNextWindowPos(popupPos, ImGuiCond.Always);
+                            ImGui.SetNextWindowSizeConstraints(new Vector2(popupWidth, 0f), new Vector2(popupWidth, float.MaxValue));
+
+                            using (SpheneCustomTheme.ApplyContextMenuTheme())
                             {
-                                popupWidth = 300f * ImGuiHelpers.GlobalScale;
-                                gap = MathF.Max(8f, ImGui.GetStyle().ItemSpacing.X) * ImGuiHelpers.GlobalScale;
-                                anchorMin = _tabMenu.SidebarPopupAnchorMin.Value;
-                                anchorMax = _tabMenu.SidebarPopupAnchorMax.Value;
-                                popupPos = canDockLeft
-                                    ? new Vector2(anchorMax.X + gap, anchorMin.Y)
-                                    : new Vector2(anchorMin.X - popupWidth - gap, anchorMin.Y);
-
-                                ImGui.SetNextWindowPos(popupPos, ImGuiCond.Always);
-                                ImGui.SetNextWindowSizeConstraints(new Vector2(popupWidth, 0f), new Vector2(popupWidth, float.MaxValue));
-
                                 // Visuals like a standard context menu and ensure it's non-movable/non-resizable
                                 var popupFlags = ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoSavedSettings | ImGuiWindowFlags.NoNavFocus | ImGuiWindowFlags.AlwaysAutoResize;
                                 if (ImGui.BeginPopup("compact-tab-popup", popupFlags))

@@ -37,6 +37,7 @@ public class TopTabMenu
     // Anchor for sidebar popup positioning (screen coordinates of last clicked button)
     public Vector2? SidebarPopupAnchorMin { get; private set; }
     public Vector2? SidebarPopupAnchorMax { get; private set; }
+    public bool TrackDefaultPopupAnchor { get; set; } = false;
 
     private enum SelectedTab
     {
@@ -71,6 +72,14 @@ public class TopTabMenu
             }
 
             _selectedTab = value;
+        }
+    }
+
+    public void EnsureDefaultSidebarSelection()
+    {
+        if (TabSelection == SelectedTab.None)
+        {
+            TabSelection = SelectedTab.Individual;
         }
     }
     public void Draw(bool wideButtons)
@@ -199,8 +208,11 @@ public class TopTabMenu
             DrawUserConfig(availableWidth, spacingX);
         }
 
-        if (TabSelection != SelectedTab.None) ImGuiHelpers.ScaledDummy(3f);
-        ImGui.Separator();
+        if (TabSelection != SelectedTab.None)
+        {
+            ImGuiHelpers.ScaledDummy(3f);
+            ImGui.Separator();
+        }
     }
 
     public void DrawSidebar(bool expanded, float sidebarWidth)
@@ -220,8 +232,8 @@ public class TopTabMenu
                 {
                     clicked = true;
                 }
-                // Keep anchor updated every frame for the selected tab so the context tracks window movement
-                if (TabSelection == tab)
+
+                if (TabSelection == tab || (TrackDefaultPopupAnchor && tab == SelectedTab.Individual))
                 {
                     SidebarPopupAnchorMin = ImGui.GetItemRectMin();
                     SidebarPopupAnchorMax = ImGui.GetItemRectMax();
@@ -240,8 +252,8 @@ public class TopTabMenu
                     {
                         clicked = true;
                     }
-                    // Keep anchor updated every frame for the selected tab so the context tracks window movement
-                    if (TabSelection == tab)
+
+                    if (TabSelection == tab || (TrackDefaultPopupAnchor && tab == SelectedTab.Individual))
                     {
                         SidebarPopupAnchorMin = ImGui.GetItemRectMin();
                         SidebarPopupAnchorMax = ImGui.GetItemRectMax();
@@ -277,6 +289,17 @@ public class TopTabMenu
     {
         SidebarPopupAnchorMin = null;
         SidebarPopupAnchorMax = null;
+        TabSelection = SelectedTab.None;
+    }
+
+    // Ephemeral selection helpers: select content for drawing, then revert without leaving a visible selection.
+    public void SelectIndividualEphemeral()
+    {
+        TabSelection = SelectedTab.Individual;
+    }
+
+    public void ClearSelectionEphemeral()
+    {
         TabSelection = SelectedTab.None;
     }
 
