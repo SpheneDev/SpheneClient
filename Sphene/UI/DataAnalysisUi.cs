@@ -34,6 +34,8 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
     private Task? _conversionTask;
     private bool _enableBc7ConversionMode = true;
     private bool _enableBackupBeforeConversion = true;
+    private bool _autoConvertNonBc7 = false;
+    private bool _autoConvertTriggered = false;
     private bool _hasUpdate = false;
     private bool _modalOpen = false;
     private Task? _backupTask;
@@ -786,9 +788,45 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                             Environment.NewLine + "- Conversion will convert all found texture duplicates (entries with more than 1 file path) automatically." +
                             Environment.NewLine + "- Converting textures to BC7 is a very expensive operation and, depending on the amount of textures to convert, will take a while to complete."
                                 , ImGuiColors.DalamudYellow);
+
+                            // Auto-convert toggle for non-BC7 textures
+                            bool autoConvert = _autoConvertNonBc7;
+                            if (ImGui.Checkbox("Auto-convert non-BC7 textures", ref autoConvert))
+                            {
+                                _autoConvertNonBc7 = autoConvert;
+                                if (!_autoConvertNonBc7)
+                                    _autoConvertTriggered = false;
+                            }
                             
                             // One-click conversion button
                             var nonBc7Textures = GetNonBc7Textures(fileGroup);
+
+                            // Automatically trigger conversion once if enabled and conditions are met
+                            if (_autoConvertNonBc7 && !_autoConvertTriggered && nonBc7Textures.Count > 0 && (_conversionTask == null || _conversionTask.IsCompleted) && (_backupTask == null || _backupTask.IsCompleted))
+                            {
+                                _logger.LogDebug("Auto-convert enabled. Preparing {Count} non-BC7 textures for conversion.", nonBc7Textures.Count);
+                                foreach (var texture in nonBc7Textures)
+                                {
+                                    var primaryPath = texture.FilePaths.First();
+                                    var duplicatePaths = texture.FilePaths.Skip(1).ToArray();
+                                    _texturesToConvert[primaryPath] = duplicatePaths;
+                                }
+
+                                if (_texturesToConvert.Count > 0)
+                                {
+                                    _logger.LogDebug("Starting auto-conversion of {Count} textures.", _texturesToConvert.Count);
+                                    if (_enableBackupBeforeConversion)
+                                    {
+                                        StartBackupAndConversion();
+                                    }
+                                    else
+                                    {
+                                        _conversionCancellationTokenSource = _conversionCancellationTokenSource.CancelRecreate();
+                                        _conversionTask = _ipcManager.Penumbra.ConvertTextureFiles(_logger, _texturesToConvert, _conversionProgress, _conversionCancellationTokenSource.Token);
+                                    }
+                                    _autoConvertTriggered = true;
+                                }
+                            }
                             if (nonBc7Textures.Count > 0 && _uiSharedService.IconTextButton(FontAwesomeIcon.Compress, $"Convert all {nonBc7Textures.Count} non-BC7 textures"))
                             {
                                 _logger.LogDebug("One-click conversion button clicked. Found {Count} non-BC7 textures", nonBc7Textures.Count);
@@ -885,7 +923,7 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
     private void DrawTable(IGrouping<string, CharacterAnalyzer.FileDataEntry> fileGroup)
     {
         var tableColumns = string.Equals(fileGroup.Key, "tex", StringComparison.Ordinal)
-            ? (_enableBc7ConversionMode ? 7 : 6)
+            ? (_enableBc7ConversionMode ? 8 : 7)
             : (string.Equals(fileGroup.Key, "mdl", StringComparison.Ordinal) ? 6 : 5);
         using var table = ImRaii.Table("Analysis", tableColumns, ImGuiTableFlags.Sortable | ImGuiTableFlags.RowBg | ImGuiTableFlags.ScrollY | ImGuiTableFlags.SizingFixedFit,
             new Vector2(0, 300));
@@ -897,6 +935,7 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
         ImGui.TableSetupColumn("Compressed Size");
         if (string.Equals(fileGroup.Key, "tex", StringComparison.Ordinal))
         {
+            ImGui.TableSetupColumn("Resolution");
             ImGui.TableSetupColumn("Format");
             if (_enableBc7ConversionMode) ImGui.TableSetupColumn("Convert to BC7");
         }
@@ -936,9 +975,14 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                 _cachedAnalysis![_selectedObjectTab] = _cachedAnalysis[_selectedObjectTab].OrderBy(k => k.Value.Triangles).ToDictionary(d => d.Key, d => d.Value, StringComparer.Ordinal);
             if (string.Equals(fileGroup.Key, "mdl", StringComparison.Ordinal) && idx == 5 && sortSpecs.Specs.SortDirection == ImGuiSortDirection.Descending)
                 _cachedAnalysis![_selectedObjectTab] = _cachedAnalysis[_selectedObjectTab].OrderByDescending(k => k.Value.Triangles).ToDictionary(d => d.Key, d => d.Value, StringComparer.Ordinal);
+            // Sorting for textures: Resolution at index 5, Format at index 6
             if (string.Equals(fileGroup.Key, "tex", StringComparison.Ordinal) && idx == 5 && sortSpecs.Specs.SortDirection == ImGuiSortDirection.Ascending)
-                _cachedAnalysis![_selectedObjectTab] = _cachedAnalysis[_selectedObjectTab].OrderBy(k => k.Value.Format.Value, StringComparer.Ordinal).ToDictionary(d => d.Key, d => d.Value, StringComparer.Ordinal);
+                _cachedAnalysis![_selectedObjectTab] = _cachedAnalysis[_selectedObjectTab].OrderBy(k => k.Value.Resolution.Value.Width * k.Value.Resolution.Value.Height).ToDictionary(d => d.Key, d => d.Value, StringComparer.Ordinal);
             if (string.Equals(fileGroup.Key, "tex", StringComparison.Ordinal) && idx == 5 && sortSpecs.Specs.SortDirection == ImGuiSortDirection.Descending)
+                _cachedAnalysis![_selectedObjectTab] = _cachedAnalysis[_selectedObjectTab].OrderByDescending(k => k.Value.Resolution.Value.Width * k.Value.Resolution.Value.Height).ToDictionary(d => d.Key, d => d.Value, StringComparer.Ordinal);
+            if (string.Equals(fileGroup.Key, "tex", StringComparison.Ordinal) && idx == 6 && sortSpecs.Specs.SortDirection == ImGuiSortDirection.Ascending)
+                _cachedAnalysis![_selectedObjectTab] = _cachedAnalysis[_selectedObjectTab].OrderBy(k => k.Value.Format.Value, StringComparer.Ordinal).ToDictionary(d => d.Key, d => d.Value, StringComparer.Ordinal);
+            if (string.Equals(fileGroup.Key, "tex", StringComparison.Ordinal) && idx == 6 && sortSpecs.Specs.SortDirection == ImGuiSortDirection.Descending)
                 _cachedAnalysis![_selectedObjectTab] = _cachedAnalysis[_selectedObjectTab].OrderByDescending(k => k.Value.Format.Value, StringComparer.Ordinal).ToDictionary(d => d.Key, d => d.Value, StringComparer.Ordinal);
 
             sortSpecs.SpecsDirty = false;
@@ -975,6 +1019,10 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
             if (ImGui.IsItemClicked()) _selectedHash = item.Hash;
             if (string.Equals(fileGroup.Key, "tex", StringComparison.Ordinal))
             {
+                ImGui.TableNextColumn();
+                var res = item.Resolution.Value;
+                ImGui.TextUnformatted(res.Width > 0 && res.Height > 0 ? $"{res.Width}x{res.Height}" : "-");
+                if (ImGui.IsItemClicked()) _selectedHash = item.Hash;
                 ImGui.TableNextColumn();
                 ImGui.TextUnformatted(item.Format.Value);
                 if (ImGui.IsItemClicked()) _selectedHash = item.Hash;

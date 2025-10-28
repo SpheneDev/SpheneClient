@@ -231,5 +231,32 @@ public sealed class CharacterAnalyzer : MediatorSubscriberBase, IDisposable
                     return string.Empty;
             }
         });
+
+        // Lazy resolution computation for texture files.
+        public Lazy<(int Width, int Height)> Resolution = new(() =>
+        {
+            switch (FileType)
+            {
+                case "tex":
+                    {
+                        try
+                        {
+                            using var stream = new FileStream(FilePaths[0], FileMode.Open, FileAccess.Read, FileShare.Read);
+                            using var reader = new BinaryReader(stream);
+                            // TEX header order: Type (uint), Format (uint), Width (ushort), Height (ushort)
+                            reader.BaseStream.Position = 8;
+                            var width = reader.ReadUInt16();
+                            var height = reader.ReadUInt16();
+                            return (width, height);
+                        }
+                        catch
+                        {
+                            return (0, 0);
+                        }
+                    }
+                default:
+                    return (0, 0);
+            }
+        });
     }
 }
