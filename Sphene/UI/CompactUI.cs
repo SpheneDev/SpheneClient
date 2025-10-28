@@ -141,6 +141,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         _isIncognitoModeActive = _configService.Current.IsIncognitoModeActive;
         _prePausedPairs = new HashSet<string>(_configService.Current.PrePausedPairs);
         _prePausedSyncshells = new HashSet<string>(_configService.Current.PrePausedSyncshells);
+        _enableBackupBeforeConversion = _configService.Current.EnableBackupBeforeConversion;
 
         AllowPinning = false;
         AllowClickthrough = false;
@@ -1779,7 +1780,11 @@ public class CompactUi : WindowMediatorSubscriberBase
                 ImGui.Text($"Total size to convert: {totalSizeMB:F1} MB");
 
                 ImGui.Spacing();
-                ImGui.Checkbox("Create backup before conversion", ref _enableBackupBeforeConversion);
+                if (ImGui.Checkbox("Create backup before conversion", ref _enableBackupBeforeConversion))
+                {
+                    _configService.Current.EnableBackupBeforeConversion = _enableBackupBeforeConversion;
+                    _configService.Save();
+                }
                 if (_enableBackupBeforeConversion)
                 {
                     UiSharedService.ColorTextWrapped("Backups will be created automatically for revert functionality.", SpheneCustomTheme.Colors.Success);
@@ -1930,23 +1935,28 @@ public class CompactUi : WindowMediatorSubscriberBase
             
             var filteredBackups = new Dictionary<string, List<string>>();
             
-            // Get all texture filenames from current analysis
+            // Collect filenames from all analyzed files (not only textures)
             var currentTextureNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            var textureData = GetTextureDataFromAnalysis(analysis);
-            _logger.LogDebug("Found {count} texture entries in current analysis", textureData.Count);
-            
-            foreach (var texture in textureData)
+            int analyzedFileCount = 0;
+            foreach (var objectKindData in analysis.Values)
             {
-                foreach (var filePath in texture.FilePaths)
+                foreach (var fileData in objectKindData.Values)
                 {
-                    var fileName = Path.GetFileName(filePath);
-                    if (!string.IsNullOrEmpty(fileName))
+                    analyzedFileCount++;
+                    if (fileData.FilePaths != null)
                     {
-                        currentTextureNames.Add(fileName);
-                        _logger.LogDebug("Added texture filename to filter: {fileName}", fileName);
+                        foreach (var filePath in fileData.FilePaths)
+                        {
+                            var fileName = Path.GetFileName(filePath);
+                            if (!string.IsNullOrEmpty(fileName))
+                            {
+                                currentTextureNames.Add(fileName);
+                            }
+                        }
                     }
                 }
             }
+            _logger.LogDebug("Total analyzed files: {count}. Unique filenames collected for backup filtering: {unique}", analyzedFileCount, currentTextureNames.Count);
             
             _logger.LogDebug("Total unique texture filenames in analysis: {count}", currentTextureNames.Count);
             

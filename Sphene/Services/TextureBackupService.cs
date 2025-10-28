@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using Sphene.SpheneConfiguration;
 using System.IO;
+using System.IO.Compression;
 
 namespace Sphene.Services;
 
@@ -54,13 +55,25 @@ public class TextureBackupService
             var backupFileName = $"{Path.GetFileNameWithoutExtension(fileName)}_{timestamp}{Path.GetExtension(fileName)}";
             var backupPath = Path.Combine(_backupDirectory, backupFileName);
 
-            // Create backup with async file copy
-            using var sourceStream = new FileStream(originalFilePath, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: 4096, useAsync: true);
-            using var destinationStream = new FileStream(backupPath, FileMode.Create, FileAccess.Write, FileShare.None, bufferSize: 4096, useAsync: true);
-            
-            await sourceStream.CopyToAsync(destinationStream, cancellationToken);
-            
-            _logger.LogDebug("Backed up texture: {original} -> {backup}", originalFilePath, backupPath);
+            if (_configService.Current.EnableZipCompressionForBackups)
+            {
+                var zipPath = backupPath + ".zip";
+                await Task.Run(() =>
+                {
+                    using var archive = ZipFile.Open(zipPath, ZipArchiveMode.Create);
+                    archive.CreateEntryFromFile(originalFilePath, backupFileName, CompressionLevel.Optimal);
+                }, cancellationToken);
+
+                _logger.LogDebug("Backed up texture with ZIP: {original} -> {zip}", originalFilePath, zipPath);
+            }
+            else
+            {
+                // Create backup with async file copy
+                using var sourceStream = new FileStream(originalFilePath, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: 4096, useAsync: true);
+                using var destinationStream = new FileStream(backupPath, FileMode.Create, FileAccess.Write, FileShare.None, bufferSize: 4096, useAsync: true);
+                await sourceStream.CopyToAsync(destinationStream, cancellationToken);
+                _logger.LogDebug("Backed up texture: {original} -> {backup}", originalFilePath, backupPath);
+            }
             return true;
         }
         catch (Exception ex)
@@ -100,7 +113,9 @@ public class TextureBackupService
             }
             
             var cutoffDate = DateTime.Now - maxAge;
-            var backupFiles = Directory.GetFiles(_backupDirectory, "*.tex");
+            var backupFiles = Directory.GetFiles(_backupDirectory, "*.tex")
+                .Concat(Directory.GetFiles(_backupDirectory, "*.tex.zip"))
+                .ToArray();
 
             foreach (var file in backupFiles)
             {
@@ -152,11 +167,13 @@ public class TextureBackupService
                 return new List<string>();
             }
             
-            var backupFiles = Directory.GetFiles(_backupDirectory, "*.tex")
+            var texFiles = Directory.GetFiles(_backupDirectory, "*.tex");
+            var zipFiles = Directory.GetFiles(_backupDirectory, "*.tex.zip");
+            var backupFiles = texFiles.Concat(zipFiles)
                 .OrderByDescending(f => new FileInfo(f).CreationTime)
                 .ToList();
                 
-            _logger.LogDebug("GetAvailableBackups: Found {count} .tex files in backup directory", backupFiles.Count);
+            _logger.LogDebug("GetAvailableBackups: Found {count} backup files (.tex/.tex.zip) in directory", backupFiles.Count);
             
             foreach (var file in backupFiles.Take(5)) // Log first 5 files for debugging
             {
@@ -186,15 +203,21 @@ public class TextureBackupService
                 var fileName = Path.GetFileName(backupFile);
                 _logger.LogDebug("Processing backup file: {fileName}", fileName);
                 
+                // Normalize name for zipped backups by removing .zip
+                var normalizedName = fileName.EndsWith(".tex.zip", StringComparison.OrdinalIgnoreCase)
+                    ? Path.GetFileNameWithoutExtension(fileName)
+                    : fileName;
+
                 // Extract original filename by removing timestamp suffix
-                // Format: originalname_20250925_134259.tex
-                var lastUnderscoreIndex = fileName.LastIndexOf('_');
+                // Format: originalname_20250925_134259.tex / originalname_20250925_134259.tex.zip
+                var lastUnderscoreIndex = normalizedName.LastIndexOf('_');
                 if (lastUnderscoreIndex > 0)
                 {
-                    var secondLastUnderscoreIndex = fileName.LastIndexOf('_', lastUnderscoreIndex - 1);
+                    var secondLastUnderscoreIndex = normalizedName.LastIndexOf('_', lastUnderscoreIndex - 1);
                     if (secondLastUnderscoreIndex > 0)
                     {
-                        var originalName = fileName.Substring(0, secondLastUnderscoreIndex) + Path.GetExtension(fileName);
+                        var originalExt = Path.GetExtension(normalizedName);
+                        var originalName = normalizedName.Substring(0, secondLastUnderscoreIndex) + originalExt;
                         _logger.LogDebug("Extracted original name: {originalName} from backup: {fileName}", originalName, fileName);
                         
                         if (!backupsByOriginal.ContainsKey(originalName))
@@ -238,13 +261,28 @@ public class TextureBackupService
             if (!string.IsNullOrEmpty(targetDirectory))
                 Directory.CreateDirectory(targetDirectory);
 
-            // Restore backup with async file copy
-            using var sourceStream = new FileStream(backupFilePath, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: 4096, useAsync: true);
-            using var destinationStream = new FileStream(targetFilePath, FileMode.Create, FileAccess.Write, FileShare.None, bufferSize: 4096, useAsync: true);
-            
-            await sourceStream.CopyToAsync(destinationStream, cancellationToken);
-            
-            _logger.LogDebug("Restored texture: {backup} -> {target}", backupFilePath, targetFilePath);
+            if (backupFilePath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+            {
+                await Task.Run(() =>
+                {
+                    using var archive = ZipFile.OpenRead(backupFilePath);
+                    var entry = archive.Entries.FirstOrDefault(e => e.Name.EndsWith(".tex", StringComparison.OrdinalIgnoreCase))
+                                ?? archive.Entries.FirstOrDefault();
+                    if (entry == null)
+                        throw new InvalidOperationException($"ZIP backup has no entries: {backupFilePath}");
+                    entry.ExtractToFile(targetFilePath, overwrite: true);
+                }, cancellationToken);
+
+                _logger.LogDebug("Restored texture from ZIP: {backup} -> {target}", backupFilePath, targetFilePath);
+            }
+            else
+            {
+                // Restore backup with async file copy
+                using var sourceStream = new FileStream(backupFilePath, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: 4096, useAsync: true);
+                using var destinationStream = new FileStream(targetFilePath, FileMode.Create, FileAccess.Write, FileShare.None, bufferSize: 4096, useAsync: true);
+                await sourceStream.CopyToAsync(destinationStream, cancellationToken);
+                _logger.LogDebug("Restored texture: {backup} -> {target}", backupFilePath, targetFilePath);
+            }
             return true;
         }
         catch (Exception ex)
@@ -327,6 +365,225 @@ public class TextureBackupService
         }
         
         return results;
+    }
+
+    public async Task<(int processedCount, int compressedCount, int deletedOriginalsCount, long freedSpace)> CompressExistingBackupsAsync(
+        bool deleteOriginals = true,
+        IProgress<(string currentFile, int completed, int total)> progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            EnsureBackupDirectoryExists();
+
+            if (!Directory.Exists(_backupDirectory))
+            {
+                _logger.LogDebug("CompressExistingBackupsAsync: Backup directory does not exist: {directory}", _backupDirectory);
+                return (0, 0, 0, 0);
+            }
+
+            var texFiles = Directory.GetFiles(_backupDirectory, "*.tex", SearchOption.TopDirectoryOnly)
+                .OrderBy(f => new FileInfo(f).CreationTime)
+                .ToList();
+
+            int total = texFiles.Count;
+            int processed = 0;
+            int compressed = 0;
+            int deleted = 0;
+            long freedSpace = 0;
+
+            await Task.Run(() =>
+            {
+                foreach (var texFile in texFiles)
+                {
+                    if (cancellationToken.IsCancellationRequested)
+                        break;
+
+                    try
+                    {
+                        progress?.Report((texFile, ++processed, total));
+
+                        var zipPath = texFile + ".zip";
+                        if (File.Exists(zipPath))
+                        {
+                            _logger.LogDebug("ZIP already exists, skipping: {zipPath}", zipPath);
+                            continue;
+                        }
+
+                        using (var archive = ZipFile.Open(zipPath, ZipArchiveMode.Create))
+                        {
+                            // Store the original backup filename inside the ZIP
+                            var entryName = Path.GetFileName(texFile);
+                            archive.CreateEntryFromFile(texFile, entryName, CompressionLevel.Optimal);
+                        }
+
+                        compressed++;
+                        _logger.LogDebug("Compressed backup to ZIP: {tex} -> {zip}", texFile, zipPath);
+
+                        if (deleteOriginals)
+                        {
+                            var fileInfo = new FileInfo(texFile);
+                            var size = fileInfo.Length;
+                            File.Delete(texFile);
+                            deleted++;
+                            freedSpace += size;
+                            _logger.LogDebug("Deleted original backup after compression: {tex} (freed {size} bytes)", texFile, size);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to compress backup file: {file}", texFile);
+                    }
+                }
+            }, cancellationToken);
+
+            _logger.LogDebug("Compression summary: processed={processed}, compressed={compressed}, deleted={deleted}, freed={freedSpace} bytes",
+                processed, compressed, deleted, freedSpace);
+
+            return (processed, compressed, deleted, freedSpace);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "CompressExistingBackupsAsync failed");
+            return (0, 0, 0, 0);
+        }
+    }
+
+    // Detailed backup statistics model
+    public class BackupStats
+    {
+        public long TotalSize { get; set; }
+        public int TotalFiles { get; set; }
+        public int TexCount { get; set; }
+        public long TexSize { get; set; }
+        public int ZipCount { get; set; }
+        public long ZipSize { get; set; }
+        public DateTime? Oldest { get; set; }
+        public DateTime? Newest { get; set; }
+        public int OriginalGroups { get; set; }
+        public double AvgBackupsPerOriginal { get; set; }
+        public List<(string FileName, long Size)> TopLargestFiles { get; set; } = new();
+        public List<(string OriginalName, int Count)> TopOriginalsByBackupCount { get; set; } = new();
+    }
+
+    public async Task<BackupStats> GetBackupStatsAsync(int topN = 5)
+    {
+        try
+        {
+            EnsureBackupDirectoryExists();
+
+            var stats = new BackupStats();
+
+            if (!Directory.Exists(_backupDirectory))
+            {
+                _logger.LogDebug("GetBackupStatsAsync: Backup directory does not exist: {directory}", _backupDirectory);
+                return stats;
+            }
+
+            var allFiles = Directory.GetFiles(_backupDirectory, "*", SearchOption.TopDirectoryOnly);
+            var texFiles = Directory.GetFiles(_backupDirectory, "*.tex", SearchOption.TopDirectoryOnly);
+            var zipFiles = Directory.GetFiles(_backupDirectory, "*.tex.zip", SearchOption.TopDirectoryOnly);
+
+            stats.TotalFiles = allFiles.Length;
+            stats.TexCount = texFiles.Length;
+            stats.ZipCount = zipFiles.Length;
+
+            DateTime? oldest = null;
+            DateTime? newest = null;
+
+            await Task.Run(() =>
+            {
+                foreach (var file in allFiles)
+                {
+                    try
+                    {
+                        var fi = new FileInfo(file);
+                        stats.TotalSize += fi.Length;
+
+                        if (!oldest.HasValue || fi.CreationTime < oldest.Value)
+                            oldest = fi.CreationTime;
+                        if (!newest.HasValue || fi.CreationTime > newest.Value)
+                            newest = fi.CreationTime;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to read file info for backup: {file}", file);
+                    }
+                }
+
+                foreach (var file in texFiles)
+                {
+                    try
+                    {
+                        var fi = new FileInfo(file);
+                        stats.TexSize += fi.Length;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to read size for tex file: {file}", file);
+                    }
+                }
+
+                foreach (var file in zipFiles)
+                {
+                    try
+                    {
+                        var fi = new FileInfo(file);
+                        stats.ZipSize += fi.Length;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to read size for zip file: {file}", file);
+                    }
+                }
+
+                // Top largest backup files
+                var topLargest = allFiles
+                    .Select(f =>
+                    {
+                        try { var fi = new FileInfo(f); return (f, fi.Length); }
+                        catch { return (f, 0L); }
+                    })
+                    .OrderByDescending(t => t.Item2)
+                    .Take(topN)
+                    .Select(t => (Path.GetFileName(t.Item1), t.Item2))
+                    .ToList();
+                stats.TopLargestFiles = topLargest;
+            });
+
+            stats.Oldest = oldest;
+            stats.Newest = newest;
+
+            // Group by original file and compute counts
+            try
+            {
+                var byOriginal = GetBackupsByOriginalFile();
+                stats.OriginalGroups = byOriginal.Count;
+                stats.AvgBackupsPerOriginal = byOriginal.Count == 0 ? 0 : byOriginal.Values.Average(v => v.Count);
+
+                stats.TopOriginalsByBackupCount = byOriginal
+                    .Select(kvp => (kvp.Key, kvp.Value.Count))
+                    .OrderByDescending(t => t.Count)
+                    .Take(topN)
+                    .Select(t => (t.Key, t.Count))
+                    .ToList();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to compute grouping statistics for backups");
+            }
+
+            _logger.LogDebug(
+                "Backup stats: totalFiles={totalFiles}, totalSize={totalSize} bytes, texFiles={texCount} ({texSize} bytes), zipFiles={zipCount} ({zipSize} bytes), originalGroups={groups}",
+                stats.TotalFiles, stats.TotalSize, stats.TexCount, stats.TexSize, stats.ZipCount, stats.ZipSize, stats.OriginalGroups);
+
+            return stats;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "GetBackupStatsAsync failed");
+            return new BackupStats();
+        }
     }
 
     public async Task<(long totalSize, int fileCount)> GetBackupStorageInfoAsync()

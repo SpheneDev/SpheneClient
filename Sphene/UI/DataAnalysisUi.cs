@@ -7,6 +7,7 @@ using Sphene.API.Data.Enum;
 using Sphene.FileCache;
 using Sphene.Interop.Ipc;
 using Sphene.SpheneConfiguration;
+using Sphene.SpheneConfiguration.Configurations;
 using Sphene.Services;
 using Sphene.Services.Mediator;
 using Sphene.Utils;
@@ -26,6 +27,7 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
     private readonly TransientResourceManager _transientResourceManager;
     private readonly TransientConfigService _transientConfigService;
     private readonly TextureBackupService _textureBackupService;
+    private readonly SpheneConfigService _configService;
     private readonly Dictionary<string, string[]> _texturesToConvert = new(StringComparer.Ordinal);
     private Dictionary<ObjectKind, Dictionary<string, CharacterAnalyzer.FileDataEntry>>? _cachedAnalysis;
     private CancellationTokenSource _conversionCancellationTokenSource = new();
@@ -58,7 +60,8 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
         CharacterAnalyzer characterAnalyzer, IpcManager ipcManager,
         PerformanceCollectorService performanceCollectorService, UiSharedService uiSharedService,
         PlayerPerformanceConfigService playerPerformanceConfig, TransientResourceManager transientResourceManager,
-        TransientConfigService transientConfigService, TextureBackupService textureBackupService)
+        TransientConfigService transientConfigService, TextureBackupService textureBackupService,
+        SpheneConfigService configService)
         : base(logger, mediator, "Sphene Character Data Analysis", performanceCollectorService)
     {
         _characterAnalyzer = characterAnalyzer;
@@ -68,6 +71,7 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
         _transientResourceManager = transientResourceManager;
         _transientConfigService = transientConfigService;
         _textureBackupService = textureBackupService;
+        _configService = configService;
         Mediator.Subscribe<CharacterDataAnalyzedMessage>(this, (_) =>
         {
             _hasUpdate = true;
@@ -87,6 +91,10 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
         };
 
         _conversionProgress.ProgressChanged += ConversionProgress_ProgressChanged;
+
+        // Initialize UI toggles from configuration
+        _enableBackupBeforeConversion = _configService.Current.EnableBackupBeforeConversion;
+        _autoConvertNonBc7 = _configService.Current.TextureProcessingMode == TextureProcessingMode.Automatic;
     }
 
     protected override void DrawInternal()
@@ -685,7 +693,11 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                         ImGui.Checkbox("Enable BC7 Conversion Mode", ref _enableBc7ConversionMode);
                         if (_enableBc7ConversionMode)
                         {
-                            ImGui.Checkbox("Create backup before conversion", ref _enableBackupBeforeConversion);
+                            if (ImGui.Checkbox("Create backup before conversion", ref _enableBackupBeforeConversion))
+                            {
+                                _configService.Current.EnableBackupBeforeConversion = _enableBackupBeforeConversion;
+                                _configService.Save();
+                            }
                             if (_enableBackupBeforeConversion)
                             {
                                 UiSharedService.ColorTextWrapped("Backups will be created in the mod folder under 'sphene_backups' before conversion.", ImGuiColors.ParsedGreen);
@@ -796,6 +808,10 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                                 _autoConvertNonBc7 = autoConvert;
                                 if (!_autoConvertNonBc7)
                                     _autoConvertTriggered = false;
+                                _configService.Current.TextureProcessingMode = _autoConvertNonBc7
+                                    ? TextureProcessingMode.Automatic
+                                    : TextureProcessingMode.Manual;
+                                _configService.Save();
                             }
                             
                             // One-click conversion button

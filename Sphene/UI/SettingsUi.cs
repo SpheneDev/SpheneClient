@@ -10,6 +10,7 @@ using Sphene.API.Routes;
 using Sphene.FileCache;
 using Sphene.Interop.Ipc;
 using Sphene.SpheneConfiguration;
+using Sphene.SpheneConfiguration.Configurations;
 using Sphene.SpheneConfiguration.Models;
 using Sphene.PlayerData.Handlers;
 using Sphene.PlayerData.Pairs;
@@ -32,8 +33,12 @@ using System.Globalization;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Numerics;
+using System.Threading;
+using System.Threading.Tasks;
+using System.IO;
 using System.Text;
 using System.Text.Json;
+using System.Linq;
 
 namespace Sphene.UI;
 
@@ -55,6 +60,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
     private readonly PlayerPerformanceConfigService _playerPerformanceConfigService;
     private readonly ServerConfigurationManager _serverConfigurationManager;
     private readonly UiSharedService _uiShared;
+    private readonly TextureBackupService _textureBackupService;
     private readonly IProgress<(int, int, FileCacheEntity)> _validationProgress;
     private (int, int, FileCacheEntity) _currentProgress;
     private bool _deleteAccountPopupModalShown = false;
@@ -79,12 +85,21 @@ public class SettingsUi : WindowMediatorSubscriberBase
         Theme,
         Alerts,
         Performance,
+        Textures,
         Transfers,
         Storage,
         Acknowledgment,
         Debug
     }
     private SettingsPage _activeSettingsPage = SettingsPage.Home;
+    private bool _zipDeleteOriginalsAfterCompression = true;
+    private bool _zipCompressionInProgress = false;
+    private string _zipCompressionStatus = string.Empty;
+    private bool _backupStatsLoading = false;
+    private TextureBackupService.BackupStats? _backupStats = null;
+    private DateTime? _backupStatsLastUpdated = null;
+    private bool _penumbraSizeLoading = false;
+    private long _penumbraFolderSize = -1;
 
 
     public SettingsUi(ILogger<SettingsUi> logger,
@@ -98,7 +113,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
         FileCacheManager fileCacheManager,
         FileCompactor fileCompactor, ApiController apiController,
         IpcManager ipcManager, CacheMonitor cacheMonitor,
-        DalamudUtilService dalamudUtilService, HttpClient httpClient) : base(logger, mediator, "Network Configuration", performanceCollector)
+        DalamudUtilService dalamudUtilService, HttpClient httpClient,
+        TextureBackupService textureBackupService) : base(logger, mediator, "Network Configuration", performanceCollector)
     {
         _configService = configService;
         _pairManager = pairManager;
@@ -115,6 +131,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         _httpClient = httpClient;
         _fileCompactor = fileCompactor;
         _uiShared = uiShared;
+        _textureBackupService = textureBackupService;
         AllowClickthrough = false;
         AllowPinning = false;
         _validationProgress = new Progress<(int, int, FileCacheEntity)>(v => _currentProgress = v);
@@ -1803,6 +1820,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         SidebarButton("Theme", SettingsPage.Theme);
         SidebarButton("Notifications", SettingsPage.Alerts);
         SidebarButton("Performance", SettingsPage.Performance);
+        SidebarButton("Textures", SettingsPage.Textures);
         SidebarButton("Transfers", SettingsPage.Transfers);
         SidebarButton("Storage", SettingsPage.Storage);
         SidebarButton("Acknowledgment", SettingsPage.Acknowledgment);
@@ -1837,6 +1855,9 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 break;
             case SettingsPage.Performance:
                 DrawPerformance();
+                break;
+            case SettingsPage.Textures:
+                DrawTextureSettings();
                 break;
             case SettingsPage.Transfers:
                 DrawCurrentTransfers();
@@ -1994,6 +2015,226 @@ public class SettingsUi : WindowMediatorSubscriberBase
         ImGui.TextUnformatted("Monitor system performance and adjust settings as needed");
         ImGui.TextUnformatted("Check file transfers and storage usage regularly");
         ImGui.Unindent();
+    }
+
+    private void DrawTextureSettings()
+    {
+        _lastTab = "Textures";
+
+        _uiShared.BigText("Texture Settings");
+        ImGui.Separator();
+
+        ImGui.TextUnformatted("Processing Mode");
+        var modeIndex = _configService.Current.TextureProcessingMode == TextureProcessingMode.Automatic ? 1 : 0;
+        string[] modeOptions = { "Manual", "Automatic" };
+        if (ImGui.Combo("Texture processing mode", ref modeIndex, modeOptions, modeOptions.Length))
+        {
+            _configService.Current.TextureProcessingMode = modeIndex == 1 ? TextureProcessingMode.Automatic : TextureProcessingMode.Manual;
+            _configService.Save();
+        }
+
+        ImGui.Spacing();
+        var enableBackup = _configService.Current.EnableBackupBeforeConversion;
+        if (ImGui.Checkbox("Create backup before conversion", ref enableBackup))
+        {
+            _configService.Current.EnableBackupBeforeConversion = enableBackup;
+            _configService.Save();
+        }
+
+        ImGui.Spacing();
+        var enableZip = _configService.Current.EnableZipCompressionForBackups;
+        if (ImGui.Checkbox("Compress backups with ZIP", ref enableZip))
+        {
+            _configService.Current.EnableZipCompressionForBackups = enableZip;
+            _configService.Save();
+        }
+
+        ImGui.Spacing();
+        UiSharedService.ColorText("Manual Backup Compression", ImGuiColors.DalamudYellow);
+        UiSharedService.TextWrapped("Compress existing backup files in your cache to ZIP format. This can save disk space and improves backup management.");
+        var deleteOriginals = _zipDeleteOriginalsAfterCompression;
+        if (ImGui.Checkbox("Delete original backups after compression", ref deleteOriginals))
+        {
+            _zipDeleteOriginalsAfterCompression = deleteOriginals;
+        }
+
+        if (_zipCompressionInProgress)
+        {
+            UiSharedService.TextWrapped(_zipCompressionStatus.Length == 0 ? "Compressing backups..." : _zipCompressionStatus);
+        }
+        else
+        {
+            if (ImGui.Button("Compress existing backups to ZIP"))
+            {
+                _zipCompressionInProgress = true;
+                _zipCompressionStatus = "Starting compression...";
+
+                var progress = new Progress<(string currentFile, int completed, int total)>(p =>
+                {
+                    var fileName = Path.GetFileName(p.currentFile);
+                    _zipCompressionStatus = $"{fileName} ({p.completed}/{p.total})";
+                });
+
+                Task.Run(async () =>
+                {
+                    var result = await _textureBackupService.CompressExistingBackupsAsync(_zipDeleteOriginalsAfterCompression, progress, CancellationToken.None);
+                    var freedMb = result.freedSpace / (1024.0 * 1024.0);
+                    _zipCompressionStatus = $"Completed: compressed {result.compressedCount}/{result.processedCount}, deleted {result.deletedOriginalsCount}, freed {freedMb:F2} MB";
+                    _zipCompressionInProgress = false;
+                });
+            }
+        }
+
+        ImGui.Spacing();
+        UiSharedService.ColorText("Notes:", ImGuiColors.DalamudYellow);
+        UiSharedService.TextWrapped("• BC7 conversion reduces texture size significantly\n• Some textures may show visual artifacts\n• Original textures are backed up for restoration\n• Conversion time depends on texture count");
+
+        ImGui.Separator();
+        _uiShared.BigText("Backup Storage Overview");
+        var backupDir = _textureBackupService.GetBackupDirectory();
+        ImGui.TextUnformatted($"Backup Folder: {backupDir}");
+
+        if (_backupStats == null && !_backupStatsLoading)
+        {
+            UiSharedService.ColorTextWrapped("No statistics loaded yet. Click Refresh to calculate.", ImGuiColors.DalamudYellow);
+        }
+
+        using (ImRaii.Disabled(_backupStatsLoading))
+        {
+            if (_uiShared.IconTextButton(FontAwesomeIcon.Sync, _backupStatsLoading ? "Calculating..." : "Refresh Backup Stats"))
+            {
+                _backupStatsLoading = true;
+                _backupStats = null;
+                Task.Run(async () =>
+                {
+                    var stats = await _textureBackupService.GetBackupStatsAsync(5);
+                    _backupStats = stats;
+                    _backupStatsLastUpdated = DateTime.Now;
+                    _backupStatsLoading = false;
+                });
+            }
+        }
+
+        if (_backupStatsLoading)
+        {
+            UiSharedService.TextWrapped("Calculating backup statistics...");
+        }
+        else if (_backupStats != null)
+        {
+            using (ImRaii.PushIndent(20f))
+            {
+                ImGui.TextUnformatted($"Total backup files: {_backupStats!.TotalFiles}");
+                ImGui.TextUnformatted($"Total backup size: {UiSharedService.ByteToString(_backupStats!.TotalSize)}");
+                ImGui.TextUnformatted($"Uncompressed .tex files: {_backupStats!.TexCount} ({UiSharedService.ByteToString(_backupStats!.TexSize)})");
+                ImGui.TextUnformatted($"Compressed .tex.zip files: {_backupStats!.ZipCount} ({UiSharedService.ByteToString(_backupStats!.ZipSize)})");
+                var zipPercent = _backupStats!.TotalSize > 0 ? (_backupStats!.ZipSize * 100.0 / _backupStats!.TotalSize) : 0.0;
+                ImGui.TextUnformatted($"ZIP portion of backups: {zipPercent:F1}%");
+                if (_backupStats!.Newest.HasValue)
+                    ImGui.TextUnformatted($"Newest backup: {_backupStats!.Newest:yyyy-MM-dd HH:mm}");
+                if (_backupStats!.Oldest.HasValue)
+                    ImGui.TextUnformatted($"Oldest backup: {_backupStats!.Oldest:yyyy-MM-dd HH:mm}");
+                ImGui.TextUnformatted($"Original files with backups: {_backupStats!.OriginalGroups}");
+                ImGui.TextUnformatted($"Average backups per original: {_backupStats!.AvgBackupsPerOriginal:F2}");
+
+                if (_backupStats!.TopLargestFiles?.Count > 0)
+                {
+                    ImGui.Separator();
+                    ImGui.TextUnformatted("Top Largest Backup Files");
+                    if (ImGui.BeginTable("TopLargestBackups", 2, ImGuiTableFlags.SizingStretchProp))
+                    {
+                        ImGui.TableSetupColumn("File", ImGuiTableColumnFlags.WidthStretch);
+                        ImGui.TableSetupColumn("Size", ImGuiTableColumnFlags.WidthFixed, 120);
+                        ImGui.TableHeadersRow();
+                        foreach (var (fileName, size) in _backupStats!.TopLargestFiles)
+                        {
+                            ImGui.TableNextColumn();
+                            ImGui.TextUnformatted(fileName);
+                            ImGui.TableNextColumn();
+                            ImGui.TextUnformatted(UiSharedService.ByteToString(size));
+                            ImGui.TableNextRow();
+                        }
+                        ImGui.EndTable();
+                    }
+                }
+
+                if (_backupStats!.TopOriginalsByBackupCount?.Count > 0)
+                {
+                    ImGui.Separator();
+                    ImGui.TextUnformatted("Originals with Most Backups");
+                    if (ImGui.BeginTable("TopOriginalsByBackups", 2, ImGuiTableFlags.SizingStretchProp))
+                    {
+                        ImGui.TableSetupColumn("Original", ImGuiTableColumnFlags.WidthStretch);
+                        ImGui.TableSetupColumn("Backups", ImGuiTableColumnFlags.WidthFixed, 80);
+                        ImGui.TableHeadersRow();
+                        foreach (var (original, count) in _backupStats!.TopOriginalsByBackupCount)
+                        {
+                            ImGui.TableNextColumn();
+                            ImGui.TextUnformatted(original);
+                            ImGui.TableNextColumn();
+                            ImGui.TextUnformatted(count.ToString());
+                            ImGui.TableNextRow();
+                        }
+                        ImGui.EndTable();
+                    }
+                }
+
+                ImGui.Separator();
+                ImGui.TextUnformatted("Folders Overview");
+                ImGui.TextUnformatted($"Sphene Storage Folder: {_configService.Current.CacheFolder}");
+                var storageSizeText = _cacheMonitor.FileCacheSize >= 0
+                    ? UiSharedService.ByteToString(_cacheMonitor.FileCacheSize)
+                    : "Calculating...";
+                ImGui.TextUnformatted($"Sphene Storage Size: {storageSizeText}");
+
+                var penumbraDir = _ipcManager.Penumbra.ModDirectory ?? string.Empty;
+                if (!string.IsNullOrEmpty(penumbraDir))
+                {
+                    ImGui.TextUnformatted($"Penumbra Mods Folder: {penumbraDir}");
+                    using (ImRaii.Disabled(_penumbraSizeLoading))
+                    {
+                        if (_uiShared.IconTextButton(FontAwesomeIcon.Sync, _penumbraSizeLoading ? "Calculating..." : "Calculate Penumbra Size"))
+                        {
+                            _penumbraSizeLoading = true;
+                            _penumbraFolderSize = -1;
+                            Task.Run(() =>
+                            {
+                                try
+                                {
+                                    long size = 0;
+                                    foreach (var file in Directory.EnumerateFiles(penumbraDir, "*", SearchOption.AllDirectories))
+                                    {
+                                        try { size += new FileInfo(file).Length; } catch { /* ignore per-file errors */ }
+                                    }
+                                    _penumbraFolderSize = size;
+                                }
+                                catch
+                                {
+                                    _penumbraFolderSize = -2; // error state
+                                }
+                                finally
+                                {
+                                    _penumbraSizeLoading = false;
+                                }
+                            });
+                        }
+                    }
+
+                    if (_penumbraFolderSize >= 0)
+                    {
+                        ImGui.TextUnformatted($"Penumbra Size: {UiSharedService.ByteToString(_penumbraFolderSize)}");
+                    }
+                    else if (_penumbraFolderSize == -2)
+                    {
+                        UiSharedService.ColorTextWrapped("Failed to calculate Penumbra size.", ImGuiColors.DalamudRed);
+                    }
+                }
+
+                if (_backupStatsLastUpdated.HasValue)
+                {
+                    ImGui.TextUnformatted($"Stats last updated: {_backupStatsLastUpdated:yyyy-MM-dd HH:mm:ss}");
+                }
+            }
+        }
     }
 
     private void DrawGeneralUserManagement()

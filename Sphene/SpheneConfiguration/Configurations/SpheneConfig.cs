@@ -105,4 +105,15 @@ public class SpheneConfig : ISpheneConfiguration
     public string SelectedTheme { get; set; } = "Default Sphene";
     public bool AutoLoadThemeOnStartup { get; set; } = true;
 
+    // Texture processing settings
+    public TextureProcessingMode TextureProcessingMode { get; set; } = TextureProcessingMode.Manual;
+    public bool EnableBackupBeforeConversion { get; set; } = true;
+    public bool EnableZipCompressionForBackups { get; set; } = false;
+
+}
+
+public enum TextureProcessingMode
+{
+    Manual = 0,
+    Automatic = 1,
 }
