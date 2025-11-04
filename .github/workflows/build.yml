@@ -20,6 +20,13 @@ jobs:
         path: ./SpheneAPI
         token: ${{ secrets.GITHUB_TOKEN }}  # Use PAT if private repo: ${{ secrets.API_ACCESS_TOKEN }}
         
+    - name: Checkout ShrinkU
+      uses: actions/checkout@v4
+      with:
+        repository: SpheneDev/ShrinkU  # Replace with actual ShrinkU repository
+        path: ./ShrinkU
+        token: ${{ secrets.GITHUB_TOKEN }}  # Use PAT if private repo: ${{ secrets.SHRINKU_ACCESS_TOKEN }}
+        
     - name: Setup .NET
       uses: actions/setup-dotnet@v4
       with:

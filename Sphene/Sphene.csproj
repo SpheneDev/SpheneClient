@@ -86,6 +86,8 @@
     <ProjectReference Include="..\SpheneAPI\SpheneAPI\Sphene.API.csproj" Condition="!Exists('..\..\SpheneAPI\SpheneAPI\Sphene.API.csproj') And Exists('..\SpheneAPI\SpheneAPI\Sphene.API.csproj')" />
     <!-- ShrinkU integration - reference local ShrinkU project -->
     <ProjectReference Include="..\..\ShrinkU\ShrinkU.csproj" Condition="Exists('..\..\ShrinkU\ShrinkU.csproj')" />
+    <!-- GitHub Actions - ShrinkU is checked out to SpheneClient/ShrinkU -->
+    <ProjectReference Include="..\ShrinkU\ShrinkU.csproj" Condition="!Exists('..\..\ShrinkU\ShrinkU.csproj') And Exists('..\ShrinkU\ShrinkU.csproj')" />
   </ItemGroup>
 
   <ItemGroup>
