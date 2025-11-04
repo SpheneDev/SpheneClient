@@ -34,6 +34,7 @@ using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Formats.Png;
 using SixLabors.ImageSharp.PixelFormats;
 using Dalamud.Interface.Textures.TextureWraps;
+using ShrinkU.Configuration;
 
 namespace Sphene.UI;
 
@@ -87,6 +88,10 @@ public class CompactUi : WindowMediatorSubscriberBase
     private string _conversionCurrentFileName = string.Empty;
     private bool _enableBackupBeforeConversion = true;
     private DateTime _conversionStartTime = DateTime.MinValue;
+    // Automatic conversion mode and gating to avoid repeated triggers across frames/analyses
+    private bool _automaticModeEnabled = false;
+    private bool _autoConvertTriggered = false;
+    private string _autoConvertKey = string.Empty;
     
     // Popup analysis gating
     private Task? _popupAnalysisTask;
@@ -118,13 +123,15 @@ public class CompactUi : WindowMediatorSubscriberBase
     private (long totalSize, int fileCount) _cachedStorageInfo;
     private readonly ShrinkU.Services.TextureBackupService _shrinkuBackupService;
     private readonly ShrinkU.Services.TextureConversionService _shrinkuConversionService;
+    private readonly ShrinkUConfigService _shrinkuConfigService;
 
     public CompactUi(ILogger<CompactUi> logger, UiSharedService uiShared, SpheneConfigService configService, ApiController apiController, PairManager pairManager,
         ServerConfigurationManager serverManager, SpheneMediator mediator, FileUploadManager fileTransferManager,
         TagHandler tagHandler, DrawEntityFactory drawEntityFactory, SelectTagForPairUi selectTagForPairUi, SelectPairForTagUi selectPairForTagUi,
         PerformanceCollectorService performanceCollectorService, IpcManager ipcManager, DalamudUtilService dalamudUtilService, CharacterAnalyzer characterAnalyzer,
         TextureBackupService textureBackupService, AreaBoundSyncshellService areaBoundSyncshellService,
-        ShrinkU.Services.TextureBackupService shrinkuBackupService, ShrinkU.Services.TextureConversionService shrinkuConversionService)
+        ShrinkU.Services.TextureBackupService shrinkuBackupService, ShrinkU.Services.TextureConversionService shrinkuConversionService,
+        ShrinkUConfigService shrinkuConfigService)
         : base(logger, mediator, "###SpheneMainUI", performanceCollectorService)
     {
         _uiSharedService = uiShared;
@@ -143,7 +150,13 @@ public class CompactUi : WindowMediatorSubscriberBase
         _textureBackupService = textureBackupService;
         _shrinkuBackupService = shrinkuBackupService;
         _shrinkuConversionService = shrinkuConversionService;
+        _shrinkuConfigService = shrinkuConfigService;
         _areaBoundSyncshellService = areaBoundSyncshellService;
+        try
+        {
+            _automaticModeEnabled = _shrinkuConfigService.Current.TextureProcessingMode == TextureProcessingMode.Automatic;
+        }
+        catch { }
         
         // Setup conversion progress handler
         _conversionProgress.ProgressChanged += (sender, progress) =>
@@ -808,13 +821,17 @@ public class CompactUi : WindowMediatorSubscriberBase
             ImGui.Text("Textures:");
             ImGui.SameLine();
             
-            // Styled conversion button with archive icon - use default button styling
-             if (_uiSharedService.IconButton(FontAwesomeIcon.FileArchive, 22f))
-             {
-                 _showConversionPopup = true;
-             }
-             
-             UiSharedService.AttachToolTip("Texture Conversion\nOptimize and convert textures to BC7 format");
+            // Styled conversion button with archive icon - disabled while background conversion is running
+            using (ImRaii.Disabled(_shrinkuConversionService.IsConverting))
+            {
+                if (_uiSharedService.IconButton(FontAwesomeIcon.FileArchive, 22f) && !_shrinkuConversionService.IsConverting)
+                {
+                    _showConversionPopup = true;
+                }
+            }
+            UiSharedService.AttachToolTip(_shrinkuConversionService.IsConverting
+                ? "Texture Conversion\nDisabled while background conversion is running"
+                : "Texture Conversion\nOptimize and convert textures to BC7 format");
             
             ImGui.SameLine();
             DrawCompactTextureIndicator();
@@ -1633,9 +1650,22 @@ public class CompactUi : WindowMediatorSubscriberBase
                 {
                     UiSharedService.ColorTextWrapped($"Found {allBackups.Count} total backup file(s). Note: Without character analysis, all backups are shown.", SpheneCustomTheme.Colors.Warning);
                     
-                    if (_uiSharedService.IconTextButton(FontAwesomeIcon.Undo, "Restore from ShrinkU backups"))
+                    using (ImRaii.Disabled(_automaticModeEnabled))
                     {
-                        StartTextureRestore(new Dictionary<string, List<string>>());
+                        if (_uiSharedService.IconTextButton(FontAwesomeIcon.Undo, "Restore from ShrinkU backups"))
+                        {
+                            StartTextureRestore(new Dictionary<string, List<string>>());
+                        }
+                    }
+                    UiSharedService.AttachToolTip(_automaticModeEnabled
+                        ? "Disable Automatic mode to enable restore."
+                        : "Restore textures from ShrinkU backups.");
+                    if (_automaticModeEnabled)
+                    {
+                        ImGui.SameLine();
+                        _uiSharedService.IconText(FontAwesomeIcon.ExclamationTriangle, SpheneCustomTheme.Colors.Warning);
+                        ImGui.SameLine();
+                        UiSharedService.ColorText("Disabled in Automatic mode", SpheneCustomTheme.Colors.Warning);
                     }
                     ImGui.SameLine();
                     
@@ -1663,9 +1693,22 @@ public class CompactUi : WindowMediatorSubscriberBase
                 {
                     UiSharedService.ColorTextWrapped("No texture backups found.", SpheneCustomTheme.CurrentTheme.TextSecondary);
                     
-                    if (_uiSharedService.IconTextButton(FontAwesomeIcon.Undo, "Restore from ShrinkU backups"))
+                    using (ImRaii.Disabled(_automaticModeEnabled))
                     {
-                        StartTextureRestore(new Dictionary<string, List<string>>());
+                        if (_uiSharedService.IconTextButton(FontAwesomeIcon.Undo, "Restore from ShrinkU backups"))
+                        {
+                            StartTextureRestore(new Dictionary<string, List<string>>());
+                        }
+                    }
+                    UiSharedService.AttachToolTip(_automaticModeEnabled
+                        ? "Disable Automatic mode to enable restore."
+                        : "Restore textures from ShrinkU backups.");
+                    if (_automaticModeEnabled)
+                    {
+                        ImGui.SameLine();
+                        _uiSharedService.IconText(FontAwesomeIcon.ExclamationTriangle, SpheneCustomTheme.Colors.Warning);
+                        ImGui.SameLine();
+                        UiSharedService.ColorText("Disabled in Automatic mode", SpheneCustomTheme.Colors.Warning);
                     }
                     ImGui.SameLine();
                     if (_uiSharedService.IconTextButton(FontAwesomeIcon.FolderOpen, "Open backup folder"))
@@ -1703,6 +1746,15 @@ public class CompactUi : WindowMediatorSubscriberBase
             var nonBc7Textures = textureData.Where(t => !string.Equals(t.Format, "BC7", StringComparison.Ordinal)).ToList();
             var totalTextures = textureData.Count;
             var bc7Textures = totalTextures - nonBc7Textures.Count;
+
+            // Compute a stable key for current candidates to reset trigger when analysis changes
+            // Use primary file paths to avoid repeated triggers across identical states
+            var candidateKey = string.Join("|", nonBc7Textures.Select(t => t.FilePaths.FirstOrDefault() ?? string.Empty));
+            if (!string.Equals(candidateKey, _autoConvertKey, StringComparison.Ordinal))
+            {
+                _autoConvertKey = candidateKey;
+                _autoConvertTriggered = false;
+            }
 
             ImGui.TextColored(SpheneCustomTheme.Colors.SpheneGold, "Texture Conversion Overview");
             ImGui.Separator();
@@ -1747,9 +1799,22 @@ public class CompactUi : WindowMediatorSubscriberBase
                     UiSharedService.ColorTextWrapped($"Found {shrinkuModBackupCount} ShrinkU mod backup(s) for current textures.", SpheneCustomTheme.Colors.Success);
                 }
                 
-                if (_uiSharedService.IconTextButton(FontAwesomeIcon.Undo, "Revert current textures"))
+                using (ImRaii.Disabled(_automaticModeEnabled))
                 {
-                    StartTextureRestore(availableBackups);
+                    if (_uiSharedService.IconTextButton(FontAwesomeIcon.Undo, "Revert current textures"))
+                    {
+                        StartTextureRestore(availableBackups);
+                    }
+                }
+                UiSharedService.AttachToolTip(_automaticModeEnabled
+                    ? "Disable Automatic mode to enable revert."
+                    : "Restore current textures from backups created earlier.");
+                if (_automaticModeEnabled)
+                {
+                    ImGui.SameLine();
+                    _uiSharedService.IconText(FontAwesomeIcon.ExclamationTriangle, SpheneCustomTheme.Colors.Warning);
+                    ImGui.SameLine();
+                    UiSharedService.ColorText("Disabled in Automatic mode", SpheneCustomTheme.Colors.Warning);
                 }
                 
                 ImGui.SameLine();
@@ -1777,9 +1842,22 @@ public class CompactUi : WindowMediatorSubscriberBase
             {
                 UiSharedService.ColorTextWrapped("No backups found for current textures.", SpheneCustomTheme.CurrentTheme.TextSecondary);
                 ImGui.Spacing();
-                if (_uiSharedService.IconTextButton(FontAwesomeIcon.Undo, "Restore from ShrinkU backups"))
+                using (ImRaii.Disabled(_automaticModeEnabled))
                 {
-                    StartTextureRestore(new Dictionary<string, List<string>>());
+                    if (_uiSharedService.IconTextButton(FontAwesomeIcon.Undo, "Restore from ShrinkU backups"))
+                    {
+                        StartTextureRestore(new Dictionary<string, List<string>>());
+                    }
+                }
+                UiSharedService.AttachToolTip(_automaticModeEnabled
+                    ? "Disable Automatic mode to enable restore."
+                    : "Restore textures from ShrinkU backups.");
+                if (_automaticModeEnabled)
+                {
+                    ImGui.SameLine();
+                    _uiSharedService.IconText(FontAwesomeIcon.ExclamationTriangle, SpheneCustomTheme.Colors.Warning);
+                    ImGui.SameLine();
+                    UiSharedService.ColorText("Disabled in Automatic mode", SpheneCustomTheme.Colors.Warning);
                 }
                 ImGui.SameLine();
                 if (_uiSharedService.IconTextButton(FontAwesomeIcon.FolderOpen, "Open backup folder"))
@@ -1839,6 +1917,29 @@ public class CompactUi : WindowMediatorSubscriberBase
             ImGui.Spacing();
             ImGui.Separator();
             ImGui.TextUnformatted("Texture Conversion:");
+            // Automatic mode toggle should be visible regardless of conversion candidates
+            ImGui.Spacing();
+            if (ImGui.Checkbox("Enable Automatic mode", ref _automaticModeEnabled))
+            {
+                _logger.LogDebug("Automatic mode toggled: {Enabled}", _automaticModeEnabled);
+                _autoConvertTriggered = false; // reset gating when toggled
+                try
+                {
+                    var newMode = _automaticModeEnabled ? TextureProcessingMode.Automatic : TextureProcessingMode.Manual;
+                    if (_shrinkuConfigService.Current.TextureProcessingMode != newMode)
+                    {
+                        _shrinkuConfigService.Current.TextureProcessingMode = newMode;
+                        // Mark that Sphene orchestrates automatic conversion when enabling Automatic mode
+                        _shrinkuConfigService.Current.AutomaticHandledBySphene = _automaticModeEnabled;
+                        _shrinkuConfigService.Save();
+                        _logger.LogDebug("Propagated automatic mode to ShrinkU: {Mode}", newMode);
+                    }
+                }
+                catch { }
+            }
+            UiSharedService.AttachToolTip(_automaticModeEnabled
+                ? "Automatic conversion is enabled. Revert actions are disabled."
+                : "Enable automatic on-the-fly conversion of non-BC7 textures.");
             
             if (nonBc7Textures.Count > 0)
             {
@@ -1864,6 +1965,9 @@ public class CompactUi : WindowMediatorSubscriberBase
                     _cachedAnalysisForPopup = null; // Clear cached analysis when popup closes
                     _showProgressPopup = true;
                 }
+
+
+                // No automatic conversion trigger on popup open when Automatic mode is enabled
             }
             else
             {

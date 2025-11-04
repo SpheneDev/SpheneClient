@@ -12,6 +12,8 @@ using Sphene.Services.Mediator;
 using Sphene.Utils;
 using Sphene.WebAPI;
 using Microsoft.Extensions.Logging;
+using ShrinkU.Services;
+using ShrinkU.Configuration;
 using System.Collections.Concurrent;
 using System.Text;
 
@@ -32,6 +34,9 @@ public sealed partial class CharaDataManager : DisposableMediatorSubscriberBase
     private readonly Dictionary<string, CharaDataFullExtendedDto> _ownCharaData = [];
     private readonly Dictionary<string, Task> _sharedMetaInfoTimeoutTasks = [];
     private readonly Dictionary<UserData, List<CharaDataMetaInfoExtendedDto>> _sharedWithYouData = [];
+    private readonly TextureConversionService _shrinkuConversionService;
+    private readonly ShrinkUConfigService _shrinkuConfigService;
+    private readonly CharacterAnalyzer _characterAnalyzer;
     private readonly Dictionary<string, CharaDataExtendedUpdateDto> _updateDtos = [];
     private CancellationTokenSource _applicationCts = new();
     private CancellationTokenSource _charaDataCreateCts = new();
@@ -45,7 +50,9 @@ public sealed partial class CharaDataManager : DisposableMediatorSubscriberBase
         SpheneMediator spheneMediator, IpcManager ipcManager, DalamudUtilService dalamudUtilService,
         FileDownloadManagerFactory fileDownloadManagerFactory,
         CharaDataConfigService charaDataConfigService, CharaDataNearbyManager charaDataNearbyManager,
-        CharaDataCharacterHandler charaDataCharacterHandler, PairManager pairManager) : base(logger, spheneMediator)
+        CharaDataCharacterHandler charaDataCharacterHandler, PairManager pairManager,
+        TextureConversionService shrinkuConversionService, ShrinkUConfigService shrinkuConfigService,
+        CharacterAnalyzer characterAnalyzer) : base(logger, spheneMediator)
     {
         _apiController = apiController;
         _fileHandler = charaDataFileHandler;
@@ -55,6 +62,9 @@ public sealed partial class CharaDataManager : DisposableMediatorSubscriberBase
         _nearbyManager = charaDataNearbyManager;
         _characterHandler = charaDataCharacterHandler;
         _pairManager = pairManager;
+        _shrinkuConversionService = shrinkuConversionService;
+        _shrinkuConfigService = shrinkuConfigService;
+        _characterAnalyzer = characterAnalyzer;
         spheneMediator.Subscribe<ConnectedMessage>(this, (msg) =>
         {
             _connectCts?.Cancel();
@@ -82,6 +92,60 @@ public sealed partial class CharaDataManager : DisposableMediatorSubscriberBase
             _sharedWithYouData.Clear();
             _updateDtos.Clear();
             Initialized = false;
+        });
+
+        // After character data analysis finishes (size indicator updated), trigger automatic conversion if enabled
+        spheneMediator.Subscribe<CharacterDataAnalyzedMessage>(this, (_) =>
+        {
+            Task.Run(async () =>
+            {
+                try
+                {
+                    if (_shrinkuConfigService.Current.TextureProcessingMode != TextureProcessingMode.Automatic)
+                    {
+                        Logger.LogDebug("Analysis complete but automatic mode is disabled");
+                        return;
+                    }
+
+                    if (_shrinkuConversionService.IsConverting)
+                    {
+                        Logger.LogDebug("Analysis complete but a conversion is already running");
+                        return;
+                    }
+
+                    // Ensure backups are created for automatic conversions initiated by Sphene
+                    _shrinkuConfigService.Current.AutomaticControllerName = "Sphene";
+                    _shrinkuConfigService.Current.AutomaticHandledBySphene = true;
+                    _shrinkuConfigService.Current.EnableBackupBeforeConversion = true;
+                    _shrinkuConfigService.Save();
+
+                    var candidates = BuildManualStyleCandidatesFromLastAnalysis();
+                    if (candidates == null || candidates.Count == 0)
+                    {
+                        Logger.LogDebug("Analysis complete but no convertible texture candidates were found");
+                        return;
+                    }
+
+                    Logger.LogDebug("Starting automatic conversion post-analysis with backups enabled");
+                    _shrinkuConversionService.StartConversionAsync(candidates).ContinueWith(t =>
+                    {
+                        if (t.IsFaulted)
+                        {
+                            var ex = t.Exception?.GetBaseException();
+                            Logger.LogDebug(ex, "Automatic conversion after analysis failed");
+                        }
+                        else
+                        {
+                            try { _shrinkuConversionService.NotifyExternalTextureChange("ipc-auto-conversion-complete"); } catch { }
+                            Logger.LogDebug("Automatic conversion after analysis completed");
+                        }
+                    });
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogDebug(ex, "Failed to start automatic conversion after analysis");
+                }
+            });
         });
     }
 
@@ -964,6 +1028,52 @@ public sealed partial class CharaDataManager : DisposableMediatorSubscriberBase
 
         var res = await _apiController.CharaDataUpdate(baseUpdateDto).ConfigureAwait(false);
         await AddOrUpdateDto(res).ConfigureAwait(false);
+
+        // Trigger ShrinkU background automatic conversion when an outfit is created/updated
+        try
+        {
+            if (_shrinkuConfigService.Current.TextureProcessingMode != TextureProcessingMode.Automatic)
+            {
+                Logger.LogDebug("Automatic conversion requested but mode is not Automatic");
+            }
+                else
+                {
+                    // Mark Sphene as controller to disable ShrinkU mode dropdown and reflect control
+                    _shrinkuConfigService.Current.AutomaticControllerName = "Sphene";
+                    _shrinkuConfigService.Current.AutomaticHandledBySphene = true;
+                    // Ensure backups are created before automatic conversion triggered by Sphene
+                    _shrinkuConfigService.Current.EnableBackupBeforeConversion = true;
+                    _shrinkuConfigService.Save();
+
+                    var candidates = await _shrinkuConversionService.GetAutomaticCandidateTexturesAsync().ConfigureAwait(false);
+                    if (candidates == null || candidates.Count == 0)
+                    {
+                        Logger.LogDebug("Automatic conversion requested but no candidate textures were found");
+                    }
+                    else
+                    {
+                        Logger.LogDebug("Starting automatic conversion with backups enabled");
+                        _ = _shrinkuConversionService.StartConversionAsync(candidates).ContinueWith(t =>
+                        {
+                            if (t.IsFaulted)
+                            {
+                                var ex = t.Exception?.GetBaseException();
+                                Logger.LogDebug(ex, "Background automatic conversion failed");
+                            }
+                            else
+                            {
+                                try { _shrinkuConversionService.NotifyExternalTextureChange("ipc-auto-conversion-complete"); } catch { }
+                                Logger.LogDebug("Background automatic conversion completed");
+                            }
+                        });
+                        Logger.LogDebug("Background automatic conversion started");
+                    }
+                }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Failed to start background automatic conversion");
+        }
     }
 
     private async Task DownloadAndAplyDataAsync(string charaName, CharaDataDownloadDto charaDataDownloadDto, CharaDataMetaInfoDto metaInfo, bool autoRevert = true)
@@ -1071,5 +1181,45 @@ public sealed partial class CharaDataManager : DisposableMediatorSubscriberBase
             if (gposeChara != null)
                 await _ipcManager.Brio.DespawnActorAsync(gposeChara.Address).ConfigureAwait(false);
         });
+    }
+    private Dictionary<string, string[]> BuildManualStyleCandidatesFromLastAnalysis()
+    {
+        try
+        {
+            var result = new Dictionary<string, string[]>(StringComparer.Ordinal);
+            var analysis = _characterAnalyzer.LastAnalysis;
+            if (analysis == null || analysis.Count == 0)
+                return result;
+
+            foreach (var objectKindData in analysis.Values)
+            {
+                foreach (var fileData in objectKindData.Values)
+                {
+                    if (fileData.FilePaths == null || fileData.FilePaths.Count == 0)
+                        continue;
+
+                    if (fileData.Format == null)
+                        continue;
+
+                    var fmt = fileData.Format.Value;
+                    if (string.IsNullOrEmpty(fmt))
+                        continue;
+
+                    if (string.Equals(fmt, "BC7", StringComparison.Ordinal))
+                        continue;
+
+                    var primaryPath = fileData.FilePaths.First();
+                    var duplicatePaths = fileData.FilePaths.Skip(1).ToArray();
+                    result[primaryPath] = duplicatePaths;
+                }
+            }
+
+            return result;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Failed to build manual-style texture candidates from analysis");
+            return new Dictionary<string, string[]>(StringComparer.Ordinal);
+        }
     }
 }
