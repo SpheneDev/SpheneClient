@@ -1461,30 +1461,65 @@ public class CompactUi : WindowMediatorSubscriberBase
         var (color, _, icon) = GetBc7ConversionIndicator();
         var textureSizeBytes = GetCurrentTextureSize();
         var textureSizeMB = textureSizeBytes / (1024.0 * 1024.0);
-        
-        ImGui.PushStyleColor(ImGuiCol.Text, color);
-        _uiSharedService.IconText(icon);
-        ImGui.SameLine(0, 2);
-        ImGui.Text($"{textureSizeMB:F0}MB");
-        ImGui.PopStyleColor();
-        
-        if (ImGui.IsItemHovered())
+
+        // If automatic mode is enabled and conversion is running, show spinner instead of the icon
+        if (_automaticModeEnabled && _shrinkuConversionService.IsConverting)
         {
-            using (SpheneCustomTheme.ApplyTooltipTheme())
+            DrawRotatingSpinnerIcon();
+            UiSharedService.AttachToolTip("Automatic conversion is running");
+
+            ImGui.SameLine(0, 2);
+            ImGui.PushStyleColor(ImGuiCol.Text, color);
+            ImGui.Text($"{textureSizeMB:F0}MB");
+            ImGui.PopStyleColor();
+
+            // Keep size tooltip on the MB text
+            if (ImGui.IsItemHovered())
             {
-                ImGui.BeginTooltip();
-                ImGui.TextColored(SpheneCustomTheme.Colors.SpheneGold, "Texture Size");
-                ImGui.Separator();
-                ImGui.Text($"Current: {textureSizeMB:F0} MB");
-                ImGui.Spacing();
-                ImGui.TextColored(SpheneCustomTheme.Colors.Success, "• 0-300 MB: Optimal");
+                using (SpheneCustomTheme.ApplyTooltipTheme())
+                {
+                    ImGui.BeginTooltip();
+                    ImGui.TextColored(SpheneCustomTheme.Colors.SpheneGold, "Texture Size");
+                    ImGui.Separator();
+                    ImGui.Text($"Current: {textureSizeMB:F0} MB");
+                    ImGui.Spacing();
+                    ImGui.TextColored(SpheneCustomTheme.Colors.Success, "• 0-300 MB: Optimal");
                     ImGui.TextColored(SpheneCustomTheme.Colors.Warning, "• 300-600 MB: Large");
                     ImGui.TextColored(SpheneCustomTheme.Colors.Error, "• 600+ MB: Very Large");
-                ImGui.Spacing();
-                ImGui.Text("Use Data Analysis to optimize textures.");
-                ImGui.Spacing();
-                ImGui.TextColored(SpheneCustomTheme.Colors.SpheneGold, "💡 Tip: Click the archive button for quick conversion!");
-                ImGui.EndTooltip();
+                    ImGui.Spacing();
+                    ImGui.Text("Use Data Analysis to optimize textures.");
+                    ImGui.Spacing();
+                    ImGui.TextColored(SpheneCustomTheme.Colors.SpheneGold, "💡 Tip: Click the archive button for quick conversion!");
+                    ImGui.EndTooltip();
+                }
+            }
+        }
+        else
+        {
+            ImGui.PushStyleColor(ImGuiCol.Text, color);
+            _uiSharedService.IconText(icon);
+            ImGui.SameLine(0, 2);
+            ImGui.Text($"{textureSizeMB:F0}MB");
+            ImGui.PopStyleColor();
+
+            if (ImGui.IsItemHovered())
+            {
+                using (SpheneCustomTheme.ApplyTooltipTheme())
+                {
+                    ImGui.BeginTooltip();
+                    ImGui.TextColored(SpheneCustomTheme.Colors.SpheneGold, "Texture Size");
+                    ImGui.Separator();
+                    ImGui.Text($"Current: {textureSizeMB:F0} MB");
+                    ImGui.Spacing();
+                    ImGui.TextColored(SpheneCustomTheme.Colors.Success, "• 0-300 MB: Optimal");
+                    ImGui.TextColored(SpheneCustomTheme.Colors.Warning, "• 300-600 MB: Large");
+                    ImGui.TextColored(SpheneCustomTheme.Colors.Error, "• 600+ MB: Very Large");
+                    ImGui.Spacing();
+                    ImGui.Text("Use Data Analysis to optimize textures.");
+                    ImGui.Spacing();
+                    ImGui.TextColored(SpheneCustomTheme.Colors.SpheneGold, "💡 Tip: Click the archive button for quick conversion!");
+                    ImGui.EndTooltip();
+                }
             }
         }
     }
@@ -1966,6 +2001,18 @@ public class CompactUi : WindowMediatorSubscriberBase
                     _showProgressPopup = true;
                 }
 
+                // Visual indicator: show spinning arrows when automatic conversion is active
+                try
+                {
+                    if (_automaticModeEnabled && _shrinkuConversionService.IsConverting)
+                    {
+                        ImGui.SameLine();
+                        DrawRotatingSpinnerIcon();
+                        UiSharedService.AttachToolTip("Automatic conversion is running");
+                    }
+                }
+                catch { }
+
 
                 // No automatic conversion trigger on popup open when Automatic mode is enabled
             }
@@ -2011,6 +2058,70 @@ public class CompactUi : WindowMediatorSubscriberBase
         return textureData;
     }
 
+    // Draw a small spinning arrows indicator to visualize auto conversion
+    private void DrawAutoConvertSpinner()
+    {
+        var frameSize = ImGui.GetFrameHeight();
+        var size = new Vector2(frameSize, frameSize);
+        ImGui.InvisibleButton("##autoConvertSpinner", size);
+        var min = ImGui.GetItemRectMin();
+        var center = new Vector2(min.X + size.X * 0.5f, min.Y + size.Y * 0.5f);
+        var drawList = ImGui.GetWindowDrawList();
+        var theme = SpheneCustomTheme.CurrentTheme;
+        var color = theme.TextPrimary;
+        var u32 = ImGui.ColorConvertFloat4ToU32(color);
+
+        var t = (float)ImGui.GetTime();
+        var radius = size.X * 0.35f;
+        var thickness = 2.0f;
+
+        // Draw two rotating arc segments with arrowheads opposite each other
+        for (int i = 0; i < 2; i++)
+        {
+            var baseAngle = t * 3.0f + i * (float)Math.PI;
+            var startAngle = baseAngle;
+            var endAngle = baseAngle + 1.2f;
+
+            drawList.PathClear();
+            drawList.PathArcTo(center, radius, startAngle, endAngle, 18);
+            drawList.PathStroke(u32, ImDrawFlags.None, thickness);
+
+            var endDir = new Vector2((float)Math.Cos(endAngle), (float)Math.Sin(endAngle));
+            var endPt = new Vector2(center.X + endDir.X * radius, center.Y + endDir.Y * radius);
+            var perp = new Vector2(-endDir.Y, endDir.X);
+            var a1 = new Vector2(endPt.X - endDir.X * 6 + perp.X * 4, endPt.Y - endDir.Y * 6 + perp.Y * 4);
+            var a2 = new Vector2(endPt.X - endDir.X * 6 - perp.X * 4, endPt.Y - endDir.Y * 6 - perp.Y * 4);
+            drawList.AddTriangleFilled(endPt, a1, a2, u32);
+        }
+    }
+
+    // Draw a rotating spinner that visually replaces the FontAwesome spinner glyph
+    // The spinner itself rotates, without any additional overlay around it
+    private void DrawRotatingSpinnerIcon(float scale = 1.0f)
+    {
+        var frameSize = ImGui.GetFrameHeight() * scale;
+        var size = new Vector2(frameSize, frameSize);
+        ImGui.InvisibleButton("##rotatingSpinnerIcon", size);
+        var min = ImGui.GetItemRectMin();
+        var center = new Vector2(min.X + size.X * 0.5f, min.Y + size.Y * 0.5f);
+        var drawList = ImGui.GetWindowDrawList();
+        var theme = SpheneCustomTheme.CurrentTheme;
+        var color = theme.TextPrimary;
+        var u32 = ImGui.ColorConvertFloat4ToU32(color);
+        var t = (float)ImGui.GetTime();
+        var radius = size.X * 0.45f;
+        var thickness = Math.Max(2.0f, size.X * 0.08f);
+        var bgColor = ImGui.ColorConvertFloat4ToU32(new Vector4(color.X, color.Y, color.Z, 0.25f));
+        drawList.AddCircle(center, radius, bgColor, 48, thickness);
+
+        var speed = 3.0f;
+        var baseAngle = t * speed;
+        var arcLen = 1.35f;
+
+        drawList.PathClear();
+        drawList.PathArcTo(center, radius, baseAngle, baseAngle + arcLen, 32);
+        drawList.PathStroke(u32, ImDrawFlags.None, thickness);
+    }
    private async void StartTextureConversion(List<(string Format, long OriginalSize, List<string> FilePaths)> textureData)
     {
         _texturesToConvert.Clear();

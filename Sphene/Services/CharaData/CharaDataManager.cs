@@ -34,7 +34,8 @@ public sealed partial class CharaDataManager : DisposableMediatorSubscriberBase
     private readonly Dictionary<string, CharaDataFullExtendedDto> _ownCharaData = [];
     private readonly Dictionary<string, Task> _sharedMetaInfoTimeoutTasks = [];
     private readonly Dictionary<UserData, List<CharaDataMetaInfoExtendedDto>> _sharedWithYouData = [];
-    private readonly TextureConversionService _shrinkuConversionService;
+    private readonly ShrinkU.Services.TextureConversionService _shrinkuConversionService;
+    private readonly ShrinkU.Services.TextureBackupService _shrinkuBackupService;
     private readonly ShrinkUConfigService _shrinkuConfigService;
     private readonly CharacterAnalyzer _characterAnalyzer;
     private readonly Dictionary<string, CharaDataExtendedUpdateDto> _updateDtos = [];
@@ -51,8 +52,8 @@ public sealed partial class CharaDataManager : DisposableMediatorSubscriberBase
         FileDownloadManagerFactory fileDownloadManagerFactory,
         CharaDataConfigService charaDataConfigService, CharaDataNearbyManager charaDataNearbyManager,
         CharaDataCharacterHandler charaDataCharacterHandler, PairManager pairManager,
-        TextureConversionService shrinkuConversionService, ShrinkUConfigService shrinkuConfigService,
-        CharacterAnalyzer characterAnalyzer) : base(logger, spheneMediator)
+        ShrinkU.Services.TextureConversionService shrinkuConversionService, ShrinkUConfigService shrinkuConfigService,
+        ShrinkU.Services.TextureBackupService shrinkuBackupService, CharacterAnalyzer characterAnalyzer) : base(logger, spheneMediator)
     {
         _apiController = apiController;
         _fileHandler = charaDataFileHandler;
@@ -63,6 +64,7 @@ public sealed partial class CharaDataManager : DisposableMediatorSubscriberBase
         _characterHandler = charaDataCharacterHandler;
         _pairManager = pairManager;
         _shrinkuConversionService = shrinkuConversionService;
+        _shrinkuBackupService = shrinkuBackupService;
         _shrinkuConfigService = shrinkuConfigService;
         _characterAnalyzer = characterAnalyzer;
         spheneMediator.Subscribe<ConnectedMessage>(this, (msg) =>
@@ -109,8 +111,8 @@ public sealed partial class CharaDataManager : DisposableMediatorSubscriberBase
 
                     if (_shrinkuConversionService.IsConverting)
                     {
-                        Logger.LogDebug("Analysis complete but a conversion is already running");
-                        return;
+                        Logger.LogDebug("Analysis complete while conversion is running; cancelling and restoring before starting new conversion");
+                        await CancelAndRestoreBeforeNewConversionAsync().ConfigureAwait(false);
                     }
 
                     // Ensure backups are created for automatic conversions initiated by Sphene
@@ -1029,6 +1031,16 @@ public sealed partial class CharaDataManager : DisposableMediatorSubscriberBase
         var res = await _apiController.CharaDataUpdate(baseUpdateDto).ConfigureAwait(false);
         await AddOrUpdateDto(res).ConfigureAwait(false);
 
+        // If an automatic conversion is in progress, cancel and restore before starting a new one
+        try
+        {
+            await CancelAndRestoreBeforeNewConversionAsync().ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Cancel/restore before new conversion failed");
+        }
+
         // Trigger ShrinkU background automatic conversion when an outfit is created/updated
         try
         {
@@ -1073,6 +1085,51 @@ public sealed partial class CharaDataManager : DisposableMediatorSubscriberBase
         catch (Exception ex)
         {
             Logger.LogDebug(ex, "Failed to start background automatic conversion");
+        }
+    }
+
+    private async Task CancelAndRestoreBeforeNewConversionAsync()
+    {
+        if (!_shrinkuConversionService.IsConverting)
+            return;
+
+        Logger.LogDebug("Detected outfit change during conversion; cancelling current conversion and restoring backups");
+
+        var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        void onCompleted() { try { tcs.TrySetResult(true); } catch { } }
+
+        try
+        {
+            _shrinkuConversionService.OnConversionCompleted += onCompleted;
+        }
+        catch { }
+
+        try
+        {
+            _shrinkuConversionService.Cancel();
+        }
+        catch { }
+
+        try
+        {
+            await tcs.Task.ConfigureAwait(false);
+        }
+        finally
+        {
+            try { _shrinkuConversionService.OnConversionCompleted -= onCompleted; } catch { }
+        }
+
+        try
+        {
+            var progress = new Progress<(string, int, int)>();
+            await _shrinkuBackupService.RestoreLatestAsync(progress, CancellationToken.None).ConfigureAwait(false);
+            try { await _ipcManager.Penumbra.RedrawPlayerAsync().ConfigureAwait(false); } catch { }
+            try { _shrinkuConversionService.NotifyExternalTextureChange("restore-latest"); } catch { }
+            Logger.LogDebug("Restored latest backups after cancelling conversion");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Restore after cancelling conversion failed");
         }
     }
 
