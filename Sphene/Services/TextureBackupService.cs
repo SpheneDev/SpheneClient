@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using Sphene.SpheneConfiguration;
 using System.IO;
+using System.IO.Compression;
 
 namespace Sphene.Services;
 
@@ -123,8 +124,11 @@ public class TextureBackupService
                 _logger.LogDebug("Backup directory does not exist: {directory}", _backupDirectory);
                 return new List<string>();
             }
-            
-            var backupFiles = Directory.GetFiles(_backupDirectory, "*.tex")
+
+            var texFiles = Directory.GetFiles(_backupDirectory, "*.tex");
+            var zipFiles = Directory.GetFiles(_backupDirectory, "*.tex.zip");
+            var backupFiles = texFiles
+                .Concat(zipFiles)
                 .OrderByDescending(f => new FileInfo(f).CreationTime)
                 .ToList();
                 
@@ -160,13 +164,17 @@ public class TextureBackupService
                 
                 // Extract original filename by removing timestamp suffix
                 // Format: originalname_20250925_134259.tex
-                var lastUnderscoreIndex = fileName.LastIndexOf('_');
+                var parseName = fileName.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)
+                    ? Path.GetFileNameWithoutExtension(fileName)
+                    : fileName;
+                var lastUnderscoreIndex = parseName.LastIndexOf('_');
                 if (lastUnderscoreIndex > 0)
                 {
-                    var secondLastUnderscoreIndex = fileName.LastIndexOf('_', lastUnderscoreIndex - 1);
+                    var secondLastUnderscoreIndex = parseName.LastIndexOf('_', lastUnderscoreIndex - 1);
                     if (secondLastUnderscoreIndex > 0)
                     {
-                        var originalName = fileName.Substring(0, secondLastUnderscoreIndex) + Path.GetExtension(fileName);
+                        var originalName = parseName.Substring(0, secondLastUnderscoreIndex) + 
+                            (parseName.EndsWith(".tex", StringComparison.OrdinalIgnoreCase) ? ".tex" : Path.GetExtension(parseName));
                         _logger.LogDebug("Extracted original name: {originalName} from backup: {fileName}", originalName, fileName);
                         
                         if (!backupsByOriginal.ContainsKey(originalName))
@@ -210,13 +218,27 @@ public class TextureBackupService
             if (!string.IsNullOrEmpty(targetDirectory))
                 Directory.CreateDirectory(targetDirectory);
 
-            // Restore backup with async file copy
-            using var sourceStream = new FileStream(backupFilePath, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: 4096, useAsync: true);
-            using var destinationStream = new FileStream(targetFilePath, FileMode.Create, FileAccess.Write, FileShare.None, bufferSize: 4096, useAsync: true);
-            
-            await sourceStream.CopyToAsync(destinationStream, cancellationToken);
-            
-            _logger.LogDebug("Restored texture: {backup} -> {target}", backupFilePath, targetFilePath);
+            // Handle zipped backups (*.tex.zip) by extracting the single entry
+            if (backupFilePath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+            {
+                await Task.Run(() =>
+                {
+                    using var archive = ZipFile.OpenRead(backupFilePath);
+                    var entry = archive.Entries.FirstOrDefault();
+                    if (entry == null)
+                        throw new InvalidOperationException($"ZIP backup has no entries: {backupFilePath}");
+                    entry.ExtractToFile(targetFilePath, overwrite: true);
+                }, cancellationToken);
+                _logger.LogDebug("Restored texture from ZIP: {backup} -> {target}", backupFilePath, targetFilePath);
+            }
+            else
+            {
+                // Restore backup with async file copy
+                using var sourceStream = new FileStream(backupFilePath, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: 4096, useAsync: true);
+                using var destinationStream = new FileStream(targetFilePath, FileMode.Create, FileAccess.Write, FileShare.None, bufferSize: 4096, useAsync: true);
+                await sourceStream.CopyToAsync(destinationStream, cancellationToken);
+                _logger.LogDebug("Restored texture: {backup} -> {target}", backupFilePath, targetFilePath);
+            }
             return true;
         }
         catch (Exception ex)
@@ -260,7 +282,15 @@ public class TextureBackupService
             var deleteResults = await DeleteBackupFilesAsync(successfulBackups);
             
             var deletedCount = deleteResults.Values.Count(success => success);
-            _logger.LogInformation("Deleted {deletedCount}/{totalCount} backup files after restoration", deletedCount, successfulBackups.Count);
+            _logger.LogDebug("Deleted {deletedCount}/{totalCount} backup files after restoration", deletedCount, successfulBackups.Count);
+            try
+            {
+                DeleteEmptyBackupSubdirectories();
+            }
+            catch (Exception cleanupEx)
+            {
+                _logger.LogDebug(cleanupEx, "Failed to delete empty backup subdirectories");
+            }
         }
 
         return results;
@@ -299,6 +329,33 @@ public class TextureBackupService
         }
         
         return results;
+    }
+
+    private void DeleteEmptyBackupSubdirectories()
+    {
+        if (!Directory.Exists(_backupDirectory))
+            return;
+
+        var subdirs = Directory.GetDirectories(_backupDirectory, "*", SearchOption.AllDirectories);
+        foreach (var dir in subdirs)
+        {
+            try
+            {
+                if (Directory.Exists(dir))
+                {
+                    var hasFiles = Directory.EnumerateFileSystemEntries(dir).Any();
+                    if (!hasFiles)
+                    {
+                        Directory.Delete(dir, recursive: false);
+                        _logger.LogDebug("Deleted empty backup subdirectory: {dir}", dir);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to delete empty subdirectory: {dir}", dir);
+            }
+        }
     }
 
     public async Task<(long totalSize, int fileCount)> GetBackupStorageInfoAsync()

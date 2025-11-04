@@ -2416,7 +2416,6 @@ public class CompactUi : WindowMediatorSubscriberBase
 
                             _cachedBackupsForAnalysis = null;
                             try { await _ipcManager.Penumbra.RedrawPlayerAsync().ConfigureAwait(false); } catch { }
-                            return;
                         }
                         else
                         {
@@ -2424,7 +2423,6 @@ public class CompactUi : WindowMediatorSubscriberBase
                             await _shrinkuBackupService.RestoreLatestAsync(_restoreProgress, _restoreCancellationTokenSource.Token).ConfigureAwait(false);
                             _cachedBackupsForAnalysis = null;
                             try { await _ipcManager.Penumbra.RedrawPlayerAsync().ConfigureAwait(false); } catch { }
-                            return;
                         }
                     }
                 }
@@ -2499,19 +2497,31 @@ public class CompactUi : WindowMediatorSubscriberBase
     {
         try
         {
-            var analysis = _characterAnalyzer.LastAnalysis;
+            // Use cached analysis if present (popup prepares a snapshot), otherwise use last analysis
+            var analysis = _cachedAnalysisForPopup ?? _characterAnalyzer.LastAnalysis;
             if (analysis == null) return string.Empty;
             
             var textureData = GetTextureDataFromAnalysis(analysis);
+            var normalizedOriginal = NormalizeDx11Name(originalFileName);
             foreach (var texture in textureData)
             {
                 foreach (var filePath in texture.FilePaths)
                 {
                     var fileName = Path.GetFileName(filePath);
+                    // Exact match on file name
                     if (string.Equals(fileName, originalFileName, StringComparison.OrdinalIgnoreCase))
-                    {
                         return filePath;
-                    }
+
+                    // Match ignoring DX11 token variations in names
+                    var normalizedCandidate = NormalizeDx11Name(fileName);
+                    if (string.Equals(normalizedCandidate, normalizedOriginal, StringComparison.OrdinalIgnoreCase))
+                        return filePath;
+
+                    // Fallback: match by path suffix to catch mod path variants
+                    if (filePath.EndsWith(originalFileName, StringComparison.OrdinalIgnoreCase))
+                        return filePath;
+                    if (filePath.EndsWith(normalizedOriginal, StringComparison.OrdinalIgnoreCase))
+                        return filePath;
                 }
             }
             
@@ -2521,6 +2531,23 @@ public class CompactUi : WindowMediatorSubscriberBase
         {
             _logger.LogError(ex, "Failed to find current texture location for {fileName}", originalFileName);
             return string.Empty;
+        }
+    }
+
+    private string NormalizeDx11Name(string name)
+    {
+        try
+        {
+            // Normalize common DX11 tokens in file names (e.g., "_dx11", "-dx11", ".dx11")
+            var n = name;
+            n = n.Replace("_dx11", string.Empty, StringComparison.OrdinalIgnoreCase);
+            n = n.Replace("-dx11", string.Empty, StringComparison.OrdinalIgnoreCase);
+            n = n.Replace(".dx11", string.Empty, StringComparison.OrdinalIgnoreCase);
+            return n;
+        }
+        catch
+        {
+            return name;
         }
     }
     
