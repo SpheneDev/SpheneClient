@@ -14,6 +14,8 @@ using Sphene.Services.ServerConfiguration;
 using Microsoft.Extensions.Logging;
 using System.Numerics;
 using System.Text.RegularExpressions;
+using ShrinkU.Configuration;
+using ShrinkU.UI;
 
 namespace Sphene.UI;
 
@@ -34,6 +36,15 @@ public partial class IntroUi : WindowMediatorSubscriberBase
     private string[]? _tosParagraphs;
     private bool _useLegacyLogin = false;
 
+    // ShrinkU integration dependencies
+    private readonly ShrinkUHostService _shrinkuHostService;
+    private readonly ShrinkUConfigService _shrinkuConfig;
+    private readonly ConversionUI _shrinkuConversion;
+    private readonly FirstRunSetupUI _shrinkuFirstRun;
+
+    // Page navigation flag
+    private bool _showShrinkUPage = false;
+
     // Modern UI constants - Optimized for reduced scrolling
     private const float SECTION_SPACING = 12.0f;
     private const float CARD_PADDING = 12.0f;
@@ -43,13 +54,19 @@ public partial class IntroUi : WindowMediatorSubscriberBase
 
     public IntroUi(ILogger<IntroUi> logger, UiSharedService uiShared, SpheneConfigService configService,
         CacheMonitor fileCacheManager, ServerConfigurationManager serverConfigurationManager, SpheneMediator spheneMediator,
-        PerformanceCollectorService performanceCollectorService, DalamudUtilService dalamudUtilService) : base(logger, spheneMediator, "Sphene Setup", performanceCollectorService)
+        PerformanceCollectorService performanceCollectorService, DalamudUtilService dalamudUtilService,
+        ShrinkUHostService shrinkuHostService, ShrinkUConfigService shrinkuConfig,
+        ConversionUI shrinkuConversion, FirstRunSetupUI shrinkuFirstRun) : base(logger, spheneMediator, "Sphene Setup", performanceCollectorService)
     {
         _uiShared = uiShared;
         _configService = configService;
         _cacheMonitor = fileCacheManager;
         _serverConfigurationManager = serverConfigurationManager;
         _dalamudUtilService = dalamudUtilService;
+        _shrinkuHostService = shrinkuHostService;
+        _shrinkuConfig = shrinkuConfig;
+        _shrinkuConversion = shrinkuConversion;
+        _shrinkuFirstRun = shrinkuFirstRun;
         IsOpen = false;
         ShowCloseButton = false;
         RespectCloseHotkey = false;
@@ -89,7 +106,11 @@ public partial class IntroUi : WindowMediatorSubscriberBase
         {
             if (contentChild)
             {
-                if (!_configService.Current.AcceptedAgreement && !_readFirstPage)
+                if (_showShrinkUPage)
+                {
+                    DrawShrinkUPageContent();
+                }
+                else if (!_configService.Current.AcceptedAgreement && !_readFirstPage)
                 {
                     DrawWelcomePageContent();
                 }
@@ -110,7 +131,8 @@ public partial class IntroUi : WindowMediatorSubscriberBase
                          && Directory.Exists(_configService.Current.CacheFolder)
                          && !_configService.Current.HasSeenSyncshellSettings)
                 {
-                    DrawSyncshellSettingsPageContent();
+                    _showShrinkUPage = true;
+                    DrawShrinkUPageContent();
                 }
                 else if (!_uiShared.ApiController.ServerAlive)
                 {
@@ -176,6 +198,38 @@ public partial class IntroUi : WindowMediatorSubscriberBase
         });
 
         if (!_uiShared.DrawOtherPluginState()) return;
+    }
+
+    private void DrawShrinkUPageContent()
+    {
+        DrawModernCard(() =>
+        {
+            DrawSectionHeader("ShrinkU", Dalamud.Interface.FontAwesomeIcon.Tools);
+            UiSharedService.TextWrapped("Manage texture backups and convert formats to keep your Penumbra-based mods healthy. ShrinkU is bundled with Sphene and integrates with the same Window System.");
+
+            ImGui.Spacing();
+            DrawInfoBox("Backup Location", "Backups are stored under Sphene's cache in 'texture_backups'. First run will configure this automatically.", ImGuiColors.HealerGreen);
+
+            ImGui.Spacing();
+            DrawInfoBox("Integration Toggle", "You can enable or disable ShrinkU integration anytime in Settings → Appearance.", ImGuiColors.DalamudGrey3);
+
+            ImGui.Spacing();
+            DrawModernButton("Open ShrinkU", Dalamud.Interface.FontAwesomeIcon.ExternalLinkAlt, () =>
+            {
+                try
+                {
+                    _shrinkuHostService.ApplyIntegrationEnabled(true);
+                    if (!_shrinkuConfig.Current.FirstRunCompleted)
+                        _shrinkuFirstRun.IsOpen = true;
+                    else
+                        _shrinkuConversion.IsOpen = true;
+                }
+                catch
+                {
+                    // Swallow exceptions to avoid UI interruption when opening ShrinkU
+                }
+            }, new Vector4(0.2f, 0.6f, 0.9f, 1.0f));
+        });
     }
 
     private void DrawAgreementPageContent()
@@ -507,12 +561,13 @@ public partial class IntroUi : WindowMediatorSubscriberBase
                  && Directory.Exists(_configService.Current.CacheFolder)
                  && !_configService.Current.HasSeenSyncshellSettings)
         {
-            // Syncshell settings page button
+            // ShrinkU step: continue to authentication
             DrawModernButton("Continue to Authentication", Dalamud.Interface.FontAwesomeIcon.ArrowRight, () =>
             {
                 _configService.Current.HasSeenSyncshellSettings = true;
                 _configService.Save();
-            });
+                _showShrinkUPage = false;
+            }, ImGuiColors.HealerGreen);
         }
         else if (!_uiShared.ApiController.ServerAlive)
         {

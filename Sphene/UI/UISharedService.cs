@@ -484,8 +484,14 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
                     _isPenumbraDirectory = string.Equals(path.ToLowerInvariant(), _ipcManager.Penumbra.ModDirectory?.ToLowerInvariant(), StringComparison.Ordinal);
                     var files = Directory.GetFiles(path, "*", SearchOption.AllDirectories);
                     _cacheDirectoryHasOtherFilesThanCache = false;
+                    var backupsRoot = Path.Combine(path, "texture_backups");
                     foreach (var file in files)
                     {
+                        if (!string.IsNullOrEmpty(backupsRoot) && file.StartsWith(backupsRoot, StringComparison.OrdinalIgnoreCase))
+                        {
+                            Logger.LogDebug("Ignoring backup file under texture_backups: {file}", file);
+                            continue;
+                        }
                         var fileName = Path.GetFileNameWithoutExtension(file);
                         if (fileName.Length != 40 && !string.Equals(fileName, "desktop", StringComparison.OrdinalIgnoreCase))
                         {

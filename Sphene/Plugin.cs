@@ -34,6 +34,8 @@ using Dalamud.Game;
 using ShrinkU.Configuration;
 using ShrinkU.Interop;
 using ShrinkU.UI;
+using System;
+using System.IO;
 
 namespace Sphene;
 
@@ -100,7 +102,35 @@ public sealed class Plugin : IDalamudPlugin
 
             // ShrinkU integration services and windows
             collection.AddSingleton<Microsoft.Extensions.Logging.ILogger>(s => s.GetRequiredService<ILoggerFactory>().CreateLogger("ShrinkU"));
-            collection.AddSingleton<ShrinkUConfigService>(s => new ShrinkUConfigService(pluginInterface, s.GetRequiredService<Microsoft.Extensions.Logging.ILogger>()));
+            collection.AddSingleton<ShrinkUConfigService>(s =>
+            {
+                var logger = s.GetRequiredService<Microsoft.Extensions.Logging.ILogger>();
+                var cfgSvc = new ShrinkUConfigService(pluginInterface, logger);
+                try
+                {
+                    var spheneCfg = s.GetRequiredService<SpheneConfigService>();
+                    var cache = spheneCfg.Current.CacheFolder;
+                    if (!string.IsNullOrWhiteSpace(cache))
+                    {
+                        var target = Path.Combine(cache, "texture_backups");
+                        var current = cfgSvc.Current.BackupFolderPath ?? string.Empty;
+                        var defaultPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "ShrinkU", "Backups");
+                        var isDefault = string.Equals(current, defaultPath, StringComparison.OrdinalIgnoreCase);
+
+                        if (cfgSvc.Current.FirstRunCompleted == false || isDefault || string.IsNullOrWhiteSpace(current))
+                        {
+                            try { Directory.CreateDirectory(target); } catch { }
+                            cfgSvc.Current.BackupFolderPath = target;
+                            // auto-complete first run when we configure the backup path
+                            cfgSvc.Current.FirstRunCompleted = true;
+                            try { cfgSvc.Save(); } catch { }
+                            logger.LogDebug("Configured ShrinkU backup path to Sphene texture_backups: {path}", target);
+                        }
+                    }
+                }
+                catch { }
+                return cfgSvc;
+            });
             collection.AddSingleton<ShrinkU.Services.PenumbraIpc>(s => new ShrinkU.Services.PenumbraIpc(pluginInterface, s.GetRequiredService<Microsoft.Extensions.Logging.ILogger>()));
             collection.AddSingleton<ShrinkU.Services.TextureBackupService>(s => new ShrinkU.Services.TextureBackupService(
                 s.GetRequiredService<Microsoft.Extensions.Logging.ILogger>(),

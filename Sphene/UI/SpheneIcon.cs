@@ -31,6 +31,7 @@ public class SpheneIcon : WindowMediatorSubscriberBase, IDisposable
     private readonly IpcManager _ipcManager;
     private readonly IDalamudPluginInterface _pluginInterface;
     private readonly ICommandManager _commandManager;
+    private readonly ShrinkUHostService _shrinkuHostService;
     // Built-in ShrinkU integration
     private readonly ShrinkU.Configuration.ShrinkUConfigService _shrinkuConfig;
     private readonly ShrinkU.UI.ConversionUI _shrinkuConversion;
@@ -60,7 +61,7 @@ public class SpheneIcon : WindowMediatorSubscriberBase, IDisposable
     public SpheneIcon(ILogger<SpheneIcon> logger, SpheneMediator mediator, 
         SpheneConfigService configService, UiSharedService uiSharedService, ApiController apiController, 
         PerformanceCollectorService performanceCollectorService, IpcManager ipcManager, IDalamudPluginInterface pluginInterface,
-        ICommandManager commandManager,
+        ICommandManager commandManager, ShrinkUHostService shrinkuHostService,
         ShrinkU.Configuration.ShrinkUConfigService shrinkuConfig,
         ShrinkU.UI.ConversionUI shrinkuConversion,
         ShrinkU.UI.SettingsUI shrinkuSettings,
@@ -75,6 +76,7 @@ public class SpheneIcon : WindowMediatorSubscriberBase, IDisposable
         _ipcManager = ipcManager;
         _pluginInterface = pluginInterface;
         _commandManager = commandManager;
+        _shrinkuHostService = shrinkuHostService;
         _shrinkuConfig = shrinkuConfig;
         _shrinkuConversion = shrinkuConversion;
         _shrinkuSettings = shrinkuSettings;
@@ -264,6 +266,7 @@ public class SpheneIcon : WindowMediatorSubscriberBase, IDisposable
             if (string.Equals(internalName, "ShrinkU.Builtin", StringComparison.OrdinalIgnoreCase))
             {
                 _logger.LogDebug("Opening built-in ShrinkU UI");
+                _shrinkuHostService.ApplyIntegrationEnabled(true);
                 if (!_shrinkuConfig.Current.FirstRunCompleted)
                 {
                     _shrinkuFirstRun.IsOpen = true;
