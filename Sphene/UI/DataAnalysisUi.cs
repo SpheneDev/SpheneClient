@@ -26,6 +26,7 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
     private readonly TransientResourceManager _transientResourceManager;
     private readonly TransientConfigService _transientConfigService;
     private readonly TextureBackupService _textureBackupService;
+    private readonly ShrinkU.Services.TextureBackupService _shrinkuBackupService;
     private readonly Dictionary<string, string[]> _texturesToConvert = new(StringComparer.Ordinal);
     private Dictionary<ObjectKind, Dictionary<string, CharacterAnalyzer.FileDataEntry>>? _cachedAnalysis;
     private CancellationTokenSource _conversionCancellationTokenSource = new();
@@ -56,7 +57,8 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
         CharacterAnalyzer characterAnalyzer, IpcManager ipcManager,
         PerformanceCollectorService performanceCollectorService, UiSharedService uiSharedService,
         PlayerPerformanceConfigService playerPerformanceConfig, TransientResourceManager transientResourceManager,
-        TransientConfigService transientConfigService, TextureBackupService textureBackupService)
+        TransientConfigService transientConfigService, TextureBackupService textureBackupService,
+        ShrinkU.Services.TextureBackupService shrinkuBackupService)
         : base(logger, mediator, "Sphene Character Data Analysis", performanceCollectorService)
     {
         _characterAnalyzer = characterAnalyzer;
@@ -66,6 +68,7 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
         _transientResourceManager = transientResourceManager;
         _transientConfigService = transientConfigService;
         _textureBackupService = textureBackupService;
+        _shrinkuBackupService = shrinkuBackupService;
         Mediator.Subscribe<CharacterDataAnalyzedMessage>(this, (_) =>
         {
             _hasUpdate = true;
@@ -706,10 +709,21 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                                 ImGui.SameLine();
                                 if (_uiSharedService.IconTextButton(FontAwesomeIcon.FolderOpen, "Open backup folder"))
                                 {
-                                    var backupDirectory = _textureBackupService.GetBackupDirectory();
-                                    if (Directory.Exists(backupDirectory))
+                                    try
                                     {
-                                        System.Diagnostics.Process.Start("explorer.exe", backupDirectory);
+                                        var overview = _shrinkuBackupService.GetBackupOverviewAsync().GetAwaiter().GetResult();
+                                        var firstPath = overview.FirstOrDefault()?.SourcePath;
+                                        var backupDirectory = string.IsNullOrEmpty(firstPath) ? _textureBackupService.GetBackupDirectory() : Path.GetDirectoryName(firstPath)!;
+                                        if (!string.IsNullOrEmpty(backupDirectory) && Directory.Exists(backupDirectory))
+                                        {
+                                            System.Diagnostics.Process.Start("explorer.exe", backupDirectory);
+                                        }
+                                    }
+                                    catch
+                                    {
+                                        var fallback = _textureBackupService.GetBackupDirectory();
+                                        if (Directory.Exists(fallback))
+                                            System.Diagnostics.Process.Start("explorer.exe", fallback);
                                     }
                                 }
                             }
@@ -728,7 +742,7 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                             {
                                 if (_storageInfoTask == null || _storageInfoTask.IsCompleted)
                                 {
-                                    _storageInfoTask = _textureBackupService.GetBackupStorageInfoAsync();
+                                    _storageInfoTask = GetShrinkUStorageInfoAsync();
                                     _lastStorageInfoUpdate = now;
                                 }
                             }
@@ -744,19 +758,7 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                                     var sizeInMB = totalSize / (1024.0 * 1024.0);
                                     UiSharedService.ColorTextWrapped($"Total backup storage: {sizeInMB:F2} MB ({fileCount} files)", ImGuiColors.DalamudYellow);
                                     
-                                    ImGui.SameLine();
-                                    if (_uiSharedService.IconTextButton(FontAwesomeIcon.Broom, "Cleanup old backups (3+ days)"))
-                                    {
-                                        Task.Run(async () =>
-                                        {
-                                            var (deletedCount, freedSpace) = await _textureBackupService.CleanupOldBackupsAsync(3);
-                                            var freedMB = freedSpace / (1024.0 * 1024.0);
-                                            _logger.LogInformation("Backup cleanup completed: {deletedCount} files deleted, {freedMB:F2} MB freed", deletedCount, freedMB);
-                                            
-                                            // Refresh storage info after cleanup
-                                            _storageInfoTask = null;
-                                        });
-                                    }
+                                    // Time-based backup cleanup removed
                                 }
                                 else
                                 {
@@ -1026,7 +1028,7 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                 // Create backups first - backup primary paths and all duplicates
                 var allTexturePaths = _texturesToConvert.SelectMany(kvp => new[] { kvp.Key }.Concat(kvp.Value)).ToArray();
                 _logger.LogDebug("Starting backup for {Count} texture paths", allTexturePaths.Length);
-                await _textureBackupService.BackupTexturesAsync(allTexturePaths, _backupProgress, _conversionCancellationTokenSource.Token);
+                await _shrinkuBackupService.BackupAsync(_texturesToConvert, _backupProgress, _conversionCancellationTokenSource.Token);
                 
                 // Start conversion after backup is complete
                 _logger.LogDebug("Backup completed, starting texture conversion");
@@ -1058,6 +1060,24 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
         {
             try
             {
+                // Prefer restoring via ShrinkU if sessions/zips exist
+                try
+                {
+                    var overview = await _shrinkuBackupService.GetBackupOverviewAsync().ConfigureAwait(false);
+                    if (overview != null && overview.Count > 0)
+                    {
+                        _logger.LogDebug("ShrinkU backups found: {count}. Restoring latest.", overview.Count);
+                        await _shrinkuBackupService.RestoreLatestAsync(_revertProgress, _revertCancellationTokenSource.Token).ConfigureAwait(false);
+                        _storageInfoTask = null;
+                        _cachedBackupsForAnalysis = null;
+                        try { await _ipcManager.Penumbra.RedrawPlayerAsync().ConfigureAwait(false); } catch { }
+                        return;
+                    }
+                }
+                catch (Exception shrEx)
+                {
+                    _logger.LogWarning(shrEx, "ShrinkU restore failed, falling back to Sphene per-file restore.");
+                }
                 // Create mapping of backup files to their target locations
                 var backupToTargetMap = new Dictionary<string, string>();
                 
@@ -1227,4 +1247,46 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
         
         return string.Empty;
     }
+
+    // ShrinkU helpers for storage info and cleanup
+    private async Task<(long totalSize, int fileCount)> GetShrinkUStorageInfoAsync()
+    {
+        try
+        {
+            var overview = await _shrinkuBackupService.GetBackupOverviewAsync().ConfigureAwait(false);
+            long total = 0;
+            int count = 0;
+            foreach (var sess in overview)
+            {
+                if (sess == null) continue;
+                if (sess.IsZip)
+                {
+                    if (File.Exists(sess.SourcePath))
+                    {
+                        var fi = new FileInfo(sess.SourcePath);
+                        total += fi.Length;
+                        count += 1;
+                    }
+                }
+                else
+                {
+                    if (Directory.Exists(sess.SourcePath))
+                    {
+                        foreach (var f in Directory.EnumerateFiles(sess.SourcePath, "*", SearchOption.AllDirectories))
+                        {
+                            try { total += new FileInfo(f).Length; count++; } catch { }
+                        }
+                    }
+                }
+            }
+            return (total, count);
+        }
+        catch
+        {
+            // Fallback to Sphene service
+            return await _textureBackupService.GetBackupStorageInfoAsync();
+        }
+    }
+
+    // Time-based backup cleanup helper removed
 }

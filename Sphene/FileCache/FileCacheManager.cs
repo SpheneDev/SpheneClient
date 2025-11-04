@@ -59,7 +59,7 @@ public sealed class FileCacheManager : IHostedService
         return CreateFileCacheEntity(fi, prefixedPath);
     }
 
-    public List<FileCacheEntity> GetAllFileCaches() => _fileCaches.Values.SelectMany(v => v).ToList();
+    public List<FileCacheEntity> GetAllFileCaches() => _fileCaches.Values.SelectMany(v => v).Where(f => f != null).ToList();
 
     public List<FileCacheEntity> GetAllFileCachesByHash(string hash, bool ignoreCacheEntries = false, bool validate = true)
     {
@@ -271,7 +271,11 @@ public sealed class FileCacheManager : IHostedService
         lock (_fileWriteLock)
         {
             StringBuilder sb = new();
-            foreach (var entry in _fileCaches.SelectMany(k => k.Value).OrderBy(f => f.PrefixedFilePath, StringComparer.OrdinalIgnoreCase))
+            var snapshot = _fileCaches.Values
+                .SelectMany(v => v?.ToArray() ?? Array.Empty<FileCacheEntity>())
+                .Where(f => f != null && !string.IsNullOrEmpty(f.PrefixedFilePath));
+
+            foreach (var entry in snapshot.OrderBy(f => f.PrefixedFilePath, StringComparer.OrdinalIgnoreCase))
             {
                 sb.AppendLine(entry.CsvEntry);
             }
@@ -316,6 +320,10 @@ public sealed class FileCacheManager : IHostedService
 
     private void AddHashedFile(FileCacheEntity fileCache)
     {
+        if (fileCache == null || string.IsNullOrEmpty(fileCache.PrefixedFilePath))
+        {
+            return;
+        }
         if (!_fileCaches.TryGetValue(fileCache.Hash, out var entries) || entries is null)
         {
             _fileCaches[fileCache.Hash] = entries = [];

@@ -31,6 +31,11 @@ public class SpheneIcon : WindowMediatorSubscriberBase, IDisposable
     private readonly IpcManager _ipcManager;
     private readonly IDalamudPluginInterface _pluginInterface;
     private readonly ICommandManager _commandManager;
+    // Built-in ShrinkU integration
+    private readonly ShrinkU.Configuration.ShrinkUConfigService _shrinkuConfig;
+    private readonly ShrinkU.UI.ConversionUI _shrinkuConversion;
+    private readonly ShrinkU.UI.SettingsUI _shrinkuSettings;
+    private readonly ShrinkU.UI.FirstRunSetupUI _shrinkuFirstRun;
     
     private Vector2 _iconPosition = new Vector2(100, 100);
     private bool _hasStoredIconPosition = false;
@@ -55,7 +60,11 @@ public class SpheneIcon : WindowMediatorSubscriberBase, IDisposable
     public SpheneIcon(ILogger<SpheneIcon> logger, SpheneMediator mediator, 
         SpheneConfigService configService, UiSharedService uiSharedService, ApiController apiController, 
         PerformanceCollectorService performanceCollectorService, IpcManager ipcManager, IDalamudPluginInterface pluginInterface,
-        ICommandManager commandManager) 
+        ICommandManager commandManager,
+        ShrinkU.Configuration.ShrinkUConfigService shrinkuConfig,
+        ShrinkU.UI.ConversionUI shrinkuConversion,
+        ShrinkU.UI.SettingsUI shrinkuSettings,
+        ShrinkU.UI.FirstRunSetupUI shrinkuFirstRun) 
         : base(logger, mediator, "###SpheneIcon", performanceCollectorService)
     {
         _logger = logger;
@@ -66,6 +75,10 @@ public class SpheneIcon : WindowMediatorSubscriberBase, IDisposable
         _ipcManager = ipcManager;
         _pluginInterface = pluginInterface;
         _commandManager = commandManager;
+        _shrinkuConfig = shrinkuConfig;
+        _shrinkuConversion = shrinkuConversion;
+        _shrinkuSettings = shrinkuSettings;
+        _shrinkuFirstRun = shrinkuFirstRun;
         
         LoadIconPositionFromConfig();
         
@@ -143,6 +156,8 @@ public class SpheneIcon : WindowMediatorSubscriberBase, IDisposable
     private List<PluginInfo> GetAvailablePlugins()
     {
         var compatiblePlugins = new List<PluginInfo>();
+        // Always expose built-in ShrinkU
+        compatiblePlugins.Add(new PluginInfo("ShrinkU", "ShrinkU.Builtin"));
         
         // Check for Penumbra
         if (_ipcManager.Penumbra.APIAvailable)
@@ -245,9 +260,22 @@ public class SpheneIcon : WindowMediatorSubscriberBase, IDisposable
                 _ => $"/{internalName.ToLower()}"
             };
             
+            // Built-in ShrinkU opens directly without chat commands
+            if (string.Equals(internalName, "ShrinkU.Builtin", StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogDebug("Opening built-in ShrinkU UI");
+                if (!_shrinkuConfig.Current.FirstRunCompleted)
+                {
+                    _shrinkuFirstRun.IsOpen = true;
+                }
+                else
+                {
+                    _shrinkuConversion.IsOpen = true;
+                }
+                return;
+            }
+
             _logger.LogDebug("Attempting to open plugin with command: {Command}", command);
-            
-            // Execute the command using ICommandManager
             _commandManager.ProcessCommand(command);
             _logger.LogDebug("Successfully executed command: {Command}", command);
             

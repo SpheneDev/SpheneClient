@@ -55,6 +55,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
     private readonly PlayerPerformanceConfigService _playerPerformanceConfigService;
     private readonly ServerConfigurationManager _serverConfigurationManager;
     private readonly UiSharedService _uiShared;
+    private readonly ShrinkUHostService _shrinkUHostService;
     private readonly IProgress<(int, int, FileCacheEntity)> _validationProgress;
     private (int, int, FileCacheEntity) _currentProgress;
     private bool _deleteAccountPopupModalShown = false;
@@ -98,6 +99,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         FileCacheManager fileCacheManager,
         FileCompactor fileCompactor, ApiController apiController,
         IpcManager ipcManager, CacheMonitor cacheMonitor,
+        ShrinkUHostService shrinkUHostService,
         DalamudUtilService dalamudUtilService, HttpClient httpClient) : base(logger, mediator, "Network Configuration", performanceCollector)
     {
         _configService = configService;
@@ -115,6 +117,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         _httpClient = httpClient;
         _fileCompactor = fileCompactor;
         _uiShared = uiShared;
+        _shrinkUHostService = shrinkUHostService;
         AllowClickthrough = false;
         AllowPinning = false;
         _validationProgress = new Progress<(int, int, FileCacheEntity)>(v => _currentProgress = v);
@@ -2076,6 +2079,15 @@ public class SettingsUi : WindowMediatorSubscriberBase
             currentProfile.EnableRightClickMenus = enableRightClickMenu;
             _configService.Save();
         }
+
+        var enableShrinkU = currentProfile.EnableShrinkUIntegration;
+        if (ImGui.Checkbox("Enable ShrinkU integration", ref enableShrinkU))
+        {
+            currentProfile.EnableShrinkUIntegration = enableShrinkU;
+            _configService.Save();
+            try { _shrinkUHostService.ApplyIntegrationEnabled(enableShrinkU); } catch { }
+        }
+        UiSharedService.AttachToolTip("Toggle ShrinkU windows and integration inside Sphene.");
 
         ImGui.Separator();
         _uiShared.BigText("Server Info Bar");

@@ -31,6 +31,9 @@ using System.Net.Http.Headers;
 using System.Reflection;
 using Sphene.Services.CharaData;
 using Dalamud.Game;
+using ShrinkU.Configuration;
+using ShrinkU.Interop;
+using ShrinkU.UI;
 
 namespace Sphene;
 
@@ -94,6 +97,42 @@ public sealed class Plugin : IDalamudPlugin
             collection.AddSingleton(commandManager);
             collection.AddSingleton(framework);
             collection.AddSingleton(pluginInterface);
+
+            // ShrinkU integration services and windows
+            collection.AddSingleton<Microsoft.Extensions.Logging.ILogger>(s => s.GetRequiredService<ILoggerFactory>().CreateLogger("ShrinkU"));
+            collection.AddSingleton<ShrinkUConfigService>(s => new ShrinkUConfigService(pluginInterface, s.GetRequiredService<Microsoft.Extensions.Logging.ILogger>()));
+            collection.AddSingleton<ShrinkU.Services.PenumbraIpc>(s => new ShrinkU.Services.PenumbraIpc(pluginInterface, s.GetRequiredService<Microsoft.Extensions.Logging.ILogger>()));
+            collection.AddSingleton<ShrinkU.Services.TextureBackupService>(s => new ShrinkU.Services.TextureBackupService(
+                s.GetRequiredService<Microsoft.Extensions.Logging.ILogger>(),
+                s.GetRequiredService<ShrinkUConfigService>(),
+                s.GetRequiredService<ShrinkU.Services.PenumbraIpc>()));
+            collection.AddSingleton<ShrinkU.Services.TextureConversionService>(s => new ShrinkU.Services.TextureConversionService(
+                s.GetRequiredService<Microsoft.Extensions.Logging.ILogger>(),
+                s.GetRequiredService<ShrinkU.Services.PenumbraIpc>(),
+                s.GetRequiredService<ShrinkU.Services.TextureBackupService>(),
+                s.GetRequiredService<ShrinkUConfigService>()));
+            collection.AddSingleton<SettingsUI>(s => new SettingsUI(
+                s.GetRequiredService<Microsoft.Extensions.Logging.ILogger>(),
+                s.GetRequiredService<ShrinkUConfigService>(),
+                s.GetRequiredService<ShrinkU.Services.TextureConversionService>()));
+            collection.AddSingleton<ConversionUI>(s => new ConversionUI(
+                s.GetRequiredService<Microsoft.Extensions.Logging.ILogger>(),
+                s.GetRequiredService<ShrinkUConfigService>(),
+                s.GetRequiredService<ShrinkU.Services.TextureConversionService>(),
+                s.GetRequiredService<ShrinkU.Services.TextureBackupService>(),
+                () => s.GetRequiredService<SettingsUI>().IsOpen = true));
+            collection.AddSingleton<FirstRunSetupUI>(s =>
+            {
+                var ui = new FirstRunSetupUI(
+                    s.GetRequiredService<Microsoft.Extensions.Logging.ILogger>(),
+                    s.GetRequiredService<ShrinkUConfigService>());
+                ui.OnCompleted = () =>
+                {
+                    try { s.GetRequiredService<ConversionUI>().IsOpen = true; } catch { }
+                };
+                return ui;
+            });
+            collection.AddSingleton<ShrinkUHostService>();
 
             // add sphene related singletons
             collection.AddSingleton<SpheneMediator>();
@@ -321,6 +360,7 @@ public sealed class Plugin : IDalamudPlugin
             collection.AddHostedService(p => p.GetRequiredService<IpcProvider>());
             collection.AddHostedService(p => p.GetRequiredService<LoginHandler>());
             collection.AddHostedService(p => p.GetRequiredService<UpdateCheckService>());
+            collection.AddHostedService(p => p.GetRequiredService<ShrinkUHostService>());
             // Initialize CitySyncshellExplanationUI early as hosted service to ensure it's created before CitySyncshellService
             collection.AddHostedService(p => 
             {

@@ -89,34 +89,6 @@ public class TextureBackupService
         return results;
     }
 
-    public void CleanupOldBackups(TimeSpan maxAge)
-    {
-        try
-        {
-            if (!Directory.Exists(_backupDirectory))
-            {
-                _logger.LogDebug("Backup directory does not exist, skipping cleanup: {directory}", _backupDirectory);
-                return;
-            }
-            
-            var cutoffDate = DateTime.Now - maxAge;
-            var backupFiles = Directory.GetFiles(_backupDirectory, "*.tex");
-
-            foreach (var file in backupFiles)
-            {
-                var fileInfo = new FileInfo(file);
-                if (fileInfo.CreationTime < cutoffDate)
-                {
-                    File.Delete(file);
-                    _logger.LogDebug("Deleted old backup: {file}", file);
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to cleanup old backups");
-        }
-    }
 
     public string GetBackupDirectory() => _backupDirectory;
 
@@ -369,61 +341,4 @@ public class TextureBackupService
         }
     }
 
-    public async Task<(int deletedCount, long freedSpace)> CleanupOldBackupsAsync(int daysOld = 3)
-    {
-        try
-        {
-            var backupDirectory = GetBackupDirectory();
-            if (!Directory.Exists(backupDirectory))
-            {
-                return (0, 0);
-            }
-
-            var cutoffDate = DateTime.Now.AddDays(-daysOld);
-            var backupFiles = Directory.GetFiles(backupDirectory, "*", SearchOption.AllDirectories);
-            
-            int deletedCount = 0;
-            long freedSpace = 0;
-
-            await Task.Run(() =>
-            {
-                foreach (var file in backupFiles)
-                {
-                    try
-                    {
-                        var fileInfo = new FileInfo(file);
-                        if (fileInfo.CreationTime < cutoffDate)
-                        {
-                            var fileSize = fileInfo.Length;
-                            File.Delete(file);
-                            deletedCount++;
-                            freedSpace += fileSize;
-                            _logger.LogDebug("Deleted old backup file: {file} (created: {created})", file, fileInfo.CreationTime);
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "Failed to delete old backup file: {file}", file);
-                    }
-                }
-            });
-
-            if (deletedCount > 0)
-            {
-                _logger.LogInformation("Cleanup completed: deleted {count} old backup files, freed {size:F2} MB", 
-                    deletedCount, freedSpace / (1024.0 * 1024.0));
-            }
-            else
-            {
-                _logger.LogDebug("No old backup files found for cleanup");
-            }
-
-            return (deletedCount, freedSpace);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to cleanup old backup files");
-            return (0, 0);
-        }
-    }
 }

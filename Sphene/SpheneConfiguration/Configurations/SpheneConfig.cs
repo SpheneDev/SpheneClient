@@ -79,6 +79,8 @@ public class SpheneConfig : ISpheneConfiguration
     public float IconPositionY { get; set; } = 100f;
     public bool ShowSpheneIcon { get; set; } = true;
     public bool LockSpheneIcon { get; set; } = false;
+    // Enable or disable integration of ShrinkU UI inside Sphene
+    public bool EnableShrinkUIntegration { get; set; } = true;
     
     // Acknowledgment System Settings
     public bool ShowAcknowledgmentPopups { get; set; } = false;
