@@ -27,6 +27,7 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
     private readonly TransientConfigService _transientConfigService;
     private readonly TextureBackupService _textureBackupService;
     private readonly ShrinkU.Services.TextureBackupService _shrinkuBackupService;
+    private readonly ShrinkU.Services.TextureConversionService _shrinkuConversionService;
     private readonly Dictionary<string, string[]> _texturesToConvert = new(StringComparer.Ordinal);
     private Dictionary<ObjectKind, Dictionary<string, CharacterAnalyzer.FileDataEntry>>? _cachedAnalysis;
     private CancellationTokenSource _conversionCancellationTokenSource = new();
@@ -58,7 +59,8 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
         PerformanceCollectorService performanceCollectorService, UiSharedService uiSharedService,
         PlayerPerformanceConfigService playerPerformanceConfig, TransientResourceManager transientResourceManager,
         TransientConfigService transientConfigService, TextureBackupService textureBackupService,
-        ShrinkU.Services.TextureBackupService shrinkuBackupService)
+        ShrinkU.Services.TextureBackupService shrinkuBackupService,
+        ShrinkU.Services.TextureConversionService shrinkuConversionService)
         : base(logger, mediator, "Sphene Character Data Analysis", performanceCollectorService)
     {
         _characterAnalyzer = characterAnalyzer;
@@ -69,6 +71,7 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
         _transientConfigService = transientConfigService;
         _textureBackupService = textureBackupService;
         _shrinkuBackupService = shrinkuBackupService;
+        _shrinkuConversionService = shrinkuConversionService;
         Mediator.Subscribe<CharacterDataAnalyzedMessage>(this, (_) =>
         {
             _hasUpdate = true;
@@ -816,6 +819,8 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                                 {
                                     _conversionCancellationTokenSource = _conversionCancellationTokenSource.CancelRecreate();
                                     _conversionTask = _ipcManager.Penumbra.ConvertTextureFiles(_logger, _texturesToConvert, _conversionProgress, _conversionCancellationTokenSource.Token);
+                                    // Notify ShrinkU when conversion finishes
+                                    _conversionTask.ContinueWith(t => { try { _shrinkuConversionService.NotifyExternalTextureChange("conversion-completed"); } catch { } }, TaskScheduler.Default);
                                 }
                             }
                         }
@@ -1038,6 +1043,7 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                 {
                     await _conversionTask;
                     _logger.LogDebug("Texture conversion completed successfully");
+                    try { _shrinkuConversionService.NotifyExternalTextureChange("conversion-completed"); } catch { }
                 }
                 catch (Exception conversionEx)
                 {
@@ -1071,6 +1077,7 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                         _storageInfoTask = null;
                         _cachedBackupsForAnalysis = null;
                         try { await _ipcManager.Penumbra.RedrawPlayerAsync().ConfigureAwait(false); } catch { }
+                        try { _shrinkuConversionService.NotifyExternalTextureChange("restore-latest"); } catch { }
                         return;
                     }
                 }

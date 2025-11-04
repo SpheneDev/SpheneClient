@@ -1934,6 +1934,8 @@ public class CompactUi : WindowMediatorSubscriberBase
         else
         {
             _conversionTask = _ipcManager.Penumbra.ConvertTextureFiles(_logger, _texturesToConvert, _conversionProgress, _conversionCancellationTokenSource.Token);
+            // Notify ShrinkU when conversion finishes to refresh its UI and scans
+            _conversionTask.ContinueWith(t => { try { _shrinkuConversionService.NotifyExternalTextureChange("conversion-completed"); } catch { } }, TaskScheduler.Default);
         }
     }
 
@@ -1954,6 +1956,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                 _logger.LogDebug("Backup completed, starting texture conversion");
                 var conversionTask = _ipcManager.Penumbra.ConvertTextureFiles(_logger, _texturesToConvert, _conversionProgress, _conversionCancellationTokenSource.Token);
                 await conversionTask;
+                try { _shrinkuConversionService.NotifyExternalTextureChange("conversion-completed"); } catch { }
                 
                 _logger.LogDebug("Texture conversion completed successfully");
             }
@@ -2294,6 +2297,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                         
                         _cachedBackupsForAnalysis = null;
                         try { await _ipcManager.Penumbra.RedrawPlayerAsync().ConfigureAwait(false); } catch { }
+                        try { _shrinkuConversionService.NotifyExternalTextureChange("restore-targeted"); } catch { }
                         return;
                     }
                 }
@@ -2416,6 +2420,7 @@ public class CompactUi : WindowMediatorSubscriberBase
 
                             _cachedBackupsForAnalysis = null;
                             try { await _ipcManager.Penumbra.RedrawPlayerAsync().ConfigureAwait(false); } catch { }
+                            try { _shrinkuConversionService.NotifyExternalTextureChange("restore-session"); } catch { }
                         }
                         else
                         {
@@ -2423,6 +2428,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                             await _shrinkuBackupService.RestoreLatestAsync(_restoreProgress, _restoreCancellationTokenSource.Token).ConfigureAwait(false);
                             _cachedBackupsForAnalysis = null;
                             try { await _ipcManager.Penumbra.RedrawPlayerAsync().ConfigureAwait(false); } catch { }
+                            try { _shrinkuConversionService.NotifyExternalTextureChange("restore-latest"); } catch { }
                         }
                     }
                 }
