@@ -80,6 +80,8 @@ public class CompactUi : WindowMediatorSubscriberBase
     // Texture conversion fields
     private bool _showConversionPopup = false;
     private bool _showProgressPopup = false;
+    private bool _conversionWindowOpen = false;
+    private bool _conversionProgressWindowOpen = false;
     private Dictionary<string, string[]> _texturesToConvert = new();
     private Task? _conversionTask;
     private CancellationTokenSource _conversionCancellationTokenSource = new();
@@ -105,6 +107,12 @@ public class CompactUi : WindowMediatorSubscriberBase
     private Task? _restoreTask;
     private CancellationTokenSource _restoreCancellationTokenSource = new();
     private Progress<(string fileName, int current, int total)> _restoreProgress = new();
+    private bool _showRestoreProgressPopup = false;
+    private string _restoreCurrentFileName = string.Empty;
+    private int _restoreCurrentIndex = 0;
+    private int _restoreTotalCount = 0;
+    private DateTime _restoreStartTime = DateTime.MinValue;
+    private bool _restoreWindowOpen = false;
 
     // Async ShrinkU mod backup detection cache
     private Dictionary<string, List<string>>? _cachedShrinkUModBackups;
@@ -170,6 +178,18 @@ public class CompactUi : WindowMediatorSubscriberBase
             {
                 _conversionCurrentFileProgress = e.Item2;
                 _conversionCurrentFileName = e.Item1;
+            }
+            catch { }
+        };
+        // Setup restore progress handler
+        _restoreProgress.ProgressChanged += (sender, progress) =>
+        {
+            try
+            {
+                _restoreCurrentFileName = progress.fileName;
+                _restoreCurrentIndex = progress.current;
+                _restoreTotalCount = progress.total;
+                _restoreWindowOpen = true;
             }
             catch { }
         };
@@ -654,8 +674,12 @@ public class CompactUi : WindowMediatorSubscriberBase
             }
         }
 
-        // Texture Conversion Popup
-        DrawTextureConversionPopup();
+        // Conversion windows (non-blocking)
+        DrawConversionWindow();
+        DrawConversionProgressWindow();
+
+        // Persistent Restore Progress Window
+        DrawRestoreProgressWindow();
 
         // Track window size changes for mediator notifications
         var pos = ImGui.GetWindowPos();
@@ -826,7 +850,7 @@ public class CompactUi : WindowMediatorSubscriberBase
             {
                 if (_uiSharedService.IconButton(FontAwesomeIcon.FileArchive, 22f) && !_shrinkuConversionService.IsConverting)
                 {
-                    _showConversionPopup = true;
+                    _conversionWindowOpen = true;
                 }
             }
             UiSharedService.AttachToolTip(_shrinkuConversionService.IsConverting
@@ -1524,121 +1548,15 @@ public class CompactUi : WindowMediatorSubscriberBase
         }
     }
 
-    private void DrawTextureConversionPopup()
+    private void DrawConversionWindow()
     {
-        if (_showConversionPopup)
-        {
-            ImGui.OpenPopup("Texture Conversion");
-        }
+        if (!_conversionWindowOpen)
+            return;
 
-        // Open progress popup when needed
-        if (_showProgressPopup)
+        using (SpheneCustomTheme.ApplyContextMenuTheme())
         {
-            ImGui.OpenPopup("BC7 Conversion in Progress");
-            _showProgressPopup = false;
-        }
-
-        // Conversion progress modal
-        if (_conversionTask != null && !_conversionTask.IsCompleted)
-        {
-            using (SpheneCustomTheme.ApplyContextMenuTheme())
-            {
-                if (ImGui.BeginPopupModal("BC7 Conversion in Progress", ImGuiWindowFlags.NoResize))
-                {
-                    // Title and overall progress
-                    ImGui.TextColored(SpheneCustomTheme.Colors.SpheneGold, "Converting Textures to BC7 Format");
-                    ImGui.Separator();
-                    
-                    // Progress statistics
-                    var totalFiles = _texturesToConvert.Count;
-                    var currentFile = _conversionCurrentFileProgress;
-                    var progressPercentage = totalFiles > 0 ? (float)currentFile / totalFiles : 0f;
-                    var remainingFiles = totalFiles - currentFile;
-                    
-                    ImGui.Text($"Progress: {currentFile} / {totalFiles} files");
-                    ImGui.Text($"Remaining: {remainingFiles} files");
-                    ImGui.Text($"Percentage: {progressPercentage * 100:F1}%");
-                    
-                    // Estimated time remaining
-                    if (currentFile > 0 && _conversionStartTime != DateTime.MinValue)
-                    {
-                        var elapsed = DateTime.Now - _conversionStartTime;
-                        var avgTimePerFile = elapsed.TotalSeconds / currentFile;
-                        var estimatedRemainingSeconds = avgTimePerFile * remainingFiles;
-                        var estimatedRemaining = TimeSpan.FromSeconds(estimatedRemainingSeconds);
-                        
-                        ImGui.Text($"Elapsed: {elapsed:mm\\:ss}");
-                        if (remainingFiles > 0)
-                        {
-                            ImGui.Text($"Estimated remaining: {estimatedRemaining:mm\\:ss}");
-                        }
-                    }
-                    
-                    // Progress bar - use theme-configured transmission bar settings
-                    var theme = SpheneCustomTheme.CurrentTheme;
-                    var barSize = new Vector2(theme.CompactTransmissionBarWidth, theme.CompactTransmissionBarHeight);
-                    ImGui.PushStyleColor(ImGuiCol.PlotHistogram, ImGui.ColorConvertFloat4ToU32(theme.CompactTransmissionBarForeground));
-                    ImGui.PushStyleColor(ImGuiCol.FrameBg, ImGui.ColorConvertFloat4ToU32(theme.CompactTransmissionBarBackground));
-                    ImGui.ProgressBar(progressPercentage, barSize, $"{progressPercentage * 100:F1}%");
-                    ImGui.PopStyleColor(2);
-                    
-                    ImGui.Spacing();
-                    
-                    // Current file information
-                    if (!string.IsNullOrEmpty(_conversionCurrentFileName))
-                    {
-                        ImGui.TextColored(SpheneCustomTheme.CurrentTheme.TextSecondary, "Currently processing:");
-                        
-                        // Extract filename from full path
-                        var fileName = Path.GetFileName(_conversionCurrentFileName);
-                        var directory = Path.GetDirectoryName(_conversionCurrentFileName);
-                        
-                        ImGui.Text($"File: {fileName}");
-                        if (!string.IsNullOrEmpty(directory))
-                        {
-                            ImGui.TextColored(SpheneCustomTheme.CurrentTheme.TextSecondary, $"Path: {directory}");
-                        }
-                        
-                        // Try to get file size if file exists
-                        try
-                        {
-                            if (File.Exists(_conversionCurrentFileName))
-                            {
-                                var fileInfo = new FileInfo(_conversionCurrentFileName);
-                                var sizeInMB = fileInfo.Length / (1024.0 * 1024.0);
-                                ImGui.TextColored(SpheneCustomTheme.CurrentTheme.TextSecondary, $"Size: {sizeInMB:F2} MB");
-                            }
-                        }
-                        catch
-                        {
-                            // Ignore file access errors
-                        }
-                    }
-                    
-                    ImGui.Spacing();
-                    ImGui.Separator();
-                    
-                    // Cancel button
-                    if (_uiSharedService.IconTextButton(FontAwesomeIcon.StopCircle, "Cancel Conversion"))
-                    {
-                        _conversionCancellationTokenSource.Cancel();
-                    }
-                    
-                    UiSharedService.SetScaledWindowSize(600);
-                    ImGui.EndPopup();
-                }
-            }
-        }
-        else if (_conversionTask != null && _conversionTask.IsCompleted && _texturesToConvert.Count > 0)
-        {
-            _conversionTask = null;
-            _texturesToConvert.Clear();
-        }
-
-        // Main conversion popup
-        if (ImGui.BeginPopupModal("Texture Conversion", ref _showConversionPopup, ImGuiWindowFlags.AlwaysAutoResize))
-        {
-            using (SpheneCustomTheme.ApplyContextMenuTheme())
+            ImGui.SetNextWindowSize(new Vector2(520, 0), ImGuiCond.FirstUseEver);
+            if (ImGui.Begin("Texture Conversion", ref _conversionWindowOpen, ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse | ImGuiWindowFlags.NoCollapse))
             {
                 // Ensure character data analysis is triggered and completed before popup is usable
                 if (_popupAnalysisTask == null || _popupAnalysisTask.IsCompleted)
@@ -1660,9 +1578,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                         ImGui.SameLine();
                         ImGui.Text($"{_characterAnalyzer.CurrentFile}/{_characterAnalyzer.TotalFiles}");
                     }
-
-                    UiSharedService.SetScaledWindowSize(600);
-                    ImGui.EndPopup();
+                    ImGui.End();
                     return;
                 }
 
@@ -1769,10 +1685,10 @@ public class CompactUi : WindowMediatorSubscriberBase
                 
                 if (ImGui.Button("Close"))
                 {
-                    _showConversionPopup = false;
-                    _cachedAnalysisForPopup = null; // Clear cached analysis when popup closes
+                    _conversionWindowOpen = false;
+                    _cachedAnalysisForPopup = null; // Clear cached analysis when window closes
                 }
-                ImGui.EndPopup();
+                ImGui.End();
                 return;
             }
 
@@ -1996,9 +1912,9 @@ public class CompactUi : WindowMediatorSubscriberBase
                 if (_uiSharedService.IconTextButton(FontAwesomeIcon.FileArchive, $"Convert {nonBc7Textures.Count} textures to BC7"))
                 {
                     StartTextureConversion(nonBc7Textures);
-                    _showConversionPopup = false;
-                    _cachedAnalysisForPopup = null; // Clear cached analysis when popup closes
-                    _showProgressPopup = true;
+                    _conversionWindowOpen = false;
+                    _cachedAnalysisForPopup = null; // Clear cached analysis when window closes
+                    _conversionProgressWindowOpen = true;
                 }
 
                 // Visual indicator: show spinning arrows when automatic conversion is active
@@ -2024,12 +1940,169 @@ public class CompactUi : WindowMediatorSubscriberBase
             ImGui.Spacing();
             if (ImGui.Button("Close"))
             {
-                _showConversionPopup = false;
-                _cachedAnalysisForPopup = null; // Clear cached analysis when popup closes
+                _conversionWindowOpen = false;
+                _cachedAnalysisForPopup = null; // Clear cached analysis when window closes
             }
-            UiSharedService.SetScaledWindowSize(400);
             }
-            ImGui.EndPopup();
+            ImGui.End();
+        }
+    }
+
+    private void DrawConversionProgressWindow()
+    {
+        var converting = _conversionTask != null && !_conversionTask.IsCompleted;
+        if (!converting && !_conversionProgressWindowOpen)
+            return;
+
+        if (converting)
+            _conversionProgressWindowOpen = true;
+
+        using (SpheneCustomTheme.ApplyContextMenuTheme())
+        {
+            ImGui.SetNextWindowSize(new Vector2(520, 0), ImGuiCond.FirstUseEver);
+            if (ImGui.Begin("Conversion Progress", ref _conversionProgressWindowOpen, ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse | ImGuiWindowFlags.NoCollapse))
+            {
+                // Title and overall progress
+                ImGui.TextColored(SpheneCustomTheme.Colors.SpheneGold, "Converting Textures to BC7 Format");
+                ImGui.Separator();
+
+                var totalFiles = _texturesToConvert.Count;
+                var currentFile = _conversionCurrentFileProgress;
+                var progressPercentage = totalFiles > 0 ? (float)currentFile / totalFiles : 0f;
+                var remainingFiles = Math.Max(0, totalFiles - currentFile);
+
+                ImGui.Text($"Progress: {currentFile} / {totalFiles} files");
+                ImGui.Text($"Remaining: {remainingFiles} files");
+                ImGui.Text($"Percentage: {progressPercentage * 100:F1}%");
+
+                if (currentFile > 0 && _conversionStartTime != DateTime.MinValue)
+                {
+                    var elapsed = DateTime.Now - _conversionStartTime;
+                    var avgTimePerFile = elapsed.TotalSeconds / currentFile;
+                    var estimatedRemainingSeconds = avgTimePerFile * remainingFiles;
+                    var estimatedRemaining = TimeSpan.FromSeconds(estimatedRemainingSeconds);
+                    ImGui.Text($"Elapsed: {elapsed:mm\\:ss}");
+                    if (remainingFiles > 0)
+                        ImGui.Text($"Estimated remaining: {estimatedRemaining:mm\\:ss}");
+                }
+
+                // Progress bar themed
+                var theme = SpheneCustomTheme.CurrentTheme;
+                var barSize = new Vector2(theme.CompactTransmissionBarWidth, theme.CompactTransmissionBarHeight);
+                ImGui.PushStyleColor(ImGuiCol.PlotHistogram, ImGui.ColorConvertFloat4ToU32(theme.CompactTransmissionBarForeground));
+                ImGui.PushStyleColor(ImGuiCol.FrameBg, ImGui.ColorConvertFloat4ToU32(theme.CompactTransmissionBarBackground));
+                ImGui.ProgressBar(progressPercentage, barSize, $"{progressPercentage * 100:F1}%");
+                ImGui.PopStyleColor(2);
+
+                ImGui.Spacing();
+
+                // Current file information
+                if (!string.IsNullOrEmpty(_conversionCurrentFileName))
+                {
+                    ImGui.TextColored(SpheneCustomTheme.CurrentTheme.TextSecondary, "Currently processing:");
+                    var fileName = Path.GetFileName(_conversionCurrentFileName);
+                    var directory = Path.GetDirectoryName(_conversionCurrentFileName);
+                    ImGui.Text($"File: {fileName}");
+                    if (!string.IsNullOrEmpty(directory))
+                        ImGui.TextColored(SpheneCustomTheme.CurrentTheme.TextSecondary, $"Path: {directory}");
+                    try
+                    {
+                        if (File.Exists(_conversionCurrentFileName))
+                        {
+                            var fileInfo = new FileInfo(_conversionCurrentFileName);
+                            var sizeInMB = fileInfo.Length / (1024.0 * 1024.0);
+                            ImGui.TextColored(SpheneCustomTheme.CurrentTheme.TextSecondary, $"Size: {sizeInMB:F2} MB");
+                        }
+                    }
+                    catch { }
+                }
+
+                ImGui.Spacing();
+                ImGui.Separator();
+
+                if (converting)
+                {
+                    if (_uiSharedService.IconTextButton(FontAwesomeIcon.StopCircle, "Cancel Conversion"))
+                    {
+                        _conversionCancellationTokenSource.Cancel();
+                    }
+                    ImGui.SameLine();
+                    UiSharedService.ColorText("Conversion is running…", SpheneCustomTheme.Colors.Warning);
+                }
+                else
+                {
+                    UiSharedService.ColorText("Conversion completed.", SpheneCustomTheme.Colors.Success);
+                }
+
+                ImGui.End();
+            }
+        }
+
+        // Cleanup once done
+        if (_conversionTask != null && _conversionTask.IsCompleted && _texturesToConvert.Count > 0)
+        {
+            _conversionTask = null;
+            _texturesToConvert.Clear();
+        }
+    }
+
+    private void DrawRestoreProgressWindow()
+    {
+        var restoreRunning = _restoreTask != null && !_restoreTask.IsCompleted;
+        if (!restoreRunning && !_restoreWindowOpen)
+            return;
+
+        // Auto-open when restore starts
+        if (restoreRunning)
+            _restoreWindowOpen = true;
+
+        if (_restoreWindowOpen)
+        {
+            using (SpheneCustomTheme.ApplyContextMenuTheme())
+            {
+                ImGui.SetNextWindowSize(new Vector2(420, 0), ImGuiCond.FirstUseEver);
+                if (ImGui.Begin("Restore Progress", ref _restoreWindowOpen, ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse | ImGuiWindowFlags.NoCollapse))
+                {
+                    var total = _restoreTotalCount;
+                    var current = _restoreCurrentIndex;
+                    var percent = total > 0 ? (float)current / total : 0f;
+                    var remaining = total > 0 ? (total - current) : 0;
+
+                    ImGui.TextColored(SpheneCustomTheme.Colors.SpheneGold, "Restoring Textures from Backups");
+                    ImGui.Separator();
+                    ImGui.Text($"Progress: {current} / {total} items");
+                    ImGui.Text($"Remaining: {remaining} items");
+                    ImGui.Text($"Percentage: {percent * 100:F1}%");
+                    if (!string.IsNullOrEmpty(_restoreCurrentFileName))
+                        ImGui.Text($"Current: {_restoreCurrentFileName}");
+
+                    if (current > 0 && _restoreStartTime != DateTime.MinValue && total > 0)
+                    {
+                        var elapsed = DateTime.Now - _restoreStartTime;
+                        var rate = current / Math.Max(1.0, elapsed.TotalSeconds);
+                        var secsRemaining = rate > 0 ? (total - current) / rate : 0.0;
+                        var eta = TimeSpan.FromSeconds(secsRemaining);
+                        ImGui.Text($"ETA: {eta:mm\\:ss}");
+                    }
+
+                    ImGui.Spacing();
+                    if (restoreRunning)
+                    {
+                        if (ImGui.Button("Cancel Restore"))
+                        {
+                            try { _restoreCancellationTokenSource.Cancel(); } catch { }
+                        }
+                        ImGui.SameLine();
+                        UiSharedService.ColorText("Restore is running…", SpheneCustomTheme.Colors.Warning);
+                    }
+                    else
+                    {
+                        UiSharedService.ColorText("Restore completed.", SpheneCustomTheme.Colors.Success);
+                    }
+
+                    ImGui.End();
+                }
+            }
         }
     }
 
@@ -2434,6 +2507,12 @@ public class CompactUi : WindowMediatorSubscriberBase
     private void StartTextureRestore(Dictionary<string, List<string>> availableBackups)
     {
         _restoreCancellationTokenSource = _restoreCancellationTokenSource.CancelRecreate();
+        _restoreStartTime = DateTime.Now;
+        _restoreCurrentFileName = string.Empty;
+        _restoreCurrentIndex = 0;
+        _restoreTotalCount = 0;
+        _showRestoreProgressPopup = true;
+        _restoreWindowOpen = true;
         
         _restoreTask = Task.Run(async () =>
         {
@@ -2711,7 +2790,11 @@ public class CompactUi : WindowMediatorSubscriberBase
             {
                 _logger.LogError(ex, "Error during texture restore process");
             }
-        }, _restoreCancellationTokenSource.Token);
+        }, _restoreCancellationTokenSource.Token).ContinueWith(_ =>
+        {
+            // Auto-close window after completion; user can reopen via next restore
+            _restoreWindowOpen = false;
+        }, TaskScheduler.Default);
     }
     
     private string FindCurrentTextureLocation(string originalFileName)
