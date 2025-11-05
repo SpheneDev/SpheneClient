@@ -56,6 +56,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
     private readonly ServerConfigurationManager _serverConfigurationManager;
     private readonly UiSharedService _uiShared;
     private readonly ShrinkUHostService _shrinkUHostService;
+    private readonly string _shrinkUVersion;
     private readonly IProgress<(int, int, FileCacheEntity)> _validationProgress;
     private (int, int, FileCacheEntity) _currentProgress;
     private bool _deleteAccountPopupModalShown = false;
@@ -118,6 +119,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         _fileCompactor = fileCompactor;
         _uiShared = uiShared;
         _shrinkUHostService = shrinkUHostService;
+        _shrinkUVersion = GetShrinkUAssemblyVersion();
         AllowClickthrough = false;
         AllowPinning = false;
         _validationProgress = new Progress<(int, int, FileCacheEntity)>(v => _currentProgress = v);
@@ -184,6 +186,16 @@ public class SettingsUi : WindowMediatorSubscriberBase
     protected override void DrawInternal()
     {
         _ = _uiShared.DrawOtherPluginState();
+
+        // Right-aligned prominent Discord button near plugin status
+        var availableWidth = ImGui.GetWindowContentRegionMax().X - ImGui.GetWindowContentRegionMin().X;
+        var rightButtonWidth = _uiShared.GetIconTextButtonSize(FontAwesomeIcon.Users, "Join Discord Community");
+        ImGui.SameLine(availableWidth - rightButtonWidth);
+        if (_uiShared.IconTextActionButton(FontAwesomeIcon.Users, "Join Discord Community"))
+        {
+            Util.OpenLink("https://discord.gg/GbnwsP2XsF");
+        }
+        UiSharedService.AttachToolTip("Get support, updates, and connect with other users");
 
         DrawSettingsContent();
         
@@ -1886,14 +1898,27 @@ public class SettingsUi : WindowMediatorSubscriberBase
         ImGui.SameLine();
         UiSharedService.TextWrapped("Advanced character synchronization and networking plugin for Final Fantasy XIV");
 
-        // Discord Button
-        ImGui.Spacing();
-        if (ImGui.Button("Join Discord Community"))
-        {
-            Util.OpenLink("https://discord.gg/GbnwsP2XsF");
-        }
+        ImGui.Separator();
+        _uiShared.BigText("ShrinkU");
+        ImGui.TextUnformatted("ShrinkU Version:");
         ImGui.SameLine();
-        UiSharedService.TextWrapped("Get support, updates, and connect with other users");
+        ImGui.TextColored(ImGuiColors.ParsedGreen, _shrinkUVersion);
+        UiSharedService.AttachToolTip("Version of bundled ShrinkU assembly.");
+
+        ImGui.TextUnformatted("Description:");
+        ImGui.SameLine();
+        UiSharedService.TextWrapped("Convert Penumbra textures to BC7 with backups. Standalone texture conversion plugin integrated with Sphene.");
+
+        var enableShrinkUOverview = _configService.Current.EnableShrinkUIntegration;
+        if (ImGui.Checkbox("Enable ShrinkU integration", ref enableShrinkUOverview))
+        {
+            _configService.Current.EnableShrinkUIntegration = enableShrinkUOverview;
+            _configService.Save();
+            try { _shrinkUHostService.ApplyIntegrationEnabled(enableShrinkUOverview); } catch { }
+        }
+        UiSharedService.AttachToolTip("Toggle ShrinkU windows and integration inside Sphene.");
+
+        // Discord button moved to Settings header for better visibility
 
         // Server Connection Section
         ImGui.Separator();
@@ -1971,32 +1996,6 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 ImGui.TextUnformatted("Reconnects to the configured service.");
             }
         }
-
-        ImGui.Separator();
-        _uiShared.BigText("Getting Started");
-        ImGui.TextUnformatted("1. Server Setup:");
-        ImGui.Indent();
-        ImGui.TextUnformatted("Configure your server connection under the 'Connectivity' tab");
-        ImGui.TextUnformatted("Enter your authentication key or set up Discord OAuth");
-        ImGui.Unindent();
-        
-        ImGui.TextUnformatted("2. Customization:");
-        ImGui.Indent();
-        ImGui.TextUnformatted("Adjust appearance settings in the 'Display' section");
-        ImGui.TextUnformatted("Configure notifications and alerts to your preference");
-        ImGui.Unindent();
-        
-        ImGui.TextUnformatted("3. User Management:");
-        ImGui.Indent();
-        ImGui.TextUnformatted("Manage paired users and add personal notes in 'People & Notes'");
-        ImGui.TextUnformatted("Export/import your notes for backup or sharing");
-        ImGui.Unindent();
-        
-        ImGui.TextUnformatted("4. Performance:");
-        ImGui.Indent();
-        ImGui.TextUnformatted("Monitor system performance and adjust settings as needed");
-        ImGui.TextUnformatted("Check file transfers and storage usage regularly");
-        ImGui.Unindent();
     }
 
     private void DrawGeneralUserManagement()
@@ -2080,14 +2079,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             _configService.Save();
         }
 
-        var enableShrinkU = currentProfile.EnableShrinkUIntegration;
-        if (ImGui.Checkbox("Enable ShrinkU integration", ref enableShrinkU))
-        {
-            currentProfile.EnableShrinkUIntegration = enableShrinkU;
-            _configService.Save();
-            try { _shrinkUHostService.ApplyIntegrationEnabled(enableShrinkU); } catch { }
-        }
-        UiSharedService.AttachToolTip("Toggle ShrinkU windows and integration inside Sphene.");
+        // ShrinkU integration settings moved to Overview page alongside version info
 
         ImGui.Separator();
         _uiShared.BigText("Server Info Bar");
@@ -2226,6 +2218,17 @@ public class SettingsUi : WindowMediatorSubscriberBase
             _configService.Save();
         }
         _uiShared.DrawHelpText("Will show profiles that have the NSFW tag enabled");
+    }
+
+    private string GetShrinkUAssemblyVersion()
+    {
+        try
+        {
+            var asm = typeof(ShrinkU.Plugin).Assembly;
+            var v = asm?.GetName()?.Version;
+            return v?.ToString() ?? "unknown";
+        }
+        catch { return "unknown"; }
     }
 
     private void DrawGeneralNotifications()
