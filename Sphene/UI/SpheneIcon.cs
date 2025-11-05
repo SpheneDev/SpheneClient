@@ -508,9 +508,9 @@ public class SpheneIcon : WindowMediatorSubscriberBase, IDisposable
     {
         try
         {
-            if (!string.IsNullOrEmpty(SpheneImages.SpheneLogoBase64_helloween))
+            if (!string.IsNullOrEmpty(SpheneImages.SpheneLogoBase64))
             {
-                var imageData = Convert.FromBase64String(SpheneImages.SpheneLogoBase64_helloween);
+                var imageData = Convert.FromBase64String(SpheneImages.SpheneLogoBase64);
                 _spheneLogoTexture = _uiSharedService.LoadImage(imageData);
             }
         }
