@@ -1870,6 +1870,15 @@ public class CompactUi : WindowMediatorSubscriberBase
             ImGui.TextUnformatted("Texture Conversion:");
             // Automatic mode toggle should be visible regardless of conversion candidates
             ImGui.Spacing();
+            // Sync checkbox state with ShrinkU config to reflect external changes
+            try
+            {
+                var isAutomaticBySphene = _shrinkuConfigService.Current.TextureProcessingMode == TextureProcessingMode.Automatic
+                    && _shrinkuConfigService.Current.AutomaticHandledBySphene;
+                if (_automaticModeEnabled != isAutomaticBySphene)
+                    _automaticModeEnabled = isAutomaticBySphene;
+            }
+            catch { }
             if (ImGui.Checkbox("Enable Automatic mode", ref _automaticModeEnabled))
             {
                 _logger.LogDebug("Automatic mode toggled: {Enabled}", _automaticModeEnabled);

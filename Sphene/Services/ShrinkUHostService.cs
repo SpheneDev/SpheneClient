@@ -55,6 +55,14 @@ public sealed class ShrinkUHostService : IHostedService
             if (enable)
             {
                 RegisterWindows();
+                // Mark ShrinkU as integrated with Sphene for UI gating
+                try
+                {
+                    _shrinkuConfigService.Current.AutomaticControllerName = "Sphene";
+                    _shrinkuConfigService.Save();
+                    _logger.LogDebug("Set ShrinkU AutomaticControllerName to Sphene on integration start");
+                }
+                catch { }
             }
         }
         catch (Exception ex)
@@ -112,6 +120,14 @@ public sealed class ShrinkUHostService : IHostedService
         try { _windowSystem.RemoveWindow(_settingsUi); } catch (Exception ex) { _logger.LogDebug(ex, "SettingsUI not registered or failed to remove"); }
         try { _windowSystem.RemoveWindow(_firstRunUi); } catch (Exception ex) { _logger.LogDebug(ex, "FirstRunSetupUI not registered or failed to remove"); }
         _registered = false;
+        // Clear integration marker so ShrinkU exposes generic Automatic mode when not hosted
+        try
+        {
+            _shrinkuConfigService.Current.AutomaticControllerName = string.Empty;
+            _shrinkuConfigService.Save();
+            _logger.LogDebug("Cleared ShrinkU AutomaticControllerName on integration stop");
+        }
+        catch { }
     }
 
     // Configure ShrinkU backup folder to Sphene's cache when available
@@ -151,9 +167,20 @@ public sealed class ShrinkUHostService : IHostedService
         {
             var enable = _configService.Current.EnableShrinkUIntegration;
             if (enable)
+            {
                 RegisterWindows();
+                try
+                {
+                    _shrinkuConfigService.Current.AutomaticControllerName = "Sphene";
+                    _shrinkuConfigService.Save();
+                    _logger.LogDebug("Set ShrinkU AutomaticControllerName to Sphene on config save");
+                }
+                catch { }
+            }
             else
+            {
                 UnregisterWindows();
+            }
         }
         catch { }
     }
