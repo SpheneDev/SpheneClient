@@ -113,6 +113,7 @@ public class CompactUi : WindowMediatorSubscriberBase
     private int _restoreTotalCount = 0;
     private DateTime _restoreStartTime = DateTime.MinValue;
     private bool _restoreWindowOpen = false;
+    private string _restoreStepText = string.Empty;
 
     // Async ShrinkU mod backup detection cache
     private Dictionary<string, List<string>>? _cachedShrinkUModBackups;
@@ -1594,6 +1595,19 @@ public class CompactUi : WindowMediatorSubscriberBase
                 ImGui.Spacing();
                 ImGui.Separator();
                 ImGui.TextUnformatted("Backup Management:");
+                // Prefer PMP restore when available (synced with ShrinkU setting)
+                try
+                {
+                    var preferPmp = _shrinkuConfigService.Current.PreferPmpRestoreWhenAvailable;
+                    if (ImGui.Checkbox("Prefer PMP restore when available", ref preferPmp))
+                    {
+                        _shrinkuConfigService.Current.PreferPmpRestoreWhenAvailable = preferPmp;
+                        _shrinkuConfigService.Save();
+                        _logger.LogDebug("Updated PMP restore preference (Sphene popup): {value}", preferPmp);
+                    }
+                    UiSharedService.AttachToolTip("If a full-mod PMP backup exists, Sphene will restore it directly instead of showing the restore menu. This overwrites the mod to the archived state.");
+                }
+                catch { }
                 
                 var allBackups = _textureBackupService.GetBackupsByOriginalFile();
                 
@@ -1719,6 +1733,19 @@ public class CompactUi : WindowMediatorSubscriberBase
             ImGui.Spacing();
             ImGui.Separator();
             ImGui.TextUnformatted("Backup Management:");
+            // Prefer PMP restore when available (synced with ShrinkU setting)
+            try
+            {
+                var preferPmp = _shrinkuConfigService.Current.PreferPmpRestoreWhenAvailable;
+                if (ImGui.Checkbox("Prefer PMP restore when available", ref preferPmp))
+                {
+                    _shrinkuConfigService.Current.PreferPmpRestoreWhenAvailable = preferPmp;
+                    _shrinkuConfigService.Save();
+                    _logger.LogDebug("Updated PMP restore preference (Sphene popup): {value}", preferPmp);
+                }
+                UiSharedService.AttachToolTip("If a full-mod PMP backup exists, Sphene will restore it directly instead of showing the restore menu. This overwrites the mod to the archived state.");
+            }
+            catch { }
             
             var availableBackups = GetCachedBackupsForCurrentAnalysis();
             // Show status when ShrinkU detection is running in background
@@ -2082,8 +2109,15 @@ public class CompactUi : WindowMediatorSubscriberBase
                     ImGui.Text($"Progress: {current} / {total} items");
                     ImGui.Text($"Remaining: {remaining} items");
                     ImGui.Text($"Percentage: {percent * 100:F1}%");
+                    ImGui.ProgressBar(percent, new Vector2(-1, 0), $"{percent * 100:F1}%");
                     if (!string.IsNullOrEmpty(_restoreCurrentFileName))
                         ImGui.Text($"Current: {_restoreCurrentFileName}");
+
+                    if (!string.IsNullOrEmpty(_restoreStepText))
+                    {
+                        ImGui.Spacing();
+                        UiSharedService.ColorText(_restoreStepText, SpheneCustomTheme.Colors.TextSecondary);
+                    }
 
                     if (current > 0 && _restoreStartTime != DateTime.MinValue && total > 0)
                     {
@@ -2522,6 +2556,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         _restoreTotalCount = 0;
         _showRestoreProgressPopup = true;
         _restoreWindowOpen = true;
+        _restoreStepText = "Preparing restore (detecting owning mods and backups)";
         
         _restoreTask = Task.Run(async () =>
         {
@@ -2569,7 +2604,34 @@ public class CompactUi : WindowMediatorSubscriberBase
                             continue;
 
                         _logger.LogInformation("Attempting targeted restore for mod {mod} ({current}/{total})", mod, restoredModCount + 1, owningMods.Count(m => { try { return _shrinkuBackupService.HasBackupForModAsync(m).Result; } catch { return false; } }));
-                        var ok = await _shrinkuBackupService.RestoreLatestForModAsync(mod, _restoreProgress, _restoreCancellationTokenSource.Token).ConfigureAwait(false);
+
+                        // Prefer PMP restore when enabled and PMP backups exist
+                        bool ok = false;
+                        try
+                        {
+                            var preferPmp = _shrinkuConfigService.Current.PreferPmpRestoreWhenAvailable;
+                            if (preferPmp)
+                            {
+                                var pmpList = await _shrinkuBackupService.GetPmpBackupsForModAsync(mod).ConfigureAwait(false);
+                                var latestPmp = pmpList?.FirstOrDefault();
+                                if (!string.IsNullOrEmpty(latestPmp))
+                                {
+                                    _restoreStepText = $"Restoring PMP archive for mod '{mod}'";
+                                    _logger.LogDebug("Prefer PMP is enabled; restoring PMP for mod {mod}: {pmp}", mod, latestPmp);
+                                    ok = await _shrinkuBackupService.RestorePmpAsync(mod, latestPmp, _restoreProgress, _restoreCancellationTokenSource.Token).ConfigureAwait(false);
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogDebug(ex, "PMP restore attempt failed; falling back to latest normal restore for {mod}");
+                        }
+
+                        if (!ok)
+                        {
+                            _restoreStepText = $"Restoring latest backup for mod '{mod}'";
+                            ok = await _shrinkuBackupService.RestoreLatestForModAsync(mod, _restoreProgress, _restoreCancellationTokenSource.Token).ConfigureAwait(false);
+                        }
                         _logger.LogInformation("Restore result for mod {mod}: {result}", mod, ok);
                         if (ok)
                         {
@@ -2586,6 +2648,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                     // If any targeted restore succeeded, validate and clear cache and redraw character once at the end
                     if (anyTargetedRestoreSucceeded)
                     {
+                        _restoreStepText = "Validating restored files and redrawing character";
                         _logger.LogInformation("Batch targeted restore completed. Restored {count} mods. Validating file placement.", restoredModCount);
                         
                         // Validate that restored files are in the correct locations
@@ -2601,6 +2664,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                         _cachedBackupsForAnalysis = null;
                         try { await _ipcManager.Penumbra.RedrawPlayerAsync().ConfigureAwait(false); } catch { }
                         try { _shrinkuConversionService.NotifyExternalTextureChange("restore-targeted"); } catch { }
+                        _restoreStepText = "Restore completed (targeted mods)";
                         return;
                     }
                 }
@@ -2612,6 +2676,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                 // Prefer restoring via ShrinkU and choose the best-matching session for current textures
                 try
                 {
+                    _restoreStepText = "Selecting best matching ShrinkU session";
                     var overview = await _shrinkuBackupService.GetBackupOverviewAsync().ConfigureAwait(false);
                     if (overview != null && overview.Count > 0)
                     {
@@ -2717,21 +2782,30 @@ public class CompactUi : WindowMediatorSubscriberBase
                         {
                             _logger.LogDebug("Restoring ShrinkU backup session '{display}' with {matches} matching entries.", best.DisplayName, bestMatches);
                             if (best.IsZip)
+                            {
+                                _restoreStepText = $"Restoring from ZIP session '{best.DisplayName}'";
                                 await _shrinkuBackupService.RestoreFromZipAsync(best.SourcePath, _restoreProgress, _restoreCancellationTokenSource.Token).ConfigureAwait(false);
+                            }
                             else
+                            {
+                                _restoreStepText = $"Restoring session '{best.DisplayName}'";
                                 await _shrinkuBackupService.RestoreFromSessionAsync(best.SourcePath, _restoreProgress, _restoreCancellationTokenSource.Token).ConfigureAwait(false);
+                            }
 
                             _cachedBackupsForAnalysis = null;
                             try { await _ipcManager.Penumbra.RedrawPlayerAsync().ConfigureAwait(false); } catch { }
                             try { _shrinkuConversionService.NotifyExternalTextureChange("restore-session"); } catch { }
+                            _restoreStepText = "Restore completed (session)";
                         }
                         else
                         {
                             _logger.LogDebug("No ShrinkU session matched current textures; falling back to latest session restore.");
+                            _restoreStepText = "Restoring latest session (no match)";
                             await _shrinkuBackupService.RestoreLatestAsync(_restoreProgress, _restoreCancellationTokenSource.Token).ConfigureAwait(false);
                             _cachedBackupsForAnalysis = null;
                             try { await _ipcManager.Penumbra.RedrawPlayerAsync().ConfigureAwait(false); } catch { }
                             try { _shrinkuConversionService.NotifyExternalTextureChange("restore-latest"); } catch { }
+                            _restoreStepText = "Restore completed (latest)";
                         }
                     }
                 }
@@ -2740,6 +2814,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                     _logger.LogWarning(shrEx, "ShrinkU restore failed or unavailable, falling back to Sphene per-file restore.");
                 }
                 // Create mapping of backup files to their target locations
+                _restoreStepText = "Mapping backups to current texture locations";
                 var backupToTargetMap = new Dictionary<string, string>();
                 
                 foreach (var kvp in availableBackups)
@@ -2769,6 +2844,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                 if (backupToTargetMap.Count > 0)
                 {
                     _logger.LogDebug("Starting texture restore for {count} texture(s) from current analysis", backupToTargetMap.Count);
+                    _restoreStepText = "Restoring textures per-file from analysis";
                     var results = await _textureBackupService.RestoreTexturesAsync(backupToTargetMap, deleteBackupsAfterRestore: true, _restoreProgress, _restoreCancellationTokenSource.Token);
                     
                     var successCount = results.Values.Count(success => success);
@@ -2788,15 +2864,18 @@ public class CompactUi : WindowMediatorSubscriberBase
                         {
                             _logger.LogWarning(ex, "Failed to trigger character redraw after texture restore");
                         }
+                        _restoreStepText = "Restore completed (per-file)";
                     }
                 }
                 else
                 {
+                    _restoreStepText = "No textures could be mapped for restoration";
                     _logger.LogWarning("No textures from current analysis could be mapped for restoration");
                 }
             }
             catch (Exception ex)
             {
+                _restoreStepText = "Error during restore";
                 _logger.LogError(ex, "Error during texture restore process");
             }
         }, _restoreCancellationTokenSource.Token).ContinueWith(_ =>
