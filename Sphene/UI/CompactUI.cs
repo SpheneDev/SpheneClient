@@ -90,6 +90,17 @@ public class CompactUi : WindowMediatorSubscriberBase
     private string _conversionCurrentFileName = string.Empty;
     private bool _enableBackupBeforeConversion = true;
     private DateTime _conversionStartTime = DateTime.MinValue;
+    // Backup progress fields for progress UI
+    private Progress<(string fileName, int current, int total)> _backupProgress = new();
+    private string _backupCurrentFileName = string.Empty;
+    private int _backupCurrentIndex = 0;
+    private int _backupTotalCount = 0;
+    private DateTime _backupStartTime = DateTime.MinValue;
+    private readonly List<string> _backupStepLog = new();
+    private string _backupCurrentStep = string.Empty;
+    private int _backupTextureCount = 0;
+    private int _backupZipCount = 0;
+    private int _backupPmpCount = 0;
     // Automatic conversion mode and gating to avoid repeated triggers across frames/analyses
     private bool _automaticModeEnabled = false;
     private bool _autoConvertTriggered = false;
@@ -125,6 +136,13 @@ public class CompactUi : WindowMediatorSubscriberBase
     private Dictionary<string, List<string>>? _cachedTextureBackupsFiltered;
     private Task<Dictionary<string, List<string>>>? _textureDetectionTask;
     private DateTime _lastTextureDetectionUpdate = DateTime.MinValue;
+    private DateTime _backupScanTriggeredAt = DateTime.MinValue;
+
+    // Stable UI text caching to avoid flicker in backup sections
+    private string _allBackupsKey = string.Empty;
+    private string _allBackupsStatusText = string.Empty;
+    private string _currentBackupsKey = string.Empty;
+    private string _currentBackupsStatusText = string.Empty;
 
     // Storage info fields for backup management
     private Task<(long totalSize, int fileCount)>? _storageInfoTask;
@@ -179,6 +197,35 @@ public class CompactUi : WindowMediatorSubscriberBase
             {
                 _conversionCurrentFileProgress = e.Item2;
                 _conversionCurrentFileName = e.Item1;
+            }
+            catch { }
+        };
+        // Setup backup progress handlers (local + ShrinkU service)
+        _backupProgress.ProgressChanged += (sender, progress) =>
+        {
+            try
+            {
+                _backupCurrentFileName = progress.fileName;
+                _backupCurrentIndex = progress.current;
+                _backupTotalCount = progress.total;
+                if (_backupStartTime == DateTime.MinValue)
+                    _backupStartTime = DateTime.Now;
+                AppendBackupStep(progress.fileName);
+                _conversionProgressWindowOpen = true; // ensure window shows while backup runs
+            }
+            catch { }
+        };
+        _shrinkuConversionService.OnBackupProgress += e =>
+        {
+            try
+            {
+                _backupCurrentFileName = e.Item1;
+                _backupCurrentIndex = e.Item2;
+                _backupTotalCount = e.Item3;
+                if (_backupStartTime == DateTime.MinValue)
+                    _backupStartTime = DateTime.Now;
+                AppendBackupStep(e.Item1);
+                _conversionProgressWindowOpen = true;
             }
             catch { }
         };
@@ -294,6 +341,32 @@ public class CompactUi : WindowMediatorSubscriberBase
             catch { _isTextureBackupScanInProgress = false; }
             try { _shrinkUDetectionTask = DetectShrinkUModBackupsAsync(); } catch { }
         });
+        // React immediately to Penumbra state changes to refresh backup detection
+        Mediator.Subscribe<PenumbraInitializedMessage>(this, (_) =>
+        {
+            try { TriggerImmediateBackupScan("penumbra-initialized"); } catch { }
+        });
+        Mediator.Subscribe<PenumbraDirectoryChangedMessage>(this, (_) =>
+        {
+            try { TriggerImmediateBackupScan("penumbra-directory-changed"); } catch { }
+        });
+        // Also listen to ShrinkU conversion service broadcasts for mod changes and external texture updates
+        try
+        {
+            _shrinkuConversionService.OnPenumbraModsChanged += () =>
+            {
+                try { TriggerImmediateBackupScan("penumbra-mods-changed"); } catch { }
+            };
+            _shrinkuConversionService.OnPenumbraModSettingChanged += (change, collectionId, modDir, inherited) =>
+            {
+                try { TriggerImmediateBackupScan("penumbra-mod-setting-changed"); } catch { }
+            };
+            _shrinkuConversionService.OnExternalTexturesChanged += reason =>
+            {
+                try { TriggerImmediateBackupScan("external-textures-changed:" + (reason ?? string.Empty)); } catch { }
+            };
+        }
+        catch { }
         Mediator.Subscribe<ShowUpdateNotificationMessage>(this, (msg) => _updateBannerInfo = msg.UpdateInfo);
         Mediator.Subscribe<AreaBoundSyncshellLeftMessage>(this, (msg) => { 
             // Force UI refresh when syncshell is left so button visibility updates
@@ -305,6 +378,38 @@ public class CompactUi : WindowMediatorSubscriberBase
         Flags |= ImGuiWindowFlags.NoDocking | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse;
 
         // End of constructor
+    }
+
+    private void TriggerImmediateBackupScan(string reason)
+    {
+        try { _logger.LogDebug("Triggering immediate backup scan: {reason}", reason); } catch { }
+        _backupScanTriggeredAt = DateTime.Now;
+        // Invalidate caches so UI shows scanning state immediately
+        _lastBackupAnalysisUpdate = DateTime.MinValue;
+        _cachedBackupsForAnalysis = null;
+        _cachedTextureBackupsFiltered = null;
+        _textureDetectionTask = null;
+        _lastTextureDetectionUpdate = DateTime.MinValue;
+        _cachedShrinkUModBackups = null;
+        _shrinkUDetectionTask = null;
+        _lastShrinkUDetectionUpdate = DateTime.MinValue;
+
+        // Start texture backup detection
+        try
+        {
+            _isTextureBackupScanInProgress = true;
+            _textureDetectionTask = Task.Run(() => GetBackupsForCurrentAnalysis());
+            _textureDetectionTask.ContinueWith(t =>
+            {
+                try { _cachedTextureBackupsFiltered = t.Status == TaskStatus.RanToCompletion ? t.Result : new Dictionary<string, List<string>>(); }
+                catch { _cachedTextureBackupsFiltered = new Dictionary<string, List<string>>(); }
+                finally { _lastTextureDetectionUpdate = DateTime.Now; _isTextureBackupScanInProgress = false; }
+            }, TaskScheduler.Default);
+        }
+        catch { _isTextureBackupScanInProgress = false; }
+
+        // Start ShrinkU mod backup detection
+        try { _shrinkUDetectionTask = DetectShrinkUModBackupsAsync(); } catch { }
     }
 
     // ShrinkU helpers for storage info and cleanup
@@ -1556,8 +1661,9 @@ public class CompactUi : WindowMediatorSubscriberBase
 
         using (SpheneCustomTheme.ApplyContextMenuTheme())
         {
-            ImGui.SetNextWindowSize(new Vector2(520, 0), ImGuiCond.FirstUseEver);
-            if (ImGui.Begin("Texture Conversion", ref _conversionWindowOpen, ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse | ImGuiWindowFlags.NoCollapse))
+            // Fixed-size compact window to keep all controls visible
+            ImGui.SetNextWindowSize(new Vector2(520, 360), ImGuiCond.Always);
+            if (ImGui.Begin("Texture Conversion", ref _conversionWindowOpen, ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoResize))
             {
                 // Ensure character data analysis is triggered and completed before popup is usable
                 if (_popupAnalysisTask == null || _popupAnalysisTask.IsCompleted)
@@ -1605,16 +1711,62 @@ public class CompactUi : WindowMediatorSubscriberBase
                         _shrinkuConfigService.Save();
                         _logger.LogDebug("Updated PMP restore preference (Sphene popup): {value}", preferPmp);
                     }
-                    UiSharedService.AttachToolTip("If a full-mod PMP backup exists, Sphene will restore it directly instead of showing the restore menu. This overwrites the mod to the archived state.");
-                }
-                catch { }
-                
-                var allBackups = _textureBackupService.GetBackupsByOriginalFile();
-                
-                if (allBackups.Count > 0)
+                    UiSharedService.AttachToolTip("If a full Penumbra Mod Package *.pmp backup exists, Sphene will restore it directly instead of just the texture backups.");
+        }
+        catch { }
+        
+        // Backup info block: render inline to simplify layout
+        var allCount = _textureBackupService.GetBackupsByOriginalFile().Count;
+                // Always show scanning message for up to 10 seconds when there are no backups
+                var detectionInProgress = _isTextureBackupScanInProgress || (_shrinkUDetectionTask != null && !_shrinkUDetectionTask.IsCompleted);
+                if (allCount == 0 && _backupScanTriggeredAt == DateTime.MinValue)
+                    _backupScanTriggeredAt = DateTime.Now;
+                var withinForcedWindow = _backupScanTriggeredAt != DateTime.MinValue && (DateTime.Now - _backupScanTriggeredAt) < TimeSpan.FromSeconds(10);
+                var scanning = (detectionInProgress || withinForcedWindow);
+                // Gate text updates also on scanning state so it can flip between scanning/no-backups
+                var newAllKey = $"C:{allCount}-S:{(scanning ? 1 : 0)}";
+                if (!string.Equals(_allBackupsKey, newAllKey, StringComparison.Ordinal))
                 {
-                    UiSharedService.ColorTextWrapped($"Found {allBackups.Count} total backup file(s). Note: Without character analysis, all backups are shown.", SpheneCustomTheme.Colors.Warning);
-                    
+                    _allBackupsKey = newAllKey;
+                    if (allCount > 0)
+                    {
+                        _allBackupsStatusText = $"Found {allCount} total backup file(s). Note: Without character analysis, all backups are shown.";
+                        // Reset forced scanning window when backups are available
+                        _backupScanTriggeredAt = DateTime.MinValue;
+                    }
+                    else
+                    {
+                        _allBackupsStatusText = scanning
+                            ? "Scanning for backups… none found yet."
+                            : "No texture backups found.";
+                    }
+                }
+                // When scanning and no backups yet, show a rotating spinner before the status text
+                if (scanning && allCount == 0)
+                {
+                    DrawRotatingSpinnerIcon(1.0f);
+                    ImGui.SameLine();
+                    UiSharedService.ColorTextWrapped(_allBackupsStatusText, SpheneCustomTheme.CurrentTheme.TextSecondary);
+                }
+                else
+                {
+                    UiSharedService.ColorTextWrapped(_allBackupsStatusText, allCount > 0 ? SpheneCustomTheme.Colors.Warning : SpheneCustomTheme.Colors.Error);
+                }
+                if (allCount == 0)
+                {
+                    // Keep tooltip aligned with scanning window
+                    detectionInProgress = _isTextureBackupScanInProgress || (_shrinkUDetectionTask != null && !_shrinkUDetectionTask.IsCompleted);
+                    withinForcedWindow = _backupScanTriggeredAt != DateTime.MinValue && (DateTime.Now - _backupScanTriggeredAt) < TimeSpan.FromSeconds(10);
+                    scanning = (detectionInProgress || withinForcedWindow);
+                    UiSharedService.AttachToolTip(scanning
+                        ? "Backups are being scanned. It may be that none exist yet or conversion was not required."
+                        : "There are currently no backups. A backup may not exist yet or was never required if the mod was already converted.");
+                }
+                // Reserve extra space to avoid layout shift on periodic redraws
+                ImGui.Dummy(new Vector2(0, ImGui.GetTextLineHeightWithSpacing() * 2));
+
+                if (allCount > 0)
+                {
                     using (ImRaii.Disabled(_automaticModeEnabled))
                     {
                         if (_uiSharedService.IconTextButton(FontAwesomeIcon.Undo, "Restore from ShrinkU backups"))
@@ -1656,25 +1808,30 @@ public class CompactUi : WindowMediatorSubscriberBase
                 }
                 else
                 {
-                    UiSharedService.ColorTextWrapped("No texture backups found.", SpheneCustomTheme.CurrentTheme.TextSecondary);
+                    detectionInProgress = _isTextureBackupScanInProgress || (_shrinkUDetectionTask != null && !_shrinkUDetectionTask.IsCompleted);
+                    withinForcedWindow = _backupScanTriggeredAt != DateTime.MinValue && (DateTime.Now - _backupScanTriggeredAt) < TimeSpan.FromSeconds(10);
+                    scanning = (detectionInProgress || withinForcedWindow);
+                    var msg = scanning ? "Scanning for backups… none found yet." : "No texture backups found.";
+                    if (scanning)
+                    {
+                        DrawRotatingSpinnerIcon(1.0f);
+                        ImGui.SameLine();
+                        UiSharedService.ColorTextWrapped(msg, SpheneCustomTheme.CurrentTheme.TextSecondary);
+                    }
+                    else
+                    {
+                        UiSharedService.ColorTextWrapped(msg, SpheneCustomTheme.CurrentTheme.TextSecondary);
+                    }
+                    // Reserve extra space to avoid layout shift on periodic redraws
+                    ImGui.Dummy(new Vector2(0, ImGui.GetTextLineHeightWithSpacing() * 2));
                     
-                    using (ImRaii.Disabled(_automaticModeEnabled))
+                    using (ImRaii.Disabled(true))
                     {
-                        if (_uiSharedService.IconTextButton(FontAwesomeIcon.Undo, "Restore from ShrinkU backups"))
-                        {
-                            StartTextureRestore(new Dictionary<string, List<string>>());
-                        }
+                        _uiSharedService.IconTextButton(FontAwesomeIcon.Undo, "Restore from ShrinkU backups");
                     }
-                    UiSharedService.AttachToolTip(_automaticModeEnabled
-                        ? "Disable Automatic mode to enable restore."
-                        : "Restore textures from ShrinkU backups.");
-                    if (_automaticModeEnabled)
-                    {
-                        ImGui.SameLine();
-                        _uiSharedService.IconText(FontAwesomeIcon.ExclamationTriangle, SpheneCustomTheme.Colors.Warning);
-                        ImGui.SameLine();
-                        UiSharedService.ColorText("Disabled in Automatic mode", SpheneCustomTheme.Colors.Warning);
-                    }
+                    UiSharedService.AttachToolTip(scanning
+                        ? "Scanning backups; restore will be enabled automatically when backups are found."
+                        : "No texture backups available to restore.");
                     ImGui.SameLine();
                     if (_uiSharedService.IconTextButton(FontAwesomeIcon.FolderOpen, "Open backup folder"))
                     {
@@ -1697,12 +1854,12 @@ public class CompactUi : WindowMediatorSubscriberBase
                     }
                 }
                 
-                if (ImGui.Button("Close"))
-                {
-                    _conversionWindowOpen = false;
-                    _cachedAnalysisForPopup = null; // Clear cached analysis when window closes
-                }
                 ImGui.End();
+                // Ensure cleanup when window was closed via title bar
+                if (!_conversionWindowOpen)
+                {
+                    _cachedAnalysisForPopup = null;
+                }
                 return;
             }
 
@@ -1721,71 +1878,131 @@ public class CompactUi : WindowMediatorSubscriberBase
                 _autoConvertTriggered = false;
             }
 
-            ImGui.TextColored(SpheneCustomTheme.Colors.SpheneGold, "Texture Conversion Overview");
+            // Compact header and statistics row
+            ImGui.TextColored(SpheneCustomTheme.Colors.SpheneGold, "Texture Conversion");
             ImGui.Separator();
+            ImGui.Text($"Textures: {totalTextures}");
+            ImGui.SameLine();
+            ImGui.Text($"BC7: {bc7Textures}");
+            ImGui.SameLine();
+            ImGui.TextColored(SpheneCustomTheme.Colors.Warning, $"Convert: {nonBc7Textures.Count}");
+            // Ensure storage info task is started or refreshed periodically
+            try
+            {
+                var now = DateTime.Now;
+                if (_storageInfoTask == null || (now - _lastStorageInfoUpdate) > TimeSpan.FromSeconds(5))
+                {
+                    if (_storageInfoTask == null || _storageInfoTask.IsCompleted)
+                    {
+                        _storageInfoTask = GetShrinkUStorageInfoAsync();
+                        _lastStorageInfoUpdate = now;
+                    }
+                }
+            }
+            catch { }
+            var (totalSize, fileCount) = _cachedStorageInfo;
+            // Compact storage info line
+            if (fileCount > 0)
+            {
+                var sizeInMB = totalSize / (1024.0 * 1024.0);
+                var updating = _storageInfoTask != null && !_storageInfoTask.IsCompleted;
+                var suffix = updating ? " [Updating...]" : string.Empty;
+                ImGui.TextColored(SpheneCustomTheme.Colors.Warning, $"Storage: {sizeInMB:F2} MB ({fileCount} files){suffix}");
+            }
+            else
+            {
+                ImGui.TextColored(SpheneCustomTheme.CurrentTheme.TextSecondary, "Storage: calculating...");
+            }
 
-            // Statistics
-            ImGui.Text($"Total textures: {totalTextures}");
-            ImGui.Text($"Already BC7: {bc7Textures}");
-            ImGui.TextColored(SpheneCustomTheme.Colors.Warning, $"Can be converted: {nonBc7Textures.Count}");
-
-            // Backup restore functionality - always show regardless of conversion needs
-            ImGui.Spacing();
+            // Backup management (compact): preference + status + actions inline
             ImGui.Separator();
-            ImGui.TextUnformatted("Backup Management:");
+            ImGui.TextUnformatted("Backups:");
+            // Render backup status area inline to simplify layout
             // Prefer PMP restore when available (synced with ShrinkU setting)
             try
             {
                 var preferPmp = _shrinkuConfigService.Current.PreferPmpRestoreWhenAvailable;
-                if (ImGui.Checkbox("Prefer PMP restore when available", ref preferPmp))
+                if (ImGui.Checkbox("Prefer PMP restore", ref preferPmp))
                 {
                     _shrinkuConfigService.Current.PreferPmpRestoreWhenAvailable = preferPmp;
                     _shrinkuConfigService.Save();
                     _logger.LogDebug("Updated PMP restore preference (Sphene popup): {value}", preferPmp);
                 }
-                UiSharedService.AttachToolTip("If a full-mod PMP backup exists, Sphene will restore it directly instead of showing the restore menu. This overwrites the mod to the archived state.");
+                UiSharedService.AttachToolTip("If a full Penumbra Mod Package backup exists, Sphene will restore it instead of just the texture backups.");
             }
             catch { }
             
             var availableBackups = GetCachedBackupsForCurrentAnalysis();
-            // Show status when ShrinkU detection is running in background
-            if (_shrinkUDetectionTask != null && !_shrinkUDetectionTask.IsCompleted)
+            // Compute counts and gate status text updates on changes in number/type
+            var textureBackupCount = availableBackups.Count(kvp => !kvp.Key.StartsWith("[ShrinkU Mod:"));
+            var shrinkuModBackupCount = availableBackups.Count(kvp => kvp.Key.StartsWith("[ShrinkU Mod:"));
+
+            // Determine scanning state for current-textures block with 10s forced window
+            var detectionInProgressCurrent = _isTextureBackupScanInProgress
+                || (_textureDetectionTask?.Status == TaskStatus.Running)
+                || (_shrinkUDetectionTask?.Status == TaskStatus.Running);
+            if ((textureBackupCount + shrinkuModBackupCount) == 0 && _backupScanTriggeredAt == DateTime.MinValue)
             {
-                ImGui.TextColored(SpheneCustomTheme.CurrentTheme.TextSecondary, "Scanning ShrinkU backups…");
+                // No backups yet and no timestamp set: start forced 10s scanning window
+                _backupScanTriggeredAt = DateTime.Now;
             }
-            // Show status when texture backup scan is running
-            if (_isTextureBackupScanInProgress)
+            var withinForcedWindowCurrent = _backupScanTriggeredAt != DateTime.MinValue
+                && (DateTime.Now - _backupScanTriggeredAt).TotalSeconds < 10.0;
+            var scanningCurrent = detectionInProgressCurrent || withinForcedWindowCurrent;
+
+            var newCurrentKey = $"T{textureBackupCount}|S{shrinkuModBackupCount}|C{(scanningCurrent ? 1 : 0)}";
+            if (!string.Equals(_currentBackupsKey, newCurrentKey, StringComparison.Ordinal))
             {
-                ImGui.TextColored(SpheneCustomTheme.CurrentTheme.TextSecondary, "Scanning texture backups…");
-            }
-            if (availableBackups.Count > 0)
-            {
-                // Count different types of backups
-                var textureBackupCount = availableBackups.Count(kvp => !kvp.Key.StartsWith("[ShrinkU Mod:"));
-                var shrinkuModBackupCount = availableBackups.Count(kvp => kvp.Key.StartsWith("[ShrinkU Mod:"));
-                
+                _currentBackupsKey = newCurrentKey;
                 if (textureBackupCount > 0 && shrinkuModBackupCount > 0)
                 {
-                    UiSharedService.ColorTextWrapped($"Found {textureBackupCount} texture backup(s) and {shrinkuModBackupCount} ShrinkU mod backup(s) for current textures.", SpheneCustomTheme.Colors.Success);
+                    _currentBackupsStatusText = $"Found {textureBackupCount} texture backup(s) and {shrinkuModBackupCount} ShrinkU mod backup(s) for current textures.";
+                    // Backups found: clear forced window to avoid stale scanning state
+                    _backupScanTriggeredAt = DateTime.MinValue;
                 }
                 else if (textureBackupCount > 0)
                 {
-                    UiSharedService.ColorTextWrapped($"Found {textureBackupCount} texture backup(s) for current textures.", SpheneCustomTheme.Colors.Success);
+                    _currentBackupsStatusText = $"Found {textureBackupCount} texture backup(s) for current textures.";
+                    _backupScanTriggeredAt = DateTime.MinValue;
                 }
                 else if (shrinkuModBackupCount > 0)
                 {
-                    UiSharedService.ColorTextWrapped($"Found {shrinkuModBackupCount} ShrinkU mod backup(s) for current textures.", SpheneCustomTheme.Colors.Success);
+                    _currentBackupsStatusText = $"Found {shrinkuModBackupCount} ShrinkU mod backup(s) for current textures.";
+                    _backupScanTriggeredAt = DateTime.MinValue;
                 }
-                
+                else
+                {
+                    _currentBackupsStatusText = scanningCurrent
+                        ? "Scanning for backups… none found yet."
+                        : "No backups found for current textures.";
+                }
+            }
+            // When scanning and no backups yet, show a rotating spinner before the status line
+            if (scanningCurrent && (textureBackupCount + shrinkuModBackupCount == 0))
+            {
+                DrawRotatingSpinnerIcon(1.0f);
+                ImGui.SameLine();
+                UiSharedService.ColorText(_currentBackupsStatusText, ImGuiColors.DalamudGrey);
+            }
+            else
+            {
+                UiSharedService.ColorText(_currentBackupsStatusText,
+                    (textureBackupCount > 0 || shrinkuModBackupCount > 0)
+                        ? SpheneCustomTheme.Colors.Success
+                        : (scanningCurrent ? ImGuiColors.DalamudGrey : SpheneCustomTheme.CurrentTheme.TextSecondary));
+            }
+
+            if (textureBackupCount > 0 || shrinkuModBackupCount > 0)
+            {
                 using (ImRaii.Disabled(_automaticModeEnabled))
                 {
-                    if (_uiSharedService.IconTextButton(FontAwesomeIcon.Undo, "Revert current textures"))
+                    if (_uiSharedService.IconTextButton(FontAwesomeIcon.Undo, "Restore"))
                     {
                         StartTextureRestore(availableBackups);
                     }
                 }
                 UiSharedService.AttachToolTip(_automaticModeEnabled
-                    ? "Disable Automatic mode to enable revert."
+                    ? "Disable Automatic mode to enable restore."
                     : "Restore current textures from backups created earlier.");
                 if (_automaticModeEnabled)
                 {
@@ -1796,7 +2013,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                 }
                 
                 ImGui.SameLine();
-                if (_uiSharedService.IconTextButton(FontAwesomeIcon.FolderOpen, "Open backup folder"))
+                if (_uiSharedService.IconTextButton(FontAwesomeIcon.FolderOpen, "Open folder"))
                 {
                     try
                     {
@@ -1818,27 +2035,13 @@ public class CompactUi : WindowMediatorSubscriberBase
             }
             else
             {
-                UiSharedService.ColorTextWrapped("No backups found for current textures.", SpheneCustomTheme.CurrentTheme.TextSecondary);
-                ImGui.Spacing();
-                using (ImRaii.Disabled(_automaticModeEnabled))
+                using (ImRaii.Disabled(true))
                 {
-                    if (_uiSharedService.IconTextButton(FontAwesomeIcon.Undo, "Restore from ShrinkU backups"))
-                    {
-                        StartTextureRestore(new Dictionary<string, List<string>>());
-                    }
+                    _uiSharedService.IconTextButton(FontAwesomeIcon.Undo, "Restore");
                 }
-                UiSharedService.AttachToolTip(_automaticModeEnabled
-                    ? "Disable Automatic mode to enable restore."
-                    : "Restore textures from ShrinkU backups.");
-                if (_automaticModeEnabled)
-                {
-                    ImGui.SameLine();
-                    _uiSharedService.IconText(FontAwesomeIcon.ExclamationTriangle, SpheneCustomTheme.Colors.Warning);
-                    ImGui.SameLine();
-                    UiSharedService.ColorText("Disabled in Automatic mode", SpheneCustomTheme.Colors.Warning);
-                }
+                UiSharedService.AttachToolTip("No texture backups available to restore.");
                 ImGui.SameLine();
-                if (_uiSharedService.IconTextButton(FontAwesomeIcon.FolderOpen, "Open backup folder"))
+                if (_uiSharedService.IconTextButton(FontAwesomeIcon.FolderOpen, "Open folder"))
                 {
                     try
                     {
@@ -1859,44 +2062,17 @@ public class CompactUi : WindowMediatorSubscriberBase
                 }
             }
             
-            // Storage information and cleanup
-            ImGui.Separator();
-            ImGui.TextUnformatted("Storage Management:");
             
-            var now = DateTime.Now;
-            if (_storageInfoTask == null || (now - _lastStorageInfoUpdate).TotalSeconds > 5)
-            {
-                if (_storageInfoTask == null || _storageInfoTask.IsCompleted)
-                {
-                    _storageInfoTask = GetShrinkUStorageInfoAsync();
-                    _lastStorageInfoUpdate = now;
-                }
-            }
             
+            // Always render stable storage info text to avoid layout flicker when the task refreshes
             if (_storageInfoTask != null && _storageInfoTask.IsCompleted)
             {
                 _cachedStorageInfo = _storageInfoTask.Result;
-                var (totalSize, fileCount) = _cachedStorageInfo;
-                
-                if (fileCount > 0)
-                {
-                    var sizeInMB = totalSize / (1024.0 * 1024.0);
-                    UiSharedService.ColorTextWrapped($"Total backup storage: {sizeInMB:F2} MB ({fileCount} files)", SpheneCustomTheme.Colors.Warning);
-                    
-                    // No time-based cleanup of backups anymore
-                }
-                else
-                {
-                    UiSharedService.ColorTextWrapped("No backup files found.", SpheneCustomTheme.CurrentTheme.TextSecondary);
-                }
             }
 
             // Texture conversion controls
-            ImGui.Spacing();
             ImGui.Separator();
-            ImGui.TextUnformatted("Texture Conversion:");
-            // Automatic mode toggle should be visible regardless of conversion candidates
-            ImGui.Spacing();
+            ImGui.TextUnformatted("Conversion:");
             // Sync checkbox state with ShrinkU config to reflect external changes
             try
             {
@@ -1906,7 +2082,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                     _automaticModeEnabled = isAutomaticBySphene;
             }
             catch { }
-            if (ImGui.Checkbox("Enable Automatic mode", ref _automaticModeEnabled))
+            if (ImGui.Checkbox("Automatic mode", ref _automaticModeEnabled))
             {
                 _logger.LogDebug("Automatic mode toggled: {Enabled}", _automaticModeEnabled);
                 _autoConvertTriggered = false; // reset gating when toggled
@@ -1923,29 +2099,54 @@ public class CompactUi : WindowMediatorSubscriberBase
                     }
                 }
                 catch { }
+
+                // Immediately start background conversion when enabling Automatic mode
+                try
+                {
+                    if (_automaticModeEnabled && !_shrinkuConversionService.IsConverting)
+                    {
+                        // Use current analysis results to convert non-BC7 textures
+                        if (nonBc7Textures != null && nonBc7Textures.Count > 0)
+                        {
+                            StartTextureConversion(nonBc7Textures);
+                            _conversionWindowOpen = false;
+                            _cachedAnalysisForPopup = null; // Clear cached analysis when window closes
+                            _conversionProgressWindowOpen = true;
+                        }
+                        else
+                        {
+                            // If analysis data is not available, trigger external texture change so ShrinkU watcher can pick up
+                            try { _shrinkuConversionService.NotifyExternalTextureChange("automatic-mode-enabled"); } catch { }
+                        }
+                    }
+                }
+                catch { }
             }
             UiSharedService.AttachToolTip(_automaticModeEnabled
                 ? "Automatic conversion is enabled. Revert actions are disabled."
                 : "Enable automatic on-the-fly conversion of non-BC7 textures.");
+
+            // Allow toggling full Penumbra Mod Package backup behavior directly in the conversion popup
+            try
+            {
+                var fullModBackup = _shrinkuConfigService.Current.EnableFullModBackupBeforeConversion;
+                ImGui.Checkbox("Backup before conversion", ref _enableBackupBeforeConversion);
+                if (ImGui.Checkbox("Full mod backup (.pmp)", ref fullModBackup))
+                {
+                    _shrinkuConfigService.Current.EnableFullModBackupBeforeConversion = fullModBackup;
+                    _shrinkuConfigService.Save();
+                    _logger.LogDebug("Updated full mod PMP backup setting: {value}", fullModBackup);
+                }
+                UiSharedService.AttachToolTip("Create a full Penumbra Mod Package archive for restore.");
+            }
+            catch { }
             
             if (nonBc7Textures.Count > 0)
             {
                 var totalSizeMB = nonBc7Textures.Sum(t => t.OriginalSize) / (1024.0 * 1024.0);
-                ImGui.Text($"Total size to convert: {totalSizeMB:F1} MB");
+                ImGui.Text($"To convert: {totalSizeMB:F1} MB");
 
-                ImGui.Spacing();
-                ImGui.Checkbox("Create backup before conversion", ref _enableBackupBeforeConversion);
-                if (_enableBackupBeforeConversion)
-                {
-                    UiSharedService.ColorTextWrapped("Backups will be created automatically for revert functionality.", SpheneCustomTheme.Colors.Success);
-                }
-
-                ImGui.Spacing();
-                UiSharedService.ColorText("Conversion Info:", SpheneCustomTheme.Colors.Warning);
-                UiSharedService.ColorTextWrapped("• BC7 conversion reduces texture size significantly\n• Some textures may show visual artifacts\n• Original textures are backed up for restoration\n• Process may take time depending on texture count", SpheneCustomTheme.CurrentTheme.TextSecondary);
-
-                ImGui.Spacing();
-                if (_uiSharedService.IconTextButton(FontAwesomeIcon.FileArchive, $"Convert {nonBc7Textures.Count} textures to BC7"))
+                if (_uiSharedService.IconTextButton(FontAwesomeIcon.FileArchive, $"Convert {nonBc7Textures.Count} to BC7"))
                 {
                     StartTextureConversion(nonBc7Textures);
                     _conversionWindowOpen = false;
@@ -1973,15 +2174,50 @@ public class CompactUi : WindowMediatorSubscriberBase
                 ImGui.TextColored(SpheneCustomTheme.Colors.Success, "All textures are already optimized!");
             }
 
-            ImGui.Spacing();
-            if (ImGui.Button("Close"))
-            {
-                _conversionWindowOpen = false;
-                _cachedAnalysisForPopup = null; // Clear cached analysis when window closes
-            }
             }
             ImGui.End();
+
+            if (!_conversionWindowOpen)
+            {
+                _cachedAnalysisForPopup = null;
+            }
         }
+    }
+
+    private void AppendBackupStep(string filePath)
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(filePath)) return;
+            var ext = Path.GetExtension(filePath)?.ToLowerInvariant();
+            string msg;
+            if (ext == ".zip")
+            {
+                msg = $"Created mod backup ZIP {filePath}";
+                _backupZipCount++;
+            }
+            else if (ext == ".pmp")
+            {
+                msg = $"Created full mod backup PMP {filePath}";
+                _backupPmpCount++;
+            }
+            else
+            {
+                msg = $"Backed up texture {filePath}";
+                _backupTextureCount++;
+            }
+
+            var stamped = $"{DateTime.Now:HH:mm:ss.fff} | {msg}";
+            _backupCurrentStep = stamped;
+
+            // De-duplicate consecutive identical messages
+            if (_backupStepLog.Count == 0 || !string.Equals(_backupStepLog[^1], stamped, StringComparison.Ordinal))
+                _backupStepLog.Add(stamped);
+            // Keep log size reasonable
+            if (_backupStepLog.Count > 200)
+                _backupStepLog.RemoveRange(0, _backupStepLog.Count - 200);
+        }
+        catch { }
     }
 
     private void DrawConversionProgressWindow()
@@ -1995,12 +2231,79 @@ public class CompactUi : WindowMediatorSubscriberBase
 
         using (SpheneCustomTheme.ApplyContextMenuTheme())
         {
-            ImGui.SetNextWindowSize(new Vector2(520, 0), ImGuiCond.FirstUseEver);
-            if (ImGui.Begin("Conversion Progress", ref _conversionProgressWindowOpen, ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse | ImGuiWindowFlags.NoCollapse))
+            ImGui.SetNextWindowSize(new Vector2(690, 420), ImGuiCond.Always);
+            if (ImGui.Begin("Conversion Progress", ref _conversionProgressWindowOpen, ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoResize))
             {
                 // Title and overall progress
                 ImGui.TextColored(SpheneCustomTheme.Colors.SpheneGold, "Converting Textures to BC7 Format");
                 ImGui.Separator();
+
+                // Backup progress section (shows while backups run or if completed with steps)
+                var backupActive = _backupTotalCount > 0 && _backupCurrentIndex < _backupTotalCount;
+                var backupCompleted = _backupTotalCount > 0 && _backupCurrentIndex >= _backupTotalCount;
+                if (backupActive || (_backupStepLog.Count > 0 && (converting || backupCompleted)))
+                {
+                    ImGui.TextColored(SpheneCustomTheme.Colors.SpheneGold, "Backup Progress");
+
+                    // Compute step-oriented progress: textures + optional ZIP + optional PMP
+                    int expectedTextures = _texturesToConvert.Count;
+                    bool expectZip = false;
+                    bool expectPmp = false;
+                    try { expectZip = _shrinkuConfigService.Current.EnableZipCompressionForBackups; } catch { }
+                    try { expectPmp = _shrinkuConfigService.Current.EnableFullModBackupBeforeConversion; } catch { }
+                    int expectedFromConfig = Math.Max(0, expectedTextures) + (expectZip ? 1 : 0) + (expectPmp ? 1 : 0);
+
+                    // Prefer service-provided total when available; fallback to config-based estimate
+                    int effectiveExpected = _backupTotalCount > 0 ? _backupTotalCount : expectedFromConfig;
+
+                    // Prefer service-provided index when available; otherwise use aggregated counts
+                    int aggregatedCompleted = Math.Max(0, _backupTextureCount) + Math.Max(0, _backupZipCount) + Math.Max(0, _backupPmpCount);
+                    int effectiveCompleted = _backupTotalCount > 0 ? Math.Min(_backupCurrentIndex, effectiveExpected) : aggregatedCompleted;
+
+                    // If service signals completion, force 100%
+                    if (_backupTotalCount > 0 && _backupCurrentIndex >= _backupTotalCount)
+                        effectiveCompleted = effectiveExpected;
+
+                    float stepPercent = effectiveExpected > 0 ? Math.Clamp((float)effectiveCompleted / effectiveExpected, 0f, 1f) : 0f;
+
+                    ImGui.ProgressBar(stepPercent, new Vector2(-1, 0), $"{stepPercent * 100:F1}%");
+                    ImGui.Text($"Steps: {effectiveCompleted} / {effectiveExpected}");
+
+                    if (!string.IsNullOrEmpty(_backupCurrentFileName))
+                        ImGui.Text($"Current: {_backupCurrentFileName}");
+                    if (!string.IsNullOrEmpty(_backupCurrentStep))
+                    {
+                        var stepText = _backupCurrentStep;
+                        try
+                        {
+                            // Remove common timestamp formats
+                            stepText = System.Text.RegularExpressions.Regex.Replace(stepText, @"\[\d{2}:\d{2}:\d{2}\]", "");
+                            stepText = System.Text.RegularExpressions.Regex.Replace(stepText, @"\[\d{2}:\d{2}:\d{2}\.\d{3}\]", "");
+                            stepText = System.Text.RegularExpressions.Regex.Replace(stepText, @"\b\d{2}:\d{2}:\d{2}\b", "");
+                            stepText = System.Text.RegularExpressions.Regex.Replace(stepText, @"\b\d{2}:\d{2}:\d{2}\.\d{1,4}\b", "");
+                            stepText = System.Text.RegularExpressions.Regex.Replace(stepText, @"\b\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\b", "");
+                            // Remove orphan millisecond tokens left after HH:MM:SS removal
+                            stepText = System.Text.RegularExpressions.Regex.Replace(stepText, @"^\.\d{1,6}\b", "");
+                            stepText = System.Text.RegularExpressions.Regex.Replace(stepText, @"(?<=\s|:)\.\d{1,6}\b", "");
+                            // Remove leading pipe from log formatting
+                            stepText = System.Text.RegularExpressions.Regex.Replace(stepText, @"^\|\s*", "");
+                            // Clean leftover separators
+                            stepText = stepText.Trim();
+                            stepText = System.Text.RegularExpressions.Regex.Replace(stepText, @"\s{2,}", " ");
+                            stepText = stepText.Trim('-', ' ', '\t');
+                        }
+                        catch { }
+                        UiSharedService.ColorTextWrapped($"Current step: {stepText}", SpheneCustomTheme.Colors.Warning);
+                    }
+                    // Show detailed breakdown
+                    ImGui.Text($"ZIPs: {_backupZipCount} · PMPs: {_backupPmpCount} · Textures: {_backupTextureCount}");
+                    if (_backupStartTime != DateTime.MinValue && (_backupCurrentIndex > 0 || aggregatedCompleted > 0))
+                    {
+                        var elapsedB = DateTime.Now - _backupStartTime;
+                        ImGui.Text($"Elapsed: {elapsedB:mm\\:ss}");
+                    }
+                    ImGui.Separator();
+                }
 
                 var totalFiles = _texturesToConvert.Count;
                 var currentFile = _conversionCurrentFileProgress;
@@ -2074,11 +2377,25 @@ public class CompactUi : WindowMediatorSubscriberBase
             }
         }
 
-        // Cleanup once done
-        if (_conversionTask != null && _conversionTask.IsCompleted && _texturesToConvert.Count > 0)
+        // Auto-close and cleanup once done
+        if (_conversionTask != null && _conversionTask.IsCompleted)
         {
+            _conversionProgressWindowOpen = false;
+            if (_texturesToConvert.Count > 0)
+            {
+                _texturesToConvert.Clear();
+            }
             _conversionTask = null;
-            _texturesToConvert.Clear();
+            // Reset backup progress state
+            _backupCurrentFileName = string.Empty;
+            _backupCurrentIndex = 0;
+            _backupTotalCount = 0;
+            _backupStartTime = DateTime.MinValue;
+            _backupStepLog.Clear();
+            _backupCurrentStep = string.Empty;
+            _backupTextureCount = 0;
+            _backupZipCount = 0;
+            _backupPmpCount = 0;
         }
     }
 
@@ -2215,28 +2532,29 @@ public class CompactUi : WindowMediatorSubscriberBase
     // The spinner itself rotates, without any additional overlay around it
     private void DrawRotatingSpinnerIcon(float scale = 1.0f)
     {
-        var frameSize = ImGui.GetFrameHeight() * scale;
-        var size = new Vector2(frameSize, frameSize);
-        ImGui.InvisibleButton("##rotatingSpinnerIcon", size);
-        var min = ImGui.GetItemRectMin();
-        var center = new Vector2(min.X + size.X * 0.5f, min.Y + size.Y * 0.5f);
+        // Size matches the current text line height for perfect inline alignment
+        var lineHeight = ImGui.GetTextLineHeight() * scale;
+        var size = new Vector2(lineHeight, lineHeight);
+        var pos = ImGui.GetCursorScreenPos();
+        var center = new Vector2(pos.X + size.X * 0.5f, pos.Y + size.Y * 0.5f);
         var drawList = ImGui.GetWindowDrawList();
         var theme = SpheneCustomTheme.CurrentTheme;
         var color = theme.TextPrimary;
         var u32 = ImGui.ColorConvertFloat4ToU32(color);
         var t = (float)ImGui.GetTime();
         var radius = size.X * 0.45f;
-        var thickness = Math.Max(2.0f, size.X * 0.08f);
+        var thickness = Math.Max(2.0f * ImGuiHelpers.GlobalScale, size.X * 0.08f);
         var bgColor = ImGui.ColorConvertFloat4ToU32(new Vector4(color.X, color.Y, color.Z, 0.25f));
         drawList.AddCircle(center, radius, bgColor, 48, thickness);
 
         var speed = 3.0f;
         var baseAngle = t * speed;
         var arcLen = 1.35f;
-
         drawList.PathClear();
         drawList.PathArcTo(center, radius, baseAngle, baseAngle + arcLen, 32);
         drawList.PathStroke(u32, ImDrawFlags.None, thickness);
+
+        ImGui.Dummy(size);
     }
    private async void StartTextureConversion(List<(string Format, long OriginalSize, List<string> FilePaths)> textureData)
     {
@@ -2279,9 +2597,8 @@ public class CompactUi : WindowMediatorSubscriberBase
                 // Create backups first
                 var allTexturePaths = _texturesToConvert.SelectMany(kvp => new[] { kvp.Key }.Concat(kvp.Value)).ToArray();
                 _logger.LogDebug("Starting backup for {Count} texture paths", allTexturePaths.Length);
-                
-                var backupProgress = new Progress<(string fileName, int current, int total)>();
-                await _shrinkuBackupService.BackupAsync(_texturesToConvert, backupProgress, _conversionCancellationTokenSource.Token);
+                _backupStartTime = DateTime.Now;
+                await _shrinkuBackupService.BackupAsync(_texturesToConvert, _backupProgress, _conversionCancellationTokenSource.Token);
 
                 // Start conversion after backup is complete
                 _logger.LogDebug("Backup completed, starting texture conversion");
@@ -2605,7 +2922,7 @@ public class CompactUi : WindowMediatorSubscriberBase
 
                         _logger.LogInformation("Attempting targeted restore for mod {mod} ({current}/{total})", mod, restoredModCount + 1, owningMods.Count(m => { try { return _shrinkuBackupService.HasBackupForModAsync(m).Result; } catch { return false; } }));
 
-                        // Prefer PMP restore when enabled and PMP backups exist
+                        // Prefer PMP restore when enabled and Penumbra Mod Package backups exist
                         bool ok = false;
                         try
                         {
