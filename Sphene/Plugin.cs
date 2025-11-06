@@ -336,6 +336,13 @@ public sealed class Plugin : IDalamudPlugin
                 s.GetRequiredService<SpheneMediator>(),
                 s.GetRequiredService<PerformanceCollectorService>(),
                 s.GetRequiredService<ICommandManager>()));
+            collection.AddSingleton<WindowMediatorSubscriberBase, ReleaseChangelogUi>((s) => new ReleaseChangelogUi(
+                s.GetRequiredService<ILogger<ReleaseChangelogUi>>(),
+                s.GetRequiredService<UiSharedService>(),
+                s.GetRequiredService<SpheneConfigService>(),
+                s.GetRequiredService<SpheneMediator>(),
+                s.GetRequiredService<PerformanceCollectorService>(),
+                s.GetRequiredService<ChangelogService>()));
 
             collection.AddScoped<WindowMediatorSubscriberBase, EditProfileUi>((s) => new EditProfileUi(s.GetRequiredService<ILogger<EditProfileUi>>(),
                 s.GetRequiredService<SpheneMediator>(), s.GetRequiredService<ApiController>(), s.GetRequiredService<UiSharedService>(), s.GetRequiredService<FileDialogManager>(),
@@ -390,6 +397,9 @@ public sealed class Plugin : IDalamudPlugin
             collection.AddHostedService(p => p.GetRequiredService<IpcProvider>());
             collection.AddHostedService(p => p.GetRequiredService<LoginHandler>());
             collection.AddHostedService(p => p.GetRequiredService<UpdateCheckService>());
+            collection.AddSingleton<ChangelogService>();
+            collection.AddSingleton<ReleaseChangelogStartupService>();
+            collection.AddHostedService(p => p.GetRequiredService<ReleaseChangelogStartupService>());
             collection.AddHostedService(p => p.GetRequiredService<ShrinkUHostService>());
             // Initialize CitySyncshellExplanationUI early as hosted service to ensure it's created before CitySyncshellService
             collection.AddHostedService(p => 

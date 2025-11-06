@@ -56,6 +56,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
     private readonly ServerConfigurationManager _serverConfigurationManager;
     private readonly UiSharedService _uiShared;
     private readonly ShrinkUHostService _shrinkUHostService;
+    private readonly ChangelogService _changelogService;
     private readonly string _shrinkUVersion;
     private readonly IProgress<(int, int, FileCacheEntity)> _validationProgress;
     private (int, int, FileCacheEntity) _currentProgress;
@@ -101,7 +102,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
         FileCompactor fileCompactor, ApiController apiController,
         IpcManager ipcManager, CacheMonitor cacheMonitor,
         ShrinkUHostService shrinkUHostService,
-        DalamudUtilService dalamudUtilService, HttpClient httpClient) : base(logger, mediator, "Network Configuration", performanceCollector)
+        DalamudUtilService dalamudUtilService, HttpClient httpClient,
+        ChangelogService changelogService) : base(logger, mediator, "Network Configuration", performanceCollector)
     {
         _configService = configService;
         _pairManager = pairManager;
@@ -119,6 +121,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         _fileCompactor = fileCompactor;
         _uiShared = uiShared;
         _shrinkUHostService = shrinkUHostService;
+        _changelogService = changelogService;
         _shrinkUVersion = GetShrinkUAssemblyVersion();
         AllowClickthrough = false;
         AllowPinning = false;
@@ -1897,6 +1900,41 @@ public class SettingsUi : WindowMediatorSubscriberBase
         ImGui.TextUnformatted("Description:");
         ImGui.SameLine();
         UiSharedService.TextWrapped("Advanced character synchronization and networking plugin for Final Fantasy XIV");
+
+        ImGui.Spacing();
+        if (_uiShared.IconTextButton(FontAwesomeIcon.InfoCircle, "Open Release Notes"))
+        {
+            Task.Run(async () =>
+            {
+                string? text = null;
+                try { text = await _changelogService.GetChangelogTextForVersionAsync(versionString).ConfigureAwait(false); } catch { }
+                Mediator.Publish(new ShowReleaseChangelogMessage(versionString, text));
+            });
+        }
+        UiSharedService.AttachToolTip("Open recent changes and highlights for this Sphene version.");
+
+        // Custom Changelog Source
+        ImGui.Spacing();
+        UiSharedService.ColorText("Release Changelog Source", ImGuiColors.DalamudWhite);
+        var url = _configService.Current.ReleaseChangelogUrl ?? string.Empty;
+        ImGui.InputText("##changelog_url", ref url, 1024);
+        UiSharedService.AttachToolTip("URL to a JSON file containing release changelogs.");
+        if (ImGui.IsItemDeactivatedAfterEdit())
+        {
+            _configService.Current.ReleaseChangelogUrl = url?.Trim() ?? string.Empty;
+            _configService.Save();
+        }
+        ImGui.SameLine();
+        if (_uiShared.IconTextButton(FontAwesomeIcon.Download, "Fetch & Open"))
+        {
+            Task.Run(async () =>
+            {
+                string? text = null;
+                try { text = await _changelogService.GetChangelogTextForVersionAsync(versionString).ConfigureAwait(false); } catch { }
+                Mediator.Publish(new ShowReleaseChangelogMessage(versionString, text));
+            });
+        }
+        UiSharedService.AttachToolTip("Fetch from the configured URL and open release notes for the current version.");
 
         ImGui.Separator();
         _uiShared.BigText("ShrinkU");

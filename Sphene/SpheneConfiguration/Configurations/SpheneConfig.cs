@@ -105,4 +105,8 @@ public class SpheneConfig : ISpheneConfiguration
     public string SelectedTheme { get; set; } = "Default Sphene";
     public bool AutoLoadThemeOnStartup { get; set; } = true;
 
+    // Release Changelog
+    public string LastSeenVersionChangelog { get; set; } = string.Empty;
+    public string ReleaseChangelogUrl { get; set; } = string.Empty;
+
 }

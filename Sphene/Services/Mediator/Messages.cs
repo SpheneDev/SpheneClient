@@ -104,6 +104,7 @@ public record OpenCharaDataHubWithFilterMessage(UserData UserData) : MessageBase
 public record SendCharacterDataAcknowledgmentMessage(CharacterDataAcknowledgmentDto AcknowledgmentDto) : MessageBase;
 public record ShowUpdateNotificationMessage(UpdateInfo UpdateInfo) : MessageBase;
 public record CheckForUpdatesMessage : MessageBase;
+public record ShowReleaseChangelogMessage(string CurrentVersion, string? ChangelogText) : MessageBase;
 
 // Area-bound syncshell messages
 public record AreaBoundJoinRequestMessage(AreaBoundJoinRequestDto JoinRequest) : MessageBase;
