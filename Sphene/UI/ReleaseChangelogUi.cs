@@ -172,7 +172,18 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
                                         ImGui.Bullet();
                                         float bulletGap = ImGui.GetStyle().ItemInnerSpacing.X + ImGuiHelpers.GlobalScale * 8f;
                                         ImGui.SameLine(0, bulletGap);
-                                        UiSharedService.TextWrapped(trimmedMain);
+                                        if (change.Sub is { Count: > 0 })
+                                        {
+                                            var baseColor = ImGuiColors.ParsedBlue;
+                                            var textColor = new Vector4(baseColor.X, baseColor.Y, baseColor.Z, 0.90f);
+                                            ImGui.PushStyleColor(ImGuiCol.Text, textColor);
+                                            UiSharedService.TextWrapped(trimmedMain);
+                                            ImGui.PopStyleColor();
+                                        }
+                                        else
+                                        {
+                                            UiSharedService.TextWrapped(trimmedMain);
+                                        }
 
                                         if (change.Sub is { Count: > 0 })
                                         {
@@ -191,6 +202,8 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
                                                 UiSharedService.TextWrapped(trimmedSub);
                                             }
                                             ImGui.Unindent(ImGuiHelpers.GlobalScale * 18f);
+                                            // add gap only after structured entries with sub-items
+                                            ImGuiHelpers.ScaledDummy(3f);
                                         }
                                     }
                                 }

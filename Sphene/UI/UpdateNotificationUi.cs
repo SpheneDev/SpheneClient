@@ -84,24 +84,6 @@ public class UpdateNotificationUi : WindowMediatorSubscriberBase
         
         ImGui.Spacing();
         
-        // Changelog section
-        if (!string.IsNullOrEmpty(_updateInfo.Changelog))
-        {
-            UiSharedService.ColorText("What's New", ImGuiColors.HealerGreen);
-            ImGui.Spacing();
-
-            using (var child = ImRaii.Child("ChangelogField", new Vector2(-1, 200), true, ImGuiWindowFlags.NoNav | ImGuiWindowFlags.HorizontalScrollbar))
-            {
-                if (child)
-                {
-                    using (ImRaii.PushStyle(ImGuiStyleVar.FrameRounding, 6f))
-                    using (ImRaii.PushStyle(ImGuiStyleVar.FramePadding, new Vector2(8, 8)))
-                    {
-                        UiSharedService.TextWrapped(_updateInfo.Changelog);
-                    }
-                }
-            }
-        }
         
         ImGui.Spacing();
         
