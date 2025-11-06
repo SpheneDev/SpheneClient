@@ -12,10 +12,6 @@ on:
         - patch
         - minor
         - major
-      changelog:
-        description: 'Changelog text for this release (use \n for line breaks)'
-        required: true
-        type: string
 
 jobs:
   release:
@@ -166,13 +162,7 @@ jobs:
         # Update download URL with new tag
         $newTag = "${{ steps.get_version.outputs.tag }}"
         $jsonContent.DownloadLinkInstall = "https://github.com/SpheneDev/SpheneClient/releases/download/$newTag/latest.zip"
-        $jsonContent.DownloadLinkTesting = "https://github.com/SpheneDev/SpheneClient/releases/download/$newTag/latest.zip"
         $jsonContent.DownloadLinkUpdate = "https://github.com/SpheneDev/SpheneClient/releases/download/$newTag/latest.zip"
-        
-        # Update changelog with proper line breaks
-        $changelogText = "${{ github.event.inputs.changelog }}"
-        $changelogText = $changelogText -replace '\\n', "`r`n"
-        $jsonContent.Changelog = $changelogText
         
         # Update the array with modified content
         $jsonArray[0] = $jsonContent
