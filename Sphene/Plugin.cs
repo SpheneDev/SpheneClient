@@ -141,10 +141,20 @@ public sealed class Plugin : IDalamudPlugin
                 s.GetRequiredService<ShrinkU.Services.PenumbraIpc>(),
                 s.GetRequiredService<ShrinkU.Services.TextureBackupService>(),
                 s.GetRequiredService<ShrinkUConfigService>()));
+            collection.AddSingleton<ShrinkU.Services.ChangelogService>(s => new ShrinkU.Services.ChangelogService(
+                s.GetRequiredService<Microsoft.Extensions.Logging.ILogger>(),
+                new System.Net.Http.HttpClient(),
+                s.GetRequiredService<ShrinkUConfigService>()));
+            collection.AddSingleton<ShrinkU.UI.ReleaseChangelogUI>(s => new ShrinkU.UI.ReleaseChangelogUI(
+                pluginInterface,
+                s.GetRequiredService<Microsoft.Extensions.Logging.ILogger>(),
+                s.GetRequiredService<ShrinkUConfigService>(),
+                s.GetRequiredService<ShrinkU.Services.ChangelogService>()));
             collection.AddSingleton<SettingsUI>(s => new SettingsUI(
                 s.GetRequiredService<Microsoft.Extensions.Logging.ILogger>(),
                 s.GetRequiredService<ShrinkUConfigService>(),
-                s.GetRequiredService<ShrinkU.Services.TextureConversionService>()));
+                s.GetRequiredService<ShrinkU.Services.TextureConversionService>(),
+                () => s.GetRequiredService<ShrinkU.UI.ReleaseChangelogUI>().IsOpen = true));
             collection.AddSingleton<ConversionUI>(s => new ConversionUI(
                 s.GetRequiredService<Microsoft.Extensions.Logging.ILogger>(),
                 s.GetRequiredService<ShrinkUConfigService>(),

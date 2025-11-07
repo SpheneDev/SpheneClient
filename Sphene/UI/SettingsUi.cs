@@ -1915,26 +1915,12 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
         // Custom Changelog Source
         ImGui.Spacing();
-        UiSharedService.ColorText("Release Changelog Source", ImGuiColors.DalamudWhite);
         var url = _configService.Current.ReleaseChangelogUrl ?? string.Empty;
-        ImGui.InputText("##changelog_url", ref url, 1024);
-        UiSharedService.AttachToolTip("URL to a JSON file containing release changelogs.");
         if (ImGui.IsItemDeactivatedAfterEdit())
         {
             _configService.Current.ReleaseChangelogUrl = url?.Trim() ?? string.Empty;
             _configService.Save();
         }
-        ImGui.SameLine();
-        if (_uiShared.IconTextButton(FontAwesomeIcon.Download, "Fetch & Open"))
-        {
-            Task.Run(async () =>
-            {
-                string? text = null;
-                try { text = await _changelogService.GetChangelogTextForVersionAsync(versionString).ConfigureAwait(false); } catch { }
-                Mediator.Publish(new ShowReleaseChangelogMessage(versionString, text));
-            });
-        }
-        UiSharedService.AttachToolTip("Fetch from the configured URL and open release notes for the current version.");
 
         ImGui.Separator();
         _uiShared.BigText("ShrinkU");

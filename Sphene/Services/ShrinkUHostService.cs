@@ -18,6 +18,7 @@ public sealed class ShrinkUHostService : IHostedService
     private readonly WindowSystem _windowSystem;
     private readonly ConversionUI _conversionUi;
     private readonly SettingsUI _settingsUi;
+    private readonly ReleaseChangelogUI _releaseChangelogUi;
     private readonly FirstRunSetupUI _firstRunUi;
     private readonly SpheneConfigService _configService;
     private readonly ShrinkUConfigService _shrinkuConfigService;
@@ -28,6 +29,7 @@ public sealed class ShrinkUHostService : IHostedService
         WindowSystem windowSystem,
         ConversionUI conversionUi,
         SettingsUI settingsUi,
+        ReleaseChangelogUI releaseChangelogUi,
         FirstRunSetupUI firstRunUi,
         SpheneConfigService configService,
         ShrinkUConfigService shrinkuConfigService)
@@ -36,6 +38,7 @@ public sealed class ShrinkUHostService : IHostedService
         _windowSystem = windowSystem;
         _conversionUi = conversionUi;
         _settingsUi = settingsUi;
+        _releaseChangelogUi = releaseChangelogUi;
         _firstRunUi = firstRunUi;
         _configService = configService;
         _shrinkuConfigService = shrinkuConfigService;
@@ -110,6 +113,7 @@ public sealed class ShrinkUHostService : IHostedService
         try { _windowSystem.AddWindow(_conversionUi); } catch (Exception ex) { _logger.LogDebug(ex, "ConversionUI already registered or failed to add"); }
         try { _windowSystem.AddWindow(_settingsUi); } catch (Exception ex) { _logger.LogDebug(ex, "SettingsUI already registered or failed to add"); }
         try { _windowSystem.AddWindow(_firstRunUi); } catch (Exception ex) { _logger.LogDebug(ex, "FirstRunSetupUI already registered or failed to add"); }
+        try { _windowSystem.AddWindow(_releaseChangelogUi); } catch (Exception ex) { _logger.LogDebug(ex, "ReleaseChangelogUI already registered or failed to add"); }
         _registered = true;
     }
 
@@ -119,6 +123,7 @@ public sealed class ShrinkUHostService : IHostedService
         try { _windowSystem.RemoveWindow(_conversionUi); } catch (Exception ex) { _logger.LogDebug(ex, "ConversionUI not registered or failed to remove"); }
         try { _windowSystem.RemoveWindow(_settingsUi); } catch (Exception ex) { _logger.LogDebug(ex, "SettingsUI not registered or failed to remove"); }
         try { _windowSystem.RemoveWindow(_firstRunUi); } catch (Exception ex) { _logger.LogDebug(ex, "FirstRunSetupUI not registered or failed to remove"); }
+        try { _windowSystem.RemoveWindow(_releaseChangelogUi); } catch (Exception ex) { _logger.LogDebug(ex, "ReleaseChangelogUI not registered or failed to remove"); }
         _registered = false;
         // Clear integration marker so ShrinkU exposes generic Automatic mode when not hosted
         try
