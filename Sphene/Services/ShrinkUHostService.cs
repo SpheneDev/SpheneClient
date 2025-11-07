@@ -135,6 +135,23 @@ public sealed class ShrinkUHostService : IHostedService
         catch { }
     }
 
+    // Open ShrinkU release notes window from Sphene settings
+    public void OpenReleaseNotes()
+    {
+        try
+        {
+            // Ensure windows are registered when integration is enabled
+            if (!_registered && _configService.Current.EnableShrinkUIntegration)
+                RegisterWindows();
+
+            _releaseChangelogUi.IsOpen = true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to open ShrinkU release notes");
+        }
+    }
+
     // Configure ShrinkU backup folder to Sphene's cache when available
     private void TryConfigureShrinkUBackupPath()
     {

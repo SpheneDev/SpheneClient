@@ -1942,6 +1942,23 @@ public class SettingsUi : WindowMediatorSubscriberBase
         }
         UiSharedService.AttachToolTip("Toggle ShrinkU UI integration inside Sphene.");
 
+        // Open ShrinkU Release Notes button (with info icon, matching Sphene style)
+        if (_configService.Current.EnableShrinkUIntegration)
+        {
+            if (_uiShared.IconTextButton(FontAwesomeIcon.InfoCircle, "Open ShrinkU Release Notes"))
+            {
+                try { _shrinkUHostService.OpenReleaseNotes(); } catch { }
+            }
+            UiSharedService.AttachToolTip("Open recent changes and highlights for ShrinkU.");
+        }
+        else
+        {
+            ImGui.BeginDisabled();
+            _uiShared.IconTextButton(FontAwesomeIcon.InfoCircle, "Open ShrinkU Release Notes");
+            UiSharedService.AttachToolTip("Enable ShrinkU UI to open release notes.");
+            ImGui.EndDisabled();
+        }
+
         // Discord button moved to Settings header for better visibility
 
         // Server Connection Section
