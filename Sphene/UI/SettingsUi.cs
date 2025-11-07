@@ -1934,13 +1934,13 @@ public class SettingsUi : WindowMediatorSubscriberBase
         UiSharedService.TextWrapped("Convert Penumbra textures to BC7 with backups. Standalone texture conversion plugin integrated with Sphene.");
 
         var enableShrinkUOverview = _configService.Current.EnableShrinkUIntegration;
-        if (ImGui.Checkbox("Enable ShrinkU integration", ref enableShrinkUOverview))
+        if (ImGui.Checkbox("Enable ShrinkU UI", ref enableShrinkUOverview))
         {
             _configService.Current.EnableShrinkUIntegration = enableShrinkUOverview;
             _configService.Save();
             try { _shrinkUHostService.ApplyIntegrationEnabled(enableShrinkUOverview); } catch { }
         }
-        UiSharedService.AttachToolTip("Toggle ShrinkU windows and integration inside Sphene.");
+        UiSharedService.AttachToolTip("Toggle ShrinkU UI integration inside Sphene.");
 
         // Discord button moved to Settings header for better visibility
 

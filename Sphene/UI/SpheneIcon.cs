@@ -122,7 +122,9 @@ public class SpheneIcon : WindowMediatorSubscriberBase, IDisposable
             
             foreach (var plugin in availablePlugins)
             {
-                if (ImGui.MenuItem($"Open {plugin.Name}"))
+                var isShrinkU = string.Equals(plugin.InternalName, "ShrinkU.Builtin", StringComparison.OrdinalIgnoreCase);
+                var enabled = !isShrinkU || _configService.Current.EnableShrinkUIntegration;
+                if (ImGui.MenuItem($"Open {plugin.Name}", string.Empty, false, enabled))
                 {
                     OpenPlugin(plugin.InternalName);
                 }
