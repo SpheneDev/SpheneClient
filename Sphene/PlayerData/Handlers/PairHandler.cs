@@ -43,7 +43,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
     private bool _isVisible;
     private Guid _penumbraCollection;
     private bool _redrawOnNextApplication = false;
-    private const float MaxProximityDistanceMeters = 110f;
+    private const float MaxProximityDistanceMeters = 100f;
 
     public PairHandler(ILogger<PairHandler> logger, Pair pair,
         GameObjectHandlerFactory gameObjectHandlerFactory,
