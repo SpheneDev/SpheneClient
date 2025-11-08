@@ -226,7 +226,7 @@ public class IdDisplayHandler
             playerText = pair.UserData.AliasOrUID;
         }
 
-        if (_SpheneConfigService.Current.ShowCharacterNameInsteadOfNotesForVisible && pair.IsVisible && !showUidInsteadOfName)
+        if (_SpheneConfigService.Current.ShowCharacterNameInsteadOfNotesForVisible && pair.IsMutuallyVisible && !showUidInsteadOfName)
         {
             playerText = pair.PlayerName;
             textIsUid = false;

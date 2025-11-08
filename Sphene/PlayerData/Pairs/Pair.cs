@@ -19,6 +19,7 @@ using NotificationType = Sphene.SpheneConfiguration.Models.NotificationType;
 using Sphene.Services.Events;
 using Dalamud.Interface.ImGuiNotification;
 using Sphene.WebAPI;
+using Sphene.API.Dto.Visibility;
 
 namespace Sphene.PlayerData.Pairs;
 
@@ -55,6 +56,7 @@ public class Pair : DisposableMediatorSubscriberBase
     public bool IsPaired => IndividualPairStatus == IndividualPairStatus.Bidirectional || UserPair.Groups.Any();
     public bool IsPaused => UserPair.OwnPermissions.IsPaused();
     public bool IsVisible => CachedPlayer?.IsVisible ?? false;
+    public bool IsMutuallyVisible { get; private set; } = false;
     public CharacterData? LastReceivedCharacterData { get; set; }
     public string? PlayerName => CachedPlayer?.PlayerName ?? string.Empty;
     public long LastAppliedDataBytes => CachedPlayer?.LastAppliedDataBytes ?? -1;
@@ -80,6 +82,33 @@ public class Pair : DisposableMediatorSubscriberBase
     public string? GetCurrentDataHash()
     {
         return LastReceivedCharacterData?.DataHash?.Value;
+    }
+
+    internal void SetMutualVisibility(bool isMutual)
+    {
+        if (IsMutuallyVisible == isMutual) return;
+        IsMutuallyVisible = isMutual;
+        Mediator.Publish(new StructuralRefreshUiMessage());
+    }
+
+    internal void ReportVisibility(bool isProximityVisible)
+    {
+        try
+        {
+            var uid = _apiController.Value.UID;
+            if (string.IsNullOrEmpty(uid))
+            {
+                Logger.LogDebug("Skipping visibility report for {alias} - UID not available yet", UserData.AliasOrUID);
+                return;
+            }
+            var dto = new UserVisibilityReportDto(new(uid), UserData, isProximityVisible, DateTime.UtcNow);
+            Logger.LogDebug("Reporting visibility: reporter={uid}, target={target}, proximity={visible}", uid, UserData.AliasOrUID, isProximityVisible);
+            _ = _apiController.Value.UserReportVisibility(dto);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Failed to report proximity visibility for {target}", UserData.AliasOrUID);
+        }
     }
 
     public void AddContextMenu(IMenuOpenedArgs args)

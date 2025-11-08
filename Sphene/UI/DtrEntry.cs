@@ -136,13 +136,13 @@ public sealed class DtrEntry : IDisposable, IHostedService
                 if (_configService.Current.ShowUidInDtrTooltip)
                 {
                     visiblePairs = _pairManager.GetOnlineUserPairs()
-                        .Where(x => x.IsVisible)
+            .Where(x => x.IsMutuallyVisible)
                         .Select(x => string.Format("{0} ({1})", _configService.Current.PreferNoteInDtrTooltip ? x.GetNote() ?? x.PlayerName : x.PlayerName, x.UserData.AliasOrUID));
                 }
                 else
                 {
                     visiblePairs = _pairManager.GetOnlineUserPairs()
-                        .Where(x => x.IsVisible)
+            .Where(x => x.IsMutuallyVisible)
                         .Select(x => string.Format("{0}", _configService.Current.PreferNoteInDtrTooltip ? x.GetNote() ?? x.PlayerName : x.PlayerName));
                 }
 

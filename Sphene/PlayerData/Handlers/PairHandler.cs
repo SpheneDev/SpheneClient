@@ -43,7 +43,8 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
     private bool _isVisible;
     private Guid _penumbraCollection;
     private bool _redrawOnNextApplication = false;
-    private const float MaxProximityDistanceMeters = 100f;
+    private bool _initIdentMissingLogged = false;
+    private bool _proximityReportedVisible = false;
 
     public PairHandler(ILogger<PairHandler> logger, Pair pair,
         GameObjectHandlerFactory gameObjectHandlerFactory,
@@ -315,7 +316,8 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         {
             PlayerName = null;
             _cachedData = null;
-            Logger.LogDebug("Disposing {name} complete", name);
+        Pair.ReportVisibility(false);
+        Logger.LogDebug("Disposing {name} complete", name);
         }
     }
 
@@ -585,7 +587,15 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         if (string.IsNullOrEmpty(PlayerName))
         {
             var pc = _dalamudUtil.FindPlayerByNameHash(Pair.Ident);
-            if (pc == default((string, nint))) return;
+            if (pc == default((string, nint)))
+            {
+                if (!_initIdentMissingLogged)
+                {
+                    _initIdentMissingLogged = true;
+                    Logger.LogDebug("Initialize deferred for {alias} - ident not found in cache: {ident}", Pair.UserData.AliasOrUID, Pair.Ident);
+                }
+                return;
+            }
             Logger.LogDebug("One-Time Initializing {this}", this);
             Initialize(pc.Name);
             Logger.LogDebug("One-Time Initialized {this}", this);
@@ -595,40 +605,41 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
 
         if (_charaHandler?.Address != nint.Zero)
         {
-            // Compute proximity to local player; gate visibility by 110 meters
-            var remoteObj = _charaHandler.GetGameObject();
-            var localPlayer = _dalamudUtil.GetPlayerCharacter();
-
-            if (remoteObj != null && localPlayer != null)
+            // Ensure we proactively report regained local proximity to the server
+            if (!_proximityReportedVisible)
             {
-                float distance = Vector3.Distance(remoteObj.Position, localPlayer.Position);
-                bool withinProximity = distance <= MaxProximityDistanceMeters;
+                Pair.ReportVisibility(true);
+                _proximityReportedVisible = true;
+            }
+            // Visibility is now gated solely by mutual visibility; distance is ignored
+            bool allowed = Pair.IsMutuallyVisible;
 
-                if (withinProximity && !IsVisible)
+            if (allowed && !IsVisible)
+            {
+                Guid appData = Guid.NewGuid();
+                IsVisible = true;
+                if (_cachedData != null)
                 {
-                    Guid appData = Guid.NewGuid();
-                    IsVisible = true;
-                    if (_cachedData != null)
+                    Logger.LogDebug("[BASE-{appBase}] {this} visibility changed (mutual), cached data exists", appData, this);
+                    _ = Task.Run(() =>
                     {
-                        Logger.LogDebug("[BASE-{appBase}] {this} visibility changed (within 110m), cached data exists", appData, this);
-                        _ = Task.Run(() =>
-                        {
-                            ApplyCharacterData(appData, _cachedData!, forceApplyCustomization: true);
-                        });
-                    }
-                    else
-                    {
-                        Logger.LogDebug("{this} visibility changed (within 110m), no cached data exists", this);
-                    }
+                        ApplyCharacterData(appData, _cachedData!, forceApplyCustomization: true);
+                    });
                 }
-                else if (!withinProximity && IsVisible)
+                else
                 {
-                    // Out of proximity: mark not visible without invalidating pointer
-                    IsVisible = false;
-                    _downloadCancellationTokenSource?.CancelDispose();
-                    _downloadCancellationTokenSource = null;
-                    Logger.LogDebug("{this} visibility changed (beyond 110m), now: {visi}", this, IsVisible);
+                    Logger.LogDebug("{this} visibility changed (mutual), no cached data exists", this);
                 }
+            }
+            else if (!allowed && IsVisible)
+            {
+                IsVisible = false;
+                _downloadCancellationTokenSource?.CancelDispose();
+                _downloadCancellationTokenSource = null;
+                // Immediately report loss of proximity visibility to the server
+                Pair.ReportVisibility(false);
+                _proximityReportedVisible = false;
+                Logger.LogDebug("{this} visibility changed (not mutual), now: {visi}", this, IsVisible);
             }
         }
         else if (_charaHandler?.Address == nint.Zero && IsVisible)
@@ -637,6 +648,9 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             _charaHandler.Invalidate();
             _downloadCancellationTokenSource?.CancelDispose();
             _downloadCancellationTokenSource = null;
+            // Immediately report loss of proximity visibility to the server
+            Pair.ReportVisibility(false);
+            _proximityReportedVisible = false;
             Logger.LogTrace("{this} visibility changed, now: {visi}", this, IsVisible);
         }
     }
@@ -646,7 +660,38 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         PlayerName = name;
         _charaHandler = _gameObjectHandlerFactory.Create(ObjectKind.Player, () => _dalamudUtil.GetPlayerCharacterFromCachedTableByIdent(Pair.Ident), isWatched: false).GetAwaiter().GetResult();
 
+        Logger.LogDebug("Initialized PairHandler for {alias} with name={name} ident={ident}", Pair.UserData.AliasOrUID, name, Pair.Ident);
+
         _serverConfigManager.AutoPopulateNoteForUid(Pair.UserData.UID, name);
+        Pair.ReportVisibility(true);
+        _proximityReportedVisible = true;
+
+        Mediator.Subscribe<ConnectedMessage>(this, (_) =>
+        {
+            // Reaffirm visibility once the hub is connected; UID becomes available then
+            Logger.LogDebug("ConnectedMessage received - reaffirming visibility for {alias}", Pair.UserData.AliasOrUID);
+            Pair.ReportVisibility(true);
+            _proximityReportedVisible = true;
+        });
+
+        Mediator.Subscribe<HubReconnectedMessage>(this, (_) =>
+        {
+            // Server reconnected after outage; reaffirm local proximity visibility
+            Logger.LogDebug("HubReconnectedMessage received - reaffirming visibility for {alias}", Pair.UserData.AliasOrUID);
+            Pair.ReportVisibility(true);
+            _proximityReportedVisible = true;
+        });
+
+        Mediator.Subscribe<DalamudLoginMessage>(this, (_) =>
+        {
+            // Client relogged; if player is locally present, reaffirm visibility
+            if (_charaHandler?.Address != nint.Zero)
+            {
+                Logger.LogDebug("DalamudLoginMessage received - reaffirming visibility for {alias}", Pair.UserData.AliasOrUID);
+                Pair.ReportVisibility(true);
+                _proximityReportedVisible = true;
+            }
+        });
 
         Mediator.Subscribe<HonorificReadyMessage>(this, async (_) =>
         {

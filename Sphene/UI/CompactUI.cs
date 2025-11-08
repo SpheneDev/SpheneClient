@@ -1083,20 +1083,20 @@ public class CompactUi : WindowMediatorSubscriberBase
             => (u.Key.IsOnline || (!u.Key.IsOnline && !_configService.Current.ShowOfflineUsersSeparately))
                 && !u.Key.UserPair.OwnPermissions.IsPaused();
         bool FilterPausedUsers(KeyValuePair<Pair, List<GroupFullInfoDto>> u)
-            => u.Key.UserPair.OwnPermissions.IsPaused() && (!u.Key.IsVisible || !_configService.Current.ShowVisibleUsersSeparately);
+            => u.Key.UserPair.OwnPermissions.IsPaused() && (!u.Key.IsMutuallyVisible || !_configService.Current.ShowVisibleUsersSeparately);
         Dictionary<Pair, List<GroupFullInfoDto>> BasicSortedDictionary(IEnumerable<KeyValuePair<Pair, List<GroupFullInfoDto>>> u)
-            => u.OrderByDescending(u => u.Key.IsVisible)
+            => u.OrderByDescending(u => u.Key.IsMutuallyVisible)
                 .ThenByDescending(u => u.Key.IsOnline)
                 .ThenBy(AlphabeticalSort, StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(u => u.Key, u => u.Value);
         ImmutableList<Pair> ImmutablePairList(IEnumerable<KeyValuePair<Pair, List<GroupFullInfoDto>>> u)
             => u.Select(k => k.Key).ToImmutableList();
         bool FilterVisibleUsers(KeyValuePair<Pair, List<GroupFullInfoDto>> u)
-            => u.Key.IsVisible
+            => u.Key.IsMutuallyVisible
                 && (_configService.Current.ShowSyncshellUsersInVisible || !(!_configService.Current.ShowSyncshellUsersInVisible && !u.Key.IsDirectlyPaired))
                 && (!_configService.Current.ShowVisibleSyncshellUsersOnlyInSyncshells || u.Key.IsDirectlyPaired);
         bool FilterTagusers(KeyValuePair<Pair, List<GroupFullInfoDto>> u, string tag)
-            => u.Key.IsDirectlyPaired && !u.Key.IsOneSidedPair && _tagHandler.HasTag(u.Key.UserData.UID, tag) && (!u.Key.IsVisible || !_configService.Current.ShowVisibleUsersSeparately);
+            => u.Key.IsDirectlyPaired && !u.Key.IsOneSidedPair && _tagHandler.HasTag(u.Key.UserData.UID, tag) && (!u.Key.IsMutuallyVisible || !_configService.Current.ShowVisibleUsersSeparately);
         bool FilterGroupUsers(KeyValuePair<Pair, List<GroupFullInfoDto>> u, GroupFullInfoDto group)
         {
             // Check if user is a member of this group
@@ -1104,20 +1104,20 @@ public class CompactUi : WindowMediatorSubscriberBase
                 return true;
             
             // For visible users, also check if they are actual members of this syncshell
-            if (u.Key.IsVisible && group.GroupPairUserInfos.ContainsKey(u.Key.UserData.UID))
+            if (u.Key.IsMutuallyVisible && group.GroupPairUserInfos.ContainsKey(u.Key.UserData.UID))
                 return true;
             
             // For area-bound syncshells (where GroupPairUserInfos is empty), also include visible users
             // This allows visible users to be shown in area-bound syncshells even if they're not permanent members
-            if (group.GroupPairUserInfos.Count == 0 && u.Key.IsVisible && _areaBoundSyncshellService.IsAreaBoundSyncshell(group.Group.GID))
+            if (group.GroupPairUserInfos.Count == 0 && u.Key.IsMutuallyVisible && _areaBoundSyncshellService.IsAreaBoundSyncshell(group.Group.GID))
                 return true;
             
             return false;
         }
         bool FilterNotTaggedUsers(KeyValuePair<Pair, List<GroupFullInfoDto>> u)
-            => u.Key.IsDirectlyPaired && !u.Key.IsOneSidedPair && !_tagHandler.HasAnyTag(u.Key.UserData.UID) && (!u.Key.IsVisible || !_configService.Current.ShowVisibleUsersSeparately);
+            => u.Key.IsDirectlyPaired && !u.Key.IsOneSidedPair && !_tagHandler.HasAnyTag(u.Key.UserData.UID) && (!u.Key.IsMutuallyVisible || !_configService.Current.ShowVisibleUsersSeparately);
         bool FilterOfflineUsers(KeyValuePair<Pair, List<GroupFullInfoDto>> u)
-            => u.Key.IsDirectlyPaired && (!u.Key.IsOneSidedPair || u.Value.Any()) && !u.Key.IsOnline && !u.Key.UserPair.OwnPermissions.IsPaused() && (!u.Key.IsVisible || !_configService.Current.ShowVisibleUsersSeparately);
+            => u.Key.IsDirectlyPaired && (!u.Key.IsOneSidedPair || u.Value.Any()) && !u.Key.IsOnline && !u.Key.UserPair.OwnPermissions.IsPaused() && (!u.Key.IsMutuallyVisible || !_configService.Current.ShowVisibleUsersSeparately);
         bool FilterOfflineSyncshellUsers(KeyValuePair<Pair, List<GroupFullInfoDto>> u)
             => (!u.Key.IsDirectlyPaired && !u.Key.IsOnline && !u.Key.UserPair.OwnPermissions.IsPaused());
 
@@ -1149,7 +1149,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                         if (info.IsModerator()) return 1;
                         if (info.IsPinned()) return 2;
                     }
-                    return u.Key.IsVisible ? 3 : 4;
+                    return u.Key.IsMutuallyVisible ? 3 : 4;
                 })
                 .ThenBy(AlphabeticalSort, StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(k => k.Key, k => k.Value);

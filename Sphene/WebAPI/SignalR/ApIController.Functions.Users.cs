@@ -1,6 +1,7 @@
 using Sphene.API.Data;
 using Sphene.API.Dto;
 using Sphene.API.Dto.User;
+using Sphene.API.Dto.Visibility;
 using Sphene.API.Dto.CharaData;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Logging;
@@ -26,6 +27,24 @@ public partial class ApiController
         catch (Exception ex)
         {
             Logger.LogWarning(ex, "Error during upload of files");
+        }
+    }
+
+    public async Task UserReportVisibility(UserVisibilityReportDto dto)
+    {
+        if (!IsConnected)
+        {
+            Logger.LogDebug("Suppressing visibility report for {target} - not connected", dto.Target.AliasOrUID);
+            return;
+        }
+        try
+        {
+            await _spheneHub!.InvokeAsync(nameof(UserReportVisibility), dto).ConfigureAwait(false);
+            Logger.LogDebug("Sent visibility report to server for reporter={reporter}, target={target}, proximity={visible}", dto.Reporter.UID, dto.Target.AliasOrUID, dto.IsVisible);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Failed to report visibility to server for {target}", dto.Target.AliasOrUID);
         }
     }
 

@@ -16,6 +16,7 @@ using System.Globalization;
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
 using Dalamud.Interface.ImGuiNotification;
+using Sphene.API.Dto.Visibility;
 
 namespace Sphene.PlayerData.Pairs;
 
@@ -144,9 +145,9 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
 
     public List<Pair> GetOnlineUserPairs() => _allClientPairs.Where(p => !string.IsNullOrEmpty(p.Value.GetPlayerNameHash())).Select(p => p.Value).ToList();
 
-    public int GetVisibleUserCount() => _allClientPairs.Count(p => p.Value.IsVisible);
+    public int GetVisibleUserCount() => _allClientPairs.Count(p => p.Value.IsMutuallyVisible);
 
-    public List<UserData> GetVisibleUsers() => [.. _allClientPairs.Where(p => p.Value.IsVisible).Select(p => p.Key)];
+    public List<UserData> GetVisibleUsers() => [.. _allClientPairs.Where(p => p.Value.IsMutuallyVisible).Select(p => p.Key)];
 
     public void MarkPairOffline(UserData user)
     {
@@ -366,6 +367,34 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         RecreateLazy();
     }
 
+    public void UpdateMutualVisibility(MutualVisibilityDto dto)
+    {
+        try
+        {
+            var currentUid = _apiController.Value.UID;
+            if (string.IsNullOrEmpty(currentUid)) return;
+
+            UserData? other = null;
+            if (string.Equals(dto.UserA.UID, currentUid, StringComparison.Ordinal))
+                other = dto.UserB;
+            else if (string.Equals(dto.UserB.UID, currentUid, StringComparison.Ordinal))
+                other = dto.UserA;
+            else
+                return;
+
+            if (other != null && _allClientPairs.TryGetValue(other, out var pair))
+            {
+                pair.SetMutualVisibility(dto.IsMutuallyVisible);
+                Logger.LogDebug("Mutual visibility updated for {user}: {state}", other.AliasOrUID, dto.IsMutuallyVisible);
+                Mediator.Publish(new RefreshUiMessage());
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Failed to update mutual visibility");
+        }
+    }
+
     public void RemoveUserPair(UserDto dto)
     {
         if (_allClientPairs.TryGetValue(dto.User, out var pair))
@@ -500,7 +529,7 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         if (args.MenuType == Dalamud.Game.Gui.ContextMenu.ContextMenuType.Inventory) return;
         if (!_configurationService.Current.EnableRightClickMenus) return;
 
-        foreach (var pair in _allClientPairs.Where((p => p.Value.IsVisible)))
+        foreach (var pair in _allClientPairs.Where((p => p.Value.IsMutuallyVisible)))
         {
             pair.Value.AddContextMenu(args);
         }
@@ -533,7 +562,7 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
                 // Also include visible users who are members of this group but not currently in memberPairs
                 // This handles cases where visible users are syncshell members but not showing up
                 var visibleMemberPairs = _allClientPairs.Select(p => p.Value)
-                    .Where(p => p.IsVisible && 
+                    .Where(p => p.IsMutuallyVisible && 
                                !memberPairs.Contains(p) && 
                                group.Value.GroupPairUserInfos.ContainsKey(p.UserData.UID))
                     .ToList();
@@ -542,7 +571,7 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
                 // For area-bound syncshells with no permanent members, also include all visible users
                 if (group.Value.GroupPairUserInfos.Count == 0 && _areaBoundSyncshellService.Value.IsAreaBoundSyncshell(group.Value.Group.GID))
                 {
-                    var areaBoundVisiblePairs = _allClientPairs.Select(p => p.Value).Where(p => p.IsVisible && !memberPairs.Contains(p)).ToList();
+                    var areaBoundVisiblePairs = _allClientPairs.Select(p => p.Value).Where(p => p.IsMutuallyVisible && !memberPairs.Contains(p)).ToList();
                     memberPairs.AddRange(areaBoundVisiblePairs);
                 }
                 
@@ -564,7 +593,7 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
                 var memberGroups = _allGroups.Where(k => pair.UserPair.Groups.Contains(k.Key.GID, StringComparer.Ordinal)).Select(k => k.Value).ToList();
                 
                 // For visible users, also check if they should be included in area-bound syncshells
-                if (pair.IsVisible)
+                if (pair.IsMutuallyVisible)
                 {
                     foreach (var group in _allGroups.Values)
                     {

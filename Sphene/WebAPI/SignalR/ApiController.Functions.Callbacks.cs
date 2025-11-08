@@ -222,6 +222,13 @@ public partial class ApiController
         return Task.CompletedTask;
     }
 
+    public Task Client_UserMutualVisibilityUpdate(Sphene.API.Dto.Visibility.MutualVisibilityDto dto)
+    {
+        Logger.LogDebug("Client_UserMutualVisibilityUpdate: {dto}", dto);
+        ExecuteSafely(() => _pairManager.UpdateMutualVisibility(dto));
+        return Task.CompletedTask;
+    }
+
     // Client_UserAckOtherUpdate method removed - AckOther is controlled by other player's AckYou
 
     public Task Client_GposeLobbyJoin(UserData userData)
@@ -401,6 +408,12 @@ public partial class ApiController
     {
         if (_initialized) return;
         _spheneHub!.On(nameof(Client_UserAckYouUpdate), act);
+    }
+
+    public void OnUserMutualVisibilityUpdate(Action<Sphene.API.Dto.Visibility.MutualVisibilityDto> act)
+    {
+        if (_initialized) return;
+        _spheneHub!.On(nameof(Client_UserMutualVisibilityUpdate), act);
     }
 
     // OnUserAckOtherUpdate method removed - AckOther is controlled by other player's AckYou

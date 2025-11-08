@@ -122,9 +122,9 @@ public class PopoutProfileUi : WindowMediatorSubscriberBase
             {
                 UiSharedService.ColorText(note, ImGuiColors.DalamudGrey);
             }
-            string status = _pair.IsVisible ? "Visible" : (_pair.IsOnline ? "Online" : "Offline");
-            UiSharedService.ColorText(status, (_pair.IsVisible || _pair.IsOnline) ? ImGuiColors.HealerGreen : ImGuiColors.DalamudRed);
-            if (_pair.IsVisible)
+        string status = _pair.IsMutuallyVisible ? "Visible" : (_pair.IsOnline ? "Online" : "Offline");
+        UiSharedService.ColorText(status, (_pair.IsMutuallyVisible || _pair.IsOnline) ? ImGuiColors.HealerGreen : ImGuiColors.DalamudRed);
+        if (_pair.IsMutuallyVisible)
             {
                 ImGui.SameLine();
                 ImGui.TextUnformatted($"({_pair.PlayerName})");

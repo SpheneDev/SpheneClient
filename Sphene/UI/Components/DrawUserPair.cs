@@ -475,7 +475,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
                     ? FontAwesomeIcon.User : FontAwesomeIcon.Users));
             userPairText = _pair.UserData.AliasOrUID + " is offline";
         }
-        else if (_pair.IsVisible)
+        else if (_pair.IsMutuallyVisible)
         {
             // Add syncshell indicator for visible pairs that are NOT directly paired
             if (_syncedGroups.Any() && _pair.IndividualPairStatus == API.Data.Enum.IndividualPairStatus.None)
@@ -509,8 +509,8 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
             userPairText = _pair.UserData.AliasOrUID + " is online";
         }
 
-        // Add synchronization status indicator - only show for visible pairs
-        if (_pair.IsOnline && _pair.IsVisible)
+        // Add synchronization status indicator - only show for mutually visible pairs
+        if (_pair.IsOnline && _pair.IsMutuallyVisible)
         {
             ImGui.SameLine();
             // Show clock for any pending acknowledgment (including build start without a specific acknowledgment ID)
