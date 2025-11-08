@@ -82,6 +82,7 @@ public class CompactUi : WindowMediatorSubscriberBase
     private bool _showProgressPopup = false;
     private bool _conversionWindowOpen = false;
     private bool _conversionProgressWindowOpen = false;
+    private bool _autoSilentConversion = false;
     private Dictionary<string, string[]> _texturesToConvert = new();
     private Task? _conversionTask;
     private CancellationTokenSource _conversionCancellationTokenSource = new();
@@ -211,7 +212,8 @@ public class CompactUi : WindowMediatorSubscriberBase
                 if (_backupStartTime == DateTime.MinValue)
                     _backupStartTime = DateTime.Now;
                 AppendBackupStep(progress.fileName);
-                _conversionProgressWindowOpen = true; // ensure window shows while backup runs
+                if (!_autoSilentConversion)
+                    _conversionProgressWindowOpen = true; // ensure window shows while backup runs
             }
             catch { }
         };
@@ -225,7 +227,8 @@ public class CompactUi : WindowMediatorSubscriberBase
                 if (_backupStartTime == DateTime.MinValue)
                     _backupStartTime = DateTime.Now;
                 AppendBackupStep(e.Item1);
-                _conversionProgressWindowOpen = true;
+                if (!_autoSilentConversion)
+                    _conversionProgressWindowOpen = true;
             }
             catch { }
         };
@@ -2111,7 +2114,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                             StartTextureConversion(nonBc7Textures);
                             _conversionWindowOpen = false;
                             _cachedAnalysisForPopup = null; // Clear cached analysis when window closes
-                            _conversionProgressWindowOpen = true;
+                            _autoSilentConversion = true; // suppress progress window for automatic background conversions
                         }
                         else
                         {
@@ -2151,6 +2154,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                     StartTextureConversion(nonBc7Textures);
                     _conversionWindowOpen = false;
                     _cachedAnalysisForPopup = null; // Clear cached analysis when window closes
+                    _autoSilentConversion = false; // show progress for manual conversion
                     _conversionProgressWindowOpen = true;
                 }
 
@@ -2226,7 +2230,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         if (!converting && !_conversionProgressWindowOpen)
             return;
 
-        if (converting)
+        if (converting && !_autoSilentConversion)
             _conversionProgressWindowOpen = true;
 
         using (SpheneCustomTheme.ApplyContextMenuTheme())
@@ -2584,7 +2588,11 @@ public class CompactUi : WindowMediatorSubscriberBase
         {
             _conversionTask = _ipcManager.Penumbra.ConvertTextureFiles(_logger, _texturesToConvert, _conversionProgress, _conversionCancellationTokenSource.Token);
             // Notify ShrinkU when conversion finishes to refresh its UI and scans
-            _conversionTask.ContinueWith(t => { try { _shrinkuConversionService.NotifyExternalTextureChange("conversion-completed"); } catch { } }, TaskScheduler.Default);
+            _conversionTask.ContinueWith(t =>
+            {
+                try { _shrinkuConversionService.NotifyExternalTextureChange("conversion-completed"); } catch { }
+                finally { _autoSilentConversion = false; }
+            }, TaskScheduler.Default);
         }
     }
 
@@ -2605,6 +2613,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                 var conversionTask = _ipcManager.Penumbra.ConvertTextureFiles(_logger, _texturesToConvert, _conversionProgress, _conversionCancellationTokenSource.Token);
                 await conversionTask;
                 try { _shrinkuConversionService.NotifyExternalTextureChange("conversion-completed"); } catch { }
+                _autoSilentConversion = false;
                 
                 _logger.LogDebug("Texture conversion completed successfully");
             }
