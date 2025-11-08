@@ -14,6 +14,7 @@ using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using ObjectKind = Sphene.API.Data.Enum.ObjectKind;
+using System.Numerics;
 
 namespace Sphene.PlayerData.Handlers;
 
@@ -42,6 +43,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
     private bool _isVisible;
     private Guid _penumbraCollection;
     private bool _redrawOnNextApplication = false;
+    private const float MaxProximityDistanceMeters = 110f;
 
     public PairHandler(ILogger<PairHandler> logger, Pair pair,
         GameObjectHandlerFactory gameObjectHandlerFactory,
@@ -591,22 +593,42 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                 $"Initializing User For Character {pc.Name}")));
         }
 
-        if (_charaHandler?.Address != nint.Zero && !IsVisible)
+        if (_charaHandler?.Address != nint.Zero)
         {
-            Guid appData = Guid.NewGuid();
-            IsVisible = true;
-            if (_cachedData != null)
-            {
-                Logger.LogTrace("[BASE-{appBase}] {this} visibility changed, now: {visi}, cached data exists", appData, this, IsVisible);
+            // Compute proximity to local player; gate visibility by 110 meters
+            var remoteObj = _charaHandler.GetGameObject();
+            var localPlayer = _dalamudUtil.GetPlayerCharacter();
 
-                _ = Task.Run(() =>
-                {
-                    ApplyCharacterData(appData, _cachedData!, forceApplyCustomization: true);
-                });
-            }
-            else
+            if (remoteObj != null && localPlayer != null)
             {
-                Logger.LogTrace("{this} visibility changed, now: {visi}, no cached data exists", this, IsVisible);
+                float distance = Vector3.Distance(remoteObj.Position, localPlayer.Position);
+                bool withinProximity = distance <= MaxProximityDistanceMeters;
+
+                if (withinProximity && !IsVisible)
+                {
+                    Guid appData = Guid.NewGuid();
+                    IsVisible = true;
+                    if (_cachedData != null)
+                    {
+                        Logger.LogDebug("[BASE-{appBase}] {this} visibility changed (within 110m), cached data exists", appData, this);
+                        _ = Task.Run(() =>
+                        {
+                            ApplyCharacterData(appData, _cachedData!, forceApplyCustomization: true);
+                        });
+                    }
+                    else
+                    {
+                        Logger.LogDebug("{this} visibility changed (within 110m), no cached data exists", this);
+                    }
+                }
+                else if (!withinProximity && IsVisible)
+                {
+                    // Out of proximity: mark not visible without invalidating pointer
+                    IsVisible = false;
+                    _downloadCancellationTokenSource?.CancelDispose();
+                    _downloadCancellationTokenSource = null;
+                    Logger.LogDebug("{this} visibility changed (beyond 110m), now: {visi}", this, IsVisible);
+                }
             }
         }
         else if (_charaHandler?.Address == nint.Zero && IsVisible)
