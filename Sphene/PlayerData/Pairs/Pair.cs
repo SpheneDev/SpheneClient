@@ -32,16 +32,19 @@ public class Pair : DisposableMediatorSubscriberBase
     private readonly Lazy<ApiController> _apiController;
     private CancellationTokenSource _applicationCts = new();
     private OnlineUserIdentDto? _onlineUserIdentDto = null;
+    private readonly VisibilityGateService _visibilityGateService;
 
     public Pair(ILogger<Pair> logger, UserFullPairDto userPair, PairHandlerFactory cachedPlayerFactory,
         SpheneMediator mediator, ServerConfigurationManager serverConfigurationManager,
-        PlayerPerformanceConfigService playerPerformanceConfigService, Lazy<ApiController> apiController) : base(logger, mediator)
+        PlayerPerformanceConfigService playerPerformanceConfigService, Lazy<ApiController> apiController,
+        VisibilityGateService visibilityGateService) : base(logger, mediator)
     {
         UserPair = userPair;
         _cachedPlayerFactory = cachedPlayerFactory;
         _serverConfigurationManager = serverConfigurationManager;
         _playerPerformanceConfigService = playerPerformanceConfigService;
         _apiController = apiController;
+        _visibilityGateService = visibilityGateService;
         
         // Subscribe to character data application completion messages
         Mediator.Subscribe<CharacterDataApplicationCompletedMessage>(this, async (message) => await OnCharacterDataApplicationCompleted(message));
@@ -95,6 +98,10 @@ public class Pair : DisposableMediatorSubscriberBase
     {
         try
         {
+            if (isProximityVisible && _visibilityGateService.IsGateActive)
+            {
+                return;
+            }
             var uid = _apiController.Value.UID;
             if (string.IsNullOrEmpty(uid))
             {

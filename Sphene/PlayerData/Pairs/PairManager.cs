@@ -34,6 +34,9 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
     private readonly MessageService _messageService;
     private readonly AcknowledgmentTimeoutManager _acknowledgmentTimeoutManager;
     private readonly Lazy<AreaBoundSyncshellService> _areaBoundSyncshellService;
+    private readonly VisibilityGateService _visibilityGateService;
+
+    private volatile bool _localVisibilityGateActive = false;
 
     private Lazy<List<Pair>> _directPairsInternal;
     private Lazy<Dictionary<GroupFullInfoDto, List<Pair>>> _groupPairsInternal;
@@ -44,7 +47,8 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
                 IContextMenu dalamudContextMenu, ServerConfigurationManager serverConfigurationManager,
                 Lazy<ApiController> apiController, SessionAcknowledgmentManager sessionAcknowledgmentManager,
                 MessageService messageService, AcknowledgmentTimeoutManager acknowledgmentTimeoutManager,
-                Lazy<AreaBoundSyncshellService> areaBoundSyncshellService) : base(logger, mediator)
+                Lazy<AreaBoundSyncshellService> areaBoundSyncshellService,
+                VisibilityGateService visibilityGateService) : base(logger, mediator)
     {
         _pairFactory = pairFactory;
         _configurationService = configurationService;
@@ -55,9 +59,17 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         _messageService = messageService;
         _acknowledgmentTimeoutManager = acknowledgmentTimeoutManager;
         _areaBoundSyncshellService = areaBoundSyncshellService;
+        _visibilityGateService = visibilityGateService;
 
         Mediator.Subscribe<DisconnectedMessage>(this, (_) => ClearPairs());
-        Mediator.Subscribe<CutsceneEndMessage>(this, (_) => ReapplyPairData());
+        Mediator.Subscribe<CutsceneEndMessage>(this, (_) =>
+        {
+            ClearLocalVisibilityGate("CutsceneEnd");
+            ReapplyPairData();
+        });
+        Mediator.Subscribe<CutsceneStartMessage>(this, (_) => ApplyLocalVisibilityGate(true, "CutsceneStart"));
+        Mediator.Subscribe<ZoneSwitchStartMessage>(this, (_) => ApplyLocalVisibilityGate(true, "ZoneSwitchStart"));
+        Mediator.Subscribe<ZoneSwitchEndMessage>(this, (_) => ClearLocalVisibilityGate("ZoneSwitchEnd"));
         Mediator.Subscribe<CharacterDataBuildStartedMessage>(this, (_) => SetPendingAcknowledgmentForBuildStart());
         _directPairsInternal = DirectPairsLazy();
         _groupPairsInternal = GroupPairsLazy();
@@ -384,8 +396,20 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
 
             if (other != null && _allClientPairs.TryGetValue(other, out var pair))
             {
-                pair.SetMutualVisibility(dto.IsMutuallyVisible);
-                Logger.LogDebug("Mutual visibility updated for {user}: {state}", other.AliasOrUID, dto.IsMutuallyVisible);
+                if (_localVisibilityGateActive)
+                {
+                    // Gate has precedence: never allow mutual=true while gate is active
+                    if (dto.IsMutuallyVisible)
+                    {
+                        Logger.LogDebug("Ignoring mutual=true for {user} due to local gate active", other.AliasOrUID);
+                    }
+                    pair.SetMutualVisibility(false);
+                }
+                else
+                {
+                    pair.SetMutualVisibility(dto.IsMutuallyVisible);
+                    Logger.LogDebug("Mutual visibility updated for {user}: {state}", other.AliasOrUID, dto.IsMutuallyVisible);
+                }
                 Mediator.Publish(new RefreshUiMessage());
             }
         }
@@ -620,6 +644,51 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         foreach (var pair in _allClientPairs.Select(k => k.Value))
         {
             pair.ApplyLastReceivedData(forced: true);
+        }
+    }
+
+    /// <summary>
+    /// Apply local gate precedence: ensure mutual visibility is false server-side
+    /// and proactively report proximity=false for all pairs during gate states.
+    /// </summary>
+    private void ApplyLocalVisibilityGate(bool hidden, string source)
+    {
+        try
+        {
+            if (!hidden) return;
+
+            Logger.LogDebug("Applying local visibility gate from {source}", source);
+            _localVisibilityGateActive = true;
+            _visibilityGateService.Activate();
+            foreach (var pair in _allClientPairs.Values)
+            {
+                // Force mutual visibility to false locally and inform the server
+                pair.SetMutualVisibility(false);
+                pair.ReportVisibility(false);
+            }
+            // Trigger immediate visibility reevaluation on handlers
+            Mediator.Publish(new FrameworkUpdateMessage());
+            Mediator.Publish(new RefreshUiMessage());
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Failed to apply local visibility gate from {source}", source);
+        }
+    }
+
+    private void ClearLocalVisibilityGate(string source)
+    {
+        try
+        {
+            if (!_localVisibilityGateActive) return;
+            _localVisibilityGateActive = false;
+            _visibilityGateService.Deactivate();
+            Logger.LogDebug("Cleared local visibility gate from {source}", source);
+            Mediator.Publish(new RefreshUiMessage());
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Failed to clear local visibility gate from {source}", source);
         }
     }
 

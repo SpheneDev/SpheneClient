@@ -189,6 +189,7 @@ public sealed class Plugin : IDalamudPlugin
             collection.AddSingleton<FileDownloadManagerFactory>();
             collection.AddSingleton<PairHandlerFactory>();
             collection.AddSingleton<PairFactory>();
+            collection.AddSingleton<VisibilityGateService>();
             collection.AddSingleton<XivDataAnalyzer>();
             collection.AddSingleton<CharacterAnalyzer>();
             collection.AddSingleton<TokenProvider>();
@@ -240,7 +241,8 @@ public sealed class Plugin : IDalamudPlugin
             collection.AddSingleton(s => new PairManager(s.GetRequiredService<ILogger<PairManager>>(), s.GetRequiredService<PairFactory>(),
                 s.GetRequiredService<SpheneConfigService>(), s.GetRequiredService<SpheneMediator>(), contextMenu, s.GetRequiredService<ServerConfigurationManager>(),
                 s.GetRequiredService<Lazy<ApiController>>(), s.GetRequiredService<SessionAcknowledgmentManager>(), s.GetRequiredService<MessageService>(),
-                s.GetRequiredService<AcknowledgmentTimeoutManager>(), s.GetRequiredService<Lazy<AreaBoundSyncshellService>>()));
+                s.GetRequiredService<AcknowledgmentTimeoutManager>(), s.GetRequiredService<Lazy<AreaBoundSyncshellService>>(),
+                s.GetRequiredService<VisibilityGateService>()));
             collection.AddSingleton(s => new EnhancedAcknowledgmentManager(s.GetRequiredService<ILogger<EnhancedAcknowledgmentManager>>(),
                 s.GetRequiredService<Lazy<ApiController>>().Value, s.GetRequiredService<SpheneMediator>(), new AcknowledgmentConfiguration(),
                 s.GetRequiredService<SessionAcknowledgmentManager>()));

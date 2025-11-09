@@ -30,6 +30,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
     private readonly IHostApplicationLifetime _lifetime;
     private readonly PlayerPerformanceService _playerPerformanceService;
     private readonly ServerConfigurationManager _serverConfigManager;
+    private volatile bool _localVisibilityGateActive = false;
     private readonly PluginWarningNotificationService _pluginWarningNotificationManager;
     private CancellationTokenSource? _applicationCancellationTokenSource = new();
     private Guid _applicationId;
@@ -53,7 +54,8 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         DalamudUtilService dalamudUtil, IHostApplicationLifetime lifetime,
         FileCacheManager fileDbManager, SpheneMediator mediator,
         PlayerPerformanceService playerPerformanceService,
-        ServerConfigurationManager serverConfigManager) : base(logger, mediator)
+        ServerConfigurationManager serverConfigManager,
+        VisibilityGateService visibilityGateService) : base(logger, mediator)
     {
         Pair = pair;
         _gameObjectHandlerFactory = gameObjectHandlerFactory;
@@ -65,6 +67,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         _fileDbManager = fileDbManager;
         _playerPerformanceService = playerPerformanceService;
         _serverConfigManager = serverConfigManager;
+        _localVisibilityGateActive = visibilityGateService.IsGateActive;
         // Initialize Penumbra collection asynchronously to avoid blocking constructor
         _ = Task.Run(async () => 
         {
@@ -81,9 +84,35 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         Mediator.Subscribe<FrameworkUpdateMessage>(this, (_) => FrameworkUpdate());
         Mediator.Subscribe<ZoneSwitchStartMessage>(this, (_) =>
         {
+            _localVisibilityGateActive = true;
             _downloadCancellationTokenSource?.CancelDispose();
             _charaHandler?.Invalidate();
-            IsVisible = false;
+            if (IsVisible)
+            {
+                IsVisible = false;
+                Pair.ReportVisibility(false);
+                _proximityReportedVisible = false;
+            }
+        });
+        Mediator.Subscribe<ZoneSwitchEndMessage>(this, (_) =>
+        {
+            _localVisibilityGateActive = false;
+        });
+        Mediator.Subscribe<CutsceneStartMessage>(this, (_) =>
+        {
+            _localVisibilityGateActive = true;
+            _downloadCancellationTokenSource?.CancelDispose();
+            _charaHandler?.Invalidate();
+            if (IsVisible)
+            {
+                IsVisible = false;
+                Pair.ReportVisibility(false);
+                _proximityReportedVisible = false;
+            }
+        });
+        Mediator.Subscribe<CutsceneEndMessage>(this, (_) =>
+        {
+            _localVisibilityGateActive = false;
         });
         Mediator.Subscribe<PenumbraInitializedMessage>(this, async (_) =>
         {
@@ -606,7 +635,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         if (_charaHandler?.Address != nint.Zero)
         {
             // Ensure we proactively report regained local proximity to the server
-            if (!_proximityReportedVisible)
+            if (!_proximityReportedVisible && !_localVisibilityGateActive)
             {
                 Pair.ReportVisibility(true);
                 _proximityReportedVisible = true;
@@ -663,23 +692,32 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         Logger.LogDebug("Initialized PairHandler for {alias} with name={name} ident={ident}", Pair.UserData.AliasOrUID, name, Pair.Ident);
 
         _serverConfigManager.AutoPopulateNoteForUid(Pair.UserData.UID, name);
-        Pair.ReportVisibility(true);
-        _proximityReportedVisible = true;
+        if (!_localVisibilityGateActive)
+        {
+            Pair.ReportVisibility(true);
+            _proximityReportedVisible = true;
+        }
 
         Mediator.Subscribe<ConnectedMessage>(this, (_) =>
         {
             // Reaffirm visibility once the hub is connected; UID becomes available then
             Logger.LogDebug("ConnectedMessage received - reaffirming visibility for {alias}", Pair.UserData.AliasOrUID);
-            Pair.ReportVisibility(true);
-            _proximityReportedVisible = true;
+            if (!_localVisibilityGateActive)
+            {
+                Pair.ReportVisibility(true);
+                _proximityReportedVisible = true;
+            }
         });
 
         Mediator.Subscribe<HubReconnectedMessage>(this, (_) =>
         {
             // Server reconnected after outage; reaffirm local proximity visibility
             Logger.LogDebug("HubReconnectedMessage received - reaffirming visibility for {alias}", Pair.UserData.AliasOrUID);
-            Pair.ReportVisibility(true);
-            _proximityReportedVisible = true;
+            if (!_localVisibilityGateActive)
+            {
+                Pair.ReportVisibility(true);
+                _proximityReportedVisible = true;
+            }
         });
 
         Mediator.Subscribe<DalamudLoginMessage>(this, (_) =>
@@ -688,8 +726,11 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             if (_charaHandler?.Address != nint.Zero)
             {
                 Logger.LogDebug("DalamudLoginMessage received - reaffirming visibility for {alias}", Pair.UserData.AliasOrUID);
-                Pair.ReportVisibility(true);
-                _proximityReportedVisible = true;
+                if (!_localVisibilityGateActive)
+                {
+                    Pair.ReportVisibility(true);
+                    _proximityReportedVisible = true;
+                }
             }
         });
 

@@ -691,14 +691,14 @@ public class DalamudUtilService : IHostedService, IMediatorSubscriber
                 Mediator.Publish(new ResumeScanMessage(nameof(IsInCombatOrPerforming)));
             }
 
-            if (_condition[ConditionFlag.WatchingCutscene] && !IsInCutscene)
+            if ((_condition[ConditionFlag.WatchingCutscene] || _condition[ConditionFlag.OccupiedInCutSceneEvent]) && !IsInCutscene)
             {
                 _logger.LogDebug("Cutscene start");
                 IsInCutscene = true;
                 Mediator.Publish(new CutsceneStartMessage());
                 Mediator.Publish(new HaltScanMessage(nameof(IsInCutscene)));
             }
-            else if (!_condition[ConditionFlag.WatchingCutscene] && IsInCutscene)
+            else if (!(_condition[ConditionFlag.WatchingCutscene] || _condition[ConditionFlag.OccupiedInCutSceneEvent]) && IsInCutscene)
             {
                 _logger.LogDebug("Cutscene end");
                 IsInCutscene = false;
@@ -712,30 +712,29 @@ public class DalamudUtilService : IHostedService, IMediatorSubscriber
                 return;
             }
 
-            if (_condition[ConditionFlag.BetweenAreas] || _condition[ConditionFlag.BetweenAreas51])
+            if ((_condition[ConditionFlag.BetweenAreas] || _condition[ConditionFlag.BetweenAreas51]) && !_sentBetweenAreas)
             {
-                var zone = _clientState.TerritoryType;
-                if (_lastZone != zone)
-                {
-                    _lastZone = zone;
-                    if (!_sentBetweenAreas)
-                    {
-                        _logger.LogDebug("Zone switch start");
-                        _sentBetweenAreas = true;
-                        Mediator.Publish(new ZoneSwitchStartMessage());
-                        Mediator.Publish(new HaltScanMessage(nameof(ConditionFlag.BetweenAreas)));
-                    }
-                }
-
+                _logger.LogDebug("Zone switch start");
+                _sentBetweenAreas = true;
+                Mediator.Publish(new ZoneSwitchStartMessage());
+                Mediator.Publish(new HaltScanMessage(nameof(ConditionFlag.BetweenAreas)));
                 return;
             }
 
             if (_sentBetweenAreas)
             {
-                _logger.LogDebug("Zone switch end");
-                _sentBetweenAreas = false;
-                Mediator.Publish(new ZoneSwitchEndMessage());
-                Mediator.Publish(new ResumeScanMessage(nameof(ConditionFlag.BetweenAreas)));
+                // Update the last known zone while transitioning
+                var zone = _clientState.TerritoryType;
+                if (_lastZone != zone)
+                    _lastZone = zone;
+
+                if (!(_condition[ConditionFlag.BetweenAreas] || _condition[ConditionFlag.BetweenAreas51]))
+                {
+                    _logger.LogDebug("Zone switch end");
+                    _sentBetweenAreas = false;
+                    Mediator.Publish(new ZoneSwitchEndMessage());
+                    Mediator.Publish(new ResumeScanMessage(nameof(ConditionFlag.BetweenAreas)));
+                }
             }
 
             var localPlayer = _clientState.LocalPlayer;

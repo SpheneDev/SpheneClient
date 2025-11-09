@@ -1,6 +1,7 @@
 using Sphene.API.Dto.User;
 using Sphene.PlayerData.Pairs;
 using Sphene.Services.Mediator;
+using Sphene.Services;
 using Sphene.Services.ServerConfiguration;
 using Sphene.SpheneConfiguration;
 using Microsoft.Extensions.Logging;
@@ -16,10 +17,12 @@ public class PairFactory
     private readonly ServerConfigurationManager _serverConfigurationManager;
     private readonly PlayerPerformanceConfigService _playerPerformanceConfigService;
     private readonly Lazy<ApiController> _apiController;
+    private readonly VisibilityGateService _visibilityGateService;
 
     public PairFactory(ILoggerFactory loggerFactory, PairHandlerFactory cachedPlayerFactory,
         SpheneMediator spheneMediator, ServerConfigurationManager serverConfigurationManager,
-        PlayerPerformanceConfigService playerPerformanceConfigService, Lazy<ApiController> apiController)
+        PlayerPerformanceConfigService playerPerformanceConfigService, Lazy<ApiController> apiController,
+        VisibilityGateService visibilityGateService)
     {
         _loggerFactory = loggerFactory;
         _cachedPlayerFactory = cachedPlayerFactory;
@@ -27,16 +30,17 @@ public class PairFactory
         _serverConfigurationManager = serverConfigurationManager;
         _playerPerformanceConfigService = playerPerformanceConfigService;
         _apiController = apiController;
+        _visibilityGateService = visibilityGateService;
     }
 
     public Pair Create(UserFullPairDto userPairDto)
     {
-        return new Pair(_loggerFactory.CreateLogger<Pair>(), userPairDto, _cachedPlayerFactory, _spheneMediator, _serverConfigurationManager, _playerPerformanceConfigService, _apiController);
+        return new Pair(_loggerFactory.CreateLogger<Pair>(), userPairDto, _cachedPlayerFactory, _spheneMediator, _serverConfigurationManager, _playerPerformanceConfigService, _apiController, _visibilityGateService);
     }
 
     public Pair Create(UserPairDto userPairDto)
     {
         return new Pair(_loggerFactory.CreateLogger<Pair>(), new(userPairDto.User, userPairDto.IndividualPairStatus, [], userPairDto.OwnPermissions, userPairDto.OtherPermissions),
-            _cachedPlayerFactory, _spheneMediator, _serverConfigurationManager, _playerPerformanceConfigService, _apiController);
+            _cachedPlayerFactory, _spheneMediator, _serverConfigurationManager, _playerPerformanceConfigService, _apiController, _visibilityGateService);
     }
 }

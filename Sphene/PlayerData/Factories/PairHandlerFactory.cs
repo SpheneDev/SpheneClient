@@ -23,12 +23,13 @@ public class PairHandlerFactory
     private readonly PlayerPerformanceService _playerPerformanceService;
     private readonly ServerConfigurationManager _serverConfigManager;
     private readonly PluginWarningNotificationService _pluginWarningNotificationManager;
+    private readonly VisibilityGateService _visibilityGateService;
 
     public PairHandlerFactory(ILoggerFactory loggerFactory, GameObjectHandlerFactory gameObjectHandlerFactory, IpcManager ipcManager,
         FileDownloadManagerFactory fileDownloadManagerFactory, DalamudUtilService dalamudUtilService,
         PluginWarningNotificationService pluginWarningNotificationManager, IHostApplicationLifetime hostApplicationLifetime,
         FileCacheManager fileCacheManager, SpheneMediator spheneMediator, PlayerPerformanceService playerPerformanceService,
-        ServerConfigurationManager serverConfigManager)
+        ServerConfigurationManager serverConfigManager, VisibilityGateService visibilityGateService)
     {
         _loggerFactory = loggerFactory;
         _gameObjectHandlerFactory = gameObjectHandlerFactory;
@@ -41,12 +42,13 @@ public class PairHandlerFactory
         _spheneMediator = spheneMediator;
         _playerPerformanceService = playerPerformanceService;
         _serverConfigManager = serverConfigManager;
+        _visibilityGateService = visibilityGateService;
     }
 
     public PairHandler Create(Pair pair)
     {
         return new PairHandler(_loggerFactory.CreateLogger<PairHandler>(), pair, _gameObjectHandlerFactory,
             _ipcManager, _fileDownloadManagerFactory.Create(), _pluginWarningNotificationManager, _dalamudUtilService, _hostApplicationLifetime,
-            _fileCacheManager, _spheneMediator, _playerPerformanceService, _serverConfigManager);
+            _fileCacheManager, _spheneMediator, _playerPerformanceService, _serverConfigManager, _visibilityGateService);
     }
 }
