@@ -46,6 +46,14 @@ public sealed class ShrinkUHostService : IHostedService
         try { _configService.ConfigSave += OnConfigSaved; } catch { }
     }
 
+    public bool IsConversionUiOpen
+    {
+        get
+        {
+            try { return _conversionUi != null && _conversionUi.IsOpen; } catch { return false; }
+        }
+    }
+
     public Task StartAsync(CancellationToken cancellationToken)
     {
         try

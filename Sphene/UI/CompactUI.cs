@@ -57,6 +57,7 @@ public class CompactUi : WindowMediatorSubscriberBase
     private readonly CharacterAnalyzer _characterAnalyzer;
     private readonly TextureBackupService _textureBackupService;
     private readonly AreaBoundSyncshellService _areaBoundSyncshellService;
+    private readonly ShrinkUHostService _shrinkuHostService;
     private List<IDrawFolder> _drawFolders;
     private Pair? _lastAddedUser;
     private string _lastAddedUserComment = string.Empty;
@@ -159,7 +160,8 @@ public class CompactUi : WindowMediatorSubscriberBase
         PerformanceCollectorService performanceCollectorService, IpcManager ipcManager, DalamudUtilService dalamudUtilService, CharacterAnalyzer characterAnalyzer,
         TextureBackupService textureBackupService, AreaBoundSyncshellService areaBoundSyncshellService,
         ShrinkU.Services.TextureBackupService shrinkuBackupService, ShrinkU.Services.TextureConversionService shrinkuConversionService,
-        ShrinkUConfigService shrinkuConfigService)
+        ShrinkUConfigService shrinkuConfigService,
+        ShrinkUHostService shrinkuHostService)
         : base(logger, mediator, "###SpheneMainUI", performanceCollectorService)
     {
         _uiSharedService = uiShared;
@@ -180,6 +182,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         _shrinkuConversionService = shrinkuConversionService;
         _shrinkuConfigService = shrinkuConfigService;
         _areaBoundSyncshellService = areaBoundSyncshellService;
+        _shrinkuHostService = shrinkuHostService;
         try
         {
             _automaticModeEnabled = _shrinkuConfigService.Current.TextureProcessingMode == TextureProcessingMode.Automatic;
@@ -212,7 +215,8 @@ public class CompactUi : WindowMediatorSubscriberBase
                 if (_backupStartTime == DateTime.MinValue)
                     _backupStartTime = DateTime.Now;
                 AppendBackupStep(progress.fileName);
-                if (!_autoSilentConversion)
+                // Do not show Sphene progress window while ShrinkU Conversion UI is open
+                if (!_autoSilentConversion && !(_shrinkuHostService?.IsConversionUiOpen ?? false))
                     _conversionProgressWindowOpen = true; // ensure window shows while backup runs
             }
             catch { }
@@ -227,7 +231,8 @@ public class CompactUi : WindowMediatorSubscriberBase
                 if (_backupStartTime == DateTime.MinValue)
                     _backupStartTime = DateTime.Now;
                 AppendBackupStep(e.Item1);
-                if (!_autoSilentConversion)
+                // Do not show Sphene progress window while ShrinkU Conversion UI is open
+                if (!_autoSilentConversion && !(_shrinkuHostService?.IsConversionUiOpen ?? false))
                     _conversionProgressWindowOpen = true;
             }
             catch { }
@@ -2227,10 +2232,13 @@ public class CompactUi : WindowMediatorSubscriberBase
     private void DrawConversionProgressWindow()
     {
         var converting = _conversionTask != null && !_conversionTask.IsCompleted;
+        // Suppress entirely while ShrinkU ConversionUI is open
+        if ((_shrinkuHostService?.IsConversionUiOpen ?? false))
+            return;
         if (!converting && !_conversionProgressWindowOpen)
             return;
 
-        if (converting && !_autoSilentConversion)
+        if (converting && !_autoSilentConversion && !(_shrinkuHostService?.IsConversionUiOpen ?? false))
             _conversionProgressWindowOpen = true;
 
         using (SpheneCustomTheme.ApplyContextMenuTheme())
@@ -2381,8 +2389,8 @@ public class CompactUi : WindowMediatorSubscriberBase
             }
         }
 
-        // Auto-close and cleanup once done
-        if (_conversionTask != null && _conversionTask.IsCompleted)
+        // Auto-close and cleanup once done (also handles cases where the task was nulled by lifecycle)
+        if (_conversionTask == null || _conversionTask.IsCompleted)
         {
             _conversionProgressWindowOpen = false;
             if (_texturesToConvert.Count > 0)

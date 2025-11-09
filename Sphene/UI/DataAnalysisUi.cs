@@ -117,10 +117,12 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                 _modalOpen = false;
             }
         }
-        else if (_conversionTask != null && _conversionTask.IsCompleted && _texturesToConvert.Count > 0)
+        else if (_conversionTask != null && _conversionTask.IsCompleted)
         {
+            // Ensure the progress modal always closes when conversion finishes
             _conversionTask = null;
-            _texturesToConvert.Clear();
+            if (_texturesToConvert.Count > 0)
+                _texturesToConvert.Clear();
             _showModal = false;
             _modalOpen = false;
         }
