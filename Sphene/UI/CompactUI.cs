@@ -599,17 +599,20 @@ public class CompactUi : WindowMediatorSubscriberBase
         var connectionStatus = _apiController.ServerState == ServerState.Connected ? "Connected" : "Disconnected";
         var statusTextSize = ImGui.CalcTextSize(connectionStatus);
         var availableWidth = ImGui.GetContentRegionAvail().X;
-        var buttonWidth = 22.0f;
+        var disconnectSize = _uiSharedService.GetIconButtonSize(FontAwesomeIcon.Unlink);
+        var connectSize = _uiSharedService.GetIconButtonSize(FontAwesomeIcon.Link);
+        var reconnectSize = _uiSharedService.GetIconButtonSize(FontAwesomeIcon.Redo);
         
         // Calculate positions from right to left: status indicator + text, disconnect button, reconnect button
         var statusIndicatorWidth = 25.0f; // Approximate width for status indicator
-        var totalRightContentWidth = statusTextSize.X + statusIndicatorWidth + (buttonWidth * 2) + (ImGui.GetStyle().ItemSpacing.X * 2); // Two buttons with proper spacing
+        var rightButtonsTotalWidth = (_apiController.IsConnected ? disconnectSize.X : connectSize.X) + reconnectSize.X + (ImGui.GetStyle().ItemSpacing.X * 0.5f);
+        var totalRightContentWidth = statusTextSize.X + statusIndicatorWidth + (_apiController.IsConnected ? disconnectSize.X : connectSize.X) + reconnectSize.X + (ImGui.GetStyle().ItemSpacing.X * 2);
         
         ImGui.AlignTextToFramePadding();
         ImGui.Text("Character Status");
         
         // Position disconnect button first (second from right) - move closer to right edge
-        ImGui.SameLine(availableWidth - (buttonWidth * 2) - (ImGui.GetStyle().ItemSpacing.X * 0.5f));
+        ImGui.SameLine(availableWidth - rightButtonsTotalWidth);
         
         // Disconnect/Connect button with custom styling
         if (_apiController.IsConnected)
@@ -620,7 +623,7 @@ public class CompactUi : WindowMediatorSubscriberBase
             ImGui.PushStyleColor(ImGuiCol.ButtonActive, new Vector4(1.0f, 0.6f, 0.4f, 1.0f));
             ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 1.0f, 1.0f, 1.0f));
             
-            if (_uiSharedService.IconButton(FontAwesomeIcon.Unlink, 22f))
+            if (_uiSharedService.IconButton(FontAwesomeIcon.Unlink))
             {
                 if (_serverManager.CurrentServer != null)
                 {
@@ -639,7 +642,7 @@ public class CompactUi : WindowMediatorSubscriberBase
             ImGui.PushStyleColor(ImGuiCol.ButtonActive, new Vector4(0.4f, 0.8f, 0.4f, 1.0f));
             ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 1.0f, 1.0f, 1.0f));
             
-            if (_uiSharedService.IconButton(FontAwesomeIcon.Link, 22f))
+            if (_uiSharedService.IconButton(FontAwesomeIcon.Link))
             {
                 if (_serverManager.CurrentServer != null)
                 {
@@ -663,7 +666,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         ImGui.PushStyleColor(ImGuiCol.Text, reconnectColor);
         using (ImRaii.Disabled(isReconnectButtonDisabled))
         {
-            if (_uiSharedService.IconButton(FontAwesomeIcon.Redo, 22f))
+            if (_uiSharedService.IconButton(FontAwesomeIcon.Redo))
             {
                 _lastReconnectButtonClick = reconnectCurrentTime;
                 _ = Task.Run(() => _apiController.CreateConnectionsAsync());
@@ -862,10 +865,14 @@ public class CompactUi : WindowMediatorSubscriberBase
                 
                 using (ImRaii.Disabled(isButtonDisabled))
                 {
-                    if (_uiSharedService.IconButton(FontAwesomeIcon.Play, 22f))
+                    using (ImRaii.PushFont(UiBuilder.IconFont))
                     {
-                        _lastIncognitoButtonClick = currentTime;
-                        _ = Task.Run(() => HandleIncognitoModeToggle());
+                        var playButtonSize = _uiSharedService.GetIconButtonSize(FontAwesomeIcon.Play);
+                        if (ImGui.Button(FontAwesomeIcon.Play.ToIconString(), playButtonSize))
+                        {
+                            _lastIncognitoButtonClick = currentTime;
+                            _ = Task.Run(() => HandleIncognitoModeToggle());
+                        }
                     }
                 }
                 
@@ -893,10 +900,14 @@ public class CompactUi : WindowMediatorSubscriberBase
                 
                 using (ImRaii.Disabled(isButtonDisabled))
                 {
-                    if (_uiSharedService.IconButton(FontAwesomeIcon.Heart, 22f))
+                    using (ImRaii.PushFont(UiBuilder.IconFont))
                     {
-                        _lastIncognitoButtonClick = currentTime;
-                        _ = Task.Run(() => HandleIncognitoModeToggle());
+                        var heartButtonSize = _uiSharedService.GetIconButtonSize(FontAwesomeIcon.Heart);
+                        if (ImGui.Button(FontAwesomeIcon.Heart.ToIconString(), heartButtonSize))
+                        {
+                            _lastIncognitoButtonClick = currentTime;
+                            _ = Task.Run(() => HandleIncognitoModeToggle());
+                        }
                     }
                 }
                 
@@ -925,9 +936,13 @@ public class CompactUi : WindowMediatorSubscriberBase
                 ImGui.Dummy(new Vector2(10, 0));
                 ImGui.SameLine();
                 
-                if (_uiSharedService.IconButton(FontAwesomeIcon.MapMarkerAlt, 22f))
+                using (ImRaii.PushFont(UiBuilder.IconFont))
                 {
-                    _areaBoundSyncshellService.TriggerAreaSyncshellSelection();
+                    var areaButtonSize = _uiSharedService.GetIconButtonSize(FontAwesomeIcon.MapMarkerAlt);
+                    if (ImGui.Button(FontAwesomeIcon.MapMarkerAlt.ToIconString(), areaButtonSize))
+                    {
+                        _areaBoundSyncshellService.TriggerAreaSyncshellSelection();
+                    }
                 }
                 UiSharedService.AttachToolTip("Open Area Syncshell Selection");
             }
@@ -936,7 +951,8 @@ public class CompactUi : WindowMediatorSubscriberBase
         
         // Right side: Texture Management
         var availableWidth = ImGui.GetContentRegionAvail().X;
-        var buttonWidth = 22f;
+        var conversionButtonSize = _uiSharedService.GetIconButtonSize(FontAwesomeIcon.ArrowsToEye);
+        var buttonWidth = conversionButtonSize.X;
         var spacing = ImGui.GetStyle().ItemSpacing.X;
         
         // Calculate actual width needed for texture section
@@ -962,9 +978,12 @@ public class CompactUi : WindowMediatorSubscriberBase
             // Styled conversion button with archive icon - disabled while background conversion is running
             using (ImRaii.Disabled(_shrinkuConversionService.IsConverting))
             {
-                if (_uiSharedService.IconButton(FontAwesomeIcon.FileArchive, 22f) && !_shrinkuConversionService.IsConverting)
+                using (ImRaii.PushFont(UiBuilder.IconFont))
                 {
-                    _conversionWindowOpen = true;
+                    if (ImGui.Button(FontAwesomeIcon.ArrowsToEye.ToIconString(), conversionButtonSize) && !_shrinkuConversionService.IsConverting)
+                    {
+                        _conversionWindowOpen = true;
+                    }
                 }
             }
             UiSharedService.AttachToolTip(_shrinkuConversionService.IsConverting

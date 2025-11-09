@@ -1007,17 +1007,25 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
         return vector.X + vector2.X + ImGui.GetStyle().FramePadding.X * 2f + num;
     }
 
-    public bool IconButton(FontAwesomeIcon icon, float? height = null)
+    public bool IconButton(FontAwesomeIcon icon, float? height = null, float? iconScale = null, float? iconPixelSize = null, float? width = null)
     {
         string text = icon.ToIconString();
 
         ImGui.PushID(text);
         Vector2 vector;
         using (IconFont.Push())
+        {
+            var scale = iconPixelSize.HasValue
+                ? iconPixelSize.Value / ImGui.GetFontSize()
+                : (iconScale ?? 1f);
+            if (iconPixelSize.HasValue) scale = MathF.Max(1f, MathF.Round(scale));
+            if (scale != 1f) ImGui.SetWindowFontScale(scale);
             vector = ImGui.CalcTextSize(text);
+            if (scale != 1f) ImGui.SetWindowFontScale(1f);
+        }
         ImDrawListPtr windowDrawList = ImGui.GetWindowDrawList();
         Vector2 cursorScreenPos = ImGui.GetCursorScreenPos();
-        float x = vector.X + ImGui.GetStyle().FramePadding.X * 2f;
+        float x = width ?? (vector.X + ImGui.GetStyle().FramePadding.X * 2f);
         float frameHeight = height ?? ImGui.GetFrameHeight();
         
         // Store button position before calling ImGui.Button
@@ -1031,7 +1039,15 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
         Vector2 pos = new Vector2(iconCenterX,
             buttonPos.Y + frameHeight / 2f - (vector.Y / 2f));
         using (IconFont.Push())
+        {
+            var scale = iconPixelSize.HasValue
+                ? iconPixelSize.Value / ImGui.GetFontSize()
+                : (iconScale ?? 1f);
+            if (iconPixelSize.HasValue) scale = MathF.Max(1f, MathF.Round(scale));
+            if (scale != 1f) ImGui.SetWindowFontScale(scale);
             windowDrawList.AddText(pos, ImGui.GetColorU32(ImGuiCol.Text), text);
+            if (scale != 1f) ImGui.SetWindowFontScale(1f);
+        }
         ImGui.PopID();
 
         return result;
