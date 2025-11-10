@@ -139,6 +139,19 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
         
         // Load current welcome page if exists
         _ = LoadCurrentWelcomePage();
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await _housingOwnershipService.ForceRefreshFromServer().ConfigureAwait(false);
+            }
+            catch
+            {
+                // Ignore errors here; UI will still show local properties
+            }
+            InitializeUiStateFromServer();
+        });
     }
 
     public GroupFullInfoDto GroupFullInfo { get; private set; }

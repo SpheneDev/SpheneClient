@@ -1,6 +1,9 @@
+using System;
+using System.Collections.Generic;
 using Sphene.API.Data;
+using Sphene.WebAPI.Data;
 
-namespace Sphene.API.Data.Comparer;
+namespace Sphene.WebAPI.Data;
 
 public class UserDataComparer : IEqualityComparer<UserData>
 {
