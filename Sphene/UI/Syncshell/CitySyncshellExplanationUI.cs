@@ -8,7 +8,7 @@ using Sphene.Services.Mediator;
 using Sphene.SpheneConfiguration;
 using System.Numerics;
 
-namespace Sphene.UI;
+namespace Sphene.UI.Syncshell;
 
 public class CitySyncshellExplanationUI : WindowMediatorSubscriberBase
 {

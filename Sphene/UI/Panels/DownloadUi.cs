@@ -6,11 +6,12 @@ using Sphene.Services;
 using Sphene.Services.Mediator;
 using Sphene.WebAPI.Files;
 using Sphene.WebAPI.Files.Models;
+using Sphene.UI.Theme;
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
 using System.Numerics;
 
-namespace Sphene.UI;
+namespace Sphene.UI.Panels;
 
 public class DownloadUi : WindowMediatorSubscriberBase
 {

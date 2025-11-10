@@ -14,6 +14,7 @@ using Sphene.Services.Mediator;
 using Sphene.Services.ServerConfiguration;
 using Sphene.SpheneConfiguration;
 using Sphene.UI.Handlers;
+using Sphene.UI.Theme;
 using Sphene.WebAPI;
 using System.Numerics;
 

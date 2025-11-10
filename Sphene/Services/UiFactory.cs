@@ -6,6 +6,8 @@ using Sphene.SpheneConfiguration;
 using Sphene.UI;
 using Sphene.UI.Components;
 using Sphene.UI.Components.Popup;
+using Sphene.UI.Panels;
+using Sphene.UI.Syncshell;
 using Sphene.WebAPI;
 using Microsoft.Extensions.Logging;
 using Dalamud.Interface.ImGuiFileDialog;

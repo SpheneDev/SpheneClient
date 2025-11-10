@@ -10,8 +10,9 @@ using Sphene.WebAPI;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using System.Runtime.InteropServices;
+using Sphene.UI.Panels;
 
-namespace Sphene.UI;
+namespace Sphene.UI.Components;
 
 public sealed class DtrEntry : IDisposable, IHostedService
 {

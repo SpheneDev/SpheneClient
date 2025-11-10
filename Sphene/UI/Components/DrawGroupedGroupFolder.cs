@@ -4,6 +4,7 @@ using Dalamud.Interface.Utility.Raii;
 using Sphene.UI.Handlers;
 using System.Collections.Immutable;
 using System.Numerics;
+using Sphene.UI.Theme;
 
 namespace Sphene.UI.Components;
 

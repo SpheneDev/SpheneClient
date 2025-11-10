@@ -10,7 +10,7 @@ using Sphene.SpheneConfiguration;
 using Sphene.SpheneConfiguration.Configurations;
 using System.Numerics;
 
-namespace Sphene.UI;
+namespace Sphene.UI.Syncshell;
 
 public class AreaBoundSyncshellConsentUI : WindowMediatorSubscriberBase
 {

@@ -17,7 +17,7 @@ using System.Text.RegularExpressions;
 using ShrinkU.Configuration;
 using ShrinkU.UI;
 
-namespace Sphene.UI;
+namespace Sphene.UI.Panels;
 
 public partial class IntroUi : WindowMediatorSubscriberBase
 {

@@ -7,6 +7,8 @@ using Sphene.Services.Mediator;
 using Sphene.Services.ServerConfiguration;
 using Sphene.UI;
 using Sphene.UI.Components;
+using Sphene.UI.Panels;
+using Sphene.UI.CharaDataHub;
 using Sphene.WebAPI;
 using Microsoft.Extensions.Logging;
 using System.Globalization;

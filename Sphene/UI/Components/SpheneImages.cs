@@ -1,6 +1,6 @@
 using System;
 
-namespace Sphene.UI;
+namespace Sphene.UI.Components;
 
 /// <summary>
 /// Central class for all images and icons in the Sphene Plugin

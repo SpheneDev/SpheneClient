@@ -15,7 +15,7 @@ using Sphene.Utils;
 using Sphene.WebAPI;
 using Microsoft.Extensions.Logging;
 
-namespace Sphene.UI;
+namespace Sphene.UI.Syncshell;
 
 internal class JoinSyncshellUI : WindowMediatorSubscriberBase
 {

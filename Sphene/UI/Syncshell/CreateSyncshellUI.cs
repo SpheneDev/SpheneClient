@@ -9,7 +9,7 @@ using Sphene.WebAPI;
 using Microsoft.Extensions.Logging;
 using System.Numerics;
 
-namespace Sphene.UI;
+namespace Sphene.UI.Syncshell;
 
 public class CreateSyncshellUI : WindowMediatorSubscriberBase
 {

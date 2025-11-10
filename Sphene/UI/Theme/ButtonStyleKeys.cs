@@ -1,4 +1,4 @@
-namespace Sphene.UI;
+﻿namespace Sphene.UI.Theme;
 
 public static class ButtonStyleKeys
 {

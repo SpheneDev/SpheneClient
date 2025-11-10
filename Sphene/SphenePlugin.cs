@@ -6,6 +6,7 @@ using Sphene.Services;
 using Sphene.Services.Mediator;
 using Sphene.Services.ServerConfiguration;
 using Sphene.UI;
+using Sphene.UI.Theme;
 using Sphene.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;

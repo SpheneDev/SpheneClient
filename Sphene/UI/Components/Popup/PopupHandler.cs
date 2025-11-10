@@ -4,6 +4,7 @@ using Dalamud.Interface.Utility;
 using Dalamud.Interface.Utility.Raii;
 using Sphene.Services;
 using Sphene.Services.Mediator;
+using Sphene.UI.Theme;
 using Microsoft.Extensions.Logging;
 using System.Numerics;
 

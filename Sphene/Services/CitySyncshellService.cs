@@ -128,7 +128,7 @@ public class CitySyncshellService : DisposableMediatorSubscriberBase, IHostedSer
                 {
                     // Get the UI instance and directly open it (don't use toggle)
                     var windows = _serviceProvider.GetServices<WindowMediatorSubscriberBase>();
-                    var citySyncshellUI = windows.OfType<UI.CitySyncshellExplanationUI>().FirstOrDefault();
+                    var citySyncshellUI = windows.OfType<Sphene.UI.Syncshell.CitySyncshellExplanationUI>().FirstOrDefault();
                     if (citySyncshellUI != null)
                     {
                         citySyncshellUI.ShowForCity(cityName);

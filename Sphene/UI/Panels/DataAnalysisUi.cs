@@ -13,8 +13,9 @@ using Sphene.Utils;
 using Microsoft.Extensions.Logging;
 using System.Linq;
 using System.Numerics;
+using Sphene.UI.Theme;
 
-namespace Sphene.UI;
+namespace Sphene.UI.Panels;
 
 public class DataAnalysisUi : WindowMediatorSubscriberBase
 {

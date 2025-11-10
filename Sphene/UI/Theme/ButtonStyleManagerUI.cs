@@ -4,7 +4,7 @@ using System.Linq;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
 
-namespace Sphene.UI;
+namespace Sphene.UI.Theme;
 
 public static class ButtonStyleManagerUI
 {

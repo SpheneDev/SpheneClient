@@ -4,7 +4,9 @@ using Dalamud.Interface;
 using Dalamud.Interface.Utility.Raii;
 using Dalamud.Bindings.ImGui;
 
-namespace Sphene.UI;
+using Sphene.UI.Components;
+
+namespace Sphene.UI.Components.Popup;
 
 public static class MarkdownFormatterPopup
 {

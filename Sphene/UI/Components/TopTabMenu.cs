@@ -8,9 +8,13 @@ using Sphene.API.Data.Extensions;
 using Sphene.PlayerData.Pairs;
 using Sphene.Services.Mediator;
 using Sphene.WebAPI;
+using Sphene.UI.Theme;
 using System.Numerics;
+using Sphene.UI.Panels;
+using Sphene.UI.CharaDataHub;
+using Sphene.UI.Syncshell;
 
-namespace Sphene.UI;
+namespace Sphene.UI.Components;
 
 public class TopTabMenu
 {

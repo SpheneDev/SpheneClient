@@ -10,7 +10,7 @@ using Microsoft.Extensions.Logging;
 using System.Numerics;
 using System.Diagnostics;
 
-namespace Sphene.UI;
+namespace Sphene.UI.Panels;
 
 public class UpdateNotificationUi : WindowMediatorSubscriberBase
 {

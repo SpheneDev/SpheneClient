@@ -13,7 +13,7 @@ using Sphene.WebAPI;
 using Sphene.WebAPI.SignalR.Utils;
 using System.Numerics;
 
-namespace Sphene.UI;
+namespace Sphene.UI.Panels;
 
 public class StatusDebugUi : WindowMediatorSubscriberBase
 {

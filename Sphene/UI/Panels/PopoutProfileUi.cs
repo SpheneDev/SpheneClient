@@ -11,7 +11,7 @@ using Sphene.Services.ServerConfiguration;
 using Microsoft.Extensions.Logging;
 using System.Numerics;
 
-namespace Sphene.UI;
+namespace Sphene.UI.Panels;
 
 public class PopoutProfileUi : WindowMediatorSubscriberBase
 {

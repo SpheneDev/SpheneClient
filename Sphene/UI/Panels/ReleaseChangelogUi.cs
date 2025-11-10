@@ -11,7 +11,7 @@ using System.Numerics;
 using System.Linq;
 using System.Text.RegularExpressions;
 
-namespace Sphene.UI;
+namespace Sphene.UI.Panels;
 
 public class ReleaseChangelogUi : WindowMediatorSubscriberBase
 {

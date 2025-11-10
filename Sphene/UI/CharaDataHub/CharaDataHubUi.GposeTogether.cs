@@ -5,7 +5,7 @@ using Dalamud.Interface.Utility;
 using Dalamud.Interface.Utility.Raii;
 using Sphene.Services.CharaData.Models;
 
-namespace Sphene.UI;
+namespace Sphene.UI.CharaDataHub;
 
 internal sealed partial class CharaDataHubUi
 {

@@ -24,6 +24,7 @@ using Sphene.WebAPI.Files;
 using Sphene.WebAPI.Files.Models;
 using Sphene.WebAPI.SignalR.Utils;
 using Sphene.UI.Components;
+using Sphene.UI.Theme;
 using Microsoft.AspNetCore.Http.Connections;
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
@@ -34,8 +35,9 @@ using System.Net.Http.Json;
 using System.Numerics;
 using System.Text;
 using System.Text.Json;
+using Sphene.UI.CharaDataHub;
 
-namespace Sphene.UI;
+namespace Sphene.UI.Panels;
 
 public class SettingsUi : WindowMediatorSubscriberBase
 {

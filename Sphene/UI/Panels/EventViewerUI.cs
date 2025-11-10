@@ -10,7 +10,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Numerics;
 
-namespace Sphene.UI;
+namespace Sphene.UI.Panels;
 
 internal class EventViewerUI : WindowMediatorSubscriberBase
 {

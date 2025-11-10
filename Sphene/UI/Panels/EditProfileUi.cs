@@ -14,8 +14,9 @@ using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using System.Diagnostics;
 using Sphene.UI.Styling;
+using Sphene.UI.Theme;
 
-namespace Sphene.UI;
+namespace Sphene.UI.Panels;
 
 public class EditProfileUi : WindowMediatorSubscriberBase
 {

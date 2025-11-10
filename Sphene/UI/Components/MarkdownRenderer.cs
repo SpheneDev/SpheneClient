@@ -8,7 +8,7 @@ using Dalamud.Interface.Utility;
 using Dalamud.Interface.Utility.Raii;
 using Dalamud.Bindings.ImGui;
 
-namespace Sphene.UI;
+namespace Sphene.UI.Components;
 
 public static class MarkdownRenderer
 {

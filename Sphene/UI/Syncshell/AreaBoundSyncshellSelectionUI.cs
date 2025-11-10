@@ -9,7 +9,7 @@ using Sphene.Services.Mediator;
 using Sphene.WebAPI;
 using System.Numerics;
 
-namespace Sphene.UI;
+namespace Sphene.UI.Syncshell;
 
 public class AreaBoundSyncshellSelectionUI : WindowMediatorSubscriberBase
 {

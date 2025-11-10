@@ -10,7 +10,7 @@ using Sphene.Utils;
 using Sphene.WebAPI;
 using Microsoft.Extensions.Logging;
 
-namespace Sphene.UI;
+namespace Sphene.UI.Panels;
 
 public class PermissionWindowUI : WindowMediatorSubscriberBase
 {

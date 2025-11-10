@@ -1,6 +1,6 @@
 using System.Linq;
 
-namespace Sphene.UI;
+namespace Sphene.UI.Theme;
 
 public static class ThemePropertyCopier
 {

@@ -18,8 +18,10 @@ using System;
 using Sphene.SpheneConfiguration.Models;
 using Sphene.Interop.Ipc;
 using Dalamud.Plugin;
+using Sphene.UI.Panels;
+using Sphene.UI.Theme;
 
-namespace Sphene.UI;
+namespace Sphene.UI.Components;
 
 public class SpheneIcon : WindowMediatorSubscriberBase, IDisposable
 {

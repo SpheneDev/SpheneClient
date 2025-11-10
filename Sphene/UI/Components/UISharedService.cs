@@ -24,6 +24,7 @@ using Sphene.Utils;
 using Sphene.WebAPI;
 using Sphene.WebAPI.SignalR;
 using Microsoft.Extensions.Logging;
+using Sphene.UI.Theme;
 using System.IdentityModel.Tokens.Jwt;
 using System.Numerics;
 using System.Runtime.InteropServices;

@@ -5,7 +5,7 @@ using Dalamud.Interface.Utility;
 using Dalamud.Interface;
 using System.Numerics;
 
-namespace Sphene.UI;
+namespace Sphene.UI.CharaDataHub;
 
 internal partial class CharaDataHubUi
 {

@@ -16,7 +16,7 @@ using Sphene.Services.ServerConfiguration;
 using Sphene.Utils;
 using Microsoft.Extensions.Logging;
 
-namespace Sphene.UI;
+namespace Sphene.UI.CharaDataHub;
 
 internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
 {

@@ -17,6 +17,7 @@ using Sphene.Services.ServerConfiguration;
 using Sphene.UI.Components;
 using Sphene.UI.Handlers;
 using Sphene.UI.Styling;
+using Sphene.UI.Theme;
 using Sphene.WebAPI;
 using Sphene.WebAPI.Files;
 using Sphene.WebAPI.Files.Models;
@@ -36,7 +37,7 @@ using SixLabors.ImageSharp.PixelFormats;
 using Dalamud.Interface.Textures.TextureWraps;
 using ShrinkU.Configuration;
 
-namespace Sphene.UI;
+namespace Sphene.UI.Panels;
 
 public class CompactUi : WindowMediatorSubscriberBase
 {

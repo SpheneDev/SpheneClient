@@ -4,7 +4,7 @@ using Dalamud.Interface.Utility;
 using Dalamud.Bindings.ImGui;
 using Sphene.UI.Styling;
 
-namespace Sphene.UI;
+namespace Sphene.UI.Theme;
 
 public static class SpheneCustomTheme
 {

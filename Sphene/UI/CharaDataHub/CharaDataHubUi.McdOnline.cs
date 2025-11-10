@@ -7,7 +7,7 @@ using Sphene.API.Dto.CharaData;
 using Sphene.Services.CharaData.Models;
 using System.Numerics;
 
-namespace Sphene.UI;
+namespace Sphene.UI.CharaDataHub;
 
 internal sealed partial class CharaDataHubUi
 {

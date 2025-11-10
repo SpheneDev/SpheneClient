@@ -10,8 +10,9 @@ using Sphene.Services.Mediator;
 using Sphene.SpheneConfiguration;
 using Microsoft.Extensions.Logging;
 using System.Numerics;
+using Sphene.UI.Components;
 
-namespace Sphene.UI;
+namespace Sphene.UI.Syncshell;
 
 public class SyncshellWelcomePageUI : WindowMediatorSubscriberBase
 {
