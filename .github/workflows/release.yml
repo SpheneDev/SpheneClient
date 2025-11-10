@@ -151,26 +151,25 @@ jobs:
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
         
-        # Read current plogonmaster.json
+        # Read full plugin array
         $jsonArray = Get-Content "plogonmaster.json" -Raw | ConvertFrom-Json
-        $jsonContent = $jsonArray[0]  # Access first element of the array
         
-        # Update version in the JSON
+        # Determine new version and tag
         $version = "${{ steps.get_version.outputs.version }}"
-        $jsonContent.AssemblyVersion = $version
-        
-        # Update download URL with new tag
         $newTag = "${{ steps.get_version.outputs.tag }}"
-        $jsonContent.DownloadLinkInstall = "https://github.com/SpheneDev/SpheneClient/releases/download/$newTag/latest.zip"
-        $jsonContent.DownloadLinkUpdate = "https://github.com/SpheneDev/SpheneClient/releases/download/$newTag/latest.zip"
+        $spheneEntry = $jsonArray | Where-Object { $_.InternalName -eq 'Sphene' -or $_.Name -eq 'Sphene' }
+        if ($null -eq $spheneEntry) {
+          Write-Error "Sphene entry not found in plogonmaster.json"
+          exit 1
+        }
         
-        # Update the array with modified content
-        $jsonArray[0] = $jsonContent
+        # Update only Sphene fields, keep other plugins untouched
+        $spheneEntry.AssemblyVersion = $version
+        $spheneEntry.DownloadLinkInstall = "https://github.com/SpheneDev/SpheneClient/releases/download/$newTag/latest.zip"
+        $spheneEntry.DownloadLinkUpdate = "https://github.com/SpheneDev/SpheneClient/releases/download/$newTag/latest.zip"
         
-        # Save updated JSON as array
-        "[" | Set-Content "plogonmaster.json" -Encoding UTF8
-        $jsonContent | ConvertTo-Json -Depth 10 | Add-Content "plogonmaster.json" -Encoding UTF8
-        "]" | Add-Content "plogonmaster.json" -Encoding UTF8
+        # Write back the full array, preserving all entries
+        $jsonArray | ConvertTo-Json -Depth 10 | Set-Content "plogonmaster.json" -Encoding UTF8
         
         # Commit and push changes
         git add plogonmaster.json
