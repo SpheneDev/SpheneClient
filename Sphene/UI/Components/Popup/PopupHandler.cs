@@ -71,8 +71,8 @@ public class PopupHandler : WindowMediatorSubscriberBase
         if (_currentHandler.ShowClose)
         {
             ImGui.Separator();
-            if (_uiSharedService.IconTextButton(FontAwesomeIcon.Times, "Close"))
-            {
+    if (_uiSharedService.IconTextButton(FontAwesomeIcon.Times, "Close", null, false, ButtonStyleKeys.Popup_Close))
+    {
                 ImGui.CloseCurrentPopup();
             }
         }

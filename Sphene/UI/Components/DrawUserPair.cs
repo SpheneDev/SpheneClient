@@ -290,7 +290,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         }
         if (_pair.IsVisible)
         {
-            if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.Sync, "Reload last data", _menuWidth))
+            if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.Sync, "Reload last data", _menuWidth, ButtonStyleKeys.Pair_ReloadLast))
             {
                 _pair.ApplyLastReceivedData(forced: true);
                 ImGui.CloseCurrentPopup();
@@ -298,7 +298,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
             UiSharedService.AttachToolTip("This reapplies the last received character data to this character");
         }
 
-        if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.PlayCircle, "Cycle pause state", _menuWidth))
+        if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.PlayCircle, "Cycle pause state", _menuWidth, ButtonStyleKeys.Pair_CyclePause))
         {
             _ = _apiController.CyclePauseAsync(_pair.UserData);
             ImGui.CloseCurrentPopup();
@@ -306,7 +306,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         ImGui.Separator();
 
         ImGui.TextUnformatted("Pair Permission Functions");
-        if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.WindowMaximize, "Open Permissions Window", _menuWidth))
+        if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.WindowMaximize, "Open Permissions Window", _menuWidth, ButtonStyleKeys.Pair_OpenPermissions))
         {
             _mediator.Publish(new OpenPermissionWindow(_pair));
             ImGui.CloseCurrentPopup();
@@ -680,7 +680,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         // Context menu button (rightmost)
         ImGui.SameLine(currentRightSide);
         ImGui.AlignTextToFramePadding();
-        if (_uiSharedService.IconButton(FontAwesomeIcon.EllipsisV))
+        if (_uiSharedService.IconButton(FontAwesomeIcon.EllipsisV, null, null, null, null, ButtonStyleKeys.Pair_Menu))
         {
             ImGui.OpenPopup("User Flyout Menu");
         }
@@ -690,7 +690,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         {
             currentRightSide -= (reloadButtonSize.X + spacingX);
             ImGui.SameLine(currentRightSide);
-            if (_uiSharedService.IconButton(FontAwesomeIcon.Sync))
+            if (_uiSharedService.IconButton(FontAwesomeIcon.Sync, null, null, null, null, ButtonStyleKeys.Pair_Reload))
             {
                 _pair.ApplyLastReceivedData(forced: true);
             }
@@ -700,7 +700,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         // Pause/Play button (leftmost of the three)
         currentRightSide -= (pauseButtonSize.X + spacingX);
         ImGui.SameLine(currentRightSide);
-        if (_uiSharedService.IconButton(pauseIcon))
+        if (_uiSharedService.IconButton(pauseIcon, null, null, null, null, ButtonStyleKeys.Pair_Pause))
         {
             var perm = _pair.UserPair!.OwnPermissions;
 
@@ -885,7 +885,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         {
             ImGui.TextUnformatted("Syncshell Moderator Functions");
             var pinText = userIsPinned ? "Unpin user" : "Pin user";
-            if (_uiSharedService.IconTextButton(FontAwesomeIcon.Thumbtack, pinText, _menuWidth, true))
+            if (_uiSharedService.IconTextButton(FontAwesomeIcon.Thumbtack, pinText, _menuWidth, true, ButtonStyleKeys.Pair_Pin))
             {
                 ImGui.CloseCurrentPopup();
                 if (!group.GroupPairUserInfos.TryGetValue(_pair.UserData.UID, out var userinfo))
@@ -900,14 +900,14 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
             }
             UiSharedService.AttachToolTip("Pin this user to the Syncshell. Pinned users will not be deleted in case of a manually initiated Syncshell clean");
 
-            if (_uiSharedService.IconTextButton(FontAwesomeIcon.Trash, "Remove user", _menuWidth, true) && UiSharedService.CtrlPressed())
+            if (_uiSharedService.IconTextButton(FontAwesomeIcon.Trash, "Remove user", _menuWidth, true, ButtonStyleKeys.Pair_Remove) && UiSharedService.CtrlPressed())
             {
                 ImGui.CloseCurrentPopup();
                 _ = _apiController.GroupRemoveUser(new(group.Group, _pair.UserData));
             }
             UiSharedService.AttachToolTip("Hold CTRL and click to remove user " + (_pair.UserData.AliasOrUID) + " from Syncshell");
 
-            if (_uiSharedService.IconTextButton(FontAwesomeIcon.UserSlash, "Ban User", _menuWidth, true))
+            if (_uiSharedService.IconTextButton(FontAwesomeIcon.UserSlash, "Ban User", _menuWidth, true, ButtonStyleKeys.Pair_Ban))
             {
                 _mediator.Publish(new OpenBanUserPopupMessage(_pair, group));
                 ImGui.CloseCurrentPopup();
@@ -921,7 +921,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         {
             ImGui.TextUnformatted("Syncshell Owner Functions");
             string modText = userIsModerator ? "Demod user" : "Mod user";
-            if (_uiSharedService.IconTextButton(FontAwesomeIcon.UserShield, modText, _menuWidth, true) && UiSharedService.CtrlPressed())
+            if (_uiSharedService.IconTextButton(FontAwesomeIcon.UserShield, modText, _menuWidth, true, ButtonStyleKeys.Pair_Mod) && UiSharedService.CtrlPressed())
             {
                 ImGui.CloseCurrentPopup();
                 if (!group.GroupPairUserInfos.TryGetValue(_pair.UserData.UID, out var userinfo))
@@ -938,7 +938,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
             UiSharedService.AttachToolTip("Hold CTRL to change the moderator status for " + (_pair.UserData.AliasOrUID) + Environment.NewLine +
                 "Moderators can kick, ban/unban, pin/unpin users and clear the Syncshell.");
 
-            if (_uiSharedService.IconTextButton(FontAwesomeIcon.Crown, "Transfer Ownership", _menuWidth, true) && UiSharedService.CtrlPressed() && UiSharedService.ShiftPressed())
+            if (_uiSharedService.IconTextButton(FontAwesomeIcon.Crown, "Transfer Ownership", _menuWidth, true, ButtonStyleKeys.Pair_Transfer) && UiSharedService.CtrlPressed() && UiSharedService.ShiftPressed())
             {
                 ImGui.CloseCurrentPopup();
                 _ = _apiController.GroupChangeOwnership(new(group.Group, _pair.UserData));

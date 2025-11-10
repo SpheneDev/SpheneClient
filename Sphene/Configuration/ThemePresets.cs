@@ -39,7 +39,7 @@ public static class ThemePresets
             IndentSpacing = 21.0f,
             
             CompactWindowPadding = new Vector2(10.6f, 8.9f),
-            CompactFramePadding = new Vector2(6.8f, 3.5f),
+            CompactFramePadding = new Vector2(6.5f, 1.8f),
             CompactItemSpacing = new Vector2(5.3f, 6.0f),
             CompactItemInnerSpacing = new Vector2(5.9f, 4.0f),
             CompactCellPadding = new Vector2(6.0f, 3.0f),
@@ -157,11 +157,11 @@ public static class ThemePresets
             CompactTitleBg = new Vector4(0.06f, 0.06f, 0.10f, 1.00f),
             CompactTitleBgActive = new Vector4(0.10f, 0.20f, 0.40f, 1.00f),
             CompactFrameBg = new Vector4(0.12f, 0.20f, 0.35f, 0.60f),
-            CompactButton = new Vector4(0.10f, 0.15f, 0.25f, 0.80f),
-            CompactButtonHovered = new Vector4(0.15f, 0.25f, 0.40f, 0.90f),
-            CompactButtonActive = new Vector4(0.20f, 0.35f, 0.55f, 1.00f),
+            CompactButton = new Vector4(0.3019608f, 0.5019608f, 0.9019608f, 0.40f),
+            CompactButtonHovered = new Vector4(0.40f, 0.60f, 1.00f, 0.60f),
+            CompactButtonActive = new Vector4(0.5019608f, 0.7019608f, 1.00f, 0.80f),
             CompactHeaderBg = new Vector4(0.08f, 0.15f, 0.30f, 0.80f),
-            CompactBorder = new Vector4(0.30f, 0.50f, 0.80f, 0.80f),
+            CompactBorder = new Vector4(0.112459175f, 0.2302277f, 0.4068802f, 0.80f),
             CompactText = new Vector4(0.90f, 0.90f, 0.90f, 1.00f),
             CompactTextSecondary = new Vector4(0.70f, 0.70f, 0.70f, 1.00f),
             CompactAccent = new Vector4(0.20f, 0.40f, 0.80f, 1.00f),
@@ -190,7 +190,130 @@ public static class ThemePresets
             CompactVisibleText = new Vector4(0.60f, 0.90f, 0.60f, 1.00f),
             CompactPairsText = new Vector4(0.55f, 0.55f, 1.00f, 1.00f),
             
-            CompactShowImGuiHeader = false
+            CompactShowImGuiHeader = false,
+
+            // Default Button Styles entries
+            ButtonStyles = new Dictionary<string, ButtonStyleOverride>
+            {
+                // TopTab buttons
+                [ButtonStyleKeys.TopTab_User] = new ButtonStyleOverride(),
+                [ButtonStyleKeys.TopTab_Users] = new ButtonStyleOverride(),
+                [ButtonStyleKeys.TopTab_Filter] = new ButtonStyleOverride(),
+                [ButtonStyleKeys.TopTab_Settings] = new ButtonStyleOverride(),
+
+                // TopTab global Individual controls
+                [ButtonStyleKeys.TopTab_IndividualPause] = new ButtonStyleOverride(),
+                [ButtonStyleKeys.TopTab_IndividualSound] = new ButtonStyleOverride(),
+                [ButtonStyleKeys.TopTab_IndividualAnimations] = new ButtonStyleOverride(),
+                [ButtonStyleKeys.TopTab_IndividualVFX] = new ButtonStyleOverride(),
+
+                // TopTab global Syncshell controls
+                [ButtonStyleKeys.TopTab_SyncshellPause] = new ButtonStyleOverride(),
+                [ButtonStyleKeys.TopTab_SyncshellSound] = new ButtonStyleOverride(),
+                [ButtonStyleKeys.TopTab_SyncshellAnimations] = new ButtonStyleOverride(),
+                [ButtonStyleKeys.TopTab_SyncshellVFX] = new ButtonStyleOverride(),
+                [ButtonStyleKeys.TopTab_SyncshellAlign] = new ButtonStyleOverride(),
+
+                // Syncshell group row (values provided below)
+
+                // Pair tag row
+                [ButtonStyleKeys.PairTag_Menu] = new ButtonStyleOverride(),
+                [ButtonStyleKeys.PairTag_Pause] = new ButtonStyleOverride(),
+
+                // CompactUI specific
+                [ButtonStyleKeys.Compact_Connect] = new ButtonStyleOverride
+                {
+                    WidthDelta = 0.0f,
+                    HeightDelta = 0.0f,
+                    IconOffset = new Vector2(0.0f, 0.0f)
+                },
+                [ButtonStyleKeys.Compact_IncognitoOn] = new ButtonStyleOverride
+                {
+                    WidthDelta = 0.0f,
+                    HeightDelta = 0.0f,
+                    IconOffset = new Vector2(1.6f, 0.9f)
+                },
+                [ButtonStyleKeys.Compact_IncognitoOff] = new ButtonStyleOverride
+                {
+                    WidthDelta = 0.0f,
+                    HeightDelta = 0.0f,
+                    IconOffset = new Vector2(1.4f, 0.0f)
+                },
+                [ButtonStyleKeys.Compact_Conversion] = new ButtonStyleOverride
+                {
+                    WidthDelta = 0.0f,
+                    HeightDelta = 0.0f,
+                    IconOffset = new Vector2(1.0f, 0.0f)
+                },
+                [ButtonStyleKeys.Compact_AreaSelect] = new ButtonStyleOverride
+                {
+                    WidthDelta = 0.0f,
+                    HeightDelta = -4.5f,
+                    IconOffset = new Vector2(0.0f, 0.0f)
+                },
+                [ButtonStyleKeys.Compact_Settings] = new ButtonStyleOverride
+                {
+                    WidthDelta = 0.0f,
+                    HeightDelta = 1.0f,
+                    IconOffset = new Vector2(0.5f, 0.4f)
+                },
+                [ButtonStyleKeys.Compact_Close] = new ButtonStyleOverride
+                {
+                    WidthDelta = 0.0f,
+                    HeightDelta = 1.0f,
+                    IconOffset = new Vector2(0.4f, -0.9f)
+                },
+
+                // Group and pair controls
+                [ButtonStyleKeys.Pair_Pause] = new ButtonStyleOverride
+                {
+                    WidthDelta = 0.6f,
+                    HeightDelta = 0.0f,
+                    IconOffset = new Vector2(0.8f, 0.0f)
+                },
+                [ButtonStyleKeys.Pair_Menu] = new ButtonStyleOverride
+                {
+                    WidthDelta = 0.0f,
+                    HeightDelta = 0.0f,
+                    IconOffset = new Vector2(0.5f, 0.0f)
+                },
+                ["GroupPair.Pause"] = new ButtonStyleOverride
+                {
+                    WidthDelta = 0.6f,
+                    HeightDelta = 0.0f,
+                    IconOffset = new Vector2(0.8f, 0.0f)
+                },
+                ["GroupPair.Menu"] = new ButtonStyleOverride
+                {
+                    WidthDelta = 0.0f,
+                    HeightDelta = 0.0f,
+                    IconOffset = new Vector2(0.5f, 0.0f)
+                },
+                [ButtonStyleKeys.GroupSyncshell_Menu] = new ButtonStyleOverride
+                {
+                    WidthDelta = 0.0f,
+                    HeightDelta = 0.0f,
+                    IconOffset = new Vector2(0.5f, 0.0f)
+                },
+                [ButtonStyleKeys.GroupSyncshell_Pause] = new ButtonStyleOverride
+                {
+                    WidthDelta = 0.0f,
+                    HeightDelta = 0.0f,
+                    IconOffset = new Vector2(1.0f, 0.0f)
+                },
+                [ButtonStyleKeys.Compact_Reconnect] = new ButtonStyleOverride
+                {
+                    WidthDelta = 0.0f,
+                    HeightDelta = 0.0f,
+                    IconOffset = new Vector2(0.0f, 0.5f)
+                },
+                [ButtonStyleKeys.Compact_Disconnect] = new ButtonStyleOverride
+                {
+                    WidthDelta = 0.0f,
+                    HeightDelta = 0.0f,
+                    IconOffset = new Vector2(0.0f, 0.0f)
+                }
+            }
         };
     }
 

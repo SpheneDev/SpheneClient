@@ -623,7 +623,7 @@ public class CompactUi : WindowMediatorSubscriberBase
             ImGui.PushStyleColor(ImGuiCol.ButtonActive, new Vector4(1.0f, 0.6f, 0.4f, 1.0f));
             ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 1.0f, 1.0f, 1.0f));
             
-            if (_uiSharedService.IconButton(FontAwesomeIcon.Unlink))
+            if (_uiSharedService.IconButton(FontAwesomeIcon.Unlink, null, null, null, null, ButtonStyleKeys.Compact_Disconnect))
             {
                 if (_serverManager.CurrentServer != null)
                 {
@@ -642,7 +642,7 @@ public class CompactUi : WindowMediatorSubscriberBase
             ImGui.PushStyleColor(ImGuiCol.ButtonActive, new Vector4(0.4f, 0.8f, 0.4f, 1.0f));
             ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 1.0f, 1.0f, 1.0f));
             
-            if (_uiSharedService.IconButton(FontAwesomeIcon.Link))
+            if (_uiSharedService.IconButton(FontAwesomeIcon.Link, null, null, null, null, ButtonStyleKeys.Compact_Connect))
             {
                 if (_serverManager.CurrentServer != null)
                 {
@@ -666,7 +666,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         ImGui.PushStyleColor(ImGuiCol.Text, reconnectColor);
         using (ImRaii.Disabled(isReconnectButtonDisabled))
         {
-            if (_uiSharedService.IconButton(FontAwesomeIcon.Redo))
+            if (_uiSharedService.IconButton(FontAwesomeIcon.Redo, null, null, null, null, ButtonStyleKeys.Compact_Reconnect))
             {
                 _lastReconnectButtonClick = reconnectCurrentTime;
                 _ = Task.Run(() => _apiController.CreateConnectionsAsync());
@@ -865,14 +865,10 @@ public class CompactUi : WindowMediatorSubscriberBase
                 
                 using (ImRaii.Disabled(isButtonDisabled))
                 {
-                    using (ImRaii.PushFont(UiBuilder.IconFont))
+                    if (_uiSharedService.IconButton(FontAwesomeIcon.Play, null, null, null, null, ButtonStyleKeys.Compact_IncognitoOff))
                     {
-                        var playButtonSize = _uiSharedService.GetIconButtonSize(FontAwesomeIcon.Play);
-                        if (ImGui.Button(FontAwesomeIcon.Play.ToIconString(), playButtonSize))
-                        {
-                            _lastIncognitoButtonClick = currentTime;
-                            _ = Task.Run(() => HandleIncognitoModeToggle());
-                        }
+                        _lastIncognitoButtonClick = currentTime;
+                        _ = Task.Run(() => HandleIncognitoModeToggle());
                     }
                 }
                 
@@ -900,14 +896,10 @@ public class CompactUi : WindowMediatorSubscriberBase
                 
                 using (ImRaii.Disabled(isButtonDisabled))
                 {
-                    using (ImRaii.PushFont(UiBuilder.IconFont))
+                    if (_uiSharedService.IconButton(FontAwesomeIcon.Heart, null, null, null, null, ButtonStyleKeys.Compact_IncognitoOn))
                     {
-                        var heartButtonSize = _uiSharedService.GetIconButtonSize(FontAwesomeIcon.Heart);
-                        if (ImGui.Button(FontAwesomeIcon.Heart.ToIconString(), heartButtonSize))
-                        {
-                            _lastIncognitoButtonClick = currentTime;
-                            _ = Task.Run(() => HandleIncognitoModeToggle());
-                        }
+                        _lastIncognitoButtonClick = currentTime;
+                        _ = Task.Run(() => HandleIncognitoModeToggle());
                     }
                 }
                 
@@ -936,13 +928,9 @@ public class CompactUi : WindowMediatorSubscriberBase
                 ImGui.Dummy(new Vector2(10, 0));
                 ImGui.SameLine();
                 
-                using (ImRaii.PushFont(UiBuilder.IconFont))
+                if (_uiSharedService.IconButton(FontAwesomeIcon.MapMarkerAlt, null, null, null, null, ButtonStyleKeys.Compact_AreaSelect))
                 {
-                    var areaButtonSize = _uiSharedService.GetIconButtonSize(FontAwesomeIcon.MapMarkerAlt);
-                    if (ImGui.Button(FontAwesomeIcon.MapMarkerAlt.ToIconString(), areaButtonSize))
-                    {
-                        _areaBoundSyncshellService.TriggerAreaSyncshellSelection();
-                    }
+                    _areaBoundSyncshellService.TriggerAreaSyncshellSelection();
                 }
                 UiSharedService.AttachToolTip("Open Area Syncshell Selection");
             }
@@ -978,12 +966,9 @@ public class CompactUi : WindowMediatorSubscriberBase
             // Styled conversion button with archive icon - disabled while background conversion is running
             using (ImRaii.Disabled(_shrinkuConversionService.IsConverting))
             {
-                using (ImRaii.PushFont(UiBuilder.IconFont))
+                if (_uiSharedService.IconButton(FontAwesomeIcon.ArrowsToEye, null, null, null, null, ButtonStyleKeys.Compact_Conversion) && !_shrinkuConversionService.IsConverting)
                 {
-                    if (ImGui.Button(FontAwesomeIcon.ArrowsToEye.ToIconString(), conversionButtonSize) && !_shrinkuConversionService.IsConverting)
-                    {
-                        _conversionWindowOpen = true;
-                    }
+                    _conversionWindowOpen = true;
                 }
             }
             UiSharedService.AttachToolTip(_shrinkuConversionService.IsConverting
@@ -3359,7 +3344,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         ImGui.PushStyleColor(ImGuiCol.ButtonActive, new Vector4(0.4f, 0.4f, 0.4f, 1.0f)); // Even lighter when pressed
         ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 1.0f, 1.0f, 1.0f)); // White text
         
-        if (_uiSharedService.IconButton(FontAwesomeIcon.Cog))
+        if (_uiSharedService.IconButton(FontAwesomeIcon.Cog, null, null, null, null, ButtonStyleKeys.Compact_Settings))
         {
             Mediator.Publish(new UiToggleMessage(typeof(SettingsUi)));
         }
@@ -3384,7 +3369,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         ImGui.PushStyleColor(ImGuiCol.ButtonActive, new Vector4(1.0f, 0.4f, 0.4f, 1.0f)); // Even lighter red when pressed
         ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 1.0f, 1.0f, 1.0f)); // White text
         
-        if (_uiSharedService.IconButton(FontAwesomeIcon.Times))
+        if (_uiSharedService.IconButton(FontAwesomeIcon.Times, null, null, null, null, ButtonStyleKeys.Compact_Close))
         {
             _logger.LogDebug("Close button clicked, closing CompactUI");
             IsOpen = false;

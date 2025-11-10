@@ -226,7 +226,7 @@ public class DrawFolderTag : DrawFolderBase
             using var menuButtonHoveredColor = ImRaii.PushColor(ImGuiCol.ButtonHovered, new Vector4(0.4f, 0.6f, 1.0f, 0.6f));
             using var menuButtonActiveColor = ImRaii.PushColor(ImGuiCol.ButtonActive, new Vector4(0.5f, 0.7f, 1.0f, 0.8f));
             
-            if (_uiSharedService.IconButton(FontAwesomeIcon.EllipsisV))
+            if (_uiSharedService.IconButton(FontAwesomeIcon.EllipsisV, menuButtonSize.Y, null, null, menuButtonSize.X, ButtonStyleKeys.PairTag_Menu))
             {
                 ImGui.OpenPopup("User Flyout Menu");
             }
@@ -244,10 +244,10 @@ public class DrawFolderTag : DrawFolderBase
 
         var allArePaused = _allPairs.All(pair => pair.UserPair!.OwnPermissions.IsPaused());
         var pauseButton = allArePaused ? FontAwesomeIcon.Play : FontAwesomeIcon.Pause;
-        var pauseButtonX = _uiSharedService.GetIconButtonSize(pauseButton).X;
+        var pauseButtonSize = _uiSharedService.GetIconButtonSize(pauseButton);
 
         // Position pause button to the left of menu button
-        var buttonPauseOffset = (shouldRenderMenu ? menuButtonOffset : currentRightSideX) - pauseButtonX - spacingX;
+        var buttonPauseOffset = (shouldRenderMenu ? menuButtonOffset : currentRightSideX) - pauseButtonSize.X - spacingX;
         ImGui.SameLine(buttonPauseOffset);
         
         // Apply brighter blue tint to pause button for better visibility
@@ -255,7 +255,7 @@ public class DrawFolderTag : DrawFolderBase
         using var pauseButtonHoveredColor = ImRaii.PushColor(ImGuiCol.ButtonHovered, new Vector4(0.4f, 0.6f, 1.0f, 0.6f));
         using var pauseButtonActiveColor = ImRaii.PushColor(ImGuiCol.ButtonActive, new Vector4(0.5f, 0.7f, 1.0f, 0.8f));
         
-        if (_uiSharedService.IconButton(pauseButton))
+        if (_uiSharedService.IconButton(pauseButton, pauseButtonSize.Y, null, null, pauseButtonSize.X, ButtonStyleKeys.PairTag_Pause))
         {
             if (allArePaused)
             {

@@ -414,7 +414,7 @@ public class DrawFolderGroup : DrawFolderBase
         using var menuButtonHoveredColor = ImRaii.PushColor(ImGuiCol.ButtonHovered, SpheneCustomTheme.CurrentTheme.CompactSyncshellButtonHovered);
         using var menuButtonActiveColor = ImRaii.PushColor(ImGuiCol.ButtonActive, SpheneCustomTheme.CurrentTheme.CompactSyncshellButtonActive);
         
-        if (_uiSharedService.IconButton(FontAwesomeIcon.EllipsisV))
+        if (_uiSharedService.IconButton(FontAwesomeIcon.EllipsisV, menuButtonSize.Y, null, null, menuButtonSize.X, ButtonStyleKeys.GroupSyncshell_Menu))
         {
             ImGui.OpenPopup("User Flyout Menu");
         }
@@ -441,7 +441,7 @@ public class DrawFolderGroup : DrawFolderBase
         using var pauseButtonHoveredColor = ImRaii.PushColor(ImGuiCol.ButtonHovered, SpheneCustomTheme.CurrentTheme.CompactSyncshellButtonHovered);
         using var pauseButtonActiveColor = ImRaii.PushColor(ImGuiCol.ButtonActive, SpheneCustomTheme.CurrentTheme.CompactSyncshellButtonActive);
         
-        if (_uiSharedService.IconButton(pauseIcon))
+        if (_uiSharedService.IconButton(pauseIcon, pauseButtonSize.Y, null, null, pauseButtonSize.X, ButtonStyleKeys.GroupSyncshell_Pause))
         {
             var perm = _groupFullInfoDto.GroupUserPermissions;
             perm.SetPaused(!perm.IsPaused());

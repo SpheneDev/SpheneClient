@@ -349,6 +349,17 @@ public class SphenePlugin : MediatorSubscriberBase, IHostedService
         target.CompactTransmissionBarBackground = cloned.CompactTransmissionBarBackground;
         target.CompactTransmissionBarForeground = cloned.CompactTransmissionBarForeground;
         target.CompactTransmissionBarBorder = cloned.CompactTransmissionBarBorder;
+
+        // Button style overrides (includes icon offsets)
+        target.ButtonStyles = cloned.ButtonStyles.ToDictionary(
+            kv => kv.Key,
+            kv => new ButtonStyleOverride
+            {
+                WidthDelta = kv.Value.WidthDelta,
+                HeightDelta = kv.Value.HeightDelta,
+                IconOffset = kv.Value.IconOffset
+            }
+        );
     }
 
     public Task StopAsync(CancellationToken cancellationToken)

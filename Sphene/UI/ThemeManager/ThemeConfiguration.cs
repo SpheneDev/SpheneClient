@@ -232,6 +232,9 @@ public class ThemeConfiguration
     
     // Event to notify when theme changes
     public event Action? ThemeChanged;
+
+    // Per-button style overrides
+    public Dictionary<string, ButtonStyleOverride> ButtonStyles { get; set; } = new();
     
     // Method to trigger theme change notification
     public void NotifyThemeChanged()
@@ -436,6 +439,13 @@ public class ThemeConfiguration
             CompactVisibleText = CompactVisibleText,
             CompactPairsText = CompactPairsText,
             CompactShowImGuiHeader = CompactShowImGuiHeader
+            ,
+            ButtonStyles = ButtonStyles.ToDictionary(kv => kv.Key, kv => new ButtonStyleOverride
+            {
+                WidthDelta = kv.Value.WidthDelta,
+                HeightDelta = kv.Value.HeightDelta,
+                IconOffset = kv.Value.IconOffset
+            })
         };
     }
     

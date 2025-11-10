@@ -1007,7 +1007,7 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
         return vector.X + vector2.X + ImGui.GetStyle().FramePadding.X * 2f + num;
     }
 
-    public bool IconButton(FontAwesomeIcon icon, float? height = null, float? iconScale = null, float? iconPixelSize = null, float? width = null)
+    public bool IconButton(FontAwesomeIcon icon, float? height = null, float? iconScale = null, float? iconPixelSize = null, float? width = null, string? styleKey = null)
     {
         string text = icon.ToIconString();
 
@@ -1027,6 +1027,17 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
         Vector2 cursorScreenPos = ImGui.GetCursorScreenPos();
         float x = width ?? (vector.X + ImGui.GetStyle().FramePadding.X * 2f);
         float frameHeight = height ?? ImGui.GetFrameHeight();
+
+        // Apply per-button style overrides if present
+        if (!string.IsNullOrEmpty(styleKey))
+        {
+            var theme = SpheneCustomTheme.CurrentTheme;
+            if (theme.ButtonStyles.TryGetValue(styleKey, out var overrideStyle))
+            {
+                x += overrideStyle.WidthDelta;
+                frameHeight += overrideStyle.HeightDelta;
+            }
+        }
         
         // Store button position before calling ImGui.Button
         Vector2 buttonPos = cursorScreenPos;
@@ -1038,6 +1049,15 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
         
         Vector2 pos = new Vector2(iconCenterX,
             buttonPos.Y + frameHeight / 2f - (vector.Y / 2f));
+
+        if (!string.IsNullOrEmpty(styleKey))
+        {
+            var theme = SpheneCustomTheme.CurrentTheme;
+            if (theme.ButtonStyles.TryGetValue(styleKey, out var overrideStyle))
+            {
+                pos += overrideStyle.IconOffset;
+            }
+        }
         using (IconFont.Push())
         {
             var scale = iconPixelSize.HasValue
@@ -1063,18 +1083,19 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
         IconText(icon, color == null ? ImGui.GetColorU32(ImGuiCol.Text) : ImGui.GetColorU32(color.Value));
     }
 
-    public bool IconTextButton(FontAwesomeIcon icon, string text, float? width = null, bool isInPopup = false)
+    public bool IconTextButton(FontAwesomeIcon icon, string text, float? width = null, bool isInPopup = false, string? styleKey = null)
     {
         return IconTextButtonInternal(icon, text,
             isInPopup ? ColorHelpers.RgbaUintToVector4(ImGui.GetColorU32(ImGuiCol.PopupBg)) : null,
-            width <= 0 ? null : width);
+            width <= 0 ? null : width,
+            null, null, styleKey);
     }
 
-    public bool IconTextActionButton(FontAwesomeIcon icon, string text, float? width = null)
+    public bool IconTextActionButton(FontAwesomeIcon icon, string text, float? width = null, string? styleKey = null)
     {
         var theme = SpheneCustomTheme.CurrentTheme;
         return IconTextButtonInternal(icon, text, theme.CompactActionButton, width <= 0 ? null : width,
-            theme.CompactActionButtonHovered, theme.CompactActionButtonActive);
+            theme.CompactActionButtonHovered, theme.CompactActionButtonActive, styleKey);
     }
 
     public IDalamudTextureWrap LoadImage(byte[] imageData)
@@ -1227,7 +1248,7 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
         ImGui.TextUnformatted(text);
     }
 
-    private bool IconTextButtonInternal(FontAwesomeIcon icon, string text, Vector4? defaultColor = null, float? width = null)
+    private bool IconTextButtonInternal(FontAwesomeIcon icon, string text, Vector4? defaultColor = null, float? width = null, string? styleKey = null)
     {
         int num = 0;
         if (defaultColor.HasValue)
@@ -1246,10 +1267,29 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
         float num2 = 3f * ImGuiHelpers.GlobalScale;
         float x = width ?? vector.X + vector2.X + ImGui.GetStyle().FramePadding.X * 2f + num2;
         float frameHeight = ImGui.GetFrameHeight();
+        if (!string.IsNullOrEmpty(styleKey))
+        {
+            var theme = SpheneCustomTheme.CurrentTheme;
+            if (theme.ButtonStyles.TryGetValue(styleKey, out var overrideStyle))
+            {
+                x += overrideStyle.WidthDelta;
+                frameHeight += overrideStyle.HeightDelta;
+            }
+        }
         bool result = ImGui.Button(string.Empty, new Vector2(x, frameHeight));
         Vector2 pos = new Vector2(cursorScreenPos.X + ImGui.GetStyle().FramePadding.X, cursorScreenPos.Y + ImGui.GetStyle().FramePadding.Y);
         using (IconFont.Push())
+        {
+            if (!string.IsNullOrEmpty(styleKey))
+            {
+                var theme = SpheneCustomTheme.CurrentTheme;
+                if (theme.ButtonStyles.TryGetValue(styleKey, out var overrideStyle))
+                {
+                    pos += overrideStyle.IconOffset;
+                }
+            }
             windowDrawList.AddText(pos, ImGui.GetColorU32(ImGuiCol.Text), icon.ToIconString());
+        }
         Vector2 pos2 = new Vector2(pos.X + vector.X + num2, cursorScreenPos.Y + ImGui.GetStyle().FramePadding.Y);
         windowDrawList.AddText(pos2, ImGui.GetColorU32(ImGuiCol.Text), text);
         ImGui.PopID();
@@ -1262,7 +1302,7 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
     }
 
     private bool IconTextButtonInternal(FontAwesomeIcon icon, string text, Vector4? defaultColor = null, float? width = null, 
-        Vector4? hoveredColor = null, Vector4? activeColor = null)
+        Vector4? hoveredColor = null, Vector4? activeColor = null, string? styleKey = null)
     {
         int num = 0;
         if (defaultColor.HasValue)
@@ -1291,10 +1331,29 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
         float num2 = 3f * ImGuiHelpers.GlobalScale;
         float x = width ?? vector.X + vector2.X + ImGui.GetStyle().FramePadding.X * 2f + num2;
         float frameHeight = ImGui.GetFrameHeight();
+        if (!string.IsNullOrEmpty(styleKey))
+        {
+            var theme = SpheneCustomTheme.CurrentTheme;
+            if (theme.ButtonStyles.TryGetValue(styleKey, out var overrideStyle))
+            {
+                x += overrideStyle.WidthDelta;
+                frameHeight += overrideStyle.HeightDelta;
+            }
+        }
         bool result = ImGui.Button(string.Empty, new Vector2(x, frameHeight));
         Vector2 pos = new Vector2(cursorScreenPos.X + ImGui.GetStyle().FramePadding.X, cursorScreenPos.Y + ImGui.GetStyle().FramePadding.Y);
         using (IconFont.Push())
+        {
+            if (!string.IsNullOrEmpty(styleKey))
+            {
+                var theme = SpheneCustomTheme.CurrentTheme;
+                if (theme.ButtonStyles.TryGetValue(styleKey, out var overrideStyle))
+                {
+                    pos += overrideStyle.IconOffset;
+                }
+            }
             windowDrawList.AddText(pos, ImGui.GetColorU32(ImGuiCol.Text), icon.ToIconString());
+        }
         Vector2 pos2 = new Vector2(pos.X + vector.X + num2, cursorScreenPos.Y + ImGui.GetStyle().FramePadding.Y);
         windowDrawList.AddText(pos2, ImGui.GetColorU32(ImGuiCol.Text), text);
         ImGui.PopID();

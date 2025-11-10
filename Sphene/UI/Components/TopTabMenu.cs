@@ -84,7 +84,7 @@ public class TopTabMenu
         using (ImRaii.PushFont(UiBuilder.IconFont))
         {
             var x = ImGui.GetCursorScreenPos();
-            if (ImGui.Button(FontAwesomeIcon.User.ToIconString(), buttonSize))
+            if (_uiSharedService.IconButton(FontAwesomeIcon.User, buttonSize.Y, null, null, buttonSize.X, ButtonStyleKeys.TopTab_User))
             {
                 TabSelection = TabSelection == SelectedTab.Individual ? SelectedTab.None : SelectedTab.Individual;
             }
@@ -97,10 +97,9 @@ public class TopTabMenu
         }
         UiSharedService.AttachToolTip("Individual Pair Menu");
 
-        using (ImRaii.PushFont(UiBuilder.IconFont))
         {
             var x = ImGui.GetCursorScreenPos();
-            if (ImGui.Button(FontAwesomeIcon.Users.ToIconString(), buttonSize))
+            if (_uiSharedService.IconButton(FontAwesomeIcon.Users, buttonSize.Y, null, null, buttonSize.X, ButtonStyleKeys.TopTab_Users))
             {
                 TabSelection = TabSelection == SelectedTab.Syncshell ? SelectedTab.None : SelectedTab.Syncshell;
             }
@@ -114,10 +113,9 @@ public class TopTabMenu
         UiSharedService.AttachToolTip("Syncshell Menu");
 
         ImGui.SameLine();
-        using (ImRaii.PushFont(UiBuilder.IconFont))
         {
             var x = ImGui.GetCursorScreenPos();
-            if (ImGui.Button(FontAwesomeIcon.Filter.ToIconString(), buttonSize))
+            if (_uiSharedService.IconButton(FontAwesomeIcon.Filter, buttonSize.Y, null, null, buttonSize.X, ButtonStyleKeys.TopTab_Filter))
             {
                 TabSelection = TabSelection == SelectedTab.Filter ? SelectedTab.None : SelectedTab.Filter;
             }
@@ -132,10 +130,9 @@ public class TopTabMenu
         UiSharedService.AttachToolTip("Filter");
 
         ImGui.SameLine();
-        using (ImRaii.PushFont(UiBuilder.IconFont))
         {
             var x = ImGui.GetCursorScreenPos();
-            if (ImGui.Button(FontAwesomeIcon.UserCog.ToIconString(), buttonSize))
+            if (_uiSharedService.IconButton(FontAwesomeIcon.UserCog, buttonSize.Y, null, null, buttonSize.X, ButtonStyleKeys.TopTab_Settings))
             {
                 TabSelection = TabSelection == SelectedTab.UserConfig ? SelectedTab.None : SelectedTab.UserConfig;
             }
@@ -222,7 +219,7 @@ public class TopTabMenu
         {
             using var disabled = ImRaii.Disabled(_globalControlCountdown > 0);
 
-            if (ImGui.Button(FontAwesomeIcon.Pause.ToIconString(), buttonSize))
+            if (_uiSharedService.IconButton(FontAwesomeIcon.Pause, buttonSize.Y, null, null, buttonSize.X, ButtonStyleKeys.TopTab_IndividualPause))
             {
                 ImGui.OpenPopup("Individual Pause");
             }
@@ -235,7 +232,7 @@ public class TopTabMenu
         {
             using var disabled = ImRaii.Disabled(_globalControlCountdown > 0);
 
-            if (ImGui.Button(FontAwesomeIcon.VolumeUp.ToIconString(), buttonSize))
+            if (_uiSharedService.IconButton(FontAwesomeIcon.VolumeUp, buttonSize.Y, null, null, buttonSize.X, ButtonStyleKeys.TopTab_IndividualSound))
             {
                 ImGui.OpenPopup("Individual Sounds");
             }
@@ -248,7 +245,7 @@ public class TopTabMenu
         {
             using var disabled = ImRaii.Disabled(_globalControlCountdown > 0);
 
-            if (ImGui.Button(FontAwesomeIcon.Running.ToIconString(), buttonSize))
+            if (_uiSharedService.IconButton(FontAwesomeIcon.Running, buttonSize.Y, null, null, buttonSize.X, ButtonStyleKeys.TopTab_IndividualAnimations))
             {
                 ImGui.OpenPopup("Individual Animations");
             }
@@ -261,7 +258,7 @@ public class TopTabMenu
         {
             using var disabled = ImRaii.Disabled(_globalControlCountdown > 0);
 
-            if (ImGui.Button(FontAwesomeIcon.Sun.ToIconString(), buttonSize))
+            if (_uiSharedService.IconButton(FontAwesomeIcon.Sun, buttonSize.Y, null, null, buttonSize.X, ButtonStyleKeys.TopTab_IndividualVFX))
             {
                 ImGui.OpenPopup("Individual VFX");
             }
@@ -330,7 +327,7 @@ public class TopTabMenu
         {
             using var disabled = ImRaii.Disabled(_globalControlCountdown > 0);
 
-            if (ImGui.Button(FontAwesomeIcon.Pause.ToIconString(), buttonSize))
+            if (_uiSharedService.IconButton(FontAwesomeIcon.Pause, buttonSize.Y, null, null, buttonSize.X, ButtonStyleKeys.TopTab_SyncshellPause))
             {
                 ImGui.OpenPopup("Syncshell Pause");
             }
@@ -344,7 +341,7 @@ public class TopTabMenu
         {
             using var disabled = ImRaii.Disabled(_globalControlCountdown > 0);
 
-            if (ImGui.Button(FontAwesomeIcon.VolumeUp.ToIconString(), buttonSize))
+            if (_uiSharedService.IconButton(FontAwesomeIcon.VolumeUp, buttonSize.Y, null, null, buttonSize.X, ButtonStyleKeys.TopTab_SyncshellSound))
             {
                 ImGui.OpenPopup("Syncshell Sounds");
             }
@@ -358,7 +355,7 @@ public class TopTabMenu
         {
             using var disabled = ImRaii.Disabled(_globalControlCountdown > 0);
 
-            if (ImGui.Button(FontAwesomeIcon.Running.ToIconString(), buttonSize))
+            if (_uiSharedService.IconButton(FontAwesomeIcon.Running, buttonSize.Y, null, null, buttonSize.X, ButtonStyleKeys.TopTab_SyncshellAnimations))
             {
                 ImGui.OpenPopup("Syncshell Animations");
             }
@@ -372,7 +369,7 @@ public class TopTabMenu
         {
             using var disabled = ImRaii.Disabled(_globalControlCountdown > 0);
 
-            if (ImGui.Button(FontAwesomeIcon.Sun.ToIconString(), buttonSize))
+            if (_uiSharedService.IconButton(FontAwesomeIcon.Sun, buttonSize.Y, null, null, buttonSize.X, ButtonStyleKeys.TopTab_SyncshellVFX))
             {
                 ImGui.OpenPopup("Syncshell VFX");
             }
@@ -436,7 +433,7 @@ public class TopTabMenu
         {
             using var disabled = ImRaii.Disabled(_globalControlCountdown > 0 || !UiSharedService.CtrlPressed());
 
-            if (ImGui.Button(FontAwesomeIcon.Check.ToIconString(), buttonSize))
+            if (_uiSharedService.IconButton(FontAwesomeIcon.Check, buttonSize.Y, null, null, buttonSize.X, ButtonStyleKeys.TopTab_SyncshellAlign))
             {
                 _ = GlobalControlCountdown(10);
                 var bulkSyncshells = _pairManager.GroupPairs.Keys.OrderBy(g => g.GroupAliasOrGID, StringComparer.OrdinalIgnoreCase)
