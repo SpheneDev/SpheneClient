@@ -138,7 +138,7 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
 
         if (_serverManager.CurrentServer?.FullPause ?? true)
         {
-            Logger.LogInformation("Not recreating Connection, paused");
+            Logger.LogDebug("Not recreating Connection, paused");
             _connectionDto = null;
             await StopConnectionAsync(ServerState.Disconnected).ConfigureAwait(false);
             _connectionCancellationTokenSource?.Cancel();
@@ -203,7 +203,7 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
 
         await StopConnectionAsync(ServerState.Disconnected).ConfigureAwait(false);
 
-        Logger.LogInformation("Recreating Connection");
+        Logger.LogDebug("Recreating Connection");
         Mediator.Publish(new EventMessage(new Services.Events.Event(nameof(ApiController), Services.Events.EventSeverity.Informational,
             $"Starting Connection to {_serverManager.CurrentServer.ServerName}")));
 
@@ -450,12 +450,12 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
         var auth = _serverManager.CurrentServer.Authentications.Find(f => string.Equals(f.CharacterName, charaName, StringComparison.Ordinal) && f.WorldId == worldId);
         if (auth?.AutoLogin ?? false)
         {
-            Logger.LogInformation("Logging into {chara}", charaName);
+            Logger.LogDebug("Logging into {chara}", charaName);
             _ = Task.Run(CreateConnectionsAsync);
         }
         else
         {
-            Logger.LogInformation("Not logging into {chara}, auto login disabled", charaName);
+            Logger.LogDebug("Not logging into {chara}, auto login disabled", charaName);
             _ = Task.Run(async () => await StopConnectionAsync(ServerState.NoAutoLogon).ConfigureAwait(false));
         }
     }
@@ -637,7 +637,7 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
     {
         ServerState = ServerState.Disconnecting;
 
-        Logger.LogInformation("Stopping existing connection");
+        Logger.LogDebug("Stopping existing connection");
         await _hubFactory.DisposeHubAsync().ConfigureAwait(false);
 
         if (_spheneHub is not null)

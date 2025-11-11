@@ -751,19 +751,24 @@ public class DalamudUtilService : IHostedService, IMediatorSubscriber
             if (isNormalFrameworkUpdate)
                 return;
 
-            if (localPlayer != null && !IsLoggedIn)
+            // Avoid emitting login/logout during area transitions to prevent connection churn
+            var isBetweenAreas = _condition[ConditionFlag.BetweenAreas] || _condition[ConditionFlag.BetweenAreas51];
+            if (!isBetweenAreas)
             {
-                _logger.LogDebug("Logged in");
-                IsLoggedIn = true;
-                _lastZone = _clientState.TerritoryType;
-                _cid = RebuildCID();
-                Mediator.Publish(new DalamudLoginMessage());
-            }
-            else if (localPlayer == null && IsLoggedIn)
-            {
-                _logger.LogDebug("Logged out");
-                IsLoggedIn = false;
-                Mediator.Publish(new DalamudLogoutMessage());
+                if (localPlayer != null && !IsLoggedIn)
+                {
+                    _logger.LogDebug("Logged in");
+                    IsLoggedIn = true;
+                    _lastZone = _clientState.TerritoryType;
+                    _cid = RebuildCID();
+                    Mediator.Publish(new DalamudLoginMessage());
+                }
+                else if (localPlayer == null && IsLoggedIn)
+                {
+                    _logger.LogDebug("Logged out");
+                    IsLoggedIn = false;
+                    Mediator.Publish(new DalamudLogoutMessage());
+                }
             }
 
             if (_gameConfig != null

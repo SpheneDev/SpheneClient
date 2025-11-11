@@ -170,8 +170,18 @@ public sealed class TokenProvider : IDisposable, IMediatorSubscriber
 
             if (string.IsNullOrEmpty(playerIdentifier))
             {
-                _logger.LogTrace("GetIdentifier: PlayerIdentifier was null, returning last identifier {identifier}", _lastJwtIdentifier);
-                return _lastJwtIdentifier;
+                try
+                {
+                    var cid = await _dalamudUtil.GetCIDAsync().ConfigureAwait(false);
+                    playerIdentifier = cid.ToString().GetHash256();
+                    _logger.LogDebug("GetIdentifier: Fallback computed playerIdentifier from CID");
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogTrace("GetIdentifier: PlayerIdentifier was null and CID fallback failed, returning last identifier {identifier}", _lastJwtIdentifier);
+                    _logger.LogDebug(ex, "GetIdentifier: CID fallback failed");
+                    return _lastJwtIdentifier;
+                }
             }
 
             if (_serverManager.CurrentServer.UseOAuth2)
