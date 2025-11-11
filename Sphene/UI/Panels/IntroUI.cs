@@ -73,8 +73,8 @@ public partial class IntroUi : WindowMediatorSubscriberBase
 
         SizeConstraints = new WindowSizeConstraints()
         {
-            MinimumSize = new Vector2(700, 500),
-            MaximumSize = new Vector2(700, 2000),
+            MinimumSize = new Vector2(700, 560),
+            MaximumSize = new Vector2(700, 600),
         };
 
         GetToSLocalization();
@@ -101,8 +101,7 @@ public partial class IntroUi : WindowMediatorSubscriberBase
         var headerHeight = HEADER_HEIGHT + 10; // Header + spacing
         var contentHeight = windowHeight - headerHeight - BUTTON_AREA_HEIGHT - 20; // Extra margin
 
-        // Content area with scrolling
-        using (var contentChild = ImRaii.Child("ContentArea", new Vector2(0, contentHeight), false))
+        using (var contentChild = ImRaii.Child("ContentArea", new Vector2(0, contentHeight), false, ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse))
         {
             if (contentChild)
             {
@@ -155,23 +154,23 @@ public partial class IntroUi : WindowMediatorSubscriberBase
 
     private void DrawModernHeader()
     {
-        var windowWidth = ImGui.GetWindowSize().X;
+        var contentWidth = ImGui.GetContentRegionAvail().X;
         var headerHeight = HEADER_HEIGHT;
         
         // Background for header
         var drawList = ImGui.GetWindowDrawList();
         var headerStart = ImGui.GetCursorScreenPos();
-        var headerEnd = new Vector2(headerStart.X + windowWidth, headerStart.Y + headerHeight);
+        var headerEnd = new Vector2(headerStart.X + contentWidth, headerStart.Y + headerHeight);
         
         drawList.AddRectFilled(headerStart, headerEnd, ImGui.GetColorU32(ImGuiCol.FrameBg), 8.0f);
         
         // Center the title - reduced padding
-        ImGui.SetCursorPosY(ImGui.GetCursorPosY() + 4);
+        ImGui.SetCursorPosY(ImGui.GetCursorPosY() - 4);
         using (_uiShared.UidFont.Push())
         {
             var titleText = "Sphene Network Setup";
             var titleSize = ImGui.CalcTextSize(titleText);
-            ImGui.SetCursorPosX((windowWidth - titleSize.X) * 0.5f);
+            ImGui.SetCursorPosX((contentWidth - titleSize.X) * 0.5f);
             UiSharedService.ColorText(titleText, ImGuiColors.TankBlue);
         }
         
@@ -214,28 +213,12 @@ public partial class IntroUi : WindowMediatorSubscriberBase
             DrawInfoBox("Integration Toggle", "You can enable or disable ShrinkU integration anytime in Settings → Appearance.", ImGuiColors.DalamudGrey3);
 
             ImGui.Spacing();
-            DrawModernButton("Open ShrinkU", Dalamud.Interface.FontAwesomeIcon.ExternalLinkAlt, () =>
-            {
-                try
-                {
-                    _shrinkuHostService.ApplyIntegrationEnabled(true);
-                    if (!_shrinkuConfig.Current.FirstRunCompleted)
-                        _shrinkuFirstRun.IsOpen = true;
-                    else
-                        _shrinkuConversion.IsOpen = true;
-                }
-                catch
-                {
-                    // Swallow exceptions to avoid UI interruption when opening ShrinkU
-                }
-            }, new Vector4(0.2f, 0.6f, 0.9f, 1.0f));
         });
     }
 
     private void DrawAgreementPageContent()
     {
-        DrawModernCard(() =>
-        {
+        
             // Language selector in top right
             var languageSize = ImGui.CalcTextSize(Strings.ToS.LanguageLabel);
             ImGui.SetCursorPosX(ImGui.GetWindowContentRegionMax().X - 120);
@@ -265,8 +248,8 @@ public partial class IntroUi : WindowMediatorSubscriberBase
             ImGui.Separator();
             ImGui.Spacing();
             
-            // Terms content in scrollable area
-            using (var child = ImRaii.Child("TermsContent", new Vector2(0, 300), true))
+            // Terms content area without scrollbars
+            using (var child = ImRaii.Child("TermsContent", new Vector2(0, 300), true, ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse))
             {
                 if (child)
                 {
@@ -277,7 +260,6 @@ public partial class IntroUi : WindowMediatorSubscriberBase
                     }
                 }
             }
-        });
     }
 
     private void DrawCacheSetupPageContent()
@@ -418,7 +400,7 @@ public partial class IntroUi : WindowMediatorSubscriberBase
         DrawModernButton("Join Discord Community", Dalamud.Interface.FontAwesomeIcon.Users, () =>
         {
             Util.OpenLink("https://discord.gg/GbnwsP2XsF");
-        }, new Vector4(0.44f, 0.47f, 0.78f, 1.0f));
+        }, new Vector4(0.44f, 0.47f, 0.78f, 1.0f), 200f, 50f);
 
         ImGui.Spacing();
         
@@ -534,11 +516,11 @@ public partial class IntroUi : WindowMediatorSubscriberBase
                 {
                     _configService.Current.AcceptedAgreement = true;
                     _configService.Save();
-                }, ImGuiColors.HealerGreen);
+                }, new Vector4(0.25f, 0.70f, 0.35f, 1.0f));
             }
             else
             {
-                DrawInfoBox("Please Wait", _timeoutLabel, ImGuiColors.DalamudYellow);
+                DrawModernButton($"Please Wait ({_timeoutLabel})", Dalamud.Interface.FontAwesomeIcon.Clock, () => { }, ImGuiColors.DalamudYellow, null, null, true);
             }
         }
         else if (_configService.Current.AcceptedAgreement
@@ -552,7 +534,7 @@ public partial class IntroUi : WindowMediatorSubscriberBase
                 DrawModernButton("Start Archive Scan", Dalamud.Interface.FontAwesomeIcon.Play, () =>
                 {
                     _cacheMonitor.InvokeScan();
-                }, ImGuiColors.HealerGreen);
+                }, new Vector4(0.25f, 0.70f, 0.35f, 1.0f));
             }
         }
         else if (_configService.Current.AcceptedAgreement 
@@ -567,7 +549,7 @@ public partial class IntroUi : WindowMediatorSubscriberBase
                 _configService.Current.HasSeenSyncshellSettings = true;
                 _configService.Save();
                 _showShrinkUPage = false;
-            }, ImGuiColors.HealerGreen);
+            }, new Vector4(0.25f, 0.70f, 0.35f, 1.0f));
         }
         else if (!_uiShared.ApiController.ServerAlive)
         {
@@ -596,7 +578,7 @@ public partial class IntroUi : WindowMediatorSubscriberBase
                     }
                     _secretKey = string.Empty;
                     _ = Task.Run(() => _uiShared.ApiController.CreateConnectionsAsync());
-                }, ImGuiColors.HealerGreen);
+                }, new Vector4(0.25f, 0.70f, 0.35f, 1.0f));
             }
         }
     }
@@ -606,18 +588,22 @@ public partial class IntroUi : WindowMediatorSubscriberBase
     {
         var drawList = ImGui.GetWindowDrawList();
         var cardStart = ImGui.GetCursorScreenPos();
+        var availableWidth = ImGui.GetContentRegionAvail().X;
         
         ImGui.BeginGroup();
         ImGui.Dummy(new Vector2(CARD_PADDING, CARD_PADDING * 0.5f));
         ImGui.Indent(CARD_PADDING);
-        
+        // Constrain text wrapping to inner width, without forcing child height
+        var innerWidth = Math.Max(0f, availableWidth - CARD_PADDING * 2);
         content();
+        ImGui.PopTextWrapPos();
         
         ImGui.Unindent(CARD_PADDING);
         ImGui.Dummy(new Vector2(CARD_PADDING, CARD_PADDING * 0.5f));
         ImGui.EndGroup();
         
-        var cardEnd = ImGui.GetItemRectMax();
+        var cardMaxY = ImGui.GetItemRectMax().Y;
+        var cardEnd = new Vector2(cardStart.X + availableWidth, cardMaxY);
         drawList.AddRectFilled(cardStart, cardEnd, ImGui.GetColorU32(ImGuiCol.ChildBg), 8.0f);
         drawList.AddRect(cardStart, cardEnd, ImGui.GetColorU32(ImGuiCol.Border), 8.0f, ImDrawFlags.None, 1.0f);
     }
@@ -630,7 +616,6 @@ public partial class IntroUi : WindowMediatorSubscriberBase
             ImGui.SameLine();
         }
         ImGui.Text(title);
-        ImGui.Separator();
         ImGui.Spacing();
     }
 
@@ -642,19 +627,68 @@ public partial class IntroUi : WindowMediatorSubscriberBase
         ImGui.Spacing();
     }
 
-    private void DrawModernButton(string text, Dalamud.Interface.FontAwesomeIcon icon, Action onClick, Vector4? color = null)
+    private void DrawModernButton(string text, Dalamud.Interface.FontAwesomeIcon icon, Action onClick, Vector4? color = null, float? width = null, float? height = null, bool disabled = false)
     {
-        var buttonWidth = ImGui.GetContentRegionAvail().X;
+        var contentAvail = ImGui.GetContentRegionAvail();
+        var targetWidth = width.HasValue ? width.Value * ImGuiHelpers.GlobalScale : contentAvail.X;
+        var targetHeight = height.HasValue ? height.Value * ImGuiHelpers.GlobalScale : Math.Max(contentAvail.Y, ImGui.GetFrameHeight());
+        var buttonSize = new Vector2(targetWidth, targetHeight);
         var actualColor = color ?? new Vector4(0.2f, 0.6f, 0.9f, 1.0f);
-        
-        using (ImRaii.PushColor(ImGuiCol.Button, actualColor))
-        using (ImRaii.PushColor(ImGuiCol.ButtonHovered, actualColor * 1.1f))
-        using (ImRaii.PushColor(ImGuiCol.ButtonActive, actualColor * 0.9f))
+
+        // Draw full-height custom button with centered icon+text
+        var drawList = ImGui.GetWindowDrawList();
+        var start = ImGui.GetCursorScreenPos();
+        var end = new Vector2(start.X + buttonSize.X, start.Y + buttonSize.Y);
+
+        // Use invisible button for input handling across the full rect
+        if (disabled) ImGui.BeginDisabled();
+        var clicked = ImGui.InvisibleButton("##modern-button", buttonSize);
+        if (disabled) ImGui.EndDisabled();
+
+        var hovered = ImGui.IsItemHovered();
+        var active = ImGui.IsItemActive();
+        var baseCol = actualColor;
+        if (disabled)
         {
-            if (_uiShared.IconTextButton(icon, text, buttonWidth))
+            baseCol = new Vector4(baseCol.X, baseCol.Y, baseCol.Z, baseCol.W * 0.6f);
+        }
+        var col = active ? baseCol * 0.9f : hovered ? baseCol * 1.1f : baseCol;
+        var colU32 = ImGui.ColorConvertFloat4ToU32(new Vector4(col.X, col.Y, col.Z, col.W));
+
+        // Background
+        var rounding = ImGui.GetStyle().FrameRounding;
+        drawList.AddRectFilled(start, end, colU32, rounding);
+
+        // Center icon + text
+        var textCol = disabled ? new Vector4(0.25f, 0.25f, 0.25f, 0.7f) : new Vector4(0.1f, 0.1f, 0.1f, 1.0f);
+        using (ImRaii.PushColor(ImGuiCol.Text, textCol))
+        {
+            var spacing = 3f * ImGuiHelpers.GlobalScale;
+            Vector2 iconSize;
+            using (_uiShared.IconFont.Push())
+                iconSize = ImGui.CalcTextSize(icon.ToIconString());
+            var textSize = ImGui.CalcTextSize(text);
+            var totalWidth = iconSize.X + spacing + textSize.X;
+            var totalHeight = Math.Max(iconSize.Y, textSize.Y);
+            var contentPos = new Vector2(
+                start.X + (buttonSize.X - totalWidth) * 0.5f,
+                start.Y + (buttonSize.Y - totalHeight) * 0.5f
+            );
+
+            var scale = 1.1f; // slightly larger text for better readability
+            ImGui.SetWindowFontScale(scale);
+            using (_uiShared.IconFont.Push())
             {
-                onClick();
+                drawList.AddText(contentPos, ImGui.GetColorU32(ImGuiCol.Text), icon.ToIconString());
             }
+            var textPos = new Vector2(contentPos.X + iconSize.X + spacing, contentPos.Y);
+            drawList.AddText(textPos, ImGui.GetColorU32(ImGuiCol.Text), text);
+            ImGui.SetWindowFontScale(1f);
+        }
+
+        if (clicked && !disabled)
+        {
+            onClick();
         }
     }
 
@@ -662,6 +696,9 @@ public partial class IntroUi : WindowMediatorSubscriberBase
     {
         var drawList = ImGui.GetWindowDrawList();
         var boxStart = ImGui.GetCursorScreenPos();
+        var containerWidth = ImGui.GetContentRegionAvail().X;
+        var style = ImGui.GetStyle();
+        var rightPadding = style.ItemSpacing.X + 8f; // ensure right inner spacing
         
         // Reserve consistent height for info boxes
         var boxHeight = BUTTON_HEIGHT + 12; // Button height + padding
@@ -669,25 +706,50 @@ public partial class IntroUi : WindowMediatorSubscriberBase
         ImGui.BeginGroup();
         ImGui.Dummy(new Vector2(6, 6));
         ImGui.Indent(10);
+        var innerWidth = Math.Max(0f, ImGui.GetContentRegionAvail().X - rightPadding);
+        ImGui.PushTextWrapPos(ImGui.GetCursorPosX() + innerWidth);
         
+        // Determine icon based on potential prefix in title and render using FontAwesome
+        var displayTitle = title ?? string.Empty;
+        var icon = Dalamud.Interface.FontAwesomeIcon.InfoCircle;
+        if (displayTitle.StartsWith("⚠ "))
+        {
+            icon = Dalamud.Interface.FontAwesomeIcon.ExclamationTriangle;
+            displayTitle = displayTitle.Substring(2).TrimStart();
+        }
+        else if (displayTitle.StartsWith("❌ "))
+        {
+            icon = Dalamud.Interface.FontAwesomeIcon.ExclamationCircle;
+            displayTitle = displayTitle.Substring(2).TrimStart();
+        }
+        else if (displayTitle.StartsWith("ℹ "))
+        {
+            icon = Dalamud.Interface.FontAwesomeIcon.InfoCircle;
+            displayTitle = displayTitle.Substring(2).TrimStart();
+        }
+
         using (ImRaii.PushColor(ImGuiCol.Text, color))
         {
-            ImGui.TextUnformatted($"ℹ {title}");
+            _uiShared.IconText(icon);
+            ImGui.SameLine();
+            ImGui.TextUnformatted(displayTitle);
         }
-        UiSharedService.TextWrapped(content);
+        UiSharedService.TextWrapped(content, ImGui.GetCursorPosX() + innerWidth);
         
         ImGui.Unindent(10);
         ImGui.Dummy(new Vector2(6, 6));
         ImGui.EndGroup();
         
-        var boxEnd = ImGui.GetItemRectMax();
+        var boxEndRect = ImGui.GetItemRectMax();
+        var boxEnd = new Vector2(boxStart.X + Math.Max(0f, containerWidth - rightPadding), boxEndRect.Y);
         
         // Ensure minimum height for consistency
-        var actualHeight = boxEnd.Y - boxStart.Y;
+        var actualHeight = boxEndRect.Y - boxStart.Y;
         if (actualHeight < boxHeight)
         {
             ImGui.Dummy(new Vector2(0, boxHeight - actualHeight));
-            boxEnd = ImGui.GetItemRectMax();
+            var newBoxEndRect = ImGui.GetItemRectMax();
+            boxEnd = new Vector2(boxStart.X + Math.Max(0f, containerWidth - rightPadding), newBoxEndRect.Y);
         }
         
         var bgColor = new Vector4(color.X, color.Y, color.Z, 0.1f);
