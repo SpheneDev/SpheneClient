@@ -69,7 +69,9 @@ public class CompactUi : WindowMediatorSubscriberBase
     private readonly HashSet<string> _prePausedSyncshells = new();
     private Sphene.Services.UpdateInfo? _updateBannerInfo;
     private DateTime _lastReconnectButtonClick = DateTime.MinValue;
-    private Vector2 _lastSize = Vector2.One;
+ private Vector2 _lastSize = Vector2.One;
+ // One-time check to correct persisted width below minimum
+ private bool _widthCorrectionChecked = false;
     private int _secretKeyIdx = -1;
     private bool _showModalForUserAddition;
     private float _transferPartHeight;
@@ -385,6 +387,12 @@ public class CompactUi : WindowMediatorSubscriberBase
 
         // Configure base window flags
         Flags |= ImGuiWindowFlags.NoDocking | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse;
+
+        // Enforce minimum window size for control panel
+        SizeConstraints = new WindowSizeConstraints()
+        {
+            MinimumSize = new(350, 400)
+        };
 
         // End of constructor
     }
@@ -802,6 +810,23 @@ public class CompactUi : WindowMediatorSubscriberBase
         // Track window size changes for mediator notifications
         var pos = ImGui.GetWindowPos();
         var size = ImGui.GetWindowSize();
+
+        // Apply width correction once: if persisted width is below 370 (unscaled), bump to 371
+        if (!_widthCorrectionChecked)
+        {
+            try
+            {
+                var unscaledWidth = size.X / ImGuiHelpers.GlobalScale;
+                if (unscaledWidth < 350f)
+                {
+                    var correctedWidth = 350f * ImGuiHelpers.GlobalScale;
+                    ImGui.SetWindowSize(new Vector2(correctedWidth, size.Y));
+                    size = new Vector2(correctedWidth, size.Y);
+                }
+            }
+            catch { }
+            finally { _widthCorrectionChecked = true; }
+        }
         
         // Separate handling for size and position changes
         var sizeChanged = _lastSize != size;
