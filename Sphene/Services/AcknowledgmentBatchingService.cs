@@ -114,7 +114,7 @@ public class AcknowledgmentBatchingService : IDisposable
         {
             try
             {
-                _logger.LogInformation("Processing batch {batchKey} with {count} users", 
+                _logger.LogDebug("Processing batch {batchKey} with {count} users", 
                     batchKey, batch.Users.Count);
 
                 // Execute the batch processing function
@@ -219,7 +219,7 @@ public class AcknowledgmentBatchingService : IDisposable
 
             try
             {
-                _logger.LogInformation("Retrying batch {batchKey} (attempt {attempt}/{maxAttempts})",
+                _logger.LogDebug("Retrying batch {batchKey} (attempt {attempt}/{maxAttempts})",
                     failedBatch.BatchKey, failedBatch.FailureCount + 1, _maxRetryAttempts);
 
                 // Execute the batch processing function

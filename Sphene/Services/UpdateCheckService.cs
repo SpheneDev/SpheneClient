@@ -40,7 +40,7 @@ public class UpdateCheckService : IHostedService, IDisposable
                 return null;
             }
             
-            _logger.LogInformation("Checking for updates from {url}", UPDATE_CHECK_URL);
+            _logger.LogDebug("Checking for updates from {url}", UPDATE_CHECK_URL);
             
             var response = await _httpClient.GetStringAsync(UPDATE_CHECK_URL);
             var updateData = JsonSerializer.Deserialize<UpdateData[]>(response);
@@ -61,7 +61,7 @@ public class UpdateCheckService : IHostedService, IDisposable
             var currentVersion = GetCurrentVersion();
             var remoteVersion = Version.Parse(spheneData.AssemblyVersion);
             
-            _logger.LogInformation("Current version: {current}, Remote version: {remote}", currentVersion, remoteVersion);
+            _logger.LogDebug("Current version: {current}, Remote version: {remote}", currentVersion, remoteVersion);
             
             if (remoteVersion > currentVersion)
             {
@@ -94,7 +94,7 @@ public class UpdateCheckService : IHostedService, IDisposable
                 return updateInfo;
             }
             
-            _logger.LogInformation("No update available");
+            _logger.LogDebug("No update available");
             return new UpdateInfo
             {
                 CurrentVersion = currentVersion,

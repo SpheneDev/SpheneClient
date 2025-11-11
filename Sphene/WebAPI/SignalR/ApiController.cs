@@ -390,11 +390,11 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
     public async Task<ConnectionDto> GetConnectionDtoAsync(bool publishConnected)
     {
         var dto = await _spheneHub!.InvokeAsync<ConnectionDto>(nameof(GetConnectionDto)).ConfigureAwait(false);
-        Logger.LogInformation("[DEBUG] ConnectionDto received - FileServerAddress: {fileServerAddress}, ServerVersion: {serverVersion}, User: {user}", 
+        Logger.LogDebug("ConnectionDto received - FileServerAddress: {fileServerAddress}, ServerVersion: {serverVersion}, User: {user}", 
             dto.ServerInfo.FileServerAddress, dto.ServerVersion, dto.User.AliasOrUID);
         if (publishConnected) 
         {
-            Logger.LogInformation("[DEBUG] Publishing ConnectedMessage with FileServerAddress: {fileServerAddress}", dto.ServerInfo.FileServerAddress);
+            Logger.LogDebug("Publishing ConnectedMessage with FileServerAddress: {fileServerAddress}", dto.ServerInfo.FileServerAddress);
             Mediator.Publish(new ConnectedMessage(dto));
         }
         return dto;

@@ -35,17 +35,17 @@ public class FileTransferOrchestrator : DisposableMediatorSubscriberBase
 
         Mediator.Subscribe<ConnectedMessage>(this, (msg) =>
         {
-            Logger.LogInformation("[DEBUG] ConnectedMessage received with FileServerAddress: {fileServerAddress}", msg.Connection.ServerInfo.FileServerAddress);
-            Logger.LogInformation("[DEBUG] Raw FileServerAddress value: '{rawValue}'", msg.Connection.ServerInfo.FileServerAddress?.ToString() ?? "NULL");
+            Logger.LogDebug("ConnectedMessage received with FileServerAddress: {fileServerAddress}", msg.Connection.ServerInfo.FileServerAddress);
+            Logger.LogDebug("Raw FileServerAddress value: '{rawValue}'", msg.Connection.ServerInfo.FileServerAddress?.ToString() ?? "NULL");
             FilesCdnUri = msg.Connection.ServerInfo.FileServerAddress;
-            Logger.LogInformation("[DEBUG] FileTransferOrchestrator initialized: {isInitialized}, FilesCdnUri: {filesCdnUri}", IsInitialized, FilesCdnUri);
+            Logger.LogDebug("FileTransferOrchestrator initialized: {isInitialized}, FilesCdnUri: {filesCdnUri}", IsInitialized, FilesCdnUri);
         });
 
         Mediator.Subscribe<DisconnectedMessage>(this, (msg) =>
         {
-            Logger.LogInformation("[DEBUG] DisconnectedMessage received, resetting FilesCdnUri to null");
+            Logger.LogDebug("DisconnectedMessage received, resetting FilesCdnUri to null");
             FilesCdnUri = null;
-            Logger.LogInformation("[DEBUG] FileTransferOrchestrator reset: {isInitialized}, FilesCdnUri: {filesCdnUri}", IsInitialized, FilesCdnUri);
+            Logger.LogDebug("FileTransferOrchestrator reset: {isInitialized}, FilesCdnUri: {filesCdnUri}", IsInitialized, FilesCdnUri);
         });
         Mediator.Subscribe<DownloadReadyMessage>(this, (msg) =>
         {

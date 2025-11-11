@@ -211,7 +211,6 @@ public class CitySyncshellService : DisposableMediatorSubscriberBase, IHostedSer
                         _mediator.Publish(consentMessage);
                     }).ConfigureAwait(false);
                     
-                    _logger.LogInformation("Sent consent request for city syncshell {cityName}", cityName);
                 }
                 else
                 {
