@@ -205,7 +205,7 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
 
     public void ReceiveCharaData(OnlineUserCharaDataDto dto)
     {
-        Logger.LogInformation("ReceiveCharaData called - User: {user}, Hash: {hash}, RequiresAck: {requiresAck}", 
+        Logger.LogDebug("ReceiveCharaData called - User: {user}, Hash: {hash}, RequiresAck: {requiresAck}", 
             dto.User.AliasOrUID, dto.DataHash[..Math.Min(8, dto.DataHash.Length)], dto.RequiresAcknowledgment);
         
         if (!_allClientPairs.TryGetValue(dto.User, out var pair))
@@ -215,7 +215,7 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         }
 
         Mediator.Publish(new EventMessage(new Event(pair.UserData, nameof(PairManager), EventSeverity.Informational, "Received Character Data")));
-        Logger.LogInformation("Calling ApplyData for user {user} with Hash {hash}", dto.User.AliasOrUID, dto.DataHash[..Math.Min(8, dto.DataHash.Length)]);
+        Logger.LogDebug("Calling ApplyData for user {user} with Hash {hash}", dto.User.AliasOrUID, dto.DataHash[..Math.Min(8, dto.DataHash.Length)]);
         pair.ApplyData(dto);
     }
 
@@ -225,8 +225,6 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
 
     public void ReceiveCharacterDataAcknowledgment(CharacterDataAcknowledgmentDto acknowledgmentDto)
     {
-        Logger.LogInformation("ReceiveCharacterDataAcknowledgment called - Hash: {hash}, User: {user}, Success: {success}", 
-            acknowledgmentDto.DataHash[..Math.Min(8, acknowledgmentDto.DataHash.Length)], acknowledgmentDto.User.AliasOrUID, acknowledgmentDto.Success);
         
         // Create unique key for deduplication (hash + user + precise timestamp)
         var preciseTimestamp = acknowledgmentDto.AcknowledgedAt.ToString("yyyy-MM-dd HH:mm:ss.fff");
@@ -235,10 +233,6 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         // Check for duplicate acknowledgment (exact same hash, user, and millisecond timestamp)
         if (_processedAcknowledgments.ContainsKey(deduplicationKey))
         {
-            Logger.LogWarning("Duplicate acknowledgment detected and ignored - Hash: {hash}, User: {user}, Timestamp: {timestamp}", 
-                acknowledgmentDto.DataHash[..Math.Min(8, acknowledgmentDto.DataHash.Length)], 
-                acknowledgmentDto.User.AliasOrUID, 
-                preciseTimestamp);
             return;
         }
         
@@ -310,8 +304,6 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
             if (_allClientPairs.TryGetValue(acknowledgmentDto.User, out var pair))
             {
                 pair.UpdateAcknowledgmentStatus(acknowledgmentDto.DataHash, acknowledgmentDto.Success, DateTimeOffset.Now);
-                Logger.LogInformation("Updated acknowledgment status for user {user} - Success: {success}", 
-                    acknowledgmentDto.User.AliasOrUID, acknowledgmentDto.Success);
                 
                 // Cancel timeout tracking since acknowledgment was received
                 _acknowledgmentTimeoutManager.CancelTimeout(acknowledgmentDto.DataHash);
@@ -328,8 +320,6 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
             if (pendingRecipients.Count == 0)
             {
                 _senderPendingAcknowledgments.TryRemove(acknowledgmentDto.DataHash, out _);
-                Logger.LogInformation("All acknowledgments received for Hash: {hash}, removed from pending list", 
-                    acknowledgmentDto.DataHash[..Math.Min(8, acknowledgmentDto.DataHash.Length)]);
             }
             
             Mediator.Publish(new EventMessage(new Event(acknowledgmentDto.User, nameof(PairManager), EventSeverity.Informational, 
@@ -778,10 +768,7 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
                 }
             }
         }
-        
-        Logger.LogInformation("Set pending acknowledgment for sender with ID {id} waiting for {count} recipients: [{recipients}]", 
-            acknowledgmentId, recipients.Count, string.Join(", ", recipients.Select(r => r.AliasOrUID)));
-        Logger.LogDebug("Total pending acknowledgments after adding: {count}", _senderPendingAcknowledgments.Count);
+            Logger.LogDebug("Total pending acknowledgments after adding: {count}", _senderPendingAcknowledgments.Count);
     }
 
     public bool HasPendingAcknowledgmentForUser(UserData userData)

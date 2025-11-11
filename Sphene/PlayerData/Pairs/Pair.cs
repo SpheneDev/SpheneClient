@@ -234,7 +234,7 @@ public class Pair : DisposableMediatorSubscriberBase
                         var dataWithSequence = data.DeepClone();
                         dataWithSequence.SequenceNumber = currentSequence;
                         _pendingAcknowledgmentQueue.Enqueue(dataWithSequence);
-                        Logger.LogInformation("Enqueued pending acknowledgment data for delayed sending (delayed path) - Hash: {hash}, Sequence: {sequence}", 
+                        Logger.LogDebug("Enqueued pending acknowledgment data for delayed sending (delayed path) - Hash: {hash}, Sequence: {sequence}", 
                             data.DataHash[..Math.Min(8, data.DataHash.Length)], currentSequence);
                     }
                 }
@@ -255,7 +255,7 @@ public class Pair : DisposableMediatorSubscriberBase
             var dataWithSequence = data.DeepClone();
             dataWithSequence.SequenceNumber = currentSequence;
             _pendingAcknowledgmentQueue.Enqueue(dataWithSequence);
-            Logger.LogInformation("Enqueued pending acknowledgment data for delayed sending - Hash: {hash}, Sequence: {sequence}, Queue size: {queueSize}", 
+            Logger.LogDebug("Enqueued pending acknowledgment data for delayed sending - Hash: {hash}, Sequence: {sequence}, Queue size: {queueSize}", 
                 data.DataHash[..Math.Min(8, data.DataHash.Length)], currentSequence, _pendingAcknowledgmentQueue.Count);
         }
     }
@@ -383,7 +383,7 @@ public class Pair : DisposableMediatorSubscriberBase
 
     public async Task UpdateAcknowledgmentStatus(string acknowledgmentId, bool success, DateTimeOffset timestamp)
     {
-        Logger.LogInformation("Updating acknowledgment status: {acknowledgmentId} - Success: {success} for user {user}", acknowledgmentId, success, UserData.AliasOrUID);
+        Logger.LogDebug("Updating acknowledgment status: {acknowledgmentId} - Success: {success} for user {user}", acknowledgmentId, success, UserData.AliasOrUID);
         LastAcknowledgmentId = acknowledgmentId;
         LastAcknowledgmentSuccess = success;
         LastAcknowledgmentTime = timestamp;
@@ -510,7 +510,7 @@ public class Pair : DisposableMediatorSubscriberBase
         // Only clear if this is the acknowledgment we're waiting for
         if (LastAcknowledgmentId == acknowledgmentId)
         {
-            Logger.LogInformation("Clearing pending acknowledgment: {acknowledgmentId} for user {user}", acknowledgmentId, UserData.AliasOrUID);
+            Logger.LogDebug("Clearing pending acknowledgment: {acknowledgmentId} for user {user}", acknowledgmentId, UserData.AliasOrUID);
             HasPendingAcknowledgment = false;
             LastAcknowledgmentId = null;
             
@@ -578,7 +578,7 @@ public class Pair : DisposableMediatorSubscriberBase
     public void ClearPendingAcknowledgmentForce(MessageService? messageService = null)
     {
         var previousAckId = LastAcknowledgmentId;
-        Logger.LogInformation("Force clearing pending acknowledgment for user {user}", UserData.AliasOrUID);
+        Logger.LogDebug("Force clearing pending acknowledgment for user {user}", UserData.AliasOrUID);
         HasPendingAcknowledgment = false;
         LastAcknowledgmentId = null;
         
@@ -632,12 +632,12 @@ public class Pair : DisposableMediatorSubscriberBase
 
     private async Task SendAcknowledgmentIfRequired(OnlineUserCharaDataDto data, bool success, bool hashVerificationPassed = true)
     {
-        Logger.LogInformation("SendAcknowledgmentIfRequired called - RequiresAcknowledgment: {requires}, Hash: {hash}, Success: {success}, HashVerification: {hashVerification}", 
+        Logger.LogDebug("SendAcknowledgmentIfRequired called - RequiresAcknowledgment: {requires}, Hash: {hash}, Success: {success}, HashVerification: {hashVerification}", 
             data.RequiresAcknowledgment, data.DataHash[..Math.Min(8, data.DataHash.Length)], success, hashVerificationPassed);
         
         if (!data.RequiresAcknowledgment || string.IsNullOrEmpty(data.DataHash))
         {
-            Logger.LogInformation("Skipping acknowledgment - RequiresAcknowledgment: {requires}, DataHash null/empty: {empty}", 
+            Logger.LogDebug("Skipping acknowledgment - RequiresAcknowledgment: {requires}, DataHash null/empty: {empty}", 
                 data.RequiresAcknowledgment, string.IsNullOrEmpty(data.DataHash));
             return;
         }
@@ -668,12 +668,12 @@ public class Pair : DisposableMediatorSubscriberBase
                 SessionId = data.SessionId // Include session ID for batch acknowledgment tracking
             };
 
-            Logger.LogInformation("Sending acknowledgment to server - Hash: {hash}, User: {user}, Success: {success}, ErrorCode: {errorCode}", 
+            Logger.LogDebug("Sending acknowledgment to server - Hash: {hash}, User: {user}, Success: {success}, ErrorCode: {errorCode}", 
                 data.DataHash[..Math.Min(8, data.DataHash.Length)], UserData.AliasOrUID, finalSuccess, errorCode);
 
             // Send acknowledgment through the mediator
              Mediator.Publish(new SendCharacterDataAcknowledgmentMessage(acknowledgmentDto));
-            Logger.LogInformation("Successfully published SendCharacterDataAcknowledgmentMessage for Hash: {hash}", 
+            Logger.LogDebug("Successfully published SendCharacterDataAcknowledgmentMessage for Hash: {hash}", 
                 data.DataHash[..Math.Min(8, data.DataHash.Length)]);
 
             // Update our own AckYou to reflect immediate acknowledgment status and send to server
@@ -708,7 +708,7 @@ public class Pair : DisposableMediatorSubscriberBase
         // Check if this message is for this pair
         if (message.UserUID == UserPair.User.UID)
         {
-            Logger.LogInformation("Character data application completed for {playerName} - processing acknowledgment queue", message.PlayerName);
+            Logger.LogDebug("Character data application completed for {playerName} - processing acknowledgment queue", message.PlayerName);
             
             // Process acknowledgment queue and send only the latest acknowledgment
             if (!_pendingAcknowledgmentQueue.IsEmpty)
@@ -726,7 +726,7 @@ public class Pair : DisposableMediatorSubscriberBase
                         if (latestAcknowledgment != null)
                         {
                             discardedCount++;
-                            Logger.LogInformation("Discarding outdated acknowledgment - Hash: {hash}, Sequence: {sequence}", 
+                            Logger.LogDebug("Discarding outdated acknowledgment - Hash: {hash}, Sequence: {sequence}", 
                                 latestAcknowledgment.DataHash[..Math.Min(8, latestAcknowledgment.DataHash.Length)], latestAcknowledgment.SequenceNumber);
                         }
                         latestAcknowledgment = acknowledgmentData;
@@ -734,12 +734,12 @@ public class Pair : DisposableMediatorSubscriberBase
                     else
                     {
                         discardedCount++;
-                        Logger.LogInformation("Discarding outdated acknowledgment - Hash: {hash}, Sequence: {sequence}", 
+                        Logger.LogDebug("Discarding outdated acknowledgment - Hash: {hash}, Sequence: {sequence}", 
                             acknowledgmentData.DataHash[..Math.Min(8, acknowledgmentData.DataHash.Length)], acknowledgmentData.SequenceNumber);
                     }
                 }
                 
-                Logger.LogInformation("Processed {processedCount} acknowledgments, discarded {discardedCount}, sending latest with sequence {sequence}", 
+                Logger.LogDebug("Processed {processedCount} acknowledgments, discarded {discardedCount}, sending latest with sequence {sequence}", 
                     processedCount, discardedCount, latestAcknowledgment?.SequenceNumber ?? -1);
                 
                 // Send the latest acknowledgment with hash verification
@@ -750,7 +750,7 @@ public class Pair : DisposableMediatorSubscriberBase
                         // Verify that the applied data hash matches the received data hash
                         var verificationSuccess = VerifyDataHashIntegrity(latestAcknowledgment);
                         
-                        Logger.LogInformation("Sending acknowledgment - Application success: {appSuccess}, Hash verification: {hashSuccess}", 
+                        Logger.LogDebug("Sending acknowledgment - Application success: {appSuccess}, Hash verification: {hashSuccess}", 
                             message.Success, verificationSuccess);
                         
                         await SendAcknowledgmentIfRequired(latestAcknowledgment, message.Success, verificationSuccess).ConfigureAwait(false);

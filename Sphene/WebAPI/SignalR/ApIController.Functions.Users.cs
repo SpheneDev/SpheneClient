@@ -139,7 +139,7 @@ public partial class ApiController
 
     public async Task UserSendCharacterDataAcknowledgment(CharacterDataAcknowledgmentDto acknowledgmentDto)
     {
-        Logger.LogInformation("UserSendCharacterDataAcknowledgment called - Hash: {hash}, User: {user}, Success: {success}, Connected: {connected}", 
+        Logger.LogDebug("UserSendCharacterDataAcknowledgment called - Hash: {hash}, User: {user}, Success: {success}, Connected: {connected}", 
             acknowledgmentDto.DataHash[..Math.Min(8, acknowledgmentDto.DataHash.Length)], acknowledgmentDto.User.AliasOrUID, acknowledgmentDto.Success, IsConnected);
         
         if (!IsConnected) 
@@ -152,7 +152,7 @@ public partial class ApiController
         try
         {
             await _spheneHub!.SendAsync(nameof(UserSendCharacterDataAcknowledgment), acknowledgmentDto).ConfigureAwait(false);
-            Logger.LogInformation("Successfully sent acknowledgment to server - Hash: {hash}", 
+            Logger.LogDebug("Successfully sent acknowledgment to server - Hash: {hash}", 
                 acknowledgmentDto.DataHash[..Math.Min(8, acknowledgmentDto.DataHash.Length)]);
         }
         catch (Exception ex)
@@ -218,7 +218,7 @@ public partial class ApiController
 
     private async Task PushCharacterDataInternal(CharacterData character, List<UserData> visibleCharacters, string? acknowledgmentId = null)
     {
-        Logger.LogInformation("Pushing character data for {hash} to {charas} with acknowledgment ID {ackId}", character.DataHash.Value, string.Join(", ", visibleCharacters.Select(c => c.AliasOrUID)), acknowledgmentId);
+        Logger.LogDebug("Pushing character data for {hash} to {charas} with acknowledgment ID {ackId}", character.DataHash.Value, string.Join(", ", visibleCharacters.Select(c => c.AliasOrUID)), acknowledgmentId);
         StringBuilder sb = new();
         foreach (var kvp in character.FileReplacements.ToList())
         {

@@ -120,7 +120,7 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
                             currentUserUID, currentHash);
                     }
                 } else {
-                    Logger.LogWarning("Cannot validate hash - current user UID is null or empty");
+                    //Logger.LogWarning("Cannot validate hash - current user UID is null or empty");
                 }
             } catch (Exception ex) {
                 Logger.LogError(ex, "Failed to validate current user hash for {hash}", currentHash);

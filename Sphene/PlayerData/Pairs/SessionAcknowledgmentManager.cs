@@ -193,7 +193,7 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
         if (pair != null)
         {
             pair.UpdateAcknowledgmentStatus(hashVersionKey, true, DateTimeOffset.UtcNow);
-            _logger.LogInformation("Updated pair acknowledgment status for user {user} - HashVersion: {hashVersionKey}", acknowledgingUser.AliasOrUID, hashVersionKey);
+            _logger.LogDebug("Updated pair acknowledgment status for user {user} - HashVersion: {hashVersionKey}", acknowledgingUser.AliasOrUID, hashVersionKey);
             
             // Add success notification
             _messageService.AddTaggedMessage(
@@ -216,7 +216,7 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
             _logger.LogWarning("Could not find pair for user {user} to update acknowledgment status", acknowledgingUser.AliasOrUID);
         }
         
-        _logger.LogInformation("Processed acknowledgment from {user} for HashVersion {hashVersionKey}", 
+        _logger.LogDebug("Processed acknowledgment from {user} for HashVersion {hashVersionKey}", 
             acknowledgingUser.AliasOrUID, hashVersionKey);
         
         // Clean up pending acknowledgment notification

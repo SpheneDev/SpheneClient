@@ -135,9 +135,6 @@ public partial class ApiController
 
     public Task Client_UserReceiveCharacterDataAcknowledgment(CharacterDataAcknowledgmentDto acknowledgmentDto)
     {
-        Logger.LogInformation("Client_UserReceiveCharacterDataAcknowledgment received from server - Hash: {hash}, User: {user}, Success: {success}", 
-            acknowledgmentDto.DataHash[..Math.Min(8, acknowledgmentDto.DataHash.Length)], acknowledgmentDto.User.AliasOrUID, acknowledgmentDto.Success);
-        
         var processed = false;
         ExecuteSafely(() => 
         {
@@ -147,7 +144,7 @@ public partial class ApiController
         
         if (processed)
         {
-            Logger.LogInformation("Successfully processed acknowledgment callback for Hash: {hash}", 
+            Logger.LogDebug("Successfully processed acknowledgment callback for Hash: {hash}", 
                 acknowledgmentDto.DataHash[..Math.Min(8, acknowledgmentDto.DataHash.Length)]);
         }
         else
