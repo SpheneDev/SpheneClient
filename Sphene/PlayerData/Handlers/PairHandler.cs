@@ -48,6 +48,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
     private bool _proximityReportedVisible = false;
     private DateTime _postZoneCheckUntil = DateTime.MinValue;
     private DateTime _postZoneLastCheck = DateTime.MinValue;
+    private bool _postZoneReaffirmDone = false;
 
     public PairHandler(ILogger<PairHandler> logger, Pair pair,
         GameObjectHandlerFactory gameObjectHandlerFactory,
@@ -95,12 +96,16 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                 Pair.ReportVisibility(false);
                 _proximityReportedVisible = false;
             }
+            _postZoneReaffirmDone = false;
         });
         Mediator.Subscribe<ZoneSwitchEndMessage>(this, (_) =>
         {
             _localVisibilityGateActive = false;
             _postZoneCheckUntil = DateTime.UtcNow.AddSeconds(20);
             _postZoneLastCheck = DateTime.MinValue;
+            // Ensure we will re-report proximity when encountering the player after zoning
+            _proximityReportedVisible = false;
+            _postZoneReaffirmDone = false;
         });
         Mediator.Subscribe<CutsceneStartMessage>(this, (_) =>
         {
@@ -645,11 +650,8 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             float maxRange = _dalamudUtil.GetDynamicAroundRangeMetersForLocation(currentLocation);
             float distance = Vector3.Distance(self.Position, gameObj?.Position ?? Vector3.Zero);
             bool withinPartyRange = !inSameParty || distance <= maxRange;
-            if (inSameParty)
-            {
-                Logger.LogDebug("Party range mode for {this}: housing={housing}, modeMax={max:F0}m, distance={dist:F1}m, within={within}", this, currentLocation.WardId > 0, maxRange, distance, withinPartyRange);
-            }
-            if (DateTime.UtcNow < _postZoneCheckUntil && !_proximityReportedVisible)
+
+            if (DateTime.UtcNow < _postZoneCheckUntil)
             {
                 var now = DateTime.UtcNow;
                 if ((now - _postZoneLastCheck) > TimeSpan.FromSeconds(1))
@@ -660,9 +662,16 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                     bool shouldReportVisible = onScreen && withinPartyRange && !_localVisibilityGateActive;
                     if (shouldReportVisible && !_proximityReportedVisible)
                     {
-                        Logger.LogDebug("Post-zone visible check for {this}: onScreen=true distance={dist:F1}m", this, distance);
+
                         Pair.ReportVisibility(true);
                         _proximityReportedVisible = true;
+                    }
+                    else if (shouldReportVisible && _proximityReportedVisible && !Pair.IsMutuallyVisible && !_postZoneReaffirmDone)
+                    {
+                        // Reaffirm proximity once post-zone when partner becomes visible on screen
+                        Logger.LogDebug("Post-zone reaffirm visibility for {this}: onScreen=true distance={dist:F1}m", this, distance);
+                        Pair.ReportVisibility(true);
+                        _postZoneReaffirmDone = true;
                     }
                 }
             }
