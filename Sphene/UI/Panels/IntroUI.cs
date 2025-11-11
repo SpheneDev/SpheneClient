@@ -400,7 +400,7 @@ public partial class IntroUi : WindowMediatorSubscriberBase
         DrawModernButton("Join Discord Community", Dalamud.Interface.FontAwesomeIcon.Users, () =>
         {
             Util.OpenLink("https://discord.gg/GbnwsP2XsF");
-        }, new Vector4(0.44f, 0.47f, 0.78f, 1.0f), 200f, 50f);
+        }, new Vector4(0.44f, 0.47f, 0.78f, 1.0f), 200f, 50f, false, 0.5f);
 
         ImGui.Spacing();
         
@@ -505,7 +505,7 @@ public partial class IntroUi : WindowMediatorSubscriberBase
 #else
                 _timeoutTask = Task.CompletedTask;
 #endif
-            });
+            }, showIcon: false);
         }
         else if (!_configService.Current.AcceptedAgreement && _readFirstPage)
         {
@@ -516,11 +516,11 @@ public partial class IntroUi : WindowMediatorSubscriberBase
                 {
                     _configService.Current.AcceptedAgreement = true;
                     _configService.Save();
-                }, new Vector4(0.25f, 0.70f, 0.35f, 1.0f));
+                }, new Vector4(0.25f, 0.70f, 0.35f, 1.0f), showIcon: false);
             }
             else
             {
-                DrawModernButton($"Please Wait ({_timeoutLabel})", Dalamud.Interface.FontAwesomeIcon.Clock, () => { }, ImGuiColors.DalamudYellow, null, null, true);
+                DrawModernButton($"Please Wait ({_timeoutLabel})", Dalamud.Interface.FontAwesomeIcon.Clock, () => { }, ImGuiColors.DalamudYellow, null, null, true, null, false);
             }
         }
         else if (_configService.Current.AcceptedAgreement
@@ -534,7 +534,7 @@ public partial class IntroUi : WindowMediatorSubscriberBase
                 DrawModernButton("Start Archive Scan", Dalamud.Interface.FontAwesomeIcon.Play, () =>
                 {
                     _cacheMonitor.InvokeScan();
-                }, new Vector4(0.25f, 0.70f, 0.35f, 1.0f));
+                }, new Vector4(0.25f, 0.70f, 0.35f, 1.0f), showIcon: false);
             }
         }
         else if (_configService.Current.AcceptedAgreement 
@@ -549,7 +549,7 @@ public partial class IntroUi : WindowMediatorSubscriberBase
                 _configService.Current.HasSeenSyncshellSettings = true;
                 _configService.Save();
                 _showShrinkUPage = false;
-            }, new Vector4(0.25f, 0.70f, 0.35f, 1.0f));
+            }, new Vector4(0.25f, 0.70f, 0.35f, 1.0f), showIcon: false);
         }
         else if (!_uiShared.ApiController.ServerAlive)
         {
@@ -578,7 +578,7 @@ public partial class IntroUi : WindowMediatorSubscriberBase
                     }
                     _secretKey = string.Empty;
                     _ = Task.Run(() => _uiShared.ApiController.CreateConnectionsAsync());
-                }, new Vector4(0.25f, 0.70f, 0.35f, 1.0f));
+                }, new Vector4(0.25f, 0.70f, 0.35f, 1.0f), showIcon: false);
             }
         }
     }
@@ -627,7 +627,7 @@ public partial class IntroUi : WindowMediatorSubscriberBase
         ImGui.Spacing();
     }
 
-    private void DrawModernButton(string text, Dalamud.Interface.FontAwesomeIcon icon, Action onClick, Vector4? color = null, float? width = null, float? height = null, bool disabled = false)
+    private void DrawModernButton(string text, Dalamud.Interface.FontAwesomeIcon icon, Action onClick, Vector4? color = null, float? width = null, float? height = null, bool disabled = false, float? textScale = null, bool showIcon = true)
     {
         var contentAvail = ImGui.GetContentRegionAvail();
         var targetWidth = width.HasValue ? width.Value * ImGuiHelpers.GlobalScale : contentAvail.X;
@@ -663,27 +663,40 @@ public partial class IntroUi : WindowMediatorSubscriberBase
         var textCol = disabled ? new Vector4(0.25f, 0.25f, 0.25f, 0.7f) : new Vector4(0.1f, 0.1f, 0.1f, 1.0f);
         using (ImRaii.PushColor(ImGuiCol.Text, textCol))
         {
-            var spacing = 3f * ImGuiHelpers.GlobalScale;
-            Vector2 iconSize;
-            using (_uiShared.IconFont.Push())
-                iconSize = ImGui.CalcTextSize(icon.ToIconString());
-            var textSize = ImGui.CalcTextSize(text);
-            var totalWidth = iconSize.X + spacing + textSize.X;
+            var spacing = showIcon ? 3f * ImGuiHelpers.GlobalScale : 0f;
+            Vector2 iconSize = Vector2.Zero;
+            if (showIcon)
+            {
+                using (_uiShared.IconFont.Push())
+                    iconSize = ImGui.CalcTextSize(icon.ToIconString());
+            }
+            Vector2 textSize;
+            using (_uiShared.UidFont.Push())
+            {
+                if (textScale.HasValue) ImGui.SetWindowFontScale(textScale.Value);
+                textSize = ImGui.CalcTextSize(text);
+                if (textScale.HasValue) ImGui.SetWindowFontScale(1f);
+            }
+            var totalWidth = (showIcon ? iconSize.X : 0f) + spacing + textSize.X;
             var totalHeight = Math.Max(iconSize.Y, textSize.Y);
             var contentPos = new Vector2(
                 start.X + (buttonSize.X - totalWidth) * 0.5f,
                 start.Y + (buttonSize.Y - totalHeight) * 0.5f
             );
-
-            var scale = 1.1f; // slightly larger text for better readability
-            ImGui.SetWindowFontScale(scale);
-            using (_uiShared.IconFont.Push())
+            if (showIcon)
             {
-                drawList.AddText(contentPos, ImGui.GetColorU32(ImGuiCol.Text), icon.ToIconString());
+                using (_uiShared.IconFont.Push())
+                {
+                    drawList.AddText(contentPos, ImGui.GetColorU32(ImGuiCol.Text), icon.ToIconString());
+                }
             }
-            var textPos = new Vector2(contentPos.X + iconSize.X + spacing, contentPos.Y);
-            drawList.AddText(textPos, ImGui.GetColorU32(ImGuiCol.Text), text);
-            ImGui.SetWindowFontScale(1f);
+            var textPos = new Vector2(contentPos.X + (showIcon ? iconSize.X : 0f) + spacing, contentPos.Y);
+            using (_uiShared.UidFont.Push())
+            {
+                if (textScale.HasValue) ImGui.SetWindowFontScale(textScale.Value);
+                drawList.AddText(textPos, ImGui.GetColorU32(ImGuiCol.Text), text);
+                if (textScale.HasValue) ImGui.SetWindowFontScale(1f);
+            }
         }
 
         if (clicked && !disabled)
