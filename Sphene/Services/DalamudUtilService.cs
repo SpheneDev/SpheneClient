@@ -853,4 +853,48 @@ public class DalamudUtilService : IHostedService, IMediatorSubscriber
         }
         return false;
     }
+
+    public uint GetDynamicAroundRangeMode()
+    {
+        if (_gameConfig != null
+            && _gameConfig.TryGet(Dalamud.Game.Config.SystemConfigOption.DynamicAroundRangeMode, out uint mode))
+        {
+            return mode;
+        }
+        return 0u;
+    }
+
+    public float GetDynamicAroundRangeMeters()
+    {
+        var mode = GetDynamicAroundRangeMode();
+        return mode switch
+        {
+            0u => 100f,
+            1u => 200f,
+            2u => 200f,
+            _ => 100f,
+        };
+    }
+
+    public float GetDynamicAroundRangeMetersForLocation(LocationInfo location)
+    {
+        var mode = GetDynamicAroundRangeMode();
+        bool isHousing = location.WardId > 0;
+        float baseMeters = mode switch
+        {
+            0u => 100f,
+            1u => 200f,
+            2u => 330f,
+            _ => 100f,
+        };
+
+        // Use smaller ranges in housing areas (close-quarters scenario)
+        if (isHousing)
+        {
+            const float housingScale = 1.0f;
+            baseMeters *= housingScale;
+        }
+
+        return baseMeters;
+    }
 }

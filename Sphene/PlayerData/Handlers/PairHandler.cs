@@ -634,14 +634,33 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
 
         if (_charaHandler?.Address != nint.Zero)
         {
+            var gameObj = _charaHandler.GetGameObject();
+            var self = _dalamudUtil.GetPlayerCharacter();
+            bool inSameParty = _dalamudUtil.IsPlayerInParty(PlayerName ?? string.Empty);
+            var currentLocation = _dalamudUtil.GetMapData();
+            float maxRange = _dalamudUtil.GetDynamicAroundRangeMetersForLocation(currentLocation);
+            float distance = Vector3.Distance(self.Position, gameObj?.Position ?? Vector3.Zero);
+            bool withinPartyRange = !inSameParty || distance <= maxRange;
+            if (inSameParty)
+            {
+                Logger.LogDebug("Party range mode for {this}: housing={housing}, modeMax={max:F0}m, distance={dist:F1}m, within={within}", this, currentLocation.WardId > 0, maxRange, distance, withinPartyRange);
+            }
+
             // Ensure we proactively report regained local proximity to the server
-            if (!_proximityReportedVisible && !_localVisibilityGateActive)
+            if (!_proximityReportedVisible && !_localVisibilityGateActive && withinPartyRange)
             {
                 Pair.ReportVisibility(true);
                 _proximityReportedVisible = true;
             }
-            // Visibility is now gated solely by mutual visibility; distance is ignored
-            bool allowed = Pair.IsMutuallyVisible;
+            // If we previously reported visible but we are outside party range, immediately report loss
+            if (_proximityReportedVisible && !withinPartyRange)
+            {
+                Pair.ReportVisibility(false);
+                _proximityReportedVisible = false;
+            }
+
+            // Visibility is gated by mutual visibility and party distance
+            bool allowed = Pair.IsMutuallyVisible && withinPartyRange;
 
             if (allowed && !IsVisible)
             {
