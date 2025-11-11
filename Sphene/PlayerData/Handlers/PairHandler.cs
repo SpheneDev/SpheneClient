@@ -46,6 +46,8 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
     private bool _redrawOnNextApplication = false;
     private bool _initIdentMissingLogged = false;
     private bool _proximityReportedVisible = false;
+    private DateTime _postZoneCheckUntil = DateTime.MinValue;
+    private DateTime _postZoneLastCheck = DateTime.MinValue;
 
     public PairHandler(ILogger<PairHandler> logger, Pair pair,
         GameObjectHandlerFactory gameObjectHandlerFactory,
@@ -97,6 +99,8 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         Mediator.Subscribe<ZoneSwitchEndMessage>(this, (_) =>
         {
             _localVisibilityGateActive = false;
+            _postZoneCheckUntil = DateTime.UtcNow.AddSeconds(20);
+            _postZoneLastCheck = DateTime.MinValue;
         });
         Mediator.Subscribe<CutsceneStartMessage>(this, (_) =>
         {
@@ -645,6 +649,23 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             {
                 Logger.LogDebug("Party range mode for {this}: housing={housing}, modeMax={max:F0}m, distance={dist:F1}m, within={within}", this, currentLocation.WardId > 0, maxRange, distance, withinPartyRange);
             }
+            if (DateTime.UtcNow < _postZoneCheckUntil && !_proximityReportedVisible)
+            {
+                var now = DateTime.UtcNow;
+                if ((now - _postZoneLastCheck) > TimeSpan.FromSeconds(1))
+                {
+                    _postZoneLastCheck = now;
+                    var screenPos = _dalamudUtil.WorldToScreen(gameObj);
+                    bool onScreen = screenPos != Vector2.Zero;
+                    bool shouldReportVisible = onScreen && withinPartyRange && !_localVisibilityGateActive;
+                    if (shouldReportVisible && !_proximityReportedVisible)
+                    {
+                        Logger.LogDebug("Post-zone visible check for {this}: onScreen=true distance={dist:F1}m", this, distance);
+                        Pair.ReportVisibility(true);
+                        _proximityReportedVisible = true;
+                    }
+                }
+            }
 
             // Ensure we proactively report regained local proximity to the server
             if (!_proximityReportedVisible && !_localVisibilityGateActive && withinPartyRange)
@@ -652,14 +673,12 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                 Pair.ReportVisibility(true);
                 _proximityReportedVisible = true;
             }
-            // If we previously reported visible but we are outside party range, immediately report loss
             if (_proximityReportedVisible && !withinPartyRange)
             {
                 Pair.ReportVisibility(false);
                 _proximityReportedVisible = false;
             }
 
-            // Visibility is gated by mutual visibility and party distance
             bool allowed = Pair.IsMutuallyVisible && withinPartyRange;
 
             if (allowed && !IsVisible)
