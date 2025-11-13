@@ -162,6 +162,7 @@ public class AcknowledgmentMonitorUI : WindowMediatorSubscriberBase
         ImGui.Text("Session Details");
         
         var acknowledgmentStatuses = _sessionAcknowledgmentManager.GetAcknowledgmentStatuses();
+        var pendingAcks = _sessionAcknowledgmentManager.GetPendingAcknowledgments();
         
         if (acknowledgmentStatuses.Any())
         {
@@ -183,6 +184,59 @@ public class AcknowledgmentMonitorUI : WindowMediatorSubscriberBase
         else
         {
             ImGui.TextColored(ImGuiColors.ParsedGreen, "No pending acknowledgments in current session.");
+        }
+
+        ImGui.Separator();
+        ImGui.Text("Pending Acknowledgments");
+        if (pendingAcks.Count == 0)
+        {
+            ImGui.TextColored(ImGuiColors.ParsedGreen, "None pending");
+        }
+        else
+        {
+            if (ImGui.BeginTable("PendingAckTable", 3, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable))
+            {
+                ImGui.TableSetupColumn("User", ImGuiTableColumnFlags.WidthFixed, 160);
+                ImGui.TableSetupColumn("Ack ID", ImGuiTableColumnFlags.WidthFixed, 220);
+                ImGui.TableSetupColumn("Actions", ImGuiTableColumnFlags.WidthStretch);
+                ImGui.TableHeadersRow();
+                
+                foreach (var kvp in pendingAcks)
+                {
+                    var userKey = kvp.Key;
+                    var ackId = kvp.Value;
+                    
+                    ImGui.TableNextRow();
+                    ImGui.TableNextColumn();
+                    ImGui.Text(userKey);
+                    
+                    ImGui.TableNextColumn();
+                    ImGui.Text(ackId.Length > 16 ? $"{ackId[..16]}..." : ackId);
+                    
+                    ImGui.TableNextColumn();
+                    
+                    ImGui.PushID($"ack_clear_{userKey}");
+                    if (ImGui.Button("Clear"))
+                    {
+                        var removed = _sessionAcknowledgmentManager.RemovePendingAcknowledgment(new Sphene.API.Data.UserData(userKey), ackId);
+                        if (removed)
+                        {
+                            UiSharedService.AttachToolTip("Cleared");
+                        }
+                    }
+                    ImGui.PopID();
+                    
+                    ImGui.SameLine();
+                    ImGui.PushID($"ack_timeout_{userKey}");
+                    if (ImGui.Button("Mark Timeout"))
+                    {
+                        _sessionAcknowledgmentManager.ProcessTimeoutAcknowledgment(ackId);
+                    }
+                    ImGui.PopID();
+                }
+                
+                ImGui.EndTable();
+            }
         }
     }
     

@@ -9,6 +9,7 @@ using Sphene.Services;
 using Sphene.Services.Mediator;
 using Sphene.Services.Events;
 using Sphene.PlayerData.Pairs;
+using Sphene.API.Data;
 using Sphene.WebAPI;
 using Sphene.WebAPI.SignalR.Utils;
 using System.Numerics;
@@ -274,8 +275,25 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                     ImGui.PushID($"clear_{userKey}");
                     if (ImGui.Button("Clear"))
                     {
-                        // Clear this specific acknowledgment
-                        LogCommunication($"[DEBUG] Manually cleared acknowledgment for {userKey}", "ACK");
+                        var user = new UserData(userKey);
+                        var removed = _sessionAcknowledgmentManager.RemovePendingAcknowledgment(user, ackId);
+                        if (removed)
+                        {
+                            LogCommunication($"[DEBUG] Manually cleared acknowledgment for {userKey}", "ACK");
+                        }
+                        else
+                        {
+                            LogCommunication($"[DEBUG] Clear failed for {userKey} (no match)", "ACK");
+                        }
+                    }
+                    ImGui.PopID();
+                    
+                    ImGui.SameLine();
+                    ImGui.PushID($"timeout_{userKey}");
+                    if (ImGui.Button("Mark Timeout"))
+                    {
+                        _sessionAcknowledgmentManager.ProcessTimeoutAcknowledgment(ackId);
+                        LogCommunication($"[DEBUG] Marked acknowledgment as timeout for {userKey}", "ACK");
                     }
                     ImGui.PopID();
                     

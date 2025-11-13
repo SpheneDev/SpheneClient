@@ -393,10 +393,8 @@ public class Pair : DisposableMediatorSubscriberBase
         // Green checkmark (success) = true, no icon (cleared) = false
         bool newAckYouStatus = success;
         
-        // Update local permissions immediately for UI responsiveness
         var permissions = UserPair.OwnPermissions;
         permissions.SetAckYou(newAckYouStatus);
-        UserPair.OwnPermissions = permissions;
         
         try
         {
@@ -405,10 +403,6 @@ public class Pair : DisposableMediatorSubscriberBase
         catch (Exception ex)
         {
             Logger.LogError(ex, "Failed to update AckYou status for user {user}", UserData.AliasOrUID);
-            // Revert local change if server update failed
-            var revertPermissions = UserPair.OwnPermissions;
-            revertPermissions.SetAckYou(!newAckYouStatus);
-            UserPair.OwnPermissions = revertPermissions;
         }
         
         // Publish specific pair acknowledgment status change event
@@ -676,14 +670,12 @@ public class Pair : DisposableMediatorSubscriberBase
             Logger.LogDebug("Successfully published SendCharacterDataAcknowledgmentMessage for Hash: {hash}", 
                 data.DataHash[..Math.Min(8, data.DataHash.Length)]);
 
-            // Update our own AckYou to reflect immediate acknowledgment status and send to server
             var permissions = UserPair.OwnPermissions;
             var newAckYouStatus = finalSuccess;
             if (permissions.IsAckYou() != newAckYouStatus)
             {
                 Logger.LogDebug("SendAcknowledgmentIfRequired: Setting Own AckYou={status} for user {user}", newAckYouStatus, UserData.AliasOrUID);
                 permissions.SetAckYou(newAckYouStatus);
-                UserPair.OwnPermissions = permissions;
                 try
                 {
                     await _apiController.Value.UserSetPairPermissions(new(UserData, permissions));

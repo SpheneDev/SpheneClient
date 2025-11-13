@@ -24,7 +24,6 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
 {
     private readonly ConcurrentDictionary<UserData, Pair> _allClientPairs = new(UserDataComparer.Instance);
     private readonly ConcurrentDictionary<GroupData, GroupFullInfoDto> _allGroups = new(GroupDataComparer.Instance);
-    private readonly ConcurrentDictionary<string, HashSet<UserData>> _senderPendingAcknowledgments = new();
     private readonly SessionAcknowledgmentManager _sessionAcknowledgmentManager;
     private readonly SpheneConfigService _configurationService;
     private readonly IContextMenu _dalamudContextMenu;
@@ -219,120 +218,32 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         pair.ApplyData(dto);
     }
 
-    // Track processed acknowledgments to prevent duplicates
-    private readonly ConcurrentDictionary<string, DateTime> _processedAcknowledgments = new();
-    private readonly TimeSpan _acknowledgmentCacheTimeout = TimeSpan.FromMinutes(5);
 
     public void ReceiveCharacterDataAcknowledgment(CharacterDataAcknowledgmentDto acknowledgmentDto)
     {
-        
-        // Create unique key for deduplication (hash + user + precise timestamp)
-        var preciseTimestamp = acknowledgmentDto.AcknowledgedAt.ToString("yyyy-MM-dd HH:mm:ss.fff");
-        var deduplicationKey = $"{acknowledgmentDto.DataHash}_{acknowledgmentDto.User.UID}_{preciseTimestamp}";
-        
-        // Check for duplicate acknowledgment (exact same hash, user, and millisecond timestamp)
-        if (_processedAcknowledgments.ContainsKey(deduplicationKey))
-        {
-            return;
-        }
-        
-        // Also check for any acknowledgment from the same user within the last 100ms to handle rapid changes
-        var recentCutoff = acknowledgmentDto.AcknowledgedAt.AddMilliseconds(-100);
-        var hasRecentAcknowledgment = _processedAcknowledgments.Keys.Any(key => 
-        {
-            var parts = key.Split('_');
-            if (parts.Length >= 3 && parts[1] == acknowledgmentDto.User.UID)
-            {
-                var keyTimestampStr = string.Join("_", parts.Skip(2));
-                if (DateTime.TryParseExact(keyTimestampStr, "yyyy-MM-dd HH:mm:ss.fff", null, DateTimeStyles.None, out var keyTimestamp))
-                {
-                    return keyTimestamp > recentCutoff && keyTimestamp < acknowledgmentDto.AcknowledgedAt;
-                }
-            }
-            return false;
-        });
-        
-        if (hasRecentAcknowledgment)
-        {
-            Logger.LogDebug("Recent acknowledgment from same user detected - allowing new hash: {hash}, User: {user}", 
-                acknowledgmentDto.DataHash[..Math.Min(8, acknowledgmentDto.DataHash.Length)], 
-                acknowledgmentDto.User.AliasOrUID);
-        }
-        
-        // Add to processed acknowledgments cache
-        _processedAcknowledgments[deduplicationKey] = DateTime.UtcNow;
-        
-        // Clean up old entries periodically (every 100 acknowledgments)
-        if (_processedAcknowledgments.Count % 100 == 0)
-        {
-            CleanupOldAcknowledgments();
-        }
-        
-        // Check if the acknowledging user is the sender themselves (self-acknowledgment)
+
         var currentUserUID = _apiController.Value.UID;
-        
         if (!string.IsNullOrEmpty(currentUserUID) && string.Equals(acknowledgmentDto.User.UID, currentUserUID, StringComparison.Ordinal))
         {
-            Logger.LogInformation("Ignoring acknowledgment from sender themselves: {user}", acknowledgmentDto.User.AliasOrUID);
+            Logger.LogDebug("Ignoring acknowledgment from sender themselves: {user}", acknowledgmentDto.User.AliasOrUID);
             return;
         }
-        
-        // Use hash for acknowledgment lookup
-        var sessionProcessed = _sessionAcknowledgmentManager.ProcessReceivedAcknowledgment(acknowledgmentDto.DataHash, acknowledgmentDto.User);
-        
 
-        
-        // Check if this is a sender acknowledgment (we sent data and are receiving confirmation)
-        if (_senderPendingAcknowledgments.TryGetValue(acknowledgmentDto.DataHash, out var pendingRecipients))
+        // Process via session acknowledgment manager (single source of truth)
+        var processedBySession = _sessionAcknowledgmentManager.ProcessReceivedAcknowledgment(acknowledgmentDto.DataHash, acknowledgmentDto.User);
+        if (!processedBySession)
         {
-            Logger.LogDebug("Found matching pending acknowledgment for Hash: {hash}", 
-                acknowledgmentDto.DataHash[..Math.Min(8, acknowledgmentDto.DataHash.Length)]);
-            
-            // Check if any pending recipient has matching UID
-            var matchingRecipient = pendingRecipients.FirstOrDefault(u => string.Equals(u.UID, acknowledgmentDto.User.UID, StringComparison.Ordinal));
-            
-            // Remove the acknowledging user from pending list
-            var removed = pendingRecipients.Remove(acknowledgmentDto.User);
-            
-            // If direct removal failed but we found a matching UID, try manual removal
-            if (!removed && matchingRecipient != null)
-            {
-                removed = pendingRecipients.Remove(matchingRecipient);
-            }
-            
-            // Update the acknowledgment status for the specific user pair
-            if (_allClientPairs.TryGetValue(acknowledgmentDto.User, out var pair))
-            {
-                pair.UpdateAcknowledgmentStatus(acknowledgmentDto.DataHash, acknowledgmentDto.Success, DateTimeOffset.Now);
-                
-                // Cancel timeout tracking since acknowledgment was received
-                _acknowledgmentTimeoutManager.CancelTimeout(acknowledgmentDto.DataHash);
-                
-                // Cancel invalid hash timeout for this user since acknowledgment was received
-                _acknowledgmentTimeoutManager.CancelInvalidHashTimeout(acknowledgmentDto.User.UID);
-            }
-            else
-            {
-                Logger.LogWarning("Could not find pair for acknowledging user: {user}", acknowledgmentDto.User.AliasOrUID);
-            }
-            
-            // If no more pending recipients, remove the acknowledgment entirely
-            if (pendingRecipients.Count == 0)
-            {
-                _senderPendingAcknowledgments.TryRemove(acknowledgmentDto.DataHash, out _);
-            }
-            
-            Mediator.Publish(new EventMessage(new Event(acknowledgmentDto.User, nameof(PairManager), EventSeverity.Informational, 
-                acknowledgmentDto.Success ? "Character Data Acknowledged" : "Character Data Acknowledgment Failed")));
-            Mediator.Publish(new RefreshUiMessage());
+            Logger.LogDebug("Ignoring non-latest acknowledgment for user {user}", acknowledgmentDto.User.AliasOrUID);
+            return;
         }
-        else
-        {
-            Logger.LogWarning("Could not find sender pending acknowledgment - Hash: {hash}, acknowledging user: {user}", 
-                acknowledgmentDto.DataHash[..Math.Min(8, acknowledgmentDto.DataHash.Length)], acknowledgmentDto.User.AliasOrUID);
-            Logger.LogWarning("Available pending acknowledgment IDs: [{ids}]", 
-                string.Join(", ", _senderPendingAcknowledgments.Keys));
-        }
+
+        // Cancel timeout tracking since acknowledgment was received
+        _acknowledgmentTimeoutManager.CancelTimeout(acknowledgmentDto.DataHash);
+        _acknowledgmentTimeoutManager.CancelInvalidHashTimeout(acknowledgmentDto.User.UID);
+
+        Mediator.Publish(new EventMessage(new Event(acknowledgmentDto.User, nameof(PairManager), EventSeverity.Informational,
+            acknowledgmentDto.Success ? "Character Data Acknowledged" : "Character Data Acknowledgment Failed")));
+        Mediator.Publish(new RefreshUiMessage());
     }
 
     public void RemoveGroup(GroupData data)
@@ -725,33 +636,12 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         Mediator.Publish(new RefreshUiMessage());
     }
     
-    private void CleanupOldAcknowledgments()
-    {
-        var cutoffTime = DateTime.UtcNow - _acknowledgmentCacheTimeout;
-        var keysToRemove = _processedAcknowledgments
-            .Where(kvp => kvp.Value < cutoffTime)
-            .Select(kvp => kvp.Key)
-            .ToList();
-            
-        foreach (var key in keysToRemove)
-        {
-            _processedAcknowledgments.TryRemove(key, out _);
-        }
-        
-        if (keysToRemove.Count > 0)
-        {
-            Logger.LogDebug("Cleaned up {count} old acknowledgment entries", keysToRemove.Count);
-        }
-    }
 
     public void SetPendingAcknowledgmentForSender(List<UserData> recipients, string acknowledgmentId)
     {
         // Use hash-based acknowledgment manager for thread-safe handling
         _sessionAcknowledgmentManager.SetPendingAcknowledgmentForHashVersion(recipients, acknowledgmentId);
-        
-        // Keep legacy tracking for backward compatibility during transition
-        _senderPendingAcknowledgments[acknowledgmentId] = new HashSet<UserData>(recipients, UserDataComparer.Instance);
-        
+
         // Also set pending acknowledgment on individual pairs for UI display
         foreach (var recipient in recipients)
         {
@@ -768,30 +658,24 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
                 }
             }
         }
-            Logger.LogDebug("Total pending acknowledgments after adding: {count}", _senderPendingAcknowledgments.Count);
+        Mediator.Publish(new RefreshUiMessage());
     }
 
     public bool HasPendingAcknowledgmentForUser(UserData userData)
     {
-        // Check if the sender is waiting for acknowledgment from this specific user
-        var hasSenderPending = _senderPendingAcknowledgments.Values.Any(recipients => recipients.Contains(userData));
-        
-        // Also check if the individual pair has a pending acknowledgment
         var hasIndividualPending = false;
         if (_allClientPairs.TryGetValue(userData, out var pair))
         {
             hasIndividualPending = pair.HasPendingAcknowledgment;
         }
-        
-        // Removed frequent debug log to reduce noise
-        
-        return hasSenderPending || hasIndividualPending;
+        return hasIndividualPending;
     }
 
     public bool HasAnySenderPendingAcknowledgments()
     {
-        // Check if the sender has any pending acknowledgments
-        return _senderPendingAcknowledgments.Any();
+        // Check if there are any pending acknowledgments tracked by session manager or pairs
+        var anyPairPending = _allClientPairs.Values.Any(p => p.HasPendingAcknowledgment);
+        return anyPairPending || _sessionAcknowledgmentManager.HasPendingAcknowledgments();
     }
 
     public void SetPendingAcknowledgmentForBuildStart()

@@ -110,6 +110,38 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
         
         var userKey = recipient.UID;
         
+        // If an older pending acknowledgment exists for this user, clear it before setting the new one
+        if (_userLatestAcknowledgments.TryGetValue(userKey, out var existing) &&
+            !string.Equals(existing.AcknowledgmentId, hashVersionKey, StringComparison.Ordinal))
+        {
+            try
+            {
+                var pair = _getPairFunc(recipient);
+                if (pair != null && pair.LastAcknowledgmentId == existing.AcknowledgmentId)
+                {
+                    // Clear previous pending state on the pair
+                    pair.ClearPendingAcknowledgmentForce(_messageService);
+                    _logger.LogDebug("Cleared previous pending ack {oldAck} on pair for user {user}", existing.AcknowledgmentId, recipient.AliasOrUID);
+                }
+
+                // Clean up notifications tied to the previous acknowledgment
+                _messageService.CleanTaggedMessages($"ack_{existing.AcknowledgmentId}");
+
+                // Publish granular UI refresh for the old acknowledgment being cleared
+                Mediator.Publish(new AcknowledgmentUiRefreshMessage(
+                    AcknowledgmentId: existing.AcknowledgmentId,
+                    User: recipient
+                ));
+
+                // Also publish legacy UI refresh for broader components
+                Mediator.Publish(new RefreshUiMessage());
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed clearing previous pending ack {oldAck} for user {user}", existing.AcknowledgmentId, recipient.AliasOrUID);
+            }
+        }
+        
         // Store only the latest acknowledgment for this user
         var latestInfo = new LatestAcknowledgmentInfo(hashVersionKey);
         
@@ -277,6 +309,63 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
     public int GetPendingAcknowledgmentCount()
     {
         return _userLatestAcknowledgments.Count;
+    }
+
+    // Remove a pending acknowledgment for a user and clear pair state
+    public bool RemovePendingAcknowledgment(UserData user, string? acknowledgmentId = null)
+    {
+        try
+        {
+            var userKey = user.UID;
+            if (string.IsNullOrEmpty(userKey))
+            {
+                Logger.LogWarning("RemovePendingAcknowledgment called with empty user UID");
+                return false;
+            }
+
+            if (!_userLatestAcknowledgments.TryGetValue(userKey, out var latestInfo))
+            {
+                Logger.LogDebug("No pending acknowledgment found for user {user}", user.AliasOrUID);
+                return false;
+            }
+
+            // If a specific acknowledgmentId was provided, ensure it matches the latest
+            if (!string.IsNullOrEmpty(acknowledgmentId) && !string.Equals(latestInfo.AcknowledgmentId, acknowledgmentId, StringComparison.Ordinal))
+            {
+                Logger.LogDebug("Provided acknowledgmentId {ackId} does not match latest {latest} for user {user}", acknowledgmentId, latestInfo.AcknowledgmentId, user.AliasOrUID);
+                return false;
+            }
+
+            // Remove pending entry
+            if (_userLatestAcknowledgments.TryRemove(userKey, out var removedInfo))
+            {
+                // Clear pair pending state and related notifications
+                var pair = _getPairFunc(user);
+                if (pair != null)
+                {
+                    pair.ClearPendingAcknowledgmentForce(_messageService);
+                    Logger.LogDebug("Cleared pending acknowledgment for user {user}", user.AliasOrUID);
+                }
+
+                // Clean up notifications tied to this acknowledgment
+                _messageService.CleanTaggedMessages($"ack_{removedInfo.AcknowledgmentId}");
+
+                // Publish UI refresh
+                Mediator.Publish(new AcknowledgmentUiRefreshMessage(
+                    AcknowledgmentId: removedInfo.AcknowledgmentId,
+                    User: user
+                ));
+                Mediator.Publish(new RefreshUiMessage());
+                return true;
+            }
+
+            return false;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Failed to remove pending acknowledgment for user {user}", user.AliasOrUID);
+            return false;
+        }
     }
     
     // Clear pending status from pair when acknowledgment is removed

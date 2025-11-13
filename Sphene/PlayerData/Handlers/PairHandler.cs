@@ -648,7 +648,9 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             bool inSameParty = _dalamudUtil.IsPlayerInParty(PlayerName ?? string.Empty);
             var currentLocation = _dalamudUtil.GetMapData();
             float maxRange = _dalamudUtil.GetDynamicAroundRangeMetersForLocation(currentLocation);
-            float distance = Vector3.Distance(self.Position, gameObj?.Position ?? Vector3.Zero);
+            var selfPos = self?.Position ?? Vector3.Zero;
+            var gamePos = gameObj?.Position ?? Vector3.Zero;
+            float distance = Vector3.Distance(selfPos, gamePos);
             bool withinPartyRange = !inSameParty || distance <= maxRange;
 
             if (DateTime.UtcNow < _postZoneCheckUntil)
@@ -657,7 +659,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                 if ((now - _postZoneLastCheck) > TimeSpan.FromSeconds(1))
                 {
                     _postZoneLastCheck = now;
-                    var screenPos = _dalamudUtil.WorldToScreen(gameObj);
+                    var screenPos = gameObj != null ? _dalamudUtil.WorldToScreen(gameObj) : Vector2.Zero;
                     bool onScreen = screenPos != Vector2.Zero;
                     bool shouldReportVisible = onScreen && withinPartyRange && !_localVisibilityGateActive;
                     if (shouldReportVisible && !_proximityReportedVisible)
@@ -718,7 +720,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                 Logger.LogDebug("{this} visibility changed (not mutual), now: {visi}", this, IsVisible);
             }
         }
-        else if (_charaHandler?.Address == nint.Zero && IsVisible)
+        else if (_charaHandler != null && _charaHandler.Address == nint.Zero && IsVisible)
         {
             IsVisible = false;
             _charaHandler.Invalidate();
