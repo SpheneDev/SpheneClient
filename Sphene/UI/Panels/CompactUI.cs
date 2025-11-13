@@ -218,8 +218,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                 if (_backupStartTime == DateTime.MinValue)
                     _backupStartTime = DateTime.Now;
                 AppendBackupStep(progress.fileName);
-                // Do not show Sphene progress window while ShrinkU Conversion UI is open
-                if (!_autoSilentConversion && !(_shrinkuHostService?.IsConversionUiOpen ?? false))
+                if (!_autoSilentConversion && !_automaticModeEnabled && !(_shrinkuHostService?.IsConversionUiOpen ?? false))
                     _conversionProgressWindowOpen = true; // ensure window shows while backup runs
             }
             catch { }
@@ -234,8 +233,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                 if (_backupStartTime == DateTime.MinValue)
                     _backupStartTime = DateTime.Now;
                 AppendBackupStep(e.Item1);
-                // Do not show Sphene progress window while ShrinkU Conversion UI is open
-                if (!_autoSilentConversion && !(_shrinkuHostService?.IsConversionUiOpen ?? false))
+                if (!_autoSilentConversion && !_automaticModeEnabled && !(_shrinkuHostService?.IsConversionUiOpen ?? false))
                     _conversionProgressWindowOpen = true;
             }
             catch { }
@@ -2268,7 +2266,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         if (!converting && !_conversionProgressWindowOpen)
             return;
 
-        if (converting && !_autoSilentConversion && !(_shrinkuHostService?.IsConversionUiOpen ?? false))
+        if (converting && !_autoSilentConversion && !_automaticModeEnabled && !(_shrinkuHostService?.IsConversionUiOpen ?? false))
             _conversionProgressWindowOpen = true;
 
         using (SpheneCustomTheme.ApplyContextMenuTheme())
