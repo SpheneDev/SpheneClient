@@ -49,6 +49,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
     private DateTime _postZoneCheckUntil = DateTime.MinValue;
     private DateTime _postZoneLastCheck = DateTime.MinValue;
     private bool _postZoneReaffirmDone = false;
+    private DateTime _lastFrameworkUpdateError = DateTime.MinValue;
 
     public PairHandler(ILogger<PairHandler> logger, Pair pair,
         GameObjectHandlerFactory gameObjectHandlerFactory,
@@ -622,6 +623,8 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
 
     private void FrameworkUpdate()
     {
+        try
+        {
         if (string.IsNullOrEmpty(PlayerName))
         {
             var pc = _dalamudUtil.FindPlayerByNameHash(Pair.Ident);
@@ -730,6 +733,15 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             Pair.ReportVisibility(false);
             _proximityReportedVisible = false;
             Logger.LogTrace("{this} visibility changed, now: {visi}", this, IsVisible);
+        }
+        }
+        catch (Exception ex)
+        {
+            if (_lastFrameworkUpdateError.AddSeconds(10) <= DateTime.UtcNow)
+            {
+                Logger.LogDebug(ex, "Error during FrameworkUpdate for {this}", this);
+                _lastFrameworkUpdateError = DateTime.UtcNow;
+            }
         }
     }
 

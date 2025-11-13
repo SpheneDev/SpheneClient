@@ -19,6 +19,7 @@ public sealed class GameObjectHandler : DisposableMediatorSubscriberBase, IHighP
     private Task? _delayedZoningTask;
     private bool _haltProcessing = false;
     private CancellationTokenSource _zoningCts = new();
+    private DateTime _lastFrameworkUpdateError = DateTime.MinValue;
 
     public GameObjectHandler(ILogger<GameObjectHandler> logger, PerformanceCollectorService performanceCollector,
         SpheneMediator mediator, DalamudUtilService dalamudUtil, ObjectKind objectKind, Func<IntPtr> getAddress, bool ownedObject = true) : base(logger, mediator)
@@ -349,7 +350,11 @@ public sealed class GameObjectHandler : DisposableMediatorSubscriberBase, IHighP
         }
         catch (Exception ex)
         {
-            Logger.LogWarning(ex, "Error during FrameworkUpdate of {this}", this);
+            if (_lastFrameworkUpdateError.AddSeconds(10) <= DateTime.UtcNow)
+            {
+                Logger.LogDebug(ex, "Error during FrameworkUpdate of {this}", this);
+                _lastFrameworkUpdateError = DateTime.UtcNow;
+            }
         }
     }
 
