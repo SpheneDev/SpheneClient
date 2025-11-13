@@ -33,6 +33,7 @@ public sealed class IpcCallerPenumbra : DisposableMediatorSubscriberBase, IIpcCa
     }
 
     private readonly ConcurrentDictionary<IntPtr, bool> _penumbraRedrawRequests = new();
+    private CancellationTokenSource _debouncedRedrawCts = new();
 
     private readonly EventSubscriber _penumbraDispose;
     private readonly EventSubscriber<nint, string, string> _penumbraGameObjectResourcePathResolved;
@@ -202,11 +203,31 @@ public sealed class IpcCallerPenumbra : DisposableMediatorSubscriberBase, IIpcCa
         }
         _spheneMediator.Publish(new ResumeScanMessage(nameof(ConvertTextureFiles)));
 
-        await _dalamudUtil.RunOnFrameworkThread(async () =>
+        ScheduleDebouncedRedraw();
+    }
+
+    private void ScheduleDebouncedRedraw(int delayMs = 600)
+    {
+        try { _debouncedRedrawCts.Cancel(); } catch { }
+        try { _debouncedRedrawCts.Dispose(); } catch { }
+        _debouncedRedrawCts = new CancellationTokenSource();
+        var token = _debouncedRedrawCts.Token;
+
+        _ = Task.Run(async () =>
         {
-            var gameObject = await _dalamudUtil.CreateGameObjectAsync(await _dalamudUtil.GetPlayerPointerAsync().ConfigureAwait(false)).ConfigureAwait(false);
-            _penumbraRedraw.Invoke(gameObject!.ObjectIndex, setting: RedrawType.Redraw);
-        }).ConfigureAwait(false);
+            try { await Task.Delay(delayMs, token).ConfigureAwait(false); } catch { return; }
+            if (token.IsCancellationRequested) return;
+
+            try
+            {
+                await _dalamudUtil.RunOnFrameworkThread(async () =>
+                {
+                    var gameObject = await _dalamudUtil.CreateGameObjectAsync(await _dalamudUtil.GetPlayerPointerAsync().ConfigureAwait(false)).ConfigureAwait(false);
+                    _penumbraRedraw.Invoke(gameObject!.ObjectIndex, setting: RedrawType.Redraw);
+                }).ConfigureAwait(false);
+            }
+            catch { }
+        }, token);
     }
 
     public async Task<Guid> CreateTemporaryCollectionAsync(ILogger logger, string uid)
