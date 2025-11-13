@@ -65,8 +65,11 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
                 {
                     var list = await _changelogService.GetChangelogEntriesAsync().ConfigureAwait(false);
                     var currentVersion = ParseVersionSafe(_version);
-                    _entries = list
-                        .Where(e => ParseVersionSafe(e.Version) <= currentVersion)
+                    var isRelease = currentVersion.Revision <= 0;
+                    var filtered = list.Where(e => ParseVersionSafe(e.Version) <= currentVersion);
+                    if (isRelease)
+                        filtered = filtered.Where(e => ParseVersionSafe(e.Version).Revision <= 0);
+                    _entries = filtered
                         .OrderByDescending(e => ParseVersionSafe(e.Version))
                         .ToList();
                     _defaultExpandedVersion = _entries.FirstOrDefault()?.Version ?? string.Empty;

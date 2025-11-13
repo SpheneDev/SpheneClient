@@ -31,7 +31,12 @@ public sealed class ReleaseChangelogStartupService : IHostedService
         {
             var assembly = Assembly.GetExecutingAssembly();
             var version = assembly.GetName().Version;
-            var currentVersion = version != null ? $"{version.Major}.{version.Minor}.{version.Build}" : string.Empty;
+            var currentVersion = version != null
+                ? (version.Revision > 0
+                    ? $"{version.Major}.{version.Minor}.{version.Build}.{version.Revision}"
+                    : $"{version.Major}.{version.Minor}.{version.Build}")
+                : string.Empty;
+            var baseVersion = version != null ? $"{version.Major}.{version.Minor}.{version.Build}" : string.Empty;
 
             var lastSeen = _configService.Current.LastSeenVersionChangelog ?? string.Empty;
             _logger.LogDebug("ReleaseChangelogStartupService: current={current}, lastSeen={last}", currentVersion, lastSeen);
@@ -42,7 +47,7 @@ public sealed class ReleaseChangelogStartupService : IHostedService
                 try
                 {
                     text = _changelogService != null
-                        ? await _changelogService.GetChangelogTextForVersionAsync(currentVersion, cancellationToken).ConfigureAwait(false)
+                        ? await _changelogService.GetChangelogTextForVersionAsync(baseVersion, cancellationToken).ConfigureAwait(false)
                         : null;
                 }
                 catch (Exception ex)

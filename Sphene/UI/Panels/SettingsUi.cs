@@ -1895,7 +1895,11 @@ public class SettingsUi : WindowMediatorSubscriberBase
         
         var assembly = System.Reflection.Assembly.GetExecutingAssembly();
         var version = assembly.GetName().Version;
-        var versionString = version != null ? $"{version.Major}.{version.Minor}.{version.Build}" : "Unknown";
+        var versionString = version != null
+            ? (version.Revision > 0
+                ? $"{version.Major}.{version.Minor}.{version.Build}.{version.Revision}"
+                : $"{version.Major}.{version.Minor}.{version.Build}")
+            : "Unknown";
         
         ImGui.TextUnformatted("Version:");
         ImGui.SameLine();
@@ -1920,7 +1924,12 @@ public class SettingsUi : WindowMediatorSubscriberBase
             Task.Run(async () =>
             {
                 string? text = null;
-                try { text = await _changelogService.GetChangelogTextForVersionAsync(versionString).ConfigureAwait(false); } catch { }
+                try
+                {
+                    var baseVersion = version != null ? $"{version.Major}.{version.Minor}.{version.Build}" : versionString;
+                    text = await _changelogService.GetChangelogTextForVersionAsync(baseVersion).ConfigureAwait(false);
+                }
+                catch { }
                 Mediator.Publish(new ShowReleaseChangelogMessage(versionString, text));
             });
         }
