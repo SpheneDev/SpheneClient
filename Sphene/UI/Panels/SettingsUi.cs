@@ -2023,13 +2023,15 @@ public class SettingsUi : WindowMediatorSubscriberBase
                     _configService.Save();
                     _uiShared.ApiController.CreateConnectionsAsync();
                 }
+                UiSharedService.AttachToolTip("When enabled, the client ignores the configured service and connects to the test server URL below. Toggling this setting switches between the main and test server and triggers an immediate reconnect. Only available in test builds (disabled on release builds).");
                 if (string.IsNullOrWhiteSpace(_configService.Current.TestServerApiUrl))
                 {
                     _configService.Current.TestServerApiUrl = "ws://test.sphene.online:6000";
                     _configService.Save();
                 }
+                ImGui.SameLine();
                 var overrideUrl = _configService.Current.TestServerApiUrl ?? string.Empty;
-                if (ImGui.InputText("Test server API URL", ref overrideUrl, 512))
+                if (ImGui.InputText("", ref overrideUrl, 50))
                 {
                     _configService.Current.TestServerApiUrl = overrideUrl;
                     _configService.Save();

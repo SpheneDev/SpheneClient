@@ -3,9 +3,9 @@
   <PropertyGroup>
     <Authors></Authors>
     <Company></Company>
-    <Version>1.1.4.2</Version>
-    <AssemblyVersion>1.1.4.2</AssemblyVersion>
-    <FileVersion>1.1.4.2</FileVersion>
+    <Version>1.1.4.4</Version>
+    <AssemblyVersion>1.1.4.4</AssemblyVersion>
+    <FileVersion>1.1.4.4</FileVersion>
     <Description></Description>
     <Copyright></Copyright>
     <PackageProjectUrl>https://github.com/SpheneDev/client</PackageProjectUrl>
