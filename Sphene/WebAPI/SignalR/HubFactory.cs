@@ -3,6 +3,7 @@ using Sphene.Services;
 using Sphene.Services.Mediator;
 using Sphene.Services.ServerConfiguration;
 using Sphene.WebAPI.SignalR.Utils;
+using Sphene.SpheneConfiguration;
 using MessagePack;
 using MessagePack.Resolvers;
 using Microsoft.AspNetCore.Http.Connections;
@@ -18,6 +19,7 @@ public class HubFactory : MediatorSubscriberBase
     private readonly ILoggerProvider _loggingProvider;
     private readonly ServerConfigurationManager _serverConfigurationManager;
     private readonly TokenProvider _tokenProvider;
+    private readonly SpheneConfigService _configService;
     private HubConnection? _instance;
     private bool _isDisposed = false;
     private readonly bool _isWine = false;
@@ -25,12 +27,13 @@ public class HubFactory : MediatorSubscriberBase
     public HubFactory(ILogger<HubFactory> logger, SpheneMediator mediator,
         ServerConfigurationManager serverConfigurationManager,
         TokenProvider tokenProvider, ILoggerProvider pluginLog,
-        DalamudUtilService dalamudUtilService) : base(logger, mediator)
+        DalamudUtilService dalamudUtilService, SpheneConfigService configService) : base(logger, mediator)
     {
         _serverConfigurationManager = serverConfigurationManager;
         _tokenProvider = tokenProvider;
         _loggingProvider = pluginLog;
         _isWine = dalamudUtilService.IsWine;
+        _configService = configService;
     }
 
     public async Task DisposeHubAsync()
@@ -83,8 +86,9 @@ public class HubFactory : MediatorSubscriberBase
         var version = Assembly.GetExecutingAssembly().GetName().Version;
         var userAgent = $"Sphene/{version!.Major}.{version!.Minor}.{version!.Build}";
         
+        var baseUrl = GetBaseApiUrl();
         _instance = new HubConnectionBuilder()
-            .WithUrl(_serverConfigurationManager.CurrentApiUrl + ISpheneHub.Path, options =>
+            .WithUrl(baseUrl + ISpheneHub.Path, options =>
             {
                 options.AccessTokenProvider = () => _tokenProvider.GetOrUpdateToken(ct);
                 options.Transports = transportType;
@@ -124,6 +128,20 @@ public class HubFactory : MediatorSubscriberBase
         _isDisposed = false;
 
         return _instance;
+    }
+
+    private string GetBaseApiUrl()
+    {
+        try
+        {
+            var isTestBuild = (Assembly.GetExecutingAssembly().GetName().Version?.Revision ?? 0) != 0;
+            if (isTestBuild && _configService.Current.UseTestServerOverride && !string.IsNullOrWhiteSpace(_configService.Current.TestServerApiUrl))
+            {
+                return _configService.Current.TestServerApiUrl.TrimEnd('/');
+            }
+        }
+        catch { }
+        return _serverConfigurationManager.CurrentApiUrl;
     }
 
     private Task HubOnClosed(Exception? arg)

@@ -92,9 +92,15 @@ public class SphenePlugin : MediatorSubscriberBase, IHostedService
     public Task StartAsync(CancellationToken cancellationToken)
     {
         var version = Assembly.GetExecutingAssembly().GetName().Version!;
-        Logger.LogInformation("Launching {name} {major}.{minor}.{build}", "Sphene", version.Major, version.Minor, version.Build);
+        Logger.LogInformation("Launching {name} {major}.{minor}.{build}.{revision}", "Sphene", version.Major, version.Minor, version.Build, version.Revision);
         Mediator.Publish(new EventMessage(new Services.Events.Event(nameof(SphenePlugin), Services.Events.EventSeverity.Informational,
-            $"Starting Sphene {version.Major}.{version.Minor}.{version.Build}")));
+            $"Starting Sphene {version.Major}.{version.Minor}.{version.Build}.{version.Revision}")));
+
+        if ((version.Revision) == 0 && _SpheneConfigService.Current.UseTestServerOverride)
+        {
+            _SpheneConfigService.Current.UseTestServerOverride = false;
+            _SpheneConfigService.Save();
+        }
 
         // Initialize ThemeManager with configuration service
         ThemeManager.Initialize(Logger, _SpheneConfigService.ConfigurationDirectory, _SpheneConfigService);

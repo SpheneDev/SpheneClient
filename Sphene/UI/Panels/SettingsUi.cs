@@ -36,6 +36,7 @@ using System.Numerics;
 using System.Text;
 using System.Text.Json;
 using Sphene.UI.CharaDataHub;
+using System.Reflection;
 
 namespace Sphene.UI.Panels;
 
@@ -2010,6 +2011,35 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 _ => ImGuiColors.DalamudRed
             };
             ImGui.TextColored(stateColor, connectionState);
+
+            var isTestBuild = (Assembly.GetExecutingAssembly().GetName().Version?.Revision ?? 0) != 0;
+            if (isTestBuild)
+            {
+                var useOverride = _configService.Current.UseTestServerOverride;
+                if (ImGui.Checkbox("Use test server override", ref useOverride))
+                {
+                    _configService.Current.UseTestServerOverride = useOverride;
+                    _configService.Save();
+                    _uiShared.ApiController.CreateConnectionsAsync();
+                }
+                if (string.IsNullOrWhiteSpace(_configService.Current.TestServerApiUrl))
+                {
+                    _configService.Current.TestServerApiUrl = "ws://test.sphene.online:6000";
+                    _configService.Save();
+                }
+                var overrideUrl = _configService.Current.TestServerApiUrl ?? string.Empty;
+                if (ImGui.InputText("Test server API URL", ref overrideUrl, 512))
+                {
+                    _configService.Current.TestServerApiUrl = overrideUrl;
+                    _configService.Save();
+                }
+                UiSharedService.AttachToolTip("Example: ws://1.1.1.2:6000 or wss://test.example.com:6000");
+            }
+            else if (_configService.Current.UseTestServerOverride)
+            {
+                _configService.Current.UseTestServerOverride = false;
+                _configService.Save();
+            }
         }
 
         // Statistics Section

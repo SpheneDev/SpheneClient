@@ -9,6 +9,7 @@ using System.Collections.Concurrent;
 using System.IdentityModel.Tokens.Jwt;
 using System.Net.Http.Headers;
 using System.Reflection;
+using Sphene.SpheneConfiguration;
 
 namespace Sphene.WebAPI.SignalR;
 
@@ -18,9 +19,10 @@ public sealed class TokenProvider : IDisposable, IMediatorSubscriber
     private readonly HttpClient _httpClient;
     private readonly ILogger<TokenProvider> _logger;
     private readonly ServerConfigurationManager _serverManager;
+    private readonly SpheneConfigService _configService;
     private readonly ConcurrentDictionary<JwtIdentifier, string> _tokenCache = new();
 
-    public TokenProvider(ILogger<TokenProvider> logger, ServerConfigurationManager serverManager, DalamudUtilService dalamudUtil, SpheneMediator spheneMediator, HttpClient httpClient)
+    public TokenProvider(ILogger<TokenProvider> logger, ServerConfigurationManager serverManager, DalamudUtilService dalamudUtil, SpheneMediator spheneMediator, HttpClient httpClient, SpheneConfigService configService)
     {
         _logger = logger;
         _serverManager = serverManager;
@@ -28,6 +30,7 @@ public sealed class TokenProvider : IDisposable, IMediatorSubscriber
         var ver = Assembly.GetExecutingAssembly().GetName().Version;
         Mediator = spheneMediator;
         _httpClient = httpClient;
+        _configService = configService;
         Mediator.Subscribe<DalamudLogoutMessage>(this, (_) =>
         {
             _lastJwtIdentifier = null;
@@ -51,8 +54,9 @@ public sealed class TokenProvider : IDisposable, IMediatorSubscriber
 
     private Uri GetAuthServiceUrl()
     {
-        var baseUrl = _serverManager.CurrentApiUrl
-            .Replace("wss://", "http://", StringComparison.OrdinalIgnoreCase)
+        var apiUrl = GetBaseApiUrl();
+        var baseUrl = apiUrl
+            .Replace("wss://", "https://", StringComparison.OrdinalIgnoreCase)
             .Replace("ws://", "http://", StringComparison.OrdinalIgnoreCase);
         
         // Replace port 6000 with 8080 for auth service
@@ -67,6 +71,20 @@ public sealed class TokenProvider : IDisposable, IMediatorSubscriber
         }
         
         return new Uri(baseUrl);
+    }
+
+    private string GetBaseApiUrl()
+    {
+        try
+        {
+            var isTestBuild = (Assembly.GetExecutingAssembly().GetName().Version?.Revision ?? 0) != 0;
+            if (isTestBuild && _configService.Current.UseTestServerOverride && !string.IsNullOrWhiteSpace(_configService.Current.TestServerApiUrl))
+            {
+                return _configService.Current.TestServerApiUrl.TrimEnd('/');
+            }
+        }
+        catch { }
+        return _serverManager.CurrentApiUrl;
     }
 
     public async Task<string> GetNewToken(bool isRenewal, JwtIdentifier identifier, CancellationToken ct)
@@ -189,7 +207,7 @@ public sealed class TokenProvider : IDisposable, IMediatorSubscriber
                 var (OAuthToken, UID) = _serverManager.GetOAuth2(out _)
                     ?? throw new InvalidOperationException("Requested OAuth2 but received null");
 
-                jwtIdentifier = new(_serverManager.CurrentApiUrl,
+                jwtIdentifier = new(GetBaseApiUrl(),
                     playerIdentifier,
                     UID, OAuthToken);
             }
@@ -198,7 +216,7 @@ public sealed class TokenProvider : IDisposable, IMediatorSubscriber
                 var secretKey = _serverManager.GetSecretKey(out _)
                     ?? throw new InvalidOperationException("Requested SecretKey but received null");
 
-                jwtIdentifier = new(_serverManager.CurrentApiUrl,
+                jwtIdentifier = new(GetBaseApiUrl(),
                                     playerIdentifier,
                                     string.Empty,
                                     secretKey);
