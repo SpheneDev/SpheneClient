@@ -1998,7 +1998,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
         {
             ImGui.TextUnformatted("Current Service:");
             ImGui.SameLine();
-            ImGui.TextColored(ImGuiColors.ParsedGreen, currentServer.ServerName);
+            var displayName = (_configService.Current.UseTestServerOverride && ((Assembly.GetExecutingAssembly().GetName().Version?.Revision ?? 0) != 0)) ? "Test Server" : currentServer.ServerName;
+            ImGui.TextColored(ImGuiColors.ParsedGreen, displayName);
 
             ImGui.TextUnformatted("Connection State:");
             ImGui.SameLine();
@@ -2033,7 +2034,6 @@ public class SettingsUi : WindowMediatorSubscriberBase
                     _configService.Current.TestServerApiUrl = overrideUrl;
                     _configService.Save();
                 }
-                UiSharedService.AttachToolTip("Example: ws://1.1.1.2:6000 or wss://test.example.com:6000");
             }
             else if (_configService.Current.UseTestServerOverride)
             {
