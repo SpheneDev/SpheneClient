@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
+using Dalamud.Interface;
 using System.Text.Json;
 using Sphene.Configuration;
 
@@ -41,56 +42,52 @@ public static class ButtonStyleManagerUI
         );
     }
     private static bool _pickerEnabled = false;
-    private static readonly (string Key, string Label)[] _keys =
+    private static readonly (string Key, string Label, FontAwesomeIcon Icon, string Category)[] _keys =
     {
-        // CompactUI controls
-        (ButtonStyleKeys.Compact_Connect, "CompactUI: Connect"),
-        (ButtonStyleKeys.Compact_Disconnect, "CompactUI: Disconnect"),
-        (ButtonStyleKeys.Compact_Reconnect, "CompactUI: Reconnect"),
-        (ButtonStyleKeys.Compact_Conversion, "CompactUI: Conversion"),
-        (ButtonStyleKeys.Compact_IncognitoOn, "CompactUI: Incognito On"),
-        (ButtonStyleKeys.Compact_IncognitoOff, "CompactUI: Incognito Off"),
-        (ButtonStyleKeys.Compact_AreaSelect, "CompactUI: Area Select"),
-        (ButtonStyleKeys.Compact_Settings, "CompactUI: Settings"),
-        (ButtonStyleKeys.Compact_Close, "CompactUI: Close"),
+        // Control Panel (CompactUI)
+        (ButtonStyleKeys.Compact_Connect, "Connect", FontAwesomeIcon.Link, "Control Panel"),
+        (ButtonStyleKeys.Compact_Disconnect, "Disconnect", FontAwesomeIcon.Unlink, "Control Panel"),
+        (ButtonStyleKeys.Compact_Reconnect, "Reconnect", FontAwesomeIcon.Redo, "Control Panel"),
+        (ButtonStyleKeys.Compact_Conversion, "Conversion", FontAwesomeIcon.ArrowsToEye, "Control Panel"),
+        (ButtonStyleKeys.Compact_IncognitoOn, "Incognito Disabled", FontAwesomeIcon.Heart, "Control Panel"),
+        (ButtonStyleKeys.Compact_IncognitoOff, "Incognito Enabled", FontAwesomeIcon.Play, "Control Panel"),
+        (ButtonStyleKeys.Compact_AreaSelect, "Area Select", FontAwesomeIcon.MapMarkerAlt, "Control Panel"),
+        (ButtonStyleKeys.Compact_Settings, "Settings", FontAwesomeIcon.Cog, "Control Panel"),
+        (ButtonStyleKeys.Compact_Close, "Close", FontAwesomeIcon.Times, "Control Panel"),
 
-        // Top tabs
-        (ButtonStyleKeys.TopTab_User, "TopTab: User"),
-        (ButtonStyleKeys.TopTab_Users, "TopTab: Users"),
-        (ButtonStyleKeys.TopTab_Filter, "TopTab: Filter"),
-        (ButtonStyleKeys.TopTab_Settings, "TopTab: Settings"),
+        // Navigation (TopTab)
+        // Navigation - Individual Controls
+        (ButtonStyleKeys.TopTab_User, "Individual Pair Menu", FontAwesomeIcon.User, "Navigation: Individual Pair"),
+        (ButtonStyleKeys.TopTab_IndividualPause, "Individual Pause", FontAwesomeIcon.Pause, "Navigation: Individual Pair"),
+        (ButtonStyleKeys.TopTab_IndividualSound, "Individual Sound", FontAwesomeIcon.VolumeUp, "Navigation: Individual Pair"),
+        (ButtonStyleKeys.TopTab_IndividualAnimations, "Individual Animations", FontAwesomeIcon.Running, "Navigation: Individual Pair"),
+        (ButtonStyleKeys.TopTab_IndividualVFX, "Individual VFX", FontAwesomeIcon.Sun, "Navigation: Individual Pair"),
 
-        // TopTab global Individual controls
-        (ButtonStyleKeys.TopTab_IndividualPause, "TopTab: Individual Pause"),
-        (ButtonStyleKeys.TopTab_IndividualSound, "TopTab: Individual Sound"),
-        (ButtonStyleKeys.TopTab_IndividualAnimations, "TopTab: Individual Animations"),
-        (ButtonStyleKeys.TopTab_IndividualVFX, "TopTab: Individual VFX"),
+        // Navigation - Syncshell Controls
+        (ButtonStyleKeys.TopTab_Users, "Syncshell Menu", FontAwesomeIcon.Users, "Navigation: Syncshell"),
+        (ButtonStyleKeys.TopTab_SyncshellPause, "Syncshell Pause", FontAwesomeIcon.PauseCircle, "Navigation: Syncshell"),
+        (ButtonStyleKeys.TopTab_SyncshellSound, "Syncshell Sound", FontAwesomeIcon.VolumeUp, "Navigation: Syncshell"),
+        (ButtonStyleKeys.TopTab_SyncshellAnimations, "Syncshell Animations", FontAwesomeIcon.Running, "Navigation: Syncshell"),
+        (ButtonStyleKeys.TopTab_SyncshellVFX, "Syncshell VFX", FontAwesomeIcon.Sun, "Navigation: Syncshell"),
+        (ButtonStyleKeys.TopTab_SyncshellAlign, "Syncshell Align", FontAwesomeIcon.Check, "Navigation: Syncshell"),
 
-        // TopTab global Syncshell controls
-        (ButtonStyleKeys.TopTab_SyncshellPause, "TopTab: Syncshell Pause"),
-        (ButtonStyleKeys.TopTab_SyncshellSound, "TopTab: Syncshell Sound"),
-        (ButtonStyleKeys.TopTab_SyncshellAnimations, "TopTab: Syncshell Animations"),
-        (ButtonStyleKeys.TopTab_SyncshellVFX, "TopTab: Syncshell VFX"),
-        (ButtonStyleKeys.TopTab_SyncshellAlign, "TopTab: Syncshell Align"),
+        // Navigation - Filter
+        (ButtonStyleKeys.TopTab_Filter, "Filter", FontAwesomeIcon.Filter, "Navigation: Filter"),
 
-        // Group Pair component
-        (ButtonStyleKeys.Pair_Sync, "GroupPair: Sync"),
-        (ButtonStyleKeys.Pair_Reload, "GroupPair: Reload"),
-        (ButtonStyleKeys.Pair_Pause, "GroupPair: Pause/Play"),
-        (ButtonStyleKeys.Pair_Menu, "GroupPair: Menu"),
+        // Navigation - Your User Menu
+        (ButtonStyleKeys.TopTab_Settings, "Your User Menu", FontAwesomeIcon.UserCog, "Navigation: Your User Menu"),
 
-        // Popup components
-        (ButtonStyleKeys.Popup_Close, "Popup: Close"),
 
-        
 
-        // Syncshell group row
-        (ButtonStyleKeys.GroupSyncshell_Menu, "Syncshell Group: Menu"),
-        (ButtonStyleKeys.GroupSyncshell_Pause, "Syncshell Group: Pause"),
-
-        // Pair tag row
-        (ButtonStyleKeys.PairTag_Menu, "Pair Tag: Menu"),
-        (ButtonStyleKeys.PairTag_Pause, "Pair Tag: Pause")
+        // Group & Pair
+        // (ButtonStyleKeys.Pair_Sync, "Pair Sync", FontAwesomeIcon.Sync, "Pairs"), // Temporarily disabled until functionality is implemented
+        (ButtonStyleKeys.Pair_Reload, "Pair Reload", FontAwesomeIcon.Sync, "Pairs"),
+        (ButtonStyleKeys.Pair_Pause, "Pair Pause/Play", FontAwesomeIcon.Pause, "Pairs"),
+        (ButtonStyleKeys.Pair_Menu, "Pair Menu", FontAwesomeIcon.EllipsisV, "Pairs"),
+        (ButtonStyleKeys.GroupSyncshell_Menu, "Syncshell Menu", FontAwesomeIcon.EllipsisV, "Synchsell"),
+        (ButtonStyleKeys.GroupSyncshell_Pause, "Syncshell Pause", FontAwesomeIcon.Pause, "Synchsell"),
+        (ButtonStyleKeys.PairTag_Menu, "Group Menu", FontAwesomeIcon.EllipsisV, "Group" ),
+        (ButtonStyleKeys.PairTag_Pause, "Group Pause", FontAwesomeIcon.Pause, "Group"),
     };
 
     private static int _selectedIndex = 0;
@@ -185,18 +182,47 @@ public static class ButtonStyleManagerUI
             Sphene.UI.UiSharedService.AttachToolTip("When enabled you can Click on Active Control Panel UI Buttons to navigate to their Button Style settings.");
         ImGui.Separator();
 
-        if (ImGui.BeginCombo("Button", _keys[_selectedIndex].Label))
+        ImGui.PushFont(UiBuilder.IconFont);
+        var iconWidth = ImGui.CalcTextSize(_keys[_selectedIndex].Icon.ToIconString()).X;
+        ImGui.PopFont();
+        var spaceWidth = ImGui.CalcTextSize(" ").X;
+        var padX = ImGui.GetStyle().FramePadding.X + ImGui.GetStyle().ItemSpacing.X;
+        var extraPad = ImGui.GetStyle().ItemSpacing.X;
+        var desiredPad = iconWidth + padX + extraPad + spaceWidth * 2.0f;
+        var spaces = Math.Max(4, (int)MathF.Ceiling(desiredPad / MathF.Max(1e-3f, spaceWidth)));
+        var selectedDisplay = new string(' ', spaces) + _keys[_selectedIndex].Label;
+        if (ImGui.BeginCombo("Button", selectedDisplay))
         {
+            string? currentCategory = null;
             for (int i = 0; i < _keys.Length; i++)
             {
+                var item = _keys[i];
+                if (item.Category != currentCategory)
+                {
+                    if (currentCategory != null) ImGui.Separator();
+                    ImGui.TextDisabled(item.Category);
+                    currentCategory = item.Category;
+                }
                 bool selected = _selectedIndex == i;
-                if (ImGui.Selectable(_keys[i].Label, selected))
+                ImGui.PushFont(UiBuilder.IconFont);
+                ImGui.TextUnformatted(item.Icon.ToIconString());
+                ImGui.PopFont();
+                ImGui.SameLine();
+                if (ImGui.Selectable(item.Label, selected))
                     _selectedIndex = i;
                 if (selected)
                     ImGui.SetItemDefaultFocus();
             }
             ImGui.EndCombo();
         }
+        var rectMin = ImGui.GetItemRectMin();
+        var rectMax = ImGui.GetItemRectMax();
+        var framePad = ImGui.GetStyle().FramePadding;
+        var iconY = rectMin.Y + (rectMax.Y - rectMin.Y - ImGui.GetTextLineHeight()) * 0.5f;
+        var iconPos = new Vector2(rectMin.X + framePad.X, iconY);
+        ImGui.PushFont(UiBuilder.IconFont);
+        ImGui.GetWindowDrawList().AddText(iconPos, ImGui.GetColorU32(ImGuiCol.Text), _keys[_selectedIndex].Icon.ToIconString());
+        ImGui.PopFont();
 
         ImGui.Separator();
 
@@ -242,7 +268,11 @@ public static class ButtonStyleManagerUI
                 ov.Button = effBtn;
                 theme.NotifyThemeChanged();
             }
-            if (ImGui.Button("Derive Hover/Active from Button"))
+            ImGui.SameLine();
+            ImGui.PushFont(UiBuilder.IconFont);
+            var genClicked = ImGui.SmallButton(FontAwesomeIcon.Magic.ToIconString());
+            ImGui.PopFont();
+            if (genClicked)
             {
                 var hover = DeriveHoverColor(effBtn);
                 var active = DeriveActiveColor(effBtn);
@@ -250,6 +280,8 @@ public static class ButtonStyleManagerUI
                 ov.ButtonActive = active;
                 theme.NotifyThemeChanged();
             }
+            if (ImGui.IsItemHovered())
+                Sphene.UI.UiSharedService.AttachToolTip("Generate Hover/Active colors from current Button color.");
             var effBtnH = ov.ButtonHovered ?? defaults.Hovered;
             if (ImGui.ColorEdit4("Button Hovered", ref effBtnH))
             {

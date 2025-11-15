@@ -252,6 +252,41 @@ public class CompactUi : WindowMediatorSubscriberBase
         };
         _tabMenu = new TopTabMenu(Mediator, _apiController, _pairManager, _uiSharedService);
 
+        Mediator.Subscribe<CompactUiStickToSettingsMessage>(this, msg =>
+        {
+            if (msg.Enabled && !_stickEnabled)
+            {
+                _preStickPos = _lastPosition;
+            }
+            else if (!msg.Enabled && _stickEnabled)
+            {
+                _restoreAfterUnstick = true;
+            }
+            _stickEnabled = msg.Enabled;
+            _settingsPos = msg.SettingsPos;
+            _settingsSize = msg.SettingsSize;
+        });
+
+        Mediator.Unsubscribe<UiToggleMessage>(this);
+        Mediator.Subscribe<UiToggleMessage>(this, (msg) =>
+        {
+            if (msg.UiType == GetType())
+            {
+                if (_stickEnabled)
+                {
+                    return;
+                }
+                var wasOpen = IsOpen;
+                Toggle();
+            }
+        });
+
+        Mediator.Subscribe<FrameworkUpdateMessage>(this, (_) =>
+        {
+            if (_stickEnabled && !IsOpen)
+                IsOpen = true;
+        });
+
         // Initialize incognito mode state from configuration
         _isIncognitoModeActive = _configService.Current.IsIncognitoModeActive;
         _prePausedPairs = new HashSet<string>(_configService.Current.PrePausedPairs);
@@ -506,9 +541,25 @@ public class CompactUi : WindowMediatorSubscriberBase
     }
 
     private IDisposable? _themeScope;
+    private bool _stickEnabled;
+    private Vector2 _settingsPos;
+    private Vector2 _settingsSize;
+    private Vector2 _preStickPos;
+    private bool _restoreAfterUnstick;
 
     public override void PreDraw()
     {
+        if (_stickEnabled && !IsOpen)
+        {
+            IsOpen = true;
+        }
+        var settingsOpen = false;
+        Mediator.Publish(new QueryWindowOpenStateMessage(typeof(SettingsUi), state => settingsOpen = state));
+        if (_stickEnabled && !settingsOpen)
+        {
+            _stickEnabled = false;
+            _restoreAfterUnstick = true;
+        }
         // Apply CompactUI theme before the window is drawn
         _themeScope = SpheneCustomTheme.ApplyThemeWithOriginalRadius();
         
@@ -520,6 +571,26 @@ public class CompactUi : WindowMediatorSubscriberBase
         else
         {
             Flags &= ~ImGuiWindowFlags.NoTitleBar;
+        }
+        
+        if (_stickEnabled)
+        {
+            var pad = 10.0f * ImGuiHelpers.GlobalScale;
+            ImGui.SetNextWindowPos(new Vector2(_settingsPos.X + _settingsSize.X + pad, _settingsPos.Y), ImGuiCond.Always);
+            Flags |= ImGuiWindowFlags.NoMove;
+        }
+        else
+        {
+            if (_restoreAfterUnstick)
+            {
+                if (_preStickPos.X > 2.0f && _preStickPos.Y > 2.0f)
+                {
+                    ImGui.SetNextWindowPos(_preStickPos, ImGuiCond.Always);
+                }
+                _restoreAfterUnstick = false;
+                _preStickPos = Vector2.Zero;
+            }
+            Flags &= ~ImGuiWindowFlags.NoMove;
         }
         
         // Apply any pending window resize before the window is drawn
@@ -814,12 +885,13 @@ public class CompactUi : WindowMediatorSubscriberBase
         
         // Separate handling for size and position changes
         var sizeChanged = _lastSize != size;
-        var positionChanged = _lastPosition != pos;
+        var positionChanged = !_stickEnabled && _lastPosition != pos;
         
         if (sizeChanged || positionChanged)
         {
             _lastSize = size;
-            _lastPosition = pos;
+            if (!_stickEnabled)
+                _lastPosition = pos;
             
             Mediator.Publish(new CompactUiChange(_lastSize, _lastPosition));
         }

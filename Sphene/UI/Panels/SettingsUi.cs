@@ -76,6 +76,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
     private Task<List<FileCacheEntity>>? _validationTask;
     private bool _wasOpen = false;
     private Vector2 _currentCompactUiSize = new Vector2(370, 400); // Default CompactUI size
+    private bool _compactUiHasLayoutInfo = false;
     private bool? _compactUiWasOpen = null;
     // New navigation state for redesigned Settings layout
     private enum SettingsPage
@@ -147,8 +148,15 @@ public class SettingsUi : WindowMediatorSubscriberBase
         Mediator.Subscribe<CharacterDataCreatedMessage>(this, (msg) => LastCreatedCharacterData = msg.CharacterData);
         Mediator.Subscribe<DownloadStartedMessage>(this, (msg) => _currentDownloads[msg.DownloadId] = msg.DownloadStatus);
         Mediator.Subscribe<DownloadFinishedMessage>(this, (msg) => _currentDownloads.TryRemove(msg.DownloadId, out _));
-        Mediator.Subscribe<CompactUiChange>(this, (msg) => _currentCompactUiSize = msg.Size);
+        Mediator.Subscribe<CompactUiChange>(this, (msg) => { _currentCompactUiSize = msg.Size; _compactUiHasLayoutInfo = true; });
         Mediator.Subscribe<ThemeNavigateToButtonSettingsMessage>(this, OnNavigateToButtonSettings);
+        Mediator.Subscribe<QueryWindowOpenStateMessage>(this, (msg) =>
+        {
+            if (msg.UiType == GetType())
+            {
+                msg.Respond(IsOpen);
+            }
+        });
     }
 
     public CharacterData? LastCreatedCharacterData { private get; set; }
@@ -256,6 +264,11 @@ public class SettingsUi : WindowMediatorSubscriberBase
             Util.OpenLink("https://discord.gg/GbnwsP2XsF");
         }
         UiSharedService.AttachToolTip("Get support, updates, and connect with other users");
+
+        var settingsPos = ImGui.GetWindowPos();
+        var settingsSize = ImGui.GetWindowSize();
+        var themePageActive = _activeSettingsPage == SettingsPage.Theme;
+        Mediator.Publish(new CompactUiStickToSettingsMessage(themePageActive && _compactUiHasLayoutInfo, settingsPos, settingsSize));
 
         if (_activeSettingsPage == SettingsPage.Theme && _compactUiWasOpen == null)
         {
@@ -3144,13 +3157,19 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 ov.Button = effBtn;
                 theme.NotifyThemeChanged();
             }
-            if (ImGui.Button("Derive Hover/Active from Button"))
+            ImGui.SameLine();
+            ImGui.PushFont(UiBuilder.IconFont);
+            var genHoverActive = ImGui.SmallButton(FontAwesomeIcon.Magic.ToIconString());
+            ImGui.PopFont();
+            if (genHoverActive)
             {
                 var tup = ButtonStyleManagerUI.DeriveHoverActive(ov.Button ?? theme.Button);
                 ov.ButtonHovered = tup.Hover;
                 ov.ButtonActive = tup.Active;
                 theme.NotifyThemeChanged();
             }
+            if (ImGui.IsItemHovered())
+                UiSharedService.AttachToolTip("Generate Hover/Active colors from current Button color.");
             var effBtnH = ov.ButtonHovered ?? theme.ButtonHovered;
             if (ImGui.ColorEdit4("Button Hovered", ref effBtnH))
             {

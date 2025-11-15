@@ -110,6 +110,8 @@ public record ShowReleaseChangelogMessage(string CurrentVersion, string? Changel
 public record ThemePickerModeToggleMessage(bool IsEnabled) : MessageBase;
 public record ThemeNavigateToButtonSettingsMessage(string ButtonStyleKey) : MessageBase;
 
+public record CompactUiStickToSettingsMessage(bool Enabled, Vector2 SettingsPos, Vector2 SettingsSize) : SameThreadMessage;
+
 // Area-bound syncshell messages
 public record AreaBoundJoinRequestMessage(AreaBoundJoinRequestDto JoinRequest) : MessageBase;
 public record AreaBoundJoinResponseMessage(AreaBoundJoinResponseDto JoinResponse) : MessageBase;
