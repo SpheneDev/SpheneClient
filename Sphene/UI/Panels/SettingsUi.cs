@@ -2992,14 +2992,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 
         if (ImGui.CollapsingHeader("Control Panel Layout", ImGuiTreeNodeFlags.None))
         {
-        
-        var compactWindowRounding = theme.CompactWindowRounding;
-        if (ImGui.SliderFloat("Corner Rounding", ref compactWindowRounding, 0.0f, 30.0f, "%.1f"))
-        {
-            theme.CompactWindowRounding = compactWindowRounding;
-            themeChanged = true;
-        }
-        
+                
         ImGui.Spacing();
         ImGui.Text("Panel Spacing & Sizing");
         ImGui.Separator();
@@ -3015,20 +3008,27 @@ public class SettingsUi : WindowMediatorSubscriberBase
         
         
         var compactChildPadding = theme.CompactChildPadding;
-        if (ImGui.SliderFloat2("Panel Child Padding", ref compactChildPadding, 0.0f, 20.0f, "%.1f"))
+        if (ImGui.SliderFloat2("Panel Padding", ref compactChildPadding, 0.0f, 20.0f, "%.1f"))
         {
             theme.CompactChildPadding = compactChildPadding;
             themeChanged = true;
         }
         
         ImGui.Spacing();
-        ImGui.Text("Panel Border Thickness");
+        ImGui.Text("Panel Border and Rounding");
         ImGui.Separator();
         
         var compactWindowBorderSize = theme.CompactWindowBorderSize;
         if (ImGui.SliderFloat("Panel Window Border Size", ref compactWindowBorderSize, 0.0f, 5.0f, "%.1f"))
         {
             theme.CompactWindowBorderSize = compactWindowBorderSize;
+            themeChanged = true;
+        }
+
+        var compactWindowRounding = theme.CompactWindowRounding;
+        if (ImGui.SliderFloat("Corner Rounding", ref compactWindowRounding, 0.0f, 30.0f, "%.1f"))
+        {
+            theme.CompactWindowRounding = compactWindowRounding;
             themeChanged = true;
         }
 
