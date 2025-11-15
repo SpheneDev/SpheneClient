@@ -3632,14 +3632,6 @@ public class SettingsUi : WindowMediatorSubscriberBase
         
             ImGui.Spacing();
             bool previewChanged = false;
-            var showTransmissionPreview = theme.ShowTransmissionPreview;
-            if (ImGui.Checkbox("Show Transmission Preview in Control Panel", ref showTransmissionPreview))
-            {
-                theme.ShowTransmissionPreview = showTransmissionPreview;
-                previewChanged = true;
-            }
-            _uiShared.DrawHelpText("When enabled, shows preview upload/download bars at their real positions.");
-            
             if (theme.ShowTransmissionPreview)
             {
                 var uploadFill = theme.TransmissionPreviewUploadFill;
@@ -3677,14 +3669,6 @@ public class SettingsUi : WindowMediatorSubscriberBase
         {
             ImGui.Separator();
             ImGui.Spacing();
-            var forceUpdateHint = theme.ForceShowUpdateHint;
-            if (ImGui.Checkbox("Force Show Update Hint in Control Panel", ref forceUpdateHint))
-            {
-                theme.ForceShowUpdateHint = forceUpdateHint;
-                _suppressUnsavedForPreview = true;
-                theme.NotifyThemeChanged();
-                _suppressUnsavedForPreview = false;
-            }
             var updateHintHeight = theme.CompactUpdateHintHeight;
             if (ImGui.SliderFloat("Update Hint Height", ref updateHintHeight, 0.0f, 64.0f, "%.1f"))
             {

@@ -23,7 +23,7 @@ public static class ThemePresets
             GrabRounding = 2.1f,
             TabRounding = 4.6f,
             
-            CompactWindowRounding = 15.0f,
+            CompactWindowRounding = 12.7f,
             CompactChildRounding = 15.0f,
             CompactPopupRounding = 4.0f,
             CompactFrameRounding = 3.9f,
@@ -40,10 +40,10 @@ public static class ThemePresets
             
             CompactWindowPadding = new Vector2(10.6f, 8.9f),
             CompactFramePadding = new Vector2(6.5f, 1.8f),
-            CompactItemSpacing = new Vector2(5.3f, 6.0f),
+            CompactItemSpacing = new Vector2(5.4f, 5.6f),
             CompactItemInnerSpacing = new Vector2(5.9f, 4.0f),
             CompactCellPadding = new Vector2(6.0f, 3.0f),
-            CompactChildPadding = new Vector2(11.5f, 11.5f),
+            CompactChildPadding = new Vector2(8.0f, 7.9f),
             CompactIndentSpacing = 23.4f,
             CompactScrollbarSize = 16.9f,
             CompactGrabMinSize = 14.0f,
@@ -63,7 +63,7 @@ public static class ThemePresets
             // CompactUI Progress Bar Settings
             ProgressBarRounding = 17.4f,
             CompactProgressBarHeight = 16.2f,
-            CompactProgressBarWidth = 335.0f,
+            CompactProgressBarWidth = 330.7f,
             CompactProgressBarBackground = new Vector4(0.1f, 0.1f, 0.15f, 0.8f),
             CompactProgressBarForeground = new Vector4(0.1791981f, 0.12884276f, 0.5568628f, 1.0f),
             CompactProgressBarBorder = new Vector4(0.3f, 0.3f, 0.4f, 1.0f),
@@ -71,12 +71,31 @@ public static class ThemePresets
             ProgressBarPreviewFill = 75.0f,
             
             // CompactUI Transmission Progress Bar Settings
-            TransmissionBarRounding = 7.5f,
-            CompactTransmissionBarHeight = 15.7f,
-            CompactTransmissionBarWidth = 178.1f,
-            CompactTransmissionBarBackground = new Vector4(0.24603176f, 0.24603176f, 0.24603176f, 0.8f),
-            CompactTransmissionBarForeground = new Vector4(0.43598622f, 0.3607843f, 1.0f, 1.0f),
-            CompactTransmissionBarBorder = new Vector4(0.0f, 0.0f, 0.0f, 1.0f),
+            TransmissionBarRounding = 2.0f,
+            CompactTransmissionBarHeight = 8.0f,
+            CompactTransmissionBarWidth = 120.0f,
+            AutoTransmissionBarWidth = true,
+            CompactTransmissionBarBackground = new Vector4(0.1f, 0.1f, 0.15f, 0.8f),
+            CompactTransmissionBarForeground = new Vector4(0.3f, 0.6f, 0.9f, 1.0f),
+            CompactTransmissionBarBorder = new Vector4(0.3f, 0.3f, 0.4f, 1.0f),
+            TransmissionUseGradient = true,
+            TransmissionGradientStart = new Vector4(0.2f, 0.5f, 0.9f, 1.0f),
+            TransmissionGradientEnd = new Vector4(0.3f, 0.7f, 1.0f, 1.0f),
+            SeparateTransmissionBarStyles = true,
+            UploadTransmissionBarRounding = 7.5f,
+            UploadTransmissionBarHeight = 15.7f,
+            UploadTransmissionBarBackground = new Vector4(0.24603176f, 0.24603176f, 0.24603176f, 0.8f),
+            UploadTransmissionBarForeground = new Vector4(0.25604612f, 0.21695521f, 0.54922897f, 1.0f),
+            UploadTransmissionBarBorder = new Vector4(0.0f, 0.0f, 0.0f, 1.0f),
+            UploadTransmissionGradientStart = new Vector4(0.43914562f, 0.19999999f, 0.9f, 1.0f),
+            UploadTransmissionGradientEnd = new Vector4(0.70555085f, 0.4661922f, 1.0f, 1.0f),
+            DownloadTransmissionBarRounding = 7.5f,
+            DownloadTransmissionBarHeight = 15.7f,
+            DownloadTransmissionBarBackground = new Vector4(0.24603176f, 0.24603176f, 0.24603176f, 0.8f),
+            DownloadTransmissionBarForeground = new Vector4(0.37915352f, 0.32247147f, 0.8042705f, 1.0f),
+            DownloadTransmissionBarBorder = new Vector4(0.0f, 0.0f, 0.0f, 1.0f),
+            DownloadTransmissionGradientStart = new Vector4(0.19999999f, 0.3594307f, 0.9f, 1.0f),
+            DownloadTransmissionGradientEnd = new Vector4(0.3f, 0.83309615f, 1.0f, 1.0f),
             
             WindowBorderSize = 0.0f,
             ChildBorderSize = 0.1f,
@@ -160,7 +179,7 @@ public static class ThemePresets
             CompactButton = new Vector4(0.3019608f, 0.5019608f, 0.9019608f, 0.40f),
             CompactButtonHovered = new Vector4(0.40f, 0.60f, 1.00f, 0.60f),
             CompactButtonActive = new Vector4(0.5019608f, 0.7019608f, 1.00f, 0.80f),
-            CompactHeaderBg = new Vector4(0.08f, 0.15f, 0.30f, 0.80f),
+            CompactHeaderBg = new Vector4(0.15949365f, 0.27783898f, 0.5314354f, 0.80f),
             CompactBorder = new Vector4(0.112459175f, 0.2302277f, 0.4068802f, 0.80f),
             CompactText = new Vector4(0.90f, 0.90f, 0.90f, 1.00f),
             CompactTextSecondary = new Vector4(0.70f, 0.70f, 0.70f, 1.00f),
@@ -169,6 +188,7 @@ public static class ThemePresets
             CompactActive = new Vector4(0.40f, 0.60f, 1.00f, 0.90f),
             CompactHeaderText = new Vector4(0.80f, 0.60f, 0.20f, 1.00f),
             
+            CompactUidFontScale = 0.77f,
             CompactUidColor = new Vector4(0.11f, 1.00f, 0.00f, 1.00f),
             CompactServerStatusConnected = new Vector4(0.33f, 0.76f, 0.47f, 1.00f),
             CompactServerStatusWarning = new Vector4(1.00f, 0.80f, 0.20f, 1.00f),
@@ -191,15 +211,42 @@ public static class ThemePresets
             CompactPairsText = new Vector4(0.55f, 0.55f, 1.00f, 1.00f),
             
             CompactShowImGuiHeader = false,
+            CompactUpdateHintColor = new Vector4(1.0f, 0.8f, 0.2f, 1.0f),
+            CompactUpdateHintHeight = 11.9f,
+            CompactUpdateHintPaddingY = 0.0f,
 
             // Default Button Styles entries
             ButtonStyles = new Dictionary<string, ButtonStyleOverride>
             {
                 // TopTab buttons
-                [ButtonStyleKeys.TopTab_User] = new ButtonStyleOverride(),
-                [ButtonStyleKeys.TopTab_Users] = new ButtonStyleOverride(),
-                [ButtonStyleKeys.TopTab_Filter] = new ButtonStyleOverride(),
-                [ButtonStyleKeys.TopTab_Settings] = new ButtonStyleOverride(),
+                [ButtonStyleKeys.TopTab_User] = new ButtonStyleOverride
+                {
+                    Button = new Vector4(0.23930794f, 0.56535655f, 0.96862745f, 0.14901961f),
+                    ButtonHovered = new Vector4(0.24705881f, 0.5836677f, 1.0f, 0.34901962f),
+                    ButtonActive = new Vector4(0.24705881f, 0.5836677f, 1.0f, 0.54901963f),
+                    BorderSize = 0f
+                },
+                [ButtonStyleKeys.TopTab_Users] = new ButtonStyleOverride
+                {
+                    Button = new Vector4(0.23921569f, 0.5647059f, 0.96862745f, 0.14901961f),
+                    ButtonHovered = new Vector4(0.24696356f, 0.582996f, 1.0f, 0.34901962f),
+                    ButtonActive = new Vector4(0.24696356f, 0.582996f, 1.0f, 0.54901963f),
+                    BorderSize = 0f
+                },
+                [ButtonStyleKeys.TopTab_Filter] = new ButtonStyleOverride
+                {
+                    Button = new Vector4(0.23921569f, 0.5647059f, 0.96862745f, 0.14901961f),
+                    ButtonHovered = new Vector4(0.24696356f, 0.582996f, 1.0f, 0.34901962f),
+                    ButtonActive = new Vector4(0.24696356f, 0.582996f, 1.0f, 0.54901963f),
+                    BorderSize = 0f
+                },
+                [ButtonStyleKeys.TopTab_Settings] = new ButtonStyleOverride
+                {
+                    Button = new Vector4(0.23921569f, 0.5647059f, 0.96862745f, 0.14901961f),
+                    ButtonHovered = new Vector4(0.24696356f, 0.582996f, 1.0f, 0.34901962f),
+                    ButtonActive = new Vector4(0.24696356f, 0.582996f, 1.0f, 0.54901963f),
+                    BorderSize = 0f
+                },
 
                 // TopTab global Individual controls
                 [ButtonStyleKeys.TopTab_IndividualPause] = new ButtonStyleOverride(),
@@ -221,26 +268,37 @@ public static class ThemePresets
                 [ButtonStyleKeys.PairTag_Pause] = new ButtonStyleOverride(),
 
                 // Unified context menu item style
-                [ButtonStyleKeys.ContextMenu_Item] = new ButtonStyleOverride(),
+                [ButtonStyleKeys.ContextMenu_Item] = new ButtonStyleOverride
+                {
+                    Button = new Vector4(0.0f, 0.5480428f, 1.0f, 0.4f),
+                    ButtonHovered = new Vector4(0.0f, 0.5480428f, 1.0f, 0.6f),
+                    ButtonActive = new Vector4(0.0f, 0.5480428f, 1.0f, 0.8f)
+                },
 
                 // CompactUI specific
                 [ButtonStyleKeys.Compact_Connect] = new ButtonStyleOverride
                 {
                     WidthDelta = 0.0f,
                     HeightDelta = 0.0f,
-                    IconOffset = new Vector2(0.0f, 0.0f)
+                    IconOffset = new Vector2(0.0f, 0.0f),
+                    BorderSize = 0f
                 },
                 [ButtonStyleKeys.Compact_IncognitoOn] = new ButtonStyleOverride
                 {
                     WidthDelta = 0.0f,
                     HeightDelta = 0.0f,
-                    IconOffset = new Vector2(1.6f, 0.9f)
+                    IconOffset = new Vector2(1.6f, 0.9f),
+                    ButtonHovered = new Vector4(0.26530612f, 0.60204077f, 1.0f, 0.6f),
+                    ButtonActive = new Vector4(0.26530612f, 0.60204077f, 1.0f, 0.8f),
+                    Icon = new Vector4(1.0f, 0.27639383f, 0.27639383f, 1.0f)
                 },
                 [ButtonStyleKeys.Compact_IncognitoOff] = new ButtonStyleOverride
                 {
                     WidthDelta = 0.0f,
                     HeightDelta = 0.0f,
-                    IconOffset = new Vector2(1.4f, 0.0f)
+                    IconOffset = new Vector2(1.4f, 0.0f),
+                    ButtonHovered = new Vector4(0.26530612f, 0.60204077f, 1.0f, 0.6f),
+                    ButtonActive = new Vector4(0.26530612f, 0.60204077f, 1.0f, 0.8f)
                 },
                 [ButtonStyleKeys.Compact_Conversion] = new ButtonStyleOverride
                 {
@@ -258,13 +316,21 @@ public static class ThemePresets
                 {
                     WidthDelta = 0.0f,
                     HeightDelta = 1.0f,
-                    IconOffset = new Vector2(0.5f, 0.4f)
+                    IconOffset = new Vector2(0.5f, 0.4f),
+                    Button = new Vector4(0.16370112f, 0.16370112f, 0.16370112f, 0.6392157f),
+                    ButtonHovered = new Vector4(0.2637011f, 0.2637011f, 0.2637011f, 0.8392157f),
+                    ButtonActive = new Vector4(0.41370112f, 0.41370112f, 0.41370112f, 1.0f),
+                    BorderSize = 0f
                 },
                 [ButtonStyleKeys.Compact_Close] = new ButtonStyleOverride
                 {
                     WidthDelta = 0.0f,
                     HeightDelta = 1.0f,
-                    IconOffset = new Vector2(0.4f, -0.9f)
+                    IconOffset = new Vector2(0.4f, -0.9f),
+                    Button = new Vector4(0.98f, 0.26f, 0.26f, 0.4f),
+                    ButtonHovered = new Vector4(1.0f, 0.26530612f, 0.26530612f, 0.6f),
+                    ButtonActive = new Vector4(1.0f, 0.26530612f, 0.26530612f, 0.8f),
+                    BorderSize = 0f
                 },
 
                 // Group and pair controls
@@ -308,13 +374,15 @@ public static class ThemePresets
                 {
                     WidthDelta = 0.0f,
                     HeightDelta = 0.0f,
-                    IconOffset = new Vector2(0.0f, 0.5f)
+                    IconOffset = new Vector2(0.0f, 0.5f),
+                    Icon = new Vector4(0.3653618f, 1.0f, 0.5866945f, 1.0f)
                 },
                 [ButtonStyleKeys.Compact_Disconnect] = new ButtonStyleOverride
                 {
                     WidthDelta = 0.0f,
                     HeightDelta = 0.0f,
-                    IconOffset = new Vector2(0.0f, 0.0f)
+                    IconOffset = new Vector2(0.0f, 0.0f),
+                    BorderSize = 0f
                 }
             }
         };
