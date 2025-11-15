@@ -357,14 +357,21 @@ public class SphenePlugin : MediatorSubscriberBase, IHostedService
         target.CompactTransmissionBarForeground = cloned.CompactTransmissionBarForeground;
         target.CompactTransmissionBarBorder = cloned.CompactTransmissionBarBorder;
 
-        // Button style overrides (includes icon offsets)
+        // Button style overrides (colors, border, offsets)
         target.ButtonStyles = cloned.ButtonStyles.ToDictionary(
             kv => kv.Key,
             kv => new ButtonStyleOverride
             {
                 WidthDelta = kv.Value.WidthDelta,
                 HeightDelta = kv.Value.HeightDelta,
-                IconOffset = kv.Value.IconOffset
+                IconOffset = kv.Value.IconOffset,
+                Button = kv.Value.Button,
+                ButtonHovered = kv.Value.ButtonHovered,
+                ButtonActive = kv.Value.ButtonActive,
+                Text = kv.Value.Text,
+                Icon = kv.Value.Icon,
+                Border = kv.Value.Border,
+                BorderSize = kv.Value.BorderSize
             }
         );
     }

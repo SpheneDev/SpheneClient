@@ -1029,7 +1029,8 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
         float x = width ?? (vector.X + ImGui.GetStyle().FramePadding.X * 2f);
         float frameHeight = height ?? ImGui.GetFrameHeight();
 
-        // Apply per-button style overrides if present
+        Vector2 buttonPos = cursorScreenPos;
+        bool result;
         if (!string.IsNullOrEmpty(styleKey))
         {
             var theme = SpheneCustomTheme.CurrentTheme;
@@ -1037,12 +1038,44 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
             {
                 x += overrideStyle.WidthDelta;
                 frameHeight += overrideStyle.HeightDelta;
+                int pushedColors = 0;
+                int pushedVars = 0;
+                if (overrideStyle.Button.HasValue) { ImGui.PushStyleColor(ImGuiCol.Button, overrideStyle.Button.Value); pushedColors++; }
+                if (overrideStyle.ButtonHovered.HasValue) { ImGui.PushStyleColor(ImGuiCol.ButtonHovered, overrideStyle.ButtonHovered.Value); pushedColors++; }
+                if (overrideStyle.ButtonActive.HasValue) { ImGui.PushStyleColor(ImGuiCol.ButtonActive, overrideStyle.ButtonActive.Value); pushedColors++; }
+                if (overrideStyle.Text.HasValue) { ImGui.PushStyleColor(ImGuiCol.Text, overrideStyle.Text.Value); pushedColors++; }
+                // Always push a border color for buttons: override or fallback to theme.Border
+                var borderColor = overrideStyle.Border.HasValue ? overrideStyle.Border.Value : theme.Border;
+                ImGui.PushStyleColor(ImGuiCol.Border, borderColor); pushedColors++;
+                if (overrideStyle.BorderSize.HasValue) { ImGui.PushStyleVar(ImGuiStyleVar.FrameBorderSize, overrideStyle.BorderSize.Value); pushedVars++; }
+                else { ImGui.PushStyleVar(ImGuiStyleVar.FrameBorderSize, 0f); pushedVars++; }
+                result = ImGui.Button(string.Empty, new Vector2(x, frameHeight));
+                if (pushedVars > 0) ImGui.PopStyleVar(pushedVars);
+                if (pushedColors > 0) ImGui.PopStyleColor(pushedColors);
+            }
+            else
+            {
+                // No override style found: ensure button border uses generic theme border color
+                int pushedColors = 0;
+                ImGui.PushStyleColor(ImGuiCol.Border, SpheneCustomTheme.CurrentTheme.Border); pushedColors++;
+                int pushedVars = 0;
+                ImGui.PushStyleVar(ImGuiStyleVar.FrameBorderSize, 0f); pushedVars++;
+                result = ImGui.Button(string.Empty, new Vector2(x, frameHeight));
+                if (pushedVars > 0) ImGui.PopStyleVar(pushedVars);
+                if (pushedColors > 0) ImGui.PopStyleColor(pushedColors);
             }
         }
-        
-        // Store button position before calling ImGui.Button
-        Vector2 buttonPos = cursorScreenPos;
-        bool result = ImGui.Button(string.Empty, new Vector2(x, frameHeight));
+        else
+        {
+            // No style key: apply generic theme border color to decouple from CompactBorder
+            int pushedColors = 0;
+            ImGui.PushStyleColor(ImGuiCol.Border, SpheneCustomTheme.CurrentTheme.Border); pushedColors++;
+            int pushedVars = 0;
+            ImGui.PushStyleVar(ImGuiStyleVar.FrameBorderSize, 0f); pushedVars++;
+            result = ImGui.Button(string.Empty, new Vector2(x, frameHeight));
+            if (pushedVars > 0) ImGui.PopStyleVar(pushedVars);
+            if (pushedColors > 0) ImGui.PopStyleColor(pushedColors);
+        }
         
         // Calculate perfect center position for the icon using stored button position
         float buttonCenterX = buttonPos.X + (x / 2f);
@@ -1066,10 +1099,25 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
                 : (iconScale ?? 1f);
             if (iconPixelSize.HasValue) scale = MathF.Max(1f, MathF.Round(scale));
             if (scale != 1f) ImGui.SetWindowFontScale(scale);
-            windowDrawList.AddText(pos, ImGui.GetColorU32(ImGuiCol.Text), text);
+            uint iconColorU32 = ImGui.GetColorU32(ImGuiCol.Text);
+            if (!string.IsNullOrEmpty(styleKey))
+            {
+                var theme = SpheneCustomTheme.CurrentTheme;
+                if (theme.ButtonStyles.TryGetValue(styleKey, out var overrideStyle) && overrideStyle.Icon.HasValue)
+                {
+                    iconColorU32 = ImGui.GetColorU32(overrideStyle.Icon.Value);
+                }
+            }
+            windowDrawList.AddText(pos, iconColorU32, text);
             if (scale != 1f) ImGui.SetWindowFontScale(1f);
         }
         ImGui.PopID();
+
+        if (result && !string.IsNullOrEmpty(styleKey) && ButtonStyleManagerUI.IsPickerEnabled)
+        {
+            Mediator.Publish(new ThemeNavigateToButtonSettingsMessage(styleKey));
+            return false;
+        }
 
         return result;
     }
@@ -1149,7 +1197,11 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
     public void DrawThemedStatusIndicator(string label, bool isActive, bool hasWarning = false, bool hasError = false)
     {
         var theme = SpheneCustomTheme.CurrentTheme;
-        var statusColor = SpheneColors.GetConnectionStatusColor(isActive, hasWarning, hasError);
+        var statusColor = hasError
+            ? theme.CompactServerStatusError
+            : hasWarning
+                ? theme.CompactServerStatusWarning
+                : (isActive ? theme.CompactServerStatusConnected : theme.CompactTextSecondary);
         var drawList = ImGui.GetWindowDrawList();
         
         // Align text to frame padding for better vertical centering
@@ -1167,7 +1219,7 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
         // Add glow effect for active status
         if (isActive && !hasError)
         {
-            var glowColor = SpheneColors.WithAlpha(statusColor, 0.4f);
+            var glowColor = new Vector4(statusColor.X, statusColor.Y, statusColor.Z, 0.4f);
             drawList.AddCircle(circleCenter, 8, ImGui.ColorConvertFloat4ToU32(glowColor), 12, 2.0f);
         }
         
@@ -1211,12 +1263,17 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
         if (progress > 0)
         {
             var progressEnd = new Vector2(pos.X + (barSize.X * progress), pos.Y + barSize.Y);
-            var progressColorStart = color ?? theme.CompactProgressBarForeground;
-            
-            // Use AddRectFilled with rounding for the progress fill
-            drawList.AddRectFilled(pos, progressEnd, ImGui.ColorConvertFloat4ToU32(progressColorStart), borderRadius);
+            if (theme.ProgressBarUseGradient)
+            {
+                DrawRoundedHorizontalGradient(drawList, pos, progressEnd, borderRadius, theme.ProgressBarGradientStart, theme.ProgressBarGradientEnd);
+            }
+            else
+            {
+                var progressColorStart = color ?? theme.CompactProgressBarForeground;
+                drawList.AddRectFilled(pos, progressEnd, ImGui.ColorConvertFloat4ToU32(progressColorStart), borderRadius);
+            }
         }
-
+        
         // Border - use theme-configured border color
         drawList.AddRect(pos, endPos, ImGui.ColorConvertFloat4ToU32(theme.CompactProgressBarBorder), borderRadius, ImDrawFlags.RoundCornersAll, theme.FrameBorderSize);
         
@@ -1232,6 +1289,122 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
         }
         
         ImGui.SetCursorPosY(ImGui.GetCursorPosY() + barSize.Y + ImGui.GetStyle().ItemSpacing.Y);
+    }
+
+    public void DrawTransmissionBar(string label, float progress, string? overlay = null, bool? isUpload = null)
+    {
+        ImGui.AlignTextToFramePadding();
+        using var textColor = ImRaii.PushColor(ImGuiCol.Text, ImGui.ColorConvertFloat4ToU32(SpheneCustomTheme.CurrentTheme.TextPrimary));
+        ImGui.TextUnformatted(label);
+        var theme = SpheneCustomTheme.CurrentTheme;
+        var width = theme.AutoTransmissionBarWidth ? Math.Max(50.0f, ImGui.GetContentRegionAvail().X) : theme.CompactTransmissionBarWidth;
+        var height = theme.SeparateTransmissionBarStyles && isUpload.HasValue
+            ? (isUpload.Value ? theme.UploadTransmissionBarHeight : theme.DownloadTransmissionBarHeight)
+            : theme.CompactTransmissionBarHeight;
+        var barSize = new Vector2(width, height);
+        DrawTransmissionBar(progress, barSize, overlay, isUpload);
+    }
+
+    public void DrawTransmissionBar(float progress, Vector2 size, string? overlay = null, bool? isUpload = null)
+    {
+        var theme = SpheneCustomTheme.CurrentTheme;
+        var drawList = ImGui.GetWindowDrawList();
+        var pos = ImGui.GetCursorScreenPos();
+        var endPos = new Vector2(pos.X + size.X, pos.Y + size.Y);
+        var borderRadius = theme.SeparateTransmissionBarStyles && isUpload.HasValue
+            ? (isUpload.Value ? theme.UploadTransmissionBarRounding : theme.DownloadTransmissionBarRounding)
+            : theme.TransmissionBarRounding;
+
+        var bg = theme.SeparateTransmissionBarStyles && isUpload.HasValue
+            ? (isUpload.Value ? theme.UploadTransmissionBarBackground : theme.DownloadTransmissionBarBackground)
+            : theme.CompactTransmissionBarBackground;
+        drawList.AddRectFilled(pos, endPos, ImGui.ColorConvertFloat4ToU32(bg), borderRadius);
+
+        if (progress > 0)
+        {
+            var progressEnd = new Vector2(pos.X + (size.X * progress), pos.Y + size.Y);
+            if (theme.SeparateTransmissionBarStyles && isUpload.HasValue)
+            {
+                if (isUpload.Value)
+                {
+                    if (theme.TransmissionUseGradient)
+                    {
+                        DrawRoundedHorizontalGradient(drawList, pos, progressEnd, borderRadius, theme.UploadTransmissionGradientStart, theme.UploadTransmissionGradientEnd);
+                    }
+                    else
+                    {
+                        drawList.AddRectFilled(pos, progressEnd, ImGui.ColorConvertFloat4ToU32(theme.UploadTransmissionBarForeground), borderRadius);
+                    }
+                }
+                else
+                {
+                    if (theme.TransmissionUseGradient)
+                    {
+                        DrawRoundedHorizontalGradient(drawList, pos, progressEnd, borderRadius, theme.DownloadTransmissionGradientStart, theme.DownloadTransmissionGradientEnd);
+                    }
+                    else
+                    {
+                        drawList.AddRectFilled(pos, progressEnd, ImGui.ColorConvertFloat4ToU32(theme.DownloadTransmissionBarForeground), borderRadius);
+                    }
+                }
+            }
+            else
+            {
+                if (theme.TransmissionUseGradient)
+                {
+                    DrawRoundedHorizontalGradient(drawList, pos, progressEnd, borderRadius, theme.TransmissionGradientStart, theme.TransmissionGradientEnd);
+                }
+                else
+                {
+                    drawList.AddRectFilled(pos, progressEnd, ImGui.ColorConvertFloat4ToU32(theme.CompactTransmissionBarForeground), borderRadius);
+                }
+            }
+        }
+
+        var border = theme.SeparateTransmissionBarStyles && isUpload.HasValue
+            ? (isUpload.Value ? theme.UploadTransmissionBarBorder : theme.DownloadTransmissionBarBorder)
+            : theme.CompactTransmissionBarBorder;
+        drawList.AddRect(pos, endPos, ImGui.ColorConvertFloat4ToU32(border), borderRadius, ImDrawFlags.RoundCornersAll, theme.FrameBorderSize);
+
+        if (!string.IsNullOrEmpty(overlay))
+        {
+            var textSize = ImGui.CalcTextSize(overlay);
+            var textPos = new Vector2(
+                pos.X + (size.X - textSize.X) * 0.5f,
+                pos.Y + (size.Y - textSize.Y) * 0.5f
+            );
+            drawList.AddText(textPos, ImGui.ColorConvertFloat4ToU32(theme.TextPrimary), overlay);
+        }
+
+        ImGui.SetCursorPosY(ImGui.GetCursorPosY() + size.Y + ImGui.GetStyle().ItemSpacing.Y);
+    }
+
+    private static void DrawRoundedHorizontalGradient(ImDrawListPtr drawList, Vector2 a, Vector2 b, float rounding, Vector4 startColor, Vector4 endColor)
+    {
+        var width = b.X - a.X;
+        if (width <= 0) return;
+        var slices = Math.Clamp((int)(width / 8.0f), 8, 64);
+        var step = width / slices;
+        for (int i = 0; i < slices; i++)
+        {
+            var x0 = a.X + step * i;
+            var x1 = i == slices - 1 ? b.X : a.X + step * (i + 1);
+            var t = (float)i / (float)(slices - 1);
+            var c = Vector4.Lerp(startColor, endColor, t);
+            var flags = ImDrawFlags.None;
+            var r = 0.0f;
+            if (i == 0)
+            {
+                flags = ImDrawFlags.RoundCornersLeft;
+                r = rounding;
+            }
+            else if (i == slices - 1)
+            {
+                flags = ImDrawFlags.RoundCornersRight;
+                r = rounding;
+            }
+            drawList.AddRectFilled(new Vector2(x0, a.Y), new Vector2(x1, b.Y), ImGui.ColorConvertFloat4ToU32(c), r, flags);
+        }
     }
 
     [GeneratedRegex(@"^(?:[a-zA-Z]:\\[\w\s\-\\]+?|\/(?:[\w\s\-\/])+?)$", RegexOptions.ECMAScript, 5000)]
@@ -1252,10 +1425,26 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
     private bool IconTextButtonInternal(FontAwesomeIcon icon, string text, Vector4? defaultColor = null, float? width = null, string? styleKey = null)
     {
         int num = 0;
+        int vars = 0;
         if (defaultColor.HasValue)
         {
             ImGui.PushStyleColor(ImGuiCol.Button, defaultColor.Value);
             num++;
+        }
+        if (!string.IsNullOrEmpty(styleKey))
+        {
+            var theme = SpheneCustomTheme.CurrentTheme;
+            if (theme.ButtonStyles.TryGetValue(styleKey, out var overrideStyle))
+            {
+                if (overrideStyle.Button.HasValue) { ImGui.PushStyleColor(ImGuiCol.Button, overrideStyle.Button.Value); num++; }
+                if (overrideStyle.ButtonHovered.HasValue) { ImGui.PushStyleColor(ImGuiCol.ButtonHovered, overrideStyle.ButtonHovered.Value); num++; }
+                if (overrideStyle.ButtonActive.HasValue) { ImGui.PushStyleColor(ImGuiCol.ButtonActive, overrideStyle.ButtonActive.Value); num++; }
+                if (overrideStyle.Text.HasValue) { ImGui.PushStyleColor(ImGuiCol.Text, overrideStyle.Text.Value); num++; }
+                if (overrideStyle.Border.HasValue) { ImGui.PushStyleColor(ImGuiCol.Border, overrideStyle.Border.Value); num++; }
+                else { ImGui.PushStyleColor(ImGuiCol.Border, theme.Border); num++; }
+                if (overrideStyle.BorderSize.HasValue) { ImGui.PushStyleVar(ImGuiStyleVar.FrameBorderSize, overrideStyle.BorderSize.Value); vars++; }
+                else { ImGui.PushStyleVar(ImGuiStyleVar.FrameBorderSize, 0f); vars++; }
+            }
         }
 
         ImGui.PushID(text);
@@ -1289,11 +1478,39 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
                     pos += overrideStyle.IconOffset;
                 }
             }
-            windowDrawList.AddText(pos, ImGui.GetColorU32(ImGuiCol.Text), icon.ToIconString());
+            uint iconColorU32 = ImGui.GetColorU32(ImGuiCol.Text);
+            if (!string.IsNullOrEmpty(styleKey))
+            {
+                var theme = SpheneCustomTheme.CurrentTheme;
+                if (theme.ButtonStyles.TryGetValue(styleKey, out var overrideStyle) && overrideStyle.Icon.HasValue)
+                {
+                    iconColorU32 = ImGui.GetColorU32(overrideStyle.Icon.Value);
+                }
+            }
+            windowDrawList.AddText(pos, iconColorU32, icon.ToIconString());
         }
         Vector2 pos2 = new Vector2(pos.X + vector.X + num2, cursorScreenPos.Y + ImGui.GetStyle().FramePadding.Y);
-        windowDrawList.AddText(pos2, ImGui.GetColorU32(ImGuiCol.Text), text);
+        uint labelColorU32 = ImGui.GetColorU32(ImGuiCol.Text);
+        if (!string.IsNullOrEmpty(styleKey))
+        {
+            var theme = SpheneCustomTheme.CurrentTheme;
+            if (theme.ButtonStyles.TryGetValue(styleKey, out var overrideStyle) && overrideStyle.Text.HasValue)
+            {
+                labelColorU32 = ImGui.GetColorU32(overrideStyle.Text.Value);
+            }
+        }
+        windowDrawList.AddText(pos2, labelColorU32, text);
         ImGui.PopID();
+        
+        if (result && !string.IsNullOrEmpty(styleKey) && ButtonStyleManagerUI.IsPickerEnabled)
+        {
+            Mediator.Publish(new ThemeNavigateToButtonSettingsMessage(styleKey));
+            return false;
+        }
+        if (vars > 0)
+        {
+            ImGui.PopStyleVar(vars);
+        }
         if (num > 0)
         {
             ImGui.PopStyleColor(num);
@@ -1306,6 +1523,7 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
         Vector4? hoveredColor = null, Vector4? activeColor = null, string? styleKey = null)
     {
         int num = 0;
+        int vars = 0;
         if (defaultColor.HasValue)
         {
             ImGui.PushStyleColor(ImGuiCol.Button, defaultColor.Value);
@@ -1321,6 +1539,21 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
             ImGui.PushStyleColor(ImGuiCol.ButtonActive, activeColor.Value);
             num++;
         }
+        if (!string.IsNullOrEmpty(styleKey))
+        {
+            var theme = SpheneCustomTheme.CurrentTheme;
+            if (theme.ButtonStyles.TryGetValue(styleKey, out var overrideStyle))
+            {
+                if (overrideStyle.Button.HasValue) { ImGui.PushStyleColor(ImGuiCol.Button, overrideStyle.Button.Value); num++; }
+                if (overrideStyle.ButtonHovered.HasValue) { ImGui.PushStyleColor(ImGuiCol.ButtonHovered, overrideStyle.ButtonHovered.Value); num++; }
+                if (overrideStyle.ButtonActive.HasValue) { ImGui.PushStyleColor(ImGuiCol.ButtonActive, overrideStyle.ButtonActive.Value); num++; }
+                if (overrideStyle.Text.HasValue) { ImGui.PushStyleColor(ImGuiCol.Text, overrideStyle.Text.Value); num++; }
+                if (overrideStyle.Border.HasValue) { ImGui.PushStyleColor(ImGuiCol.Border, overrideStyle.Border.Value); num++; }
+                else { ImGui.PushStyleColor(ImGuiCol.Border, theme.Border); num++; }
+                if (overrideStyle.BorderSize.HasValue) { ImGui.PushStyleVar(ImGuiStyleVar.FrameBorderSize, overrideStyle.BorderSize.Value); vars++; }
+                else { ImGui.PushStyleVar(ImGuiStyleVar.FrameBorderSize, 0f); vars++; }
+            }
+        }
 
         ImGui.PushID(text);
         Vector2 vector;
@@ -1353,11 +1586,33 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
                     pos += overrideStyle.IconOffset;
                 }
             }
-            windowDrawList.AddText(pos, ImGui.GetColorU32(ImGuiCol.Text), icon.ToIconString());
+            uint iconColorU32 = ImGui.GetColorU32(ImGuiCol.Text);
+            if (!string.IsNullOrEmpty(styleKey))
+            {
+                var theme = SpheneCustomTheme.CurrentTheme;
+                if (theme.ButtonStyles.TryGetValue(styleKey, out var overrideStyle) && overrideStyle.Icon.HasValue)
+                {
+                    iconColorU32 = ImGui.GetColorU32(overrideStyle.Icon.Value);
+                }
+            }
+            windowDrawList.AddText(pos, iconColorU32, icon.ToIconString());
         }
         Vector2 pos2 = new Vector2(pos.X + vector.X + num2, cursorScreenPos.Y + ImGui.GetStyle().FramePadding.Y);
-        windowDrawList.AddText(pos2, ImGui.GetColorU32(ImGuiCol.Text), text);
+        uint labelColorU32 = ImGui.GetColorU32(ImGuiCol.Text);
+        if (!string.IsNullOrEmpty(styleKey))
+        {
+            var theme = SpheneCustomTheme.CurrentTheme;
+            if (theme.ButtonStyles.TryGetValue(styleKey, out var overrideStyle) && overrideStyle.Text.HasValue)
+            {
+                labelColorU32 = ImGui.GetColorU32(overrideStyle.Text.Value);
+            }
+        }
+        windowDrawList.AddText(pos2, labelColorU32, text);
         ImGui.PopID();
+        if (vars > 0)
+        {
+            ImGui.PopStyleVar(vars);
+        }
         if (num > 0)
         {
             ImGui.PopStyleColor(num);

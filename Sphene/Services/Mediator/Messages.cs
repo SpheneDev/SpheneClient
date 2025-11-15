@@ -106,6 +106,9 @@ public record ShowUpdateNotificationMessage(UpdateInfo UpdateInfo) : MessageBase
 public record CheckForUpdatesMessage : MessageBase;
 public record ShowReleaseChangelogMessage(string CurrentVersion, string? ChangelogText) : MessageBase;
 
+public record ThemePickerModeToggleMessage(bool IsEnabled) : MessageBase;
+public record ThemeNavigateToButtonSettingsMessage(string ButtonStyleKey) : MessageBase;
+
 // Area-bound syncshell messages
 public record AreaBoundJoinRequestMessage(AreaBoundJoinRequestDto JoinRequest) : MessageBase;
 public record AreaBoundJoinResponseMessage(AreaBoundJoinResponseDto JoinResponse) : MessageBase;

@@ -1,4 +1,4 @@
-﻿namespace Sphene.UI.Theme;
+namespace Sphene.UI.Theme;
 
 public static class ButtonStyleKeys
 {
@@ -48,6 +48,9 @@ public static class ButtonStyleKeys
 
     // Popup buttons
     public const string Popup_Close = "Popup.Close";
+
+    // Unified context menu item style
+    public const string ContextMenu_Item = "ContextMenu.Item";
 
     // Syncshell group row buttons
     public const string GroupSyncshell_Menu = "GroupSyncshell.Menu";

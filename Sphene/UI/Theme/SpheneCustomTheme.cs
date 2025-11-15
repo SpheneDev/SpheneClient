@@ -520,9 +520,9 @@ public static class SpheneCustomTheme
             PushColor(ImGuiCol.SliderGrabActive, SpheneCustomTheme.CurrentTheme.CompactActive);
             
             // Separators
-            PushColor(ImGuiCol.Separator, SpheneCustomTheme.CurrentTheme.CompactBorder);
-            PushColor(ImGuiCol.SeparatorHovered, SpheneCustomTheme.CurrentTheme.CompactHover);
-            PushColor(ImGuiCol.SeparatorActive, SpheneCustomTheme.CurrentTheme.CompactActive);
+            PushColor(ImGuiCol.Separator, SpheneCustomTheme.CurrentTheme.Separator);
+            PushColor(ImGuiCol.SeparatorHovered, SpheneCustomTheme.CurrentTheme.SeparatorHovered);
+            PushColor(ImGuiCol.SeparatorActive, SpheneCustomTheme.CurrentTheme.SeparatorActive);
             
             // Resize grip
             PushColor(ImGuiCol.ResizeGrip, SpheneCustomTheme.CurrentTheme.CompactAccent);

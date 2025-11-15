@@ -282,14 +282,14 @@ public class DrawFolderGroup : DrawFolderBase
         ImGui.Separator();
 
         ImGui.TextUnformatted("General Syncshell Actions");
-        if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.Copy, "Copy ID", menuWidth))
+        if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.Copy, "Copy ID", menuWidth, ButtonStyleKeys.ContextMenu_Item))
         {
             ImGui.CloseCurrentPopup();
             ImGui.SetClipboardText(_groupFullInfoDto.GroupAliasOrGID);
         }
         UiSharedService.AttachToolTip("Copy Syncshell ID to Clipboard");
 
-        if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.StickyNote, "Copy Notes", menuWidth))
+        if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.StickyNote, "Copy Notes", menuWidth, ButtonStyleKeys.ContextMenu_Item))
         {
             ImGui.CloseCurrentPopup();
             ImGui.SetClipboardText(UiSharedService.GetNotes(DrawPairs.Select(k => k.Pair).ToList()));
@@ -303,7 +303,7 @@ public class DrawFolderGroup : DrawFolderBase
         if (isOwner)
         {
             // Show "Delete Syncshell" button for owners
-            if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.Trash, "Delete Syncshell", menuWidth) && UiSharedService.CtrlPressed())
+            if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.Trash, "Delete Syncshell", menuWidth, ButtonStyleKeys.ContextMenu_Item) && UiSharedService.CtrlPressed())
             {
                 _ = _apiController.GroupDelete(new(_groupFullInfoDto.Group));
                 ImGui.CloseCurrentPopup();
@@ -314,7 +314,7 @@ public class DrawFolderGroup : DrawFolderBase
         else if (isAreaBound)
         {
             // Show "Leave Area Syncshell" button for non-owners in area-bound syncshells
-            if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.MapMarkerAlt, "Leave Area Syncshell", menuWidth) && UiSharedService.CtrlPressed())
+            if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.MapMarkerAlt, "Leave Area Syncshell", menuWidth, ButtonStyleKeys.ContextMenu_Item) && UiSharedService.CtrlPressed())
             {
                 _ = LeaveAreaSyncshellWithConsentReset();
                 ImGui.CloseCurrentPopup();
@@ -325,7 +325,7 @@ public class DrawFolderGroup : DrawFolderBase
         else
         {
             // Show regular "Leave Syncshell" button for non-owners in regular syncshells
-            if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.ArrowCircleLeft, "Leave Syncshell", menuWidth) && UiSharedService.CtrlPressed())
+            if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.ArrowCircleLeft, "Leave Syncshell", menuWidth, ButtonStyleKeys.ContextMenu_Item) && UiSharedService.CtrlPressed())
             {
                 _ = _apiController.GroupLeave(_groupFullInfoDto);
                 ImGui.CloseCurrentPopup();
@@ -343,7 +343,7 @@ public class DrawFolderGroup : DrawFolderBase
         if ((_groupFullInfoDto.GroupPermissions.IsPreferDisableAnimations() != disableAnims
             || _groupFullInfoDto.GroupPermissions.IsPreferDisableSounds() != disableSounds
             || _groupFullInfoDto.GroupPermissions.IsPreferDisableVFX() != disableVfx)
-            && _uiSharedService.IconTextActionButton(FontAwesomeIcon.Check, "Align with suggested permissions", menuWidth))
+            && _uiSharedService.IconTextActionButton(FontAwesomeIcon.Check, "Align with suggested permissions", menuWidth, ButtonStyleKeys.ContextMenu_Item))
         {
             perm.SetDisableVFX(_groupFullInfoDto.GroupPermissions.IsPreferDisableVFX());
             perm.SetDisableSounds(_groupFullInfoDto.GroupPermissions.IsPreferDisableSounds());
@@ -352,21 +352,21 @@ public class DrawFolderGroup : DrawFolderBase
             ImGui.CloseCurrentPopup();
         }
 
-        if (_uiSharedService.IconTextActionButton(disableSounds ? FontAwesomeIcon.VolumeUp : FontAwesomeIcon.VolumeOff, disableSounds ? "Enable Sound Sync" : "Disable Sound Sync", menuWidth))
+        if (_uiSharedService.IconTextActionButton(disableSounds ? FontAwesomeIcon.VolumeUp : FontAwesomeIcon.VolumeOff, disableSounds ? "Enable Sound Sync" : "Disable Sound Sync", menuWidth, ButtonStyleKeys.ContextMenu_Item))
         {
             perm.SetDisableSounds(!disableSounds);
             _ = _apiController.GroupChangeIndividualPermissionState(new(_groupFullInfoDto.Group, new(_apiController.UID), perm));
             ImGui.CloseCurrentPopup();
         }
 
-        if (_uiSharedService.IconTextActionButton(disableAnims ? FontAwesomeIcon.Running : FontAwesomeIcon.Stop, disableAnims ? "Enable Animation Sync" : "Disable Animation Sync", menuWidth))
+        if (_uiSharedService.IconTextActionButton(disableAnims ? FontAwesomeIcon.Running : FontAwesomeIcon.Stop, disableAnims ? "Enable Animation Sync" : "Disable Animation Sync", menuWidth, ButtonStyleKeys.ContextMenu_Item))
         {
             perm.SetDisableAnimations(!disableAnims);
             _ = _apiController.GroupChangeIndividualPermissionState(new(_groupFullInfoDto.Group, new(_apiController.UID), perm));
             ImGui.CloseCurrentPopup();
         }
 
-        if (_uiSharedService.IconTextActionButton(disableVfx ? FontAwesomeIcon.Sun : FontAwesomeIcon.Circle, disableVfx ? "Enable VFX Sync" : "Disable VFX Sync", menuWidth))
+        if (_uiSharedService.IconTextActionButton(disableVfx ? FontAwesomeIcon.Sun : FontAwesomeIcon.Circle, disableVfx ? "Enable VFX Sync" : "Disable VFX Sync", menuWidth, ButtonStyleKeys.ContextMenu_Item))
         {
             perm.SetDisableVFX(!disableVfx);
             _ = _apiController.GroupChangeIndividualPermissionState(new(_groupFullInfoDto.Group, new(_apiController.UID), perm));
@@ -377,7 +377,7 @@ public class DrawFolderGroup : DrawFolderBase
         {
             ImGui.Separator();
             ImGui.TextUnformatted("Syncshell Admin Functions");
-            if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.Cog, "Open Admin Panel", menuWidth))
+            if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.Cog, "Open Admin Panel", menuWidth, ButtonStyleKeys.ContextMenu_Item))
             {
                 ImGui.CloseCurrentPopup();
                 _spheneMediator.Publish(new OpenSyncshellAdminPanel(_groupFullInfoDto));

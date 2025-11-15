@@ -591,16 +591,12 @@ public class CompactUi : WindowMediatorSubscriberBase
         // Main content area
         // Network Identity Section
         ImGui.Spacing();
-        ImGui.PushStyleColor(ImGuiCol.Text, SpheneCustomTheme.CurrentTheme.CompactHeaderText);
-        ImGui.Text("Regulator ID");
-        ImGui.PopStyleColor();
+        SpheneCustomTheme.DrawStyledText("Regulator ID", SpheneCustomTheme.CurrentTheme.CompactHeaderText);
         ImGui.Separator();
         DrawUIDContent();
         
         ImGui.Spacing();
         
-        // Server Status Section
-        ImGui.PushStyleColor(ImGuiCol.Text, SpheneCustomTheme.CurrentTheme.CompactHeaderText);
         
         // Calculate connection status text and button positions at the end of the line
         var connectionStatus = _apiController.ServerState == ServerState.Connected ? "Connected" : "Disconnected";
@@ -616,20 +612,13 @@ public class CompactUi : WindowMediatorSubscriberBase
         var totalRightContentWidth = statusTextSize.X + statusIndicatorWidth + (_apiController.IsConnected ? disconnectSize.X : connectSize.X) + reconnectSize.X + (ImGui.GetStyle().ItemSpacing.X * 2);
         
         ImGui.AlignTextToFramePadding();
-        ImGui.Text("Character Status");
+        SpheneCustomTheme.DrawStyledText("Character Status", SpheneCustomTheme.CurrentTheme.CompactHeaderText);
         
         // Position disconnect button first (second from right) - move closer to right edge
         ImGui.SameLine(availableWidth - rightButtonsTotalWidth);
         
-        // Disconnect/Connect button with custom styling
         if (_apiController.IsConnected)
         {
-            // Connected state - show disconnect button in orange/warning colors
-            ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.8f, 0.4f, 0.2f, 0.8f));
-            ImGui.PushStyleColor(ImGuiCol.ButtonHovered, new Vector4(0.9f, 0.5f, 0.3f, 0.9f));
-            ImGui.PushStyleColor(ImGuiCol.ButtonActive, new Vector4(1.0f, 0.6f, 0.4f, 1.0f));
-            ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 1.0f, 1.0f, 1.0f));
-            
             if (_uiSharedService.IconButton(FontAwesomeIcon.Unlink, null, null, null, null, ButtonStyleKeys.Compact_Disconnect))
             {
                 if (_serverManager.CurrentServer != null)
@@ -643,12 +632,6 @@ public class CompactUi : WindowMediatorSubscriberBase
         }
         else
         {
-            // Disconnected state - show connect button in green colors
-            ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.2f, 0.6f, 0.2f, 0.8f));
-            ImGui.PushStyleColor(ImGuiCol.ButtonHovered, new Vector4(0.3f, 0.7f, 0.3f, 0.9f));
-            ImGui.PushStyleColor(ImGuiCol.ButtonActive, new Vector4(0.4f, 0.8f, 0.4f, 1.0f));
-            ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 1.0f, 1.0f, 1.0f));
-            
             if (_uiSharedService.IconButton(FontAwesomeIcon.Link, null, null, null, null, ButtonStyleKeys.Compact_Connect))
             {
                 if (_serverManager.CurrentServer != null)
@@ -660,7 +643,6 @@ public class CompactUi : WindowMediatorSubscriberBase
             }
             UiSharedService.AttachToolTip("Connect to Server");
         }
-        ImGui.PopStyleColor(4);
         
         // Position reconnect button (rightmost) - use SameLine() for natural spacing
         ImGui.SameLine();
@@ -669,8 +651,6 @@ public class CompactUi : WindowMediatorSubscriberBase
         var reconnectTimeSinceLastClick = reconnectCurrentTime - _lastReconnectButtonClick;
         var isReconnectButtonDisabled = reconnectTimeSinceLastClick.TotalSeconds < 5.0;
         var reconnectColor = isReconnectButtonDisabled ? SpheneCustomTheme.CurrentTheme.TextSecondary : SpheneCustomTheme.CurrentTheme.TextPrimary;
-        
-        ImGui.PushStyleColor(ImGuiCol.Text, reconnectColor);
         using (ImRaii.Disabled(isReconnectButtonDisabled))
         {
             if (_uiSharedService.IconButton(FontAwesomeIcon.Redo, null, null, null, null, ButtonStyleKeys.Compact_Reconnect))
@@ -679,7 +659,6 @@ public class CompactUi : WindowMediatorSubscriberBase
                 _ = Task.Run(() => _apiController.CreateConnectionsAsync());
             }
         }
-        ImGui.PopStyleColor();
         
         var reconnectTooltipText = "Reconnect to the Sphene Network";
         if (isReconnectButtonDisabled)
@@ -693,7 +672,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         ImGui.SameLine(availableWidth - totalRightContentWidth);
         _uiSharedService.DrawThemedStatusIndicator(connectionStatus, _apiController.ServerState == ServerState.Connected);
         
-        ImGui.PopStyleColor();
+        
         ImGui.Separator();
         DrawServerStatusContent();
         
@@ -724,15 +703,7 @@ public class CompactUi : WindowMediatorSubscriberBase
             SpheneCustomTheme.DrawStyledText(onlineText, SpheneCustomTheme.CurrentTheme.CompactConnectedText);
             ImGui.Separator();
             
-            // Show preview progress bar if enabled in theme settings
-            if (SpheneCustomTheme.CurrentTheme.ShowProgressBarPreview)
-            {
-                ImGui.Spacing();
-                ImGui.Text("Progress Bar Preview:");
-                var previewProgress = SpheneCustomTheme.CurrentTheme.ProgressBarPreviewFill / 100.0f;
-                _uiSharedService.DrawThemedProgressBar("Preview Progress", previewProgress, $"{SpheneCustomTheme.CurrentTheme.ProgressBarPreviewFill:F1}%");
-                ImGui.Spacing();
-            }
+            
             
             using (ImRaii.PushId("pairlist")) DrawPairs();
             
@@ -743,24 +714,32 @@ public class CompactUi : WindowMediatorSubscriberBase
             using (ImRaii.PushId("grouping-popup")) _selectGroupForPairUi.Draw();
         }
         
-        // Draw update notification at bottom if available
-        if (_updateBannerInfo?.IsUpdateAvailable == true)
+        // Draw update notification at bottom if available or forced by theme
+        if (Sphene.UI.Theme.SpheneCustomTheme.CurrentTheme.ForceShowUpdateHint || _updateBannerInfo?.IsUpdateAvailable == true)
         {
             ImGui.Separator();
             using (ImRaii.PushId("update-hint-footer"))
             {
+                var startY = ImGui.GetCursorPosY();
+                var lineH = ImGui.GetTextLineHeight();
+                var h = Sphene.UI.Theme.SpheneCustomTheme.CurrentTheme.CompactUpdateHintHeight;
+                var pad = Sphene.UI.Theme.SpheneCustomTheme.CurrentTheme.CompactUpdateHintPaddingY;
+                var offset = Math.Max(0.0f, (h - lineH) * 0.5f);
+                ImGui.SetCursorPosY(startY + pad + offset);
                 using (var font = ImRaii.PushFont(UiBuilder.IconFont))
                 {
-                    ImGui.TextColored(SpheneCustomTheme.Colors.Warning, FontAwesomeIcon.InfoCircle.ToIconString());
+                    ImGui.TextColored(Sphene.UI.Theme.SpheneCustomTheme.CurrentTheme.CompactUpdateHintColor, FontAwesomeIcon.InfoCircle.ToIconString());
                 }
                 ImGui.SameLine();
-                UiSharedService.ColorTextWrapped($"Update available: {_updateBannerInfo.LatestVersion}", SpheneCustomTheme.Colors.Warning);
+                var updateText = _updateBannerInfo?.LatestVersion != null ? $"Update available: {_updateBannerInfo.LatestVersion}" : "Update available";
+                UiSharedService.ColorTextWrapped(updateText, Sphene.UI.Theme.SpheneCustomTheme.CurrentTheme.CompactUpdateHintColor);
                 ImGui.SameLine();
                 if (_uiSharedService.IconTextButton(FontAwesomeIcon.Download, "Open Details"))
                 {
                     _logger.LogDebug("Update details button clicked, toggling UpdateNotificationUi");
                     Mediator.Publish(new UiToggleMessage(typeof(UpdateNotificationUi)));
                 }
+                ImGui.SetCursorPosY(startY + h + pad * 2);
             }
         }
         
@@ -815,9 +794,9 @@ public class CompactUi : WindowMediatorSubscriberBase
             try
             {
                 var unscaledWidth = size.X / ImGuiHelpers.GlobalScale;
-                if (unscaledWidth < 350f)
+                if (unscaledWidth < 370f)
                 {
-                    var correctedWidth = 350f * ImGuiHelpers.GlobalScale;
+                    var correctedWidth = 370f * ImGuiHelpers.GlobalScale;
                     ImGui.SetWindowSize(new Vector2(correctedWidth, size.Y));
                     size = new Vector2(correctedWidth, size.Y);
                 }
@@ -842,7 +821,12 @@ public class CompactUi : WindowMediatorSubscriberBase
     private void DrawPairs()
     {
         // Reserve additional space for update notification if available
-        var updateNotificationHeight = _updateBannerInfo?.IsUpdateAvailable == true ? 40f : 0f;
+        var updateNotificationHeight =
+            (Sphene.UI.Theme.SpheneCustomTheme.CurrentTheme.ForceShowUpdateHint || _updateBannerInfo?.IsUpdateAvailable == true)
+                ? Sphene.UI.Theme.SpheneCustomTheme.CurrentTheme.CompactUpdateHintHeight
+                    + Sphene.UI.Theme.SpheneCustomTheme.CurrentTheme.CompactUpdateHintPaddingY * 2
+                    + ImGui.GetStyle().ItemSpacing.Y
+                : 0f;
         
         var ySize = _transferPartHeight == 0
             ? 1
@@ -1034,7 +1018,7 @@ public class CompactUi : WindowMediatorSubscriberBase
             var uploadProgress = totalToUpload > 0 ? (float)totalUploaded / totalToUpload : 0f;
             var uploadText = $"{doneUploads}/{totalUploads} ({UiSharedService.ByteToString(totalUploaded)}/{UiSharedService.ByteToString(totalToUpload)})";
             
-            _uiSharedService.DrawThemedProgressBar("Transmitting", uploadProgress, uploadText, SpheneCustomTheme.Colors.AccentBlue);
+            _uiSharedService.DrawTransmissionBar("Transmitting", uploadProgress, uploadText, true);
         }
 
         // Only show download progress if there are active downloads
@@ -1052,7 +1036,30 @@ public class CompactUi : WindowMediatorSubscriberBase
             var downloadProgress = totalToDownload > 0 ? (float)totalDownloaded / totalToDownload : 0f;
             var downloadText = $"{doneDownloads}/{totalDownloads} ({UiSharedService.ByteToString(totalDownloaded)}/{UiSharedService.ByteToString(totalToDownload)})";
             
-            _uiSharedService.DrawThemedProgressBar("Receiving", downloadProgress, downloadText, SpheneCustomTheme.Colors.AccentCyan);
+            _uiSharedService.DrawTransmissionBar("Receiving", downloadProgress, downloadText, false);
+        }
+
+        // Show transmission preview in-place when enabled
+        var theme = Sphene.UI.Theme.SpheneCustomTheme.CurrentTheme;
+        if (theme.ShowTransmissionPreview)
+        {
+            if (!currentUploads.Any())
+            {
+                ImGui.AlignTextToFramePadding();
+                _uiSharedService.IconText(FontAwesomeIcon.Upload);
+                ImGui.SameLine(35 * ImGuiHelpers.GlobalScale);
+                var previewUpload = theme.TransmissionPreviewUploadFill / 100.0f;
+                _uiSharedService.DrawTransmissionBar("Transmitting", previewUpload, $"{theme.TransmissionPreviewUploadFill:F1}%", true);
+            }
+
+            if (!currentDownloads.Any())
+            {
+                ImGui.AlignTextToFramePadding();
+                _uiSharedService.IconText(FontAwesomeIcon.Download);
+                ImGui.SameLine(35 * ImGuiHelpers.GlobalScale);
+                var previewDownload = theme.TransmissionPreviewDownloadFill / 100.0f;
+                _uiSharedService.DrawTransmissionBar("Receiving", previewDownload, $"{theme.TransmissionPreviewDownloadFill:F1}%", false);
+        }
         }
     }
 
@@ -3317,12 +3324,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         var headerStart = new Vector2(contentStart.X, contentStart.Y);
         var headerEnd = new Vector2(headerStart.X + ImGui.GetContentRegionAvail().X, headerStart.Y + headerHeight);
         
-        // Choose background color based on build type
-#if DEBUG
-        var headerBgColor = SpheneColors.WithAlpha(new Vector4(0.8f, 0.2f, 0.2f, 1.0f), 0.3f); // Red for debug
-#else
-        var headerBgColor = SpheneColors.WithAlpha(SpheneColors.CrystalBlue, 0.3f); // Crystal Blue for release
-#endif
+        var headerBgColor = SpheneCustomTheme.CurrentTheme.CompactHeaderBg;
         
         // Draw the rounded background rectangle
         var drawList = ImGui.GetWindowDrawList();
@@ -3362,12 +3364,6 @@ public class CompactUi : WindowMediatorSubscriberBase
         // Position settings button centered vertically in header
         ImGui.SetCursorScreenPos(new Vector2(contentStart.X + settingsButtonX, buttonY));
         
-        // Settings button with custom styling for better visibility
-        ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.2f, 0.2f, 0.2f, 0.8f)); // Dark background
-        ImGui.PushStyleColor(ImGuiCol.ButtonHovered, new Vector4(0.3f, 0.3f, 0.3f, 0.9f)); // Slightly lighter on hover
-        ImGui.PushStyleColor(ImGuiCol.ButtonActive, new Vector4(0.4f, 0.4f, 0.4f, 1.0f)); // Even lighter when pressed
-        ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 1.0f, 1.0f, 1.0f)); // White text
-        
         if (_uiSharedService.IconButton(FontAwesomeIcon.Cog, null, null, null, null, ButtonStyleKeys.Compact_Settings))
         {
             Mediator.Publish(new UiToggleMessage(typeof(SettingsUi)));
@@ -3382,16 +3378,9 @@ public class CompactUi : WindowMediatorSubscriberBase
             }
         }
         
-        ImGui.PopStyleColor(4); // Pop all 4 style colors
         
         // Position close button centered vertically in header
         ImGui.SetCursorScreenPos(new Vector2(contentStart.X + closeButtonX, buttonY));
-        
-        // Close button with custom styling for better visibility
-        ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.6f, 0.2f, 0.2f, 0.8f)); // Dark red background
-        ImGui.PushStyleColor(ImGuiCol.ButtonHovered, new Vector4(0.8f, 0.3f, 0.3f, 0.9f)); // Lighter red on hover
-        ImGui.PushStyleColor(ImGuiCol.ButtonActive, new Vector4(1.0f, 0.4f, 0.4f, 1.0f)); // Even lighter red when pressed
-        ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 1.0f, 1.0f, 1.0f)); // White text
         
         if (_uiSharedService.IconButton(FontAwesomeIcon.Times, null, null, null, null, ButtonStyleKeys.Compact_Close))
         {
@@ -3408,7 +3397,6 @@ public class CompactUi : WindowMediatorSubscriberBase
             }
         }
         
-        ImGui.PopStyleColor(4); // Pop all 4 style colors
         
         // Move cursor to end of header area
         ImGui.SetCursorScreenPos(new Vector2(contentStart.X, headerEnd.Y));
@@ -3422,7 +3410,7 @@ public class CompactUi : WindowMediatorSubscriberBase
             return;
         }
 
-        _logger.LogInformation("Validating restored files for {count} mods", restoredMods.Count);
+        _logger.LogDebug("Validating restored files for {count} mods", restoredMods.Count);
         
         int validatedMods = 0;
         int totalFilesFound = 0;

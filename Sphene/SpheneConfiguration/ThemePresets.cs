@@ -220,6 +220,9 @@ public static class ThemePresets
                 [ButtonStyleKeys.PairTag_Menu] = new ButtonStyleOverride(),
                 [ButtonStyleKeys.PairTag_Pause] = new ButtonStyleOverride(),
 
+                // Unified context menu item style
+                [ButtonStyleKeys.ContextMenu_Item] = new ButtonStyleOverride(),
+
                 // CompactUI specific
                 [ButtonStyleKeys.Compact_Connect] = new ButtonStyleOverride
                 {

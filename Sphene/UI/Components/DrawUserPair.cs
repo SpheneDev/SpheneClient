@@ -282,7 +282,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
     {
         if (!_pair.IsPaused)
         {
-            if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.User, "Open Profile", _menuWidth))
+            if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.User, "Open Profile", _menuWidth, ButtonStyleKeys.ContextMenu_Item))
             {
                 _displayHandler.OpenProfile(_pair);
                 ImGui.CloseCurrentPopup();
@@ -291,7 +291,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         }
         if (_pair.IsVisible)
         {
-            if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.Sync, "Reload last data", _menuWidth, ButtonStyleKeys.Pair_ReloadLast))
+            if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.Sync, "Reload last data", _menuWidth, ButtonStyleKeys.ContextMenu_Item))
             {
                 _pair.ApplyLastReceivedData(forced: true);
                 ImGui.CloseCurrentPopup();
@@ -299,7 +299,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
             UiSharedService.AttachToolTip("This reapplies the last received character data to this character");
         }
 
-        if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.PlayCircle, "Cycle pause state", _menuWidth, ButtonStyleKeys.Pair_CyclePause))
+        if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.PlayCircle, "Cycle pause state", _menuWidth, ButtonStyleKeys.ContextMenu_Item))
         {
             _ = _apiController.CyclePauseAsync(_pair.UserData);
             ImGui.CloseCurrentPopup();
@@ -307,7 +307,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         ImGui.Separator();
 
         ImGui.TextUnformatted("Pair Permission Functions");
-        if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.WindowMaximize, "Open Permissions Window", _menuWidth, ButtonStyleKeys.Pair_OpenPermissions))
+        if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.WindowMaximize, "Open Permissions Window", _menuWidth, ButtonStyleKeys.ContextMenu_Item))
         {
             _mediator.Publish(new OpenPermissionWindow(_pair));
             ImGui.CloseCurrentPopup();
@@ -317,7 +317,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         var isSticky = _pair.UserPair!.OwnPermissions.IsSticky();
         string stickyText = isSticky ? "Disable Preferred Permissions" : "Enable Preferred Permissions";
         var stickyIcon = isSticky ? FontAwesomeIcon.ArrowCircleDown : FontAwesomeIcon.ArrowCircleUp;
-        if (_uiSharedService.IconTextActionButton(stickyIcon, stickyText, _menuWidth))
+        if (_uiSharedService.IconTextActionButton(stickyIcon, stickyText, _menuWidth, ButtonStyleKeys.ContextMenu_Item))
         {
             var permissions = _pair.UserPair.OwnPermissions;
             permissions.SetSticky(!isSticky);
@@ -333,7 +333,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         var isDisableSounds = _pair.UserPair!.OwnPermissions.IsDisableSounds();
         string disableSoundsText = isDisableSounds ? "Enable sound sync" : "Disable sound sync";
         var disableSoundsIcon = isDisableSounds ? FontAwesomeIcon.VolumeUp : FontAwesomeIcon.VolumeMute;
-        if (_uiSharedService.IconTextActionButton(disableSoundsIcon, disableSoundsText, _menuWidth))
+        if (_uiSharedService.IconTextActionButton(disableSoundsIcon, disableSoundsText, _menuWidth, ButtonStyleKeys.ContextMenu_Item))
         {
             var permissions = _pair.UserPair.OwnPermissions;
             permissions.SetDisableSounds(!isDisableSounds);
@@ -344,7 +344,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         var isDisableAnims = _pair.UserPair!.OwnPermissions.IsDisableAnimations();
         string disableAnimsText = isDisableAnims ? "Enable animation sync" : "Disable animation sync";
         var disableAnimsIcon = isDisableAnims ? FontAwesomeIcon.Running : FontAwesomeIcon.Stop;
-        if (_uiSharedService.IconTextActionButton(disableAnimsIcon, disableAnimsText, _menuWidth))
+        if (_uiSharedService.IconTextActionButton(disableAnimsIcon, disableAnimsText, _menuWidth, ButtonStyleKeys.ContextMenu_Item))
         {
             var permissions = _pair.UserPair.OwnPermissions;
             permissions.SetDisableAnimations(!isDisableAnims);
@@ -355,7 +355,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         var isDisableVFX = _pair.UserPair!.OwnPermissions.IsDisableVFX();
         string disableVFXText = isDisableVFX ? "Enable VFX sync" : "Disable VFX sync";
         var disableVFXIcon = isDisableVFX ? FontAwesomeIcon.Sun : FontAwesomeIcon.Circle;
-        if (_uiSharedService.IconTextActionButton(disableVFXIcon, disableVFXText, _menuWidth))
+        if (_uiSharedService.IconTextActionButton(disableVFXIcon, disableVFXText, _menuWidth, ButtonStyleKeys.ContextMenu_Item))
         {
             var permissions = _pair.UserPair.OwnPermissions;
             permissions.SetDisableVFX(!isDisableVFX);
@@ -373,7 +373,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         
         if (!isWhitelisted)
         {
-            if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.Shield, "Add to Performance Whitelist", _menuWidth))
+            if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.Shield, "Add to Performance Whitelist", _menuWidth, ButtonStyleKeys.ContextMenu_Item))
             {
                 // Use alias if available, otherwise use UID
                 var identifierToAdd = !string.IsNullOrEmpty(_pair.UserData.Alias) ? _pair.UserData.Alias : _pair.UserData.UID;
@@ -390,7 +390,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         }
         else
         {
-            if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.ShieldAlt, "Remove from Performance Whitelist", _menuWidth))
+            if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.ShieldAlt, "Remove from Performance Whitelist", _menuWidth, ButtonStyleKeys.ContextMenu_Item))
             {
                 // Remove both alias and UID if they exist in the list
                 _performanceConfigService.Current.UIDsToIgnore.RemoveAll(uid => 
@@ -434,12 +434,12 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
 
         if (_pair.IndividualPairStatus != API.Data.Enum.IndividualPairStatus.None)
         {
-            if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.Folder, "Pair Groups", _menuWidth))
+            if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.Folder, "Pair Groups", _menuWidth, ButtonStyleKeys.ContextMenu_Item))
             {
                 _selectTagForPairUi.Open(_pair);
             }
             UiSharedService.AttachToolTip("Choose pair groups for " + entryUID);
-            if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.Trash, "Unpair Permanently", _menuWidth) && UiSharedService.CtrlPressed())
+            if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.Trash, "Unpair Permanently", _menuWidth, ButtonStyleKeys.ContextMenu_Item) && UiSharedService.CtrlPressed())
             {
                 _ = _apiController.UserRemovePair(new(_pair.UserData));
             }
@@ -447,7 +447,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         }
         else
         {
-            if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.Plus, "Pair individually", _menuWidth))
+            if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.Plus, "Pair individually", _menuWidth, ButtonStyleKeys.ContextMenu_Item))
             {
                 _ = _apiController.UserAddPair(new(_pair.UserData));
             }

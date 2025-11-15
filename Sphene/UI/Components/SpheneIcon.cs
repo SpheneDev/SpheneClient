@@ -587,23 +587,24 @@ public class SpheneIcon : WindowMediatorSubscriberBase, IDisposable
     
     private Vector4 GetStatusColor(ServerState serverState)
     {
+        var t = Sphene.UI.Theme.SpheneCustomTheme.CurrentTheme;
         return serverState switch
         {
-            ServerState.Connected => SpheneColors.NetworkConnected,
-            ServerState.Connecting => SpheneColors.NetworkWarning,
-            ServerState.Reconnecting => SpheneColors.NetworkWarning,
-            ServerState.Disconnected => SpheneColors.NetworkDisconnected,
-            ServerState.Disconnecting => SpheneColors.NetworkWarning,
-            ServerState.Offline => SpheneColors.NetworkInactive,
-            ServerState.Unauthorized => SpheneColors.NetworkError,
-            ServerState.VersionMisMatch => SpheneColors.NetworkError,
-            ServerState.RateLimited => SpheneColors.NetworkError,
-            ServerState.NoSecretKey => SpheneColors.NetworkError,
-            ServerState.MultiChara => SpheneColors.NetworkError,
-            ServerState.OAuthMisconfigured => SpheneColors.NetworkError,
-            ServerState.OAuthLoginTokenStale => SpheneColors.NetworkError,
-            ServerState.NoAutoLogon => SpheneColors.NetworkInactive,
-            _ => SpheneColors.NetworkInactive
+            ServerState.Connected => t.CompactServerStatusConnected,
+            ServerState.Connecting => t.CompactServerStatusWarning,
+            ServerState.Reconnecting => t.CompactServerStatusWarning,
+            ServerState.Disconnected => t.CompactServerStatusWarning,
+            ServerState.Disconnecting => t.CompactServerStatusWarning,
+            ServerState.Offline => t.CompactServerStatusError,
+            ServerState.Unauthorized => t.CompactServerStatusError,
+            ServerState.VersionMisMatch => t.CompactServerStatusError,
+            ServerState.RateLimited => t.CompactServerStatusWarning,
+            ServerState.NoSecretKey => t.CompactServerStatusWarning,
+            ServerState.MultiChara => t.CompactServerStatusWarning,
+            ServerState.OAuthMisconfigured => t.CompactServerStatusError,
+            ServerState.OAuthLoginTokenStale => t.CompactServerStatusError,
+            ServerState.NoAutoLogon => t.CompactServerStatusWarning,
+            _ => t.CompactServerStatusError
         };
     }
     

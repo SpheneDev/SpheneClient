@@ -61,6 +61,12 @@ public class ThemeConfiguration
     public bool ShowProgressBarPreview { get; set; } = false;
     public float ProgressBarPreviewFill { get; set; } = 75.0f; // 0-100%
     
+    // Update Hint Preview/Control
+    public bool ForceShowUpdateHint { get; set; } = false;
+    public Vector4 CompactUpdateHintColor { get; set; } = new(1.0f, 0.8f, 0.2f, 1.0f);
+    public float CompactUpdateHintHeight { get; set; } = 24.0f;
+    public float CompactUpdateHintPaddingY { get; set; } = 4.0f;
+    
     // Progress Bar Appearance Settings
     public float ProgressBarRounding { get; set; } = 4.0f;
     public float CompactProgressBarHeight { get; set; } = 20.0f;
@@ -68,14 +74,47 @@ public class ThemeConfiguration
     public Vector4 CompactProgressBarBackground { get; set; } = new(0.1f, 0.1f, 0.15f, 0.8f);
     public Vector4 CompactProgressBarForeground { get; set; } = new(0.2f, 0.4f, 0.8f, 1.0f);
     public Vector4 CompactProgressBarBorder { get; set; } = new(0.3f, 0.3f, 0.4f, 1.0f);
+    public bool ProgressBarUseGradient { get; set; } = false;
+    public Vector4 ProgressBarGradientStart { get; set; } = new(0.2f, 0.4f, 0.8f, 1.0f);
+    public Vector4 ProgressBarGradientEnd { get; set; } = new(0.3f, 0.6f, 0.9f, 1.0f);
     
     // Transmission Progress Bar Settings (bars under players)
     public float TransmissionBarRounding { get; set; } = 2.0f;
     public float CompactTransmissionBarHeight { get; set; } = 8.0f;
     public float CompactTransmissionBarWidth { get; set; } = 120.0f;
+    public bool AutoTransmissionBarWidth { get; set; } = true;
     public Vector4 CompactTransmissionBarBackground { get; set; } = new(0.1f, 0.1f, 0.15f, 0.8f);
     public Vector4 CompactTransmissionBarForeground { get; set; } = new(0.3f, 0.6f, 0.9f, 1.0f);
     public Vector4 CompactTransmissionBarBorder { get; set; } = new(0.3f, 0.3f, 0.4f, 1.0f);
+    public bool TransmissionUseGradient { get; set; } = false;
+    public Vector4 TransmissionGradientStart { get; set; } = new(0.2f, 0.5f, 0.9f, 1.0f);
+    public Vector4 TransmissionGradientEnd { get; set; } = new(0.3f, 0.7f, 1.0f, 1.0f);
+    
+    // Separate per-bar styling toggle
+    public bool SeparateTransmissionBarStyles { get; set; } = false;
+    
+    // Upload bar specific settings
+    public float UploadTransmissionBarRounding { get; set; } = 2.0f;
+    public float UploadTransmissionBarHeight { get; set; } = 8.0f;
+    public Vector4 UploadTransmissionBarBackground { get; set; } = new(0.1f, 0.1f, 0.15f, 0.8f);
+    public Vector4 UploadTransmissionBarForeground { get; set; } = new(0.2f, 0.5f, 0.9f, 1.0f);
+    public Vector4 UploadTransmissionBarBorder { get; set; } = new(0.3f, 0.3f, 0.4f, 1.0f);
+    public Vector4 UploadTransmissionGradientStart { get; set; } = new(0.2f, 0.5f, 0.9f, 1.0f);
+    public Vector4 UploadTransmissionGradientEnd { get; set; } = new(0.3f, 0.7f, 1.0f, 1.0f);
+    
+    // Download bar specific settings
+    public float DownloadTransmissionBarRounding { get; set; } = 2.0f;
+    public float DownloadTransmissionBarHeight { get; set; } = 8.0f;
+    public Vector4 DownloadTransmissionBarBackground { get; set; } = new(0.1f, 0.1f, 0.15f, 0.8f);
+    public Vector4 DownloadTransmissionBarForeground { get; set; } = new(0.3f, 0.6f, 0.9f, 1.0f);
+    public Vector4 DownloadTransmissionBarBorder { get; set; } = new(0.3f, 0.3f, 0.4f, 1.0f);
+    public Vector4 DownloadTransmissionGradientStart { get; set; } = new(0.2f, 0.5f, 0.9f, 1.0f);
+    public Vector4 DownloadTransmissionGradientEnd { get; set; } = new(0.3f, 0.7f, 1.0f, 1.0f);
+    
+    // Transmission Preview Controls (CompactUI preview location)
+    public bool ShowTransmissionPreview { get; set; } = false;
+    public float TransmissionPreviewUploadFill { get; set; } = 60.0f; // 0-100%
+    public float TransmissionPreviewDownloadFill { get; set; } = 40.0f; // 0-100%
     
     // Border Settings
     public float WindowBorderSize { get; set; } = 1.5f;
@@ -298,14 +337,48 @@ public class ThemeConfiguration
             CompactProgressBarBackground = CompactProgressBarBackground,
             CompactProgressBarForeground = CompactProgressBarForeground,
             CompactProgressBarBorder = CompactProgressBarBorder,
+            ProgressBarUseGradient = ProgressBarUseGradient,
+            ProgressBarGradientStart = ProgressBarGradientStart,
+            ProgressBarGradientEnd = ProgressBarGradientEnd,
+            
+            // Update Hint Controls
+            ForceShowUpdateHint = ForceShowUpdateHint,
+            CompactUpdateHintColor = CompactUpdateHintColor,
+            CompactUpdateHintHeight = CompactUpdateHintHeight,
+            CompactUpdateHintPaddingY = CompactUpdateHintPaddingY,
             
             // CompactUI Transmission Progress Bar Settings
             TransmissionBarRounding = TransmissionBarRounding,
             CompactTransmissionBarHeight = CompactTransmissionBarHeight,
             CompactTransmissionBarWidth = CompactTransmissionBarWidth,
+            AutoTransmissionBarWidth = AutoTransmissionBarWidth,
             CompactTransmissionBarBackground = CompactTransmissionBarBackground,
             CompactTransmissionBarForeground = CompactTransmissionBarForeground,
             CompactTransmissionBarBorder = CompactTransmissionBarBorder,
+            TransmissionUseGradient = TransmissionUseGradient,
+            TransmissionGradientStart = TransmissionGradientStart,
+            TransmissionGradientEnd = TransmissionGradientEnd,
+            
+            SeparateTransmissionBarStyles = SeparateTransmissionBarStyles,
+            UploadTransmissionBarRounding = UploadTransmissionBarRounding,
+            UploadTransmissionBarHeight = UploadTransmissionBarHeight,
+            UploadTransmissionBarBackground = UploadTransmissionBarBackground,
+            UploadTransmissionBarForeground = UploadTransmissionBarForeground,
+            UploadTransmissionBarBorder = UploadTransmissionBarBorder,
+            UploadTransmissionGradientStart = UploadTransmissionGradientStart,
+            UploadTransmissionGradientEnd = UploadTransmissionGradientEnd,
+            DownloadTransmissionBarRounding = DownloadTransmissionBarRounding,
+            DownloadTransmissionBarHeight = DownloadTransmissionBarHeight,
+            DownloadTransmissionBarBackground = DownloadTransmissionBarBackground,
+            DownloadTransmissionBarForeground = DownloadTransmissionBarForeground,
+            DownloadTransmissionBarBorder = DownloadTransmissionBarBorder,
+            DownloadTransmissionGradientStart = DownloadTransmissionGradientStart,
+            DownloadTransmissionGradientEnd = DownloadTransmissionGradientEnd,
+            
+            // Transmission Preview Controls
+            ShowTransmissionPreview = ShowTransmissionPreview,
+            TransmissionPreviewUploadFill = TransmissionPreviewUploadFill,
+            TransmissionPreviewDownloadFill = TransmissionPreviewDownloadFill,
             
             ScrollbarSize = ScrollbarSize,
             GrabMinSize = GrabMinSize,
@@ -444,7 +517,14 @@ public class ThemeConfiguration
             {
                 WidthDelta = kv.Value.WidthDelta,
                 HeightDelta = kv.Value.HeightDelta,
-                IconOffset = kv.Value.IconOffset
+                IconOffset = kv.Value.IconOffset,
+                Button = kv.Value.Button,
+                ButtonHovered = kv.Value.ButtonHovered,
+                ButtonActive = kv.Value.ButtonActive,
+                Text = kv.Value.Text,
+                Icon = kv.Value.Icon,
+                Border = kv.Value.Border,
+                BorderSize = kv.Value.BorderSize
             })
         };
     }

@@ -213,7 +213,14 @@ public static class ThemePropertyCopier
             {
                 WidthDelta = kv.Value.WidthDelta,
                 HeightDelta = kv.Value.HeightDelta,
-                IconOffset = kv.Value.IconOffset
+                IconOffset = kv.Value.IconOffset,
+                Button = kv.Value.Button,
+                ButtonHovered = kv.Value.ButtonHovered,
+                ButtonActive = kv.Value.ButtonActive,
+                Text = kv.Value.Text,
+                Icon = kv.Value.Icon,
+                Border = kv.Value.Border,
+                BorderSize = kv.Value.BorderSize
             }
         );
     }
