@@ -3285,34 +3285,29 @@ public class SettingsUi : WindowMediatorSubscriberBase
             }
             UiSharedService.ColorTextWrapped("Show the standard window header. Disable for a cleaner panel.", ImGuiColors.DalamudGrey);
 
-            var headerBg = theme.CompactHeaderBg;
-            if (ImGui.ColorEdit4("Header Background", ref headerBg))
+            if (!theme.CompactShowImGuiHeader)
             {
-                theme.CompactHeaderBg = headerBg;
-                themeChanged = true;
-            }
+                var headerBg = theme.CompactHeaderBg;
+                if (ImGui.ColorEdit4("Header Background", ref headerBg))
+                {
+                    theme.CompactHeaderBg = headerBg;
+                    themeChanged = true;
+                }
 
-            var titleText = theme.CompactPanelTitleText;
-            if (ImGui.ColorEdit4("Title Text", ref titleText))
-            {
-                theme.CompactPanelTitleText = titleText;
-                themeChanged = true;
+                var titleText = theme.CompactPanelTitleText;
+                if (ImGui.ColorEdit4("Title Text", ref titleText))
+                {
+                    theme.CompactPanelTitleText = titleText;
+                    themeChanged = true;
+                }
+                
+                var compactHeaderRounding = theme.CompactHeaderRounding;
+                if (ImGui.SliderFloat("Header Rounding", ref compactHeaderRounding, 0.0f, 30.0f, "%.1f"))
+                {
+                    theme.CompactHeaderRounding = compactHeaderRounding;
+                    themeChanged = true;
+                }
             }
-
-            var sectionHeaderText = theme.CompactHeaderText;
-            if (ImGui.ColorEdit4("Section Header Text", ref sectionHeaderText))
-            {
-                theme.CompactHeaderText = sectionHeaderText;
-                themeChanged = true;
-            }
-
-            var compactHeaderRounding = theme.CompactHeaderRounding;
-            if (ImGui.SliderFloat("Header Rounding", ref compactHeaderRounding, 0.0f, 30.0f, "%.1f"))
-            {
-                theme.CompactHeaderRounding = compactHeaderRounding;
-                themeChanged = true;
-            }
-
             if (theme.CompactShowImGuiHeader)
             {
                 var compactTitleBg = theme.CompactTitleBg;
@@ -3328,6 +3323,15 @@ public class SettingsUi : WindowMediatorSubscriberBase
                     themeChanged = true;
                 }
             }
+            var sectionHeaderText = theme.CompactHeaderText;
+            if (ImGui.ColorEdit4("Section Header Text", ref sectionHeaderText))
+            {
+                theme.CompactHeaderText = sectionHeaderText;
+                themeChanged = true;
+            }
+
+
+
 
             ImGui.Spacing();
         }
