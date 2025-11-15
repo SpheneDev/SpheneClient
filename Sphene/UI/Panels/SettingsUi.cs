@@ -33,6 +33,7 @@ using System.Globalization;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Numerics;
+using System.Text.Json;
 using System.Text;
 using System.Text.Json;
 using Sphene.UI.CharaDataHub;
@@ -75,6 +76,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
     private Task<List<FileCacheEntity>>? _validationTask;
     private bool _wasOpen = false;
     private Vector2 _currentCompactUiSize = new Vector2(370, 400); // Default CompactUI size
+    private bool? _compactUiWasOpen = null;
     // New navigation state for redesigned Settings layout
     private enum SettingsPage
     {
@@ -193,14 +195,52 @@ public class SettingsUi : WindowMediatorSubscriberBase
             SpheneCustomTheme.CurrentTheme.ShowProgressBarPreview = false;
             _configService.Save();
         }
+        if (SpheneCustomTheme.CurrentTheme.ShowTransmissionPreview)
+        {
+            SpheneCustomTheme.CurrentTheme.ShowTransmissionPreview = false;
+        }
+        if (SpheneCustomTheme.CurrentTheme.ForceShowUpdateHint)
+        {
+            SpheneCustomTheme.CurrentTheme.ForceShowUpdateHint = false;
+        }
+        Sphene.UI.Theme.ButtonStyleManagerUI.DisablePicker();
+
+        if (_compactUiWasOpen.HasValue)
+        {
+            var currentOpen = false;
+            Mediator.Publish(new QueryWindowOpenStateMessage(typeof(CompactUi), state => currentOpen = state));
+            if (currentOpen != _compactUiWasOpen.Value)
+            {
+                Mediator.Publish(new UiToggleMessage(typeof(CompactUi)));
+            }
+            _compactUiWasOpen = null;
+        }
 
         base.OnClose();
     }
 
-    // Mark unsaved changes whenever the theme notifies a change
+    private bool _suppressUnsavedForPreview = false;
     private void OnThemeChanged()
     {
-        _hasUnsavedThemeChanges = true;
+        if (_suppressUnsavedForPreview)
+            return;
+        _hasUnsavedThemeChanges = HasSerializableThemeChanges();
+    }
+
+    private bool HasSerializableThemeChanges()
+    {
+        if (_originalThemeState == null)
+            return false;
+        var options = new JsonSerializerOptions
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            Converters = { new Sphene.UI.Theme.Vector4JsonConverter(), new Sphene.UI.Theme.Vector2JsonConverter() }
+        };
+        var currentClone = SpheneCustomTheme.CurrentTheme.Clone();
+        currentClone.ForceShowUpdateHint = _originalThemeState.ForceShowUpdateHint;
+        var currentJson = JsonSerializer.Serialize(currentClone, options);
+        var originalJson = JsonSerializer.Serialize(_originalThemeState, options);
+        return !string.Equals(currentJson, originalJson, StringComparison.Ordinal);
     }
 
     protected override void DrawInternal()
@@ -216,6 +256,27 @@ public class SettingsUi : WindowMediatorSubscriberBase
             Util.OpenLink("https://discord.gg/GbnwsP2XsF");
         }
         UiSharedService.AttachToolTip("Get support, updates, and connect with other users");
+
+        if (_activeSettingsPage == SettingsPage.Theme && _compactUiWasOpen == null)
+        {
+            var wasOpen = false;
+            Mediator.Publish(new QueryWindowOpenStateMessage(typeof(CompactUi), state => wasOpen = state));
+            _compactUiWasOpen = wasOpen;
+            if (!wasOpen)
+            {
+                Mediator.Publish(new UiToggleMessage(typeof(CompactUi)));
+            }
+        }
+        else if (_activeSettingsPage != SettingsPage.Theme && _compactUiWasOpen.HasValue)
+        {
+            var currentOpen = false;
+            Mediator.Publish(new QueryWindowOpenStateMessage(typeof(CompactUi), state => currentOpen = state));
+            if (currentOpen != _compactUiWasOpen.Value)
+            {
+                Mediator.Publish(new UiToggleMessage(typeof(CompactUi)));
+            }
+            _compactUiWasOpen = null;
+        }
 
         DrawSettingsContent();
         
@@ -2546,7 +2607,6 @@ public class SettingsUi : WindowMediatorSubscriberBase
     private void DrawThemeSettings()
     {
         _uiShared.BigText("Theme Customization");
-        UiSharedService.ColorTextWrapped("Customize the appearance of the Sphene UI with real-time preview. Changes are applied immediately.", ImGuiColors.DalamudGrey);
         
         ImGui.Separator();
         
@@ -2555,36 +2615,50 @@ public class SettingsUi : WindowMediatorSubscriberBase
         
         ImGui.Separator();
         
-        using (var themeTabBar = ImRaii.TabBar("ThemeTabBar"))
+        if (ApiController.IsAdmin)
         {
-            if (themeTabBar)
+            using (var themeTabBar = ImRaii.TabBar("ThemeTabBar"))
             {
-                var availableRegion = ImGui.GetContentRegionAvail();
-                var tabContentHeight = availableRegion.Y;
-
-                var generalTab = ImRaii.TabItem("General Theme", ImGuiTabItemFlags.None);
-                if (generalTab)
+                if (themeTabBar)
                 {
-                    if (ImGui.BeginChild("GeneralThemeChild", new Vector2(0, tabContentHeight), true))
-                    {
-                        DrawGeneralThemeSettings();
-                        ImGui.EndChild();
-                    }
-                }
-                generalTab.Dispose();
+                    var availableRegion = ImGui.GetContentRegionAvail();
+                    var tabContentHeight = availableRegion.Y;
 
-                var panelTab = ImRaii.TabItem("Panel Theme", _preferPanelThemeTab ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None);
-                if (panelTab)
-                {
-                    if (ImGui.BeginChild("PanelThemeChild", new Vector2(0, tabContentHeight), true))
+                    var generalTab = ImRaii.TabItem("General Theme", ImGuiTabItemFlags.None);
+                    if (generalTab)
                     {
-                        DrawCompactUIThemeSettings();
-                        ImGui.EndChild();
+                        if (ImGui.BeginChild("GeneralThemeChild", new Vector2(0, tabContentHeight), true))
+                        {
+                            DrawGeneralThemeSettings();
+                            ImGui.EndChild();
+                        }
                     }
+                    generalTab.Dispose();
+
+                    var panelTab = ImRaii.TabItem("Panel Theme", _preferPanelThemeTab ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None);
+                    if (panelTab)
+                    {
+                        if (ImGui.BeginChild("PanelThemeChild", new Vector2(0, tabContentHeight), true))
+                        {
+                            DrawCompactUIThemeSettings();
+                            ImGui.EndChild();
+                        }
+                    }
+                    panelTab.Dispose();
+                    _preferPanelThemeTab = false;
                 }
-                panelTab.Dispose();
-                _preferPanelThemeTab = false;
             }
+        }
+        else
+        {
+            var availableRegion = ImGui.GetContentRegionAvail();
+            var tabContentHeight = availableRegion.Y;
+            if (ImGui.BeginChild("PanelThemeChild", new Vector2(0, tabContentHeight), true))
+            {
+                DrawCompactUIThemeSettings();
+                ImGui.EndChild();
+            }
+            _preferPanelThemeTab = false;
         }
     }
 
@@ -2908,15 +2982,11 @@ public class SettingsUi : WindowMediatorSubscriberBase
         var theme = SpheneCustomTheme.CurrentTheme;
         bool themeChanged = false;
         
-        ImGui.Text("Panel Layout");
-        ImGui.Separator();
         
-        UiSharedService.ColorTextWrapped("Customize how the Panel looks and feels. Basic options below; detailed controls further down.", ImGuiColors.DalamudGrey);
+        UiSharedService.ColorTextWrapped("Customize how the Panel looks and feels.", ImGuiColors.DalamudGrey);
+        UiSharedService.ColorTextWrapped("Panel will be opened automaticly and you can see changes immediately.", ImGuiColors.DalamudYellow);
         ImGui.Spacing();
         
-        // Panel Header Settings
-        ImGui.Text("Basic Options");
-        ImGui.Separator();
         
         ImGui.Spacing();
                 
@@ -2929,14 +2999,6 @@ public class SettingsUi : WindowMediatorSubscriberBase
             theme.CompactWindowRounding = compactWindowRounding;
             themeChanged = true;
         }
-
-        var compactFrameRounding = theme.CompactFrameRounding;
-        if (ImGui.SliderFloat("Panel Frame Rounding", ref compactFrameRounding, 0.0f, 30.0f, "%.1f"))
-        {
-            theme.CompactFrameRounding = compactFrameRounding;
-            themeChanged = true;
-        }
-        
         
         ImGui.Spacing();
         ImGui.Text("Panel Spacing & Sizing");
@@ -2969,416 +3031,55 @@ public class SettingsUi : WindowMediatorSubscriberBase
             theme.CompactWindowBorderSize = compactWindowBorderSize;
             themeChanged = true;
         }
-        
-        
-        }
-        
-        
-        
+
         ImGui.Spacing();
-        if (ImGui.CollapsingHeader("Player Transmission Bars", ImGuiTreeNodeFlags.None))
+        ImGui.Text("Panel Backgrounds");
+        ImGui.Separator();
+        var compactWindowBg = theme.CompactWindowBg;
+        if (ImGui.ColorEdit4("Panel Background", ref compactWindowBg))
         {
-            ImGui.Separator();
-        
-        var prevSeparate = theme.SeparateTransmissionBarStyles;
-        var separateBars = theme.SeparateTransmissionBarStyles;
-        if (ImGui.Checkbox("Separate Upload/Download Settings", ref separateBars))
-        {
-            theme.SeparateTransmissionBarStyles = separateBars;
-            themeChanged = true;
-            if (!prevSeparate && theme.SeparateTransmissionBarStyles)
-            {
-                theme.UploadTransmissionBarRounding = theme.TransmissionBarRounding;
-                theme.UploadTransmissionBarHeight = theme.CompactTransmissionBarHeight;
-                theme.UploadTransmissionBarBackground = theme.CompactTransmissionBarBackground;
-                theme.UploadTransmissionBarForeground = theme.CompactTransmissionBarForeground;
-                theme.UploadTransmissionBarBorder = theme.CompactTransmissionBarBorder;
-                theme.DownloadTransmissionBarRounding = theme.TransmissionBarRounding;
-                theme.DownloadTransmissionBarHeight = theme.CompactTransmissionBarHeight;
-                theme.DownloadTransmissionBarBackground = theme.CompactTransmissionBarBackground;
-                theme.DownloadTransmissionBarForeground = theme.CompactTransmissionBarForeground;
-                theme.DownloadTransmissionBarBorder = theme.CompactTransmissionBarBorder;
-                theme.UploadTransmissionGradientStart = theme.TransmissionGradientStart;
-                theme.UploadTransmissionGradientEnd = theme.TransmissionGradientEnd;
-                theme.DownloadTransmissionGradientStart = theme.TransmissionGradientStart;
-                theme.DownloadTransmissionGradientEnd = theme.TransmissionGradientEnd;
-                themeChanged = true;
-            }
-        }
-        
-        var autoTransmissionWidth = theme.AutoTransmissionBarWidth;
-        if (ImGui.Checkbox("Auto Transmission Width (fit content)", ref autoTransmissionWidth))
-        {
-            theme.AutoTransmissionBarWidth = autoTransmissionWidth;
+            theme.CompactWindowBg = compactWindowBg;
             themeChanged = true;
         }
-        
-        if (!theme.SeparateTransmissionBarStyles)
+        var compactFrameBg = theme.CompactFrameBg;
+        if (ImGui.ColorEdit4("Control Background", ref compactFrameBg))
         {
-            var transmissionBarRounding = theme.TransmissionBarRounding;
-            if (ImGui.SliderFloat("Transmission Bar Rounding", ref transmissionBarRounding, 0.0f, 15.0f, "%.1f"))
-            {
-                theme.TransmissionBarRounding = transmissionBarRounding;
-                themeChanged = true;
-            }
-            
-            var compactTransmissionBarHeight = theme.CompactTransmissionBarHeight;
-            if (ImGui.SliderFloat("Transmission Bar Height", ref compactTransmissionBarHeight, 2.0f, 30.0f, "%.1f"))
-            {
-                theme.CompactTransmissionBarHeight = compactTransmissionBarHeight;
-                themeChanged = true;
-            }
-            
-            var compactTransmissionBarBackground = theme.CompactTransmissionBarBackground;
-            if (ImGui.ColorEdit4("Transmission Bar Background", ref compactTransmissionBarBackground))
-            {
-                theme.CompactTransmissionBarBackground = compactTransmissionBarBackground;
-                themeChanged = true;
-            }
-            
-            var compactTransmissionBarForeground = theme.CompactTransmissionBarForeground;
-            if (ImGui.ColorEdit4("Transmission Bar Foreground", ref compactTransmissionBarForeground))
-            {
-                theme.CompactTransmissionBarForeground = compactTransmissionBarForeground;
-                themeChanged = true;
-            }
-            
-            var compactTransmissionBarBorder = theme.CompactTransmissionBarBorder;
-            if (ImGui.ColorEdit4("Transmission Bar Border", ref compactTransmissionBarBorder))
-            {
-                theme.CompactTransmissionBarBorder = compactTransmissionBarBorder;
-                themeChanged = true;
-            }
-            var useTransGrad = theme.TransmissionUseGradient;
-            if (ImGui.Checkbox("Use Gradient Fill", ref useTransGrad))
-            {
-                theme.TransmissionUseGradient = useTransGrad;
-                themeChanged = true;
-            }
-            if (theme.TransmissionUseGradient)
-            {
-                var tGradStart = theme.TransmissionGradientStart;
-                if (ImGui.ColorEdit4("Gradient Start", ref tGradStart))
-                {
-                    theme.TransmissionGradientStart = tGradStart;
-                    themeChanged = true;
-                }
-                var tGradEnd = theme.TransmissionGradientEnd;
-                if (ImGui.ColorEdit4("Gradient End", ref tGradEnd))
-                {
-                    theme.TransmissionGradientEnd = tGradEnd;
-                    themeChanged = true;
-                }
-            }
-        }
-        else
-        {
-            ImGui.Text("Upload Bar");
-            ImGui.Separator();
-            var uploadRounding = theme.UploadTransmissionBarRounding;
-            if (ImGui.SliderFloat("Upload Bar Rounding", ref uploadRounding, 0.0f, 15.0f, "%.1f"))
-            {
-                theme.UploadTransmissionBarRounding = uploadRounding;
-                themeChanged = true;
-            }
-            var uploadHeight = theme.UploadTransmissionBarHeight;
-            if (ImGui.SliderFloat("Upload Bar Height", ref uploadHeight, 2.0f, 30.0f, "%.1f"))
-            {
-                theme.UploadTransmissionBarHeight = uploadHeight;
-                themeChanged = true;
-            }
-            var uploadBg = theme.UploadTransmissionBarBackground;
-            if (ImGui.ColorEdit4("Upload Bar Background", ref uploadBg))
-            {
-                theme.UploadTransmissionBarBackground = uploadBg;
-                themeChanged = true;
-            }
-            var uploadFg = theme.UploadTransmissionBarForeground;
-            if (ImGui.ColorEdit4("Upload Bar Foreground", ref uploadFg))
-            {
-                theme.UploadTransmissionBarForeground = uploadFg;
-                themeChanged = true;
-            }
-            var uploadBorder = theme.UploadTransmissionBarBorder;
-            if (ImGui.ColorEdit4("Upload Bar Border", ref uploadBorder))
-            {
-                theme.UploadTransmissionBarBorder = uploadBorder;
-                themeChanged = true;
-            }
-            var useTransGrad = theme.TransmissionUseGradient;
-            if (ImGui.Checkbox("Use Gradient Fill (Upload/Download)", ref useTransGrad))
-            {
-                theme.TransmissionUseGradient = useTransGrad;
-                themeChanged = true;
-            }
-            if (theme.TransmissionUseGradient)
-            {
-                var upGradStart = theme.UploadTransmissionGradientStart;
-                if (ImGui.ColorEdit4("Upload Gradient Start", ref upGradStart))
-                {
-                    theme.UploadTransmissionGradientStart = upGradStart;
-                    themeChanged = true;
-                }
-                var upGradEnd = theme.UploadTransmissionGradientEnd;
-                if (ImGui.ColorEdit4("Upload Gradient End", ref upGradEnd))
-                {
-                    theme.UploadTransmissionGradientEnd = upGradEnd;
-                    themeChanged = true;
-                }
-            }
-            
-            ImGui.Spacing();
-            ImGui.Text("Download Bar");
-            ImGui.Separator();
-            var downloadRounding = theme.DownloadTransmissionBarRounding;
-            if (ImGui.SliderFloat("Download Bar Rounding", ref downloadRounding, 0.0f, 15.0f, "%.1f"))
-            {
-                theme.DownloadTransmissionBarRounding = downloadRounding;
-                themeChanged = true;
-            }
-            var downloadHeight = theme.DownloadTransmissionBarHeight;
-            if (ImGui.SliderFloat("Download Bar Height", ref downloadHeight, 2.0f, 30.0f, "%.1f"))
-            {
-                theme.DownloadTransmissionBarHeight = downloadHeight;
-                themeChanged = true;
-            }
-            var downloadBg = theme.DownloadTransmissionBarBackground;
-            if (ImGui.ColorEdit4("Download Bar Background", ref downloadBg))
-            {
-                theme.DownloadTransmissionBarBackground = downloadBg;
-                themeChanged = true;
-            }
-            var downloadFg = theme.DownloadTransmissionBarForeground;
-            if (ImGui.ColorEdit4("Download Bar Foreground", ref downloadFg))
-            {
-                theme.DownloadTransmissionBarForeground = downloadFg;
-                themeChanged = true;
-            }
-            var downloadBorder = theme.DownloadTransmissionBarBorder;
-            if (ImGui.ColorEdit4("Download Bar Border", ref downloadBorder))
-            {
-                theme.DownloadTransmissionBarBorder = downloadBorder;
-                themeChanged = true;
-            }
-            if (theme.TransmissionUseGradient)
-            {
-                var downGradStart = theme.DownloadTransmissionGradientStart;
-                if (ImGui.ColorEdit4("Download Gradient Start", ref downGradStart))
-                {
-                    theme.DownloadTransmissionGradientStart = downGradStart;
-                    themeChanged = true;
-                }
-                var downGradEnd = theme.DownloadTransmissionGradientEnd;
-                if (ImGui.ColorEdit4("Download Gradient End", ref downGradEnd))
-                {
-                    theme.DownloadTransmissionGradientEnd = downGradEnd;
-                    themeChanged = true;
-                }
-            }
-        }
-
-            ImGui.Spacing();
-            var showTransmissionPreview = theme.ShowTransmissionPreview;
-            if (ImGui.Checkbox("Show Transmission Preview in Control Panel", ref showTransmissionPreview))
-            {
-                theme.ShowTransmissionPreview = showTransmissionPreview;
-                themeChanged = true;
-            }
-            _uiShared.DrawHelpText("When enabled, shows preview upload/download bars at their real positions.");
-
-            if (theme.ShowTransmissionPreview)
-            {
-                var uploadFill = theme.TransmissionPreviewUploadFill;
-                if (ImGui.SliderFloat("Preview Upload Fill", ref uploadFill, 0.0f, 100.0f, "%.1f%"))
-                {
-                    theme.TransmissionPreviewUploadFill = uploadFill;
-                    themeChanged = true;
-                }
-
-                var downloadFill = theme.TransmissionPreviewDownloadFill;
-                if (ImGui.SliderFloat("Preview Download Fill", ref downloadFill, 0.0f, 100.0f, "%.1f%"))
-                {
-                    theme.TransmissionPreviewDownloadFill = downloadFill;
-                    themeChanged = true;
-                }
-            }
-        }
-                
-        ImGui.Spacing();
-        if (ImGui.CollapsingHeader("Header", ImGuiTreeNodeFlags.None))
-        {
-            ImGui.Separator();
-
-            var compactShowImGuiHeader = theme.CompactShowImGuiHeader;
-            if (ImGui.Checkbox("Show Window Header", ref compactShowImGuiHeader))
-            {
-                theme.CompactShowImGuiHeader = compactShowImGuiHeader;
-                themeChanged = true;
-            }
-            UiSharedService.ColorTextWrapped("Show the standard window header. Disable for a cleaner panel.", ImGuiColors.DalamudGrey);
-
-            var headerBg = theme.CompactHeaderBg;
-            if (ImGui.ColorEdit4("Header Background", ref headerBg))
-            {
-                theme.CompactHeaderBg = headerBg;
-                themeChanged = true;
-            }
-
-            var titleText = theme.CompactPanelTitleText;
-            if (ImGui.ColorEdit4("Title Text", ref titleText))
-            {
-                theme.CompactPanelTitleText = titleText;
-                themeChanged = true;
-            }
-
-            var sectionHeaderText = theme.CompactHeaderText;
-            if (ImGui.ColorEdit4("Section Header Text", ref sectionHeaderText))
-            {
-                theme.CompactHeaderText = sectionHeaderText;
-                themeChanged = true;
-            }
-
-            var compactHeaderRounding = theme.CompactHeaderRounding;
-            if (ImGui.SliderFloat("Header Rounding", ref compactHeaderRounding, 0.0f, 30.0f, "%.1f"))
-            {
-                theme.CompactHeaderRounding = compactHeaderRounding;
-                themeChanged = true;
-            }
-
-            if (theme.CompactShowImGuiHeader)
-            {
-                var compactTitleBg = theme.CompactTitleBg;
-                if (ImGui.ColorEdit4("Window Header Background", ref compactTitleBg))
-                {
-                    theme.CompactTitleBg = compactTitleBg;
-                    themeChanged = true;
-                }
-                var compactTitleBgActive = theme.CompactTitleBgActive;
-                if (ImGui.ColorEdit4("Window Header Background (Active)", ref compactTitleBgActive))
-                {
-                    theme.CompactTitleBgActive = compactTitleBgActive;
-                    themeChanged = true;
-                }
-            }
-
-            ImGui.Spacing();
-            ImGui.Text("Header Preview");
-            ImGui.Separator();
-            var avail = ImGui.GetContentRegionAvail();
-            var cursor = ImGui.GetCursorScreenPos();
-            var drawList = ImGui.GetWindowDrawList();
-            var end = new Vector2(cursor.X + Math.Max(200.0f, avail.X), cursor.Y + 30.0f);
-            drawList.AddRectFilled(cursor, end, ImGui.ColorConvertFloat4ToU32(theme.CompactHeaderBg), theme.CompactHeaderRounding);
-            var title = "Sphene Control Panel";
-            var tSize = ImGui.CalcTextSize(title);
-            var tPos = new Vector2(cursor.X + (end.X - cursor.X - tSize.X) * 0.5f, cursor.Y + (end.Y - cursor.Y - tSize.Y) * 0.5f);
-            drawList.AddText(tPos, ImGui.ColorConvertFloat4ToU32(theme.CompactPanelTitleText), title);
-            ImGui.Dummy(new Vector2(end.X - cursor.X, end.Y - cursor.Y));
+            theme.CompactFrameBg = compactFrameBg;
+            themeChanged = true;
         }
 
         ImGui.Spacing();
-        if (ImGui.CollapsingHeader("Regulator ID", ImGuiTreeNodeFlags.None))
+        ImGui.Text("General Text");
+        ImGui.Separator();
+        var compactText = theme.CompactText;
+        if (ImGui.ColorEdit4("Text", ref compactText))
         {
-            ImGui.Separator();
-
-            var uidColor = theme.CompactUidColor;
-            if (ImGui.ColorEdit4("UID Text", ref uidColor))
-            {
-                theme.CompactUidColor = uidColor;
-                themeChanged = true;
-            }
-
-            ImGui.Spacing();
-            ImGui.Text("Regulator ID Preview");
-            ImGui.Separator();
-            Sphene.UI.Theme.SpheneCustomTheme.DrawStyledText("Regulator ID", theme.CompactHeaderText);
-            ImGui.SameLine();
-            ImGui.TextColored(theme.CompactUidColor, "Player#1234");
+            theme.CompactText = compactText;
+            themeChanged = true;
+        }
+        var compactTextSecondary = theme.CompactTextSecondary;
+        if (ImGui.ColorEdit4("Text (Secondary)", ref compactTextSecondary))
+        {
+            theme.CompactTextSecondary = compactTextSecondary;
+            themeChanged = true;
         }
 
         ImGui.Spacing();
-        if (ImGui.CollapsingHeader("Panel Backgrounds", ImGuiTreeNodeFlags.None))
+        ImGui.Text("Accents & Borders");
+        ImGui.Separator();
+        var compactBorder = theme.CompactBorder;
+        if (ImGui.ColorEdit4("Border", ref compactBorder))
         {
-            ImGui.Separator();
-            var compactWindowBg = theme.CompactWindowBg;
-            if (ImGui.ColorEdit4("Panel Background", ref compactWindowBg))
-            {
-                theme.CompactWindowBg = compactWindowBg;
-                themeChanged = true;
-            }
-            var compactFrameBg = theme.CompactFrameBg;
-            if (ImGui.ColorEdit4("Control Background", ref compactFrameBg))
-            {
-                theme.CompactFrameBg = compactFrameBg;
-                themeChanged = true;
-            }
+            theme.CompactBorder = compactBorder;
+            themeChanged = true;
+        }
+        var separator = theme.Separator;
+        if (ImGui.ColorEdit4("Separator", ref separator))
+        {
+            theme.Separator = separator;
+            themeChanged = true;
         }
 
-        ImGui.Spacing();
-        if (ImGui.CollapsingHeader("Connected Status", ImGuiTreeNodeFlags.None))
-        {
-            ImGui.Separator();
-
-            var statusConnected = theme.CompactServerStatusConnected;
-            if (ImGui.ColorEdit4("Connected", ref statusConnected))
-            {
-                theme.CompactServerStatusConnected = statusConnected;
-                themeChanged = true;
-            }
-
-            var statusWarning = theme.CompactServerStatusWarning;
-            if (ImGui.ColorEdit4("Warning", ref statusWarning))
-            {
-                theme.CompactServerStatusWarning = statusWarning;
-                themeChanged = true;
-            }
-
-            var statusError = theme.CompactServerStatusError;
-            if (ImGui.ColorEdit4("Error", ref statusError))
-            {
-                theme.CompactServerStatusError = statusError;
-                themeChanged = true;
-            }
-
-            ImGui.Spacing();
-            ImGui.Text("Status Preview");
-            ImGui.Separator();
-            _uiShared.DrawThemedStatusIndicator("Connected", true);
-            _uiShared.DrawThemedStatusIndicator("Warning", false, hasWarning: true);
-            _uiShared.DrawThemedStatusIndicator("Error", false, hasError: true);
-        }
-
-        ImGui.Spacing();
-        if (ImGui.CollapsingHeader("General Text", ImGuiTreeNodeFlags.None))
-        {
-            ImGui.Separator();
-            var compactText = theme.CompactText;
-            if (ImGui.ColorEdit4("Text", ref compactText))
-            {
-                theme.CompactText = compactText;
-                themeChanged = true;
-            }
-            var compactTextSecondary = theme.CompactTextSecondary;
-            if (ImGui.ColorEdit4("Text (Secondary)", ref compactTextSecondary))
-            {
-                theme.CompactTextSecondary = compactTextSecondary;
-                themeChanged = true;
-            }
-        }
-
-        ImGui.Spacing();
-        if (_preferButtonStylesTab) ImGui.SetNextItemOpen(true, ImGuiCond.Always);
-        if (ImGui.CollapsingHeader("Button Styles", ImGuiTreeNodeFlags.None))
-        {
-            ImGui.Separator();
-            var compactFrameRounding = theme.CompactFrameRounding;
-            if (ImGui.SliderFloat("Rounding for all buttons", ref compactFrameRounding, 0.0f, 30.0f, "%.1f"))
-            {
-                theme.CompactFrameRounding = compactFrameRounding;
-                themeChanged = true;
-            }
-            ButtonStyleManagerUI.Draw();
-            _preferButtonStylesTab = false;
         }
 
         ImGui.Spacing();
@@ -3419,13 +3120,13 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 theme.ButtonStyles[key] = ov;
             }
             var widthDelta = ov.WidthDelta;
-            if (ImGui.DragFloat("Width Delta", ref widthDelta, 0.1f, -100f, 200f))
+            if (ImGui.DragFloat("Width", ref widthDelta, 0.1f, -100f, 200f))
             {
                 ov.WidthDelta = widthDelta;
                 theme.NotifyThemeChanged();
             }
             var heightDelta = ov.HeightDelta;
-            if (ImGui.DragFloat("Height Delta", ref heightDelta, 0.1f, -50f, 100f))
+            if (ImGui.DragFloat("Height", ref heightDelta, 0.1f, -50f, 100f))
             {
                 ov.HeightDelta = heightDelta;
                 theme.NotifyThemeChanged();
@@ -3497,7 +3198,6 @@ public class SettingsUi : WindowMediatorSubscriberBase
             var previewHeight = 96.0f;
             var start = ImGui.GetCursorScreenPos();
             var dl = ImGui.GetWindowDrawList();
-            // Headings
             var tooltipHeadingPos = start;
             var contextHeadingPos = new Vector2(start.X + tooltipPreviewWidth + spacingX, start.Y);
             ImGui.SetCursorScreenPos(tooltipHeadingPos);
@@ -3505,7 +3205,6 @@ public class SettingsUi : WindowMediatorSubscriberBase
             var headingH = ImGui.GetTextLineHeight();
             ImGui.SetCursorScreenPos(contextHeadingPos);
             ImGui.TextUnformatted("Context Menu Preview");
-            // Boxes below headings
             var tooltipStart = new Vector2(tooltipHeadingPos.X, tooltipHeadingPos.Y + headingH + spacingY);
             var contextStart = new Vector2(contextHeadingPos.X, contextHeadingPos.Y + headingH + spacingY);
             var tooltipEnd = new Vector2(tooltipStart.X + tooltipPreviewWidth, tooltipStart.Y + previewHeight);
@@ -3515,7 +3214,6 @@ public class SettingsUi : WindowMediatorSubscriberBase
             dl.AddRectFilled(contextStart, contextEnd, ImGui.ColorConvertFloat4ToU32(theme.CompactPopupBg), theme.CompactContextMenuRounding);
             dl.AddRect(contextStart, contextEnd, ImGui.ColorConvertFloat4ToU32(theme.CompactBorder), theme.CompactContextMenuRounding, 0, contextBorder);
             var menuWidth = desiredMenuWidth;
-            // Tooltip inner child
             ImGui.SetCursorScreenPos(new Vector2(tooltipStart.X + padding.X + tooltipBorder, tooltipStart.Y + padding.Y + tooltipBorder));
             ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, padding);
             if (ImGui.BeginChild("##tooltip-preview", new Vector2(desiredMenuWidth + padding.X * 2.0f, previewHeight - tooltipBorder * 2.0f), false, ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse | ImGuiWindowFlags.NoBackground))
@@ -3524,7 +3222,6 @@ public class SettingsUi : WindowMediatorSubscriberBase
             }
             ImGui.EndChild();
             ImGui.PopStyleVar();
-            // Context inner child
             ImGui.SetCursorScreenPos(new Vector2(contextStart.X + padding.X + contextBorder, contextStart.Y + padding.Y + contextBorder));
             ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, padding);
             if (ImGui.BeginChild("##context-preview", new Vector2(desiredMenuWidth + padding.X * 2.0f, previewHeight - contextBorder * 2.0f), false, ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse | ImGuiWindowFlags.NoBackground))
@@ -3537,8 +3234,141 @@ public class SettingsUi : WindowMediatorSubscriberBase
             ImGui.EndChild();
             ImGui.PopStyleVar();
             ImGui.SetCursorScreenPos(new Vector2(start.X, MathF.Max(contextEnd.Y, tooltipEnd.Y)));
-
         }
+        ImGui.Spacing();
+
+        if (_preferButtonStylesTab) ImGui.SetNextItemOpen(true, ImGuiCond.Always);
+        if (ImGui.CollapsingHeader("Button Styles", ImGuiTreeNodeFlags.None))
+        {
+            ImGui.Separator();
+            var compactFrameRounding = theme.CompactFrameRounding;
+            if (ImGui.SliderFloat("Rounding for all buttons", ref compactFrameRounding, 0.0f, 30.0f, "%.1f"))
+            {
+                theme.CompactFrameRounding = compactFrameRounding;
+                themeChanged = true;
+            }
+            ButtonStyleManagerUI.Draw();
+            _preferButtonStylesTab = false;
+        }
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+        
+        if (ImGui.CollapsingHeader("Header", ImGuiTreeNodeFlags.None))
+        {
+            ImGui.Separator();
+
+            var compactShowImGuiHeader = theme.CompactShowImGuiHeader;
+            if (ImGui.Checkbox("Show Window Header", ref compactShowImGuiHeader))
+            {
+                theme.CompactShowImGuiHeader = compactShowImGuiHeader;
+                themeChanged = true;
+            }
+            UiSharedService.ColorTextWrapped("Show the standard window header. Disable for a cleaner panel.", ImGuiColors.DalamudGrey);
+
+            var headerBg = theme.CompactHeaderBg;
+            if (ImGui.ColorEdit4("Header Background", ref headerBg))
+            {
+                theme.CompactHeaderBg = headerBg;
+                themeChanged = true;
+            }
+
+            var titleText = theme.CompactPanelTitleText;
+            if (ImGui.ColorEdit4("Title Text", ref titleText))
+            {
+                theme.CompactPanelTitleText = titleText;
+                themeChanged = true;
+            }
+
+            var sectionHeaderText = theme.CompactHeaderText;
+            if (ImGui.ColorEdit4("Section Header Text", ref sectionHeaderText))
+            {
+                theme.CompactHeaderText = sectionHeaderText;
+                themeChanged = true;
+            }
+
+            var compactHeaderRounding = theme.CompactHeaderRounding;
+            if (ImGui.SliderFloat("Header Rounding", ref compactHeaderRounding, 0.0f, 30.0f, "%.1f"))
+            {
+                theme.CompactHeaderRounding = compactHeaderRounding;
+                themeChanged = true;
+            }
+
+            if (theme.CompactShowImGuiHeader)
+            {
+                var compactTitleBg = theme.CompactTitleBg;
+                if (ImGui.ColorEdit4("Window Header Background", ref compactTitleBg))
+                {
+                    theme.CompactTitleBg = compactTitleBg;
+                    themeChanged = true;
+                }
+                var compactTitleBgActive = theme.CompactTitleBgActive;
+                if (ImGui.ColorEdit4("Window Header Background (Active)", ref compactTitleBgActive))
+                {
+                    theme.CompactTitleBgActive = compactTitleBgActive;
+                    themeChanged = true;
+                }
+            }
+
+            ImGui.Spacing();
+        }
+
+        ImGui.Spacing();
+        if (ImGui.CollapsingHeader("Regulator ID", ImGuiTreeNodeFlags.None))
+        {
+            ImGui.Separator();
+
+            var uidColor = theme.CompactUidColor;
+            if (ImGui.ColorEdit4("UID Text", ref uidColor))
+            {
+                theme.CompactUidColor = uidColor;
+                themeChanged = true;
+            }
+
+            ImGui.Spacing();
+            var uidScale = theme.CompactUidFontScale;
+            if (ImGui.SliderFloat("UID Font Scale", ref uidScale, 0.5f, 2.0f, "%.2f"))
+            {
+                theme.CompactUidFontScale = uidScale;
+                themeChanged = true;
+            }
+            ImGui.Spacing();
+        }
+
+        
+
+        ImGui.Spacing();
+        if (ImGui.CollapsingHeader("Connected Status", ImGuiTreeNodeFlags.None))
+        {
+            ImGui.Separator();
+
+            var statusConnected = theme.CompactServerStatusConnected;
+            if (ImGui.ColorEdit4("Connected", ref statusConnected))
+            {
+                theme.CompactServerStatusConnected = statusConnected;
+                themeChanged = true;
+            }
+
+            var statusWarning = theme.CompactServerStatusWarning;
+            if (ImGui.ColorEdit4("Warning", ref statusWarning))
+            {
+                theme.CompactServerStatusWarning = statusWarning;
+                themeChanged = true;
+            }
+
+            var statusError = theme.CompactServerStatusError;
+            if (ImGui.ColorEdit4("Error", ref statusError))
+            {
+                theme.CompactServerStatusError = statusError;
+                themeChanged = true;
+            }
+
+            ImGui.Spacing();
+        }
+
+        
+
+        
         ImGui.Spacing();
 
         if (ImGui.CollapsingHeader("Connected Pairs", ImGuiTreeNodeFlags.None))
@@ -3588,44 +3418,275 @@ public class SettingsUi : WindowMediatorSubscriberBase
             }
 
             ImGui.Spacing();
-            ImGui.Text("Connected Pairs Preview");
-            ImGui.Separator();
-            Sphene.UI.Theme.SpheneCustomTheme.DrawStyledText("Connected Pairs", theme.CompactHeaderText);
-            ImGui.SameLine();
-            Sphene.UI.Theme.SpheneCustomTheme.DrawStyledText("(3 / 5) online", theme.CompactConnectedText);
         }
+        
+        ImGui.Spacing();
+        var ptbOpen = ImGui.CollapsingHeader("Player Transmission Bars", ImGuiTreeNodeFlags.None);
+        if (ptbOpen != theme.ShowTransmissionPreview)
+        {
+            theme.ShowTransmissionPreview = ptbOpen;
+            _suppressUnsavedForPreview = true;
+            theme.NotifyThemeChanged();
+            _suppressUnsavedForPreview = false;
+        }
+        if (ptbOpen)
+        {
+            ImGui.Separator();
+        
+            var prevSeparate = theme.SeparateTransmissionBarStyles;
+            var separateBars = theme.SeparateTransmissionBarStyles;
+            if (ImGui.Checkbox("Separate Upload/Download Settings", ref separateBars))
+            {
+                theme.SeparateTransmissionBarStyles = separateBars;
+                themeChanged = true;
+                if (!prevSeparate && theme.SeparateTransmissionBarStyles)
+                {
+                    theme.UploadTransmissionBarRounding = theme.TransmissionBarRounding;
+                    theme.UploadTransmissionBarHeight = theme.CompactTransmissionBarHeight;
+                    theme.UploadTransmissionBarBackground = theme.CompactTransmissionBarBackground;
+                    theme.UploadTransmissionBarForeground = theme.CompactTransmissionBarForeground;
+                    theme.UploadTransmissionBarBorder = theme.CompactTransmissionBarBorder;
+                    theme.DownloadTransmissionBarRounding = theme.TransmissionBarRounding;
+                    theme.DownloadTransmissionBarHeight = theme.CompactTransmissionBarHeight;
+                    theme.DownloadTransmissionBarBackground = theme.CompactTransmissionBarBackground;
+                    theme.DownloadTransmissionBarForeground = theme.CompactTransmissionBarForeground;
+                    theme.DownloadTransmissionBarBorder = theme.CompactTransmissionBarBorder;
+                    theme.UploadTransmissionGradientStart = theme.TransmissionGradientStart;
+                    theme.UploadTransmissionGradientEnd = theme.TransmissionGradientEnd;
+                    theme.DownloadTransmissionGradientStart = theme.TransmissionGradientStart;
+                    theme.DownloadTransmissionGradientEnd = theme.TransmissionGradientEnd;
+                    themeChanged = true;
+                }
+            }
+        
+            var autoTransmissionWidth = theme.AutoTransmissionBarWidth;
+            if (ImGui.Checkbox("Auto Transmission Width (fit content)", ref autoTransmissionWidth))
+            {
+                theme.AutoTransmissionBarWidth = autoTransmissionWidth;
+                themeChanged = true;
+            }
+        
+            if (!theme.SeparateTransmissionBarStyles)
+            {
+                var transmissionBarRounding = theme.TransmissionBarRounding;
+                if (ImGui.SliderFloat("Transmission Bar Rounding", ref transmissionBarRounding, 0.0f, 15.0f, "%.1f"))
+                {
+                    theme.TransmissionBarRounding = transmissionBarRounding;
+                    themeChanged = true;
+                }
+                
+                var compactTransmissionBarHeight = theme.CompactTransmissionBarHeight;
+                if (ImGui.SliderFloat("Transmission Bar Height", ref compactTransmissionBarHeight, 2.0f, 30.0f, "%.1f"))
+                {
+                    theme.CompactTransmissionBarHeight = compactTransmissionBarHeight;
+                    themeChanged = true;
+                }
+                
+                var compactTransmissionBarBackground = theme.CompactTransmissionBarBackground;
+                if (ImGui.ColorEdit4("Transmission Bar Background", ref compactTransmissionBarBackground))
+                {
+                    theme.CompactTransmissionBarBackground = compactTransmissionBarBackground;
+                    themeChanged = true;
+                }
+                
+                var compactTransmissionBarForeground = theme.CompactTransmissionBarForeground;
+                if (ImGui.ColorEdit4("Transmission Bar Foreground", ref compactTransmissionBarForeground))
+                {
+                    theme.CompactTransmissionBarForeground = compactTransmissionBarForeground;
+                    themeChanged = true;
+                }
+                
+                var compactTransmissionBarBorder = theme.CompactTransmissionBarBorder;
+                if (ImGui.ColorEdit4("Transmission Bar Border", ref compactTransmissionBarBorder))
+                {
+                    theme.CompactTransmissionBarBorder = compactTransmissionBarBorder;
+                    themeChanged = true;
+                }
+                var useTransGrad = theme.TransmissionUseGradient;
+                if (ImGui.Checkbox("Use Gradient Fill", ref useTransGrad))
+                {
+                    theme.TransmissionUseGradient = useTransGrad;
+                    themeChanged = true;
+                }
+                if (theme.TransmissionUseGradient)
+                {
+                    var tGradStart = theme.TransmissionGradientStart;
+                    if (ImGui.ColorEdit4("Gradient Start", ref tGradStart))
+                    {
+                        theme.TransmissionGradientStart = tGradStart;
+                        themeChanged = true;
+                    }
+                    var tGradEnd = theme.TransmissionGradientEnd;
+                    if (ImGui.ColorEdit4("Gradient End", ref tGradEnd))
+                    {
+                        theme.TransmissionGradientEnd = tGradEnd;
+                        themeChanged = true;
+                    }
+                }
+            }
+            else
+            {
+                ImGui.Text("Upload Bar");
+                ImGui.Separator();
+                var uploadRounding = theme.UploadTransmissionBarRounding;
+                if (ImGui.SliderFloat("Upload Bar Rounding", ref uploadRounding, 0.0f, 15.0f, "%.1f"))
+                {
+                    theme.UploadTransmissionBarRounding = uploadRounding;
+                    themeChanged = true;
+                }
+                var uploadHeight = theme.UploadTransmissionBarHeight;
+                if (ImGui.SliderFloat("Upload Bar Height", ref uploadHeight, 2.0f, 30.0f, "%.1f"))
+                {
+                    theme.UploadTransmissionBarHeight = uploadHeight;
+                    themeChanged = true;
+                }
+                var uploadBg = theme.UploadTransmissionBarBackground;
+                if (ImGui.ColorEdit4("Upload Bar Background", ref uploadBg))
+                {
+                    theme.UploadTransmissionBarBackground = uploadBg;
+                    themeChanged = true;
+                }
+                var uploadFg = theme.UploadTransmissionBarForeground;
+                if (ImGui.ColorEdit4("Upload Bar Foreground", ref uploadFg))
+                {
+                    theme.UploadTransmissionBarForeground = uploadFg;
+                    themeChanged = true;
+                }
+                var uploadBorder = theme.UploadTransmissionBarBorder;
+                if (ImGui.ColorEdit4("Upload Bar Border", ref uploadBorder))
+                {
+                    theme.UploadTransmissionBarBorder = uploadBorder;
+                    themeChanged = true;
+                }
+                var useTransGrad = theme.TransmissionUseGradient;
+                if (ImGui.Checkbox("Use Gradient Fill (Upload/Download)", ref useTransGrad))
+                {
+                    theme.TransmissionUseGradient = useTransGrad;
+                    themeChanged = true;
+                }
+                if (theme.TransmissionUseGradient)
+                {
+                    var upGradStart = theme.UploadTransmissionGradientStart;
+                    if (ImGui.ColorEdit4("Upload Gradient Start", ref upGradStart))
+                    {
+                        theme.UploadTransmissionGradientStart = upGradStart;
+                        themeChanged = true;
+                    }
+                    var upGradEnd = theme.UploadTransmissionGradientEnd;
+                    if (ImGui.ColorEdit4("Upload Gradient End", ref upGradEnd))
+                    {
+                        theme.UploadTransmissionGradientEnd = upGradEnd;
+                        themeChanged = true;
+                    }
+                }
+                
+                ImGui.Spacing();
+                ImGui.Text("Download Bar");
+                ImGui.Separator();
+                var downloadRounding = theme.DownloadTransmissionBarRounding;
+                if (ImGui.SliderFloat("Download Bar Rounding", ref downloadRounding, 0.0f, 15.0f, "%.1f"))
+                {
+                    theme.DownloadTransmissionBarRounding = downloadRounding;
+                    themeChanged = true;
+                }
+                var downloadHeight = theme.DownloadTransmissionBarHeight;
+                if (ImGui.SliderFloat("Download Bar Height", ref downloadHeight, 2.0f, 30.0f, "%.1f"))
+                {
+                    theme.DownloadTransmissionBarHeight = downloadHeight;
+                    themeChanged = true;
+                }
+                var downloadBg = theme.DownloadTransmissionBarBackground;
+                if (ImGui.ColorEdit4("Download Bar Background", ref downloadBg))
+                {
+                    theme.DownloadTransmissionBarBackground = downloadBg;
+                    themeChanged = true;
+                }
+                var downloadFg = theme.DownloadTransmissionBarForeground;
+                if (ImGui.ColorEdit4("Download Bar Foreground", ref downloadFg))
+                {
+                    theme.DownloadTransmissionBarForeground = downloadFg;
+                    themeChanged = true;
+                }
+                var downloadBorder = theme.DownloadTransmissionBarBorder;
+                if (ImGui.ColorEdit4("Download Bar Border", ref downloadBorder))
+                {
+                    theme.DownloadTransmissionBarBorder = downloadBorder;
+                    themeChanged = true;
+                }
+                if (theme.TransmissionUseGradient)
+                {
+                    var downGradStart = theme.DownloadTransmissionGradientStart;
+                    if (ImGui.ColorEdit4("Download Gradient Start", ref downGradStart))
+                    {
+                        theme.DownloadTransmissionGradientStart = downGradStart;
+                        themeChanged = true;
+                    }
+                    var downGradEnd = theme.DownloadTransmissionGradientEnd;
+                    if (ImGui.ColorEdit4("Download Gradient End", ref downGradEnd))
+                    {
+                        theme.DownloadTransmissionGradientEnd = downGradEnd;
+                        themeChanged = true;
+                    }
+                }
+            }
+        
+            ImGui.Spacing();
+            bool previewChanged = false;
+            var showTransmissionPreview = theme.ShowTransmissionPreview;
+            if (ImGui.Checkbox("Show Transmission Preview in Control Panel", ref showTransmissionPreview))
+            {
+                theme.ShowTransmissionPreview = showTransmissionPreview;
+                previewChanged = true;
+            }
+            _uiShared.DrawHelpText("When enabled, shows preview upload/download bars at their real positions.");
+            
+            if (theme.ShowTransmissionPreview)
+            {
+                var uploadFill = theme.TransmissionPreviewUploadFill;
+                if (ImGui.SliderFloat("Preview Upload Fill", ref uploadFill, 0.0f, 100.0f, "%.1f%"))
+                {
+                    theme.TransmissionPreviewUploadFill = uploadFill;
+                    previewChanged = true;
+                }
+                
+                var downloadFill = theme.TransmissionPreviewDownloadFill;
+                if (ImGui.SliderFloat("Preview Download Fill", ref downloadFill, 0.0f, 100.0f, "%.1f%"))
+                {
+                    theme.TransmissionPreviewDownloadFill = downloadFill;
+                    previewChanged = true;
+                }
+            }
+            if (previewChanged)
+            {
+                _suppressUnsavedForPreview = true;
+                theme.NotifyThemeChanged();
+                _suppressUnsavedForPreview = false;
+            }
+        }
+        ImGui.Spacing();
 
-        ImGui.Spacing();
-        if (ImGui.CollapsingHeader("Accents & Borders", ImGuiTreeNodeFlags.None))
+        var uhOpen = ImGui.CollapsingHeader("Update Hint", ImGuiTreeNodeFlags.None);
+        if (uhOpen != theme.ForceShowUpdateHint)
         {
-            ImGui.Separator();
-            var compactBorder = theme.CompactBorder;
-            if (ImGui.ColorEdit4("Border", ref compactBorder))
-            {
-                theme.CompactBorder = compactBorder;
-                themeChanged = true;
-            }
-            var separator = theme.Separator;
-            if (ImGui.ColorEdit4("Separator", ref separator))
-            {
-                theme.Separator = separator;
-                themeChanged = true;
-            }
+            theme.ForceShowUpdateHint = uhOpen;
+            _suppressUnsavedForPreview = true;
+            theme.NotifyThemeChanged();
+            _suppressUnsavedForPreview = false;
         }
-        ImGui.Spacing();
-        if (ImGui.CollapsingHeader("Update Hint", ImGuiTreeNodeFlags.None))
+        if (uhOpen)
         {
             ImGui.Separator();
-            UiSharedService.ColorTextWrapped("Preview of the update hint banner shown in the Compact UI.", ImGuiColors.DalamudGrey);
             ImGui.Spacing();
             var forceUpdateHint = theme.ForceShowUpdateHint;
             if (ImGui.Checkbox("Force Show Update Hint in Control Panel", ref forceUpdateHint))
             {
                 theme.ForceShowUpdateHint = forceUpdateHint;
-                themeChanged = true;
+                _suppressUnsavedForPreview = true;
+                theme.NotifyThemeChanged();
+                _suppressUnsavedForPreview = false;
             }
             var updateHintHeight = theme.CompactUpdateHintHeight;
-            if (ImGui.SliderFloat("Update Hint Height", ref updateHintHeight, 12.0f, 64.0f, "%.1f"))
+            if (ImGui.SliderFloat("Update Hint Height", ref updateHintHeight, 0.0f, 64.0f, "%.1f"))
             {
                 theme.CompactUpdateHintHeight = updateHintHeight;
                 themeChanged = true;
@@ -3642,24 +3703,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 theme.CompactUpdateHintColor = updateHintColor;
                 themeChanged = true;
             }
-            using (ImRaii.PushId("update-hint-preview"))
-            {
-                var startY = ImGui.GetCursorPosY();
-                var lineH = ImGui.GetTextLineHeight();
-                var h = theme.CompactUpdateHintHeight;
-                var pad = theme.CompactUpdateHintPaddingY;
-                var offset = Math.Max(0.0f, (h - lineH) * 0.5f);
-                ImGui.SetCursorPosY(startY + pad + offset);
-                using (var font = ImRaii.PushFont(UiBuilder.IconFont))
-                {
-                    ImGui.TextColored(Sphene.UI.Theme.SpheneCustomTheme.CurrentTheme.CompactUpdateHintColor, FontAwesomeIcon.InfoCircle.ToIconString());
-                }
-                ImGui.SameLine();
-                UiSharedService.ColorTextWrapped("Update available: 1.2.3", Sphene.UI.Theme.SpheneCustomTheme.CurrentTheme.CompactUpdateHintColor);
-                ImGui.SameLine();
-                _uiShared.IconTextButton(FontAwesomeIcon.Download, "Open Details");
-                ImGui.SetCursorPosY(startY + h + pad * 2);
-            }
+            ImGui.Spacing();
         }
         
         // Apply changes in real-time
@@ -4699,7 +4743,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
     private void DrawThemeSelector()
     {
-        ImGui.Text("Theme Presets");
+        ImGui.Text("Themes");
         ImGui.SameLine();
         _uiShared.DrawHelpText("Select from built-in themes or your custom saved themes. Changes apply immediately.");
         
@@ -4741,6 +4785,23 @@ public class SettingsUi : WindowMediatorSubscriberBase
         }
         
         ImGui.SameLine();
+        var canDelete = !string.IsNullOrEmpty(_selectedPresetTheme) && !builtInThemes.Contains(_selectedPresetTheme) && !_selectedPresetTheme.StartsWith("---");
+        using (ImRaii.Disabled(!canDelete || !UiSharedService.CtrlPressed()))
+        {
+            if (_uiShared.IconButton(FontAwesomeIcon.Trash))
+            {
+                if (ThemeManager.DeleteTheme(_selectedPresetTheme))
+                {
+                    _selectedPresetTheme = "Default Sphene";
+                    ApplySelectedPresetTheme("Default Sphene", builtInThemes);
+                }
+            }
+            UiSharedService.AttachToolTip(canDelete
+                ? ($"Hold CTRL to delete selected custom theme: '{_selectedPresetTheme}'")
+                : "Only custom themes can be deleted");
+        }
+        
+        ImGui.SameLine();
         if (ImGui.Button("Reset to Default Sphene Theme"))
         {
             _selectedPresetTheme = "Default Sphene";
@@ -4749,29 +4810,16 @@ public class SettingsUi : WindowMediatorSubscriberBase
         
         // Theme Management Actions
         ImGui.Spacing();
-        ImGui.Text("Theme Management");
-        
-        if (ImGui.Button("Reset to Defaults"))
+
+        if (ImGui.Button("New Theme"))
         {
-            if (_originalThemeState != null)
-            {
-                // Restore to the original theme state when the settings were opened
-                ThemePropertyCopier.Copy(_originalThemeState, SpheneCustomTheme.CurrentTheme);
-            }
-            else
-            {
-                // Fallback to system defaults if no original state is available
-                SpheneCustomTheme.CurrentTheme.ResetToDefaults();
-            }
-            SpheneCustomTheme.CurrentTheme.NotifyThemeChanged();
-            
-            // Reset change tracking
-            _hasUnsavedThemeChanges = false;
+            _saveThemeName = "";
+            ImGui.OpenPopup("SaveThemePopup");
         }
-        
+
         ImGui.SameLine();
-        
-        if (ImGui.Button("Save Theme"))
+        if (!_hasUnsavedThemeChanges) ImGui.BeginDisabled();
+        if (ImGui.Button("Save Theme Changes"))
         {
             if (!string.IsNullOrEmpty(_currentThemeName) && !builtInThemes.Contains(_currentThemeName))
             {
@@ -4789,21 +4837,24 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 ImGui.OpenPopup("SaveThemePopup");
             }
         }
-        
+        if (!_hasUnsavedThemeChanges) ImGui.EndDisabled();
+
         ImGui.SameLine();
-        
-        if (ImGui.Button("New Theme"))
+        if (!_hasUnsavedThemeChanges) ImGui.BeginDisabled();
+        if (ImGui.Button("Reset Theme Changes"))
         {
-            _saveThemeName = "";
-            ImGui.OpenPopup("SaveThemePopup");
+            if (_originalThemeState != null)
+            {
+                ThemePropertyCopier.Copy(_originalThemeState, SpheneCustomTheme.CurrentTheme);
+            }
+            else
+            {
+                SpheneCustomTheme.CurrentTheme.ResetToDefaults();
+            }
+            SpheneCustomTheme.CurrentTheme.NotifyThemeChanged();
+            _hasUnsavedThemeChanges = false;
         }
-        
-        ImGui.SameLine();
-        
-        if (ImGui.Button("Load Theme"))
-        {
-            ImGui.OpenPopup("LoadThemePopup");
-        }
+        if (!_hasUnsavedThemeChanges) ImGui.EndDisabled();
         
         // Save Theme Popup
         if (ImGui.BeginPopup("SaveThemePopup"))
@@ -4811,16 +4862,6 @@ public class SettingsUi : WindowMediatorSubscriberBase
             using (SpheneCustomTheme.ApplyContextMenuTheme())
             {
                 DrawSaveThemePopup();
-            }
-            ImGui.EndPopup();
-        }
-        
-        // Load Theme Popup
-        if (ImGui.BeginPopup("LoadThemePopup"))
-        {
-            using (SpheneCustomTheme.ApplyContextMenuTheme())
-            {
-                DrawLoadThemePopup();
             }
             ImGui.EndPopup();
         }
@@ -4852,6 +4893,19 @@ public class SettingsUi : WindowMediatorSubscriberBase
         // Reset change tracking when applying a preset theme
         _hasUnsavedThemeChanges = false;
         _currentThemeName = themeName;
+        _originalThemeState = currentTheme.Clone();
+        var builtIn = builtInThemes.Contains(themeName);
+        if (!builtIn)
+        {
+            _ = Task.Run(async () =>
+            {
+                var success = await ThemeManager.SaveTheme(currentTheme, themeName);
+                if (success)
+                {
+                    _logger.LogDebug($"Auto-saved theme: {themeName}");
+                }
+            });
+        }
         
         currentTheme.NotifyThemeChanged();
     }
@@ -4883,27 +4937,43 @@ public class SettingsUi : WindowMediatorSubscriberBase
     {
         if (!_showThemeSavePrompt)
             return;
-            
-        ImGui.OpenPopup("Unsaved Theme Changes");
-        
-        if (ImGui.BeginPopupModal("Unsaved Theme Changes", ref _showThemeSavePrompt, ImGuiWindowFlags.AlwaysAutoResize))
+        var center = (ImGui.GetMainViewport().Size / 2) + ImGui.GetMainViewport().Pos;
+        ImGui.SetNextWindowPos(center, ImGuiCond.Appearing, new System.Numerics.Vector2(0.5f, 0.5f));
+        ImGui.SetNextWindowSizeConstraints(new System.Numerics.Vector2(480, 240), new System.Numerics.Vector2(900, float.MaxValue));
+        if (ImGui.Begin("Unsaved Theme Changes", ref _showThemeSavePrompt, ImGuiWindowFlags.AlwaysAutoResize | ImGuiWindowFlags.NoCollapse))
         {
             using (SpheneCustomTheme.ApplyContextMenuTheme())
             {
-                ImGui.Text("You have made changes to the theme settings.");
-                ImGui.Text("Would you like to save these changes as a new custom theme?");
-                ImGui.Spacing();
-                
+                _uiShared.IconText(FontAwesomeIcon.ExclamationTriangle, ImGuiColors.DalamudYellow);
+                ImGui.SameLine();
+                _uiShared.BigText("Unsaved Theme Changes");
+                ImGuiHelpers.ScaledDummy(8f);
+                UiSharedService.ColorTextWrapped("You have modified theme settings that are not yet saved.", ImGuiColors.DalamudYellow);
+                ImGuiHelpers.ScaledDummy(4f);
+                UiSharedService.ColorTextWrapped("Save them as a new theme, keep them temporarily, or discard.", ImGuiColors.DalamudGrey);
+                ImGuiHelpers.ScaledDummy(10f);
                 ImGui.Text("Theme Name:");
                 ImGui.InputText("##NewThemeName", ref _saveThemeName, 100);
-                
-                ImGui.Spacing();
-                
-                if (ImGui.Button("Save as New Theme"))
+                var bottomPadding = 16f * ImGuiHelpers.GlobalScale;
+                var spacingX = ImGui.GetStyle().ItemSpacing.X;
+                var btn1 = "Save as New Theme";
+                var btn2 = "Discard Changes";
+                var btn3 = "Keep Changes";
+                var w1 = ImGui.CalcTextSize(btn1).X + ImGui.GetStyle().FramePadding.X * 2f;
+                var w2 = ImGui.CalcTextSize(btn2).X + ImGui.GetStyle().FramePadding.X * 2f;
+                var w3 = ImGui.CalcTextSize(btn3).X + ImGui.GetStyle().FramePadding.X * 2f;
+                var totalButtonsWidth = w1 + w2 + w3 + spacingX * 2f;
+                var contentWidth = ImGui.GetWindowContentRegionMax().X - ImGui.GetWindowContentRegionMin().X;
+                var startX = System.Math.Max(0f, (contentWidth - totalButtonsWidth) / 2f);
+                var availY = ImGui.GetContentRegionAvail().Y;
+                var buttonHeight = ImGui.GetFrameHeight();
+                var offsetY = System.Math.Max(0f, availY - buttonHeight - bottomPadding);
+                ImGui.Dummy(new System.Numerics.Vector2(1, offsetY));
+                ImGui.SetCursorPosX(ImGui.GetCursorPosX() + startX);
+                if (ImGui.Button(btn1))
                 {
                     if (!string.IsNullOrWhiteSpace(_saveThemeName))
                     {
-                        // Capture the theme name before clearing it
                         var themeNameToSave = _saveThemeName;
                         _ = Task.Run(async () =>
                         {
@@ -4911,23 +4981,18 @@ public class SettingsUi : WindowMediatorSubscriberBase
                             if (success)
                             {
                                 _logger.LogDebug($"Created new custom theme: {themeNameToSave}");
-                                // Update current theme name for future auto-saves
                                 _currentThemeName = themeNameToSave;
                                 ThemeManager.SetSelectedTheme(themeNameToSave);
-                                
-                                // Reset change tracking
                                 _hasUnsavedThemeChanges = false;
                             }
                         });
                         _saveThemeName = "";
                         _showThemeSavePrompt = false;
-                        ImGui.CloseCurrentPopup();
+                        IsOpen = false;
                     }
                 }
-                
-                ImGui.SameLine();
-                
-                if (ImGui.Button("Discard Changes"))
+                ImGui.SameLine(0, spacingX);
+                if (ImGui.Button(btn2))
                 {
                     var builtInThemes = ThemePresets.BuiltInThemes.Keys.ToList();
                     var themeToReload = string.IsNullOrEmpty(_currentThemeName) ? ThemeManager.GetSelectedTheme() : _currentThemeName;
@@ -4937,19 +5002,17 @@ public class SettingsUi : WindowMediatorSubscriberBase
                     }
                     _hasUnsavedThemeChanges = false;
                     _showThemeSavePrompt = false;
-                    ImGui.CloseCurrentPopup();
+                    IsOpen = false;
                 }
-                
-                ImGui.SameLine();
-                
-                if (ImGui.Button("Keep Changes"))
+                ImGui.SameLine(0, spacingX);
+                if (ImGui.Button(btn3))
                 {
                     _hasUnsavedThemeChanges = false;
                     _showThemeSavePrompt = false;
-                    ImGui.CloseCurrentPopup();
+                    IsOpen = false;
                 }
             }
-            ImGui.EndPopup();
+            ImGui.End();
         }
     }
 
@@ -4957,17 +5020,36 @@ public class SettingsUi : WindowMediatorSubscriberBase
     {
         if (!_showUnsavedCustomThemePrompt)
             return;
-            
-        ImGui.OpenPopup("Unsaved Changes on Custom Theme");
-        
-        if (ImGui.BeginPopupModal("Unsaved Changes on Custom Theme", ref _showUnsavedCustomThemePrompt, ImGuiWindowFlags.AlwaysAutoResize))
+        var center2 = (ImGui.GetMainViewport().Size / 2) + ImGui.GetMainViewport().Pos;
+        ImGui.SetNextWindowPos(center2, ImGuiCond.Appearing, new System.Numerics.Vector2(0.5f, 0.5f));
+        ImGui.SetNextWindowSizeConstraints(new System.Numerics.Vector2(480, 240), new System.Numerics.Vector2(900, float.MaxValue));
+        if (ImGui.Begin("Unsaved Changes on Custom Theme", ref _showUnsavedCustomThemePrompt, ImGuiWindowFlags.AlwaysAutoResize | ImGuiWindowFlags.NoCollapse))
         {
             using (SpheneCustomTheme.ApplyContextMenuTheme())
             {
-                ImGui.Text("You have unsaved changes to the current custom theme.");
-                ImGui.Spacing();
-                
-                if (ImGui.Button("Save"))
+                _uiShared.IconText(FontAwesomeIcon.ExclamationTriangle, ImGuiColors.DalamudYellow);
+                ImGui.SameLine();
+                _uiShared.BigText("Unsaved Custom Theme Changes");
+                ImGuiHelpers.ScaledDummy(8f);
+                UiSharedService.ColorTextWrapped("These changes are not saved to your current custom theme.", ImGuiColors.DalamudYellow);
+                ImGuiHelpers.ScaledDummy(10f);
+                var bottomPadding2 = 16f * ImGuiHelpers.GlobalScale;
+                var spacingX2 = ImGui.GetStyle().ItemSpacing.X;
+                var lbl1 = "Save";
+                var lbl2 = "Discard Changes";
+                var lbl3 = "Keep Changes";
+                var sw1 = ImGui.CalcTextSize(lbl1).X + ImGui.GetStyle().FramePadding.X * 2f;
+                var sw2 = ImGui.CalcTextSize(lbl2).X + ImGui.GetStyle().FramePadding.X * 2f;
+                var sw3 = ImGui.CalcTextSize(lbl3).X + ImGui.GetStyle().FramePadding.X * 2f;
+                var tWidth = sw1 + sw2 + sw3 + spacingX2 * 2f;
+                var cWidth = ImGui.GetWindowContentRegionMax().X - ImGui.GetWindowContentRegionMin().X;
+                var sX = System.Math.Max(0f, (cWidth - tWidth) / 2f);
+                var aY = ImGui.GetContentRegionAvail().Y;
+                var bH = ImGui.GetFrameHeight();
+                var offY = System.Math.Max(0f, aY - bH - bottomPadding2);
+                ImGui.Dummy(new System.Numerics.Vector2(1, offY));
+                ImGui.SetCursorPosX(ImGui.GetCursorPosX() + sX);
+                if (ImGui.Button(lbl1))
                 {
                     if (!string.IsNullOrEmpty(_currentThemeName))
                     {
@@ -4982,12 +5064,10 @@ public class SettingsUi : WindowMediatorSubscriberBase
                         });
                     }
                     _showUnsavedCustomThemePrompt = false;
-                    ImGui.CloseCurrentPopup();
+                    IsOpen = false;
                 }
-                
-                ImGui.SameLine();
-                
-                if (ImGui.Button("Discard Changes"))
+                ImGui.SameLine(0, spacingX2);
+                if (ImGui.Button(lbl2))
                 {
                     var builtInThemes = ThemePresets.BuiltInThemes.Keys.ToList();
                     var themeToReload = string.IsNullOrEmpty(_currentThemeName) ? ThemeManager.GetSelectedTheme() : _currentThemeName;
@@ -4997,19 +5077,17 @@ public class SettingsUi : WindowMediatorSubscriberBase
                     }
                     _hasUnsavedThemeChanges = false;
                     _showUnsavedCustomThemePrompt = false;
-                    ImGui.CloseCurrentPopup();
+                    IsOpen = false;
                 }
-                
-                ImGui.SameLine();
-                
-                if (ImGui.Button("Keep Changes"))
+                ImGui.SameLine(0, spacingX2);
+                if (ImGui.Button(lbl3))
                 {
                     _hasUnsavedThemeChanges = false;
                     _showUnsavedCustomThemePrompt = false;
-                    ImGui.CloseCurrentPopup();
+                    IsOpen = false;
                 }
             }
-            ImGui.EndPopup();
+            ImGui.End();
         }
     }
 }

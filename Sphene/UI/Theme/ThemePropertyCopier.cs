@@ -171,7 +171,13 @@ public static class ThemePropertyCopier
         target.CompactHover = cloned.CompactHover;
         target.CompactActive = cloned.CompactActive;
         target.CompactHeaderText = cloned.CompactHeaderText;
+        target.CompactUidFontScale = cloned.CompactUidFontScale;
         target.CompactUidColor = cloned.CompactUidColor;
+
+        // Update Hint controls (runtime toggle ForceShowUpdateHint is not copied)
+        target.CompactUpdateHintColor = cloned.CompactUpdateHintColor;
+        target.CompactUpdateHintHeight = cloned.CompactUpdateHintHeight;
+        target.CompactUpdateHintPaddingY = cloned.CompactUpdateHintPaddingY;
         target.CompactServerStatusConnected = cloned.CompactServerStatusConnected;
         target.CompactServerStatusWarning = cloned.CompactServerStatusWarning;
         target.CompactServerStatusError = cloned.CompactServerStatusError;
@@ -190,21 +196,42 @@ public static class ThemePropertyCopier
         target.CompactPairsText = cloned.CompactPairsText;
         target.CompactShowImGuiHeader = cloned.CompactShowImGuiHeader;
 
-        // Bars
+        // Progress bars
         target.ProgressBarRounding = cloned.ProgressBarRounding;
-        target.ProgressBarPreviewFill = cloned.ProgressBarPreviewFill;
-        target.ShowProgressBarPreview = cloned.ShowProgressBarPreview;
-        target.TransmissionBarRounding = cloned.TransmissionBarRounding;
         target.CompactProgressBarHeight = cloned.CompactProgressBarHeight;
         target.CompactProgressBarWidth = cloned.CompactProgressBarWidth;
         target.CompactProgressBarBackground = cloned.CompactProgressBarBackground;
         target.CompactProgressBarForeground = cloned.CompactProgressBarForeground;
         target.CompactProgressBarBorder = cloned.CompactProgressBarBorder;
-        target.CompactTransmissionBarHeight = cloned.CompactTransmissionBarHeight;
-        target.CompactTransmissionBarWidth = cloned.CompactTransmissionBarWidth;
-        target.CompactTransmissionBarBackground = cloned.CompactTransmissionBarBackground;
-        target.CompactTransmissionBarForeground = cloned.CompactTransmissionBarForeground;
-        target.CompactTransmissionBarBorder = cloned.CompactTransmissionBarBorder;
+        target.ProgressBarUseGradient = cloned.ProgressBarUseGradient;
+        target.ProgressBarGradientStart = cloned.ProgressBarGradientStart;
+        target.ProgressBarGradientEnd = cloned.ProgressBarGradientEnd;
+
+        // Bars
+        target.AutoTransmissionBarWidth = cloned.AutoTransmissionBarWidth;
+        target.TransmissionUseGradient = cloned.TransmissionUseGradient;
+        target.TransmissionGradientStart = cloned.TransmissionGradientStart;
+        target.TransmissionGradientEnd = cloned.TransmissionGradientEnd;
+
+        target.SeparateTransmissionBarStyles = cloned.SeparateTransmissionBarStyles;
+        target.UploadTransmissionBarRounding = cloned.UploadTransmissionBarRounding;
+        target.UploadTransmissionBarHeight = cloned.UploadTransmissionBarHeight;
+        target.UploadTransmissionBarBackground = cloned.UploadTransmissionBarBackground;
+        target.UploadTransmissionBarForeground = cloned.UploadTransmissionBarForeground;
+        target.UploadTransmissionBarBorder = cloned.UploadTransmissionBarBorder;
+        target.UploadTransmissionGradientStart = cloned.UploadTransmissionGradientStart;
+        target.UploadTransmissionGradientEnd = cloned.UploadTransmissionGradientEnd;
+        target.DownloadTransmissionBarRounding = cloned.DownloadTransmissionBarRounding;
+        target.DownloadTransmissionBarHeight = cloned.DownloadTransmissionBarHeight;
+        target.DownloadTransmissionBarBackground = cloned.DownloadTransmissionBarBackground;
+        target.DownloadTransmissionBarForeground = cloned.DownloadTransmissionBarForeground;
+        target.DownloadTransmissionBarBorder = cloned.DownloadTransmissionBarBorder;
+        target.DownloadTransmissionGradientStart = cloned.DownloadTransmissionGradientStart;
+        target.DownloadTransmissionGradientEnd = cloned.DownloadTransmissionGradientEnd;
+
+        target.ShowTransmissionPreview = cloned.ShowTransmissionPreview;
+        target.TransmissionPreviewUploadFill = cloned.TransmissionPreviewUploadFill;
+        target.TransmissionPreviewDownloadFill = cloned.TransmissionPreviewDownloadFill;
 
         // Button style overrides
         target.ButtonStyles = cloned.ButtonStyles.ToDictionary(

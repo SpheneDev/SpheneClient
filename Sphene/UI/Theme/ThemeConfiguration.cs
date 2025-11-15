@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Text.Json.Serialization;
 
 namespace Sphene.UI.Theme;
 
@@ -58,10 +59,13 @@ public class ThemeConfiguration
     public float CompactContextMenuBorderSize { get; set; } = 1.0f;
     
     // Progress Bar Preview Settings
+    [JsonIgnore]
     public bool ShowProgressBarPreview { get; set; } = false;
+    [JsonIgnore]
     public float ProgressBarPreviewFill { get; set; } = 75.0f; // 0-100%
     
     // Update Hint Preview/Control
+    [JsonIgnore]
     public bool ForceShowUpdateHint { get; set; } = false;
     public Vector4 CompactUpdateHintColor { get; set; } = new(1.0f, 0.8f, 0.2f, 1.0f);
     public float CompactUpdateHintHeight { get; set; } = 24.0f;
@@ -112,8 +116,11 @@ public class ThemeConfiguration
     public Vector4 DownloadTransmissionGradientEnd { get; set; } = new(0.3f, 0.7f, 1.0f, 1.0f);
     
     // Transmission Preview Controls (CompactUI preview location)
+    [JsonIgnore]
     public bool ShowTransmissionPreview { get; set; } = false;
+    [JsonIgnore]
     public float TransmissionPreviewUploadFill { get; set; } = 60.0f; // 0-100%
+    [JsonIgnore]
     public float TransmissionPreviewDownloadFill { get; set; } = 40.0f; // 0-100%
     
     // Border Settings
@@ -238,6 +245,7 @@ public class ThemeConfiguration
     public Vector4 CompactHover { get; set; } = new(0.3f, 0.5f, 0.9f, 0.8f);
     public Vector4 CompactActive { get; set; } = new(0.4f, 0.6f, 1.0f, 0.9f);
     public Vector4 CompactHeaderText { get; set; } = new(0.8f, 0.6f, 0.2f, 1.0f); // Golden header text for CompactUI
+    public float CompactUidFontScale { get; set; } = 1.0f;
     
     // CompactUI Specific Status Colors
     public Vector4 CompactUidColor { get; set; } = new(0.2f, 0.8f, 0.4f, 1.0f); // Green for UID display
@@ -494,6 +502,7 @@ public class ThemeConfiguration
             CompactHover = CompactHover,
             CompactActive = CompactActive,
             CompactHeaderText = CompactHeaderText,
+            CompactUidFontScale = CompactUidFontScale,
             CompactUidColor = CompactUidColor,
             CompactServerStatusConnected = CompactServerStatusConnected,
             CompactServerStatusWarning = CompactServerStatusWarning,

@@ -115,7 +115,7 @@ public class SphenePlugin : MediatorSubscriberBase, IHostedService
             {
                 // Load built-in theme
                 var presetTheme = ThemePresets.BuiltInThemes.GetValueOrDefault(selectedThemeName, ThemePresets.BuiltInThemes["Default Sphene"]);
-                CopyThemeProperties(presetTheme, SpheneCustomTheme.CurrentTheme);
+                ThemePropertyCopier.Copy(presetTheme, SpheneCustomTheme.CurrentTheme);
                 Logger.LogDebug($"Loaded built-in theme: {selectedThemeName}");
             }
             else
@@ -124,14 +124,14 @@ public class SphenePlugin : MediatorSubscriberBase, IHostedService
                 var customTheme = ThemeManager.LoadTheme(selectedThemeName);
                 if (customTheme != null)
                 {
-                    CopyThemeProperties(customTheme, SpheneCustomTheme.CurrentTheme);
+                    ThemePropertyCopier.Copy(customTheme, SpheneCustomTheme.CurrentTheme);
                     Logger.LogDebug($"Loaded custom theme: {selectedThemeName}");
                 }
                 else
                 {
                     Logger.LogWarning($"Failed to load theme '{selectedThemeName}', falling back to Default Sphene");
                     var defaultTheme = ThemePresets.BuiltInThemes["Default Sphene"];
-                    CopyThemeProperties(defaultTheme, SpheneCustomTheme.CurrentTheme);
+                    ThemePropertyCopier.Copy(defaultTheme, SpheneCustomTheme.CurrentTheme);
                 }
             }
             
@@ -157,223 +157,7 @@ public class SphenePlugin : MediatorSubscriberBase, IHostedService
     
     private static void CopyThemeProperties(ThemeConfiguration source, ThemeConfiguration target)
     {
-        // Use the built-in Clone method to ensure all properties are copied
-        var cloned = source.Clone();
-        
-        // Copy all properties from cloned to target
-        target.WindowRounding = cloned.WindowRounding;
-        target.ChildRounding = cloned.ChildRounding;
-        target.PopupRounding = cloned.PopupRounding;
-        target.FrameRounding = cloned.FrameRounding;
-        target.ScrollbarRounding = cloned.ScrollbarRounding;
-        target.GrabRounding = cloned.GrabRounding;
-        target.TabRounding = cloned.TabRounding;
-        target.CompactWindowRounding = cloned.CompactWindowRounding;
-        target.CompactChildRounding = cloned.CompactChildRounding;
-        target.CompactPopupRounding = cloned.CompactPopupRounding;
-        target.CompactFrameRounding = cloned.CompactFrameRounding;
-        target.CompactScrollbarRounding = cloned.CompactScrollbarRounding;
-        target.CompactGrabRounding = cloned.CompactGrabRounding;
-        target.CompactTabRounding = cloned.CompactTabRounding;
-        target.CompactHeaderRounding = cloned.CompactHeaderRounding;
-        
-        // Spacing Settings
-        target.WindowPadding = cloned.WindowPadding;
-        target.FramePadding = cloned.FramePadding;
-        target.ItemSpacing = cloned.ItemSpacing;
-        target.ItemInnerSpacing = cloned.ItemInnerSpacing;
-        target.IndentSpacing = cloned.IndentSpacing;
-        target.CompactWindowPadding = cloned.CompactWindowPadding;
-        target.CompactFramePadding = cloned.CompactFramePadding;
-        target.CompactItemSpacing = cloned.CompactItemSpacing;
-        target.CompactItemInnerSpacing = cloned.CompactItemInnerSpacing;
-        target.CompactCellPadding = cloned.CompactCellPadding;
-        target.CompactChildPadding = cloned.CompactChildPadding;
-        target.CompactIndentSpacing = cloned.CompactIndentSpacing;
-        target.CompactScrollbarSize = cloned.CompactScrollbarSize;
-        target.CompactGrabMinSize = cloned.CompactGrabMinSize;
-        target.CompactButtonTextAlign = cloned.CompactButtonTextAlign;
-        target.CompactSelectableTextAlign = cloned.CompactSelectableTextAlign;
-        
-        // Border Settings
-        target.WindowBorderSize = cloned.WindowBorderSize;
-        target.ChildBorderSize = cloned.ChildBorderSize;
-        target.PopupBorderSize = cloned.PopupBorderSize;
-        target.FrameBorderSize = cloned.FrameBorderSize;
-        target.CompactWindowBorderSize = cloned.CompactWindowBorderSize;
-        target.CompactChildBorderSize = cloned.CompactChildBorderSize;
-        target.CompactPopupBorderSize = cloned.CompactPopupBorderSize;
-        target.CompactFrameBorderSize = cloned.CompactFrameBorderSize;
-        target.CompactTooltipRounding = cloned.CompactTooltipRounding;
-        target.CompactTooltipBorderSize = cloned.CompactTooltipBorderSize;
-        target.CompactContextMenuRounding = cloned.CompactContextMenuRounding;
-        target.CompactContextMenuBorderSize = cloned.CompactContextMenuBorderSize;
-        target.ScrollbarSize = cloned.ScrollbarSize;
-        target.GrabMinSize = cloned.GrabMinSize;
-        
-        // Color Properties
-        target.PrimaryDark = cloned.PrimaryDark;
-        target.SecondaryDark = cloned.SecondaryDark;
-        target.AccentBlue = cloned.AccentBlue;
-        target.AccentCyan = cloned.AccentCyan;
-        target.TextPrimary = cloned.TextPrimary;
-        target.TextSecondary = cloned.TextSecondary;
-        target.Border = cloned.Border;
-        target.Hover = cloned.Hover;
-        target.Active = cloned.Active;
-        target.HeaderBg = cloned.HeaderBg;
-        
-        // Window Colors
-        target.WindowBg = cloned.WindowBg;
-        target.ChildBg = cloned.ChildBg;
-        target.PopupBg = cloned.PopupBg;
-        target.BorderShadow = cloned.BorderShadow;
-        
-        // Frame Colors
-        target.FrameBg = cloned.FrameBg;
-        target.FrameBgHovered = cloned.FrameBgHovered;
-        target.FrameBgActive = cloned.FrameBgActive;
-        
-        // Title Bar Colors
-        target.TitleBg = cloned.TitleBg;
-        target.TitleBgActive = cloned.TitleBgActive;
-        target.TitleBgCollapsed = cloned.TitleBgCollapsed;
-        
-        // Menu Colors
-        target.MenuBarBg = cloned.MenuBarBg;
-        
-        // Scrollbar Colors
-        target.ScrollbarBg = cloned.ScrollbarBg;
-        target.ScrollbarGrab = cloned.ScrollbarGrab;
-        target.ScrollbarGrabHovered = cloned.ScrollbarGrabHovered;
-        target.ScrollbarGrabActive = cloned.ScrollbarGrabActive;
-        
-        // Check Mark Colors
-        target.CheckMark = cloned.CheckMark;
-        
-        // Slider Colors
-        target.SliderGrab = cloned.SliderGrab;
-        target.SliderGrabActive = cloned.SliderGrabActive;
-        
-        // Button Colors
-        target.Button = cloned.Button;
-        target.ButtonHovered = cloned.ButtonHovered;
-        target.ButtonActive = cloned.ButtonActive;
-        
-        // Header Colors
-        target.Header = cloned.Header;
-        target.HeaderHovered = cloned.HeaderHovered;
-        target.HeaderActive = cloned.HeaderActive;
-        
-        // Separator Colors
-        target.Separator = cloned.Separator;
-        target.SeparatorHovered = cloned.SeparatorHovered;
-        target.SeparatorActive = cloned.SeparatorActive;
-        
-        // Resize Grip Colors
-        target.ResizeGrip = cloned.ResizeGrip;
-        target.ResizeGripHovered = cloned.ResizeGripHovered;
-        target.ResizeGripActive = cloned.ResizeGripActive;
-        
-        // Tab Colors
-        target.Tab = cloned.Tab;
-        target.TabHovered = cloned.TabHovered;
-        target.TabActive = cloned.TabActive;
-        target.TabUnfocused = cloned.TabUnfocused;
-        target.TabUnfocusedActive = cloned.TabUnfocusedActive;
-        
-        // Table Colors
-        target.TableHeaderBg = cloned.TableHeaderBg;
-        target.TableBorderStrong = cloned.TableBorderStrong;
-        target.TableBorderLight = cloned.TableBorderLight;
-        target.TableRowBg = cloned.TableRowBg;
-        target.TableRowBgAlt = cloned.TableRowBgAlt;
-        
-        // Text Colors
-        target.TextDisabled = cloned.TextDisabled;
-        target.TextSelectedBg = cloned.TextSelectedBg;
-        
-        // Drag Drop Colors
-        target.DragDropTarget = cloned.DragDropTarget;
-        
-        // Navigation Colors
-        target.NavHighlight = cloned.NavHighlight;
-        target.NavWindowingHighlight = cloned.NavWindowingHighlight;
-        target.NavWindowingDimBg = cloned.NavWindowingDimBg;
-        
-        // Modal Colors
-        target.ModalWindowDimBg = cloned.ModalWindowDimBg;
-        
-        // CompactUI Specific Colors
-        target.CompactWindowBg = cloned.CompactWindowBg;
-        target.CompactChildBg = cloned.CompactChildBg;
-        target.CompactPopupBg = cloned.CompactPopupBg;
-        target.CompactTitleBg = cloned.CompactTitleBg;
-        target.CompactTitleBgActive = cloned.CompactTitleBgActive;
-        target.CompactFrameBg = cloned.CompactFrameBg;
-        target.CompactButton = cloned.CompactButton;
-        target.CompactButtonHovered = cloned.CompactButtonHovered;
-        target.CompactButtonActive = cloned.CompactButtonActive;
-        target.CompactHeaderBg = cloned.CompactHeaderBg;
-        target.CompactBorder = cloned.CompactBorder;
-        target.CompactText = cloned.CompactText;
-        target.CompactTextSecondary = cloned.CompactTextSecondary;
-        target.CompactAccent = cloned.CompactAccent;
-        target.CompactHover = cloned.CompactHover;
-        target.CompactActive = cloned.CompactActive;
-        target.CompactHeaderText = cloned.CompactHeaderText;
-        target.CompactUidColor = cloned.CompactUidColor;
-        target.CompactServerStatusConnected = cloned.CompactServerStatusConnected;
-        target.CompactServerStatusWarning = cloned.CompactServerStatusWarning;
-        target.CompactServerStatusError = cloned.CompactServerStatusError;
-        target.CompactActionButton = cloned.CompactActionButton;
-        target.CompactActionButtonHovered = cloned.CompactActionButtonHovered;
-        target.CompactActionButtonActive = cloned.CompactActionButtonActive;
-        target.CompactSyncshellButton = cloned.CompactSyncshellButton;
-        target.CompactSyncshellButtonHovered = cloned.CompactSyncshellButtonHovered;
-        target.CompactSyncshellButtonActive = cloned.CompactSyncshellButtonActive;
-        target.CompactPanelTitleText = cloned.CompactPanelTitleText;
-        target.CompactConnectedText = cloned.CompactConnectedText;
-        target.CompactAllSyncshellsText = cloned.CompactAllSyncshellsText;
-        target.CompactOfflinePausedText = cloned.CompactOfflinePausedText;
-        target.CompactOfflineSyncshellText = cloned.CompactOfflineSyncshellText;
-        target.CompactVisibleText = cloned.CompactVisibleText;
-        target.CompactPairsText = cloned.CompactPairsText;
-        target.CompactShowImGuiHeader = cloned.CompactShowImGuiHeader;
-        
-        // Progress Bar Properties
-        target.ProgressBarRounding = cloned.ProgressBarRounding;
-        target.ProgressBarPreviewFill = cloned.ProgressBarPreviewFill;
-        target.ShowProgressBarPreview = cloned.ShowProgressBarPreview;
-        target.TransmissionBarRounding = cloned.TransmissionBarRounding;
-        target.CompactProgressBarHeight = cloned.CompactProgressBarHeight;
-        target.CompactProgressBarWidth = cloned.CompactProgressBarWidth;
-        target.CompactProgressBarBackground = cloned.CompactProgressBarBackground;
-        target.CompactProgressBarForeground = cloned.CompactProgressBarForeground;
-        target.CompactProgressBarBorder = cloned.CompactProgressBarBorder;
-        target.CompactTransmissionBarHeight = cloned.CompactTransmissionBarHeight;
-        target.CompactTransmissionBarWidth = cloned.CompactTransmissionBarWidth;
-        target.CompactTransmissionBarBackground = cloned.CompactTransmissionBarBackground;
-        target.CompactTransmissionBarForeground = cloned.CompactTransmissionBarForeground;
-        target.CompactTransmissionBarBorder = cloned.CompactTransmissionBarBorder;
-
-        // Button style overrides (colors, border, offsets)
-        target.ButtonStyles = cloned.ButtonStyles.ToDictionary(
-            kv => kv.Key,
-            kv => new ButtonStyleOverride
-            {
-                WidthDelta = kv.Value.WidthDelta,
-                HeightDelta = kv.Value.HeightDelta,
-                IconOffset = kv.Value.IconOffset,
-                Button = kv.Value.Button,
-                ButtonHovered = kv.Value.ButtonHovered,
-                ButtonActive = kv.Value.ButtonActive,
-                Text = kv.Value.Text,
-                Icon = kv.Value.Icon,
-                Border = kv.Value.Border,
-                BorderSize = kv.Value.BorderSize
-            }
-        );
+        ThemePropertyCopier.Copy(source, target);
     }
 
     public Task StopAsync(CancellationToken cancellationToken)

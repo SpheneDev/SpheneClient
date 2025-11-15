@@ -318,6 +318,13 @@ public class CompactUi : WindowMediatorSubscriberBase
         Mediator.Subscribe<DownloadFinishedMessage>(this, (msg) => _currentDownloads.TryRemove(msg.DownloadId, out _));
         Mediator.Subscribe<RefreshUiMessage>(this, (msg) => RefreshIconsOnly());
         Mediator.Subscribe<StructuralRefreshUiMessage>(this, (msg) => RefreshDrawFolders());
+        Mediator.Subscribe<QueryWindowOpenStateMessage>(this, (msg) =>
+        {
+            if (msg.UiType == GetType())
+            {
+                msg.Respond(IsOpen);
+            }
+        });
         Mediator.Subscribe<CharacterDataAnalyzedMessage>(this, (_) =>
         {
             // Invalidate backup caches and ShrinkU detection when analysis changes
@@ -1074,6 +1081,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         
         using (_uiSharedService.UidFont.Push())
         {
+            ImGui.SetWindowFontScale(SpheneCustomTheme.CurrentTheme.CompactUidFontScale);
             var uidTextSize = ImGui.CalcTextSize(uidText);
             ImGui.SetCursorPosX((ImGui.GetWindowContentRegionMax().X - ImGui.GetWindowContentRegionMin().X) / 2 - (uidTextSize.X / 2));
             
@@ -1083,6 +1091,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                 : GetServerStatusColor();
             
             ImGui.TextColored(uidColor, uidText);
+            ImGui.SetWindowFontScale(1.0f);
         }
 
         if (_apiController.ServerState is ServerState.Connected)

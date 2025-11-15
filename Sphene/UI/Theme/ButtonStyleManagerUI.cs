@@ -9,6 +9,36 @@ namespace Sphene.UI.Theme;
 
 public static class ButtonStyleManagerUI
 {
+    private static readonly JsonSerializerOptions ClipboardJsonOptions = new JsonSerializerOptions
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        Converters = { new Vector4JsonConverter(), new Vector2JsonConverter() }
+    };
+
+    private static (Vector4 Button, Vector4 Hovered, Vector4 Active, Vector4 Text, Vector4 Icon, Vector4 Border, float BorderSize) GetDefaultsForKey(string key, ThemeConfiguration theme)
+    {
+        if (key.StartsWith("CompactUI."))
+        {
+            return (
+                theme.CompactActionButton,
+                theme.CompactActionButtonHovered,
+                theme.CompactActionButtonActive,
+                theme.TextPrimary,
+                theme.TextPrimary,
+                theme.CompactBorder,
+                theme.FrameBorderSize
+            );
+        }
+        return (
+            theme.Button,
+            theme.ButtonHovered,
+            theme.ButtonActive,
+            theme.TextPrimary,
+            theme.TextPrimary,
+            theme.Border,
+            theme.FrameBorderSize
+        );
+    }
     private static bool _pickerEnabled = false;
     private static readonly (string Key, string Label)[] _keys =
     {
@@ -66,6 +96,10 @@ public static class ButtonStyleManagerUI
     private static int _copyTargetIndex = 0;
 
     public static bool IsPickerEnabled => _pickerEnabled;
+    public static void DisablePicker()
+    {
+        _pickerEnabled = false;
+    }
 
     public static void SelectButtonKey(string key)
     {
@@ -171,6 +205,7 @@ public static class ButtonStyleManagerUI
 
         {
             var key = _keys[_selectedIndex].Key;
+            var defaults = GetDefaultsForKey(key, theme);
             if (!theme.ButtonStyles.TryGetValue(key, out var ov))
             {
                 ov = new ButtonStyleOverride();
@@ -200,7 +235,7 @@ public static class ButtonStyleManagerUI
 
             ImGui.Separator();
             ImGui.Text("Selected Button Colors");
-            var effBtn = ov.Button ?? theme.Button;
+            var effBtn = ov.Button ?? defaults.Button;
             if (ImGui.ColorEdit4("Button", ref effBtn))
             {
                 ov.Button = effBtn;
@@ -214,37 +249,37 @@ public static class ButtonStyleManagerUI
                 ov.ButtonActive = active;
                 theme.NotifyThemeChanged();
             }
-            var effBtnH = ov.ButtonHovered ?? theme.ButtonHovered;
+            var effBtnH = ov.ButtonHovered ?? defaults.Hovered;
             if (ImGui.ColorEdit4("Button Hovered", ref effBtnH))
             {
                 ov.ButtonHovered = effBtnH;
                 theme.NotifyThemeChanged();
             }
-            var effBtnA = ov.ButtonActive ?? theme.ButtonActive;
+            var effBtnA = ov.ButtonActive ?? defaults.Active;
             if (ImGui.ColorEdit4("Button Active", ref effBtnA))
             {
                 ov.ButtonActive = effBtnA;
                 theme.NotifyThemeChanged();
             }
-            var effIcon = ov.Icon ?? theme.TextPrimary;
+            var effIcon = ov.Icon ?? defaults.Icon;
             if (ImGui.ColorEdit4("Icon", ref effIcon))
             {
                 ov.Icon = effIcon;
                 theme.NotifyThemeChanged();
             }
-            var effBorder = ov.Border ?? theme.Border;
+            var effBorder = ov.Border ?? defaults.Border;
             if (ImGui.ColorEdit4("Border", ref effBorder))
             {
                 ov.Border = effBorder;
                 theme.NotifyThemeChanged();
             }
-            var effBorderSize = ov.BorderSize ?? theme.FrameBorderSize;
+            var effBorderSize = ov.BorderSize ?? defaults.BorderSize;
             if (ImGui.SliderFloat("Border Width", ref effBorderSize, 0f, 5f, "%.1f"))
             {
                 ov.BorderSize = effBorderSize;
                 theme.NotifyThemeChanged();
             }
-            var effTxt = ov.Text ?? theme.TextPrimary;
+            var effTxt = ov.Text ?? defaults.Text;
             if (ImGui.ColorEdit4("Text", ref effTxt))
             {
                 ov.Text = effTxt;
@@ -275,16 +310,24 @@ public static class ButtonStyleManagerUI
                     src = new ButtonStyleOverride();
                     theme.ButtonStyles[srcKey] = src;
                 }
+                var srcDefaults = GetDefaultsForKey(srcKey, theme);
+                var effSrcBtn = src.Button ?? srcDefaults.Button;
+                var effSrcBtnH = src.ButtonHovered ?? srcDefaults.Hovered;
+                var effSrcBtnA = src.ButtonActive ?? srcDefaults.Active;
+                var effSrcIcon = src.Icon ?? srcDefaults.Icon;
+                var effSrcBorder = src.Border ?? srcDefaults.Border;
+                var effSrcText = src.Text ?? srcDefaults.Text;
+                var effSrcBorderSize = src.BorderSize ?? srcDefaults.BorderSize;
                 var payload = JsonSerializer.Serialize(new ButtonStyleOverride
                 {
-                    Button = src.Button,
-                    ButtonHovered = src.ButtonHovered,
-                    ButtonActive = src.ButtonActive,
-                    Text = src.Text,
-                    Icon = src.Icon,
-                    Border = src.Border,
-                    BorderSize = src.BorderSize
-                });
+                    Button = effSrcBtn,
+                    ButtonHovered = effSrcBtnH,
+                    ButtonActive = effSrcBtnA,
+                    Text = effSrcText,
+                    Icon = effSrcIcon,
+                    Border = effSrcBorder,
+                    BorderSize = effSrcBorderSize
+                }, ClipboardJsonOptions);
                 ImGui.SetClipboardText("SPHENE_BTN_STYLE:colors:" + payload);
             }
             ImGui.SameLine();
@@ -295,7 +338,7 @@ public static class ButtonStyleManagerUI
                     src = new ButtonStyleOverride();
                     theme.ButtonStyles[srcKey] = src;
                 }
-                var payload = JsonSerializer.Serialize(src);
+                var payload = JsonSerializer.Serialize(src, ClipboardJsonOptions);
                 ImGui.SetClipboardText("SPHENE_BTN_STYLE:all:" + payload);
             }
 
@@ -305,7 +348,7 @@ public static class ButtonStyleManagerUI
                 if (clip != null && clip.StartsWith("SPHENE_BTN_STYLE:colors:"))
                 {
                     var json = clip.Substring("SPHENE_BTN_STYLE:colors:".Length);
-                    var src = JsonSerializer.Deserialize<ButtonStyleOverride>(json);
+                    var src = JsonSerializer.Deserialize<ButtonStyleOverride>(json, ClipboardJsonOptions);
                     if (src != null)
                     {
                         var dstKey = _keys[_selectedIndex].Key;
@@ -332,7 +375,7 @@ public static class ButtonStyleManagerUI
                 if (clip != null && clip.StartsWith("SPHENE_BTN_STYLE:all:"))
                 {
                     var json = clip.Substring("SPHENE_BTN_STYLE:all:".Length);
-                    var src = JsonSerializer.Deserialize<ButtonStyleOverride>(json);
+                    var src = JsonSerializer.Deserialize<ButtonStyleOverride>(json, ClipboardJsonOptions);
                     if (src != null)
                     {
                         var dstKey = _keys[_selectedIndex].Key;

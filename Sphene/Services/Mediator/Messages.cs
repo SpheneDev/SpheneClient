@@ -68,6 +68,7 @@ public record DownloadReadyMessage(Guid RequestId) : MessageBase;
 public record DownloadStartedMessage(GameObjectHandler DownloadId, Dictionary<string, FileDownloadStatus> DownloadStatus) : MessageBase;
 public record DownloadFinishedMessage(GameObjectHandler DownloadId) : MessageBase;
 public record UiToggleMessage(Type UiType) : MessageBase;
+public record QueryWindowOpenStateMessage(Type UiType, Action<bool> Respond) : SameThreadMessage;
 public record OpenWelcomePageLivePreviewMessage(GroupFullInfoDto GroupFullInfo, string WelcomeText, IDalamudTextureWrap? WelcomeImageTexture) : MessageBase;
 public record UpdateWelcomePageLivePreviewMessage(string WelcomeText, IDalamudTextureWrap? WelcomeImageTexture) : MessageBase;
 public record PlayerUploadingMessage(GameObjectHandler Handler, bool IsUploading) : MessageBase;

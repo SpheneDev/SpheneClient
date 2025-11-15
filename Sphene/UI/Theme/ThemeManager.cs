@@ -179,6 +179,7 @@ public static class ThemeManager
 
             var sanitizedName = SanitizeFileName(themeName);
             var filePath = Path.Combine(_themesDirectory, $"{sanitizedName}.json");
+            var legacyFilePath = Path.Combine(_oldThemesDirectory, $"{sanitizedName}.json");
 
             if (!File.Exists(filePath))
             {
@@ -188,6 +189,18 @@ public static class ThemeManager
 
             File.Delete(filePath);
             _logger?.LogInformation($"Theme '{themeName}' deleted successfully");
+            try
+            {
+                if (File.Exists(legacyFilePath))
+                {
+                    File.Delete(legacyFilePath);
+                    _logger?.LogDebug($"Deleted legacy theme file: {legacyFilePath}");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, $"Failed to delete legacy theme file: {legacyFilePath}");
+            }
             return true;
         }
         catch (Exception ex)
