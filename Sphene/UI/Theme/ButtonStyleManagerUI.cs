@@ -244,12 +244,12 @@ public static class ButtonStyleManagerUI
             iconOffset = ov.IconOffset;
 
             ImGui.Text("Selected Button Overrides");
-            if (ImGui.DragFloat("Width Delta", ref widthDelta, 0.1f, -100f, 200f))
+            if (ImGui.DragFloat("Width", ref widthDelta, 0.1f, -100f, 200f))
             {
                 ov.WidthDelta = widthDelta;
                 theme.NotifyThemeChanged();
             }
-            if (ImGui.DragFloat("Height Delta", ref heightDelta, 0.1f, -50f, 100f))
+            if (ImGui.DragFloat("Height", ref heightDelta, 0.1f, -50f, 100f))
             {
                 ov.HeightDelta = heightDelta;
                 theme.NotifyThemeChanged();
