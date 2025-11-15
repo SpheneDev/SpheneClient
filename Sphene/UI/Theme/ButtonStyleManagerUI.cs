@@ -4,6 +4,7 @@ using System.Linq;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using System.Text.Json;
+using Sphene.Configuration;
 
 namespace Sphene.UI.Theme;
 
@@ -286,18 +287,41 @@ public static class ButtonStyleManagerUI
                 theme.NotifyThemeChanged();
             }
 
-            if (ImGui.Button("Reset Selected"))
+            if (ImGui.Button("Reset Changes"))
             {
-                ov.WidthDelta = 0f;
-                ov.HeightDelta = 0f;
-                ov.IconOffset = Vector2.Zero;
-                ov.Button = null;
-                ov.ButtonHovered = null;
-                ov.ButtonActive = null;
-                ov.Text = null;
-                ov.Icon = null;
-                ov.Border = null;
-                ov.BorderSize = null;
+                var selectedThemeName = ThemeManager.GetSelectedTheme();
+                ThemeConfiguration? baseline = null;
+                if (ThemePresets.BuiltInThemes.ContainsKey(selectedThemeName))
+                    baseline = ThemePresets.BuiltInThemes[selectedThemeName];
+                else
+                    baseline = ThemeManager.LoadTheme(selectedThemeName);
+
+                if (baseline != null && baseline.ButtonStyles.TryGetValue(key, out var baseOv))
+                {
+                    ov.WidthDelta = baseOv.WidthDelta;
+                    ov.HeightDelta = baseOv.HeightDelta;
+                    ov.IconOffset = baseOv.IconOffset;
+                    ov.Button = baseOv.Button;
+                    ov.ButtonHovered = baseOv.ButtonHovered;
+                    ov.ButtonActive = baseOv.ButtonActive;
+                    ov.Text = baseOv.Text;
+                    ov.Icon = baseOv.Icon;
+                    ov.Border = baseOv.Border;
+                    ov.BorderSize = baseOv.BorderSize;
+                }
+                else
+                {
+                    ov.WidthDelta = 0f;
+                    ov.HeightDelta = 0f;
+                    ov.IconOffset = Vector2.Zero;
+                    ov.Button = null;
+                    ov.ButtonHovered = null;
+                    ov.ButtonActive = null;
+                    ov.Text = null;
+                    ov.Icon = null;
+                    ov.Border = null;
+                    ov.BorderSize = null;
+                }
                 theme.NotifyThemeChanged();
             }
 
