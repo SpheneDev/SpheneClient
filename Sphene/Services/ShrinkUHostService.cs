@@ -74,6 +74,7 @@ public sealed class ShrinkUHostService : IHostedService
                     _logger.LogDebug("Set ShrinkU AutomaticControllerName to Sphene on integration start");
                 }
                 catch { }
+                CleanupDuplicateShrinkUConfig();
             }
         }
         catch (Exception ex)
@@ -206,11 +207,29 @@ public sealed class ShrinkUHostService : IHostedService
                     _logger.LogDebug("Set ShrinkU AutomaticControllerName to Sphene on config save");
                 }
                 catch { }
+                CleanupDuplicateShrinkUConfig();
             }
             else
             {
                 UnregisterWindows();
             }
+        }
+        catch { }
+    }
+
+    private void CleanupDuplicateShrinkUConfig()
+    {
+        try
+        {
+            var baseDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "XIVLauncher", "pluginConfigs");
+            var shrinkPath = Path.Combine(baseDir, "ShrinkU.json");
+            if (!File.Exists(shrinkPath))
+                return;
+            var spheneRootPath = Path.Combine(baseDir, "Sphene.json");
+            var spheneSubPath = Path.Combine(baseDir, "Sphene", "Sphene.json");
+            try { if (File.Exists(spheneRootPath)) File.Delete(spheneRootPath); } catch { }
+            try { if (File.Exists(spheneSubPath)) File.Delete(spheneSubPath); } catch { }
+            _logger.LogDebug("CleanupDuplicateShrinkUConfig executed");
         }
         catch { }
     }
