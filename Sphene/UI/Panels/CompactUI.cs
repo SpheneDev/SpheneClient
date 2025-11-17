@@ -2283,28 +2283,60 @@ public class CompactUi : WindowMediatorSubscriberBase
                 ? "Automatic conversion is enabled. Revert actions are disabled."
                 : "Enable automatic on-the-fly conversion of non-BC7 textures.");
 
-            // Allow toggling full Penumbra Mod Package backup behavior directly in the conversion popup
+            // Backup mode selection via dropdown (Texture / Full Mod / Both)
             try
             {
+                var texturesBackup = _shrinkuConfigService.Current.EnableBackupBeforeConversion;
                 var fullModBackup = _shrinkuConfigService.Current.EnableFullModBackupBeforeConversion;
-                var backupEnabled = _shrinkuConfigService.Current.EnableBackupBeforeConversion;
-                if (_enableBackupBeforeConversion != backupEnabled)
-                    _enableBackupBeforeConversion = backupEnabled;
+                if (_enableBackupBeforeConversion != texturesBackup)
+                    _enableBackupBeforeConversion = texturesBackup;
 
-                if (ImGui.Checkbox("Backup before conversion", ref _enableBackupBeforeConversion))
+                string currentMode = (texturesBackup, fullModBackup) switch
                 {
-                    _shrinkuConfigService.Current.EnableBackupBeforeConversion = _enableBackupBeforeConversion;
-                    _shrinkuConfigService.Save();
-                    _logger.LogDebug("Updated ShrinkU backup-before-conversion setting: {value}", _enableBackupBeforeConversion);
-                }
-                UiSharedService.AttachToolTip("Stores original textures before converting. Uses less disk space than full-mod PMP backups but restores individual files only.");
-                if (ImGui.Checkbox("Full mod backup (.pmp)", ref fullModBackup))
+                    (true, false) => "Texture",
+                    (false, true) => "Full Mod",
+                    (true, true) => "Both",
+                    _ => "Texture",
+                };
+                if (!texturesBackup && !fullModBackup)
                 {
-                    _shrinkuConfigService.Current.EnableFullModBackupBeforeConversion = fullModBackup;
+                    _shrinkuConfigService.Current.EnableBackupBeforeConversion = true;
+                    _shrinkuConfigService.Current.EnableFullModBackupBeforeConversion = false;
                     _shrinkuConfigService.Save();
-                    _logger.LogDebug("Updated full mod PMP backup setting: {value}", fullModBackup);
+                    texturesBackup = true;
+                    fullModBackup = false;
+                    currentMode = "Texture";
                 }
-                UiSharedService.AttachToolTip("Creates a full Penumbra Mod Package archive. PMP backups increase backup storage compared to per-texture backups, but allow safer full mod restore. Consider the trade-off before enabling.");
+
+                ImGui.TextUnformatted("Backup Mode:");
+                ImGui.SameLine();
+                if (ImGui.BeginCombo("##BackupModeCombo", currentMode))
+                {
+                    if (ImGui.Selectable("Texture", currentMode == "Texture"))
+                    {
+                        _shrinkuConfigService.Current.EnableBackupBeforeConversion = true;
+                        _shrinkuConfigService.Current.EnableFullModBackupBeforeConversion = false;
+                        _shrinkuConfigService.Save();
+                        _logger.LogDebug("Set backup mode to Texture");
+                    }
+                    if (ImGui.Selectable("Full Mod", currentMode == "Full Mod"))
+                    {
+                        _shrinkuConfigService.Current.EnableBackupBeforeConversion = false;
+                        _shrinkuConfigService.Current.EnableFullModBackupBeforeConversion = true;
+                        _shrinkuConfigService.Save();
+                        _logger.LogDebug("Set backup mode to Full Mod");
+                    }
+                    if (ImGui.Selectable("Both", currentMode == "Both"))
+                    {
+                        _shrinkuConfigService.Current.EnableBackupBeforeConversion = true;
+                        _shrinkuConfigService.Current.EnableFullModBackupBeforeConversion = true;
+                        _shrinkuConfigService.Save();
+                        _logger.LogDebug("Set backup mode to Both");
+                    }
+                    ImGui.EndCombo();
+                }
+
+                UiSharedService.AttachToolTip("Backup Modes:\n- Texture: smaller storage; per-file restore\n- Full Mod: larger storage; safer full restore\n- Both: combines advantages; highest storage use");
             }
             catch { }
             
