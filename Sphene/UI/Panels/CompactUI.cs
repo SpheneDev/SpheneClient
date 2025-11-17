@@ -189,6 +189,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         try
         {
             _automaticModeEnabled = _shrinkuConfigService.Current.TextureProcessingMode == TextureProcessingMode.Automatic;
+            _enableBackupBeforeConversion = _shrinkuConfigService.Current.EnableBackupBeforeConversion;
         }
         catch { }
         
@@ -500,6 +501,38 @@ public class CompactUi : WindowMediatorSubscriberBase
                     }
                 }
             }
+            try
+            {
+                string backupDirectory = string.Empty;
+                var firstPath = overview.FirstOrDefault()?.SourcePath;
+                if (!string.IsNullOrWhiteSpace(firstPath))
+                {
+                    if (File.Exists(firstPath))
+                    {
+                        var modDir = Path.GetDirectoryName(firstPath) ?? string.Empty;
+                        backupDirectory = Directory.GetParent(modDir)?.FullName ?? string.Empty;
+                    }
+                    else if (Directory.Exists(firstPath))
+                    {
+                        backupDirectory = Path.GetDirectoryName(firstPath) ?? string.Empty;
+                    }
+                }
+                if (string.IsNullOrWhiteSpace(backupDirectory))
+                {
+                    backupDirectory = _textureBackupService.GetBackupDirectory();
+                }
+                if (!string.IsNullOrWhiteSpace(backupDirectory) && Directory.Exists(backupDirectory))
+                {
+                    foreach (var modDir in Directory.EnumerateDirectories(backupDirectory))
+                    {
+                        foreach (var pmp in Directory.EnumerateFiles(modDir, "mod_backup_*.pmp"))
+                        {
+                            try { total += new FileInfo(pmp).Length; count++; } catch { }
+                        }
+                    }
+                }
+            }
+            catch { }
             return (total, count);
         }
         catch
@@ -2254,14 +2287,24 @@ public class CompactUi : WindowMediatorSubscriberBase
             try
             {
                 var fullModBackup = _shrinkuConfigService.Current.EnableFullModBackupBeforeConversion;
-                ImGui.Checkbox("Backup before conversion", ref _enableBackupBeforeConversion);
+                var backupEnabled = _shrinkuConfigService.Current.EnableBackupBeforeConversion;
+                if (_enableBackupBeforeConversion != backupEnabled)
+                    _enableBackupBeforeConversion = backupEnabled;
+
+                if (ImGui.Checkbox("Backup before conversion", ref _enableBackupBeforeConversion))
+                {
+                    _shrinkuConfigService.Current.EnableBackupBeforeConversion = _enableBackupBeforeConversion;
+                    _shrinkuConfigService.Save();
+                    _logger.LogDebug("Updated ShrinkU backup-before-conversion setting: {value}", _enableBackupBeforeConversion);
+                }
+                UiSharedService.AttachToolTip("Stores original textures before converting. Uses less disk space than full-mod PMP backups but restores individual files only.");
                 if (ImGui.Checkbox("Full mod backup (.pmp)", ref fullModBackup))
                 {
                     _shrinkuConfigService.Current.EnableFullModBackupBeforeConversion = fullModBackup;
                     _shrinkuConfigService.Save();
                     _logger.LogDebug("Updated full mod PMP backup setting: {value}", fullModBackup);
                 }
-                UiSharedService.AttachToolTip("Create a full Penumbra Mod Package archive for restore.");
+                UiSharedService.AttachToolTip("Creates a full Penumbra Mod Package archive. PMP backups increase backup storage compared to per-texture backups, but allow safer full mod restore. Consider the trade-off before enabling.");
             }
             catch { }
             

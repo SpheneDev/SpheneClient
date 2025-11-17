@@ -115,10 +115,8 @@ public sealed partial class CharaDataManager : DisposableMediatorSubscriberBase
                         await CancelAndRestoreBeforeNewConversionAsync().ConfigureAwait(false);
                     }
 
-                    // Ensure backups are created for automatic conversions initiated by Sphene
                     _shrinkuConfigService.Current.AutomaticControllerName = "Sphene";
                     _shrinkuConfigService.Current.AutomaticHandledBySphene = true;
-                    _shrinkuConfigService.Current.EnableBackupBeforeConversion = true;
                     _shrinkuConfigService.Save();
 
                     var candidates = BuildManualStyleCandidatesFromLastAnalysis();
@@ -1053,8 +1051,6 @@ public sealed partial class CharaDataManager : DisposableMediatorSubscriberBase
                     // Mark Sphene as controller to disable ShrinkU mode dropdown and reflect control
                     _shrinkuConfigService.Current.AutomaticControllerName = "Sphene";
                     _shrinkuConfigService.Current.AutomaticHandledBySphene = true;
-                    // Ensure backups are created before automatic conversion triggered by Sphene
-                    _shrinkuConfigService.Current.EnableBackupBeforeConversion = true;
                     _shrinkuConfigService.Save();
 
                     var candidates = await _shrinkuConversionService.GetAutomaticCandidateTexturesAsync().ConfigureAwait(false);

@@ -693,9 +693,11 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                         if (_enableBc7ConversionMode)
                         {
                             ImGui.Checkbox("Create backup before conversion", ref _enableBackupBeforeConversion);
+                            UiSharedService.AttachToolTip("Stores original textures prior to conversion. Smaller storage footprint than full-mod PMP but only per-file restore.");
                             if (_enableBackupBeforeConversion)
                             {
                                 UiSharedService.ColorTextWrapped("Backups will be created in the mod folder under 'sphene_backups' before conversion.", ImGuiColors.ParsedGreen);
+                                UiSharedService.ColorTextWrapped("Using full-mod PMP backups increases required storage, but enables safer complete mod restoration.", ImGuiColors.DalamudYellow);
                             }
                             
                             // Revert functionality
@@ -1289,6 +1291,38 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                     }
                 }
             }
+            try
+            {
+                string backupDirectory = string.Empty;
+                var firstPath = overview.FirstOrDefault()?.SourcePath;
+                if (!string.IsNullOrWhiteSpace(firstPath))
+                {
+                    if (File.Exists(firstPath))
+                    {
+                        var modDir = Path.GetDirectoryName(firstPath) ?? string.Empty;
+                        backupDirectory = Directory.GetParent(modDir)?.FullName ?? string.Empty;
+                    }
+                    else if (Directory.Exists(firstPath))
+                    {
+                        backupDirectory = Path.GetDirectoryName(firstPath) ?? string.Empty;
+                    }
+                }
+                if (string.IsNullOrWhiteSpace(backupDirectory))
+                {
+                    backupDirectory = _textureBackupService.GetBackupDirectory();
+                }
+                if (!string.IsNullOrWhiteSpace(backupDirectory) && Directory.Exists(backupDirectory))
+                {
+                    foreach (var modDir in Directory.EnumerateDirectories(backupDirectory))
+                    {
+                        foreach (var pmp in Directory.EnumerateFiles(modDir, "mod_backup_*.pmp"))
+                        {
+                            try { total += new FileInfo(pmp).Length; count++; } catch { }
+                        }
+                    }
+                }
+            }
+            catch { }
             return (total, count);
         }
         catch
