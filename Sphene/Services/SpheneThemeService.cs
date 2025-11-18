@@ -17,10 +17,12 @@ public class SpheneThemeService
     // Apply Sphene theme to a window if it's not the CompactUI
     public IDisposable? ApplyThemeToWindow(Type windowType)
     {
-        // Skip theme application for CompactUI to maintain its original styling
-        if (windowType.Name == "CompactUi")
+        // Skip theme for CompactUI and external plugins like ShrinkU
+        var asmName = windowType.Assembly.GetName().Name ?? string.Empty;
+        var ns = windowType.Namespace ?? string.Empty;
+        if (windowType.Name == "CompactUi" || asmName.Equals("ShrinkU", StringComparison.OrdinalIgnoreCase) || ns.StartsWith("ShrinkU", StringComparison.OrdinalIgnoreCase))
         {
-            _logger.LogDebug("Skipping theme application for CompactUI window");
+            _logger.LogDebug("Skipping Sphene theme for window: {WindowType} (assembly={Assembly}, ns={Namespace})", windowType.Name, asmName, ns);
             return null;
         }
 
@@ -31,6 +33,8 @@ public class SpheneThemeService
     // Check if a window type should have theme applied
     public bool ShouldApplyTheme(Type windowType)
     {
-        return windowType.Name != "CompactUi";
+        var asmName = windowType.Assembly.GetName().Name ?? string.Empty;
+        var ns = windowType.Namespace ?? string.Empty;
+        return windowType.Name != "CompactUi" && !asmName.Equals("ShrinkU", StringComparison.OrdinalIgnoreCase) && !ns.StartsWith("ShrinkU", StringComparison.OrdinalIgnoreCase);
     }
 }

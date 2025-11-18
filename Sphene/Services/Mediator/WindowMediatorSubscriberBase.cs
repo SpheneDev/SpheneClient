@@ -1,4 +1,5 @@
 using Dalamud.Interface.Windowing;
+using Sphene.UI.Theme;
 using Microsoft.Extensions.Logging;
 using System;
 
@@ -39,6 +40,7 @@ public abstract class WindowMediatorSubscriberBase : Window, IMediatorSubscriber
 
     public override void Draw()
     {
+        using var themeScope = SpheneCustomTheme.ApplyThemeForWindow();
         _performanceCollectorService.LogPerformance(this, $"Draw", DrawInternal);
     }
 

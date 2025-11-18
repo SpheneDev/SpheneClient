@@ -138,9 +138,6 @@ public sealed class UiService : DisposableMediatorSubscriberBase
 
     private void Draw()
     {
-        // Apply global theme for all windows
-        using var themeScope = SpheneCustomTheme.ApplyThemeForWindow();
-        
         _windowSystem.Draw();
         _fileDialogManager.Draw();
         MarkdownFormatterPopup.Draw();
