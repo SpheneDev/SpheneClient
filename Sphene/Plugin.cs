@@ -135,15 +135,20 @@ public sealed class Plugin : IDalamudPlugin
                 return cfgSvc;
             });
             collection.AddSingleton<ShrinkU.Services.PenumbraIpc>(s => new ShrinkU.Services.PenumbraIpc(pluginInterface, s.GetRequiredService<Microsoft.Extensions.Logging.ILogger>()));
+            collection.AddSingleton<ShrinkU.Services.ModStateService>(s => new ShrinkU.Services.ModStateService(
+                s.GetRequiredService<Microsoft.Extensions.Logging.ILogger>(),
+                s.GetRequiredService<ShrinkUConfigService>()));
             collection.AddSingleton<ShrinkU.Services.TextureBackupService>(s => new ShrinkU.Services.TextureBackupService(
                 s.GetRequiredService<Microsoft.Extensions.Logging.ILogger>(),
                 s.GetRequiredService<ShrinkUConfigService>(),
-                s.GetRequiredService<ShrinkU.Services.PenumbraIpc>()));
+                s.GetRequiredService<ShrinkU.Services.PenumbraIpc>(),
+                s.GetRequiredService<ShrinkU.Services.ModStateService>()));
             collection.AddSingleton<ShrinkU.Services.TextureConversionService>(s => new ShrinkU.Services.TextureConversionService(
                 s.GetRequiredService<Microsoft.Extensions.Logging.ILogger>(),
                 s.GetRequiredService<ShrinkU.Services.PenumbraIpc>(),
                 s.GetRequiredService<ShrinkU.Services.TextureBackupService>(),
-                s.GetRequiredService<ShrinkUConfigService>()));
+                s.GetRequiredService<ShrinkUConfigService>(),
+                s.GetRequiredService<ShrinkU.Services.ModStateService>()));
             collection.AddSingleton<ShrinkU.Services.ChangelogService>(s => new ShrinkU.Services.ChangelogService(
                 s.GetRequiredService<Microsoft.Extensions.Logging.ILogger>(),
                 new System.Net.Http.HttpClient(),
@@ -164,7 +169,8 @@ public sealed class Plugin : IDalamudPlugin
                 s.GetRequiredService<ShrinkUConfigService>(),
                 s.GetRequiredService<ShrinkU.Services.TextureConversionService>(),
                 s.GetRequiredService<ShrinkU.Services.TextureBackupService>(),
-                () => s.GetRequiredService<SettingsUI>().IsOpen = true));
+                () => s.GetRequiredService<SettingsUI>().IsOpen = true,
+                s.GetRequiredService<ShrinkU.Services.ModStateService>()));
             collection.AddSingleton<FirstRunSetupUI>(s =>
             {
                 var ui = new FirstRunSetupUI(
