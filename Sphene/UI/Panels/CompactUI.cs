@@ -2779,14 +2779,13 @@ public class CompactUi : WindowMediatorSubscriberBase
         _conversionStartTime = DateTime.Now;
         _conversionCancellationTokenSource = new CancellationTokenSource();
 
-        if (_enableBackupBeforeConversion)
+        if (_enableBackupBeforeConversion || _shrinkuConfigService.Current.EnableFullModBackupBeforeConversion)
         {
             StartBackupAndConversion();
         }
         else
         {
             _conversionTask = _ipcManager.Penumbra.ConvertTextureFiles(_logger, _texturesToConvert, _conversionProgress, _conversionCancellationTokenSource.Token);
-            // Notify ShrinkU when conversion finishes to refresh its UI and scans
             _conversionTask.ContinueWith(t =>
             {
                 try { _shrinkuConversionService.NotifyExternalTextureChange("conversion-completed"); } catch { }
@@ -2795,17 +2794,65 @@ public class CompactUi : WindowMediatorSubscriberBase
         }
     }
 
-    private void StartBackupAndConversion()
-    {
-        _conversionTask = Task.Run(async () =>
+        private void StartBackupAndConversion()
         {
-            try
+            _conversionTask = Task.Run(async () =>
             {
-                // Create backups first
-                var allTexturePaths = _texturesToConvert.SelectMany(kvp => new[] { kvp.Key }.Concat(kvp.Value)).ToArray();
-                _logger.LogDebug("Starting backup for {Count} texture paths", allTexturePaths.Length);
-                _backupStartTime = DateTime.Now;
-                await _shrinkuBackupService.BackupAsync(_texturesToConvert, _backupProgress, _conversionCancellationTokenSource.Token);
+                try
+                {
+                    if (_shrinkuConfigService.Current.EnableFullModBackupBeforeConversion)
+                    {
+                        try
+                        {
+                            var penumbraRoot = _ipcManager.Penumbra.ModDirectory ?? string.Empty;
+                            var mods = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                            foreach (var kvp in _texturesToConvert)
+                            {
+                                var paths = new List<string> { kvp.Key };
+                                if (kvp.Value != null && kvp.Value.Length > 0)
+                                    paths.AddRange(kvp.Value);
+                                foreach (var p in paths)
+                                {
+                                    try
+                                    {
+                                        var rel = !string.IsNullOrWhiteSpace(penumbraRoot) ? Path.GetRelativePath(penumbraRoot, p) : p;
+                                        rel = rel.Replace('/', '\\');
+                                        if (!string.IsNullOrWhiteSpace(rel) && !rel.StartsWith("..", StringComparison.Ordinal))
+                                        {
+                                            var idx = rel.IndexOf('\\');
+                                            var mod = idx >= 0 ? rel.Substring(0, idx) : rel;
+                                            if (!string.IsNullOrWhiteSpace(mod))
+                                                mods.Add(mod);
+                                        }
+                                    }
+                                    catch { }
+                                }
+                            }
+
+                            _logger.LogDebug("Ensuring full mod backups for {Count} mods before conversion", mods.Count);
+                            foreach (var mod in mods)
+                            {
+                                bool hasPmp = false;
+                                try { hasPmp = await _shrinkuBackupService.HasPmpBackupForModAsync(mod).ConfigureAwait(false); } catch { }
+                                if (!hasPmp)
+                                {
+                                    try
+                                    {
+                                        _logger.LogDebug("Creating full mod PMP backup for {mod}", mod);
+                                        await _shrinkuBackupService.CreateFullModBackupAsync(mod, _backupProgress, _conversionCancellationTokenSource.Token).ConfigureAwait(false);
+                                    }
+                                    catch { }
+                                }
+                            }
+                        }
+                        catch { }
+                    }
+
+                    // Create backups first
+                    var allTexturePaths = _texturesToConvert.SelectMany(kvp => new[] { kvp.Key }.Concat(kvp.Value)).ToArray();
+                    _logger.LogDebug("Starting backup for {Count} texture paths", allTexturePaths.Length);
+                    _backupStartTime = DateTime.Now;
+                    await _shrinkuBackupService.BackupAsync(_texturesToConvert, _backupProgress, _conversionCancellationTokenSource.Token);
 
                 // Start conversion after backup is complete
                 _logger.LogDebug("Backup completed, starting texture conversion");
