@@ -29,6 +29,7 @@ using System.Collections.Immutable;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using ShrinkU.Helpers;
 using System.Numerics;
 using System.Reflection;
 using SixLabors.ImageSharp;
@@ -2800,6 +2801,7 @@ public class CompactUi : WindowMediatorSubscriberBase
             {
                 try
                 {
+                    var traceUiTotal = PerfTrace.Step(_logger, "UI Backup+Conversion total");
                     if (_shrinkuConfigService.Current.EnableFullModBackupBeforeConversion)
                     {
                         try
@@ -2852,23 +2854,28 @@ public class CompactUi : WindowMediatorSubscriberBase
                     var allTexturePaths = _texturesToConvert.SelectMany(kvp => new[] { kvp.Key }.Concat(kvp.Value)).ToArray();
                     _logger.LogDebug("Starting backup for {Count} texture paths", allTexturePaths.Length);
                     _backupStartTime = DateTime.Now;
+                    var traceUiBackup = PerfTrace.Step(_logger, "UI Backup");
                     await _shrinkuBackupService.BackupAsync(_texturesToConvert, _backupProgress, _conversionCancellationTokenSource.Token);
+                    traceUiBackup.Dispose();
 
                 // Start conversion after backup is complete
                 _logger.LogDebug("Backup completed, starting texture conversion");
+                var traceUiConvert = PerfTrace.Step(_logger, "UI Convert");
                 var conversionTask = _ipcManager.Penumbra.ConvertTextureFiles(_logger, _texturesToConvert, _conversionProgress, _conversionCancellationTokenSource.Token);
                 await conversionTask;
+                traceUiConvert.Dispose();
                 try { _shrinkuConversionService.NotifyExternalTextureChange("conversion-completed"); } catch { }
                 _autoSilentConversion = false;
                 
                 _logger.LogDebug("Texture conversion completed successfully");
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error during backup and conversion process");
-            }
-        }, _conversionCancellationTokenSource.Token);
-    }
+                traceUiTotal.Dispose();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error during backup and conversion process");
+                }
+            }, _conversionCancellationTokenSource.Token);
+        }
     
     private Dictionary<string, List<string>> GetCachedBackupsForCurrentAnalysis()
     {

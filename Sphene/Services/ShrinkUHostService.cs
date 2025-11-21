@@ -19,10 +19,14 @@ public sealed class ShrinkUHostService : IHostedService
     private readonly ConversionUI _conversionUi;
     private readonly SettingsUI _settingsUi;
     private readonly ReleaseChangelogUI _releaseChangelogUi;
+    private readonly DebugUI _debugUi;
     private readonly FirstRunSetupUI _firstRunUi;
     private readonly SpheneConfigService _configService;
     private readonly ShrinkUConfigService _shrinkuConfigService;
     private bool _registered;
+    private readonly ShrinkU.Services.TextureBackupService _backupService;
+    private readonly ShrinkU.Services.TextureConversionService _shrinkuConversionService;
+    private CancellationTokenSource? _refreshCts;
 
     public ShrinkUHostService(
         ILogger<ShrinkUHostService> logger,
@@ -30,18 +34,24 @@ public sealed class ShrinkUHostService : IHostedService
         ConversionUI conversionUi,
         SettingsUI settingsUi,
         ReleaseChangelogUI releaseChangelogUi,
+        DebugUI debugUi,
         FirstRunSetupUI firstRunUi,
         SpheneConfigService configService,
-        ShrinkUConfigService shrinkuConfigService)
+        ShrinkUConfigService shrinkuConfigService,
+        ShrinkU.Services.TextureBackupService backupService,
+        ShrinkU.Services.TextureConversionService shrinkuConversionService)
     {
         _logger = logger;
         _windowSystem = windowSystem;
         _conversionUi = conversionUi;
         _settingsUi = settingsUi;
         _releaseChangelogUi = releaseChangelogUi;
+        _debugUi = debugUi;
         _firstRunUi = firstRunUi;
         _configService = configService;
         _shrinkuConfigService = shrinkuConfigService;
+        _backupService = backupService;
+        _shrinkuConversionService = shrinkuConversionService;
 
         try { _configService.ConfigSave += OnConfigSaved; } catch { }
     }
@@ -75,6 +85,36 @@ public sealed class ShrinkUHostService : IHostedService
                 }
                 catch { }
                 CleanupDuplicateShrinkUConfig();
+                try { _conversionUi.GetType().GetMethod("SetStartupRefreshInProgress", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public)?.Invoke(_conversionUi, new object[] { true }); } catch { }
+                try { _shrinkuConversionService.SetEnabled(true); } catch { }
+            }
+            if (enable)
+            {
+                try
+                {
+                    _refreshCts?.Cancel();
+                    _refreshCts = new CancellationTokenSource();
+                    var token = _refreshCts.Token;
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            await Task.Delay(TimeSpan.FromSeconds(1), token).ConfigureAwait(false);
+                            if (token.IsCancellationRequested) return;
+                            await _backupService.RefreshAllBackupStateAsync().ConfigureAwait(false);
+                            _logger.LogDebug("Initial ShrinkU backup state refresh completed");
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogDebug(ex, "Initial ShrinkU backup state refresh failed");
+                        }
+                        finally
+                        {
+                            try { _conversionUi.SetStartupRefreshInProgress(false); } catch { }
+                        }
+                    }, token);
+                }
+                catch { }
             }
         }
         catch (Exception ex)
@@ -89,12 +129,16 @@ public sealed class ShrinkUHostService : IHostedService
         try
         {
             _logger.LogDebug("ShrinkUHostService StopAsync: removing windows");
+            try { _conversionUi.DisableModStateSaving(); } catch { }
+            try { _conversionUi.ShutdownBackgroundWork(); } catch { }
             UnregisterWindows();
         }
         catch
         {
             // ignore
         }
+        try { _refreshCts?.Cancel(); } catch { }
+        try { _refreshCts?.Dispose(); } catch { }
         try { _configService.ConfigSave -= OnConfigSaved; } catch { }
         return Task.CompletedTask;
     }
@@ -106,9 +150,25 @@ public sealed class ShrinkUHostService : IHostedService
         {
             _logger.LogDebug("Applying ShrinkU integration toggle: enabled={enabled}", enabled);
             if (enabled)
+            {
                 RegisterWindows();
+                try
+                {
+                    if (_shrinkuConfigService.Current.FirstRunCompleted)
+                        _conversionUi.IsOpen = true;
+                    else
+                        _firstRunUi.IsOpen = true;
+                }
+                catch { }
+            }
             else
+            {
+                try { _refreshCts?.Cancel(); } catch { }
+                try { _refreshCts?.Dispose(); } catch { }
+                _refreshCts = null;
                 UnregisterWindows();
+                try { _shrinkuConversionService.SetEnabled(false); } catch { }
+            }
         }
         catch (Exception ex)
         {
@@ -123,6 +183,7 @@ public sealed class ShrinkUHostService : IHostedService
         try { _windowSystem.AddWindow(_settingsUi); } catch (Exception ex) { _logger.LogDebug(ex, "SettingsUI already registered or failed to add"); }
         try { _windowSystem.AddWindow(_firstRunUi); } catch (Exception ex) { _logger.LogDebug(ex, "FirstRunSetupUI already registered or failed to add"); }
         try { _windowSystem.AddWindow(_releaseChangelogUi); } catch (Exception ex) { _logger.LogDebug(ex, "ReleaseChangelogUI already registered or failed to add"); }
+        try { _windowSystem.AddWindow(_debugUi); } catch (Exception ex) { _logger.LogDebug(ex, "DebugUI already registered or failed to add"); }
         _registered = true;
     }
 
@@ -133,6 +194,7 @@ public sealed class ShrinkUHostService : IHostedService
         try { _windowSystem.RemoveWindow(_settingsUi); } catch (Exception ex) { _logger.LogDebug(ex, "SettingsUI not registered or failed to remove"); }
         try { _windowSystem.RemoveWindow(_firstRunUi); } catch (Exception ex) { _logger.LogDebug(ex, "FirstRunSetupUI not registered or failed to remove"); }
         try { _windowSystem.RemoveWindow(_releaseChangelogUi); } catch (Exception ex) { _logger.LogDebug(ex, "ReleaseChangelogUI not registered or failed to remove"); }
+        try { _windowSystem.RemoveWindow(_debugUi); } catch (Exception ex) { _logger.LogDebug(ex, "DebugUI not registered or failed to remove"); }
         _registered = false;
         // Clear integration marker so ShrinkU exposes generic Automatic mode when not hosted
         try
