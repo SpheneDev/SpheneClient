@@ -20,6 +20,7 @@ public sealed class ShrinkUHostService : IHostedService
     private readonly SettingsUI _settingsUi;
     private readonly ReleaseChangelogUI _releaseChangelogUi;
     private readonly DebugUI _debugUi;
+    private readonly ShrinkU.UI.StartupProgressUI _startupProgressUi;
     private readonly FirstRunSetupUI _firstRunUi;
     private readonly SpheneConfigService _configService;
     private readonly ShrinkUConfigService _shrinkuConfigService;
@@ -39,7 +40,8 @@ public sealed class ShrinkUHostService : IHostedService
         SpheneConfigService configService,
         ShrinkUConfigService shrinkuConfigService,
         ShrinkU.Services.TextureBackupService backupService,
-        ShrinkU.Services.TextureConversionService shrinkuConversionService)
+        ShrinkU.Services.TextureConversionService shrinkuConversionService,
+        ShrinkU.UI.StartupProgressUI startupProgressUi)
     {
         _logger = logger;
         _windowSystem = windowSystem;
@@ -48,6 +50,7 @@ public sealed class ShrinkUHostService : IHostedService
         _releaseChangelogUi = releaseChangelogUi;
         _debugUi = debugUi;
         _firstRunUi = firstRunUi;
+        _startupProgressUi = startupProgressUi;
         _configService = configService;
         _shrinkuConfigService = shrinkuConfigService;
         _backupService = backupService;
@@ -95,13 +98,18 @@ public sealed class ShrinkUHostService : IHostedService
                     _refreshCts?.Cancel();
                     _refreshCts = new CancellationTokenSource();
                     var token = _refreshCts.Token;
+                    try { _startupProgressUi.ResetAll(); _startupProgressUi.IsOpen = true; } catch { }
                     _ = Task.Run(async () =>
                     {
                         try
                         {
                             await Task.Delay(TimeSpan.FromSeconds(1), token).ConfigureAwait(false);
                             if (token.IsCancellationRequested) return;
+                            try { _startupProgressUi.SetStep(1); } catch { }
                             await _backupService.RefreshAllBackupStateAsync().ConfigureAwait(false);
+                            try { _startupProgressUi.MarkBackupDone(); _startupProgressUi.SetStep(2); } catch { }
+                            await _backupService.PopulateMissingOriginalBytesAsync(token).ConfigureAwait(false);
+                            try { _startupProgressUi.SetStep(3); } catch { }
                             _logger.LogDebug("Initial ShrinkU backup state refresh completed");
                         }
                         catch (Exception ex)
@@ -111,6 +119,7 @@ public sealed class ShrinkUHostService : IHostedService
                         finally
                         {
                             try { _conversionUi.SetStartupRefreshInProgress(false); } catch { }
+                            try { _startupProgressUi.IsOpen = false; } catch { }
                         }
                     }, token);
                 }
@@ -184,6 +193,7 @@ public sealed class ShrinkUHostService : IHostedService
         try { _windowSystem.AddWindow(_firstRunUi); } catch (Exception ex) { _logger.LogDebug(ex, "FirstRunSetupUI already registered or failed to add"); }
         try { _windowSystem.AddWindow(_releaseChangelogUi); } catch (Exception ex) { _logger.LogDebug(ex, "ReleaseChangelogUI already registered or failed to add"); }
         try { _windowSystem.AddWindow(_debugUi); } catch (Exception ex) { _logger.LogDebug(ex, "DebugUI already registered or failed to add"); }
+        try { _windowSystem.AddWindow(_startupProgressUi); } catch (Exception ex) { _logger.LogDebug(ex, "StartupProgressUI already registered or failed to add"); }
         _registered = true;
     }
 

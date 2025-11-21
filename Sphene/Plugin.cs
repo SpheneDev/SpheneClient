@@ -164,6 +164,11 @@ public sealed class Plugin : IDalamudPlugin
                 s.GetRequiredService<Microsoft.Extensions.Logging.ILogger>(),
                 s.GetRequiredService<ShrinkUConfigService>(),
                 s.GetRequiredService<ShrinkU.Services.DebugTraceService>()));
+            collection.AddSingleton<ShrinkU.UI.StartupProgressUI>(s => new ShrinkU.UI.StartupProgressUI(
+                s.GetRequiredService<Microsoft.Extensions.Logging.ILogger>(),
+                s.GetRequiredService<ShrinkUConfigService>(),
+                s.GetRequiredService<ShrinkU.Services.TextureConversionService>(),
+                s.GetRequiredService<ShrinkU.Services.TextureBackupService>()));
             collection.AddSingleton<SettingsUI>(s => new SettingsUI(
                 s.GetRequiredService<Microsoft.Extensions.Logging.ILogger>(),
                 s.GetRequiredService<ShrinkUConfigService>(),
