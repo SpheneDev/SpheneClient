@@ -44,6 +44,9 @@ public sealed class FileCacheManager : IHostedService
         _logger.LogTrace("Creating cache entry for {path}", path);
         var fullName = fi.FullName.ToLowerInvariant();
         if (!fullName.Contains(_configService.Current.CacheFolder.ToLowerInvariant(), StringComparison.Ordinal)) return null;
+        var cacheRoot = Path.GetFullPath(_configService.Current.CacheFolder).TrimEnd('\\').ToLowerInvariant();
+        var fileDir = Path.GetFullPath(fi.DirectoryName ?? string.Empty).TrimEnd('\\').ToLowerInvariant();
+        if (!string.Equals(fileDir, cacheRoot, StringComparison.Ordinal)) return null;
         string prefixedPath = fullName.Replace(_configService.Current.CacheFolder.ToLowerInvariant(), CachePrefix + "\\", StringComparison.Ordinal).Replace("\\\\", "\\", StringComparison.Ordinal);
         return CreateFileCacheEntity(fi, prefixedPath);
     }
