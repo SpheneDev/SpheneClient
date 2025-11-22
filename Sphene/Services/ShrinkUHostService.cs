@@ -27,6 +27,7 @@ public sealed class ShrinkUHostService : IHostedService
     private bool _registered;
     private readonly ShrinkU.Services.TextureBackupService _backupService;
     private readonly ShrinkU.Services.TextureConversionService _shrinkuConversionService;
+    private readonly Sphene.Interop.Ipc.IpcManager _ipcManager;
     private CancellationTokenSource? _refreshCts;
 
     public ShrinkUHostService(
@@ -41,7 +42,8 @@ public sealed class ShrinkUHostService : IHostedService
         ShrinkUConfigService shrinkuConfigService,
         ShrinkU.Services.TextureBackupService backupService,
         ShrinkU.Services.TextureConversionService shrinkuConversionService,
-        ShrinkU.UI.StartupProgressUI startupProgressUi)
+        ShrinkU.UI.StartupProgressUI startupProgressUi,
+        Sphene.Interop.Ipc.IpcManager ipcManager)
     {
         _logger = logger;
         _windowSystem = windowSystem;
@@ -55,6 +57,7 @@ public sealed class ShrinkUHostService : IHostedService
         _shrinkuConfigService = shrinkuConfigService;
         _backupService = backupService;
         _shrinkuConversionService = shrinkuConversionService;
+        _ipcManager = ipcManager;
 
         try { _configService.ConfigSave += OnConfigSaved; } catch { }
     }
@@ -83,6 +86,7 @@ public sealed class ShrinkUHostService : IHostedService
                 try
                 {
                     _shrinkuConfigService.Current.AutomaticControllerName = "Sphene";
+                    _shrinkuConfigService.Current.AutomaticHandledBySphene = true;
                     _shrinkuConfigService.Save();
                     _logger.LogDebug("Set ShrinkU AutomaticControllerName to Sphene on integration start");
                 }
@@ -103,6 +107,26 @@ public sealed class ShrinkUHostService : IHostedService
                     {
                         try
                         {
+                            try
+                            {
+                                _ipcManager.Penumbra.CheckAPI();
+                                _ipcManager.Penumbra.CheckModDirectory();
+                                var avail = _ipcManager.Penumbra.APIAvailable;
+                                var dir = _ipcManager.Penumbra.ModDirectory ?? string.Empty;
+                                _logger.LogDebug("ShrinkU startup: Penumbra API available={avail}, modDir='{dir}'", avail, dir);
+                                var maxWaitMs = Math.Max(1, _shrinkuConfigService.Current.StartupFolderTimeoutSeconds) * 1000;
+                                var waited = 0;
+                                while (!avail && waited < maxWaitMs && !token.IsCancellationRequested)
+                                {
+                                    await Task.Delay(250, token).ConfigureAwait(false);
+                                    _ipcManager.Penumbra.CheckAPI();
+                                    avail = _ipcManager.Penumbra.APIAvailable;
+                                }
+                                _ipcManager.Penumbra.CheckModDirectory();
+                                dir = _ipcManager.Penumbra.ModDirectory ?? string.Empty;
+                                _logger.LogDebug("ShrinkU startup: Penumbra ready={avail}, modDir='{dir}'", avail, dir);
+                            }
+                            catch { }
                             await Task.Delay(TimeSpan.FromSeconds(1), token).ConfigureAwait(false);
                             if (token.IsCancellationRequested) return;
                             try { _startupProgressUi.SetStep(1); } catch { }
@@ -110,7 +134,9 @@ public sealed class ShrinkUHostService : IHostedService
                             try { _startupProgressUi.MarkBackupDone(); _startupProgressUi.SetStep(2); } catch { }
                             await _backupService.PopulateMissingOriginalBytesAsync(token).ConfigureAwait(false);
                             try { _startupProgressUi.SetStep(3); } catch { }
-                            _logger.LogDebug("Initial ShrinkU backup state refresh completed");
+                            var threads = Math.Max(1, _shrinkuConfigService.Current.MaxStartupThreads);
+                            await _shrinkuConversionService.RunInitialParallelUpdateAsync(threads, token).ConfigureAwait(false);
+                            _logger.LogDebug("Initial ShrinkU startup update completed");
                         }
                         catch (Exception ex)
                         {
@@ -149,6 +175,13 @@ public sealed class ShrinkUHostService : IHostedService
         try { _refreshCts?.Cancel(); } catch { }
         try { _refreshCts?.Dispose(); } catch { }
         try { _configService.ConfigSave -= OnConfigSaved; } catch { }
+        try
+        {
+            _shrinkuConfigService.Current.AutomaticHandledBySphene = false;
+            _shrinkuConfigService.Current.AutomaticControllerName = string.Empty;
+            _shrinkuConfigService.Save();
+        }
+        catch { }
         return Task.CompletedTask;
     }
 
@@ -177,6 +210,13 @@ public sealed class ShrinkUHostService : IHostedService
                 _refreshCts = null;
                 UnregisterWindows();
                 try { _shrinkuConversionService.SetEnabled(false); } catch { }
+                try
+                {
+                    _shrinkuConfigService.Current.AutomaticHandledBySphene = false;
+                    _shrinkuConfigService.Current.AutomaticControllerName = string.Empty;
+                    _shrinkuConfigService.Save();
+                }
+                catch { }
             }
         }
         catch (Exception ex)
@@ -204,16 +244,17 @@ public sealed class ShrinkUHostService : IHostedService
         try { _windowSystem.RemoveWindow(_settingsUi); } catch (Exception ex) { _logger.LogDebug(ex, "SettingsUI not registered or failed to remove"); }
         try { _windowSystem.RemoveWindow(_firstRunUi); } catch (Exception ex) { _logger.LogDebug(ex, "FirstRunSetupUI not registered or failed to remove"); }
         try { _windowSystem.RemoveWindow(_releaseChangelogUi); } catch (Exception ex) { _logger.LogDebug(ex, "ReleaseChangelogUI not registered or failed to remove"); }
-        try { _windowSystem.RemoveWindow(_debugUi); } catch (Exception ex) { _logger.LogDebug(ex, "DebugUI not registered or failed to remove"); }
-        _registered = false;
-        // Clear integration marker so ShrinkU exposes generic Automatic mode when not hosted
-        try
-        {
-            _shrinkuConfigService.Current.AutomaticControllerName = string.Empty;
-            _shrinkuConfigService.Save();
-            _logger.LogDebug("Cleared ShrinkU AutomaticControllerName on integration stop");
-        }
-        catch { }
+            try { _windowSystem.RemoveWindow(_debugUi); } catch (Exception ex) { _logger.LogDebug(ex, "DebugUI not registered or failed to remove"); }
+            _registered = false;
+            // Clear integration marker so ShrinkU exposes generic Automatic mode when not hosted
+            try
+            {
+                _shrinkuConfigService.Current.AutomaticControllerName = string.Empty;
+                _shrinkuConfigService.Current.AutomaticHandledBySphene = false;
+                _shrinkuConfigService.Save();
+                _logger.LogDebug("Cleared ShrinkU AutomaticControllerName on integration stop");
+            }
+            catch { }
     }
 
     // Open ShrinkU release notes window from Sphene settings
@@ -275,6 +316,7 @@ public sealed class ShrinkUHostService : IHostedService
                 try
                 {
                     _shrinkuConfigService.Current.AutomaticControllerName = "Sphene";
+                    _shrinkuConfigService.Current.AutomaticHandledBySphene = true;
                     _shrinkuConfigService.Save();
                     _logger.LogDebug("Set ShrinkU AutomaticControllerName to Sphene on config save");
                 }
@@ -284,6 +326,13 @@ public sealed class ShrinkUHostService : IHostedService
             else
             {
                 UnregisterWindows();
+                try
+                {
+                    _shrinkuConfigService.Current.AutomaticHandledBySphene = false;
+                    _shrinkuConfigService.Current.AutomaticControllerName = string.Empty;
+                    _shrinkuConfigService.Save();
+                }
+                catch { }
             }
         }
         catch { }
