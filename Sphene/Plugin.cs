@@ -124,7 +124,6 @@ public sealed class Plugin : IDalamudPlugin
                         {
                             try { Directory.CreateDirectory(target); } catch { }
                             cfgSvc.Current.BackupFolderPath = target;
-                            // auto-complete first run when we configure the backup path
                             cfgSvc.Current.FirstRunCompleted = true;
                             try { cfgSvc.Save(); } catch { }
                             logger.LogDebug("Configured ShrinkU backup path to Sphene texture_backups: {path}", target);

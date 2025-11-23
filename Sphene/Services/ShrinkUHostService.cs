@@ -107,33 +107,31 @@ public sealed class ShrinkUHostService : IHostedService
                     {
                         try
                         {
-                            try
-                            {
-                                _ipcManager.Penumbra.CheckAPI();
-                                _ipcManager.Penumbra.CheckModDirectory();
-                                var avail = _ipcManager.Penumbra.APIAvailable;
-                                var dir = _ipcManager.Penumbra.ModDirectory ?? string.Empty;
-                                _logger.LogDebug("ShrinkU startup: Penumbra API available={avail}, modDir='{dir}'", avail, dir);
-                                var maxWaitMs = Math.Max(1, _shrinkuConfigService.Current.StartupFolderTimeoutSeconds) * 1000;
-                                var waited = 0;
-                                while (!avail && waited < maxWaitMs && !token.IsCancellationRequested)
-                                {
-                                    await Task.Delay(250, token).ConfigureAwait(false);
-                                    _ipcManager.Penumbra.CheckAPI();
-                                    avail = _ipcManager.Penumbra.APIAvailable;
-                                }
-                                _ipcManager.Penumbra.CheckModDirectory();
-                                dir = _ipcManager.Penumbra.ModDirectory ?? string.Empty;
-                                _logger.LogDebug("ShrinkU startup: Penumbra ready={avail}, modDir='{dir}'", avail, dir);
-                            }
-                            catch { }
+                            try { _logger.LogDebug("ShrinkU startup via Sphene: skipping Penumbra wait"); } catch { }
+                            try { _backupService.SetSavingEnabled(false); } catch { }
                             await Task.Delay(TimeSpan.FromSeconds(1), token).ConfigureAwait(false);
                             if (token.IsCancellationRequested) return;
                             try { _startupProgressUi.SetStep(1); } catch { }
-                            await _backupService.RefreshAllBackupStateAsync().ConfigureAwait(false);
-                            try { _startupProgressUi.MarkBackupDone(); _startupProgressUi.SetStep(2); } catch { }
+                            var maxBackupSeconds = 5;
+                            var refreshTask = _backupService.RefreshAllBackupStateAsync();
+                            var completed = await Task.WhenAny(refreshTask, Task.Delay(TimeSpan.FromSeconds(maxBackupSeconds), token)).ConfigureAwait(false);
+                            if (completed != refreshTask)
+                            {
+                                _logger.LogWarning("Backup refresh timed out after {sec}s; continuing", maxBackupSeconds);
+                            }
+                            else
+                            {
+                                try { await refreshTask.ConfigureAwait(false); } catch { }
+                            }
+                            try { _startupProgressUi.MarkBackupDone(); _startupProgressUi.SetStep(3); } catch { }
                             await _backupService.PopulateMissingOriginalBytesAsync(token).ConfigureAwait(false);
-                            try { _startupProgressUi.SetStep(3); } catch { }
+                            try { _startupProgressUi.SetStep(4); } catch { }
+                            try { await _shrinkuConversionService.UpdateAllModUsedTextureFilesAsync().ConfigureAwait(false); } catch { }
+                            try { _startupProgressUi.MarkUsedDone(); _startupProgressUi.SetStep(5); } catch { }
+                            try { _backupService.SetSavingEnabled(true); } catch { }
+                            try { _backupService.SaveModState(); } catch { }
+                            try { _startupProgressUi.MarkSaveDone(); } catch { }
+                            try { _conversionUi.TriggerStartupRescan(); } catch { }
                             var threads = Math.Max(1, _shrinkuConfigService.Current.MaxStartupThreads);
                             await _shrinkuConversionService.RunInitialParallelUpdateAsync(threads, token).ConfigureAwait(false);
                             _logger.LogDebug("Initial ShrinkU startup update completed");
@@ -295,6 +293,23 @@ public sealed class ShrinkUHostService : IHostedService
                 _shrinkuConfigService.Current.FirstRunCompleted = true;
                 try { _shrinkuConfigService.Save(); } catch { }
                 _logger.LogDebug("Configured ShrinkU backup path to Sphene texture_backups on setup completion: {path}", target);
+            }
+            else
+            {
+                try
+                {
+                    try { Directory.CreateDirectory(target); } catch { }
+                    var test = Path.Combine(target, ".shrinku_write_test.tmp");
+                    try { File.WriteAllText(test, "ok"); } catch { }
+                    try { if (File.Exists(test)) File.Delete(test); } catch { }
+                }
+                catch
+                {
+                    try { Directory.CreateDirectory(target); } catch { }
+                    _shrinkuConfigService.Current.BackupFolderPath = target;
+                    try { _shrinkuConfigService.Save(); } catch { }
+                    _logger.LogDebug("Backup path not writable; switched to Sphene texture_backups: {path}", target);
+                }
             }
         }
         catch (Exception ex)
