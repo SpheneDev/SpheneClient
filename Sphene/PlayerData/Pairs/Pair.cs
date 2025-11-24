@@ -110,6 +110,18 @@ public class Pair : DisposableMediatorSubscriberBase
             var dto = new UserVisibilityReportDto(new(uid), UserData, isProximityVisible, DateTime.UtcNow);
             Logger.LogDebug("Reporting visibility: reporter={uid}, target={target}, proximity={visible}", uid, UserData.AliasOrUID, isProximityVisible);
             _ = _apiController.Value.UserReportVisibility(dto);
+
+            if (isProximityVisible)
+            {
+                if (!IsMutuallyVisible && UserPair.Groups.Any())
+                {
+                    SetMutualVisibility(true);
+                }
+            }
+            else if (UserPair.Groups.Any() && IsMutuallyVisible)
+            {
+                SetMutualVisibility(false);
+            }
         }
         catch (Exception ex)
         {
