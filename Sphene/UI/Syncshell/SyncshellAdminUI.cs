@@ -41,10 +41,9 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
     private int _pruneDays = 14;
     
     // Area binding related fields
-    private LocationInfo? _currentLocation;
+    
     private AreaBoundSyncshellDto? _currentAreaBinding;
-    private AreaBoundSettings _areaBoundSettings = new();
-    private bool _isAreaBound = false;
+    
     private bool _isLoadingAreaBinding = false;
     private bool _areaBindingEnabled = false;
     private bool _autoBroadcastEnabled = true;
@@ -58,7 +57,7 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
     private string _joinRules = string.Empty;
     private int _rulesVersion = 1;
     private bool _requireRulesAcceptance = false;
-    private List<string> _rulesList = new();
+    private readonly List<string> _rulesList = new();
     private bool _rulesChanged = false;
     
     // Multi-location support
@@ -71,13 +70,13 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
     private bool _aliasChangeSuccess = true;
     
     // Welcome page fields
-    private SyncshellWelcomePageDto? _welcomePage;
+    
     private string _welcomeText = string.Empty;
     private string _welcomeImageBase64 = string.Empty;
     
     // Text selection tracking
-    private bool _hasSelection = false;
-    private Vector4 _selectedColor = new Vector4(1.0f, 0.0f, 0.0f, 1.0f); // Default red color for picker
+    
+    
     private IDalamudTextureWrap? _welcomeImageTexture = null;
     private string _imageFileName = string.Empty;
     private string _imageContentType = string.Empty;
@@ -87,31 +86,31 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
     private bool _showOnAreaBoundJoin = true;
     private bool _isLoadingWelcomePage = false;
     private bool _welcomePageSaveSuccess = true;
-    private bool _showFormattingHelp = false;
+    
     
     // User list pagination fields
     private int _userListCurrentPage = 0;
     private const int _userListItemsPerPage = 25;
     
     private readonly FileDialogManager _fileDialogManager;
-    private readonly UiFactory _uiFactory;
+    
     private readonly HousingOwnershipService _housingOwnershipService;
     
     // UI-only state for property preferences - immediate UI updates
     
     // Tab switching control
     private bool _shouldSelectAreaBindingTab = false;
-    private readonly Dictionary<string, (bool AllowOutdoor, bool AllowIndoor)> _uiPropertyStates = new();
+    private readonly Dictionary<string, (bool AllowOutdoor, bool AllowIndoor)> _uiPropertyStates = new(StringComparer.Ordinal);
     
     // Track properties that have been deleted in the UI (to hide them until server confirms)
-    private readonly HashSet<string> _deletedPropertyKeys = new();
+    private readonly HashSet<string> _deletedPropertyKeys = new(StringComparer.Ordinal);
     
     // State for ownership verification checkboxes
     private bool _verificationAllowOutdoor = true;
     private bool _verificationAllowIndoor = true;
     
     public SyncshellAdminUI(ILogger<SyncshellAdminUI> logger, SpheneMediator mediator, ApiController apiController,
-        UiSharedService uiSharedService, PairManager pairManager, DalamudUtilService dalamudUtilService, GroupFullInfoDto groupFullInfo, PerformanceCollectorService performanceCollectorService, FileDialogManager fileDialogManager, UiFactory uiFactory, HousingOwnershipService housingOwnershipService)
+        UiSharedService uiSharedService, PairManager pairManager, DalamudUtilService dalamudUtilService, GroupFullInfoDto groupFullInfo, PerformanceCollectorService performanceCollectorService, FileDialogManager fileDialogManager, HousingOwnershipService housingOwnershipService)
         : base(logger, mediator, "Syncshell Admin Panel (" + groupFullInfo.GroupAliasOrGID + ")", performanceCollectorService)
     {
         GroupFullInfo = groupFullInfo;
@@ -120,7 +119,6 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
         _pairManager = pairManager;
         _dalamudUtilService = dalamudUtilService;
         _fileDialogManager = fileDialogManager;
-        _uiFactory = uiFactory;
         _housingOwnershipService = housingOwnershipService;
         _isOwner = string.Equals(GroupFullInfo.OwnerUID, _apiController.UID, StringComparison.Ordinal);
         _isModerator = GroupFullInfo.GroupUserInfo.IsModerator();
@@ -162,30 +160,29 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
         try
         {
             var areaBoundSyncshells = await _apiController.GroupGetAreaBoundSyncshells().ConfigureAwait(false);
-            var currentBinding = areaBoundSyncshells.FirstOrDefault(x => x.Group.GID == GroupFullInfo.Group.GID);
+            var currentBinding = areaBoundSyncshells.FirstOrDefault(x => string.Equals(x.Group.GID, GroupFullInfo.Group.GID, StringComparison.Ordinal));
             
             if (currentBinding != null)
             {
                 _currentAreaBinding = currentBinding;
-                _areaBoundSettings = currentBinding.Settings;
-                _isAreaBound = true;
                 _areaBindingEnabled = true;
                 
                 // Load bound areas
                 _boundAreas = currentBinding.BoundAreas.ToList();
                 
                 // Load global settings
-                _autoBroadcastEnabled = _areaBoundSettings.AutoBroadcastEnabled;
-                _requireOwnerPresence = _areaBoundSettings.RequireOwnerPresence;
-                _maxAutoJoinUsers = _areaBoundSettings.MaxAutoJoinUsers;
-                _notifyOnUserEnter = _areaBoundSettings.NotifyOnUserEnter;
-                _notifyOnUserLeave = _areaBoundSettings.NotifyOnUserLeave;
-                _customJoinMessage = _areaBoundSettings.CustomJoinMessage ?? string.Empty;
+                var areaBoundSettings = currentBinding.Settings;
+                _autoBroadcastEnabled = areaBoundSettings.AutoBroadcastEnabled;
+                _requireOwnerPresence = areaBoundSettings.RequireOwnerPresence;
+                _maxAutoJoinUsers = areaBoundSettings.MaxAutoJoinUsers;
+                _notifyOnUserEnter = areaBoundSettings.NotifyOnUserEnter;
+                _notifyOnUserLeave = areaBoundSettings.NotifyOnUserLeave;
+                _customJoinMessage = areaBoundSettings.CustomJoinMessage ?? string.Empty;
                 
                 // Load rules settings
-                _joinRules = _areaBoundSettings.JoinRules ?? string.Empty;
-                _rulesVersion = _areaBoundSettings.RulesVersion;
-                _requireRulesAcceptance = _areaBoundSettings.RequireRulesAcceptance;
+                _joinRules = areaBoundSettings.JoinRules ?? string.Empty;
+                _rulesVersion = areaBoundSettings.RulesVersion;
+                _requireRulesAcceptance = areaBoundSettings.RequireRulesAcceptance;
                 
                 // Parse existing rules into list
                 ParseRulesIntoList();
@@ -193,10 +190,8 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
             else
             {
                 _currentAreaBinding = null;
-                _isAreaBound = false;
                 _areaBindingEnabled = false;
                 _boundAreas.Clear();
-                _areaBoundSettings = new AreaBoundSettings();
                 
                 // Reset UI variables to defaults
                 _autoBroadcastEnabled = true;
@@ -347,10 +342,24 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
                     ImGui.SameLine();
                     using (ImRaii.Disabled(_multiInvites <= 1 || _multiInvites > 100))
                     {
-                        if (_uiSharedService.IconTextButton(FontAwesomeIcon.Envelope, "Generate " + _multiInvites + " invites"))
+                    if (_uiSharedService.IconTextButton(FontAwesomeIcon.Envelope, "Generate " + _multiInvites + " invites"))
+                    {
+                        _ = Task.Run(async () =>
                         {
-                            _oneTimeInvites.AddRange(_apiController.GroupCreateTempInvite(new(GroupFullInfo.Group), _multiInvites).Result);
-                        }
+                            try
+                            {
+                                var invites = await _apiController.GroupCreateTempInvite(new(GroupFullInfo.Group), _multiInvites).ConfigureAwait(false);
+                                lock (_oneTimeInvites)
+                                {
+                                    _oneTimeInvites.AddRange(invites);
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogError(ex, "Failed to generate {Count} one-time invites for group {GID}", _multiInvites, GroupFullInfo.Group.GID);
+                            }
+                        });
+                    }
                     }
                     UiSharedService.AttachToolTip($"Generate {_multiInvites} one-time invites (1-100 allowed)");
 
@@ -358,10 +367,8 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
                 }
                 
                 // Generated Invites Section
-                if (_oneTimeInvites.Any())
+                if (_oneTimeInvites.Any() && ImGui.CollapsingHeader("Generated Invites", ImGuiTreeNodeFlags.DefaultOpen))
                 {
-                    if (ImGui.CollapsingHeader("Generated Invites", ImGuiTreeNodeFlags.DefaultOpen))
-                    {
                         ImGuiHelpers.ScaledDummy(2f);
                         
                         var invites = string.Join(Environment.NewLine, _oneTimeInvites);
@@ -379,7 +386,6 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
                         UiSharedService.AttachToolTip("Clear the generated invites list");
                         
                         ImGuiHelpers.ScaledDummy(2f);
-                    }
                 }
             }
             inviteTab.Dispose();
@@ -685,12 +691,16 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
                                 ImGui.TableNextColumn();
                                 UiSharedService.TextWrapped(bannedUser.Reason);
                                 ImGui.TableNextColumn();
-                                using var _ = ImRaii.PushId(bannedUser.UID);
-                                if (_uiSharedService.IconTextButton(FontAwesomeIcon.UserCheck, "Unban"))
-                                {
-                                    _apiController.GroupUnbanUser(bannedUser);
-                                    _bannedUsers.RemoveAll(b => string.Equals(b.UID, bannedUser.UID, StringComparison.Ordinal));
-                                }
+                                using var idScope = ImRaii.PushId(bannedUser.UID);
+                if (_uiSharedService.IconTextButton(FontAwesomeIcon.UserCheck, "Unban"))
+                {
+                    _ = Task.Run(async () =>
+                    {
+                        try { await _apiController.GroupUnbanUser(bannedUser).ConfigureAwait(false); }
+                        catch (Exception ex) { _logger.LogError(ex, "Failed to unban user {UID}", bannedUser.UID); }
+                    });
+                    _bannedUsers.RemoveAll(b => string.Equals(b.UID, bannedUser.UID, StringComparison.Ordinal));
+                }
                                 UiSharedService.AttachToolTip("Remove this user from the ban list");
                             }
 
@@ -708,9 +718,9 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
             mgmtTab.Dispose();
 
             var permissionTab = ImRaii.TabItem("Permissions");
+            #pragma warning disable S1066
             if (permissionTab)
             {
-                // Sync Preferences Section
                 if (ImGui.CollapsingHeader("Suggested Sync Preferences", ImGuiTreeNodeFlags.DefaultOpen))
                 {
                     ImGuiHelpers.ScaledDummy(2f);
@@ -722,7 +732,7 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
                     bool isDisableAnimations = perm.IsPreferDisableAnimations();
                     bool isDisableSounds = perm.IsPreferDisableSounds();
                     bool isDisableVfx = perm.IsPreferDisableVFX();
-
+                    
                     // Sound Sync
                     ImGui.AlignTextToFramePadding();
                     ImGui.Text("Sound Sync:");
@@ -737,34 +747,34 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
                     {
                         perm.SetPreferDisableSounds(!perm.IsPreferDisableSounds());
                         _ = _apiController.GroupChangeGroupPermissionState(new(GroupFullInfo.Group, perm));
-                }
-
-                ImGuiHelpers.ScaledDummy(2f);
-                
-                // Animation Sync
-                ImGui.AlignTextToFramePadding();
-                ImGui.Text("Animation Sync:");
-                ImGui.SameLine();
-                _uiSharedService.BooleanToColoredIcon(!isDisableAnimations);
-                ImGui.SameLine();
-                ImGui.TextColored(!isDisableAnimations ? ImGuiColors.ParsedGreen : ImGuiColors.DalamudRed, 
-                    !isDisableAnimations ? "Enabled" : "Disabled");
-                ImGui.SameLine(230);
-                if (_uiSharedService.IconTextButton(isDisableAnimations ? FontAwesomeIcon.Running : FontAwesomeIcon.Stop,
-                    isDisableAnimations ? "Suggest to enable animation sync" : "Suggest to disable animation sync"))
-                {
-                    perm.SetPreferDisableAnimations(!perm.IsPreferDisableAnimations());
-                    _ = _apiController.GroupChangeGroupPermissionState(new(GroupFullInfo.Group, perm));
-                }
-
-                ImGuiHelpers.ScaledDummy(2f);
-                
-                // VFX Sync
-                ImGui.AlignTextToFramePadding();
-                ImGui.Text("VFX Sync:");
-                ImGui.SameLine();
-                _uiSharedService.BooleanToColoredIcon(!isDisableVfx);
-                ImGui.SameLine();
+                    }
+                    
+                    ImGuiHelpers.ScaledDummy(2f);
+                    
+                    // Animation Sync
+                    ImGui.AlignTextToFramePadding();
+                    ImGui.Text("Animation Sync:");
+                    ImGui.SameLine();
+                    _uiSharedService.BooleanToColoredIcon(!isDisableAnimations);
+                    ImGui.SameLine();
+                    ImGui.TextColored(!isDisableAnimations ? ImGuiColors.ParsedGreen : ImGuiColors.DalamudRed, 
+                        !isDisableAnimations ? "Enabled" : "Disabled");
+                    ImGui.SameLine(230);
+                    if (_uiSharedService.IconTextButton(isDisableAnimations ? FontAwesomeIcon.Running : FontAwesomeIcon.Stop,
+                        isDisableAnimations ? "Suggest to enable animation sync" : "Suggest to disable animation sync"))
+                    {
+                        perm.SetPreferDisableAnimations(!perm.IsPreferDisableAnimations());
+                        _ = _apiController.GroupChangeGroupPermissionState(new(GroupFullInfo.Group, perm));
+                    }
+                    
+                    ImGuiHelpers.ScaledDummy(2f);
+                    
+                    // VFX Sync
+                    ImGui.AlignTextToFramePadding();
+                    ImGui.Text("VFX Sync:");
+                    ImGui.SameLine();
+                    _uiSharedService.BooleanToColoredIcon(!isDisableVfx);
+                    ImGui.SameLine();
                     ImGui.TextColored(!isDisableVfx ? ImGuiColors.ParsedGreen : ImGuiColors.DalamudRed, 
                         !isDisableVfx ? "Enabled" : "Disabled");
                     ImGui.SameLine(230);
@@ -774,7 +784,7 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
                         perm.SetPreferDisableVFX(!perm.IsPreferDisableVFX());
                         _ = _apiController.GroupChangeGroupPermissionState(new(GroupFullInfo.Group, perm));
                     }
-
+                    
                     ImGuiHelpers.ScaledDummy(3f);
                     
                     ImGui.TextColored(ImGuiColors.DalamudGrey, "Note: These suggested permissions will be shown to users when joining the Syncshell.");
@@ -782,6 +792,7 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
                     ImGuiHelpers.ScaledDummy(2f);
                 }
             }
+            #pragma warning restore S1066
             permissionTab.Dispose();
 
             if (_isOwner)
@@ -921,7 +932,7 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
                         // Check if current location is verified as owned
                         var currentLocation = _dalamudUtilService.GetMapData();
                         var isCurrentLocationVerified = _housingOwnershipService.IsLocationVerifiedAndAllowed(currentLocation);
-                        var isInHousingArea = _housingOwnershipService.IsHousingArea(currentLocation);
+                        var isInHousingArea = HousingOwnershipService.IsHousingArea(currentLocation);
                         
                         if (!isInHousingArea)
                         {
@@ -942,17 +953,13 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
                             UiSharedService.TextWrapped("To configure Area Binding, you must first verify ownership of this property in the 'Owned Properties Management' section below.");
                             ImGuiHelpers.ScaledDummy(1f);
                         }
+                        else if (_isLoadingAreaBinding)
+                        {
+                            ImGui.TextUnformatted("Loading area binding settings...");
+                        }
                         else
                         {
-                            // Show Area Binding controls only if location is verified
-                            if (_isLoadingAreaBinding)
-                            {
-                                ImGui.TextUnformatted("Loading area binding settings...");
-                            }
-                            else
-                            {
-                                DrawAreaBindingControls();
-                            }
+                            DrawAreaBindingControls();
                         }
 
                         ImGuiHelpers.ScaledDummy(2f);
@@ -1040,7 +1047,7 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
         ImGuiHelpers.ScaledDummy(2f);
         
         // Area binding toggle
-        var isInHousingArea = _housingOwnershipService.IsHousingArea(loc);
+        var isInHousingArea = HousingOwnershipService.IsHousingArea(loc);
         
         // Status indicator for area binding
         if (_areaBindingEnabled && _currentAreaBinding != null)
@@ -1073,13 +1080,9 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
         }
         
         ImGui.BeginDisabled(!isInHousingArea);
-        if (ImGui.Checkbox("Enable Area Binding", ref _areaBindingEnabled))
+        if (ImGui.Checkbox("Enable Area Binding", ref _areaBindingEnabled) && !_areaBindingEnabled && _currentAreaBinding != null)
         {
-            if (!_areaBindingEnabled && _currentAreaBinding != null)
-            {
-                // Remove area binding
-                _ = RemoveAreaBinding();
-            }
+            _ = RemoveAreaBinding();
         }
         ImGui.EndDisabled();
         
@@ -1157,6 +1160,7 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
                 ImGui.TextUnformatted("Rules:");
                 
                 // Display existing rules with remove buttons
+                int removeIndex = -1;
                 for (int i = 0; i < _rulesList.Count; i++)
                 {
                     ImGui.PushID($"rule_{i}");
@@ -1177,13 +1181,16 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
                     ImGui.SameLine();
                     if (_uiSharedService.IconButton(FontAwesomeIcon.Trash))
                     {
-                        _rulesList.RemoveAt(i);
+                        removeIndex = i;
                         _rulesChanged = true;
-                        i--; // Adjust index after removal
                     }
                     UiSharedService.AttachToolTip("Remove this rule");
                     
                     ImGui.PopID();
+                }
+                if (removeIndex >= 0)
+                {
+                    _rulesList.RemoveAt(removeIndex);
                 }
                 
                 // Add new rule button
@@ -1436,7 +1443,7 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
             }
             
             // Check if location is a housing area first
-            if (!_housingOwnershipService.IsHousingArea(location))
+            if (!HousingOwnershipService.IsHousingArea(location))
             {
                 var message = "Area syncshells can only be created in housing areas (plots, houses, or rooms). For other areas, please use city syncshells or create a non-area-bound syncshell.";
                 
@@ -1449,11 +1456,11 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
             }
             
             // Check ownership before allowing area binding
-            var ownershipResult = await _housingOwnershipService.VerifyOwnershipAsync(location);
+            var ownershipResult = await _housingOwnershipService.VerifyOwnershipAsync(location).ConfigureAwait(false);
             
-            if (ownershipResult.IsOwner != true)
+            if (!ownershipResult.IsOwner)
             {
-                var message = ownershipResult.IsOwner == false 
+                var message = !ownershipResult.IsOwner 
                     ? "You cannot create area syncshells on properties you don't own."
                     : "Cannot verify property ownership. Please ensure you are the owner of this property.";
                     
@@ -1496,7 +1503,7 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
             _boundAreas.Add(newLocation);
             
             // Update server
-            await UpdateAreaBindingSettings();
+            await UpdateAreaBindingSettings().ConfigureAwait(false);
             
             // Reset input fields
             _newLocationMatchingMode = AreaMatchingMode.ExactMatch;
@@ -1517,7 +1524,7 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
             if (index >= 0 && index < _boundAreas.Count)
             {
                 _boundAreas.RemoveAt(index);
-                await UpdateAreaBindingSettings();
+                await UpdateAreaBindingSettings().ConfigureAwait(false);
                 
                 _logger.LogDebug("Successfully removed location binding at index {Index} for syncshell {GID}", index, GroupFullInfo.Group.GID);
             }
@@ -1552,7 +1559,7 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
                 Settings = settings
             };
             
-            await _apiController.GroupSetAreaBinding(dto);
+            await _apiController.GroupSetAreaBinding(dto).ConfigureAwait(false);
             _currentAreaBinding = dto;
             
             _logger.LogDebug("Successfully updated area binding settings for syncshell {GID}", GroupFullInfo.Group.GID);
@@ -1567,10 +1574,9 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
     {
         try
         {
-            await _apiController.GroupRemoveAreaBinding(new(GroupFullInfo.Group));
+            await _apiController.GroupRemoveAreaBinding(new(GroupFullInfo.Group)).ConfigureAwait(false);
             _currentAreaBinding = null;
             _areaBindingEnabled = false;
-            _isAreaBound = false;
             _boundAreas.Clear();
             
             // Reset UI variables to defaults
@@ -1619,7 +1625,7 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
                 continue;
                 
             // Remove existing numbering if present (e.g., "1. Rule content" -> "Rule content")
-            var match = System.Text.RegularExpressions.Regex.Match(trimmedLine, @"^\d+\.\s*(.*)$");
+            var match = System.Text.RegularExpressions.Regex.Match(trimmedLine, @"^\d+\.\s*(.*)$", System.Text.RegularExpressions.RegexOptions.CultureInvariant | System.Text.RegularExpressions.RegexOptions.Compiled | System.Text.RegularExpressions.RegexOptions.ExplicitCapture, TimeSpan.FromMilliseconds(2000));
             if (match.Success)
             {
                 _rulesList.Add(match.Groups[1].Value);
@@ -1653,7 +1659,7 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
         UpdateRulesText();
         _rulesChanged = false;
         
-        await UpdateAreaBindingSettings();
+        await UpdateAreaBindingSettings().ConfigureAwait(false);
         
         _logger.LogDebug("Rules saved with version {Version} for syncshell {GID}", _rulesVersion, GroupFullInfo.Group.GID);
     }
@@ -1663,18 +1669,18 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
         _isLoadingWelcomePage = true;
         try
         {
-            _welcomePage = await _apiController.GroupGetWelcomePage(new GroupDto(GroupFullInfo.Group)).ConfigureAwait(false);
+            var page = await _apiController.GroupGetWelcomePage(new GroupDto(GroupFullInfo.Group)).ConfigureAwait(false);
             
-            if (_welcomePage != null)
+            if (page != null)
             {
-                _welcomeText = _welcomePage.WelcomeText ?? string.Empty;
-                _welcomeImageBase64 = _welcomePage.WelcomeImageBase64 ?? string.Empty;
-                _imageFileName = _welcomePage.ImageFileName ?? string.Empty;
-                _imageContentType = _welcomePage.ImageContentType ?? string.Empty;
-                _imageSize = _welcomePage.ImageSize ?? 0;
-                _welcomePageEnabled = _welcomePage.IsEnabled;
-                _showOnJoin = _welcomePage.ShowOnJoin;
-                _showOnAreaBoundJoin = _welcomePage.ShowOnAreaBoundJoin;
+                _welcomeText = page.WelcomeText ?? string.Empty;
+                _welcomeImageBase64 = page.WelcomeImageBase64 ?? string.Empty;
+                _imageFileName = page.ImageFileName ?? string.Empty;
+                _imageContentType = page.ImageContentType ?? string.Empty;
+                _imageSize = page.ImageSize ?? 0;
+                _welcomePageEnabled = page.IsEnabled;
+                _showOnJoin = page.ShowOnJoin;
+                _showOnAreaBoundJoin = page.ShowOnAreaBoundJoin;
                 
                 // Create texture from base64 image data if available
                 if (!string.IsNullOrEmpty(_welcomeImageBase64))
@@ -1694,7 +1700,6 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
             }
             else
             {
-                // Reset to defaults if no welcome page exists
                 _welcomeText = string.Empty;
                 _welcomeImageBase64 = string.Empty;
                 _imageFileName = string.Empty;
@@ -1790,20 +1795,6 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
                 // Keyboard shortcuts are now handled by the Markdown Formatter Popup
                 bool textChanged = false;
                 
-                // Detect if text is selected using keyboard shortcuts
-                var io = ImGui.GetIO();
-                if (ImGui.IsItemFocused() && io.KeyCtrl)
-                {
-                    if (ImGui.IsKeyPressed(ImGuiKey.A))
-                    {
-                        _hasSelection = !string.IsNullOrEmpty(_welcomeText);
-                    }
-                    else if (ImGui.IsKeyPressed(ImGuiKey.C) || ImGui.IsKeyPressed(ImGuiKey.X))
-                    {
-                        _hasSelection = true; // Assume text is selected when copying/cutting
-                    }
-                }
-                
                 // Store original text for comparison
                 string originalText = _welcomeText;
                 
@@ -1813,7 +1804,7 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
                     _ = SaveWelcomePage();
                     
                     // Update live preview if it's open and text has changed
-                    if (originalText != _welcomeText)
+                    if (!string.Equals(originalText, _welcomeText, StringComparison.Ordinal))
                     {
                         Mediator.Publish(new UpdateWelcomePageLivePreviewMessage(_welcomeText, _welcomeImageTexture));
                     }
@@ -1972,51 +1963,12 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
         base.Dispose(disposing);
     }
     
-    private List<AreaMatchingMode> GetAvailableMatchingModes(LocationInfo location)
-    {
-        var availableModes = new List<AreaMatchingMode>();
-        
-        // Always available modes
-        availableModes.Add(AreaMatchingMode.ExactMatch);
-        availableModes.Add(AreaMatchingMode.TerritoryOnly);
-        availableModes.Add(AreaMatchingMode.ServerAndTerritory);
-        
-        // Housing-specific modes - only show if player is in a housing area
-        if (location.WardId > 0)
-        {
-            availableModes.Add(AreaMatchingMode.HousingWardOnly);
-            
-            // Plot-specific modes - only show if player is in a specific plot
-            if (location.HouseId > 0)
-            {
-                availableModes.Add(AreaMatchingMode.HousingPlotOnly);
-                availableModes.Add(AreaMatchingMode.HousingPlotOutdoor);
-                availableModes.Add(AreaMatchingMode.HousingPlotIndoor);
-            }
-        }
-        
-        return availableModes;
-    }
     
-    private string GetMatchingModeDisplayName(AreaMatchingMode mode)
-    {
-        return mode switch
-        {
-            AreaMatchingMode.ExactMatch => "Exact Match - Precise location (map, ward, house, room)",
-            AreaMatchingMode.TerritoryOnly => "Territory Only - Anywhere in the same zone/area",
-            AreaMatchingMode.ServerAndTerritory => "Server & Territory - Same server and zone/area",
-            AreaMatchingMode.HousingWardOnly => "Housing Ward Only - Anywhere in the same housing ward",
-            AreaMatchingMode.HousingPlotOnly => "Housing Plot Only - Specific housing plot (indoor & outdoor)",
-            AreaMatchingMode.HousingPlotOutdoor => "Housing Plot Outdoor - Only outdoor areas of the plot",
-            AreaMatchingMode.HousingPlotIndoor => "Housing Plot Indoor - Only inside the house",
-            _ => "Unknown"
-        };
-    }
     
     private void DrawOwnedPropertiesControls()
     {
         var currentLocation = _dalamudUtilService.GetMapData();
-        var ownedProperties = _housingOwnershipService.GetOwnedProperties();
+        _ = _housingOwnershipService.GetOwnedProperties();
         var verifiedProperties = GetCachedVerifiedProperties();
         
         
@@ -2095,11 +2047,11 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
                     _uiPropertyStates.Clear();
                     
                     // Send clear to server in background
-                    Task.Run(() =>
+                    _ = Task.Run(async () =>
                     {
                         try
                         {
-                            _housingOwnershipService.ClearAllVerifiedProperties();
+                            await _housingOwnershipService.ClearAllVerifiedProperties().ConfigureAwait(false);
                             _logger.LogDebug("All properties cleared from server");
                          }
                          catch (Exception ex)
@@ -2278,16 +2230,16 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
                             _uiPropertyStates[key] = (newAllowOutdoor, newAllowIndoor);
                             
                             // Send update to server in background (fire and forget)
-                            Task.Run(() =>
+                            _ = Task.Run(async () =>
                             {
                                 try
                                 {
-                                    _housingOwnershipService.UpdateVerifiedPropertyPreferences(
+                                    await _housingOwnershipService.UpdateVerifiedPropertyPreferences(
                                         location, 
                                         newAllowOutdoor, 
                                         newAllowIndoor, 
                                         property.PreferOutdoorSyncshells, 
-                                        property.PreferIndoorSyncshells);
+                                        property.PreferIndoorSyncshells).ConfigureAwait(false);
                                     _logger.LogDebug("Property preferences updated on server for {Location}", location);
                                  }
                                  catch (Exception ex)
@@ -2318,11 +2270,11 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
                             _uiPropertyStates.Remove(key);
                             
                             // Send removal to server in background
-                            Task.Run(() =>
+                            _ = Task.Run(async () =>
                             {
                                 try
                                 {
-                                    _housingOwnershipService.RemoveVerifiedOwnedProperty(location);
+                                    await _housingOwnershipService.RemoveVerifiedOwnedProperty(location).ConfigureAwait(false);
                                     _logger.LogDebug("Property removed from server for {Location}", location);
                                  }
                                  catch (Exception ex)
@@ -2350,7 +2302,7 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
         }
     }
     
-    private bool LocationsMatch(LocationInfo loc1, LocationInfo loc2)
+    private static bool LocationsMatch(LocationInfo loc1, LocationInfo loc2)
     {
         return loc1.ServerId == loc2.ServerId &&
                loc1.TerritoryId == loc2.TerritoryId &&
@@ -2363,12 +2315,12 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
     {
         try
         {
-            var verificationResult = await _housingOwnershipService.PerformOneTimeOwnershipVerificationAsync(location);
+            var verificationResult = await _housingOwnershipService.PerformOneTimeOwnershipVerificationAsync(location).ConfigureAwait(false);
             
             if (verificationResult.IsOwner)
             {
                 // Add the property with the specified preferences
-                _housingOwnershipService.AddVerifiedOwnedPropertyWithPreferences(location, allowOutdoor, allowIndoor);
+                await _housingOwnershipService.AddVerifiedOwnedPropertyWithPreferences(location, allowOutdoor, allowIndoor).ConfigureAwait(false);
                 
                 // Refresh UI state to show the newly added property
                 InitializeUiStateFromServer();
@@ -2395,13 +2347,13 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
     {
         try
         {
-            var verificationResult = await _housingOwnershipService.PerformOneTimeOwnershipVerificationAsync(location);
+            var verificationResult = await _housingOwnershipService.PerformOneTimeOwnershipVerificationAsync(location).ConfigureAwait(false);
             
             if (verificationResult.IsOwner)
             {
                 // For rooms, add the property without outdoor/indoor preferences
                 // Rooms are always indoor by nature and don't need these settings
-                _housingOwnershipService.AddVerifiedOwnedRoom(location);
+                await _housingOwnershipService.AddVerifiedOwnedRoom(location).ConfigureAwait(false);
                 
                 // Refresh UI state to show the newly added property
                 InitializeUiStateFromServer();
@@ -2424,31 +2376,6 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
         }
     }
 
-    private async Task PerformOwnershipVerification(LocationInfo location)
-    {
-        try
-        {
-            var verificationResult = await _housingOwnershipService.PerformOneTimeOwnershipVerificationAsync(location);
-            
-            if (verificationResult.IsOwner)
-            {
-                _logger.LogInformation("Successfully verified ownership for location: {Location}. Reason: {Reason}", 
-                    LocationDisplayService.GetLocationDisplayTextWithNames(location, _dalamudUtilService),
-                    verificationResult.Reason);
-            }
-            else
-            {
-                _logger.LogWarning("Failed to verify ownership for location: {Location}. Reason: {Reason}", 
-                    LocationDisplayService.GetLocationDisplayTextWithNames(location, _dalamudUtilService),
-                    verificationResult.Reason);
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error during ownership verification for location: {Location}", 
-                LocationDisplayService.GetLocationDisplayTextWithNames(location, _dalamudUtilService));
-        }
-    }
     
     private List<VerifiedHousingProperty> GetCachedVerifiedProperties()
     {

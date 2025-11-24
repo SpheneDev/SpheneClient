@@ -102,21 +102,21 @@ public static class VariousExtensions
                         }
                         else
                         {
-                            var existingFace = existingFileReplacements.Where(g => g.GamePaths.Any(p => p.Contains("/face/", StringComparison.OrdinalIgnoreCase)))
+                            var existingFace = (existingFileReplacements ?? Enumerable.Empty<FileReplacementData>()).Where(g => g.GamePaths.Any(p => p.Contains("/face/", StringComparison.OrdinalIgnoreCase)))
                                 .OrderBy(g => string.IsNullOrEmpty(g.Hash) ? g.FileSwapPath : g.Hash, StringComparer.OrdinalIgnoreCase).ToList();
-                            var existingHair = existingFileReplacements.Where(g => g.GamePaths.Any(p => p.Contains("/hair/", StringComparison.OrdinalIgnoreCase)))
+                            var existingHair = (existingFileReplacements ?? Enumerable.Empty<FileReplacementData>()).Where(g => g.GamePaths.Any(p => p.Contains("/hair/", StringComparison.OrdinalIgnoreCase)))
                                 .OrderBy(g => string.IsNullOrEmpty(g.Hash) ? g.FileSwapPath : g.Hash, StringComparer.OrdinalIgnoreCase).ToList();
-                            var existingTail = existingFileReplacements.Where(g => g.GamePaths.Any(p => p.Contains("/tail/", StringComparison.OrdinalIgnoreCase)))
+                            var existingTail = (existingFileReplacements ?? Enumerable.Empty<FileReplacementData>()).Where(g => g.GamePaths.Any(p => p.Contains("/tail/", StringComparison.OrdinalIgnoreCase)))
                                 .OrderBy(g => string.IsNullOrEmpty(g.Hash) ? g.FileSwapPath : g.Hash, StringComparer.OrdinalIgnoreCase).ToList();
-                            var newFace = newFileReplacements.Where(g => g.GamePaths.Any(p => p.Contains("/face/", StringComparison.OrdinalIgnoreCase)))
+                            var newFace = (newFileReplacements ?? Enumerable.Empty<FileReplacementData>()).Where(g => g.GamePaths.Any(p => p.Contains("/face/", StringComparison.OrdinalIgnoreCase)))
                                 .OrderBy(g => string.IsNullOrEmpty(g.Hash) ? g.FileSwapPath : g.Hash, StringComparer.OrdinalIgnoreCase).ToList();
-                            var newHair = newFileReplacements.Where(g => g.GamePaths.Any(p => p.Contains("/hair/", StringComparison.OrdinalIgnoreCase)))
+                            var newHair = (newFileReplacements ?? Enumerable.Empty<FileReplacementData>()).Where(g => g.GamePaths.Any(p => p.Contains("/hair/", StringComparison.OrdinalIgnoreCase)))
                                 .OrderBy(g => string.IsNullOrEmpty(g.Hash) ? g.FileSwapPath : g.Hash, StringComparer.OrdinalIgnoreCase).ToList();
-                            var newTail = newFileReplacements.Where(g => g.GamePaths.Any(p => p.Contains("/tail/", StringComparison.OrdinalIgnoreCase)))
+                            var newTail = (newFileReplacements ?? Enumerable.Empty<FileReplacementData>()).Where(g => g.GamePaths.Any(p => p.Contains("/tail/", StringComparison.OrdinalIgnoreCase)))
                                 .OrderBy(g => string.IsNullOrEmpty(g.Hash) ? g.FileSwapPath : g.Hash, StringComparer.OrdinalIgnoreCase).ToList();
-                            var existingTransients = existingFileReplacements.Where(g => g.GamePaths.Any(g => !g.EndsWith("mdl") && !g.EndsWith("tex") && !g.EndsWith("mtrl")))
+                            var existingTransients = (existingFileReplacements ?? Enumerable.Empty<FileReplacementData>()).Where(g => g.GamePaths.Any(g => !g.EndsWith("mdl", StringComparison.OrdinalIgnoreCase) && !g.EndsWith("tex", StringComparison.OrdinalIgnoreCase) && !g.EndsWith("mtrl", StringComparison.OrdinalIgnoreCase)))
                                 .OrderBy(g => string.IsNullOrEmpty(g.Hash) ? g.FileSwapPath : g.Hash, StringComparer.OrdinalIgnoreCase).ToList();
-                            var newTransients = newFileReplacements.Where(g => g.GamePaths.Any(g => !g.EndsWith("mdl") && !g.EndsWith("tex") && !g.EndsWith("mtrl")))
+                            var newTransients = (newFileReplacements ?? Enumerable.Empty<FileReplacementData>()).Where(g => g.GamePaths.Any(g => !g.EndsWith("mdl", StringComparison.OrdinalIgnoreCase) && !g.EndsWith("tex", StringComparison.OrdinalIgnoreCase) && !g.EndsWith("mtrl", StringComparison.OrdinalIgnoreCase)))
                                 .OrderBy(g => string.IsNullOrEmpty(g.Hash) ? g.FileSwapPath : g.Hash, StringComparer.OrdinalIgnoreCase).ToList();
 
                             logger.LogTrace("[BASE-{appbase}] ExistingFace: {of}, NewFace: {fc}; ExistingHair: {eh}, NewHair: {nh}; ExistingTail: {et}, NewTail: {nt}; ExistingTransient: {etr}, NewTransient: {ntr}", applicationBase,

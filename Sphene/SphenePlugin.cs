@@ -108,15 +108,15 @@ public class SphenePlugin : MediatorSubscriberBase, IHostedService
         if (ThemeManager.ShouldAutoLoadTheme())
         {
             var selectedThemeName = ThemeManager.GetSelectedTheme();
-            Logger.LogDebug($"Auto-loading theme: {selectedThemeName}");
+            Logger.LogDebug("Auto-loading theme: {Theme}", selectedThemeName);
             
             // Try to load the selected theme
-            if (selectedThemeName == "Default Sphene" || ThemePresets.BuiltInThemes.ContainsKey(selectedThemeName))
+            if (string.Equals(selectedThemeName, "Default Sphene", StringComparison.Ordinal) || ThemePresets.BuiltInThemes.ContainsKey(selectedThemeName))
             {
                 // Load built-in theme
                 var presetTheme = ThemePresets.BuiltInThemes.GetValueOrDefault(selectedThemeName, ThemePresets.BuiltInThemes["Default Sphene"]);
                 ThemePropertyCopier.Copy(presetTheme, SpheneCustomTheme.CurrentTheme);
-                Logger.LogDebug($"Loaded built-in theme: {selectedThemeName}");
+                Logger.LogDebug("Loaded built-in theme: {Theme}", selectedThemeName);
             }
             else
             {
@@ -125,11 +125,11 @@ public class SphenePlugin : MediatorSubscriberBase, IHostedService
                 if (customTheme != null)
                 {
                     ThemePropertyCopier.Copy(customTheme, SpheneCustomTheme.CurrentTheme);
-                    Logger.LogDebug($"Loaded custom theme: {selectedThemeName}");
+                    Logger.LogDebug("Loaded custom theme: {Theme}", selectedThemeName);
                 }
                 else
                 {
-                    Logger.LogWarning($"Failed to load theme '{selectedThemeName}', falling back to Default Sphene");
+                    Logger.LogWarning("Failed to load theme '{Theme}', falling back to Default Sphene", selectedThemeName);
                     var defaultTheme = ThemePresets.BuiltInThemes["Default Sphene"];
                     ThemePropertyCopier.Copy(defaultTheme, SpheneCustomTheme.CurrentTheme);
                 }
@@ -139,9 +139,9 @@ public class SphenePlugin : MediatorSubscriberBase, IHostedService
             SpheneCustomTheme.CurrentTheme.NotifyThemeChanged();
             
             // Add a small delay to ensure UI components have time to apply the theme
-            Task.Delay(100).ContinueWith(_ => 
+            _ = Task.Run(async () =>
             {
-                // Force another theme change notification to ensure all UI components are updated
+                await Task.Delay(100).ConfigureAwait(false);
                 SpheneCustomTheme.CurrentTheme.NotifyThemeChanged();
             });
         }
@@ -155,10 +155,7 @@ public class SphenePlugin : MediatorSubscriberBase, IHostedService
         return Task.CompletedTask;
     }
     
-    private static void CopyThemeProperties(ThemeConfiguration source, ThemeConfiguration target)
-    {
-        ThemePropertyCopier.Copy(source, target);
-    }
+    
 
     public Task StopAsync(CancellationToken cancellationToken)
     {

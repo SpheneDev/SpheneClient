@@ -1,5 +1,4 @@
 using Microsoft.Extensions.Logging;
-using Sphene.SpheneConfiguration;
 using System.Net.Http;
 using System.Text.Json;
 
@@ -9,14 +8,12 @@ public sealed class ChangelogService
 {
     private readonly ILogger<ChangelogService> _logger;
     private readonly HttpClient _httpClient;
-    private readonly SpheneConfigService _configService;
     private const string DefaultUrl = "https://sphene.online/sphene/changelog.json";
 
-    public ChangelogService(ILogger<ChangelogService> logger, HttpClient httpClient, SpheneConfigService configService)
+    public ChangelogService(ILogger<ChangelogService> logger, HttpClient httpClient)
     {
         _logger = logger;
         _httpClient = httpClient;
-        _configService = configService;
     }
 
 public async Task<string?> GetChangelogTextForVersionAsync(string version, CancellationToken ct = default)
@@ -28,7 +25,7 @@ public async Task<string?> GetChangelogTextForVersionAsync(string version, Cance
             _logger.LogDebug("Fetching release changelog from {url}", url);
             using var resp = await _httpClient.GetAsync(url, ct).ConfigureAwait(false);
             resp.EnsureSuccessStatusCode();
-            await using var stream = await resp.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+            using var stream = await resp.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
 
             using var jsonDoc = await JsonDocument.ParseAsync(stream, cancellationToken: ct).ConfigureAwait(false);
             var root = jsonDoc.RootElement;
@@ -139,7 +136,7 @@ public async Task<List<ReleaseChangelogViewEntry>> GetChangelogEntriesAsync(Canc
             _logger.LogDebug("Fetching release changelog entries from {url}", url);
             using var resp = await _httpClient.GetAsync(url, ct).ConfigureAwait(false);
             resp.EnsureSuccessStatusCode();
-            await using var stream = await resp.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+            using var stream = await resp.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
 
             using var jsonDoc = await JsonDocument.ParseAsync(stream, cancellationToken: ct).ConfigureAwait(false);
             var root = jsonDoc.RootElement;
@@ -199,13 +196,11 @@ public async Task<List<ReleaseChangelogViewEntry>> GetChangelogEntriesAsync(Canc
                                             var s = sub.GetString();
                                             if (!string.IsNullOrWhiteSpace(s)) view.Sub.Add(s!.Trim());
                                         }
-                                        else if (sub.ValueKind == JsonValueKind.Object)
+                                        else if (sub.ValueKind == JsonValueKind.Object &&
+                                                 sub.TryGetProperty("description", out var sdProp) && sdProp.ValueKind == JsonValueKind.String)
                                         {
-                                            if (sub.TryGetProperty("description", out var sdProp) && sdProp.ValueKind == JsonValueKind.String)
-                                            {
-                                                var s = sdProp.GetString();
-                                                if (!string.IsNullOrWhiteSpace(s)) view.Sub.Add(s!.Trim());
-                                            }
+                                            var s = sdProp.GetString();
+                                            if (!string.IsNullOrWhiteSpace(s)) view.Sub.Add(s!.Trim());
                                         }
                                     }
                                 }
@@ -246,38 +241,3 @@ public async Task<List<ReleaseChangelogViewEntry>> GetChangelogEntriesAsync(Canc
     }
 }
 
-public sealed class ReleaseChangelogDocument
-{
-    public List<ReleaseChangelogEntry> Changelogs { get; set; } = new();
-}
-
-public sealed class ReleaseChangelogEntry
-{
-    public string Version { get; set; } = string.Empty;
-    public string Title { get; set; } = string.Empty;
-    public string Description { get; set; } = string.Empty;
-    public List<ReleaseChange> Changes { get; set; } = new();
-    public bool IsPrerelease { get; set; }
-}
-
-public sealed class ReleaseChange
-{
-    public string Type { get; set; } = string.Empty;
-    public string Description { get; set; } = string.Empty;
-    public string Category { get; set; } = string.Empty;
-}
-
-public sealed class ReleaseChangelogViewEntry
-{
-    public string Version { get; set; } = string.Empty;
-    public string Title { get; set; } = string.Empty;
-    public string Description { get; set; } = string.Empty;
-    public List<ReleaseChangeView> Changes { get; set; } = new();
-    public bool IsPrerelease { get; set; }
-}
-
-public sealed class ReleaseChangeView
-{
-    public string Text { get; set; } = string.Empty;
-    public List<string> Sub { get; set; } = new();
-}

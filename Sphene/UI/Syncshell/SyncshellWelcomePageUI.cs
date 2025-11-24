@@ -20,7 +20,7 @@ public class SyncshellWelcomePageUI : WindowMediatorSubscriberBase
     private readonly SpheneConfigService _configService;
     private readonly SyncshellWelcomePageDto _welcomePage;
     private readonly string _syncshellName;
-    private IDalamudTextureWrap? _welcomeImageTexture = null;
+    private readonly IDalamudTextureWrap? _welcomeImageTexture = null;
 
     public SyncshellWelcomePageUI(ILogger<SyncshellWelcomePageUI> logger, SpheneMediator mediator,
         UiSharedService uiSharedService, SpheneConfigService configService, SyncshellWelcomePageDto welcomePage, string syncshellName,

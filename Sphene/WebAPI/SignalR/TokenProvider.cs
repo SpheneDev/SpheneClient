@@ -27,7 +27,6 @@ public sealed class TokenProvider : IDisposable, IMediatorSubscriber
         _logger = logger;
         _serverManager = serverManager;
         _dalamudUtil = dalamudUtil;
-        var ver = Assembly.GetExecutingAssembly().GetName().Version;
         Mediator = spheneMediator;
         _httpClient = httpClient;
         _configService = configService;
@@ -64,7 +63,7 @@ public sealed class TokenProvider : IDisposable, IMediatorSubscriber
         {
             baseUrl = baseUrl.Replace(":6000", ":8080");
         }
-        else if (!baseUrl.Contains(":") && baseUrl.StartsWith("http://"))
+        else if (!baseUrl.Contains(":") && baseUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
         {
             // If no port specified, add 8080
             baseUrl += ":8080";
@@ -83,7 +82,10 @@ public sealed class TokenProvider : IDisposable, IMediatorSubscriber
                 return _configService.Current.TestServerApiUrl.TrimEnd('/');
             }
         }
-        catch { }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to read TestServer override from config");
+        }
         return _serverManager.CurrentApiUrl;
     }
 
@@ -156,13 +158,13 @@ public sealed class TokenProvider : IDisposable, IMediatorSubscriber
                 throw new SpheneAuthFailureException(response);
             }
 
-            throw;
+            throw new HttpRequestException("GetNewToken failed", ex);
         }
 
         var handler = new JwtSecurityTokenHandler();
         var jwtToken = handler.ReadJwtToken(response);
         _logger.LogTrace("GetNewToken: JWT {token}", response);
-        _logger.LogDebug("GetNewToken: Valid until {date}, ValidClaim until {date}", jwtToken.ValidTo,
+        _logger.LogDebug("GetNewToken: Valid until {date}, ValidClaim until {validClaimDate}", jwtToken.ValidTo,
                 new DateTime(long.Parse(jwtToken.Claims.Single(c => string.Equals(c.Type, "expiration_date", StringComparison.Ordinal)).Value), DateTimeKind.Utc));
         var dateTimeMinus10 = DateTime.UtcNow.Subtract(TimeSpan.FromMinutes(10));
         var dateTimePlus10 = DateTime.UtcNow.Add(TimeSpan.FromMinutes(10));

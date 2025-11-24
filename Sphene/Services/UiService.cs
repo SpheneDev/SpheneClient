@@ -45,7 +45,7 @@ public sealed class UiService : DisposableMediatorSubscriberBase
         foreach (var window in windows)
         {
             _logger.LogDebug("Adding window to WindowSystem: {WindowType}", window.GetType().Name);
-            if (window.GetType().Name == "CitySyncshellExplanationUI")
+            if (string.Equals(window.GetType().Name, "CitySyncshellExplanationUI", StringComparison.Ordinal))
             {
                 _logger.LogDebug("CitySyncshellExplanationUI instance found and being added to WindowSystem");
             }

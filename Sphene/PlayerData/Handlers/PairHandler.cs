@@ -124,22 +124,25 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         {
             _localVisibilityGateActive = false;
         });
-        Mediator.Subscribe<PenumbraInitializedMessage>(this, async (_) =>
+        Mediator.Subscribe<PenumbraInitializedMessage>(this, msg =>
         {
-            try
+            _ = Task.Run(async () =>
             {
-                _penumbraCollection = await _ipcManager.Penumbra.CreateTemporaryCollectionAsync(logger, Pair.UserData.UID).ConfigureAwait(false);
-                if (!IsVisible && _charaHandler != null)
+                try
                 {
-                    PlayerName = string.Empty;
-                    _charaHandler.Dispose();
-                    _charaHandler = null;
+                    _penumbraCollection = await _ipcManager.Penumbra.CreateTemporaryCollectionAsync(logger, Pair.UserData.UID).ConfigureAwait(false);
+                    if (!IsVisible && _charaHandler != null)
+                    {
+                        PlayerName = string.Empty;
+                        _charaHandler.Dispose();
+                        _charaHandler = null;
+                    }
                 }
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError(ex, "Failed to recreate Penumbra collection for {uid}", Pair.UserData.UID);
-            }
+                catch (Exception ex)
+                {
+                    Logger.LogError(ex, "Failed to recreate Penumbra collection for {uid}", Pair.UserData.UID);
+                }
+            });
         });
         Mediator.Subscribe<ClassJobChangedMessage>(this, (msg) =>
         {
@@ -300,9 +303,11 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         try
         {
             Guid applicationId = Guid.NewGuid();
-            _applicationCancellationTokenSource?.CancelDispose();
+            _applicationCancellationTokenSource?.Cancel();
+            _applicationCancellationTokenSource?.Dispose();
             _applicationCancellationTokenSource = null;
-            _downloadCancellationTokenSource?.CancelDispose();
+            _downloadCancellationTokenSource?.Cancel();
+            _downloadCancellationTokenSource?.Dispose();
             _downloadCancellationTokenSource = null;
             _downloadManager.Dispose();
             _charaHandler?.Dispose();
@@ -646,7 +651,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
 
         if (_charaHandler?.Address != nint.Zero)
         {
-            var gameObj = _charaHandler.GetGameObject();
+            var gameObj = _charaHandler!.GetGameObject();
             var self = _dalamudUtil.GetPlayerCharacter();
             bool inSameParty = _dalamudUtil.IsPlayerInParty(PlayerName ?? string.Empty);
             var currentLocation = _dalamudUtil.GetMapData();
@@ -795,18 +800,18 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             }
         });
 
-        Mediator.Subscribe<HonorificReadyMessage>(this, async (_) =>
+        Mediator.Subscribe<HonorificReadyMessage>(this, msg =>
         {
             if (string.IsNullOrEmpty(_cachedData?.HonorificData)) return;
             Logger.LogTrace("Reapplying Honorific data for {this}", this);
-            await _ipcManager.Honorific.SetTitleAsync(PlayerCharacter, _cachedData.HonorificData).ConfigureAwait(false);
+            _ = _ipcManager.Honorific.SetTitleAsync(PlayerCharacter, _cachedData.HonorificData).ConfigureAwait(false);
         });
 
-        Mediator.Subscribe<PetNamesReadyMessage>(this, async (_) =>
+        Mediator.Subscribe<PetNamesReadyMessage>(this, msg =>
         {
             if (string.IsNullOrEmpty(_cachedData?.PetNamesData)) return;
             Logger.LogTrace("Reapplying Pet Names data for {this}", this);
-            await _ipcManager.PetNames.SetPlayerData(PlayerCharacter, _cachedData.PetNamesData).ConfigureAwait(false);
+            _ = _ipcManager.PetNames.SetPlayerData(PlayerCharacter, _cachedData.PetNamesData).ConfigureAwait(false);
         });
 
         _ipcManager.Penumbra.AssignTemporaryCollectionAsync(Logger, _penumbraCollection, _charaHandler.GetGameObject()!.ObjectIndex).GetAwaiter().GetResult();
@@ -996,7 +1001,6 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                     catch (OperationCanceledException)
                     {
                         cancellationRequested = true;
-                        return;
                     }
                     catch (Exception itemEx)
                     {

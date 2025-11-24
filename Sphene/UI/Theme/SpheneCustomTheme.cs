@@ -174,10 +174,11 @@ public static class SpheneCustomTheme
         style.GrabMinSize = CurrentTheme.GrabMinSize;
     }
     
-    private class ThemeScope : IDisposable
+    private sealed class ThemeScope : IDisposable
     {
         private int _colorsPushed = 0;
         private int _stylesPushed = 0;
+        private bool _disposed;
         
         public ThemeScope()
         {
@@ -312,22 +313,19 @@ public static class SpheneCustomTheme
         
         public void Dispose()
         {
-            // Pop all style variables and colors in reverse order
-            if (_stylesPushed > 0)
-            {
-                ImGui.PopStyleVar(_stylesPushed);
-            }
-            if (_colorsPushed > 0)
-            {
-                ImGui.PopStyleColor(_colorsPushed);
-            }
+            if (_disposed) return;
+            if (_stylesPushed > 0) ImGui.PopStyleVar(_stylesPushed);
+            if (_colorsPushed > 0) ImGui.PopStyleColor(_colorsPushed);
+            _disposed = true;
+            GC.SuppressFinalize(this);
         }
     }
     
-    private class ReducedRadiusThemeScope : IDisposable
+    private sealed class ReducedRadiusThemeScope : IDisposable
     {
         private int _colorsPushed = 0;
         private int _stylesPushed = 0;
+        private bool _disposed;
         
         public ReducedRadiusThemeScope()
         {
@@ -447,22 +445,19 @@ public static class SpheneCustomTheme
         
         public void Dispose()
         {
-            // Pop all style variables and colors in reverse order
-            if (_stylesPushed > 0)
-            {
-                ImGui.PopStyleVar(_stylesPushed);
-            }
-            if (_colorsPushed > 0)
-            {
-                ImGui.PopStyleColor(_colorsPushed);
-            }
+            if (_disposed) return;
+            if (_stylesPushed > 0) ImGui.PopStyleVar(_stylesPushed);
+            if (_colorsPushed > 0) ImGui.PopStyleColor(_colorsPushed);
+            _disposed = true;
+            GC.SuppressFinalize(this);
         }
     }
     
-    private class OriginalRadiusThemeScope : IDisposable
+    private sealed class OriginalRadiusThemeScope : IDisposable
     {
         private int _colorsPushed = 0;
         private int _stylesPushed = 0;
+        private bool _disposed;
         
         public OriginalRadiusThemeScope()
         {
@@ -603,28 +598,25 @@ public static class SpheneCustomTheme
         
         public void Dispose()
         {
-            // Pop all style variables and colors in reverse order
-            if (_stylesPushed > 0)
-            {
-                ImGui.PopStyleVar(_stylesPushed);
-            }
-            if (_colorsPushed > 0)
-            {
-                ImGui.PopStyleColor(_colorsPushed);
-            }
+            if (_disposed) return;
+            if (_stylesPushed > 0) ImGui.PopStyleVar(_stylesPushed);
+            if (_colorsPushed > 0) ImGui.PopStyleColor(_colorsPushed);
+            _disposed = true;
+            GC.SuppressFinalize(this);
         }
     }
     
-    private class ContextMenuThemeScope : IDisposable
+    private sealed class ContextMenuThemeScope : IDisposable
     {
         private int _stylesPushed = 0;
+        private bool _disposed;
         
         public ContextMenuThemeScope()
         {
-            ApplyContextMenuTheme();
+            Apply();
         }
         
-        private void ApplyContextMenuTheme()
+        private void Apply()
         {
             // Apply CompactUI-specific context menu styling
             // Context menus are popups, so we need to override the global PopupRounding and PopupBorderSize
@@ -645,24 +637,25 @@ public static class SpheneCustomTheme
         
         public void Dispose()
         {
-            if (_stylesPushed > 0)
-            {
-                ImGui.PopStyleVar(_stylesPushed);
-                _stylesPushed = 0;
-            }
+            if (_disposed) return;
+            if (_stylesPushed > 0) ImGui.PopStyleVar(_stylesPushed);
+            _stylesPushed = 0;
+            _disposed = true;
+            GC.SuppressFinalize(this);
         }
     }
     
-    private class TooltipThemeScope : IDisposable
+    private sealed class TooltipThemeScope : IDisposable
     {
         private int _stylesPushed = 0;
+        private bool _disposed;
         
         public TooltipThemeScope()
         {
-            ApplyTooltipTheme();
+            Apply();
         }
         
-        private void ApplyTooltipTheme()
+        private void Apply()
         {
             // Apply CompactUI-specific tooltip styling independently
             // This will override any previously set WindowRounding for tooltips
@@ -682,11 +675,11 @@ public static class SpheneCustomTheme
         
         public void Dispose()
         {
-            if (_stylesPushed > 0)
-            {
-                ImGui.PopStyleVar(_stylesPushed);
-                _stylesPushed = 0;
-            }
+            if (_disposed) return;
+            if (_stylesPushed > 0) ImGui.PopStyleVar(_stylesPushed);
+            _stylesPushed = 0;
+            _disposed = true;
+            GC.SuppressFinalize(this);
         }
     }
     

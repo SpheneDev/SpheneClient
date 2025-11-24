@@ -16,15 +16,13 @@ public class DrawFolderTag : DrawFolderBase
 {
     private readonly ApiController _apiController;
     private readonly SelectPairForTagUi _selectPairForTagUi;
-    private readonly SpheneConfigService _configService;
 
     public DrawFolderTag(string id, IImmutableList<DrawUserPair> drawPairs, IImmutableList<Pair> allPairs,
-        TagHandler tagHandler, ApiController apiController, SelectPairForTagUi selectPairForTagUi, UiSharedService uiSharedService, SpheneConfigService configService)
+        TagHandler tagHandler, ApiController apiController, SelectPairForTagUi selectPairForTagUi, UiSharedService uiSharedService)
         : base(id, drawPairs, allPairs, tagHandler, uiSharedService, 0f, false) // Consistent width with other containers, not a syncshell folder
     {
         _apiController = apiController;
         _selectPairForTagUi = selectPairForTagUi;
-        _configService = configService;
     }
 
     protected override bool RenderIfEmpty => _id switch

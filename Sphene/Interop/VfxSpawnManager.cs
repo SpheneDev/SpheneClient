@@ -17,13 +17,13 @@ public unsafe class VfxSpawnManager : DisposableMediatorSubscriberBase
     private static readonly byte[] _pool = "Client.System.Scheduler.Instance.VfxObject\0"u8.ToArray();
 
     [Signature("E8 ?? ?? ?? ?? F3 0F 10 35 ?? ?? ?? ?? 48 89 43 08")]
-    private readonly delegate* unmanaged<byte*, byte*, VfxStruct*> _staticVfxCreate;
+    private readonly delegate* unmanaged<byte*, byte*, VfxStruct*> _staticVfxCreate = null;
 
     [Signature("E8 ?? ?? ?? ?? ?? ?? ?? 8B 4A ?? 85 C9")]
-    private readonly delegate* unmanaged<VfxStruct*, float, int, ulong> _staticVfxRun;
+    private readonly delegate* unmanaged<VfxStruct*, float, int, ulong> _staticVfxRun = null;
 
     [Signature("40 53 48 83 EC 20 48 8B D9 48 8B 89 ?? ?? ?? ?? 48 85 C9 74 28 33 D2 E8 ?? ?? ?? ?? 48 8B 8B ?? ?? ?? ?? 48 85 C9")]
-    private readonly delegate* unmanaged<VfxStruct*, nint> _staticVfxRemove;
+    private readonly delegate* unmanaged<VfxStruct*, nint> _staticVfxRemove = null;
 
     public VfxSpawnManager(ILogger<VfxSpawnManager> logger, IGameInteropProvider gameInteropProvider, SpheneMediator spheneMediator)
     : base(logger, spheneMediator)

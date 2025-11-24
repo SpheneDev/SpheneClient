@@ -15,7 +15,6 @@ public class UpdateCheckService : IHostedService, IDisposable
     private readonly HttpClient _httpClient;
     private readonly SpheneMediator _mediator;
     private readonly DalamudUtilService _dalamudUtilService;
-    private readonly IDalamudPluginInterface _pluginInterface;
     private Timer? _updateCheckTimer;
     private const string UPDATE_CHECK_URL = "https://raw.githubusercontent.com/SpheneDev/repo/refs/heads/main/plogonmaster.json";
     private const int UPDATE_CHECK_INTERVAL_MINUTES = 5;
@@ -26,7 +25,7 @@ public class UpdateCheckService : IHostedService, IDisposable
         _httpClient = httpClient;
         _mediator = mediator;
         _dalamudUtilService = dalamudUtilService;
-        _pluginInterface = pluginInterface;
+        _ = pluginInterface;
     }
     
     public async Task<UpdateInfo?> CheckForUpdatesAsync(bool skipCombatCheck = false)
@@ -42,7 +41,7 @@ public class UpdateCheckService : IHostedService, IDisposable
             
             _logger.LogDebug("Checking for updates from {url}", UPDATE_CHECK_URL);
             
-            var response = await _httpClient.GetStringAsync(UPDATE_CHECK_URL);
+            var response = await _httpClient.GetStringAsync(UPDATE_CHECK_URL).ConfigureAwait(false);
             var updateData = JsonSerializer.Deserialize<UpdateData[]>(response);
             
             if (updateData == null || updateData.Length == 0)
@@ -51,7 +50,7 @@ public class UpdateCheckService : IHostedService, IDisposable
                 return null;
             }
             
-            var spheneData = updateData.FirstOrDefault(x => x.InternalName == "Sphene");
+            var spheneData = updateData.FirstOrDefault(x => string.Equals(x.InternalName, "Sphene", StringComparison.Ordinal));
             if (spheneData == null)
             {
                 _logger.LogWarning("Sphene data not found in update response");
@@ -110,7 +109,7 @@ public class UpdateCheckService : IHostedService, IDisposable
     }
     
 
-    private Version GetCurrentVersion()
+    private static Version GetCurrentVersion()
     {
         var assembly = Assembly.GetExecutingAssembly();
         var version = assembly.GetName().Version;
@@ -131,17 +130,20 @@ public class UpdateCheckService : IHostedService, IDisposable
         }
     }
     
-    private async void OnUpdateCheckTimer(object? state)
+    private void OnUpdateCheckTimer(object? state)
     {
-        try
+        _ = Task.Run(async () =>
         {
-            _logger.LogDebug("Periodic update check triggered");
-            await CheckForUpdatesAsync();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error during periodic update check");
-        }
+            try
+            {
+                _logger.LogDebug("Periodic update check triggered");
+                await CheckForUpdatesAsync().ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error during periodic update check");
+            }
+        });
     }
 
     public Task StartAsync(CancellationToken cancellationToken)
@@ -166,39 +168,18 @@ public class UpdateCheckService : IHostedService, IDisposable
         return Task.CompletedTask;
     }
     
+    protected virtual void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _updateCheckTimer?.Dispose();
+            _updateCheckTimer = null;
+        }
+    }
+
     public void Dispose()
     {
-        _updateCheckTimer?.Dispose();
+        Dispose(true);
+        GC.SuppressFinalize(this);
     }
-}
-
-public class UpdateInfo
-{
-    public Version CurrentVersion { get; set; } = new(0, 0, 0, 0);
-    public Version LatestVersion { get; set; } = new(0, 0, 0, 0);
-    public string? Changelog { get; set; }
-    public string? DownloadUrl { get; set; }
-    public bool IsUpdateAvailable { get; set; }
-}
-
-public class UpdateData
-{
-    public string Author { get; set; } = string.Empty;
-    public string Name { get; set; } = string.Empty;
-    public string InternalName { get; set; } = string.Empty;
-    public string AssemblyVersion { get; set; } = string.Empty;
-    public string Description { get; set; } = string.Empty;
-    public string ApplicableVersion { get; set; } = string.Empty;
-    public string RepoUrl { get; set; } = string.Empty;
-    public string[] Tags { get; set; } = Array.Empty<string>();
-    public int DalamudApiLevel { get; set; }
-    public int LoadPriority { get; set; }
-    public string IconUrl { get; set; } = string.Empty;
-    public string Punchline { get; set; } = string.Empty;
-    public string Changelog { get; set; } = string.Empty;
-    public string DownloadLinkInstall { get; set; } = string.Empty;
-    public string DownloadLinkTesting { get; set; } = string.Empty;
-    public string DownloadLinkUpdate { get; set; } = string.Empty;
-    public string TestingAssemblyVersion { get; set; } = string.Empty;
-    public string TestingDalamudApiLevel { get; set; } = string.Empty;
 }

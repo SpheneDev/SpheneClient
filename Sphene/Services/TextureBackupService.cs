@@ -8,14 +8,12 @@ namespace Sphene.Services;
 public class TextureBackupService
 {
     private readonly ILogger<TextureBackupService> _logger;
-    private readonly SpheneConfigService _configService;
     private readonly string _backupDirectory;
 
     public TextureBackupService(ILogger<TextureBackupService> logger, SpheneConfigService configService)
     {
         _logger = logger;
-        _configService = configService;
-        _backupDirectory = Path.Combine(_configService.Current.CacheFolder, "texture_backups");
+        _backupDirectory = Path.Combine(configService.Current.CacheFolder, "texture_backups");
         
         // Don't create directory in constructor to avoid permission issues
         // Directory will be created when first needed
@@ -59,7 +57,7 @@ public class TextureBackupService
             using var sourceStream = new FileStream(originalFilePath, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: 4096, useAsync: true);
             using var destinationStream = new FileStream(backupPath, FileMode.Create, FileAccess.Write, FileShare.None, bufferSize: 4096, useAsync: true);
             
-            await sourceStream.CopyToAsync(destinationStream, cancellationToken);
+            await sourceStream.CopyToAsync(destinationStream, cancellationToken).ConfigureAwait(false);
             
             _logger.LogDebug("Backed up texture: {original} -> {backup}", originalFilePath, backupPath);
             return true;
@@ -71,9 +69,9 @@ public class TextureBackupService
         }
     }
 
-    public async Task<Dictionary<string, bool>> BackupTexturesAsync(IEnumerable<string> filePaths, IProgress<(string, int, int)> progress = null, CancellationToken cancellationToken = default)
+    public async Task<Dictionary<string, bool>> BackupTexturesAsync(IEnumerable<string> filePaths, IProgress<(string, int, int)>? progress = null, CancellationToken cancellationToken = default)
     {
-        var results = new Dictionary<string, bool>();
+        var results = new Dictionary<string, bool>(StringComparer.Ordinal);
         var fileList = filePaths.ToList();
         int completed = 0;
         int total = fileList.Count;
@@ -84,7 +82,7 @@ public class TextureBackupService
                 break;
 
             progress?.Report((filePath, ++completed, total));
-            results[filePath] = await BackupTextureAsync(filePath, cancellationToken);
+            results[filePath] = await BackupTextureAsync(filePath, cancellationToken).ConfigureAwait(false);
         }
 
         return results;
@@ -150,7 +148,7 @@ public class TextureBackupService
 
     public Dictionary<string, List<string>> GetBackupsByOriginalFile()
     {
-        var backupsByOriginal = new Dictionary<string, List<string>>();
+        var backupsByOriginal = new Dictionary<string, List<string>>(StringComparer.Ordinal);
         
         try
         {
@@ -228,7 +226,7 @@ public class TextureBackupService
                     if (entry == null)
                         throw new InvalidOperationException($"ZIP backup has no entries: {backupFilePath}");
                     entry.ExtractToFile(targetFilePath, overwrite: true);
-                }, cancellationToken);
+                }, cancellationToken).ConfigureAwait(false);
                 _logger.LogDebug("Restored texture from ZIP: {backup} -> {target}", backupFilePath, targetFilePath);
             }
             else
@@ -236,7 +234,7 @@ public class TextureBackupService
                 // Restore backup with async file copy
                 using var sourceStream = new FileStream(backupFilePath, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: 4096, useAsync: true);
                 using var destinationStream = new FileStream(targetFilePath, FileMode.Create, FileAccess.Write, FileShare.None, bufferSize: 4096, useAsync: true);
-                await sourceStream.CopyToAsync(destinationStream, cancellationToken);
+                await sourceStream.CopyToAsync(destinationStream, cancellationToken).ConfigureAwait(false);
                 _logger.LogDebug("Restored texture: {backup} -> {target}", backupFilePath, targetFilePath);
             }
             return true;
@@ -248,14 +246,14 @@ public class TextureBackupService
         }
     }
 
-    public async Task<Dictionary<string, bool>> RestoreTexturesAsync(Dictionary<string, string> backupToTargetMap, IProgress<(string, int, int)> progress = null, CancellationToken cancellationToken = default)
+    public async Task<Dictionary<string, bool>> RestoreTexturesAsync(Dictionary<string, string> backupToTargetMap, IProgress<(string, int, int)>? progress = null, CancellationToken cancellationToken = default)
     {
-        return await RestoreTexturesAsync(backupToTargetMap, deleteBackupsAfterRestore: false, progress, cancellationToken);
+        return await RestoreTexturesAsync(backupToTargetMap, deleteBackupsAfterRestore: false, progress, cancellationToken).ConfigureAwait(false);
     }
 
-    public async Task<Dictionary<string, bool>> RestoreTexturesAsync(Dictionary<string, string> backupToTargetMap, bool deleteBackupsAfterRestore, IProgress<(string, int, int)> progress = null, CancellationToken cancellationToken = default)
+    public async Task<Dictionary<string, bool>> RestoreTexturesAsync(Dictionary<string, string> backupToTargetMap, bool deleteBackupsAfterRestore, IProgress<(string, int, int)>? progress = null, CancellationToken cancellationToken = default)
     {
-        var results = new Dictionary<string, bool>();
+        var results = new Dictionary<string, bool>(StringComparer.Ordinal);
         var successfulBackups = new List<string>();
         int completed = 0;
         int total = backupToTargetMap.Count;
@@ -266,7 +264,7 @@ public class TextureBackupService
                 break;
 
             progress?.Report((kvp.Value, ++completed, total));
-            var restoreSuccess = await RestoreTextureAsync(kvp.Key, kvp.Value, cancellationToken);
+            var restoreSuccess = await RestoreTextureAsync(kvp.Key, kvp.Value, cancellationToken).ConfigureAwait(false);
             results[kvp.Key] = restoreSuccess;
             
             if (restoreSuccess && deleteBackupsAfterRestore)
@@ -279,7 +277,7 @@ public class TextureBackupService
         if (deleteBackupsAfterRestore && successfulBackups.Count > 0)
         {
             _logger.LogDebug("Deleting {count} backup files after successful restoration", successfulBackups.Count);
-            var deleteResults = await DeleteBackupFilesAsync(successfulBackups);
+            var deleteResults = await DeleteBackupFilesAsync(successfulBackups).ConfigureAwait(false);
             
             var deletedCount = deleteResults.Values.Count(success => success);
             _logger.LogDebug("Deleted {deletedCount}/{totalCount} backup files after restoration", deletedCount, successfulBackups.Count);
@@ -302,7 +300,7 @@ public class TextureBackupService
         {
             if (File.Exists(backupFilePath))
             {
-                await Task.Run(() => File.Delete(backupFilePath));
+                await Task.Run(() => File.Delete(backupFilePath)).ConfigureAwait(false);
                 _logger.LogDebug("Deleted backup file: {backupFile}", backupFilePath);
                 return true;
             }
@@ -321,11 +319,11 @@ public class TextureBackupService
 
     public async Task<Dictionary<string, bool>> DeleteBackupFilesAsync(IEnumerable<string> backupFilePaths)
     {
-        var results = new Dictionary<string, bool>();
+        var results = new Dictionary<string, bool>(StringComparer.Ordinal);
         
         foreach (var backupFilePath in backupFilePaths)
         {
-            results[backupFilePath] = await DeleteBackupFileAsync(backupFilePath);
+            results[backupFilePath] = await DeleteBackupFileAsync(backupFilePath).ConfigureAwait(false);
         }
         
         return results;
@@ -387,7 +385,7 @@ public class TextureBackupService
                         _logger.LogWarning(ex, "Failed to get size for backup file: {file}", file);
                     }
                 }
-            });
+            }).ConfigureAwait(false);
 
             return (totalSize, fileCount);
         }

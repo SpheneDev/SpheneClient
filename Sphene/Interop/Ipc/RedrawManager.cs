@@ -8,7 +8,7 @@ using System.Collections.Concurrent;
 
 namespace Sphene.Interop.Ipc;
 
-public class RedrawManager
+public class RedrawManager : IDisposable
 {
     private readonly SpheneMediator _spheneMediator;
     private readonly DalamudUtilService _dalamudUtil;
@@ -50,5 +50,24 @@ public class RedrawManager
     internal void Cancel()
     {
         _disposalCts = _disposalCts.CancelRecreate();
+    }
+
+    private bool _disposed;
+
+    public void Dispose()
+    {
+        Dispose(true);
+        GC.SuppressFinalize(this);
+    }
+
+    protected virtual void Dispose(bool disposing)
+    {
+        if (_disposed) return;
+        if (disposing)
+        {
+            _disposalCts.Cancel();
+            _disposalCts.Dispose();
+        }
+        _disposed = true;
     }
 }

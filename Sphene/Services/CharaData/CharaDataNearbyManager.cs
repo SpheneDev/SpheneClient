@@ -28,7 +28,7 @@ public sealed class CharaDataNearbyManager : DisposableMediatorSubscriberBase
     private Task? _filterEntriesRunningTask;
     private (Guid VfxId, PoseEntryExtended Pose)? _hoveredVfx = null;
     private DateTime _lastExecutionTime = DateTime.UtcNow;
-    private SemaphoreSlim _sharedDataUpdateSemaphore = new(1, 1);
+    private readonly SemaphoreSlim _sharedDataUpdateSemaphore = new(1, 1);
     public CharaDataNearbyManager(ILogger<CharaDataNearbyManager> logger, SpheneMediator mediator,
         DalamudUtilService dalamudUtilService, VfxSpawnManager vfxSpawnManager,
         ServerConfigurationManager serverConfigurationManager,
@@ -260,7 +260,7 @@ public sealed class CharaDataNearbyManager : DisposableMediatorSubscriberBase
         Vector3 cameraPos = new(camera->Position.X, camera->Position.Y, camera->Position.Z);
         Vector3 lookAt = new(camera->LookAtVector.X, camera->LookAtVector.Y, camera->LookAtVector.Z);
 
-        if (_filterEntriesRunningTask?.IsCompleted ?? true && _dalamudUtilService.IsLoggedIn)
+        if ((_filterEntriesRunningTask == null || _filterEntriesRunningTask.IsCompleted) && _dalamudUtilService.IsLoggedIn)
             _filterEntriesRunningTask = FilterEntriesAsync(cameraPos, lookAt);
     }
 

@@ -120,17 +120,19 @@ public sealed class Plugin : IDalamudPlugin
                         var defaultPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "ShrinkU", "Backups");
                         var isDefault = string.Equals(current, defaultPath, StringComparison.OrdinalIgnoreCase);
 
-                        if (cfgSvc.Current.FirstRunCompleted == false || isDefault || string.IsNullOrWhiteSpace(current))
+                        if (!cfgSvc.Current.FirstRunCompleted || isDefault || string.IsNullOrWhiteSpace(current))
                         {
-                            try { Directory.CreateDirectory(target); } catch { }
+                            try { Directory.CreateDirectory(target); }
+                            catch (Exception ex) { logger.LogDebug(ex, "Failed to create ShrinkU backup directory {path}", target); }
                             cfgSvc.Current.BackupFolderPath = target;
                             cfgSvc.Current.FirstRunCompleted = true;
-                            try { cfgSvc.Save(); } catch { }
+                            try { cfgSvc.Save(); }
+                            catch (Exception ex) { logger.LogDebug(ex, "Failed to save ShrinkU configuration after setting backup path"); }
                             logger.LogDebug("Configured ShrinkU backup path to Sphene texture_backups: {path}", target);
                         }
                     }
                 }
-                catch { }
+                catch (Exception ex) { logger.LogDebug(ex, "Failed to initialize ShrinkU configuration integration"); }
                 return cfgSvc;
             });
             collection.AddSingleton<ShrinkU.Services.PenumbraIpc>(s => new ShrinkU.Services.PenumbraIpc(pluginInterface, s.GetRequiredService<Microsoft.Extensions.Logging.ILogger>()));
@@ -197,7 +199,8 @@ public sealed class Plugin : IDalamudPlugin
                     s.GetRequiredService<ShrinkUConfigService>());
                 ui.OnCompleted = () =>
                 {
-                    try { s.GetRequiredService<ConversionUI>().IsOpen = true; } catch { }
+                    try { s.GetRequiredService<ConversionUI>().IsOpen = true; }
+                    catch (Exception ex) { s.GetRequiredService<Microsoft.Extensions.Logging.ILogger>().LogDebug(ex, "Failed to open ConversionUI after FirstRunSetup completion"); }
                 };
                 return ui;
             });
@@ -268,7 +271,7 @@ public sealed class Plugin : IDalamudPlugin
             collection.AddSingleton(s => new AcknowledgmentTimeoutManager(s.GetRequiredService<ILogger<AcknowledgmentTimeoutManager>>(),
                 s.GetRequiredService<SpheneMediator>(), s.GetRequiredService<Lazy<ApiController>>(), s.GetRequiredService<Lazy<PairManager>>()));
             collection.AddSingleton(s => new PairManager(s.GetRequiredService<ILogger<PairManager>>(), s.GetRequiredService<PairFactory>(),
-                s.GetRequiredService<SpheneConfigService>(), s.GetRequiredService<SpheneMediator>(), contextMenu, s.GetRequiredService<ServerConfigurationManager>(),
+                s.GetRequiredService<SpheneConfigService>(), s.GetRequiredService<SpheneMediator>(), contextMenu,
                 s.GetRequiredService<Lazy<ApiController>>(), s.GetRequiredService<SessionAcknowledgmentManager>(), s.GetRequiredService<MessageService>(),
                 s.GetRequiredService<AcknowledgmentTimeoutManager>(), s.GetRequiredService<Lazy<AreaBoundSyncshellService>>(),
                 s.GetRequiredService<VisibilityGateService>()));
@@ -447,7 +450,7 @@ public sealed class Plugin : IDalamudPlugin
             {
                 // Force creation of CitySyncshellExplanationUI singleton - get it as WindowMediatorSubscriberBase
                 var windows = p.GetServices<WindowMediatorSubscriberBase>();
-                var citySyncshellUI = windows.OfType<CitySyncshellExplanationUI>().FirstOrDefault();
+                _ = windows.OfType<CitySyncshellExplanationUI>().FirstOrDefault();
                 return new DummyHostedService();
             });
             collection.AddHostedService(p => p.GetRequiredService<AreaBoundSyncshellService>());

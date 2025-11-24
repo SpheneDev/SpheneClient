@@ -22,7 +22,6 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
     private volatile bool _loading;
     private List<ReleaseChangelogViewEntry> _entries = new();
     private bool _showAll;
-    private bool _firstRenderAfterOpen;
     private string _defaultExpandedVersion = string.Empty;
 
     public ReleaseChangelogUi(
@@ -55,11 +54,10 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
             _loading = true;
             _entries = new List<ReleaseChangelogViewEntry>();
             _showAll = false;
-            _firstRenderAfterOpen = true;
             _defaultExpandedVersion = string.Empty;
             IsOpen = true;
 
-            Task.Run(async () =>
+            _ = Task.Run(async () =>
             {
                 try
                 {
@@ -74,7 +72,10 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
                         .ToList();
                     _defaultExpandedVersion = _entries.FirstOrDefault()?.Version ?? string.Empty;
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Failed to load release changelog entries");
+                }
                 finally { _loading = false; }
             });
         });
@@ -148,7 +149,7 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
                         foreach (var e in list)
                         {
                             var flags = ImGuiTreeNodeFlags.None;
-                            if (!string.IsNullOrEmpty(_defaultExpandedVersion) && e.Version == _defaultExpandedVersion)
+                            if (!string.IsNullOrEmpty(_defaultExpandedVersion) && string.Equals(e.Version, _defaultExpandedVersion, StringComparison.Ordinal))
                             {
                                 ImGui.SetNextItemOpen(true, ImGuiCond.Always);
                                 flags |= ImGuiTreeNodeFlags.DefaultOpen;
@@ -173,8 +174,8 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
                                             continue;
 
                                         var trimmedMain = (change.Text ?? string.Empty).Trim();
-                                        if (trimmedMain.StartsWith("- ")) trimmedMain = trimmedMain.Substring(2);
-                                        if (trimmedMain.StartsWith("• ")) trimmedMain = trimmedMain.Substring(2);
+                                        if (trimmedMain.StartsWith("- ", StringComparison.Ordinal)) trimmedMain = trimmedMain.Substring(2);
+                                        if (trimmedMain.StartsWith("• ", StringComparison.Ordinal)) trimmedMain = trimmedMain.Substring(2);
 
                                         ImGui.Bullet();
                                         float bulletGap = ImGui.GetStyle().ItemInnerSpacing.X + ImGuiHelpers.GlobalScale * 8f;
@@ -201,8 +202,8 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
                                                     continue;
 
                                                 var trimmedSub = sub.Trim();
-                                                if (trimmedSub.StartsWith("- ")) trimmedSub = trimmedSub.Substring(2);
-                                                if (trimmedSub.StartsWith("• ")) trimmedSub = trimmedSub.Substring(2);
+                                                if (trimmedSub.StartsWith("- ", StringComparison.Ordinal)) trimmedSub = trimmedSub.Substring(2);
+                                                if (trimmedSub.StartsWith("• ", StringComparison.Ordinal)) trimmedSub = trimmedSub.Substring(2);
 
                                                 ImGui.Bullet();
                                                 ImGui.SameLine(0, bulletGap);
@@ -217,8 +218,7 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
                             }
                             ImGui.Spacing();
                         }
-
-                        _firstRenderAfterOpen = false;
+                        
                     }
                 }
             }

@@ -86,68 +86,18 @@ public class TopTabMenu
         ImGuiHelpers.ScaledDummy(spacing.Y / 2f);
 
         using (ImRaii.PushFont(UiBuilder.IconFont))
-        {
-            var x = ImGui.GetCursorScreenPos();
-            if (_uiSharedService.IconButton(FontAwesomeIcon.User, buttonSize.Y, null, null, buttonSize.X, ButtonStyleKeys.TopTab_User))
-            {
-                TabSelection = TabSelection == SelectedTab.Individual ? SelectedTab.None : SelectedTab.Individual;
-            }
-            ImGui.SameLine();
-            var xAfter = ImGui.GetCursorScreenPos();
-            if (TabSelection == SelectedTab.Individual)
-                drawList.AddLine(x with { Y = x.Y + buttonSize.Y + spacing.Y },
-                    xAfter with { Y = xAfter.Y + buttonSize.Y + spacing.Y, X = xAfter.X - spacing.X },
-                    underlineColor, 2);
-        }
+        DrawTabButton(FontAwesomeIcon.User, SelectedTab.Individual, ButtonStyleKeys.TopTab_User, buttonSize, spacing, underlineColor, drawList);
         UiSharedService.AttachToolTip("Individual Pair Menu");
 
-        {
-            var x = ImGui.GetCursorScreenPos();
-            if (_uiSharedService.IconButton(FontAwesomeIcon.Users, buttonSize.Y, null, null, buttonSize.X, ButtonStyleKeys.TopTab_Users))
-            {
-                TabSelection = TabSelection == SelectedTab.Syncshell ? SelectedTab.None : SelectedTab.Syncshell;
-            }
-            ImGui.SameLine();
-            var xAfter = ImGui.GetCursorScreenPos();
-            if (TabSelection == SelectedTab.Syncshell)
-                drawList.AddLine(x with { Y = x.Y + buttonSize.Y + spacing.Y },
-                    xAfter with { Y = xAfter.Y + buttonSize.Y + spacing.Y, X = xAfter.X - spacing.X },
-                    underlineColor, 2);
-        }
+        DrawTabButton(FontAwesomeIcon.Users, SelectedTab.Syncshell, ButtonStyleKeys.TopTab_Users, buttonSize, spacing, underlineColor, drawList);
         UiSharedService.AttachToolTip("Syncshell Menu");
 
         ImGui.SameLine();
-        {
-            var x = ImGui.GetCursorScreenPos();
-            if (_uiSharedService.IconButton(FontAwesomeIcon.Filter, buttonSize.Y, null, null, buttonSize.X, ButtonStyleKeys.TopTab_Filter))
-            {
-                TabSelection = TabSelection == SelectedTab.Filter ? SelectedTab.None : SelectedTab.Filter;
-            }
-
-            ImGui.SameLine();
-            var xAfter = ImGui.GetCursorScreenPos();
-            if (TabSelection == SelectedTab.Filter)
-                drawList.AddLine(x with { Y = x.Y + buttonSize.Y + spacing.Y },
-                    xAfter with { Y = xAfter.Y + buttonSize.Y + spacing.Y, X = xAfter.X - spacing.X },
-                    underlineColor, 2);
-        }
+        DrawTabButton(FontAwesomeIcon.Filter, SelectedTab.Filter, ButtonStyleKeys.TopTab_Filter, buttonSize, spacing, underlineColor, drawList);
         UiSharedService.AttachToolTip("Filter");
 
         ImGui.SameLine();
-        {
-            var x = ImGui.GetCursorScreenPos();
-            if (_uiSharedService.IconButton(FontAwesomeIcon.UserCog, buttonSize.Y, null, null, buttonSize.X, ButtonStyleKeys.TopTab_Settings))
-            {
-                TabSelection = TabSelection == SelectedTab.UserConfig ? SelectedTab.None : SelectedTab.UserConfig;
-            }
-
-            ImGui.SameLine();
-            var xAfter = ImGui.GetCursorScreenPos();
-            if (TabSelection == SelectedTab.UserConfig)
-                drawList.AddLine(x with { Y = x.Y + buttonSize.Y + spacing.Y },
-                    xAfter with { Y = xAfter.Y + buttonSize.Y + spacing.Y, X = xAfter.X - spacing.X },
-                    underlineColor, 2);
-        }
+        DrawTabButton(FontAwesomeIcon.UserCog, SelectedTab.UserConfig, ButtonStyleKeys.TopTab_Settings, buttonSize, spacing, underlineColor, drawList);
         UiSharedService.AttachToolTip("Your User Menu");
 
         ImGui.NewLine();
@@ -176,6 +126,23 @@ public class TopTabMenu
 
         if (TabSelection != SelectedTab.None) ImGuiHelpers.ScaledDummy(3f);
         ImGui.Separator();
+    }
+
+    private void DrawTabButton(FontAwesomeIcon icon, SelectedTab tab, string styleKey, Vector2 buttonSize, Vector2 spacing, uint underlineColor, ImDrawListPtr drawList)
+    {
+        var x = ImGui.GetCursorScreenPos();
+        if (_uiSharedService.IconButton(icon, buttonSize.Y, null, null, buttonSize.X, styleKey))
+        {
+            TabSelection = TabSelection == tab ? SelectedTab.None : tab;
+        }
+        ImGui.SameLine();
+        var xAfter = ImGui.GetCursorScreenPos();
+        if (TabSelection == tab)
+        {
+            drawList.AddLine(x with { Y = x.Y + buttonSize.Y + spacing.Y },
+                xAfter with { Y = xAfter.Y + buttonSize.Y + spacing.Y, X = xAfter.X - spacing.X },
+                underlineColor, 2);
+        }
     }
 
     private void DrawAddPair(float availableXWidth, float spacingX)

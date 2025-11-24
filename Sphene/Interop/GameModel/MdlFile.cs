@@ -30,11 +30,11 @@ public class MdlFile
     public ushort Unknown9;
 
     // Offsets are stored relative to RuntimeSize instead of file start.
-    public uint[] VertexOffset = [0, 0, 0];
-    public uint[] IndexOffset = [0, 0, 0];
+    public uint[] VertexOffset;
+    public uint[] IndexOffset;
 
-    public uint[] VertexBufferSize = [0, 0, 0];
-    public uint[] IndexBufferSize = [0, 0, 0];
+    public uint[] VertexBufferSize;
+    public uint[] IndexBufferSize;
     public byte LodCount;
     public bool EnableIndexBufferStreaming;
     public bool EnableEdgeGeometry;
@@ -42,12 +42,12 @@ public class MdlFile
     public ModelFlags1 Flags1;
     public ModelFlags2 Flags2;
 
-    public VertexDeclarationStruct[] VertexDeclarations = [];
-    public ElementIdStruct[] ElementIds = [];
-    public MeshStruct[] Meshes = [];
-    public BoundingBoxStruct[] BoneBoundingBoxes = [];
-    public LodStruct[] Lods = [];
-    public ExtraLodStruct[] ExtraLods = [];
+    public VertexDeclarationStruct[] VertexDeclarations;
+    public ElementIdStruct[] ElementIds;
+    public MeshStruct[] Meshes;
+    public BoundingBoxStruct[] BoneBoundingBoxes = Array.Empty<BoundingBoxStruct>();
+    public LodStruct[] Lods;
+    public ExtraLodStruct[] ExtraLods;
 
     public MdlFile(string filePath)
     {
@@ -92,7 +92,7 @@ public class MdlFile
             Lods[i] = lod;
         }
 
-        ExtraLods = (modelHeader.Flags2 & ModelFlags2.ExtraLodEnabled) != 0
+        ExtraLods = (modelHeader.Flags2 & ModelFlags2.ExtraLodEnabled) != default
             ? r.ReadStructuresAsArray<ExtraLodStruct>(3)
             : [];
 
@@ -150,6 +150,7 @@ public class MdlFile
         return (offsets, strings);
     }
 
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential, Pack = 1)]
     public unsafe struct ModelHeader
     {
         // MeshHeader
@@ -179,7 +180,7 @@ public class MdlFile
         public ushort BoneTableArrayCountTotal;
         public ushort Unknown8;
         public ushort Unknown9;
-        private fixed byte _padding[6];
+        public fixed byte _padding[6];
     }
 
     public struct ShapeStruct

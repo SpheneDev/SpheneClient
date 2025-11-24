@@ -140,7 +140,10 @@ public class HubFactory : MediatorSubscriberBase
                 return _configService.Current.TestServerApiUrl.TrimEnd('/');
             }
         }
-        catch { }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Failed to read TestServer override from config");
+        }
         return _serverConfigurationManager.CurrentApiUrl;
     }
 

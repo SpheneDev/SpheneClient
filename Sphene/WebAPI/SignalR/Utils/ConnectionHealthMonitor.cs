@@ -2,6 +2,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
+using System.Threading;
 using Sphene.Services.Mediator;
 using Sphene.SpheneConfiguration.Models;
 
@@ -12,7 +13,7 @@ public class ConnectionHealthMonitor : IDisposable
     private readonly ILogger<ConnectionHealthMonitor> _logger;
     private readonly SpheneMediator _mediator;
     private readonly Timer _healthCheckTimer;
-    private readonly object _lockObject = new();
+    private readonly Lock _lockObject = new();
     
     private bool _disposed = false;
     private int _consecutiveFailures = 0;
@@ -45,16 +46,15 @@ public class ConnectionHealthMonitor : IDisposable
 
     public void RecordSuccessfulConnection()
     {
-        lock (_lockObject)
+        _lockObject.Enter();
+        try
         {
             _consecutiveFailures = 0;
             _lastSuccessfulConnection = DateTime.UtcNow;
-            
             if (!IsHealthy)
             {
                 IsHealthy = true;
                 _logger.LogInformation("Connection health restored after {failures} consecutive failures", _consecutiveFailures);
-                
                 _mediator.Publish(new NotificationMessage(
                     "Connection Restored",
                     "Connection to server has been restored",
@@ -63,26 +63,27 @@ public class ConnectionHealthMonitor : IDisposable
                 ));
             }
         }
+        finally
+        {
+            _lockObject.Exit();
+        }
     }
 
     public void RecordConnectionFailure(Exception? exception = null)
     {
-        lock (_lockObject)
+        _lockObject.Enter();
+        try
         {
             _consecutiveFailures++;
-            
             _logger.LogWarning(exception, 
                 "Connection failure recorded. Consecutive failures: {failures}", 
                 _consecutiveFailures);
-            
-            // Mark as unhealthy if we exceed threshold
             if (_consecutiveFailures >= MaxConsecutiveFailures && IsHealthy)
             {
                 IsHealthy = false;
                 _logger.LogError(
                     "Connection marked as unhealthy after {failures} consecutive failures", 
                     _consecutiveFailures);
-                
                 _mediator.Publish(new NotificationMessage(
                     "Connection Unstable",
                     $"Connection has failed {_consecutiveFailures} times consecutively",
@@ -91,11 +92,16 @@ public class ConnectionHealthMonitor : IDisposable
                 ));
             }
         }
+        finally
+        {
+            _lockObject.Exit();
+        }
     }
 
     public ConnectionHealthStatus GetHealthStatus()
     {
-        lock (_lockObject)
+        _lockObject.Enter();
+        try
         {
             return new ConnectionHealthStatus
             {
@@ -105,6 +111,10 @@ public class ConnectionHealthMonitor : IDisposable
                 LastHealthCheck = _lastHealthCheck
             };
         }
+        finally
+        {
+            _lockObject.Exit();
+        }
     }
 
     private void PerformHealthCheck(object? state)
@@ -113,11 +123,10 @@ public class ConnectionHealthMonitor : IDisposable
         
         try
         {
-            lock (_lockObject)
+            _lockObject.Enter();
+            try
             {
                 _lastHealthCheck = DateTime.UtcNow;
-                
-                // Check if we've been disconnected for too long
                 if (TimeSinceLastSuccess.TotalMinutes > UnhealthyThresholdMinutes && IsHealthy)
                 {
                     IsHealthy = false;
@@ -125,10 +134,13 @@ public class ConnectionHealthMonitor : IDisposable
                         "Connection marked as unhealthy due to prolonged disconnection ({minutes} minutes)",
                         TimeSinceLastSuccess.TotalMinutes);
                 }
-                
                 _logger.LogDebug(
                     "Health check completed. Healthy: {healthy}, Consecutive failures: {failures}, Time since last success: {time}",
                     IsHealthy, _consecutiveFailures, TimeSinceLastSuccess);
+            }
+            finally
+            {
+                _lockObject.Exit();
             }
         }
         catch (Exception ex)
@@ -137,20 +149,20 @@ public class ConnectionHealthMonitor : IDisposable
         }
     }
 
-    public void Dispose()
+    protected virtual void Dispose(bool disposing)
     {
         if (_disposed) return;
-        
         _disposed = true;
-        _healthCheckTimer?.Dispose();
+        if (disposing)
+        {
+            _healthCheckTimer?.Dispose();
+        }
         _logger.LogDebug("Connection health monitor disposed");
     }
-}
 
-public class ConnectionHealthStatus
-{
-    public bool IsHealthy { get; set; }
-    public int ConsecutiveFailures { get; set; }
-    public TimeSpan TimeSinceLastSuccess { get; set; }
-    public DateTime LastHealthCheck { get; set; }
+    public void Dispose()
+    {
+        Dispose(true);
+        GC.SuppressFinalize(this);
+    }
 }

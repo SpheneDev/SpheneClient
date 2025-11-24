@@ -15,7 +15,7 @@ public class FileTransferOrchestrator : DisposableMediatorSubscriberBase
     private readonly ConcurrentDictionary<Guid, bool> _downloadReady = new();
     private readonly HttpClient _httpClient;
     private readonly SpheneConfigService _SpheneConfig;
-    private readonly object _semaphoreModificationLock = new();
+    private readonly System.Threading.Lock _semaphoreModificationLock = new();
     private readonly TokenProvider _tokenProvider;
     private int _availableDownloadSlots;
     private SemaphoreSlim _downloadSemaphore;
@@ -111,13 +111,18 @@ public class FileTransferOrchestrator : DisposableMediatorSubscriberBase
 
     public async Task WaitForDownloadSlotAsync(CancellationToken token)
     {
-        lock (_semaphoreModificationLock)
+        _semaphoreModificationLock.Enter();
+        try
         {
             if (_availableDownloadSlots != _SpheneConfig.Current.ParallelDownloads && _availableDownloadSlots == _downloadSemaphore.CurrentCount)
             {
                 _availableDownloadSlots = _SpheneConfig.Current.ParallelDownloads;
                 _downloadSemaphore = new(_availableDownloadSlots, _availableDownloadSlots);
             }
+        }
+        finally
+        {
+            _semaphoreModificationLock.Exit();
         }
 
         await _downloadSemaphore.WaitAsync(token).ConfigureAwait(false);
@@ -177,7 +182,7 @@ public class FileTransferOrchestrator : DisposableMediatorSubscriberBase
         catch (Exception ex)
         {
             Logger.LogWarning(ex, "Error during SendRequestInternal for {uri}", requestMessage.RequestUri);
-            throw;
+            throw new HttpRequestException($"Failed to send request to {requestMessage.RequestUri}", ex);
         }
     }
 }

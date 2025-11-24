@@ -85,12 +85,24 @@ public class DrawGroupedGroupFolder : IDrawFolder
         }
     }
 
+    private bool _disposed;
+
+    protected virtual void Dispose(bool disposing)
+    {
+        if (_disposed) return;
+        if (disposing)
+        {
+            foreach (var group in _groups)
+            {
+                group.Dispose();
+            }
+        }
+        _disposed = true;
+    }
+
     public void Dispose()
     {
-        // Dispose all nested folders which will dispose their DrawUserPair instances
-        foreach (var group in _groups)
-        {
-            group.Dispose();
-        }
+        Dispose(true);
+        GC.SuppressFinalize(this);
     }
 }

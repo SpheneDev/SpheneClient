@@ -20,7 +20,7 @@ public class SpheneThemeService
         // Skip theme for CompactUI and external plugins like ShrinkU
         var asmName = windowType.Assembly.GetName().Name ?? string.Empty;
         var ns = windowType.Namespace ?? string.Empty;
-        if (windowType.Name == "CompactUi" || asmName.Equals("ShrinkU", StringComparison.OrdinalIgnoreCase) || ns.StartsWith("ShrinkU", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(windowType.Name, "CompactUi", StringComparison.Ordinal) || asmName.Equals("ShrinkU", StringComparison.OrdinalIgnoreCase) || ns.StartsWith("ShrinkU", StringComparison.OrdinalIgnoreCase))
         {
             _logger.LogDebug("Skipping Sphene theme for window: {WindowType} (assembly={Assembly}, ns={Namespace})", windowType.Name, asmName, ns);
             return null;
@@ -31,10 +31,10 @@ public class SpheneThemeService
     }
 
     // Check if a window type should have theme applied
-    public bool ShouldApplyTheme(Type windowType)
+    public static bool ShouldApplyTheme(Type windowType)
     {
         var asmName = windowType.Assembly.GetName().Name ?? string.Empty;
         var ns = windowType.Namespace ?? string.Empty;
-        return windowType.Name != "CompactUi" && !asmName.Equals("ShrinkU", StringComparison.OrdinalIgnoreCase) && !ns.StartsWith("ShrinkU", StringComparison.OrdinalIgnoreCase);
+        return !string.Equals(windowType.Name, "CompactUi", StringComparison.Ordinal) && !asmName.Equals("ShrinkU", StringComparison.OrdinalIgnoreCase) && !ns.StartsWith("ShrinkU", StringComparison.OrdinalIgnoreCase);
     }
 }

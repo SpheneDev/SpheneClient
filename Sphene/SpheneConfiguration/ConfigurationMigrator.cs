@@ -64,20 +64,20 @@ public class ConfigurationMigrator(ILogger<ConfigurationMigrator> logger, Transi
     {
         var servers = serverConfigService.Current.ServerStorage;
         var duplicateGroups = servers
-            .GroupBy(s => s.ServerName)
+            .GroupBy(s => s.ServerName, StringComparer.Ordinal)
             .Where(g => g.Count() > 1)
             .ToList();
 
         foreach (var group in duplicateGroups)
         {
-            var duplicates = group.OrderBy(s => s.ServerUri).ToList();
-            _logger.LogInformation($"Found {duplicates.Count} duplicate servers with name '{group.Key}'");
+            var duplicates = group.OrderBy(s => s.ServerUri, StringComparer.Ordinal).ToList();
+            _logger.LogInformation("Found {Count} duplicate servers with name '{ServerName}'", duplicates.Count, group.Key);
 
             // Keep the first server (usually the original one) and remove the rest
             for (int i = 1; i < duplicates.Count; i++)
             {
                 var serverToRemove = duplicates[i];
-                _logger.LogInformation($"Removing duplicate server: {serverToRemove.ServerName} ({serverToRemove.ServerUri})");
+                _logger.LogInformation("Removing duplicate server: {Name} ({Uri})", serverToRemove.ServerName, serverToRemove.ServerUri);
                 servers.Remove(serverToRemove);
             }
         }
@@ -85,7 +85,7 @@ public class ConfigurationMigrator(ILogger<ConfigurationMigrator> logger, Transi
         // Ensure CurrentServer index is still valid after cleanup
         if (serverConfigService.Current.CurrentServer >= servers.Count)
         {
-            _logger.LogInformation($"Adjusting CurrentServer index from {serverConfigService.Current.CurrentServer} to 0 after cleanup");
+            _logger.LogInformation("Adjusting CurrentServer index from {Index} to 0 after cleanup", serverConfigService.Current.CurrentServer);
             serverConfigService.Current.CurrentServer = 0;
         }
     }

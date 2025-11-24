@@ -2,7 +2,6 @@ using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Colors;
 using Dalamud.Interface.Utility;
 using Dalamud.Interface.Utility.Raii;
-using Sphene.API.Data.Enum;
 using Sphene.API.Data.Extensions;
 using Sphene.API.Data;
 using Sphene.API.Data.Enum;
@@ -183,15 +182,15 @@ internal class JoinSyncshellUI : WindowMediatorSubscriberBase
                 {
                     try
                     {
-                        var joinResult = await _apiController.GroupJoinFinalize(new GroupJoinDto(_groupJoinInfo.Group, _previousPassword, joinPermissions));
+                        var joinResult = await _apiController.GroupJoinFinalize(new GroupJoinDto(_groupJoinInfo.Group, _previousPassword, joinPermissions)).ConfigureAwait(false);
                         if (joinResult)
                         {
                             // Check if there's a welcome page for this group
-                            var welcomePage = await _apiController.GroupGetWelcomePage(new GroupDto(_groupJoinInfo.Group));
+                            var welcomePage = await _apiController.GroupGetWelcomePage(new GroupDto(_groupJoinInfo.Group)).ConfigureAwait(false);
                             if (welcomePage != null && welcomePage.IsEnabled && welcomePage.ShowOnJoin)
                             {
                                 // Get current group info from PairManager for up-to-date alias
-                                var groupFullInfo = _pairManager.Groups.Values.FirstOrDefault(g => g.Group.GID == _groupJoinInfo.Group.GID);
+                                var groupFullInfo = _pairManager.Groups.Values.FirstOrDefault(g => string.Equals(g.Group.GID, _groupJoinInfo.Group.GID, StringComparison.Ordinal));
                                 if (groupFullInfo != null)
                                 {
                                     _logger.LogDebug("Publishing OpenWelcomePageMessage with GroupFullInfo: {GroupAliasOrGID}", groupFullInfo.Group.AliasOrGID);
@@ -207,7 +206,7 @@ internal class JoinSyncshellUI : WindowMediatorSubscriberBase
                             _groupJoinInfo.GroupPermissions,
                             GroupUserPreferredPermissions.NoneSet, // Default user permissions
                             new GroupPairUserInfo(), // Empty user info
-                            new Dictionary<string, GroupPairUserInfo>() // Empty pair user infos
+                            new Dictionary<string, GroupPairUserInfo>(StringComparer.Ordinal) // Empty pair user infos
                         );
                         Mediator.Publish(new OpenWelcomePageMessage(welcomePage, fallbackGroupFullInfo));
                     }

@@ -15,7 +15,7 @@ namespace Sphene.UI.Panels;
 public class UpdateNotificationUi : WindowMediatorSubscriberBase
 {
     private readonly UiSharedService _uiShared;
-    private readonly ILogger<UpdateNotificationUi> _logger;
+    private new readonly ILogger<UpdateNotificationUi> _logger;
     private readonly ICommandManager _commandManager;
     private UpdateInfo? _updateInfo;
     
@@ -105,7 +105,6 @@ public class UpdateNotificationUi : WindowMediatorSubscriberBase
         ImGui.Separator();
         
         // Buttons
-        var buttonWidth = (ImGui.GetContentRegionAvail().X - ImGui.GetStyle().ItemSpacing.X) / 2;
         
         if (!string.IsNullOrEmpty(_updateInfo.DownloadUrl))
         {

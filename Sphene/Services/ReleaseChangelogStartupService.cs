@@ -65,8 +65,7 @@ public sealed class ReleaseChangelogStartupService : IHostedService
         {
             _logger.LogError(ex, "Error in ReleaseChangelogStartupService StartAsync");
         }
-
-        await Task.CompletedTask;
+        
     }
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;

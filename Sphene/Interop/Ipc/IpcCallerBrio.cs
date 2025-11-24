@@ -94,7 +94,8 @@ public sealed class IpcCallerBrio : IIpcCaller
         var gameObject = await _dalamudUtilService.CreateGameObjectAsync(address).ConfigureAwait(false);
         if (gameObject == null) return default;
         var data = await _dalamudUtilService.RunOnFrameworkThread(() => _brioGetModelTransform.InvokeFunc(gameObject)).ConfigureAwait(false);
-        //_logger.LogDebug("Getting Transform from Actor {actor}", gameObject.Name.TextValue);
+
+        if (!data.Item1.HasValue || !data.Item2.HasValue || !data.Item3.HasValue) return default;
 
         return new WorldData()
         {

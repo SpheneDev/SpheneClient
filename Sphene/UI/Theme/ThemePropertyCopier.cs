@@ -248,7 +248,7 @@ public static class ThemePropertyCopier
                 Icon = kv.Value.Icon,
                 Border = kv.Value.Border,
                 BorderSize = kv.Value.BorderSize
-            }
+            }, StringComparer.Ordinal
         );
     }
 }

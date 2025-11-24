@@ -16,10 +16,10 @@ public class LoginHandler : DisposableMediatorSubscriberBase, IHostedService
         _logger = logger;
 
         // Subscribe to login event to check for updates
-        Mediator.Subscribe<DalamudLoginMessage>(this, async (_) =>
+        Mediator.Subscribe<DalamudLoginMessage>(this, msg =>
         {
             _logger.LogInformation("Player logged in, checking for updates...");
-            await _updateCheckService.CheckForUpdatesAsync();
+            _ = _updateCheckService.CheckForUpdatesAsync().ConfigureAwait(false);
         });
     }
 

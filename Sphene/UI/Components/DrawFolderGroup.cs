@@ -69,7 +69,7 @@ public class DrawFolderGroup : DrawFolderBase
             var allSyncshellUsers = _groupFullInfoDto.GroupPairUserInfos.Keys.ToList();
             
             // Count syncshell users that are online but not already counted in visible pairs
-            var visibleUserUIDs = DrawPairs.Select(dp => dp.Pair.UserData.UID).ToHashSet();
+            var visibleUserUIDs = DrawPairs.Select(dp => dp.Pair.UserData.UID).ToHashSet(StringComparer.Ordinal);
             int additionalOnlineCount = 0;
             
             foreach (var userUID in allSyncshellUsers)
@@ -107,7 +107,7 @@ public class DrawFolderGroup : DrawFolderBase
             var visiblePairsCount = DrawPairs.Count;
             
             // Count syncshell members not already in visible pairs
-            var visibleUserUIDs = DrawPairs.Select(dp => dp.Pair.UserData.UID).ToHashSet();
+            var visibleUserUIDs = DrawPairs.Select(dp => dp.Pair.UserData.UID).ToHashSet(StringComparer.Ordinal);
             var additionalSyncshellMembers = _groupFullInfoDto.GroupPairUserInfos.Keys
                 .Count(uid => !visibleUserUIDs.Contains(uid));
             
@@ -513,38 +513,16 @@ public class DrawFolderGroup : DrawFolderBase
 
     private async Task LeaveAreaSyncshellWithConsentReset()
     {
-        try
-        {
-            // First reset the consent
-            await _areaBoundSyncshellService.ResetAreaBoundConsent(_groupFullInfoDto.Group.GID);
-            
-            // Then leave the syncshell using the service method to ensure proper cleanup
-            await _areaBoundSyncshellService.LeaveAreaSyncshell(_groupFullInfoDto.Group.GID);
-        }
-        catch (Exception ex)
-        {
-            // Log error but don't show to user as this is a background operation
-            // The UI will handle any error feedback through normal channels
-        }
+        await _areaBoundSyncshellService.ResetAreaBoundConsent(_groupFullInfoDto.Group.GID).ConfigureAwait(false);
+        await _areaBoundSyncshellService.LeaveAreaSyncshell(_groupFullInfoDto.Group.GID).ConfigureAwait(false);
     }
 
     private async Task ShowWelcomeMessageOnDemand()
     {
-        try
+        var welcomePage = await _apiController.GroupGetWelcomePage(new GroupDto(_groupFullInfoDto.Group)).ConfigureAwait(false);
+        if (welcomePage != null && welcomePage.IsEnabled)
         {
-            // Get the welcome page for this syncshell
-            var welcomePage = await _apiController.GroupGetWelcomePage(new GroupDto(_groupFullInfoDto.Group));
-            
-            if (welcomePage != null && welcomePage.IsEnabled)
-            {
-                // Publish the OpenWelcomePageMessage to show the welcome page
-                _spheneMediator.Publish(new OpenWelcomePageMessage(welcomePage, _groupFullInfoDto));
-            }
-        }
-        catch (Exception ex)
-        {
-            // Log error but don't show to user as this is an optional feature
-            // Could add a subtle notification here if needed
+            _spheneMediator.Publish(new OpenWelcomePageMessage(welcomePage, _groupFullInfoDto));
         }
     }
 }

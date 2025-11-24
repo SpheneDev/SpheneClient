@@ -150,17 +150,17 @@ public sealed class XivDataAnalyzer
         return output;
     }
 
-    public async Task<long> GetTrianglesByHash(string hash)
+    public Task<long> GetTrianglesByHash(string hash)
     {
         if (_configService.Current.TriangleDictionary.TryGetValue(hash, out var cachedTris) && cachedTris > 0)
-            return cachedTris;
+            return Task.FromResult(cachedTris);
 
         if (_failedCalculatedTris.Contains(hash, StringComparer.Ordinal))
-            return 0;
+            return Task.FromResult(0L);
 
         var path = _fileCacheManager.GetFileCacheByHash(hash);
         if (path == null || !path.ResolvedFilepath.EndsWith(".mdl", StringComparison.OrdinalIgnoreCase))
-            return 0;
+            return Task.FromResult(0L);
 
         var filePath = path.ResolvedFilepath;
 
@@ -173,7 +173,7 @@ public sealed class XivDataAnalyzer
                 _failedCalculatedTris.Add(hash);
                 _configService.Current.TriangleDictionary[hash] = 0;
                 _configService.Save();
-                return 0;
+                return Task.FromResult(0L);
             }
 
             long tris = 0;
@@ -200,7 +200,7 @@ public sealed class XivDataAnalyzer
                 }
             }
 
-            return tris;
+            return Task.FromResult(tris);
         }
         catch (Exception e)
         {
@@ -208,7 +208,7 @@ public sealed class XivDataAnalyzer
             _configService.Current.TriangleDictionary[hash] = 0;
             _configService.Save();
             _logger.LogWarning(e, "Could not parse file {file}", filePath);
-            return 0;
+            return Task.FromResult(0L);
         }
     }
 }

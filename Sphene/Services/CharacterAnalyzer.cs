@@ -22,7 +22,9 @@ public sealed class CharacterAnalyzer : MediatorSubscriberBase, IDisposable
     {
         Mediator.Subscribe<CharacterDataCreatedMessage>(this, (msg) =>
         {
-            _baseAnalysisCts = _baseAnalysisCts.CancelRecreate();
+            _baseAnalysisCts.Cancel();
+            _baseAnalysisCts.Dispose();
+            _baseAnalysisCts = new();
             var token = _baseAnalysisCts.Token;
             _ = BaseAnalysis(msg.CharacterData, token);
         });
@@ -90,7 +92,10 @@ public sealed class CharacterAnalyzer : MediatorSubscriberBase, IDisposable
 
     public void Dispose()
     {
-        _analysisCts.CancelDispose();
+        _analysisCts?.Cancel();
+        _analysisCts?.Dispose();
+        _baseAnalysisCts?.Cancel();
+        _baseAnalysisCts?.Dispose();
     }
 
     private async Task BaseAnalysis(CharacterData charaData, CancellationToken token)
@@ -127,7 +132,7 @@ public sealed class CharacterAnalyzer : MediatorSubscriberBase, IDisposable
                 {
                     data[fileEntry.Hash] = new FileDataEntry(fileEntry.Hash, ext,
                         [.. fileEntry.GamePaths],
-                        fileCacheEntries.Select(c => c.ResolvedFilepath).Distinct().ToList(),
+                        fileCacheEntries.Select(c => c.ResolvedFilepath).Distinct(StringComparer.Ordinal).ToList(),
                         entry.Size > 0 ? entry.Size.Value : 0,
                         entry.CompressedSize > 0 ? entry.CompressedSize.Value : 0,
                         tris);

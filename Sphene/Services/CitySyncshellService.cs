@@ -30,7 +30,7 @@ public class CitySyncshellService : DisposableMediatorSubscriberBase, IHostedSer
     
     private LocationInfo? _lastLocation;
     private readonly Timer _locationCheckTimer;
-    private bool _isEnabled = true;
+    private readonly bool _isEnabled = true;
     
     // Define the main cities with their territory IDs
     private readonly Dictionary<uint, string> _mainCities = new()
@@ -90,16 +90,12 @@ public class CitySyncshellService : DisposableMediatorSubscriberBase, IHostedSer
         {
             var currentLocation = await _dalamudUtilService.GetMapDataAsync().ConfigureAwait(false);
             
-            // Skip if current location is null
-            if (currentLocation == null) 
-            {
-                return;
-            }
+            
             
             // Check if location changed
             if (_lastLocation == null || !LocationsEqual(_lastLocation.Value, currentLocation))
             {
-                await HandleLocationChange(_lastLocation, currentLocation).ConfigureAwait(false);
+                await HandleLocationChange(currentLocation).ConfigureAwait(false);
                 _lastLocation = currentLocation;
             }
         }
@@ -109,7 +105,7 @@ public class CitySyncshellService : DisposableMediatorSubscriberBase, IHostedSer
         }
     }
 
-    private async Task HandleLocationChange(LocationInfo? oldLocation, LocationInfo newLocation)
+    private async Task HandleLocationChange(LocationInfo newLocation)
     {
         // Check if we entered a major city
         if (_mainCities.TryGetValue(newLocation.TerritoryId, out var cityName))
@@ -170,10 +166,10 @@ public class CitySyncshellService : DisposableMediatorSubscriberBase, IHostedSer
         try
         {
             // Get the city alias that matches the server's naming convention (now includes full server name)
-            var cityAlias = await GetCityAliasAsync(cityName);
+            var cityAlias = await GetCityAliasAsync(cityName).ConfigureAwait(false);
             
             // Get all area-bound syncshells to find the city syncshell
-            var areaBoundSyncshells = await _apiController.GroupGetAreaBoundSyncshells();
+            var areaBoundSyncshells = await _apiController.GroupGetAreaBoundSyncshells().ConfigureAwait(false);
             
             // Find the city syncshell by alias
             var citySyncshell = areaBoundSyncshells.FirstOrDefault(s => 
@@ -190,12 +186,12 @@ public class CitySyncshellService : DisposableMediatorSubscriberBase, IHostedSer
                     try
                     {
                         // Check if user already has valid consent
-                        var hasValidConsent = await _apiController.GroupCheckAreaBoundConsent(citySyncshell.GID);
+                        var hasValidConsent = await _apiController.GroupCheckAreaBoundConsent(citySyncshell.GID).ConfigureAwait(false);
                         
                         if (hasValidConsent)
                         {
                             // Auto-join without showing consent UI
-                            await _apiController.AreaBoundJoinRequest(citySyncshell.GID);
+                            await _apiController.AreaBoundJoinRequest(citySyncshell.GID).ConfigureAwait(false);
                             return;
                         }
                     }
@@ -216,7 +212,7 @@ public class CitySyncshellService : DisposableMediatorSubscriberBase, IHostedSer
                 {
                     // No rules acceptance required - join directly
                     _logger.LogDebug("No rules acceptance required for city syncshell {cityName}, joining directly", cityName);
-                    await _apiController.AreaBoundJoinRequest(citySyncshell.GID);
+                    await _apiController.AreaBoundJoinRequest(citySyncshell.GID).ConfigureAwait(false);
                 }
             }
             else
@@ -233,7 +229,7 @@ public class CitySyncshellService : DisposableMediatorSubscriberBase, IHostedSer
     private async Task<string> GetCityAliasAsync(string cityName)
     {
         // Get the current world name
-        var worldId = await _dalamudUtilService.GetWorldIdAsync();
+        var worldId = await _dalamudUtilService.GetWorldIdAsync().ConfigureAwait(false);
         var worldName = _dalamudUtilService.WorldData.Value.TryGetValue((ushort)worldId, out var name) ? name : $"World{worldId}";
         
         // Get the base city alias
@@ -269,6 +265,3 @@ public class CitySyncshellService : DisposableMediatorSubscriberBase, IHostedSer
         base.Dispose(disposing);
     }
 }
-
-public record CitySyncshellExplanationRequestMessage(string CityName) : MessageBase;
-public record CitySyncshellExplanationResponseMessage(string CityName, bool ShouldJoin) : MessageBase;

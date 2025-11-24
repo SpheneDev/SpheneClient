@@ -39,9 +39,9 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
     private bool _enableBackupBeforeConversion = true;
     private bool _hasUpdate = false;
     private bool _modalOpen = false;
-    private Task? _backupTask;
+    
     private readonly Progress<(string, int, int)> _backupProgress = new();
-    private Task? _revertTask;
+    
     private readonly Progress<(string, int, int)> _revertProgress = new();
     private CancellationTokenSource _revertCancellationTokenSource = new();
     private Task<(long totalSize, int fileCount)>? _storageInfoTask;
@@ -745,14 +745,11 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                             ImGui.TextUnformatted("Storage Management:");
                             
                             // Update storage info every 5 seconds or if task is null
-                            var now = DateTime.Now;
-                            if (_storageInfoTask == null || (now - _lastStorageInfoUpdate).TotalSeconds > 5)
+                            var now = DateTime.UtcNow;
+                            if (_storageInfoTask == null || (((now - _lastStorageInfoUpdate).TotalSeconds > 5) && _storageInfoTask.IsCompleted))
                             {
-                                if (_storageInfoTask == null || _storageInfoTask.IsCompleted)
-                                {
-                                    _storageInfoTask = GetShrinkUStorageInfoAsync();
-                                    _lastStorageInfoUpdate = now;
-                                }
+                                _storageInfoTask = GetShrinkUStorageInfoAsync();
+                                _lastStorageInfoUpdate = now;
                             }
                             
                             // Display storage info
@@ -806,7 +803,7 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                                 foreach (var texture in nonBc7Textures)
                                 {
                                     // Use the first file path as the primary texture to convert
-                                    var primaryPath = texture.FilePaths.First();
+                                    var primaryPath = texture.FilePaths[0];
                                     var duplicatePaths = texture.FilePaths.Skip(1).ToArray();
                                     _texturesToConvert[primaryPath] = duplicatePaths;
                                     _logger.LogDebug("Added texture {PrimaryPath} with {DuplicateCount} duplicates to conversion list", primaryPath, duplicatePaths.Length);
@@ -825,7 +822,7 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                                     _conversionCancellationTokenSource = _conversionCancellationTokenSource.CancelRecreate();
                                     _conversionTask = _ipcManager.Penumbra.ConvertTextureFiles(_logger, _texturesToConvert, _conversionProgress, _conversionCancellationTokenSource.Token);
                                     // Notify ShrinkU when conversion finishes
-                                    _conversionTask.ContinueWith(t => { try { _shrinkuConversionService.NotifyExternalTextureChange("conversion-completed"); } catch { } }, TaskScheduler.Default);
+                                    _ = _conversionTask.ContinueWith(t => { try { _shrinkuConversionService.NotifyExternalTextureChange("conversion-completed"); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to notify ShrinkU after conversion-completed"); } }, TaskScheduler.Default);
                                 }
                             }
                         }
@@ -886,6 +883,12 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
     {
         base.Dispose(disposing);
         _conversionProgress.ProgressChanged -= ConversionProgress_ProgressChanged;
+        _conversionCancellationTokenSource.Cancel();
+        _conversionCancellationTokenSource.Dispose();
+        _revertCancellationTokenSource.Cancel();
+        _revertCancellationTokenSource.Dispose();
+        _transientRecordCts.Cancel();
+        _transientRecordCts.Dispose();
     }
 
     private void ConversionProgress_ProgressChanged(object? sender, (string, int) e)
@@ -1022,7 +1025,7 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
         }
     }
 
-    private List<CharacterAnalyzer.FileDataEntry> GetNonBc7Textures(IGrouping<string, CharacterAnalyzer.FileDataEntry> fileGroup)
+    private static List<CharacterAnalyzer.FileDataEntry> GetNonBc7Textures(IGrouping<string, CharacterAnalyzer.FileDataEntry> fileGroup)
     {
         return fileGroup.Where(item => !string.Equals(item.Format.Value, "BC7", StringComparison.Ordinal)).ToList();
     }
@@ -1031,14 +1034,14 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
     {
         _conversionCancellationTokenSource = _conversionCancellationTokenSource.CancelRecreate();
         
-        _backupTask = Task.Run(async () =>
+        _ = Task.Run(async () =>
         {
             try
             {
                 // Create backups first - backup primary paths and all duplicates
                 var allTexturePaths = _texturesToConvert.SelectMany(kvp => new[] { kvp.Key }.Concat(kvp.Value)).ToArray();
                 _logger.LogDebug("Starting backup for {Count} texture paths", allTexturePaths.Length);
-                await _shrinkuBackupService.BackupAsync(_texturesToConvert, _backupProgress, _conversionCancellationTokenSource.Token);
+                await _shrinkuBackupService.BackupAsync(_texturesToConvert, _backupProgress, _conversionCancellationTokenSource.Token).ConfigureAwait(false);
                 
                 // Start conversion after backup is complete
                 _logger.LogDebug("Backup completed, starting texture conversion");
@@ -1046,9 +1049,9 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                 
                 try
                 {
-                    await _conversionTask;
+                    await _conversionTask.ConfigureAwait(false);
                     _logger.LogDebug("Texture conversion completed successfully");
-                    try { _shrinkuConversionService.NotifyExternalTextureChange("conversion-completed"); } catch { }
+                    try { _shrinkuConversionService.NotifyExternalTextureChange("conversion-completed"); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to notify ShrinkU after conversion-completed"); }
                 }
                 catch (Exception conversionEx)
                 {
@@ -1067,7 +1070,7 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
     {
         _revertCancellationTokenSource = _revertCancellationTokenSource.CancelRecreate();
         
-        _revertTask = Task.Run(async () =>
+        _ = Task.Run(async () =>
         {
             try
             {
@@ -1081,8 +1084,8 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                         await _shrinkuBackupService.RestoreLatestAsync(_revertProgress, _revertCancellationTokenSource.Token).ConfigureAwait(false);
                         _storageInfoTask = null;
                         _cachedBackupsForAnalysis = null;
-                        try { await _ipcManager.Penumbra.RedrawPlayerAsync().ConfigureAwait(false); } catch { }
-                        try { _shrinkuConversionService.NotifyExternalTextureChange("restore-latest"); } catch { }
+                        try { await _ipcManager.Penumbra.RedrawPlayerAsync().ConfigureAwait(false); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to redraw player after restore-latest"); }
+                        try { _shrinkuConversionService.NotifyExternalTextureChange("restore-latest"); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to notify ShrinkU after restore-latest"); }
                         return;
                     }
                 }
@@ -1091,7 +1094,7 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                     _logger.LogWarning(shrEx, "ShrinkU restore failed, falling back to Sphene per-file restore.");
                 }
                 // Create mapping of backup files to their target locations
-                var backupToTargetMap = new Dictionary<string, string>();
+                var backupToTargetMap = new Dictionary<string, string>(StringComparer.Ordinal);
                 
                 foreach (var kvp in availableBackups)
                 {
@@ -1101,7 +1104,7 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                     // Use the most recent backup (first in the list since they're ordered by creation time)
                     if (backupFiles.Count > 0)
                     {
-                        var mostRecentBackup = backupFiles.First();
+                        var mostRecentBackup = backupFiles[0];
                         
                         // Try to find the current location of this texture in the loaded data
                         var targetPath = FindCurrentTextureLocation(originalFileName);
@@ -1120,7 +1123,7 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                 if (backupToTargetMap.Count > 0)
                 {
                     _logger.LogDebug("Starting selective revert for {count} texture(s) from current analysis", backupToTargetMap.Count);
-                    var results = await _textureBackupService.RestoreTexturesAsync(backupToTargetMap, deleteBackupsAfterRestore: true, _revertProgress, _revertCancellationTokenSource.Token);
+                    var results = await _textureBackupService.RestoreTexturesAsync(backupToTargetMap, deleteBackupsAfterRestore: true, _revertProgress, _revertCancellationTokenSource.Token).ConfigureAwait(false);
                     
                     var successCount = results.Values.Count(success => success);
                     _logger.LogInformation("Selective texture revert completed: {successCount}/{totalCount} textures from current analysis restored successfully. Backup files have been automatically deleted.", successCount, results.Count);
@@ -1161,14 +1164,14 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
     private Dictionary<string, List<string>> GetCachedBackupsForCurrentAnalysis()
     {
         // Cache for 5 seconds to avoid excessive recalculation
-        if (_cachedBackupsForAnalysis != null && 
-            DateTime.Now - _lastBackupAnalysisUpdate < TimeSpan.FromSeconds(5))
+            if (_cachedBackupsForAnalysis != null && 
+            DateTime.UtcNow - _lastBackupAnalysisUpdate < TimeSpan.FromSeconds(5))
         {
             return _cachedBackupsForAnalysis;
         }
 
         _cachedBackupsForAnalysis = GetBackupsForCurrentAnalysis();
-        _lastBackupAnalysisUpdate = DateTime.Now;
+        _lastBackupAnalysisUpdate = DateTime.UtcNow;
         return _cachedBackupsForAnalysis;
     }
 
@@ -1176,11 +1179,11 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
     {
         try
         {
-            if (_cachedAnalysis == null) return new Dictionary<string, List<string>>();
+            if (_cachedAnalysis == null) return new Dictionary<string, List<string>>(StringComparer.Ordinal);
             
             // Get all available backups
             var allBackups = _textureBackupService.GetBackupsByOriginalFile();
-            var filteredBackups = new Dictionary<string, List<string>>();
+            var filteredBackups = new Dictionary<string, List<string>>(StringComparer.Ordinal);
             
             // Get all texture filenames from current analysis
             var currentTextureNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -1223,7 +1226,7 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error filtering backups for current analysis");
-            return new Dictionary<string, List<string>>();
+            return new Dictionary<string, List<string>>(StringComparer.Ordinal);
         }
     }
 
@@ -1286,7 +1289,7 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                     {
                         foreach (var f in Directory.EnumerateFiles(sess.SourcePath, "*", SearchOption.AllDirectories))
                         {
-                            try { total += new FileInfo(f).Length; count++; } catch { }
+                            try { total += new FileInfo(f).Length; count++; } catch (Exception ex) { _logger.LogDebug(ex, "Failed to read file size for {file}", f); }
                         }
                     }
                 }
@@ -1317,18 +1320,21 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                     {
                         foreach (var pmp in Directory.EnumerateFiles(modDir, "mod_backup_*.pmp"))
                         {
-                            try { total += new FileInfo(pmp).Length; count++; } catch { }
+                            try { total += new FileInfo(pmp).Length; count++; } catch (Exception ex) { _logger.LogDebug(ex, "Failed to read file size for {file}", pmp); }
                         }
                     }
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to compute backup size from ShrinkU directories");
+            }
             return (total, count);
         }
         catch
         {
             // Fallback to Sphene service
-            return await _textureBackupService.GetBackupStorageInfoAsync();
+            return await _textureBackupService.GetBackupStorageInfoAsync().ConfigureAwait(false);
         }
     }
 

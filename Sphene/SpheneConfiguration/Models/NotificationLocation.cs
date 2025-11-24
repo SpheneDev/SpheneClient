@@ -8,10 +8,3 @@ public enum NotificationLocation
     Both
 }
 
-public enum NotificationType
-{
-    Info,
-    Warning,
-    Error,
-    Success
-}

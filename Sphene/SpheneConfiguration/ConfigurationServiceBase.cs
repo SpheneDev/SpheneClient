@@ -56,7 +56,7 @@ public abstract class ConfigurationServiceBase<T> : IConfigService<T> where T : 
         if (!File.Exists(ConfigurationPath))
         {
             config = AttemptToLoadBackup();
-            if (Equals(config, default(T)))
+            if (config is null)
             {
                 config = (T)Activator.CreateInstance(typeof(T))!;
                 Save();
@@ -70,11 +70,10 @@ public abstract class ConfigurationServiceBase<T> : IConfigService<T> where T : 
             }
             catch
             {
-                // config failed to load for some reason
                 config = AttemptToLoadBackup();
             }
 
-            if (config == null || Equals(config, default(T)))
+            if (config is null)
             {
                 config = (T)Activator.CreateInstance(typeof(T))!;
                 Save();
@@ -82,7 +81,7 @@ public abstract class ConfigurationServiceBase<T> : IConfigService<T> where T : 
         }
 
         _configLastWriteTime = GetConfigLastWriteTime();
-        return config;
+        return config!;
     }
 
     private T? AttemptToLoadBackup()
@@ -98,7 +97,7 @@ public abstract class ConfigurationServiceBase<T> : IConfigService<T> where T : 
             try
             {
                 var config = JsonSerializer.Deserialize<T>(File.ReadAllText(file));
-                if (Equals(config, default(T)))
+                if (config is null)
                 {
                     File.Delete(file);
                 }

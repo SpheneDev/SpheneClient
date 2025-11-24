@@ -9,7 +9,7 @@ namespace Sphene.WebAPI.Files
         public static long Infinite => long.MaxValue;
         private readonly Stream _baseStream;
         private long _bandwidthLimit;
-        private Bandwidth _bandwidth;
+        private Bandwidth _bandwidth = new Bandwidth();
         private CancellationTokenSource _bandwidthChangeTokenSource = new CancellationTokenSource();
 
         /// <summary>

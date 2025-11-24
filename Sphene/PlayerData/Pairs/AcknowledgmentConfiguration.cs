@@ -9,32 +9,86 @@ public class AcknowledgmentConfiguration
     
     /// Default timeout for acknowledgments in seconds
     
-    public int DefaultTimeoutSeconds { get; set; } = 30;
+    private int _defaultTimeoutSeconds = 30;
+    public int DefaultTimeoutSeconds
+    {
+        get => _defaultTimeoutSeconds;
+        set
+        {
+            if (value <= 0) throw new ArgumentOutOfRangeException(nameof(value));
+            _defaultTimeoutSeconds = value;
+        }
+    }
     
     
     /// Maximum number of retry attempts for failed acknowledgments
     
-    public int MaxRetryAttempts { get; set; } = 3;
+    private int _maxRetryAttempts = 3;
+    public int MaxRetryAttempts
+    {
+        get => _maxRetryAttempts;
+        set
+        {
+            if (value < 0) throw new ArgumentOutOfRangeException(nameof(value));
+            _maxRetryAttempts = value;
+        }
+    }
     
     
     /// Base delay for exponential backoff in milliseconds
     
-    public int BaseRetryDelayMs { get; set; } = 1000;
+    private int _baseRetryDelayMs = 1000;
+    public int BaseRetryDelayMs
+    {
+        get => _baseRetryDelayMs;
+        set
+        {
+            if (value <= 0) throw new ArgumentOutOfRangeException(nameof(value));
+            _baseRetryDelayMs = value;
+        }
+    }
     
     
     /// Maximum delay for exponential backoff in milliseconds
     
-    public int MaxRetryDelayMs { get; set; } = 30000;
+    private int _maxRetryDelayMs = 30000;
+    public int MaxRetryDelayMs
+    {
+        get => _maxRetryDelayMs;
+        set
+        {
+            if (value < _baseRetryDelayMs) throw new ArgumentOutOfRangeException(nameof(value));
+            _maxRetryDelayMs = value;
+        }
+    }
     
     
     /// Maximum number of acknowledgments to batch together
     
-    public int MaxBatchSize { get; set; } = 10;
+    private int _maxBatchSize = 10;
+    public int MaxBatchSize
+    {
+        get => _maxBatchSize;
+        set
+        {
+            if (value <= 0) throw new ArgumentOutOfRangeException(nameof(value));
+            _maxBatchSize = value;
+        }
+    }
     
     
     /// Maximum time to wait before sending a partial batch in milliseconds
     
-    public int BatchTimeoutMs { get; set; } = 5000;
+    private int _batchTimeoutMs = 5000;
+    public int BatchTimeoutMs
+    {
+        get => _batchTimeoutMs;
+        set
+        {
+            if (value <= 0) throw new ArgumentOutOfRangeException(nameof(value));
+            _batchTimeoutMs = value;
+        }
+    }
     
     
     /// Enable adaptive timeout based on network conditions
@@ -64,7 +118,16 @@ public class AcknowledgmentConfiguration
     
     /// Maximum number of pending acknowledgments per user
     
-    public int MaxPendingAcknowledgmentsPerUser { get; set; } = 100;
+    private int _maxPendingAcknowledgmentsPerUser = 100;
+    public int MaxPendingAcknowledgmentsPerUser
+    {
+        get => _maxPendingAcknowledgmentsPerUser;
+        set
+        {
+            if (value <= 0) throw new ArgumentOutOfRangeException(nameof(value));
+            _maxPendingAcknowledgmentsPerUser = value;
+        }
+    }
     
     
     /// Enable or disable acknowledgment batching
@@ -86,28 +149,68 @@ public class AcknowledgmentConfiguration
     
     
     /// Timeout for high priority acknowledgments in seconds
-    
-    public int HighPriorityTimeoutSeconds { get; set; } = 10;
+    private int _highPriorityTimeoutSeconds = 10;
+    public int HighPriorityTimeoutSeconds
+    {
+        get => _highPriorityTimeoutSeconds;
+        set
+        {
+            if (value <= 0) throw new ArgumentOutOfRangeException(nameof(value));
+            _highPriorityTimeoutSeconds = value;
+        }
+    }
     
     
     /// Timeout for medium priority acknowledgments in seconds
-    
-    public int MediumPriorityTimeoutSeconds { get; set; } = 20;
+    private int _mediumPriorityTimeoutSeconds = 20;
+    public int MediumPriorityTimeoutSeconds
+    {
+        get => _mediumPriorityTimeoutSeconds;
+        set
+        {
+            if (value <= 0) throw new ArgumentOutOfRangeException(nameof(value));
+            _mediumPriorityTimeoutSeconds = value;
+        }
+    }
     
     
     /// Timeout for low priority acknowledgments in seconds
-    
-    public int LowPriorityTimeoutSeconds { get; set; } = 60;
+    private int _lowPriorityTimeoutSeconds = 60;
+    public int LowPriorityTimeoutSeconds
+    {
+        get => _lowPriorityTimeoutSeconds;
+        set
+        {
+            if (value <= 0) throw new ArgumentOutOfRangeException(nameof(value));
+            _lowPriorityTimeoutSeconds = value;
+        }
+    }
     
     
     /// Maximum size of the acknowledgment cache
-    
-    public int MaxCacheSize { get; set; } = 1000;
+    private int _maxCacheSize = 1000;
+    public int MaxCacheSize
+    {
+        get => _maxCacheSize;
+        set
+        {
+            if (value <= 0) throw new ArgumentOutOfRangeException(nameof(value));
+            _maxCacheSize = value;
+        }
+    }
     
     
     /// Cache expiration time in minutes
-    
-    public int CacheExpirationMinutes { get; set; } = 30;
+    private int _cacheExpirationMinutes = 30;
+    public int CacheExpirationMinutes
+    {
+        get => _cacheExpirationMinutes;
+        set
+        {
+            if (value <= 0) throw new ArgumentOutOfRangeException(nameof(value));
+            _cacheExpirationMinutes = value;
+        }
+    }
     
     
     /// Enable or disable performance metrics collection
@@ -119,43 +222,7 @@ public class AcknowledgmentConfiguration
     
     public void Validate()
     {
-        if (DefaultTimeoutSeconds <= 0)
-            throw new ArgumentException("DefaultTimeoutSeconds must be greater than 0");
-            
-        if (MaxRetryAttempts < 0)
-            throw new ArgumentException("MaxRetryAttempts must be greater than or equal to 0");
-            
-        if (BaseRetryDelayMs <= 0)
-            throw new ArgumentException("BaseRetryDelayMs must be greater than 0");
-            
-        if (MaxRetryDelayMs < BaseRetryDelayMs)
-            throw new ArgumentException("MaxRetryDelayMs must be greater than or equal to BaseRetryDelayMs");
-            
-        if (MaxBatchSize <= 0)
-            throw new ArgumentException("MaxBatchSize must be greater than 0");
-            
-        if (BatchTimeoutMs <= 0)
-            throw new ArgumentException("BatchTimeoutMs must be greater than 0");
-            
-
-            
-        if (MaxPendingAcknowledgmentsPerUser <= 0)
-            throw new ArgumentException("MaxPendingAcknowledgmentsPerUser must be greater than 0");
-            
-        if (HighPriorityTimeoutSeconds <= 0)
-            throw new ArgumentException("HighPriorityTimeoutSeconds must be greater than 0");
-            
-        if (MediumPriorityTimeoutSeconds <= 0)
-            throw new ArgumentException("MediumPriorityTimeoutSeconds must be greater than 0");
-            
-        if (LowPriorityTimeoutSeconds <= 0)
-            throw new ArgumentException("LowPriorityTimeoutSeconds must be greater than 0");
-            
-        if (MaxCacheSize <= 0)
-            throw new ArgumentException("MaxCacheSize must be greater than 0");
-            
-        if (CacheExpirationMinutes <= 0)
-            throw new ArgumentException("CacheExpirationMinutes must be greater than 0");
+        // All validations are enforced in property setters
     }
     
     
@@ -174,28 +241,4 @@ public class AcknowledgmentConfiguration
 }
 
 
-/// Priority levels for acknowledgments
-public enum AcknowledgmentPriority
-{
-    Low = 0,
-    Medium = 1,
-    High = 2
-}
-
-
-/// Error codes for acknowledgment failures
-public enum AcknowledgmentErrorCode
-{
-    None = 0,
-    Timeout = 1,
-    NetworkError = 2,
-    InvalidData = 3,
-    UserNotFound = 4,
-    ServerError = 5,
-    RateLimited = 6,
-    AuthenticationFailed = 7,
-    DataCorrupted = 8,
-    InsufficientPermissions = 9,
-    ServiceUnavailable = 10,
-    HashVerificationFailed = 11
-}
+ 

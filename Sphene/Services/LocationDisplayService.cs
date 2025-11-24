@@ -3,7 +3,7 @@ using Sphene.API.Dto.Group;
 
 namespace Sphene.Services;
 
-public class LocationDisplayService
+public static class LocationDisplayService
 {
     public static string GetLocationDisplayText(LocationInfo location, AreaMatchingMode? matchingMode = null)
     {

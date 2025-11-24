@@ -25,7 +25,8 @@ public sealed class DalamudLoggingProvider : ILoggerProvider
 
     public ILogger CreateLogger(string categoryName)
     {
-        string catName = categoryName.Split(".", StringSplitOptions.RemoveEmptyEntries).Last();
+        var parts = categoryName.Split(".", StringSplitOptions.RemoveEmptyEntries);
+        string catName = parts.Length > 0 ? parts[parts.Length - 1] : string.Empty;
         if (catName.Length > 15)
         {
             catName = string.Join("", catName.Take(6)) + "..." + string.Join("", catName.TakeLast(6));

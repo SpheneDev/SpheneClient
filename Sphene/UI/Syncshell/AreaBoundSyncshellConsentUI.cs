@@ -153,7 +153,11 @@ public class AreaBoundSyncshellConsentUI : WindowMediatorSubscriberBase
         {
             if (ImGui.Button("Accept and Join", new Vector2(buttonWidth, 0)))
             {
-                HandleAccept();
+                _ = Task.Run(async () =>
+                {
+                    try { await HandleAccept().ConfigureAwait(false); }
+                    catch (Exception ex) { _logger.LogError(ex, "Background error during area-bound consent accept"); }
+                });
             }
         }
         
@@ -182,13 +186,19 @@ public class AreaBoundSyncshellConsentUI : WindowMediatorSubscriberBase
         base.Dispose(disposing);
     }
 
-    private async void HandleAccept()
+    private async Task HandleAccept()
     {
+        if (_currentRequest?.Syncshell?.Group == null)
+        {
+            _errorMessage = "No pending request";
+            return;
+        }
         _logger.LogDebug("User accepted consent for syncshell: {syncshellId}", _currentRequest.Syncshell.Group.GID);
         
         try
         {
-            await _areaBoundService.JoinAreaBoundSyncshell(_currentRequest.Syncshell.Group.GID, _rulesAccepted, _currentRequest.Syncshell.Settings.RulesVersion);
+            var rulesVersion = _currentRequest.Syncshell.Settings?.RulesVersion ?? 0;
+            await _areaBoundService.JoinAreaBoundSyncshell(_currentRequest.Syncshell.Group.GID, _rulesAccepted, rulesVersion).ConfigureAwait(false);
             _currentRequest = null;
             IsOpen = false;
             _errorMessage = string.Empty;

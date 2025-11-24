@@ -15,7 +15,7 @@ public sealed class FileCompactor
     private readonly ConcurrentDictionary<string, bool> _driveNTFSCache;
     private readonly SemaphoreSlim _parallelSemaphore;
 
-    private readonly WOF_FILE_COMPRESSION_INFO_V1 _efInfo;
+    private readonly WofFileCompressionInfoV1 _efInfo;
     private readonly ILogger<FileCompactor> _logger;
 
     private readonly SpheneConfigService _SpheneConfigService;
@@ -29,7 +29,7 @@ public sealed class FileCompactor
         _logger = logger;
         _SpheneConfigService = SpheneConfigService;
         _dalamudUtilService = dalamudUtilService;
-        _efInfo = new WOF_FILE_COMPRESSION_INFO_V1
+        _efInfo = new WofFileCompressionInfoV1
         {
             Algorithm = CompressionAlgorithm.XPRESS8K,
             Flags = 0
@@ -79,13 +79,13 @@ public sealed class FileCompactor
                 },
                 async (file, ct) =>
                 {
-                    await _parallelSemaphore.WaitAsync(ct);
+                    await _parallelSemaphore.WaitAsync(ct).ConfigureAwait(false);
                     try
                     {
                         if (compress)
-                            await CompactFileAsync(file, ct);
+                            await CompactFileAsync(file, ct).ConfigureAwait(false);
                         else
-                            await DecompressFileAsync(file, ct);
+                            await DecompressFileAsync(file, ct).ConfigureAwait(false);
 
                         var current = Interlocked.Increment(ref processedFiles);
                         Progress = $"{current}/{totalFiles}";
@@ -94,7 +94,7 @@ public sealed class FileCompactor
                     {
                         _parallelSemaphore.Release();
                     }
-                });
+                }).ConfigureAwait(false);
         }
         finally
         {
@@ -149,7 +149,7 @@ public sealed class FileCompactor
             return;
         }
 
-        await CompactFileAsync(filePath, token);
+        await CompactFileAsync(filePath, token).ConfigureAwait(false);
     }
 
     [DllImport("kernel32.dll")]
@@ -165,19 +165,19 @@ public sealed class FileCompactor
            out uint lpTotalNumberOfClusters);
 
     [DllImport("WoFUtil.dll")]
-    private static extern int WofIsExternalFile([MarshalAs(UnmanagedType.LPWStr)] string Filepath, out int IsExternalFile, out uint Provider, out WOF_FILE_COMPRESSION_INFO_V1 Info, ref uint BufferLength);
+    private static extern int WofIsExternalFile([MarshalAs(UnmanagedType.LPWStr)] string Filepath, out int IsExternalFile, out uint Provider, out WofFileCompressionInfoV1 Info, ref uint BufferLength);
 
     [DllImport("WofUtil.dll")]
     private static extern int WofSetFileDataLocation(IntPtr FileHandle, ulong Provider, IntPtr ExternalFileInfo, ulong Length);
 
     private async Task CompactFileAsync(string filePath, CancellationToken cancellationToken = default)
     {
-        await Task.Run(() => CompactFile(filePath), cancellationToken);
+        await Task.Run(() => CompactFile(filePath), cancellationToken).ConfigureAwait(false);
     }
 
     private async Task DecompressFileAsync(string filePath, CancellationToken cancellationToken = default)
     {
-        await Task.Run(() => DecompressFile(filePath), cancellationToken);
+        await Task.Run(() => DecompressFile(filePath), cancellationToken).ConfigureAwait(false);
     }
 
     private void CompactFile(string filePath)
@@ -294,7 +294,8 @@ public sealed class FileCompactor
         }
     }
 
-    private struct WOF_FILE_COMPRESSION_INFO_V1
+    [StructLayout(LayoutKind.Sequential)]
+    private struct WofFileCompressionInfoV1
     {
         public CompressionAlgorithm Algorithm;
         public ulong Flags;

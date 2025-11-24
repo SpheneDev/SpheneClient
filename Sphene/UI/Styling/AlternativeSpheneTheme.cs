@@ -120,7 +120,7 @@ public static class AlternativeSpheneTheme
     /// <summary>
     /// Disposable class that restores original ImGui colors when disposed
     /// </summary>
-    private class AlternativeColorRestorer : IDisposable
+    private sealed class AlternativeColorRestorer : IDisposable
     {
         private readonly Dictionary<ImGuiCol, Vector4> _originalColors;
         

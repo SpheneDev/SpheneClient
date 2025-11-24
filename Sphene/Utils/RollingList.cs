@@ -4,7 +4,7 @@ namespace Sphene.Utils;
 
 public class RollingList<T> : IEnumerable<T>
 {
-    private readonly object _addLock = new();
+    private readonly System.Threading.Lock _addLock = new();
     private readonly LinkedList<T> _list = new();
 
     public RollingList(int maximumCount)
@@ -31,13 +31,18 @@ public class RollingList<T> : IEnumerable<T>
 
     public void Add(T value)
     {
-        lock (_addLock)
+        _addLock.Enter();
+        try
         {
             if (_list.Count == MaximumCount)
             {
                 _list.RemoveFirst();
             }
             _list.AddLast(value);
+        }
+        finally
+        {
+            _addLock.Exit();
         }
     }
 

@@ -7,7 +7,6 @@ using Sphene.API.Dto.User;
 using Sphene.PlayerData.Factories;
 using Sphene.PlayerData.Handlers;
 using Sphene.Services.Mediator;
-using Sphene.Services.Events;
 using Sphene.Services.ServerConfiguration;
 using Sphene.SpheneConfiguration;
 using Sphene.SpheneConfiguration.Models;
@@ -47,7 +46,7 @@ public class Pair : DisposableMediatorSubscriberBase
         _visibilityGateService = visibilityGateService;
         
         // Subscribe to character data application completion messages
-        Mediator.Subscribe<CharacterDataApplicationCompletedMessage>(this, async (message) => await OnCharacterDataApplicationCompleted(message));
+        Mediator.Subscribe<CharacterDataApplicationCompletedMessage>(this, message => { _ = OnCharacterDataApplicationCompleted(message); });
     }
 
     public bool HasCachedPlayer => CachedPlayer != null && !string.IsNullOrEmpty(CachedPlayer.PlayerName) && _onlineUserIdentDto != null;
@@ -135,7 +134,7 @@ public class Pair : DisposableMediatorSubscriberBase
         // Performance whitelist functionality
         var config = _playerPerformanceConfigService.Current;
         var userIdentifier = !string.IsNullOrEmpty(UserPair.User.Alias) ? UserPair.User.Alias : UserData.UID;
-        var isWhitelisted = config.UIDsToIgnore.Contains(UserData.UID);
+        var isWhitelisted = System.Linq.Enumerable.Contains(config.UIDsToIgnore, UserData.UID, StringComparer.Ordinal);
         var whitelistText = isWhitelisted ? "Remove from Performance Whitelist" : "Add to Performance Whitelist";
         var performanceWhitelistSeString = seStringBuilder5.AddText(whitelistText).Build();
         
@@ -398,7 +397,7 @@ public class Pair : DisposableMediatorSubscriberBase
         
         try
         {
-            await _apiController.Value.UserSetPairPermissions(new(UserData, permissions));
+            await _apiController.Value.UserSetPairPermissions(new(UserData, permissions)).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -444,7 +443,7 @@ public class Pair : DisposableMediatorSubscriberBase
         
         try
         {
-            await _apiController.Value.UserSetPairPermissions(new(UserData, permissions));
+            await _apiController.Value.UserSetPairPermissions(new(UserData, permissions)).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -502,7 +501,7 @@ public class Pair : DisposableMediatorSubscriberBase
     public async Task ClearPendingAcknowledgment(string acknowledgmentId, MessageService? messageService = null)
     {
         // Only clear if this is the acknowledgment we're waiting for
-        if (LastAcknowledgmentId == acknowledgmentId)
+        if (string.Equals(LastAcknowledgmentId, acknowledgmentId, StringComparison.Ordinal))
         {
             Logger.LogDebug("Clearing pending acknowledgment: {acknowledgmentId} for user {user}", acknowledgmentId, UserData.AliasOrUID);
             HasPendingAcknowledgment = false;
@@ -519,7 +518,7 @@ public class Pair : DisposableMediatorSubscriberBase
             
             try
             {
-                await _apiController.Value.UserSetPairPermissions(new(UserData, permissions));
+                await _apiController.Value.UserSetPairPermissions(new(UserData, permissions)).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -678,7 +677,7 @@ public class Pair : DisposableMediatorSubscriberBase
                 permissions.SetAckYou(newAckYouStatus);
                 try
                 {
-                    await _apiController.Value.UserSetPairPermissions(new(UserData, permissions));
+                    await _apiController.Value.UserSetPairPermissions(new(UserData, permissions)).ConfigureAwait(false);
                 }
                 catch (Exception ex)
                 {
@@ -698,7 +697,7 @@ public class Pair : DisposableMediatorSubscriberBase
     private async Task OnCharacterDataApplicationCompleted(CharacterDataApplicationCompletedMessage message)
     {
         // Check if this message is for this pair
-        if (message.UserUID == UserPair.User.UID)
+        if (string.Equals(message.UserUID, UserPair.User.UID, StringComparison.Ordinal))
         {
             Logger.LogDebug("Character data application completed for {playerName} - processing acknowledgment queue", message.PlayerName);
             
@@ -793,4 +792,17 @@ public class Pair : DisposableMediatorSubscriberBase
              return false;
          }
      }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _applicationCts?.Cancel();
+            _applicationCts?.Dispose();
+            _creationSemaphore.Dispose();
+            CachedPlayer?.Dispose();
+            CachedPlayer = null;
+        }
+        base.Dispose(disposing);
+    }
 }

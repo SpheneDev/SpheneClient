@@ -73,7 +73,7 @@ public class CharacterStatusService : MediatorSubscriberBase, IHostedService
     }
 
     // Check if a status ID is valid/accepted
-    public bool IsValidOnlineStatusId(uint statusId)
+    public static bool IsValidOnlineStatusId(uint statusId)
     {
         if (statusId == 0) return true;
         
@@ -94,19 +94,15 @@ public class CharacterStatusService : MediatorSubscriberBase, IHostedService
             {
                 var status = onlineStatusSheet.GetRow(statusId);
                 var statusName = status.Name.ToString() ?? $"Status {statusId}";
-                
-                // Add validation info for mentor statuses
                 if (IsMentorStatus(statusId))
                 {
                     statusName += " (Requires mentor unlock)";
                 }
-                
                 result[statusId] = statusName;
             }
-            catch
+            catch (Exception ex)
             {
-                // Skip invalid status IDs
-                continue;
+                Logger.LogDebug(ex, "Failed to read online status name for id {statusId}", statusId);
             }
         }
 
@@ -114,7 +110,7 @@ public class CharacterStatusService : MediatorSubscriberBase, IHostedService
     }
 
     // Check if a status is a mentor status
-    public bool IsMentorStatus(uint statusId)
+    public static bool IsMentorStatus(uint statusId)
     {
         return statusId == OnlineStatusMentor || 
                statusId == OnlineStatusBattleMentor || 
@@ -141,33 +137,27 @@ public class CharacterStatusService : MediatorSubscriberBase, IHostedService
                 {
                     var status = onlineStatusSheet.GetRow(statusId);
                     var statusName = status.Name.ToString() ?? $"Status {statusId}";
-                    
-                    // Handle special case for status ID 0 - set name to "Online"
                     if (statusId == 0)
                     {
                         statusName = "Online";
                     }
-                    
                     bool isUnlocked = true;
-                    
                     if (IsMentorStatus(statusId) && playerState != null)
                     {
                         isUnlocked = statusId switch
                         {
                             OnlineStatusMentor => playerState->IsBattleMentor() && playerState->IsTradeMentor() && playerState->MentorVersion == 3,
-                            OnlineStatusBattleMentor => playerState->IsBattleMentor() && playerState->MentorVersion == 3, // PvE Battle Mentor (28)
-                            OnlineStatusPvPMentor => playerState->IsBattleMentor() && playerState->MentorVersion == 3,    // PvP Battle Mentor (30) - uses same check as PvE
-                            OnlineStatusTradeMentor => playerState->IsTradeMentor() && playerState->MentorVersion == 3,   // Trade Mentor (29)
+                            OnlineStatusBattleMentor => playerState->IsBattleMentor() && playerState->MentorVersion == 3,
+                            OnlineStatusPvPMentor => playerState->IsBattleMentor() && playerState->MentorVersion == 3,
+                            OnlineStatusTradeMentor => playerState->IsTradeMentor() && playerState->MentorVersion == 3,
                             _ => false
                         };
                     }
-                    
                     result[statusId] = (statusName, isUnlocked);
                 }
-                catch
+                catch (Exception ex)
                 {
-                    // Skip invalid status IDs
-                    continue;
+                    Logger.LogDebug(ex, "Failed to read online status validation for id {statusId}", statusId);
                 }
             }
         }

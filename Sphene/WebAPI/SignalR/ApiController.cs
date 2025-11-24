@@ -141,7 +141,8 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
             Logger.LogDebug("Not recreating Connection, paused");
             _connectionDto = null;
             await StopConnectionAsync(ServerState.Disconnected).ConfigureAwait(false);
-            _connectionCancellationTokenSource?.Cancel();
+            if (_connectionCancellationTokenSource is not null)
+                await _connectionCancellationTokenSource.CancelAsync().ConfigureAwait(false);
             return;
         }
 
@@ -155,7 +156,8 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
                 Mediator.Publish(new NotificationMessage("Multiple Identical Characters detected", "Your Service configuration has multiple characters with the same name and world set up. Delete the duplicates in the character management to be able to connect to Sphene.",
                     NotificationType.Error));
                 await StopConnectionAsync(ServerState.MultiChara).ConfigureAwait(false);
-                _connectionCancellationTokenSource?.Cancel();
+                if (_connectionCancellationTokenSource is not null)
+                    await _connectionCancellationTokenSource.CancelAsync().ConfigureAwait(false);
                 return;
             }
 
@@ -164,7 +166,8 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
                 Logger.LogWarning("No secret key set for current character");
                 _connectionDto = null;
                 await StopConnectionAsync(ServerState.NoSecretKey).ConfigureAwait(false);
-                _connectionCancellationTokenSource?.Cancel();
+                if (_connectionCancellationTokenSource is not null)
+                    await _connectionCancellationTokenSource.CancelAsync().ConfigureAwait(false);
                 return;
             }
         }
@@ -178,7 +181,8 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
                 Mediator.Publish(new NotificationMessage("Multiple Identical Characters detected", "Your Service configuration has multiple characters with the same name and world set up. Delete the duplicates in the character management to be able to connect to Sphene.",
                     NotificationType.Error));
                 await StopConnectionAsync(ServerState.MultiChara).ConfigureAwait(false);
-                _connectionCancellationTokenSource?.Cancel();
+                if (_connectionCancellationTokenSource is not null)
+                    await _connectionCancellationTokenSource.CancelAsync().ConfigureAwait(false);
                 return;
             }
 
@@ -187,7 +191,8 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
                 Logger.LogWarning("No UID/OAuth set for current character");
                 _connectionDto = null;
                 await StopConnectionAsync(ServerState.OAuthMisconfigured).ConfigureAwait(false);
-                _connectionCancellationTokenSource?.Cancel();
+                if (_connectionCancellationTokenSource is not null)
+                    await _connectionCancellationTokenSource.CancelAsync().ConfigureAwait(false);
                 return;
             }
 
@@ -196,7 +201,8 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
                 Logger.LogWarning("OAuth2 login token could not be updated");
                 _connectionDto = null;
                 await StopConnectionAsync(ServerState.OAuthLoginTokenStale).ConfigureAwait(false);
-                _connectionCancellationTokenSource?.Cancel();
+                if (_connectionCancellationTokenSource is not null)
+                    await _connectionCancellationTokenSource.CancelAsync().ConfigureAwait(false);
                 return;
             }
         }
@@ -207,7 +213,8 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
         Mediator.Publish(new EventMessage(new Services.Events.Event(nameof(ApiController), Services.Events.EventSeverity.Informational,
             $"Starting Connection to {_serverManager.CurrentServer.ServerName}")));
 
-        _connectionCancellationTokenSource?.Cancel();
+        if (_connectionCancellationTokenSource is not null)
+            await _connectionCancellationTokenSource.CancelAsync().ConfigureAwait(false);
         _connectionCancellationTokenSource?.Dispose();
         _connectionCancellationTokenSource = new CancellationTokenSource();
         var token = _connectionCancellationTokenSource.Token;
@@ -410,9 +417,11 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
         
         base.Dispose(disposing);
 
-        _healthCheckTokenSource?.Cancel();
+        if (_healthCheckTokenSource is not null)
+            _ = _healthCheckTokenSource.CancelAsync();
         _ = Task.Run(async () => await StopConnectionAsync(ServerState.Disconnected).ConfigureAwait(false));
-        _connectionCancellationTokenSource?.Cancel();
+        if (_connectionCancellationTokenSource is not null)
+            _ = _connectionCancellationTokenSource.CancelAsync();
     }
 
     private async Task ClientHealthCheckAsync(CancellationToken ct)
@@ -511,7 +520,8 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
         OnGposeLobbyPushPoseData((dto, data) => _ = Client_GposeLobbyPushPoseData(dto, data));
         OnGposeLobbyPushWorldData((dto, data) => _ = Client_GposeLobbyPushWorldData(dto, data));
 
-        _healthCheckTokenSource?.Cancel();
+        if (_healthCheckTokenSource is not null)
+            _ = _healthCheckTokenSource.CancelAsync();
         _healthCheckTokenSource?.Dispose();
         _healthCheckTokenSource = new CancellationTokenSource();
         _ = ClientHealthCheckAsync(_healthCheckTokenSource.Token);
@@ -553,7 +563,8 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
 
     private void SpheneHubOnClosed(Exception? arg)
     {
-        _healthCheckTokenSource?.Cancel();
+        if (_healthCheckTokenSource is not null)
+            _ = _healthCheckTokenSource.CancelAsync();
         Mediator.Publish(new DisconnectedMessage());
         ServerState = ServerState.Offline;
         if (arg != null)
@@ -593,7 +604,8 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
     private void SpheneHubOnReconnecting(Exception? arg)
     {
         _doNotNotifyOnNextInfo = true;
-        _healthCheckTokenSource?.Cancel();
+        if (_healthCheckTokenSource is not null)
+            _ = _healthCheckTokenSource.CancelAsync();
         ServerState = ServerState.Reconnecting;
         Logger.LogWarning(arg, "Connection closed... Reconnecting");
         Mediator.Publish(new EventMessage(new Services.Events.Event(nameof(ApiController), Services.Events.EventSeverity.Warning,
@@ -646,7 +658,8 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
                 $"Stopping existing connection to {_serverManager.CurrentServer.ServerName}")));
 
             _initialized = false;
-            _healthCheckTokenSource?.Cancel();
+            if (_healthCheckTokenSource is not null)
+                await _healthCheckTokenSource.CancelAsync().ConfigureAwait(false);
             Mediator.Publish(new DisconnectedMessage());
             _spheneHub = null;
             _connectionDto = null;
@@ -675,41 +688,39 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
         _spheneHub?.On(nameof(Client_AreaBoundSyncshellConfigurationUpdate), act);
     }
 
-    public async Task Client_AreaBoundSyncshellBroadcast(AreaBoundBroadcastDto dto)
+    public Task Client_AreaBoundSyncshellBroadcast(AreaBoundBroadcastDto dto)
     {
-        await ExecuteSafely(async () =>
+        ExecuteSafely(() =>
         {
             Logger.LogDebug("Received area-bound syncshell broadcast for group: {GroupId} ({GroupAlias})", dto.Group.GID, dto.Group.Alias);
             Logger.LogDebug("Broadcast area: {Area}, Users in area: {UserCount}", dto.Area, dto.UsersInArea.Count);
-            
-            // Create and publish an area-bound syncshell notification message
+
             var title = "Area Syncshell Available";
             var message = $"Area-bound syncshell '{dto.Group.Alias}' is available in this area!";
-            
-            // Get the notification location setting from config
+
             var notificationLocation = _SpheneConfigService?.Current?.AreaBoundSyncshellNotification ?? NotificationLocation.Toast;
-            
+
             Logger.LogDebug("Creating area-bound notification: {Title} - {Message} (Location: {Location})", title, message, notificationLocation);
-            
-            // Create a custom notification message for area-bound syncshells
+
             var notificationMessage = new AreaBoundSyncshellNotificationMessage(title, message, notificationLocation);
             Mediator.Publish(notificationMessage);
-            
+
             Logger.LogDebug("Published area-bound syncshell notification for group: {GroupAlias}", dto.Group.Alias);
         });
+        return Task.CompletedTask;
     }
 
-    public async Task Client_AreaBoundSyncshellConfigurationUpdate()
+    public Task Client_AreaBoundSyncshellConfigurationUpdate()
     {
-        await ExecuteSafely(async () =>
+        ExecuteSafely(() =>
         {
             Logger.LogDebug("Received area-bound syncshell configuration update notification");
-            
-            // Publish a mediator message to notify the AreaBoundSyncshellService
+
             Mediator.Publish(new AreaBoundSyncshellConfigurationUpdateMessage());
-            
+
             Logger.LogDebug("Published area-bound syncshell configuration update message");
         });
+        return Task.CompletedTask;
     }
 
     public async Task BroadcastAreaBoundSyncshells(LocationInfo userLocation)

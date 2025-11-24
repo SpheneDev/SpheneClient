@@ -8,19 +8,21 @@ namespace Sphene.UI.CharaDataHub;
 
 internal sealed partial class CharaDataHubUi
 {
-	private static string GetAccessTypeString(AccessTypeDto dto) => dto switch
-	{
-		AccessTypeDto.AllPairs => "All Pairs",
-		AccessTypeDto.ClosePairs => "Direct Pairs",
-		AccessTypeDto.Individuals => "Specified",
-		AccessTypeDto.Public => "Everyone"
-	};
+    private static string GetAccessTypeString(AccessTypeDto dto) => dto switch
+    {
+        AccessTypeDto.AllPairs => "All Pairs",
+        AccessTypeDto.ClosePairs => "Direct Pairs",
+        AccessTypeDto.Individuals => "Specified",
+        AccessTypeDto.Public => "Everyone",
+        _ => "Unknown"
+    };
 
-	private static string GetShareTypeString(ShareTypeDto dto) => dto switch
-	{
-		ShareTypeDto.Private => "Code Only",
-		ShareTypeDto.Shared => "Shared"
-	};
+    private static string GetShareTypeString(ShareTypeDto dto) => dto switch
+    {
+        ShareTypeDto.Private => "Code Only",
+        ShareTypeDto.Shared => "Shared",
+        _ => "Unknown"
+    };
 
 	private static string GetWorldDataTooltipText(PoseEntryExtended poseEntry)
 	{

@@ -19,7 +19,7 @@ public static class ButtonStyleManagerUI
 
     private static (Vector4 Button, Vector4 Hovered, Vector4 Active, Vector4 Text, Vector4 Icon, Vector4 Border, float BorderSize) GetDefaultsForKey(string key, ThemeConfiguration theme)
     {
-        if (key.StartsWith("CompactUI."))
+        if (key.StartsWith("CompactUI.", StringComparison.Ordinal))
         {
             return (
                 theme.CompactActionButton,
@@ -91,7 +91,6 @@ public static class ButtonStyleManagerUI
     };
 
     private static int _selectedIndex = 0;
-    private static int _copyTargetIndex = 0;
 
     public static bool IsPickerEnabled => _pickerEnabled;
     public static void DisablePicker()
@@ -134,16 +133,16 @@ public static class ButtonStyleManagerUI
         float min = MathF.Min(r, MathF.Min(g, b));
         v = max;
         float d = max - min;
-        s = max == 0 ? 0 : d / max;
-        if (d == 0)
+        s = MathF.Abs(max) < 1e-6f ? 0 : d / max;
+        if (MathF.Abs(d) < 1e-6f)
         {
             h = 0;
         }
         else
         {
-            if (max == r)
+            if (MathF.Abs(max - r) < 1e-6f)
                 h = (g - b) / d + (g < b ? 6 : 0);
-            else if (max == g)
+            else if (MathF.Abs(max - g) < 1e-6f)
                 h = (b - r) / d + 2;
             else
                 h = (r - g) / d + 4;
@@ -153,7 +152,7 @@ public static class ButtonStyleManagerUI
 
     private static Vector4 RgbaFromHsv(float h, float s, float v, float a)
     {
-        if (s == 0)
+        if (MathF.Abs(s) < 1e-6f)
             return new Vector4(v, v, v, a);
         h *= 6f;
         int i = (int)MathF.Floor(h);
@@ -197,7 +196,7 @@ public static class ButtonStyleManagerUI
             for (int i = 0; i < _keys.Length; i++)
             {
                 var item = _keys[i];
-                if (item.Category != currentCategory)
+                if (!string.Equals(item.Category, currentCategory, StringComparison.Ordinal))
                 {
                     if (currentCategory != null) ImGui.Separator();
                     ImGui.TextDisabled(item.Category);
@@ -226,235 +225,7 @@ public static class ButtonStyleManagerUI
 
         ImGui.Separator();
 
-        float widthDelta = 0f;
-        float heightDelta = 0f;
-        Vector2 iconOffset = Vector2.Zero;
-
-        {
-            var key = _keys[_selectedIndex].Key;
-            var defaults = GetDefaultsForKey(key, theme);
-            if (!theme.ButtonStyles.TryGetValue(key, out var ov))
-            {
-                ov = new ButtonStyleOverride();
-                theme.ButtonStyles[key] = ov;
-            }
-
-            widthDelta = ov.WidthDelta;
-            heightDelta = ov.HeightDelta;
-            iconOffset = ov.IconOffset;
-
-            ImGui.Text("Selected Button Overrides");
-            if (ImGui.DragFloat("Width", ref widthDelta, 0.1f, -100f, 200f))
-            {
-                ov.WidthDelta = widthDelta;
-                theme.NotifyThemeChanged();
-            }
-            if (ImGui.DragFloat("Height", ref heightDelta, 0.1f, -50f, 100f))
-            {
-                ov.HeightDelta = heightDelta;
-                theme.NotifyThemeChanged();
-            }
-            if (ImGui.DragFloat2("Icon Offset", ref iconOffset, 0.1f, -50f, 50f))
-            {
-                ov.IconOffset = iconOffset;
-                theme.NotifyThemeChanged();
-            }
-
-            ImGui.Separator();
-            ImGui.Text("Selected Button Colors");
-            var effBtn = ov.Button ?? defaults.Button;
-            if (ImGui.ColorEdit4("Button", ref effBtn))
-            {
-                ov.Button = effBtn;
-                theme.NotifyThemeChanged();
-            }
-            ImGui.SameLine();
-            ImGui.PushFont(UiBuilder.IconFont);
-            var genClicked = ImGui.SmallButton(FontAwesomeIcon.Magic.ToIconString());
-            ImGui.PopFont();
-            if (genClicked)
-            {
-                var hover = DeriveHoverColor(effBtn);
-                var active = DeriveActiveColor(effBtn);
-                ov.ButtonHovered = hover;
-                ov.ButtonActive = active;
-                theme.NotifyThemeChanged();
-            }
-            if (ImGui.IsItemHovered())
-                Sphene.UI.UiSharedService.AttachToolTip("Generate Hover/Active colors from current Button color.");
-            var effBtnH = ov.ButtonHovered ?? defaults.Hovered;
-            if (ImGui.ColorEdit4("Button Hovered", ref effBtnH))
-            {
-                ov.ButtonHovered = effBtnH;
-                theme.NotifyThemeChanged();
-            }
-            var effBtnA = ov.ButtonActive ?? defaults.Active;
-            if (ImGui.ColorEdit4("Button Active", ref effBtnA))
-            {
-                ov.ButtonActive = effBtnA;
-                theme.NotifyThemeChanged();
-            }
-            var effIcon = ov.Icon ?? defaults.Icon;
-            if (ImGui.ColorEdit4("Icon", ref effIcon))
-            {
-                ov.Icon = effIcon;
-                theme.NotifyThemeChanged();
-            }
-            var effBorder = ov.Border ?? defaults.Border;
-            if (ImGui.ColorEdit4("Border", ref effBorder))
-            {
-                ov.Border = effBorder;
-                theme.NotifyThemeChanged();
-            }
-            var effBorderSize = ov.BorderSize ?? defaults.BorderSize;
-            if (ImGui.SliderFloat("Border Width", ref effBorderSize, 0f, 5f, "%.1f"))
-            {
-                ov.BorderSize = effBorderSize;
-                theme.NotifyThemeChanged();
-            }
-            var effTxt = ov.Text ?? defaults.Text;
-            if (ImGui.ColorEdit4("Text", ref effTxt))
-            {
-                ov.Text = effTxt;
-                theme.NotifyThemeChanged();
-            }
-
-            if (ImGui.Button("Reset Changes"))
-            {
-                var selectedThemeName = ThemeManager.GetSelectedTheme();
-                ThemeConfiguration? baseline = null;
-                if (ThemePresets.BuiltInThemes.ContainsKey(selectedThemeName))
-                    baseline = ThemePresets.BuiltInThemes[selectedThemeName];
-                else
-                    baseline = ThemeManager.LoadTheme(selectedThemeName);
-
-                if (baseline != null && baseline.ButtonStyles.TryGetValue(key, out var baseOv))
-                {
-                    ov.WidthDelta = baseOv.WidthDelta;
-                    ov.HeightDelta = baseOv.HeightDelta;
-                    ov.IconOffset = baseOv.IconOffset;
-                    ov.Button = baseOv.Button;
-                    ov.ButtonHovered = baseOv.ButtonHovered;
-                    ov.ButtonActive = baseOv.ButtonActive;
-                    ov.Text = baseOv.Text;
-                    ov.Icon = baseOv.Icon;
-                    ov.Border = baseOv.Border;
-                    ov.BorderSize = baseOv.BorderSize;
-                }
-                else
-                {
-                    ov.WidthDelta = 0f;
-                    ov.HeightDelta = 0f;
-                    ov.IconOffset = Vector2.Zero;
-                    ov.Button = null;
-                    ov.ButtonHovered = null;
-                    ov.ButtonActive = null;
-                    ov.Text = null;
-                    ov.Icon = null;
-                    ov.Border = null;
-                    ov.BorderSize = null;
-                }
-                theme.NotifyThemeChanged();
-            }
-
-            ImGui.Separator();
-            var srcKey = _keys[_selectedIndex].Key;
-            if (ImGui.Button("Copy Colors"))
-            {
-                if (!theme.ButtonStyles.TryGetValue(srcKey, out var src))
-                {
-                    src = new ButtonStyleOverride();
-                    theme.ButtonStyles[srcKey] = src;
-                }
-                var srcDefaults = GetDefaultsForKey(srcKey, theme);
-                var effSrcBtn = src.Button ?? srcDefaults.Button;
-                var effSrcBtnH = src.ButtonHovered ?? srcDefaults.Hovered;
-                var effSrcBtnA = src.ButtonActive ?? srcDefaults.Active;
-                var effSrcIcon = src.Icon ?? srcDefaults.Icon;
-                var effSrcBorder = src.Border ?? srcDefaults.Border;
-                var effSrcText = src.Text ?? srcDefaults.Text;
-                var effSrcBorderSize = src.BorderSize ?? srcDefaults.BorderSize;
-                var payload = JsonSerializer.Serialize(new ButtonStyleOverride
-                {
-                    Button = effSrcBtn,
-                    ButtonHovered = effSrcBtnH,
-                    ButtonActive = effSrcBtnA,
-                    Text = effSrcText,
-                    Icon = effSrcIcon,
-                    Border = effSrcBorder,
-                    BorderSize = effSrcBorderSize
-                }, ClipboardJsonOptions);
-                ImGui.SetClipboardText("SPHENE_BTN_STYLE:colors:" + payload);
-            }
-            ImGui.SameLine();
-            if (ImGui.Button("Copy All"))
-            {
-                if (!theme.ButtonStyles.TryGetValue(srcKey, out var src))
-                {
-                    src = new ButtonStyleOverride();
-                    theme.ButtonStyles[srcKey] = src;
-                }
-                var payload = JsonSerializer.Serialize(src, ClipboardJsonOptions);
-                ImGui.SetClipboardText("SPHENE_BTN_STYLE:all:" + payload);
-            }
-
-            if (ImGui.Button("Paste Colors"))
-            {
-                var clip = ImGui.GetClipboardText();
-                if (clip != null && clip.StartsWith("SPHENE_BTN_STYLE:colors:"))
-                {
-                    var json = clip.Substring("SPHENE_BTN_STYLE:colors:".Length);
-                    var src = JsonSerializer.Deserialize<ButtonStyleOverride>(json, ClipboardJsonOptions);
-                    if (src != null)
-                    {
-                        var dstKey = _keys[_selectedIndex].Key;
-                        if (!theme.ButtonStyles.TryGetValue(dstKey, out var dst))
-                        {
-                            dst = new ButtonStyleOverride();
-                            theme.ButtonStyles[dstKey] = dst;
-                        }
-                        dst.Button = src.Button;
-                        dst.ButtonHovered = src.ButtonHovered;
-                        dst.ButtonActive = src.ButtonActive;
-                        dst.Text = src.Text;
-                        dst.Icon = src.Icon;
-                        dst.Border = src.Border;
-                        dst.BorderSize = src.BorderSize;
-                        theme.NotifyThemeChanged();
-                    }
-                }
-            }
-            ImGui.SameLine();
-            if (ImGui.Button("Paste All"))
-            {
-                var clip = ImGui.GetClipboardText();
-                if (clip != null && clip.StartsWith("SPHENE_BTN_STYLE:all:"))
-                {
-                    var json = clip.Substring("SPHENE_BTN_STYLE:all:".Length);
-                    var src = JsonSerializer.Deserialize<ButtonStyleOverride>(json, ClipboardJsonOptions);
-                    if (src != null)
-                    {
-                        var dstKey = _keys[_selectedIndex].Key;
-                        if (!theme.ButtonStyles.TryGetValue(dstKey, out var dst))
-                        {
-                            dst = new ButtonStyleOverride();
-                            theme.ButtonStyles[dstKey] = dst;
-                        }
-                        dst.WidthDelta = src.WidthDelta;
-                        dst.HeightDelta = src.HeightDelta;
-                        dst.IconOffset = src.IconOffset;
-                        dst.Button = src.Button;
-                        dst.ButtonHovered = src.ButtonHovered;
-                        dst.ButtonActive = src.ButtonActive;
-                        dst.Text = src.Text;
-                        dst.Icon = src.Icon;
-                        dst.Border = src.Border;
-                        dst.BorderSize = src.BorderSize;
-                        theme.NotifyThemeChanged();
-                    }
-                }
-            }
-        }
+        DrawSelectedButtonOverrides(theme);
     }
 
     public static (Vector4 Hover, Vector4 Active) DeriveHoverActive(Vector4 baseColor)
@@ -462,5 +233,236 @@ public static class ButtonStyleManagerUI
         var hover = DeriveHoverColor(baseColor);
         var active = DeriveActiveColor(baseColor);
         return (hover, active);
+    }
+
+    private static void DrawSelectedButtonOverrides(ThemeConfiguration theme)
+    {
+        float widthDelta = 0f;
+        float heightDelta = 0f;
+        Vector2 iconOffset;
+
+        var key = _keys[_selectedIndex].Key;
+        var defaults = GetDefaultsForKey(key, theme);
+        if (!theme.ButtonStyles.TryGetValue(key, out var ov))
+        {
+            ov = new ButtonStyleOverride();
+            theme.ButtonStyles[key] = ov;
+        }
+
+        widthDelta = ov.WidthDelta;
+        heightDelta = ov.HeightDelta;
+        iconOffset = ov.IconOffset;
+
+        ImGui.Text("Selected Button Overrides");
+        if (ImGui.DragFloat("Width", ref widthDelta, 0.1f, -100f, 200f))
+        {
+            ov.WidthDelta = widthDelta;
+            theme.NotifyThemeChanged();
+        }
+        if (ImGui.DragFloat("Height", ref heightDelta, 0.1f, -50f, 100f))
+        {
+            ov.HeightDelta = heightDelta;
+            theme.NotifyThemeChanged();
+        }
+        if (ImGui.DragFloat2("Icon Offset", ref iconOffset, 0.1f, -50f, 50f))
+        {
+            ov.IconOffset = iconOffset;
+            theme.NotifyThemeChanged();
+        }
+
+        ImGui.Separator();
+        ImGui.Text("Selected Button Colors");
+        var effBtn = ov.Button ?? defaults.Button;
+        if (ImGui.ColorEdit4("Button", ref effBtn))
+        {
+            ov.Button = effBtn;
+            theme.NotifyThemeChanged();
+        }
+        ImGui.SameLine();
+        ImGui.PushFont(UiBuilder.IconFont);
+        var genClicked = ImGui.SmallButton(FontAwesomeIcon.Magic.ToIconString());
+        ImGui.PopFont();
+        if (genClicked)
+        {
+            var hover = DeriveHoverColor(effBtn);
+            var active = DeriveActiveColor(effBtn);
+            ov.ButtonHovered = hover;
+            ov.ButtonActive = active;
+            theme.NotifyThemeChanged();
+        }
+        if (ImGui.IsItemHovered())
+            Sphene.UI.UiSharedService.AttachToolTip("Generate Hover/Active colors from current Button color.");
+        var effBtnH = ov.ButtonHovered ?? defaults.Hovered;
+        if (ImGui.ColorEdit4("Button Hovered", ref effBtnH))
+        {
+            ov.ButtonHovered = effBtnH;
+            theme.NotifyThemeChanged();
+        }
+        var effBtnA = ov.ButtonActive ?? defaults.Active;
+        if (ImGui.ColorEdit4("Button Active", ref effBtnA))
+        {
+            ov.ButtonActive = effBtnA;
+            theme.NotifyThemeChanged();
+        }
+        var effIcon = ov.Icon ?? defaults.Icon;
+        if (ImGui.ColorEdit4("Icon", ref effIcon))
+        {
+            ov.Icon = effIcon;
+            theme.NotifyThemeChanged();
+        }
+        var effBorder = ov.Border ?? defaults.Border;
+        if (ImGui.ColorEdit4("Border", ref effBorder))
+        {
+            ov.Border = effBorder;
+            theme.NotifyThemeChanged();
+        }
+        var effBorderSize = ov.BorderSize ?? defaults.BorderSize;
+        if (ImGui.SliderFloat("Border Width", ref effBorderSize, 0f, 5f, "%.1f"))
+        {
+            ov.BorderSize = effBorderSize;
+            theme.NotifyThemeChanged();
+        }
+        var effTxt = ov.Text ?? defaults.Text;
+        if (ImGui.ColorEdit4("Text", ref effTxt))
+        {
+            ov.Text = effTxt;
+            theme.NotifyThemeChanged();
+        }
+
+        if (ImGui.Button("Reset Changes"))
+        {
+            var selectedThemeName = ThemeManager.GetSelectedTheme();
+            ThemeConfiguration? baseline = null;
+            if (ThemePresets.BuiltInThemes.ContainsKey(selectedThemeName))
+                baseline = ThemePresets.BuiltInThemes[selectedThemeName];
+            else
+                baseline = ThemeManager.LoadTheme(selectedThemeName);
+
+            if (baseline != null && baseline.ButtonStyles.TryGetValue(key, out var baseOv))
+            {
+                ov.WidthDelta = baseOv.WidthDelta;
+                ov.HeightDelta = baseOv.HeightDelta;
+                ov.IconOffset = baseOv.IconOffset;
+                ov.Button = baseOv.Button;
+                ov.ButtonHovered = baseOv.ButtonHovered;
+                ov.ButtonActive = baseOv.ButtonActive;
+                ov.Text = baseOv.Text;
+                ov.Icon = baseOv.Icon;
+                ov.Border = baseOv.Border;
+                ov.BorderSize = baseOv.BorderSize;
+            }
+            else
+            {
+                ov.WidthDelta = 0f;
+                ov.HeightDelta = 0f;
+                ov.IconOffset = Vector2.Zero;
+                ov.Button = null;
+                ov.ButtonHovered = null;
+                ov.ButtonActive = null;
+                ov.Text = null;
+                ov.Icon = null;
+                ov.Border = null;
+                ov.BorderSize = null;
+            }
+            theme.NotifyThemeChanged();
+        }
+
+        ImGui.Separator();
+        var srcKey = _keys[_selectedIndex].Key;
+        if (ImGui.Button("Copy Colors"))
+        {
+            if (!theme.ButtonStyles.TryGetValue(srcKey, out var src))
+            {
+                src = new ButtonStyleOverride();
+                theme.ButtonStyles[srcKey] = src;
+            }
+            var srcDefaults = GetDefaultsForKey(srcKey, theme);
+            var effSrcBtn = src.Button ?? srcDefaults.Button;
+            var effSrcBtnH = src.ButtonHovered ?? srcDefaults.Hovered;
+            var effSrcBtnA = src.ButtonActive ?? srcDefaults.Active;
+            var effSrcIcon = src.Icon ?? srcDefaults.Icon;
+            var effSrcBorder = src.Border ?? srcDefaults.Border;
+            var effSrcText = src.Text ?? srcDefaults.Text;
+            var effSrcBorderSize = src.BorderSize ?? srcDefaults.BorderSize;
+            var payload = JsonSerializer.Serialize(new ButtonStyleOverride
+            {
+                Button = effSrcBtn,
+                ButtonHovered = effSrcBtnH,
+                ButtonActive = effSrcBtnA,
+                Text = effSrcText,
+                Icon = effSrcIcon,
+                Border = effSrcBorder,
+                BorderSize = effSrcBorderSize
+            }, ClipboardJsonOptions);
+            ImGui.SetClipboardText("SPHENE_BTN_STYLE:colors:" + payload);
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Copy All"))
+        {
+            if (!theme.ButtonStyles.TryGetValue(srcKey, out var src))
+            {
+                src = new ButtonStyleOverride();
+                theme.ButtonStyles[srcKey] = src;
+            }
+            var payload = JsonSerializer.Serialize(src, ClipboardJsonOptions);
+            ImGui.SetClipboardText("SPHENE_BTN_STYLE:all:" + payload);
+        }
+
+        if (ImGui.Button("Paste Colors"))
+        {
+            var clip = ImGui.GetClipboardText();
+            if (clip != null && clip.StartsWith("SPHENE_BTN_STYLE:colors:", StringComparison.Ordinal))
+            {
+                var json = clip.Substring("SPHENE_BTN_STYLE:colors:".Length);
+                var src = JsonSerializer.Deserialize<ButtonStyleOverride>(json, ClipboardJsonOptions);
+                if (src != null)
+                {
+                    var dstKey = _keys[_selectedIndex].Key;
+                    if (!theme.ButtonStyles.TryGetValue(dstKey, out var dst))
+                    {
+                        dst = new ButtonStyleOverride();
+                        theme.ButtonStyles[dstKey] = dst;
+                    }
+                    dst.Button = src.Button;
+                    dst.ButtonHovered = src.ButtonHovered;
+                    dst.ButtonActive = src.ButtonActive;
+                    dst.Text = src.Text;
+                    dst.Icon = src.Icon;
+                    dst.Border = src.Border;
+                    dst.BorderSize = src.BorderSize;
+                    theme.NotifyThemeChanged();
+                }
+            }
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Paste All"))
+        {
+            var clip = ImGui.GetClipboardText();
+            if (clip != null && clip.StartsWith("SPHENE_BTN_STYLE:all:", StringComparison.Ordinal))
+            {
+                var json = clip.Substring("SPHENE_BTN_STYLE:all:".Length);
+                var src = JsonSerializer.Deserialize<ButtonStyleOverride>(json, ClipboardJsonOptions);
+                if (src != null)
+                {
+                    var dstKey = _keys[_selectedIndex].Key;
+                    if (!theme.ButtonStyles.TryGetValue(dstKey, out var dst))
+                    {
+                        dst = new ButtonStyleOverride();
+                        theme.ButtonStyles[dstKey] = dst;
+                    }
+                    dst.WidthDelta = src.WidthDelta;
+                    dst.HeightDelta = src.HeightDelta;
+                    dst.IconOffset = src.IconOffset;
+                    dst.Button = src.Button;
+                    dst.ButtonHovered = src.ButtonHovered;
+                    dst.ButtonActive = src.ButtonActive;
+                    dst.Text = src.Text;
+                    dst.Icon = src.Icon;
+                    dst.Border = src.Border;
+                    dst.BorderSize = src.BorderSize;
+                    theme.NotifyThemeChanged();
+                }
+            }
+        }
     }
 }

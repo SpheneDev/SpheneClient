@@ -60,44 +60,43 @@ public class CompactUi : WindowMediatorSubscriberBase
     private readonly TextureBackupService _textureBackupService;
     private readonly AreaBoundSyncshellService _areaBoundSyncshellService;
     private readonly ShrinkUHostService _shrinkuHostService;
-    private List<IDrawFolder> _drawFolders;
+    private List<IDrawFolder> _drawFolders = new();
     private Pair? _lastAddedUser;
     private string _lastAddedUserComment = string.Empty;
     private Vector2 _lastPosition = Vector2.One;
     private bool _isIncognitoModeActive = false;
     private DateTime _lastIncognitoButtonClick = DateTime.MinValue;
-    private readonly HashSet<string> _prePausedPairs = new();
-    private readonly HashSet<string> _prePausedSyncshells = new();
+    private readonly HashSet<string> _prePausedPairs;
+    private readonly HashSet<string> _prePausedSyncshells;
     private Sphene.Services.UpdateInfo? _updateBannerInfo;
     private DateTime _lastReconnectButtonClick = DateTime.MinValue;
  private Vector2 _lastSize = Vector2.One;
  // One-time check to correct persisted width below minimum
  private bool _widthCorrectionChecked = false;
-    private int _secretKeyIdx = -1;
+    
     private bool _showModalForUserAddition;
     private float _transferPartHeight;
     private bool _wasOpen;
-    private float _windowContentWidth;
+    
     
     // Halloween background texture
-    private IDalamudTextureWrap? _halloweenBackgroundTexture;
+    private readonly IDalamudTextureWrap? _halloweenBackgroundTexture = null;
     
     // Texture conversion fields
-    private bool _showConversionPopup = false;
-    private bool _showProgressPopup = false;
+    
     private bool _conversionWindowOpen = false;
     private bool _conversionProgressWindowOpen = false;
     private bool _autoSilentConversion = false;
-    private Dictionary<string, string[]> _texturesToConvert = new();
+    private readonly Dictionary<string, string[]> _texturesToConvert = new(StringComparer.Ordinal);
     private Task? _conversionTask;
     private CancellationTokenSource _conversionCancellationTokenSource = new();
-    private Progress<(string fileName, int progress)> _conversionProgress = new();
-    private int _conversionCurrentFileProgress = 0;
+    private readonly Progress<(string fileName, int progress)> _conversionProgress = new();
+    private int _conversionCurrentFileProgress;
     private string _conversionCurrentFileName = string.Empty;
-    private bool _enableBackupBeforeConversion = true;
+    private bool _enableBackupBeforeConversion;
     private DateTime _conversionStartTime = DateTime.MinValue;
     // Backup progress fields for progress UI
-    private Progress<(string fileName, int current, int total)> _backupProgress = new();
+    private readonly Progress<(string fileName, int current, int total)> _backupProgress = new();
     private string _backupCurrentFileName = string.Empty;
     private int _backupCurrentIndex = 0;
     private int _backupTotalCount = 0;
@@ -109,13 +108,13 @@ public class CompactUi : WindowMediatorSubscriberBase
     private int _backupPmpCount = 0;
     // Automatic conversion mode and gating to avoid repeated triggers across frames/analyses
     private bool _automaticModeEnabled = false;
-    private bool _autoConvertTriggered = false;
+    
     private string _autoConvertKey = string.Empty;
     
     // Popup analysis gating
     private Task? _popupAnalysisTask;
     private bool _isPopupAnalysisBlocking;
-    private DateTime _lastPopupAnalysisStart = DateTime.MinValue;
+    
     
     // Backup restore fields
     private Dictionary<string, List<string>>? _cachedBackupsForAnalysis;
@@ -123,8 +122,8 @@ public class CompactUi : WindowMediatorSubscriberBase
     private Dictionary<ObjectKind, Dictionary<string, CharacterAnalyzer.FileDataEntry>>? _cachedAnalysisForPopup;
     private Task? _restoreTask;
     private CancellationTokenSource _restoreCancellationTokenSource = new();
-    private Progress<(string fileName, int current, int total)> _restoreProgress = new();
-    private bool _showRestoreProgressPopup = false;
+    private readonly Progress<(string fileName, int current, int total)> _restoreProgress = new();
+    
     private string _restoreCurrentFileName = string.Empty;
     private int _restoreCurrentIndex = 0;
     private int _restoreTotalCount = 0;
@@ -168,6 +167,8 @@ public class CompactUi : WindowMediatorSubscriberBase
         ShrinkUHostService shrinkuHostService)
         : base(logger, mediator, "###SpheneMainUI", performanceCollectorService)
     {
+        _prePausedPairs = new(StringComparer.Ordinal);
+        _prePausedSyncshells = new(StringComparer.Ordinal);
         _uiSharedService = uiShared;
         _configService = configService;
         _apiController = apiController;
@@ -192,7 +193,11 @@ public class CompactUi : WindowMediatorSubscriberBase
             _automaticModeEnabled = _shrinkuConfigService.Current.TextureProcessingMode == TextureProcessingMode.Automatic;
             _enableBackupBeforeConversion = _shrinkuConfigService.Current.EnableBackupBeforeConversion;
         }
-        catch { }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to read ShrinkU configuration for automatic mode");
+            _enableBackupBeforeConversion = true;
+        }
         
         // Setup conversion progress handler
         _conversionProgress.ProgressChanged += (sender, progress) =>
@@ -207,7 +212,10 @@ public class CompactUi : WindowMediatorSubscriberBase
                 _conversionCurrentFileProgress = e.Item2;
                 _conversionCurrentFileName = e.Item1;
             }
-            catch { }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to update conversion progress");
+            }
         };
         // Setup backup progress handlers (local + ShrinkU service)
         _backupProgress.ProgressChanged += (sender, progress) =>
@@ -218,12 +226,15 @@ public class CompactUi : WindowMediatorSubscriberBase
                 _backupCurrentIndex = progress.current;
                 _backupTotalCount = progress.total;
                 if (_backupStartTime == DateTime.MinValue)
-                    _backupStartTime = DateTime.Now;
+                    _backupStartTime = DateTime.UtcNow;
                 AppendBackupStep(progress.fileName);
                 if (!_autoSilentConversion && !_automaticModeEnabled && !(_shrinkuHostService?.IsConversionUiOpen ?? false))
-                    _conversionProgressWindowOpen = true; // ensure window shows while backup runs
+                    _conversionProgressWindowOpen = true;
             }
-            catch { }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to update backup progress");
+            }
         };
         _shrinkuConversionService.OnBackupProgress += e =>
         {
@@ -233,12 +244,15 @@ public class CompactUi : WindowMediatorSubscriberBase
                 _backupCurrentIndex = e.Item2;
                 _backupTotalCount = e.Item3;
                 if (_backupStartTime == DateTime.MinValue)
-                    _backupStartTime = DateTime.Now;
+                    _backupStartTime = DateTime.UtcNow;
                 AppendBackupStep(e.Item1);
                 if (!_autoSilentConversion && !_automaticModeEnabled && !(_shrinkuHostService?.IsConversionUiOpen ?? false))
                     _conversionProgressWindowOpen = true;
             }
-            catch { }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to update backup progress (service)");
+            }
         };
         // Setup restore progress handler
         _restoreProgress.ProgressChanged += (sender, progress) =>
@@ -250,7 +264,10 @@ public class CompactUi : WindowMediatorSubscriberBase
                 _restoreTotalCount = progress.total;
                 _restoreWindowOpen = true;
             }
-            catch { }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to update restore progress");
+            }
         };
         _tabMenu = new TopTabMenu(Mediator, _apiController, _pairManager, _uiSharedService);
 
@@ -278,7 +295,6 @@ public class CompactUi : WindowMediatorSubscriberBase
                 {
                     return;
                 }
-                var wasOpen = IsOpen;
                 Toggle();
             }
         });
@@ -291,8 +307,8 @@ public class CompactUi : WindowMediatorSubscriberBase
 
         // Initialize incognito mode state from configuration
         _isIncognitoModeActive = _configService.Current.IsIncognitoModeActive;
-        _prePausedPairs = new HashSet<string>(_configService.Current.PrePausedPairs);
-        _prePausedSyncshells = new HashSet<string>(_configService.Current.PrePausedSyncshells);
+        _prePausedPairs = new HashSet<string>(_configService.Current.PrePausedPairs, StringComparer.Ordinal);
+        _prePausedSyncshells = new HashSet<string>(_configService.Current.PrePausedSyncshells, StringComparer.Ordinal);
 
         AllowPinning = false;
         AllowClickthrough = false;
@@ -345,7 +361,10 @@ public class CompactUi : WindowMediatorSubscriberBase
         Toggle();
 #else
         var ver = Assembly.GetExecutingAssembly().GetName().Version;
-        WindowName = "Sphene " + ver.Major + "." + ver.Minor + "." + ver.Build + "###SpheneMainUI";
+        var major = ver?.Major ?? 0;
+        var minor = ver?.Minor ?? 0;
+        var build = ver?.Build ?? 0;
+        WindowName = "Sphene " + major + "." + minor + "." + build + "###SpheneMainUI";
 #endif
         Mediator.Subscribe<SwitchToMainUiMessage>(this, (_) => IsOpen = true);
         Mediator.Subscribe<SwitchToIntroUiMessage>(this, (_) => { _logger.LogDebug("SwitchToIntroUiMessage received, closing CompactUI"); IsOpen = false; });
@@ -362,7 +381,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                 msg.Respond(IsOpen);
             }
         });
-        Mediator.Subscribe<CharacterDataAnalyzedMessage>(this, (_) =>
+        Mediator.Subscribe<CharacterDataAnalyzedMessage>(this, (msg) =>
         {
             // Invalidate backup caches and ShrinkU detection when analysis changes
             _lastBackupAnalysisUpdate = DateTime.MinValue;
@@ -383,43 +402,52 @@ public class CompactUi : WindowMediatorSubscriberBase
             try
             {
                 _isTextureBackupScanInProgress = true;
-                _textureDetectionTask = Task.Run(() => GetBackupsForCurrentAnalysis());
-                _textureDetectionTask.ContinueWith(t =>
-                {
-                    try { _cachedTextureBackupsFiltered = t.Status == TaskStatus.RanToCompletion ? t.Result : new Dictionary<string, List<string>>(); }
-                    catch { _cachedTextureBackupsFiltered = new Dictionary<string, List<string>>(); }
-                    finally { _lastTextureDetectionUpdate = DateTime.Now; _isTextureBackupScanInProgress = false; }
-                }, TaskScheduler.Default);
+            _textureDetectionTask = Task.Run(() => GetBackupsForCurrentAnalysis());
+            _ = _textureDetectionTask.ContinueWith(t =>
+            {
+                try { _cachedTextureBackupsFiltered = t.Status == TaskStatus.RanToCompletion ? t.Result : new Dictionary<string, List<string>>(StringComparer.Ordinal); }
+                catch (Exception ex) { _cachedTextureBackupsFiltered = new Dictionary<string, List<string>>(StringComparer.Ordinal); _logger.LogDebug(ex, "Texture backup detection task failed"); }
+                finally { _lastTextureDetectionUpdate = DateTime.UtcNow; _isTextureBackupScanInProgress = false; }
+            }, TaskScheduler.Default);
             }
-            catch { _isTextureBackupScanInProgress = false; }
-            try { _shrinkUDetectionTask = DetectShrinkUModBackupsAsync(); } catch { }
+            catch (Exception ex) { _isTextureBackupScanInProgress = false; _logger.LogDebug(ex, "Failed to prewarm backup detection caches"); }
+        try { _shrinkUDetectionTask = DetectShrinkUModBackupsAsync(); }
+        catch (Exception ex) { _logger.LogDebug(ex, "Failed to start ShrinkU detection task"); }
         });
         // React immediately to Penumbra state changes to refresh backup detection
         Mediator.Subscribe<PenumbraInitializedMessage>(this, (_) =>
         {
-            try { TriggerImmediateBackupScan("penumbra-initialized"); } catch { }
+            try { TriggerImmediateBackupScan("penumbra-initialized"); }
+            catch (Exception ex) { _logger.LogDebug(ex, "Failed to trigger backup scan: penumbra-initialized"); }
         });
         Mediator.Subscribe<PenumbraDirectoryChangedMessage>(this, (_) =>
         {
-            try { TriggerImmediateBackupScan("penumbra-directory-changed"); } catch { }
+            try { TriggerImmediateBackupScan("penumbra-directory-changed"); }
+            catch (Exception ex) { _logger.LogDebug(ex, "Failed to trigger backup scan: penumbra-directory-changed"); }
         });
         // Also listen to ShrinkU conversion service broadcasts for mod changes and external texture updates
         try
         {
             _shrinkuConversionService.OnPenumbraModsChanged += () =>
             {
-                try { TriggerImmediateBackupScan("penumbra-mods-changed"); } catch { }
+                try { TriggerImmediateBackupScan("penumbra-mods-changed"); }
+                catch (Exception ex) { _logger.LogDebug(ex, "Failed to trigger backup scan: penumbra-mods-changed"); }
             };
             _shrinkuConversionService.OnPenumbraModSettingChanged += (change, collectionId, modDir, inherited) =>
             {
-                try { TriggerImmediateBackupScan("penumbra-mod-setting-changed"); } catch { }
+                try { TriggerImmediateBackupScan("penumbra-mod-setting-changed"); }
+                catch (Exception ex) { _logger.LogDebug(ex, "Failed to trigger backup scan: penumbra-mod-setting-changed"); }
             };
             _shrinkuConversionService.OnExternalTexturesChanged += reason =>
             {
-                try { TriggerImmediateBackupScan("external-textures-changed:" + (reason ?? string.Empty)); } catch { }
+                try { TriggerImmediateBackupScan("external-textures-changed:" + (reason ?? string.Empty)); }
+                catch (Exception ex) { _logger.LogDebug(ex, "Failed to trigger backup scan: external-textures-changed"); }
             };
         }
-        catch { }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to subscribe to ShrinkU conversion events");
+        }
         Mediator.Subscribe<ShowUpdateNotificationMessage>(this, (msg) => _updateBannerInfo = msg.UpdateInfo);
         Mediator.Subscribe<AreaBoundSyncshellLeftMessage>(this, (msg) => { 
             // Force UI refresh when syncshell is left so button visibility updates
@@ -441,8 +469,8 @@ public class CompactUi : WindowMediatorSubscriberBase
 
     private void TriggerImmediateBackupScan(string reason)
     {
-        try { _logger.LogDebug("Triggering immediate backup scan: {reason}", reason); } catch { }
-        _backupScanTriggeredAt = DateTime.Now;
+        _logger.LogDebug("Triggering immediate backup scan: {reason}", reason);
+        _backupScanTriggeredAt = DateTime.UtcNow;
         // Invalidate caches so UI shows scanning state immediately
         _lastBackupAnalysisUpdate = DateTime.MinValue;
         _cachedBackupsForAnalysis = null;
@@ -458,17 +486,18 @@ public class CompactUi : WindowMediatorSubscriberBase
         {
             _isTextureBackupScanInProgress = true;
             _textureDetectionTask = Task.Run(() => GetBackupsForCurrentAnalysis());
-            _textureDetectionTask.ContinueWith(t =>
+            _ = _textureDetectionTask.ContinueWith(t =>
             {
-                try { _cachedTextureBackupsFiltered = t.Status == TaskStatus.RanToCompletion ? t.Result : new Dictionary<string, List<string>>(); }
-                catch { _cachedTextureBackupsFiltered = new Dictionary<string, List<string>>(); }
-                finally { _lastTextureDetectionUpdate = DateTime.Now; _isTextureBackupScanInProgress = false; }
+                try { _cachedTextureBackupsFiltered = t.Status == TaskStatus.RanToCompletion ? t.Result : new Dictionary<string, List<string>>(StringComparer.Ordinal); }
+                catch (Exception ex) { _cachedTextureBackupsFiltered = new Dictionary<string, List<string>>(StringComparer.Ordinal); _logger.LogDebug(ex, "Texture backup detection task failed"); }
+                finally { _lastTextureDetectionUpdate = DateTime.UtcNow; _isTextureBackupScanInProgress = false; }
             }, TaskScheduler.Default);
         }
-        catch { _isTextureBackupScanInProgress = false; }
+        catch (Exception ex) { _isTextureBackupScanInProgress = false; _logger.LogDebug(ex, "Failed to start texture backup detection"); }
 
         // Start ShrinkU mod backup detection
-        try { _shrinkUDetectionTask = DetectShrinkUModBackupsAsync(); } catch { }
+        try { _shrinkUDetectionTask = DetectShrinkUModBackupsAsync(); }
+        catch (Exception ex) { _logger.LogDebug(ex, "Failed to start ShrinkU mod backup detection"); }
     }
 
     // ShrinkU helpers for storage info and cleanup
@@ -497,7 +526,8 @@ public class CompactUi : WindowMediatorSubscriberBase
                     {
                         foreach (var f in Directory.EnumerateFiles(sess.SourcePath, "*", SearchOption.AllDirectories))
                         {
-                            try { total += new FileInfo(f).Length; count++; } catch { }
+                            try { total += new FileInfo(f).Length; count++; }
+                            catch (Exception ex) { _logger.LogDebug(ex, "Failed to read file size during backup storage info"); }
                         }
                     }
                 }
@@ -528,30 +558,27 @@ public class CompactUi : WindowMediatorSubscriberBase
                     {
                         foreach (var pmp in Directory.EnumerateFiles(modDir, "mod_backup_*.pmp"))
                         {
-                            try { total += new FileInfo(pmp).Length; count++; } catch { }
+                            try { total += new FileInfo(pmp).Length; count++; }
+                            catch (Exception ex) { _logger.LogDebug(ex, "Failed to read pmp file size during backup storage info"); }
                         }
                     }
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to update PMP restore preference");
+            }
             return (total, count);
         }
         catch
         {
             // Fallback to Sphene service
-            return await _textureBackupService.GetBackupStorageInfoAsync();
+            return await _textureBackupService.GetBackupStorageInfoAsync().ConfigureAwait(false);
         }
     }
 
 
-    private void UpdateSizeConstraints()
-    {
-        SizeConstraints = new WindowSizeConstraints()
-        {
-            MinimumSize = new Vector2(370 * ImGuiHelpers.GlobalScale, 400 * ImGuiHelpers.GlobalScale),
-            MaximumSize = new Vector2(800 * ImGuiHelpers.GlobalScale, 2000 * ImGuiHelpers.GlobalScale),
-        };
-    }
+    
 
     // Removed ConvertSvgBase64ToPng method - no longer needed
 
@@ -570,6 +597,11 @@ public class CompactUi : WindowMediatorSubscriberBase
             
             // Dispose Halloween background texture
             _halloweenBackgroundTexture?.Dispose();
+
+            _conversionCancellationTokenSource?.Cancel();
+            _conversionCancellationTokenSource?.Dispose();
+            _restoreCancellationTokenSource?.Cancel();
+            _restoreCancellationTokenSource?.Dispose();
         }
         base.Dispose(disposing);
     }
@@ -647,7 +679,6 @@ public class CompactUi : WindowMediatorSubscriberBase
         // Draw Halloween background first (behind all content)
         DrawHalloweenBackground();
         
-        _windowContentWidth = UiSharedService.GetBaseFolderWidth(); // Use consistent width calculation
 
 
         if (!_apiController.IsCurrentVersion)
@@ -731,27 +762,21 @@ public class CompactUi : WindowMediatorSubscriberBase
         
         if (_apiController.IsConnected)
         {
-            if (_uiSharedService.IconButton(FontAwesomeIcon.Unlink, null, null, null, null, ButtonStyleKeys.Compact_Disconnect))
+            if (_uiSharedService.IconButton(FontAwesomeIcon.Unlink, null, null, null, null, ButtonStyleKeys.Compact_Disconnect) && _serverManager.CurrentServer != null)
             {
-                if (_serverManager.CurrentServer != null)
-                {
-                    _serverManager.CurrentServer.FullPause = true;
-                    _serverManager.Save();
-                    _ = _apiController.CreateConnectionsAsync();
-                }
+                _serverManager.CurrentServer.FullPause = true;
+                _serverManager.Save();
+                _ = _apiController.CreateConnectionsAsync();
             }
             UiSharedService.AttachToolTip("Disconnect from Server");
         }
         else
         {
-            if (_uiSharedService.IconButton(FontAwesomeIcon.Link, null, null, null, null, ButtonStyleKeys.Compact_Connect))
+            if (_uiSharedService.IconButton(FontAwesomeIcon.Link, null, null, null, null, ButtonStyleKeys.Compact_Connect) && _serverManager.CurrentServer != null)
             {
-                if (_serverManager.CurrentServer != null)
-                {
-                    _serverManager.CurrentServer.FullPause = false;
-                    _serverManager.Save();
-                    _ = _apiController.CreateConnectionsAsync();
-                }
+                _serverManager.CurrentServer.FullPause = false;
+                _serverManager.Save();
+                _ = _apiController.CreateConnectionsAsync();
             }
             UiSharedService.AttachToolTip("Connect to Server");
         }
@@ -759,10 +784,10 @@ public class CompactUi : WindowMediatorSubscriberBase
         // Position reconnect button (rightmost) - use SameLine() for natural spacing
         ImGui.SameLine();
         
-        var reconnectCurrentTime = DateTime.Now;
+        var reconnectCurrentTime = DateTime.UtcNow;
         var reconnectTimeSinceLastClick = reconnectCurrentTime - _lastReconnectButtonClick;
         var isReconnectButtonDisabled = reconnectTimeSinceLastClick.TotalSeconds < 5.0;
-        var reconnectColor = isReconnectButtonDisabled ? SpheneCustomTheme.CurrentTheme.TextSecondary : SpheneCustomTheme.CurrentTheme.TextPrimary;
+        
         using (ImRaii.Disabled(isReconnectButtonDisabled))
         {
             if (_uiSharedService.IconButton(FontAwesomeIcon.Redo, null, null, null, null, ButtonStyleKeys.Compact_Reconnect))
@@ -782,7 +807,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         
         // Position connection status indicator and text (third from right)
         ImGui.SameLine(availableWidth - totalRightContentWidth);
-        _uiSharedService.DrawThemedStatusIndicator(connectionStatus, _apiController.ServerState == ServerState.Connected);
+        UiSharedService.DrawThemedStatusIndicator(connectionStatus, _apiController.ServerState == ServerState.Connected);
         
         
         ImGui.Separator();
@@ -913,7 +938,10 @@ public class CompactUi : WindowMediatorSubscriberBase
                     size = new Vector2(correctedWidth, size.Y);
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to apply width correction for CompactUI window");
+            }
             finally { _widthCorrectionChecked = true; }
         }
         
@@ -941,7 +969,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                     + ImGui.GetStyle().ItemSpacing.Y
                 : 0f;
         
-        var ySize = _transferPartHeight == 0
+        var ySize = Math.Abs(_transferPartHeight) < 0.0001f
             ? 1
             : (ImGui.GetWindowContentRegionMax().Y - ImGui.GetWindowContentRegionMin().Y
                 + ImGui.GetTextLineHeight() - ImGui.GetStyle().WindowPadding.Y - ImGui.GetStyle().WindowBorderSize) - _transferPartHeight - ImGui.GetCursorPosY() - 15 - updateNotificationHeight; // add some Space and reserve space for update notification
@@ -957,158 +985,130 @@ public class CompactUi : WindowMediatorSubscriberBase
 
         ImGui.EndChild();
     }
-    private void DrawServerStatus()
-    {
-        DrawServerStatusContent();
-    }
+    
 
     private void DrawServerStatusContent()
     {
         // Create a more intuitive layout with grouped functionality
         ImGui.AlignTextToFramePadding();
         
-        // Left side: Mode Controls
-        ImGui.BeginGroup();
-        {
-            // Incognito Mode section with label
-            ImGui.Text("Mode:");
-            ImGui.SameLine();
-            
-            var currentTime = DateTime.Now;
-            var timeSinceLastClick = currentTime - _lastIncognitoButtonClick;
-            var isButtonDisabled = timeSinceLastClick.TotalSeconds < 5.0;
-            
-            if (_isIncognitoModeActive)
-            {
-                // Resume mode - use play icon with default button styling
-                var resumeColor = isButtonDisabled ? SpheneCustomTheme.CurrentTheme.TextSecondary : SpheneCustomTheme.Colors.Success;
-                ImGui.PushStyleColor(ImGuiCol.Text, resumeColor);
-                
-                using (ImRaii.Disabled(isButtonDisabled))
-                {
-                    if (_uiSharedService.IconButton(FontAwesomeIcon.Play, null, null, null, null, ButtonStyleKeys.Compact_IncognitoOff))
-                    {
-                        _lastIncognitoButtonClick = currentTime;
-                        _ = Task.Run(() => HandleIncognitoModeToggle());
-                    }
-                }
-                
-                ImGui.PopStyleColor();
-                
-                if (ImGui.IsItemHovered())
-                {
-                    var tooltipText = "Resume Normal Mode\nUnpause all pairs and reconnect syncshells";
-                    if (isButtonDisabled)
-                    {
-                        var remainingSeconds = Math.Ceiling(5.0 - timeSinceLastClick.TotalSeconds);
-                        tooltipText += $"\nCooldown: {remainingSeconds} seconds remaining";
-                    }
-                    UiSharedService.AttachToolTip(tooltipText);
-                }
-                
-                ImGui.SameLine();
-                ImGui.TextColored(SpheneCustomTheme.Colors.Success, "Incognito");
-            }
-            else
-            {
-                // Normal mode - use heart icon with red color but default button background
-                var heartColor = isButtonDisabled ? SpheneCustomTheme.CurrentTheme.TextSecondary : SpheneCustomTheme.Colors.Error;
-                ImGui.PushStyleColor(ImGuiCol.Text, heartColor);
-                
-                using (ImRaii.Disabled(isButtonDisabled))
-                {
-                    if (_uiSharedService.IconButton(FontAwesomeIcon.Heart, null, null, null, null, ButtonStyleKeys.Compact_IncognitoOn))
-                    {
-                        _lastIncognitoButtonClick = currentTime;
-                        _ = Task.Run(() => HandleIncognitoModeToggle());
-                    }
-                }
-                
-                ImGui.PopStyleColor();
-                
-                if (ImGui.IsItemHovered())
-                {
-                    var tooltipText = "Enter Incognito Mode\nPause all pairs and syncshells except party members";
-                    if (isButtonDisabled)
-                    {
-                        var remainingSeconds = Math.Ceiling(5.0 - timeSinceLastClick.TotalSeconds);
-                        tooltipText += $"\nCooldown: {remainingSeconds} seconds remaining";
-                    }
-                    UiSharedService.AttachToolTip(tooltipText);
-                }
-                
-                ImGui.SameLine();
-                ImGui.TextColored(SpheneCustomTheme.CurrentTheme.TextPrimary, "Normal");
-            }
-            
-            // Area Syncshell Selection Button - only show if available
-            bool hasAreaSyncshells = _areaBoundSyncshellService.HasAvailableAreaSyncshells();
-            if (hasAreaSyncshells)
-            {
-                ImGui.SameLine();
-                ImGui.Dummy(new Vector2(10, 0));
-                ImGui.SameLine();
-                
-                if (_uiSharedService.IconButton(FontAwesomeIcon.MapMarkerAlt, null, null, null, null, ButtonStyleKeys.Compact_AreaSelect))
-                {
-                    _areaBoundSyncshellService.TriggerAreaSyncshellSelection();
-                }
-                UiSharedService.AttachToolTip("Open Area Syncshell Selection");
-            }
-        }
-        ImGui.EndGroup();
+        DrawModeControls();
         
         // Right side: Texture Management
+        DrawTextureManagement();
+        
+        if (_apiController.ServerState == ServerState.Connected)
+        {
+            // reserved for future server status details
+        }
+    }
+
+    private void DrawModeControls()
+    {
+        ImGui.BeginGroup();
+        ImGui.Text("Mode:");
+        ImGui.SameLine();
+        var currentTime = DateTime.UtcNow;
+        var timeSinceLastClick = currentTime - _lastIncognitoButtonClick;
+        var isButtonDisabled = timeSinceLastClick.TotalSeconds < 5.0;
+        if (_isIncognitoModeActive)
+        {
+            var resumeColor = isButtonDisabled ? SpheneCustomTheme.CurrentTheme.TextSecondary : SpheneCustomTheme.Colors.Success;
+            ImGui.PushStyleColor(ImGuiCol.Text, resumeColor);
+            using (ImRaii.Disabled(isButtonDisabled))
+            {
+                if (_uiSharedService.IconButton(FontAwesomeIcon.Play, null, null, null, null, ButtonStyleKeys.Compact_IncognitoOff))
+                {
+                    _lastIncognitoButtonClick = currentTime;
+                    _ = Task.Run(() => HandleIncognitoModeToggle());
+                }
+            }
+            ImGui.PopStyleColor();
+            if (ImGui.IsItemHovered())
+            {
+                var tooltipText = "Resume Normal Mode\nUnpause all pairs and reconnect syncshells";
+                if (isButtonDisabled)
+                {
+                    var remainingSeconds = Math.Ceiling(5.0 - timeSinceLastClick.TotalSeconds);
+                    tooltipText += $"\nCooldown: {remainingSeconds} seconds remaining";
+                }
+                UiSharedService.AttachToolTip(tooltipText);
+            }
+            ImGui.SameLine();
+            ImGui.TextColored(SpheneCustomTheme.Colors.Success, "Incognito");
+        }
+        else
+        {
+            var heartColor = isButtonDisabled ? SpheneCustomTheme.CurrentTheme.TextSecondary : SpheneCustomTheme.Colors.Error;
+            ImGui.PushStyleColor(ImGuiCol.Text, heartColor);
+            using (ImRaii.Disabled(isButtonDisabled))
+            {
+                if (_uiSharedService.IconButton(FontAwesomeIcon.Heart, null, null, null, null, ButtonStyleKeys.Compact_IncognitoOn))
+                {
+                    _lastIncognitoButtonClick = currentTime;
+                    _ = Task.Run(() => HandleIncognitoModeToggle());
+                }
+            }
+            ImGui.PopStyleColor();
+            if (ImGui.IsItemHovered())
+            {
+                var tooltipText = "Enter Incognito Mode\nPause all pairs and syncshells except party members";
+                if (isButtonDisabled)
+                {
+                    var remainingSeconds = Math.Ceiling(5.0 - timeSinceLastClick.TotalSeconds);
+                    tooltipText += $"\nCooldown: {remainingSeconds} seconds remaining";
+                }
+                UiSharedService.AttachToolTip(tooltipText);
+            }
+            ImGui.SameLine();
+            ImGui.TextColored(SpheneCustomTheme.CurrentTheme.TextPrimary, "Normal");
+        }
+        bool hasAreaSyncshells = _areaBoundSyncshellService.HasAvailableAreaSyncshells();
+        if (hasAreaSyncshells)
+        {
+            ImGui.SameLine();
+            ImGui.Dummy(new Vector2(10, 0));
+            ImGui.SameLine();
+            if (_uiSharedService.IconButton(FontAwesomeIcon.MapMarkerAlt, null, null, null, null, ButtonStyleKeys.Compact_AreaSelect))
+            {
+                _areaBoundSyncshellService.TriggerAreaSyncshellSelection();
+            }
+            UiSharedService.AttachToolTip("Open Area Syncshell Selection");
+        }
+        ImGui.EndGroup();
+    }
+
+    private void DrawTextureManagement()
+    {
         var availableWidth = ImGui.GetContentRegionAvail().X;
         var conversionButtonSize = _uiSharedService.GetIconButtonSize(FontAwesomeIcon.ArrowsToEye);
         var buttonWidth = conversionButtonSize.X;
         var spacing = ImGui.GetStyle().ItemSpacing.X;
-        
-        // Calculate actual width needed for texture section
         var textureLabelWidth = ImGui.CalcTextSize("Textures:").X;
-        
-        // Calculate texture indicator width dynamically
         var textureSizeBytes = GetCurrentTextureSize();
         var textureSizeMB = textureSizeBytes / (1024.0 * 1024.0);
         var textureIndicatorText = $"{textureSizeMB:F0}MB";
-        var iconWidth = 16f; // Approximate icon width
+        var iconWidth = 16f;
         var textWidth = ImGui.CalcTextSize(textureIndicatorText).X;
-        var textureIndicatorWidth = iconWidth + textWidth + 2f; // 2f for spacing between icon and text
-        
+        var textureIndicatorWidth = iconWidth + textWidth + 2f;
         var totalRightContentWidth = textureLabelWidth + buttonWidth + textureIndicatorWidth + (spacing * 2);
-        
-        // Position texture section flush to the right edge
         ImGui.SameLine(availableWidth - totalRightContentWidth);
         ImGui.BeginGroup();
+        ImGui.Text("Textures:");
+        ImGui.SameLine();
+        using (ImRaii.Disabled(_shrinkuConversionService.IsConverting))
         {
-            ImGui.Text("Textures:");
-            ImGui.SameLine();
-            
-            // Styled conversion button with archive icon - disabled while background conversion is running
-            using (ImRaii.Disabled(_shrinkuConversionService.IsConverting))
+            if (_uiSharedService.IconButton(FontAwesomeIcon.ArrowsToEye, null, null, null, null, ButtonStyleKeys.Compact_Conversion) && !_shrinkuConversionService.IsConverting)
             {
-                if (_uiSharedService.IconButton(FontAwesomeIcon.ArrowsToEye, null, null, null, null, ButtonStyleKeys.Compact_Conversion) && !_shrinkuConversionService.IsConverting)
-                {
-                    _conversionWindowOpen = true;
-                }
+                _conversionWindowOpen = true;
             }
-            UiSharedService.AttachToolTip(_shrinkuConversionService.IsConverting
-                ? "Texture Conversion\nDisabled while background conversion is running"
-                : "Texture Conversion\nOptimize and convert textures to BC7 format");
-            
-            ImGui.SameLine();
-            DrawCompactTextureIndicator();
         }
+        UiSharedService.AttachToolTip(_shrinkuConversionService.IsConverting
+            ? "Texture Conversion\nDisabled while background conversion is running"
+            : "Texture Conversion\nOptimize and convert textures to BC7 format");
+        ImGui.SameLine();
+        DrawCompactTextureIndicator();
         ImGui.EndGroup();
-        
-        if (_apiController.ServerState == ServerState.Connected)
-        {
-            var userCount = _apiController.OnlineUsers;
-            var shardInfo = _apiController.ServerInfo?.ShardName ?? "Unknown";
-            
-            // ImGui.Text($"Users Online: {userCount}");
-            // ImGui.Text($"Shard: {shardInfo}");
-        }
     }
 
     private void DrawTransfers()
@@ -1131,7 +1131,7 @@ public class CompactUi : WindowMediatorSubscriberBase
             var uploadProgress = totalToUpload > 0 ? (float)totalUploaded / totalToUpload : 0f;
             var uploadText = $"{doneUploads}/{totalUploads} ({UiSharedService.ByteToString(totalUploaded)}/{UiSharedService.ByteToString(totalToUpload)})";
             
-            _uiSharedService.DrawTransmissionBar("Transmitting", uploadProgress, uploadText, true);
+            UiSharedService.DrawTransmissionBar("Transmitting", uploadProgress, uploadText, true);
         }
 
         // Only show download progress if there are active downloads
@@ -1149,7 +1149,7 @@ public class CompactUi : WindowMediatorSubscriberBase
             var downloadProgress = totalToDownload > 0 ? (float)totalDownloaded / totalToDownload : 0f;
             var downloadText = $"{doneDownloads}/{totalDownloads} ({UiSharedService.ByteToString(totalDownloaded)}/{UiSharedService.ByteToString(totalToDownload)})";
             
-            _uiSharedService.DrawTransmissionBar("Receiving", downloadProgress, downloadText, false);
+            UiSharedService.DrawTransmissionBar("Receiving", downloadProgress, downloadText, false);
         }
 
         // Show transmission preview in-place when enabled
@@ -1162,7 +1162,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                 _uiSharedService.IconText(FontAwesomeIcon.Upload);
                 ImGui.SameLine(35 * ImGuiHelpers.GlobalScale);
                 var previewUpload = theme.TransmissionPreviewUploadFill / 100.0f;
-                _uiSharedService.DrawTransmissionBar("Transmitting", previewUpload, $"{theme.TransmissionPreviewUploadFill:F1}%", true);
+                UiSharedService.DrawTransmissionBar("Transmitting", previewUpload, $"{theme.TransmissionPreviewUploadFill:F1}%", true);
             }
 
             if (!currentDownloads.Any())
@@ -1171,15 +1171,12 @@ public class CompactUi : WindowMediatorSubscriberBase
                 _uiSharedService.IconText(FontAwesomeIcon.Download);
                 ImGui.SameLine(35 * ImGuiHelpers.GlobalScale);
                 var previewDownload = theme.TransmissionPreviewDownloadFill / 100.0f;
-                _uiSharedService.DrawTransmissionBar("Receiving", previewDownload, $"{theme.TransmissionPreviewDownloadFill:F1}%", false);
+                UiSharedService.DrawTransmissionBar("Receiving", previewDownload, $"{theme.TransmissionPreviewDownloadFill:F1}%", false);
         }
         }
     }
 
-    private void DrawUIDHeader()
-    {
-        DrawUIDContent();
-    }
+    
 
     private void DrawUIDContent()
     {
@@ -1372,23 +1369,14 @@ public class CompactUi : WindowMediatorSubscriberBase
         return drawFolders;
     }
 
-    private string GetControlPanelTitle()
+    private static string GetControlPanelTitle()
     {
-#if DEBUG
-        // Get build timestamp from assembly metadata
-        var assembly = System.Reflection.Assembly.GetExecutingAssembly();
-        var buildTimestamp = assembly.GetCustomAttributes<System.Reflection.AssemblyMetadataAttribute>()
-            .FirstOrDefault(attr => attr.Key == "BuildTimestamp")?.Value;
-        
-        if (!string.IsNullOrEmpty(buildTimestamp))
+        var ver = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
+        if (ver is not null)
         {
-            return $"Sphene Control Panel - {buildTimestamp}";
+            return $"Sphene Control Panel {ver.Major}.{ver.Minor}.{ver.Build}";
         }
-        
-        return "Sphene Control Panel - Built: Dev Build";
-#else
         return "Sphene Control Panel";
-#endif
     }
 
     private void RefreshDrawFolders()
@@ -1441,27 +1429,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         };
     }
 
-    private Vector4 GetUidColor()
-    {
-        return _apiController.ServerState switch
-        {
-            ServerState.Connecting => SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning,
-            ServerState.Reconnecting => SpheneCustomTheme.CurrentTheme.CompactServerStatusError,
-            ServerState.Connected => SpheneCustomTheme.CurrentTheme.CompactServerStatusConnected,
-            ServerState.Disconnected => SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning,
-            ServerState.Disconnecting => SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning,
-            ServerState.Unauthorized => SpheneCustomTheme.CurrentTheme.CompactServerStatusError,
-            ServerState.VersionMisMatch => SpheneCustomTheme.CurrentTheme.CompactServerStatusError,
-            ServerState.Offline => SpheneCustomTheme.CurrentTheme.CompactServerStatusError,
-            ServerState.RateLimited => SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning,
-            ServerState.NoSecretKey => SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning,
-            ServerState.MultiChara => SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning,
-            ServerState.OAuthMisconfigured => SpheneCustomTheme.CurrentTheme.CompactServerStatusError,
-            ServerState.OAuthLoginTokenStale => SpheneCustomTheme.CurrentTheme.CompactServerStatusError,
-            ServerState.NoAutoLogon => SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning,
-            _ => SpheneCustomTheme.CurrentTheme.CompactServerStatusError
-        };
-    }
+    
 
     private Vector4 GetServerStatusColor()
     {
@@ -1526,7 +1494,7 @@ public class CompactUi : WindowMediatorSubscriberBase
     {
         if (string.IsNullOrEmpty(playerName)) return false;
         
-        var partyMembers = await _dalamudUtilService.RunOnFrameworkThread(() => _dalamudUtilService.GetPartyMemberNames());
+        var partyMembers = await _dalamudUtilService.RunOnFrameworkThread(() => _dalamudUtilService.GetPartyMemberNames()).ConfigureAwait(false);
         return partyMembers.Contains(playerName, StringComparer.OrdinalIgnoreCase);
     }
 
@@ -1550,7 +1518,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                         {
                             var permissions = pair.UserPair.OwnPermissions;
                             permissions.SetPaused(false);
-                            await _apiController.UserSetPairPermissions(new(pair.UserData, permissions));
+                            await _apiController.UserSetPairPermissions(new(pair.UserData, permissions)).ConfigureAwait(false);
                             _logger.LogInformation("Unpaused pair (was paused by incognito): {uid}", pair.UserData.UID);
                         }
                         else
@@ -1588,7 +1556,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                 // Apply bulk unpause to syncshells
                 if (syncshellsToUnpause.Count > 0)
                 {
-                    await _apiController.SetBulkPermissions(new(new(StringComparer.Ordinal), syncshellsToUnpause));
+                    await _apiController.SetBulkPermissions(new(new(StringComparer.Ordinal), syncshellsToUnpause)).ConfigureAwait(false);
                     _logger.LogInformation("Unpaused {count} syncshells after incognito mode", syncshellsToUnpause.Count);
                 }
                 
@@ -1600,15 +1568,15 @@ public class CompactUi : WindowMediatorSubscriberBase
                 
                 // Save configuration
                 _configService.Current.IsIncognitoModeActive = _isIncognitoModeActive;
-                _configService.Current.PrePausedPairs = new HashSet<string>(_prePausedPairs);
-                _configService.Current.PrePausedSyncshells = new HashSet<string>(_prePausedSyncshells);
+                _configService.Current.PrePausedPairs = new HashSet<string>(_prePausedPairs, StringComparer.Ordinal);
+                _configService.Current.PrePausedSyncshells = new HashSet<string>(_prePausedSyncshells, StringComparer.Ordinal);
                 _configService.Save();
             }
             else
             {
                 // Incognito Mode: Pause user pairs that are NOT in current party
                 var allUserPairs = _pairManager.DirectPairs.ToList();
-                var partyMembers = await _dalamudUtilService.RunOnFrameworkThread(() => _dalamudUtilService.GetPartyMemberNames());
+        var partyMembers = await _dalamudUtilService.RunOnFrameworkThread(() => _dalamudUtilService.GetPartyMemberNames()).ConfigureAwait(false);
                 _logger.LogInformation("Emergency stop: Checking {count} user pairs against party members: [{members}]", 
                     allUserPairs.Count, string.Join(", ", partyMembers));
                 
@@ -1629,11 +1597,12 @@ public class CompactUi : WindowMediatorSubscriberBase
                         else
                         {
                             var playerName = pair.PlayerName;
-                            if (!await IsPlayerInCurrentPartyAsync(playerName))
+                            var inParty = !string.IsNullOrEmpty(playerName) && await IsPlayerInCurrentPartyAsync(playerName).ConfigureAwait(false);
+                            if (!inParty)
                             {
                                 var permissions = pair.UserPair.OwnPermissions;
                                 permissions.SetPaused(true);
-                                await _apiController.UserSetPairPermissions(new(pair.UserData, permissions));
+                                await _apiController.UserSetPairPermissions(new(pair.UserData, permissions)).ConfigureAwait(false);
                                 _logger.LogInformation("Paused pair (not in party): {uid} - {playerName}", pair.UserData.UID, playerName);
                             }
                             else
@@ -1659,7 +1628,8 @@ public class CompactUi : WindowMediatorSubscriberBase
                     bool hasPartyMember = false;
                     foreach (var pair in pairsInGroup)
                     {
-                        if (await IsPlayerInCurrentPartyAsync(pair.PlayerName))
+                        var memberName = pair.PlayerName;
+                        if (!string.IsNullOrEmpty(memberName) && await IsPlayerInCurrentPartyAsync(memberName).ConfigureAwait(false))
                         {
                             hasPartyMember = true;
                             break;
@@ -1687,7 +1657,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                 // Apply bulk pause to syncshells
                 if (syncshellsToPause.Count > 0)
                 {
-                    await _apiController.SetBulkPermissions(new(new(StringComparer.Ordinal), syncshellsToPause));
+                    await _apiController.SetBulkPermissions(new(new(StringComparer.Ordinal), syncshellsToPause)).ConfigureAwait(false);
                     _logger.LogInformation("Paused {count} syncshells for incognito mode", syncshellsToPause.Count);
                 }
                 
@@ -1696,7 +1666,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                 
                 // Save configuration
                 _configService.Current.IsIncognitoModeActive = _isIncognitoModeActive;
-                _configService.Current.PrePausedPairs = new HashSet<string>(_prePausedPairs);
+                _configService.Current.PrePausedPairs = new HashSet<string>(_prePausedPairs, StringComparer.Ordinal);
                 _configService.Save();
             }
         }
@@ -1824,14 +1794,9 @@ public class CompactUi : WindowMediatorSubscriberBase
             if (ImGui.Begin("Texture Conversion", ref _conversionWindowOpen, ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoResize))
             {
                 // Ensure character data analysis is triggered and completed before popup is usable
-                if (_popupAnalysisTask == null || _popupAnalysisTask.IsCompleted)
+                if ((_popupAnalysisTask == null || _popupAnalysisTask.IsCompleted) && NeedsPopupAnalysis())
                 {
-                    // Start analysis task only if needed
-                    if (NeedsPopupAnalysis())
-                    {
-                        _popupAnalysisTask = EnsurePopupAnalysisAsync();
-                        _lastPopupAnalysisStart = DateTime.Now;
-                    }
+                    _popupAnalysisTask = EnsurePopupAnalysisAsync();
                 }
 
                 // If analysis is running or blocking, show busy indicator and avoid interactive content
@@ -1871,15 +1836,18 @@ public class CompactUi : WindowMediatorSubscriberBase
                     }
                     UiSharedService.AttachToolTip("If a full Penumbra Mod Package *.pmp backup exists, Sphene will restore it directly instead of just the texture backups.");
         }
-        catch { }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to update PMP restore preference (popup)");
+        }
         
         // Backup info block: render inline to simplify layout
         var allCount = _textureBackupService.GetBackupsByOriginalFile().Count;
                 // Always show scanning message for up to 10 seconds when there are no backups
                 var detectionInProgress = _isTextureBackupScanInProgress || (_shrinkUDetectionTask != null && !_shrinkUDetectionTask.IsCompleted);
                 if (allCount == 0 && _backupScanTriggeredAt == DateTime.MinValue)
-                    _backupScanTriggeredAt = DateTime.Now;
-                var withinForcedWindow = _backupScanTriggeredAt != DateTime.MinValue && (DateTime.Now - _backupScanTriggeredAt) < TimeSpan.FromSeconds(10);
+                    _backupScanTriggeredAt = DateTime.UtcNow;
+                var withinForcedWindow = _backupScanTriggeredAt != DateTime.MinValue && (DateTime.UtcNow - _backupScanTriggeredAt) < TimeSpan.FromSeconds(10);
                 var scanning = (detectionInProgress || withinForcedWindow);
                 // Gate text updates also on scanning state so it can flip between scanning/no-backups
                 var newAllKey = $"C:{allCount}-S:{(scanning ? 1 : 0)}";
@@ -1914,7 +1882,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                 {
                     // Keep tooltip aligned with scanning window
                     detectionInProgress = _isTextureBackupScanInProgress || (_shrinkUDetectionTask != null && !_shrinkUDetectionTask.IsCompleted);
-                    withinForcedWindow = _backupScanTriggeredAt != DateTime.MinValue && (DateTime.Now - _backupScanTriggeredAt) < TimeSpan.FromSeconds(10);
+                    withinForcedWindow = _backupScanTriggeredAt != DateTime.MinValue && (DateTime.UtcNow - _backupScanTriggeredAt) < TimeSpan.FromSeconds(10);
                     scanning = (detectionInProgress || withinForcedWindow);
                     UiSharedService.AttachToolTip(scanning
                         ? "Backups are being scanned. It may be that none exist yet or conversion was not required."
@@ -1929,7 +1897,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                     {
                         if (_uiSharedService.IconTextButton(FontAwesomeIcon.Undo, "Restore from ShrinkU backups"))
                         {
-                            StartTextureRestore(new Dictionary<string, List<string>>());
+                            StartTextureRestore(new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase));
                         }
                     }
                     UiSharedService.AttachToolTip(_automaticModeEnabled
@@ -1967,7 +1935,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                 else
                 {
                     detectionInProgress = _isTextureBackupScanInProgress || (_shrinkUDetectionTask != null && !_shrinkUDetectionTask.IsCompleted);
-                    withinForcedWindow = _backupScanTriggeredAt != DateTime.MinValue && (DateTime.Now - _backupScanTriggeredAt) < TimeSpan.FromSeconds(10);
+                    withinForcedWindow = _backupScanTriggeredAt != DateTime.MinValue && (DateTime.UtcNow - _backupScanTriggeredAt) < TimeSpan.FromSeconds(10);
                     scanning = (detectionInProgress || withinForcedWindow);
                     var msg = scanning ? "Scanning for backups… none found yet." : "No texture backups found.";
                     if (scanning)
@@ -2033,7 +2001,6 @@ public class CompactUi : WindowMediatorSubscriberBase
             if (!string.Equals(candidateKey, _autoConvertKey, StringComparison.Ordinal))
             {
                 _autoConvertKey = candidateKey;
-                _autoConvertTriggered = false;
             }
 
             // Compact header and statistics row
@@ -2047,17 +2014,17 @@ public class CompactUi : WindowMediatorSubscriberBase
             // Ensure storage info task is started or refreshed periodically
             try
             {
-                var now = DateTime.Now;
-                if (_storageInfoTask == null || (now - _lastStorageInfoUpdate) > TimeSpan.FromSeconds(5))
+                var now = DateTime.UtcNow;
+                if (_storageInfoTask == null || (((now - _lastStorageInfoUpdate) > TimeSpan.FromSeconds(5)) && _storageInfoTask.IsCompleted))
                 {
-                    if (_storageInfoTask == null || _storageInfoTask.IsCompleted)
-                    {
-                        _storageInfoTask = GetShrinkUStorageInfoAsync();
-                        _lastStorageInfoUpdate = now;
-                    }
+                    _storageInfoTask = GetShrinkUStorageInfoAsync();
+                    _lastStorageInfoUpdate = now;
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to refresh ShrinkU storage info task");
+            }
             var (totalSize, fileCount) = _cachedStorageInfo;
             // Compact storage info line
             if (fileCount > 0)
@@ -2088,12 +2055,15 @@ public class CompactUi : WindowMediatorSubscriberBase
                 }
                 UiSharedService.AttachToolTip("If a full Penumbra Mod Package backup exists, Sphene will restore it instead of just the texture backups.");
             }
-            catch { }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to update PMP restore preference (inline)");
+            }
             
             var availableBackups = GetCachedBackupsForCurrentAnalysis();
             // Compute counts and gate status text updates on changes in number/type
-            var textureBackupCount = availableBackups.Count(kvp => !kvp.Key.StartsWith("[ShrinkU Mod:"));
-            var shrinkuModBackupCount = availableBackups.Count(kvp => kvp.Key.StartsWith("[ShrinkU Mod:"));
+            var textureBackupCount = availableBackups.Count(kvp => !kvp.Key.StartsWith("[ShrinkU Mod:", StringComparison.Ordinal));
+            var shrinkuModBackupCount = availableBackups.Count(kvp => kvp.Key.StartsWith("[ShrinkU Mod:", StringComparison.Ordinal));
 
             // Determine scanning state for current-textures block with 10s forced window
             var detectionInProgressCurrent = _isTextureBackupScanInProgress
@@ -2102,10 +2072,10 @@ public class CompactUi : WindowMediatorSubscriberBase
             if ((textureBackupCount + shrinkuModBackupCount) == 0 && _backupScanTriggeredAt == DateTime.MinValue)
             {
                 // No backups yet and no timestamp set: start forced 10s scanning window
-                _backupScanTriggeredAt = DateTime.Now;
+                _backupScanTriggeredAt = DateTime.UtcNow;
             }
             var withinForcedWindowCurrent = _backupScanTriggeredAt != DateTime.MinValue
-                && (DateTime.Now - _backupScanTriggeredAt).TotalSeconds < 10.0;
+                && (DateTime.UtcNow - _backupScanTriggeredAt).TotalSeconds < 10.0;
             var scanningCurrent = detectionInProgressCurrent || withinForcedWindowCurrent;
 
             var newCurrentKey = $"T{textureBackupCount}|S{shrinkuModBackupCount}|C{(scanningCurrent ? 1 : 0)}";
@@ -2239,11 +2209,13 @@ public class CompactUi : WindowMediatorSubscriberBase
                 if (_automaticModeEnabled != isAutomaticBySphene)
                     _automaticModeEnabled = isAutomaticBySphene;
             }
-            catch { }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to sync automatic mode state with ShrinkU config");
+            }
             if (ImGui.Checkbox("Automatic mode", ref _automaticModeEnabled))
             {
                 _logger.LogDebug("Automatic mode toggled: {Enabled}", _automaticModeEnabled);
-                _autoConvertTriggered = false; // reset gating when toggled
                 try
                 {
                     var newMode = _automaticModeEnabled ? TextureProcessingMode.Automatic : TextureProcessingMode.Manual;
@@ -2256,7 +2228,10 @@ public class CompactUi : WindowMediatorSubscriberBase
                         _logger.LogDebug("Propagated automatic mode to ShrinkU: {Mode}", newMode);
                     }
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Failed to propagate automatic mode to ShrinkU");
+                }
 
                 // Immediately start background conversion when enabling Automatic mode
                 try
@@ -2266,7 +2241,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                         // Use current analysis results to convert non-BC7 textures
                         if (nonBc7Textures != null && nonBc7Textures.Count > 0)
                         {
-                            StartTextureConversion(nonBc7Textures);
+                            _ = StartTextureConversion(nonBc7Textures);
                             _conversionWindowOpen = false;
                             _cachedAnalysisForPopup = null; // Clear cached analysis when window closes
                             _autoSilentConversion = true; // suppress progress window for automatic background conversions
@@ -2274,11 +2249,14 @@ public class CompactUi : WindowMediatorSubscriberBase
                         else
                         {
                             // If analysis data is not available, trigger external texture change so ShrinkU watcher can pick up
-                            try { _shrinkuConversionService.NotifyExternalTextureChange("automatic-mode-enabled"); } catch { }
+                            try { _shrinkuConversionService.NotifyExternalTextureChange("automatic-mode-enabled"); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to notify automatic-mode-enabled"); }
                         }
                     }
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Failed to start automatic conversion");
+                }
             }
             UiSharedService.AttachToolTip(_automaticModeEnabled
                 ? "Automatic conversion is enabled. Revert actions are disabled."
@@ -2304,8 +2282,6 @@ public class CompactUi : WindowMediatorSubscriberBase
                     _shrinkuConfigService.Current.EnableBackupBeforeConversion = true;
                     _shrinkuConfigService.Current.EnableFullModBackupBeforeConversion = false;
                     _shrinkuConfigService.Save();
-                    texturesBackup = true;
-                    fullModBackup = false;
                     currentMode = "Texture";
                 }
 
@@ -2313,21 +2289,21 @@ public class CompactUi : WindowMediatorSubscriberBase
                 ImGui.SameLine();
                 if (ImGui.BeginCombo("##BackupModeCombo", currentMode))
                 {
-                    if (ImGui.Selectable("Texture", currentMode == "Texture"))
+                    if (ImGui.Selectable("Texture", string.Equals(currentMode, "Texture", StringComparison.Ordinal)))
                     {
                         _shrinkuConfigService.Current.EnableBackupBeforeConversion = true;
                         _shrinkuConfigService.Current.EnableFullModBackupBeforeConversion = false;
                         _shrinkuConfigService.Save();
                         _logger.LogDebug("Set backup mode to Texture");
                     }
-                    if (ImGui.Selectable("Full Mod", currentMode == "Full Mod"))
+                    if (ImGui.Selectable("Full Mod", string.Equals(currentMode, "Full Mod", StringComparison.Ordinal)))
                     {
                         _shrinkuConfigService.Current.EnableBackupBeforeConversion = false;
                         _shrinkuConfigService.Current.EnableFullModBackupBeforeConversion = true;
                         _shrinkuConfigService.Save();
                         _logger.LogDebug("Set backup mode to Full Mod");
                     }
-                    if (ImGui.Selectable("Both", currentMode == "Both"))
+                    if (ImGui.Selectable("Both", string.Equals(currentMode, "Both", StringComparison.Ordinal)))
                     {
                         _shrinkuConfigService.Current.EnableBackupBeforeConversion = true;
                         _shrinkuConfigService.Current.EnableFullModBackupBeforeConversion = true;
@@ -2339,16 +2315,20 @@ public class CompactUi : WindowMediatorSubscriberBase
 
                 UiSharedService.AttachToolTip("Backup Modes:\n- Texture: smaller storage; per-file restore\n- Full Mod: larger storage; safer full restore\n- Both: combines advantages; highest storage use");
             }
-            catch { }
-            
-            if (nonBc7Textures.Count > 0)
+            catch (Exception ex)
             {
-                var totalSizeMB = nonBc7Textures.Sum(t => t.OriginalSize) / (1024.0 * 1024.0);
+                _logger.LogDebug(ex, "Failed to render backup mode UI");
+            }
+            
+            if ((nonBc7Textures?.Count ?? 0) > 0)
+            {
+                var totalSizeBytes = (nonBc7Textures?.Sum(t => t.OriginalSize) ?? 0L);
+                var totalSizeMB = totalSizeBytes / (1024.0 * 1024.0);
                 ImGui.Text($"To convert: {totalSizeMB:F1} MB");
 
-                if (_uiSharedService.IconTextButton(FontAwesomeIcon.FileArchive, $"Convert {nonBc7Textures.Count} to BC7"))
+                if (_uiSharedService.IconTextButton(FontAwesomeIcon.FileArchive, $"Convert {(nonBc7Textures?.Count ?? 0)} to BC7"))
                 {
-                    StartTextureConversion(nonBc7Textures);
+                    _ = StartTextureConversion(nonBc7Textures!);
                     _conversionWindowOpen = false;
                     _cachedAnalysisForPopup = null; // Clear cached analysis when window closes
                     _autoSilentConversion = false; // show progress for manual conversion
@@ -2365,7 +2345,10 @@ public class CompactUi : WindowMediatorSubscriberBase
                         UiSharedService.AttachToolTip("Automatic conversion is running");
                     }
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Failed to update automatic conversion spinner");
+                }
 
 
                 // No automatic conversion trigger on popup open when Automatic mode is enabled
@@ -2392,12 +2375,12 @@ public class CompactUi : WindowMediatorSubscriberBase
             if (string.IsNullOrEmpty(filePath)) return;
             var ext = Path.GetExtension(filePath)?.ToLowerInvariant();
             string msg;
-            if (ext == ".zip")
+            if (string.Equals(ext, ".zip", StringComparison.Ordinal))
             {
                 msg = $"Created mod backup ZIP {filePath}";
                 _backupZipCount++;
             }
-            else if (ext == ".pmp")
+            else if (string.Equals(ext, ".pmp", StringComparison.Ordinal))
             {
                 msg = $"Created full mod backup PMP {filePath}";
                 _backupPmpCount++;
@@ -2408,7 +2391,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                 _backupTextureCount++;
             }
 
-            var stamped = $"{DateTime.Now:HH:mm:ss.fff} | {msg}";
+            var stamped = $"{DateTime.UtcNow:HH:mm:ss.fff} | {msg}";
             _backupCurrentStep = stamped;
 
             // De-duplicate consecutive identical messages
@@ -2418,7 +2401,10 @@ public class CompactUi : WindowMediatorSubscriberBase
             if (_backupStepLog.Count > 200)
                 _backupStepLog.RemoveRange(0, _backupStepLog.Count - 200);
         }
-        catch { }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to update backup step log");
+        }
     }
 
     private void DrawConversionProgressWindow()
@@ -2453,8 +2439,10 @@ public class CompactUi : WindowMediatorSubscriberBase
                     int expectedTextures = _texturesToConvert.Count;
                     bool expectZip = false;
                     bool expectPmp = false;
-                    try { expectZip = _shrinkuConfigService.Current.EnableZipCompressionForBackups; } catch { }
-                    try { expectPmp = _shrinkuConfigService.Current.EnableFullModBackupBeforeConversion; } catch { }
+                    try { expectZip = _shrinkuConfigService.Current.EnableZipCompressionForBackups; }
+                    catch (Exception ex) { _logger.LogDebug(ex, "Failed to read ShrinkU zip compression setting"); }
+                    try { expectPmp = _shrinkuConfigService.Current.EnableFullModBackupBeforeConversion; }
+                    catch (Exception ex) { _logger.LogDebug(ex, "Failed to read ShrinkU full mod backup setting"); }
                     int expectedFromConfig = Math.Max(0, expectedTextures) + (expectZip ? 1 : 0) + (expectPmp ? 1 : 0);
 
                     // Prefer service-provided total when available; fallback to config-based estimate
@@ -2481,29 +2469,32 @@ public class CompactUi : WindowMediatorSubscriberBase
                         try
                         {
                             // Remove common timestamp formats
-                            stepText = System.Text.RegularExpressions.Regex.Replace(stepText, @"\[\d{2}:\d{2}:\d{2}\]", "");
-                            stepText = System.Text.RegularExpressions.Regex.Replace(stepText, @"\[\d{2}:\d{2}:\d{2}\.\d{3}\]", "");
-                            stepText = System.Text.RegularExpressions.Regex.Replace(stepText, @"\b\d{2}:\d{2}:\d{2}\b", "");
-                            stepText = System.Text.RegularExpressions.Regex.Replace(stepText, @"\b\d{2}:\d{2}:\d{2}\.\d{1,4}\b", "");
-                            stepText = System.Text.RegularExpressions.Regex.Replace(stepText, @"\b\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\b", "");
+                            stepText = System.Text.RegularExpressions.Regex.Replace(stepText, @"\[\d{2}:\d{2}:\d{2}\]", "", System.Text.RegularExpressions.RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(50));
+                            stepText = System.Text.RegularExpressions.Regex.Replace(stepText, @"\[\d{2}:\d{2}:\d{2}\.\d{3}\]", "", System.Text.RegularExpressions.RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(50));
+                            stepText = System.Text.RegularExpressions.Regex.Replace(stepText, @"\b\d{2}:\d{2}:\d{2}\b", "", System.Text.RegularExpressions.RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(50));
+                            stepText = System.Text.RegularExpressions.Regex.Replace(stepText, @"\b\d{2}:\d{2}:\d{2}\.\d{1,4}\b", "", System.Text.RegularExpressions.RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(50));
+                            stepText = System.Text.RegularExpressions.Regex.Replace(stepText, @"\b\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\b", "", System.Text.RegularExpressions.RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(50));
                             // Remove orphan millisecond tokens left after HH:MM:SS removal
-                            stepText = System.Text.RegularExpressions.Regex.Replace(stepText, @"^\.\d{1,6}\b", "");
-                            stepText = System.Text.RegularExpressions.Regex.Replace(stepText, @"(?<=\s|:)\.\d{1,6}\b", "");
+                            stepText = System.Text.RegularExpressions.Regex.Replace(stepText, @"^\.\d{1,6}\b", "", System.Text.RegularExpressions.RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(50));
+                            stepText = System.Text.RegularExpressions.Regex.Replace(stepText, @"(?<=\s|:)\.\d{1,6}\b", "", System.Text.RegularExpressions.RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(50));
                             // Remove leading pipe from log formatting
-                            stepText = System.Text.RegularExpressions.Regex.Replace(stepText, @"^\|\s*", "");
+                            stepText = System.Text.RegularExpressions.Regex.Replace(stepText, @"^\|\s*", "", System.Text.RegularExpressions.RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(50));
                             // Clean leftover separators
                             stepText = stepText.Trim();
-                            stepText = System.Text.RegularExpressions.Regex.Replace(stepText, @"\s{2,}", " ");
+                            stepText = System.Text.RegularExpressions.Regex.Replace(stepText, @"\s{2,}", " ", System.Text.RegularExpressions.RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(50));
                             stepText = stepText.Trim('-', ' ', '\t');
                         }
-                        catch { }
+                        catch (Exception ex)
+                        {
+                            _logger.LogDebug(ex, "Failed to analyze used texture path for owning mod");
+                        }
                         UiSharedService.ColorTextWrapped($"Current step: {stepText}", SpheneCustomTheme.Colors.Warning);
                     }
                     // Show detailed breakdown
                     ImGui.Text($"ZIPs: {_backupZipCount} · PMPs: {_backupPmpCount} · Textures: {_backupTextureCount}");
                     if (_backupStartTime != DateTime.MinValue && (_backupCurrentIndex > 0 || aggregatedCompleted > 0))
                     {
-                        var elapsedB = DateTime.Now - _backupStartTime;
+                        var elapsedB = DateTime.UtcNow - _backupStartTime;
                         ImGui.Text($"Elapsed: {elapsedB:mm\\:ss}");
                     }
                     ImGui.Separator();
@@ -2520,7 +2511,7 @@ public class CompactUi : WindowMediatorSubscriberBase
 
                 if (currentFile > 0 && _conversionStartTime != DateTime.MinValue)
                 {
-                    var elapsed = DateTime.Now - _conversionStartTime;
+                    var elapsed = DateTime.UtcNow - _conversionStartTime;
                     var avgTimePerFile = elapsed.TotalSeconds / currentFile;
                     var estimatedRemainingSeconds = avgTimePerFile * remainingFiles;
                     var estimatedRemaining = TimeSpan.FromSeconds(estimatedRemainingSeconds);
@@ -2557,7 +2548,10 @@ public class CompactUi : WindowMediatorSubscriberBase
                             ImGui.TextColored(SpheneCustomTheme.CurrentTheme.TextSecondary, $"Size: {sizeInMB:F2} MB");
                         }
                     }
-                    catch { }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug(ex, "Failed to read file info for conversion progress");
+                    }
                 }
 
                 ImGui.Spacing();
@@ -2642,7 +2636,7 @@ public class CompactUi : WindowMediatorSubscriberBase
 
                     if (current > 0 && _restoreStartTime != DateTime.MinValue && total > 0)
                     {
-                        var elapsed = DateTime.Now - _restoreStartTime;
+                        var elapsed = DateTime.UtcNow - _restoreStartTime;
                         var rate = current / Math.Max(1.0, elapsed.TotalSeconds);
                         var secsRemaining = rate > 0 ? (total - current) / rate : 0.0;
                         var eta = TimeSpan.FromSeconds(secsRemaining);
@@ -2654,7 +2648,8 @@ public class CompactUi : WindowMediatorSubscriberBase
                     {
                         if (ImGui.Button("Cancel Restore"))
                         {
-                            try { _restoreCancellationTokenSource.Cancel(); } catch { }
+                            try { _restoreCancellationTokenSource.Cancel(); }
+                            catch (Exception ex) { _logger.LogDebug(ex, "Failed to cancel restore operation"); }
                         }
                         ImGui.SameLine();
                         UiSharedService.ColorText("Restore is running…", SpheneCustomTheme.Colors.Warning);
@@ -2670,7 +2665,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         }
     }
 
-    private List<(string Format, long OriginalSize, List<string> FilePaths)> GetTextureDataFromAnalysis(Dictionary<ObjectKind, Dictionary<string, CharacterAnalyzer.FileDataEntry>> analysis)
+    private static List<(string Format, long OriginalSize, List<string> FilePaths)> GetTextureDataFromAnalysis(Dictionary<ObjectKind, Dictionary<string, CharacterAnalyzer.FileDataEntry>> analysis)
     {
         var textureData = new List<(string Format, long OriginalSize, List<string> FilePaths)>();
         var totalFiles = 0;
@@ -2681,14 +2676,10 @@ public class CompactUi : WindowMediatorSubscriberBase
             foreach (var fileData in objectKindData.Values)
             {
                 totalFiles++;
-                if (fileData.FilePaths != null && fileData.FilePaths.Count > 0)
+                if (fileData.FilePaths != null && fileData.FilePaths.Count > 0 && fileData.Format != null && !string.IsNullOrEmpty(fileData.Format.Value))
                 {
-                    // Check if this is a texture file (has format information)
-                    if (fileData.Format != null && !string.IsNullOrEmpty(fileData.Format.Value))
-                    {
-                        textureFiles++;
-                        textureData.Add((fileData.Format.Value, fileData.OriginalSize, fileData.FilePaths));
-                    }
+                    textureFiles++;
+                    textureData.Add((fileData.Format.Value, fileData.OriginalSize, fileData.FilePaths));
                 }
             }
         }
@@ -2696,45 +2687,11 @@ public class CompactUi : WindowMediatorSubscriberBase
     }
 
     // Draw a small spinning arrows indicator to visualize auto conversion
-    private void DrawAutoConvertSpinner()
-    {
-        var frameSize = ImGui.GetFrameHeight();
-        var size = new Vector2(frameSize, frameSize);
-        ImGui.InvisibleButton("##autoConvertSpinner", size);
-        var min = ImGui.GetItemRectMin();
-        var center = new Vector2(min.X + size.X * 0.5f, min.Y + size.Y * 0.5f);
-        var drawList = ImGui.GetWindowDrawList();
-        var theme = SpheneCustomTheme.CurrentTheme;
-        var color = theme.TextPrimary;
-        var u32 = ImGui.ColorConvertFloat4ToU32(color);
-
-        var t = (float)ImGui.GetTime();
-        var radius = size.X * 0.35f;
-        var thickness = 2.0f;
-
-        // Draw two rotating arc segments with arrowheads opposite each other
-        for (int i = 0; i < 2; i++)
-        {
-            var baseAngle = t * 3.0f + i * (float)Math.PI;
-            var startAngle = baseAngle;
-            var endAngle = baseAngle + 1.2f;
-
-            drawList.PathClear();
-            drawList.PathArcTo(center, radius, startAngle, endAngle, 18);
-            drawList.PathStroke(u32, ImDrawFlags.None, thickness);
-
-            var endDir = new Vector2((float)Math.Cos(endAngle), (float)Math.Sin(endAngle));
-            var endPt = new Vector2(center.X + endDir.X * radius, center.Y + endDir.Y * radius);
-            var perp = new Vector2(-endDir.Y, endDir.X);
-            var a1 = new Vector2(endPt.X - endDir.X * 6 + perp.X * 4, endPt.Y - endDir.Y * 6 + perp.Y * 4);
-            var a2 = new Vector2(endPt.X - endDir.X * 6 - perp.X * 4, endPt.Y - endDir.Y * 6 - perp.Y * 4);
-            drawList.AddTriangleFilled(endPt, a1, a2, u32);
-        }
-    }
+    
 
     // Draw a rotating spinner that visually replaces the FontAwesome spinner glyph
     // The spinner itself rotates, without any additional overlay around it
-    private void DrawRotatingSpinnerIcon(float scale = 1.0f)
+    private static void DrawRotatingSpinnerIcon(float scale = 1.0f)
     {
         // Size matches the current text line height for perfect inline alignment
         var lineHeight = ImGui.GetTextLineHeight() * scale;
@@ -2760,7 +2717,7 @@ public class CompactUi : WindowMediatorSubscriberBase
 
         ImGui.Dummy(size);
     }
-   private async void StartTextureConversion(List<(string Format, long OriginalSize, List<string> FilePaths)> textureData)
+   private Task StartTextureConversion(List<(string Format, long OriginalSize, List<string> FilePaths)> textureData)
     {
         _texturesToConvert.Clear();
 
@@ -2769,29 +2726,31 @@ public class CompactUi : WindowMediatorSubscriberBase
         {
             if (texture.FilePaths.Count > 0)
             {
-                var primaryPath = texture.FilePaths.First();
+                var primaryPath = texture.FilePaths[0];
                 var duplicatePaths = texture.FilePaths.Skip(1).ToArray();
                 _texturesToConvert[primaryPath] = duplicatePaths;
             }
         }
-
         _logger.LogDebug("Starting texture conversion for {Count} textures", _texturesToConvert.Count);
 
-        _conversionStartTime = DateTime.Now;
+        _conversionStartTime = DateTime.UtcNow;
         _conversionCancellationTokenSource = new CancellationTokenSource();
 
         if (_enableBackupBeforeConversion || _shrinkuConfigService.Current.EnableFullModBackupBeforeConversion)
         {
             StartBackupAndConversion();
+            return Task.CompletedTask;
         }
         else
         {
             _conversionTask = _ipcManager.Penumbra.ConvertTextureFiles(_logger, _texturesToConvert, _conversionProgress, _conversionCancellationTokenSource.Token);
-            _conversionTask.ContinueWith(t =>
+            _ = _conversionTask.ContinueWith(t =>
             {
-                try { _shrinkuConversionService.NotifyExternalTextureChange("conversion-completed"); } catch { }
+                try { _shrinkuConversionService.NotifyExternalTextureChange("conversion-completed"); }
+                catch (Exception ex) { _logger.LogDebug(ex, "Failed to notify ShrinkU after conversion-completed"); }
                 finally { _autoSilentConversion = false; }
             }, TaskScheduler.Default);
+            return Task.CompletedTask;
         }
     }
 
@@ -2827,7 +2786,10 @@ public class CompactUi : WindowMediatorSubscriberBase
                                                 mods.Add(mod);
                                         }
                                     }
-                                    catch { }
+                                    catch (Exception ex)
+                                    {
+                                        _logger.LogDebug(ex, "Failed to infer owning mod from path {path}", p);
+                                    }
                                 }
                             }
 
@@ -2835,7 +2797,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                             foreach (var mod in mods)
                             {
                                 bool hasPmp = false;
-                                try { hasPmp = await _shrinkuBackupService.HasPmpBackupForModAsync(mod).ConfigureAwait(false); } catch { }
+                                try { hasPmp = await _shrinkuBackupService.HasPmpBackupForModAsync(mod).ConfigureAwait(false); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to check PMP backup for {mod}", mod); }
                                 if (!hasPmp)
                                 {
                                     try
@@ -2843,28 +2805,34 @@ public class CompactUi : WindowMediatorSubscriberBase
                                         _logger.LogDebug("Creating full mod PMP backup for {mod}", mod);
                                         await _shrinkuBackupService.CreateFullModBackupAsync(mod, _backupProgress, _conversionCancellationTokenSource.Token).ConfigureAwait(false);
                                     }
-                                    catch { }
+                                    catch (Exception ex)
+                                    {
+                                        _logger.LogDebug(ex, "Failed to create full mod PMP backup for {mod}", mod);
+                                    }
                                 }
                             }
                         }
-                        catch { }
+                        catch (Exception ex)
+                        {
+                            _logger.LogDebug(ex, "Failed during mod backup preparation loop");
+                        }
                     }
 
                     // Create backups first
                     var allTexturePaths = _texturesToConvert.SelectMany(kvp => new[] { kvp.Key }.Concat(kvp.Value)).ToArray();
                     _logger.LogDebug("Starting backup for {Count} texture paths", allTexturePaths.Length);
-                    _backupStartTime = DateTime.Now;
+                    _backupStartTime = DateTime.UtcNow;
                     var traceUiBackup = PerfTrace.Step(_logger, "UI Backup");
-                    await _shrinkuBackupService.BackupAsync(_texturesToConvert, _backupProgress, _conversionCancellationTokenSource.Token);
+                    await _shrinkuBackupService.BackupAsync(_texturesToConvert, _backupProgress, _conversionCancellationTokenSource.Token).ConfigureAwait(false);
                     traceUiBackup.Dispose();
 
                 // Start conversion after backup is complete
                 _logger.LogDebug("Backup completed, starting texture conversion");
                 var traceUiConvert = PerfTrace.Step(_logger, "UI Convert");
                 var conversionTask = _ipcManager.Penumbra.ConvertTextureFiles(_logger, _texturesToConvert, _conversionProgress, _conversionCancellationTokenSource.Token);
-                await conversionTask;
+                await conversionTask.ConfigureAwait(false);
                 traceUiConvert.Dispose();
-                try { _shrinkuConversionService.NotifyExternalTextureChange("conversion-completed"); } catch { }
+                try { _shrinkuConversionService.NotifyExternalTextureChange("conversion-completed"); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to notify ShrinkU after conversion-completed"); }
                 _autoSilentConversion = false;
                 
                 _logger.LogDebug("Texture conversion completed successfully");
@@ -2881,13 +2849,13 @@ public class CompactUi : WindowMediatorSubscriberBase
     {
         // Cache for 5 seconds to avoid excessive recalculation
         if (_cachedBackupsForAnalysis != null && 
-            DateTime.Now - _lastBackupAnalysisUpdate < TimeSpan.FromSeconds(5))
+            DateTime.UtcNow - _lastBackupAnalysisUpdate < TimeSpan.FromSeconds(5))
         {
             return _cachedBackupsForAnalysis;
         }
         // Start texture backup detection in background if stale/not started
         var shouldStartTextureDetection = _textureDetectionTask == null
-            || (_textureDetectionTask.IsCompleted && DateTime.Now - _lastTextureDetectionUpdate > TimeSpan.FromSeconds(5));
+            || (_textureDetectionTask.IsCompleted && DateTime.UtcNow - _lastTextureDetectionUpdate > TimeSpan.FromSeconds(5));
         if (shouldStartTextureDetection)
         {
             try
@@ -2895,7 +2863,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                 _isTextureBackupScanInProgress = true;
                 _textureDetectionTask = Task.Run(() => GetBackupsForCurrentAnalysis());
             }
-            catch { _isTextureBackupScanInProgress = false; }
+            catch (Exception ex) { _isTextureBackupScanInProgress = false; _logger.LogDebug(ex, "Failed to prewarm backup detection caches (restore)"); }
         }
         // If texture detection finished, update cache
         if (_textureDetectionTask != null && _textureDetectionTask.IsCompleted)
@@ -2904,28 +2872,33 @@ public class CompactUi : WindowMediatorSubscriberBase
             {
                 _cachedTextureBackupsFiltered = _textureDetectionTask.Result;
             }
-            catch { _cachedTextureBackupsFiltered = new Dictionary<string, List<string>>(); }
+            catch (Exception ex) { _cachedTextureBackupsFiltered = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase); _logger.LogDebug(ex, "Failed to cache texture backups (restore)"); }
             finally
             {
-                _lastTextureDetectionUpdate = DateTime.Now;
+                _lastTextureDetectionUpdate = DateTime.UtcNow;
                 _isTextureBackupScanInProgress = false;
             }
         }
 
         // Kick off ShrinkU mod backup detection asynchronously if stale or not started
         var shouldStartDetection = _shrinkUDetectionTask == null
-            || (_shrinkUDetectionTask.IsCompleted && DateTime.Now - _lastShrinkUDetectionUpdate > TimeSpan.FromSeconds(5));
+            || (_shrinkUDetectionTask.IsCompleted && DateTime.UtcNow - _lastShrinkUDetectionUpdate > TimeSpan.FromSeconds(5));
         if (shouldStartDetection)
         {
             try
             {
                 _shrinkUDetectionTask = DetectShrinkUModBackupsAsync();
             }
-            catch { }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to start ShrinkU mod backup detection task");
+            }
         }
 
         // Combine cached texture service backups with any cached ShrinkU mod backups
-        var combined = new Dictionary<string, List<string>>(_cachedTextureBackupsFiltered ?? new());
+        var combined = _cachedTextureBackupsFiltered != null 
+            ? new Dictionary<string, List<string>>(_cachedTextureBackupsFiltered, StringComparer.OrdinalIgnoreCase)
+            : new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
         if (_cachedShrinkUModBackups != null && _cachedShrinkUModBackups.Count > 0)
         {
             foreach (var kvp in _cachedShrinkUModBackups)
@@ -2935,7 +2908,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         }
 
         _cachedBackupsForAnalysis = combined;
-        _lastBackupAnalysisUpdate = DateTime.Now;
+        _lastBackupAnalysisUpdate = DateTime.UtcNow;
         return _cachedBackupsForAnalysis;
     }
 
@@ -2950,14 +2923,14 @@ public class CompactUi : WindowMediatorSubscriberBase
             {
                 _logger.LogDebug("No character analysis available for backup filtering (cached: {cached}, current: {current})", 
                     _cachedAnalysisForPopup != null, _characterAnalyzer.LastAnalysis != null);
-                return new Dictionary<string, List<string>>();
+                return new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
             }
             
             // Get all available backups from texture backup service (fast path)
             var allBackups = _textureBackupService.GetBackupsByOriginalFile();
             _logger.LogDebug("Found {count} total texture backup service files", allBackups.Count);
             
-            var filteredBackups = new Dictionary<string, List<string>>();
+            var filteredBackups = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
             
             // Get all texture filenames from current analysis
             var currentTextureNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -2995,7 +2968,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to get backups for current analysis");
-            return new Dictionary<string, List<string>>();
+            return new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
         }
         finally
         {
@@ -3010,7 +2983,7 @@ public class CompactUi : WindowMediatorSubscriberBase
             var usedPaths = await _shrinkuConversionService.GetUsedModTexturePathsAsync().ConfigureAwait(false);
             var penumbraRoot = _ipcManager.Penumbra.ModDirectory ?? string.Empty;
             penumbraRoot = penumbraRoot.Replace('/', '\\');
-            if (!string.IsNullOrWhiteSpace(penumbraRoot) && !penumbraRoot.EndsWith("\\"))
+            if (!string.IsNullOrWhiteSpace(penumbraRoot) && !penumbraRoot.EndsWith('\\'))
                 penumbraRoot += "\\";
 
             var owningMods = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -3028,12 +3001,15 @@ public class CompactUi : WindowMediatorSubscriberBase
                             owningMods.Add(modFolder);
                     }
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Failed to analyze used texture path for owning mod");
+                }
             }
 
             _logger.LogDebug("Detected {count} owning mods from used texture paths: {mods}", owningMods.Count, string.Join(", ", owningMods));
 
-            var result = new Dictionary<string, List<string>>();
+            var result = new Dictionary<string, List<string>>(StringComparer.Ordinal);
             int shrinkuBackupCount = 0;
             foreach (var mod in owningMods)
             {
@@ -3055,7 +3031,7 @@ public class CompactUi : WindowMediatorSubscriberBase
             }
 
             _cachedShrinkUModBackups = result;
-            _lastShrinkUDetectionUpdate = DateTime.Now;
+            _lastShrinkUDetectionUpdate = DateTime.UtcNow;
             _logger.LogDebug("ShrinkU backup detection completed: {count} mods with available backups", shrinkuBackupCount);
         }
         catch (Exception ex)
@@ -3129,11 +3105,10 @@ public class CompactUi : WindowMediatorSubscriberBase
     private void StartTextureRestore(Dictionary<string, List<string>> availableBackups)
     {
         _restoreCancellationTokenSource = _restoreCancellationTokenSource.CancelRecreate();
-        _restoreStartTime = DateTime.Now;
+        _restoreStartTime = DateTime.UtcNow;
         _restoreCurrentFileName = string.Empty;
         _restoreCurrentIndex = 0;
         _restoreTotalCount = 0;
-        _showRestoreProgressPopup = true;
         _restoreWindowOpen = true;
         _restoreStepText = "Preparing restore (detecting owning mods and backups)";
         
@@ -3147,7 +3122,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                     var usedPaths = await _shrinkuConversionService.GetUsedModTexturePathsAsync().ConfigureAwait(false);
                     var penumbraRoot = _ipcManager.Penumbra.ModDirectory ?? string.Empty;
                     penumbraRoot = penumbraRoot.Replace('/', '\\');
-                    if (!string.IsNullOrWhiteSpace(penumbraRoot) && !penumbraRoot.EndsWith("\\"))
+                    if (!string.IsNullOrWhiteSpace(penumbraRoot) && !penumbraRoot.EndsWith('\\'))
                         penumbraRoot += "\\";
 
                     var owningMods = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -3165,7 +3140,10 @@ public class CompactUi : WindowMediatorSubscriberBase
                                     owningMods.Add(modFolder);
                             }
                         }
-                        catch { }
+                        catch (Exception ex)
+                        {
+                            _logger.LogDebug(ex, "Failed to analyze texture path for session matching");
+                        }
                     }
 
                     _logger.LogInformation("Penumbra mod root: {root}", penumbraRoot);
@@ -3177,7 +3155,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                     foreach (var mod in owningMods)
                     {
                         bool hasBackup = false;
-                        try { hasBackup = await _shrinkuBackupService.HasBackupForModAsync(mod).ConfigureAwait(false); } catch { }
+                        try { hasBackup = await _shrinkuBackupService.HasBackupForModAsync(mod).ConfigureAwait(false); } catch (Exception ex) { _logger.LogDebug(ex, "Backup availability check failed for {mod}", mod); }
                         _logger.LogInformation("Backup availability for mod {mod}: {hasBackup}", mod, hasBackup);
                         if (!hasBackup)
                             continue;
@@ -3203,7 +3181,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                         }
                         catch (Exception ex)
                         {
-                            _logger.LogDebug(ex, "PMP restore attempt failed; falling back to latest normal restore for {mod}");
+                            _logger.LogDebug(ex, "PMP restore attempt failed; falling back to latest normal restore for {mod}", mod);
                         }
 
                         if (!ok)
@@ -3241,8 +3219,8 @@ public class CompactUi : WindowMediatorSubscriberBase
                         }
                         
                         _cachedBackupsForAnalysis = null;
-                        try { await _ipcManager.Penumbra.RedrawPlayerAsync().ConfigureAwait(false); } catch { }
-                        try { _shrinkuConversionService.NotifyExternalTextureChange("restore-targeted"); } catch { }
+                        try { await _ipcManager.Penumbra.RedrawPlayerAsync().ConfigureAwait(false); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to redraw player after targeted restore"); }
+                        try { _shrinkuConversionService.NotifyExternalTextureChange("restore-targeted"); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to notify external texture change after targeted restore"); }
                         _restoreStepText = "Restore completed (targeted mods)";
                         return;
                     }
@@ -3272,7 +3250,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                         // Detect Penumbra mod root to extract owning mod folder names
                         var penumbraRoot = _ipcManager.Penumbra.ModDirectory ?? string.Empty;
                         penumbraRoot = penumbraRoot.Replace('/', '\\');
-                        if (!string.IsNullOrWhiteSpace(penumbraRoot) && !penumbraRoot.EndsWith("\\"))
+                        if (!string.IsNullOrWhiteSpace(penumbraRoot) && !penumbraRoot.EndsWith('\\'))
                             penumbraRoot += "\\";
 
                         foreach (var p in texturePaths)
@@ -3306,7 +3284,10 @@ public class CompactUi : WindowMediatorSubscriberBase
                                     }
                                 }
                             }
-                            catch { }
+                            catch (Exception ex)
+                            {
+                                _logger.LogDebug(ex, "Failed to parse texture path for session matching");
+                            }
                         }
 
                         // Include any file names from availableBackups mapping as additional match candidates
@@ -3347,7 +3328,10 @@ public class CompactUi : WindowMediatorSubscriberBase
                                             matches++;
                                     }
                                 }
-                                catch { }
+                                catch (Exception ex)
+                                {
+                                    _logger.LogDebug(ex, "Failed to match backup entry against analysis");
+                                }
                             }
                             if (matches > bestMatches || (matches == bestMatches && sess.CreatedUtc > bestCreated))
                             {
@@ -3372,8 +3356,8 @@ public class CompactUi : WindowMediatorSubscriberBase
                             }
 
                             _cachedBackupsForAnalysis = null;
-                            try { await _ipcManager.Penumbra.RedrawPlayerAsync().ConfigureAwait(false); } catch { }
-                            try { _shrinkuConversionService.NotifyExternalTextureChange("restore-session"); } catch { }
+                            try { await _ipcManager.Penumbra.RedrawPlayerAsync().ConfigureAwait(false); } catch (Exception ex) { _logger.LogDebug(ex, "Redraw after restore (session) failed"); }
+                            try { _shrinkuConversionService.NotifyExternalTextureChange("restore-session"); } catch (Exception ex) { _logger.LogDebug(ex, "Notify external texture change (session) failed"); }
                             _restoreStepText = "Restore completed (session)";
                         }
                         else
@@ -3382,8 +3366,8 @@ public class CompactUi : WindowMediatorSubscriberBase
                             _restoreStepText = "Restoring latest session (no match)";
                             await _shrinkuBackupService.RestoreLatestAsync(_restoreProgress, _restoreCancellationTokenSource.Token).ConfigureAwait(false);
                             _cachedBackupsForAnalysis = null;
-                            try { await _ipcManager.Penumbra.RedrawPlayerAsync().ConfigureAwait(false); } catch { }
-                            try { _shrinkuConversionService.NotifyExternalTextureChange("restore-latest"); } catch { }
+                            try { await _ipcManager.Penumbra.RedrawPlayerAsync().ConfigureAwait(false); } catch (Exception ex) { _logger.LogDebug(ex, "Redraw after restore (latest) failed"); }
+                            try { _shrinkuConversionService.NotifyExternalTextureChange("restore-latest"); } catch (Exception ex) { _logger.LogDebug(ex, "Notify external texture change (latest) failed"); }
                             _restoreStepText = "Restore completed (latest)";
                         }
                     }
@@ -3394,7 +3378,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                 }
                 // Create mapping of backup files to their target locations
                 _restoreStepText = "Mapping backups to current texture locations";
-                var backupToTargetMap = new Dictionary<string, string>();
+                var backupToTargetMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                 
                 foreach (var kvp in availableBackups)
                 {
@@ -3404,7 +3388,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                     // Use the most recent backup (first in the list since they're ordered by creation time)
                     if (backupFiles.Count > 0)
                     {
-                        var mostRecentBackup = backupFiles.First();
+                        var mostRecentBackup = backupFiles[0];
                         
                         // Try to find the current location of this texture in the loaded data
                         var targetPath = FindCurrentTextureLocation(originalFileName);
@@ -3424,7 +3408,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                 {
                     _logger.LogDebug("Starting texture restore for {count} texture(s) from current analysis", backupToTargetMap.Count);
                     _restoreStepText = "Restoring textures per-file from analysis";
-                    var results = await _textureBackupService.RestoreTexturesAsync(backupToTargetMap, deleteBackupsAfterRestore: true, _restoreProgress, _restoreCancellationTokenSource.Token);
+                    var results = await _textureBackupService.RestoreTexturesAsync(backupToTargetMap, deleteBackupsAfterRestore: true, _restoreProgress, _restoreCancellationTokenSource.Token).ConfigureAwait(false);
                     
                     var successCount = results.Values.Count(success => success);
                     _logger.LogInformation("Texture restore completed: {successCount}/{totalCount} textures restored successfully. Backup files have been automatically deleted.", successCount, results.Count);
@@ -3505,7 +3489,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         }
     }
 
-    private string NormalizeDx11Name(string name)
+    private static string NormalizeDx11Name(string name)
     {
         try
         {
@@ -3547,8 +3531,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         // Window title - vertically centered
         SpheneCustomTheme.DrawStyledText(GetControlPanelTitle(), SpheneCustomTheme.CurrentTheme.CompactPanelTitleText);
         
-        // Store the text Y position for button alignment
-        var textY = contentY;
+        
         
         // Header buttons on the same line, positioned from the right with padding
         var buttonSpacing = 8.0f; // Reduced spacing between buttons (was 16.0f)
@@ -3564,11 +3547,9 @@ public class CompactUi : WindowMediatorSubscriberBase
         // Position settings button with reduced spacing from close button
         var settingsButtonX = closeButtonX - buttonWidth - buttonSpacing;
         
-        // Position area syncshell button with reduced spacing from settings button
-        var areaSyncshellButtonX = settingsButtonX - buttonWidth - buttonSpacing;
         
-        // Check if area syncshells are available in current location
-        bool hasAreaSyncshells = _areaBoundSyncshellService.HasAvailableAreaSyncshells();
+        
+        
         
         
         // Position settings button centered vertically in header
@@ -3612,14 +3593,14 @@ public class CompactUi : WindowMediatorSubscriberBase
         ImGui.SetCursorScreenPos(new Vector2(contentStart.X, headerEnd.Y));
     }
     
-    private async Task ValidateRestoredFiles(HashSet<string> restoredMods, string penumbraRoot)
+    private Task ValidateRestoredFiles(HashSet<string> restoredMods, string penumbraRoot)
     {
         if (restoredMods == null || restoredMods.Count == 0 || string.IsNullOrWhiteSpace(penumbraRoot))
         {
             _logger.LogDebug("No mods to validate or invalid Penumbra root");
-            return;
+            return Task.CompletedTask;
         }
-
+        
         _logger.LogDebug("Validating restored files for {count} mods", restoredMods.Count);
         
         int validatedMods = 0;
@@ -3657,30 +3638,17 @@ public class CompactUi : WindowMediatorSubscriberBase
         
         _logger.LogInformation("File validation completed: {validatedMods}/{totalMods} mods validated, {totalFiles} texture files found", 
             validatedMods, restoredMods.Count, totalFilesFound);
+        return Task.CompletedTask;
     }
     
-    private void LoadHalloweenBackgroundTexture()
-    {
-        try
-        {
-            if (!string.IsNullOrEmpty(SpheneImages.SpheneHelloweenBgBase64))
-            {
-                var imageData = Convert.FromBase64String(SpheneImages.SpheneHelloweenBgBase64);
-                _halloweenBackgroundTexture = _uiSharedService.LoadImage(imageData);
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to load Halloween background texture");
-        }
-    }
+    
     
     private void DrawHalloweenBackground()
     {
         if (_halloweenBackgroundTexture == null) return;
         
         // Check if it's Halloween season (October 25-31)
-        var now = DateTime.Now;
+        var now = DateTime.UtcNow;
         bool isHalloweenSeason = now.Month == 10 && now.Day >= 15 && now.Day <= 31;
         
         if (!isHalloweenSeason) return;

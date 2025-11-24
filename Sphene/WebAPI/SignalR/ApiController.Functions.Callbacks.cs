@@ -258,7 +258,6 @@ public partial class ApiController
 
     public Task Client_GposeLobbyPushWorldData(UserData userData, WorldData worldData)
     {
-        //Logger.LogDebug("Client_GposeLobbyPushWorldData: {dto}", userData);
         ExecuteSafely(() => Mediator.Publish(new GPoseLobbyReceiveWorldData(userData, worldData)));
         return Task.CompletedTask;
     }
@@ -329,10 +328,10 @@ public partial class ApiController
         _spheneHub!.On(nameof(Client_UpdateSystemInfo), act);
     }
 
-    public void OnUpdateUserIndividualPairStatusDto(Action<UserIndividualPairStatusDto> action)
+    public void OnUpdateUserIndividualPairStatusDto(Action<UserIndividualPairStatusDto> act)
     {
         if (_initialized) return;
-        _spheneHub!.On(nameof(Client_UpdateUserIndividualPairStatusDto), action);
+        _spheneHub!.On(nameof(Client_UpdateUserIndividualPairStatusDto), act);
     }
 
     public void OnUserAddClientPair(Action<UserPairDto> act)
@@ -445,34 +444,24 @@ public partial class ApiController
         _spheneHub!.On(nameof(Client_GposeLobbyPushWorldData), act);
     }
 
-    public async Task Client_AreaBoundJoinRequest(AreaBoundJoinRequestDto dto)
+    public Task Client_AreaBoundJoinRequest(AreaBoundJoinRequestDto dto)
     {
-        await ExecuteSafely(async () =>
+        ExecuteSafely(() =>
         {
             Logger.LogDebug("Received area-bound join request for group: {GroupId} from user: {UserId}", dto.GID, dto.UID);
             Mediator.Publish(new AreaBoundJoinRequestMessage(dto));
         });
+        return Task.CompletedTask;
     }
 
-    public async Task Client_AreaBoundJoinResponse(AreaBoundJoinResponseDto dto)
+    public Task Client_AreaBoundJoinResponse(AreaBoundJoinResponseDto dto)
     {
-        await ExecuteSafely(async () =>
+        ExecuteSafely(() =>
         {
             Logger.LogDebug("Received area-bound join response for group: {GroupId}, Accepted: {Accepted}", dto.GID, dto.Accepted);
             Mediator.Publish(new AreaBoundJoinResponseMessage(dto));
         });
-    }
-
-    private async Task ExecuteSafely(Func<Task> action)
-    {
-        try
-        {
-            await action();
-        }
-        catch (Exception ex)
-        {
-            Logger.LogCritical(ex, "Error on executing safely");
-        }
+        return Task.CompletedTask;
     }
 
     private void ExecuteSafely(Action act)

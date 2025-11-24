@@ -177,7 +177,7 @@ public sealed class CharaDataFileHandler : IDisposable
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Could not parse MCDF header of file {file}", filePath);
-            throw;
+            throw new InvalidOperationException($"Could not parse MCDF header of file {filePath}", ex);
         }
     }
 

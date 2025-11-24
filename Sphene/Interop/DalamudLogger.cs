@@ -20,7 +20,7 @@ internal sealed class DalamudLogger : ILogger
         _hasModifiedGameFiles = hasModifiedGameFiles;
     }
 
-    public IDisposable BeginScope<TState>(TState state) => default!;
+    public IDisposable BeginScope<TState>(TState state) where TState : notnull => default!;
 
     public bool IsEnabled(LogLevel logLevel)
     {

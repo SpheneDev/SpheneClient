@@ -6,7 +6,6 @@ using Dalamud.Interface.Utility.Raii;
 using Sphene.API.Data.Extensions;
 using Sphene.API.Dto.Group;
 using Sphene.API.Dto.User;
-using Sphene.SpheneConfiguration;
 using Sphene.PlayerData.Pairs;
 using Sphene.Services;
 using Sphene.Services.Events;
@@ -40,20 +39,17 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
     private bool _wasHovered = false;
     
     // Static dictionary to track reload timers for each user
-    private static readonly Dictionary<string, System.Threading.Timer> _reloadTimers = new();
-    private static readonly object _timerLock = new();
+    private static readonly Dictionary<string, System.Threading.Timer> _reloadTimers = new(StringComparer.Ordinal);
+    private static readonly System.Threading.Lock _timerLock = new();
     
     // Global rate limiting and status tracking per user (static to prevent multiple instances from sending)
-    private static readonly Dictionary<string, bool?> _globalLastSentAckYouStatus = new();
-    private static readonly Dictionary<string, DateTime> _globalLastAckYouSentTime = new();
-    private static readonly object _globalAckYouLock = new();
-    private static readonly TimeSpan MinTimeBetweenAckYouCalls = TimeSpan.FromSeconds(1);
+    private static readonly Dictionary<string, bool?> _globalLastSentAckYouStatus = new(StringComparer.Ordinal);
+    private static readonly Dictionary<string, DateTime> _globalLastAckYouSentTime = new(StringComparer.Ordinal);
+    private static readonly System.Threading.Lock _globalAckYouLock = new();
+    
     
     // Cache acknowledgment status - updated only via events
     private bool _cachedHasPendingAck = false;
-    private bool _cacheInitialized = false;
-    private bool _isProcessingServerUpdate = false;
-
     public DrawUserPair(string id, Pair entry, List<GroupFullInfoDto> syncedGroups,
         GroupFullInfoDto? currentGroup,
         ApiController apiController, IdDisplayHandler uIDDisplayHandler,
@@ -82,18 +78,18 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         _mediator.Subscribe<AcknowledgmentPendingMessage>(this, OnAcknowledgmentPending);
         _mediator.Subscribe<AcknowledgmentUiRefreshMessage>(this, OnAcknowledgmentUiRefresh);
         
-        // Subscribe to server permission updates to track when we're processing server pushes
-        _mediator.Subscribe<RefreshUiMessage>(this, OnServerPermissionUpdate);
+        
         
         // Subscribe to selective icon updates for performance optimization
         _mediator.Subscribe<UserPairIconUpdateMessage>(this, OnIconUpdate);
         
         // Initialize cache once during construction to avoid frequent PairManager calls
         _cachedHasPendingAck = _pairManager.HasPendingAcknowledgmentForUser(_pair.UserData);
-        _cacheInitialized = true;
+        
         
         // Initialize global status tracking for this user to prevent initial spam
-        lock (_globalAckYouLock)
+        _globalAckYouLock.Enter();
+        try
         {
             var userUID = _pair.UserData.UID;
             if (!_globalLastSentAckYouStatus.ContainsKey(userUID))
@@ -102,6 +98,10 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
                 _globalLastAckYouSentTime[userUID] = DateTime.MinValue;
             }
         }
+        finally
+        {
+            _globalAckYouLock.Exit();
+        }
     }
     
     public SpheneMediator Mediator => _mediator;
@@ -109,65 +109,38 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
     private void OnAcknowledgmentStatusChanged(PairAcknowledgmentStatusChangedMessage message)
     {
         // Only handle events for this specific pair
-        if (message.User.UID != _pair.UserData.UID) return;
+        if (!string.Equals(message.User.UID, _pair.UserData.UID, StringComparison.Ordinal)) return;
         
-        var userUID = _pair.UserData.UID;
-        var now = DateTime.UtcNow;
-        
-        // Calculate current icon status (what the UI shows)
-        // Clock icon (pending): HasPendingAcknowledgment && !string.IsNullOrEmpty(LastAcknowledgmentId)
-        // Checkmark icon (success): !HasPendingAcknowledgment && LastAcknowledgmentSuccess == true
-        bool currentClockVisible = _pair.HasPendingAcknowledgment && !string.IsNullOrEmpty(_pair.LastAcknowledgmentId);
-        bool currentCheckmarkVisible = !_pair.HasPendingAcknowledgment && (_pair.LastAcknowledgmentSuccess == true);
-        
-        // Calculate new icon status based on message
-        // Update cached acknowledgment status
         _cachedHasPendingAck = message.HasPendingAcknowledgment;
-        _cacheInitialized = true;
-        
-        // UI will automatically update when the pair data changes
     }
     
-    private void OnServerPermissionUpdate(RefreshUiMessage message)
-    {
-        // Set flag to indicate we're processing a server update
-        // This prevents OnAcknowledgmentStatusChanged from sending UserUpdateAckYou
-        _isProcessingServerUpdate = true;
-        
-        // Reset the flag after a short delay to allow the acknowledgment events to process
-        _ = Task.Run(async () =>
-        {
-            await Task.Delay(100); // Small delay to ensure all related events are processed
-            _isProcessingServerUpdate = false;
-        });
-    }
+    
     
     private void OnAcknowledgmentPending(AcknowledgmentPendingMessage message)
     {
         // Only handle events for this specific pair
-        if (message.User.UID != _pair.UserData.UID) return;
+        if (!string.Equals(message.User.UID, _pair.UserData.UID, StringComparison.Ordinal)) return;
         
         // Update cached acknowledgment status to pending
         _cachedHasPendingAck = true;
-        _cacheInitialized = true;
+        
     }
     
     private void OnAcknowledgmentUiRefresh(AcknowledgmentUiRefreshMessage message)
     {
         // Handle refresh for this specific pair or global refresh
         if (message.RefreshAll || 
-            (message.User != null && message.User.UID == _pair.UserData.UID))
+            (message.User != null && string.Equals(message.User.UID, _pair.UserData.UID, StringComparison.Ordinal)))
         {
             // Force cache refresh by querying current status
             _cachedHasPendingAck = _pairManager.HasPendingAcknowledgmentForUser(_pair.UserData);
-            _cacheInitialized = true;
         }
     }
     
     private void OnIconUpdate(UserPairIconUpdateMessage message)
     {
         // Only handle events for this specific pair
-        if (message.User.UID != _pair.UserData.UID) return;
+        if (!string.Equals(message.User.UID, _pair.UserData.UID, StringComparison.Ordinal)) return;
         
         // Handle specific icon updates without full UI rebuild
         switch (message.UpdateType)
@@ -176,7 +149,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
                 if (message.UpdateData is AcknowledgmentStatusData ackData)
                 {
                     _cachedHasPendingAck = ackData.HasPending;
-                    _cacheInitialized = true;
+                    
                 }
                 break;
                 
@@ -209,54 +182,24 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
     {
         var userUID = _pair.UserData.UID;
         
-        lock (_timerLock)
+        _timerLock.Enter();
+        try
         {
             // If AckYou is true (green eye), stop any existing timer
-            if (isAckYou)
+            if (isAckYou && _reloadTimers.TryGetValue(userUID, out var existingTimer))
             {
-                if (_reloadTimers.TryGetValue(userUID, out var existingTimer))
-                {
-                    existingTimer.Dispose();
-                    _reloadTimers.Remove(userUID);
-                }
+                existingTimer.Dispose();
+                _reloadTimers.Remove(userUID);
             }
             // 8-second timer temporarily disabled
-            // If AckYou is false (yellow eye), start a 8-second timer
-            /*
-            else
-            {
-                // Only start timer if one doesn't already exist for this user
-                if (!_reloadTimers.ContainsKey(userUID))
-                {
-                    var timer = new System.Threading.Timer(OnReloadTimerElapsed, userUID, TimeSpan.FromSeconds(8), Timeout.InfiniteTimeSpan);
-                    _reloadTimers[userUID] = timer;
-                }
-            }
-            */
+        }
+        finally
+        {
+            _timerLock.Exit();
         }
     }
     
-    private void OnReloadTimerElapsed(object? state)
-    {
-        if (state is not string userUID) return;
-        
-        lock (_timerLock)
-        {
-            // Remove the timer from dictionary
-            if (_reloadTimers.TryGetValue(userUID, out var timer))
-            {
-                timer.Dispose();
-                _reloadTimers.Remove(userUID);
-            }
-        }
-        
-        // Only reload if this is still our pair and it's still visible with yellow eye
-         if (_pair.UserData.UID == userUID && _pair.IsVisible && !_pair.UserPair.OwnPermissions.IsAckYou())
-         {
-             // Execute reload last received data
-             _pair.ApplyLastReceivedData(forced: true);
-         }
-    }
+    
 
     public Pair Pair => _pair;
     public UserFullPairDto UserPair => _pair.UserPair!;
@@ -403,28 +346,46 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         }
     }
 
-    public void Dispose()
+    private bool _disposed;
+
+    protected virtual void Dispose(bool disposing)
     {
-        // Unsubscribe from all events to prevent memory leaks and duplicate event handling
-        _mediator.Unsubscribe<PairAcknowledgmentStatusChangedMessage>(this);
-        _mediator.Unsubscribe<AcknowledgmentPendingMessage>(this);
-        
-        // Clean up any active reload timers for this user
-        lock (_timerLock)
+        if (_disposed) return;
+        if (disposing)
         {
-            if (_reloadTimers.TryGetValue(_pair.UserData.UID, out var timer))
+            _mediator.Unsubscribe<PairAcknowledgmentStatusChangedMessage>(this);
+            _mediator.Unsubscribe<AcknowledgmentPendingMessage>(this);
+            _timerLock.Enter();
+            try
             {
-                timer.Dispose();
-                _reloadTimers.Remove(_pair.UserData.UID);
+                if (_reloadTimers.TryGetValue(_pair.UserData.UID, out var timer))
+                {
+                    timer.Dispose();
+                    _reloadTimers.Remove(_pair.UserData.UID);
+                }
+            }
+            finally
+            {
+                _timerLock.Exit();
+            }
+            _globalAckYouLock.Enter();
+            try
+            {
+                _globalLastSentAckYouStatus.Remove(_pair.UserData.UID);
+                _globalLastAckYouSentTime.Remove(_pair.UserData.UID);
+            }
+            finally
+            {
+                _globalAckYouLock.Exit();
             }
         }
-        
-        // Clean up global tracking data for this user
-        lock (_globalAckYouLock)
-        {
-            _globalLastSentAckYouStatus.Remove(_pair.UserData.UID);
-            _globalLastAckYouSentTime.Remove(_pair.UserData.UID);
-        }
+        _disposed = true;
+    }
+
+    public void Dispose()
+    {
+        Dispose(true);
+        GC.SuppressFinalize(this);
     }
 
     private void DrawIndividualMenu()

@@ -25,7 +25,7 @@ public partial class HousingOwnershipService
     private readonly ICondition _condition;
     
     // Cache of verified owned properties to avoid repeated checks
-    private readonly Dictionary<string, DateTime> _verifiedOwnedProperties = new();
+    private readonly Dictionary<string, DateTime> _verifiedOwnedProperties = new(StringComparer.Ordinal);
     private readonly TimeSpan _verificationCacheExpiry = TimeSpan.FromMinutes(30);
     
     // Server-side housing properties cache
@@ -79,7 +79,7 @@ public partial class HousingOwnershipService
             }
             
             // Perform ownership verification
-            var verificationResult = await PerformOwnershipVerificationAsync(location);
+            var verificationResult = await PerformOwnershipVerificationAsync(location).ConfigureAwait(false);
             
             // Cache positive results in session cache
             if (verificationResult.IsOwner)
@@ -114,12 +114,12 @@ public partial class HousingOwnershipService
             }
             
             // Perform the verification process
-            var verificationResult = await PerformOwnershipVerificationAsync(location);
+            var verificationResult = await PerformOwnershipVerificationAsync(location).ConfigureAwait(false);
             
             // If verification successful, store it permanently
             if (verificationResult.IsOwner)
             {
-                AddVerifiedOwnedProperty(location);
+                await AddVerifiedOwnedProperty(location).ConfigureAwait(false);
                 _logger.LogInformation("Successfully verified and stored ownership for Ward {Ward}, House {House}, Room {Room}", 
                     location.WardId, location.HouseId, location.RoomId);
                 return new OwnershipVerificationResult(true, "Ownership verified and stored permanently");
@@ -140,7 +140,7 @@ public partial class HousingOwnershipService
         // we use a strict multi-step verification approach to prevent abuse:
         
         // 1. Check if player is currently in the housing area they want to bind
-        var currentLocation = _dalamudUtilService.GetMapData();
+        var currentLocation = await _dalamudUtilService.GetMapDataAsync().ConfigureAwait(false);
         if (!IsLocationInSameHousingArea(location, currentLocation))
         {
             return new OwnershipVerificationResult(false, 
@@ -181,13 +181,11 @@ public partial class HousingOwnershipService
         }
         
         // 4. For outdoor plots, verify player is on the correct plot
-        if (!location.IsIndoor && location.HouseId > 0)
+        if (!location.IsIndoor && location.HouseId > 0 &&
+            (currentLocation.HouseId != location.HouseId || currentLocation.WardId != location.WardId))
         {
-            if (currentLocation.HouseId != location.HouseId || currentLocation.WardId != location.WardId)
-            {
-                return new OwnershipVerificationResult(false, 
-                    "You must be on the specific plot you want to verify");
-            }
+            return new OwnershipVerificationResult(false, 
+                "You must be on the specific plot you want to verify");
         }
         
         // 5. If UsingHousingFunctions is active and location checks pass, ownership is verified
@@ -195,12 +193,12 @@ public partial class HousingOwnershipService
             "Ownership verified - housing functions are active and location matches");
     }
     
-    public bool IsHousingArea(LocationInfo location)
+    public static bool IsHousingArea(LocationInfo location)
     {
         return location.WardId > 0;
     }
     
-    private bool IsLocationInSameHousingArea(LocationInfo targetLocation, LocationInfo currentLocation)
+    private static bool IsLocationInSameHousingArea(LocationInfo targetLocation, LocationInfo currentLocation)
     {
         // Only allow area syncshells in housing areas
         if (!IsHousingArea(targetLocation))
@@ -253,14 +251,9 @@ public partial class HousingOwnershipService
         return verifiedProperties.Any(owned => LocationsMatch(owned.Location, location));
     }
     
-    private bool IsInConfiguredOwnedProperties(LocationInfo location)
-    {
-        // Check against user's manually configured owned properties (legacy)
-        var ownedProperties = _configService.Current.OwnedHousingProperties ?? new List<LocationInfo>();
-        return ownedProperties.Any(owned => LocationsMatch(owned, location));
-    }
     
-    private bool LocationsMatch(LocationInfo loc1, LocationInfo loc2)
+    
+    private static bool LocationsMatch(LocationInfo loc1, LocationInfo loc2)
     {
         return loc1.ServerId == loc2.ServerId &&
                loc1.TerritoryId == loc2.TerritoryId &&
@@ -269,13 +262,13 @@ public partial class HousingOwnershipService
                loc1.RoomId == loc2.RoomId;
     }
     
-    private string GetLocationKey(LocationInfo location)
+    private static string GetLocationKey(LocationInfo location)
     {
         return $"{location.ServerId}_{location.TerritoryId}_{location.WardId}_{location.HouseId}_{location.RoomId}";
     }
     
     // Add a verified property to the persistent storage
-    private async void AddVerifiedOwnedProperty(LocationInfo location, bool allowOutdoor = true, bool allowIndoor = true, bool preferOutdoorSyncshells = true, bool preferIndoorSyncshells = true)
+    private async Task AddVerifiedOwnedProperty(LocationInfo location, bool allowOutdoor = true, bool allowIndoor = true, bool preferOutdoorSyncshells = true, bool preferIndoorSyncshells = true)
     {
         try
         {
@@ -315,10 +308,10 @@ public partial class HousingOwnershipService
     }
     
     // Add a verified room to the persistent storage without outdoor/indoor preferences
-    private void AddVerifiedOwnedPropertyForRoom(LocationInfo location)
+    private async Task AddVerifiedOwnedPropertyForRoom(LocationInfo location)
     {
         // Use server-first approach for rooms - rooms are always indoor, so set AllowIndoor to true
-        AddVerifiedOwnedProperty(location, false, true, true, true);
+        await AddVerifiedOwnedProperty(location, false, true, true, true).ConfigureAwait(false);
         
         _logger.LogInformation("Added verified owned room: Ward {Ward}, House {House}, Room {Room} (indoor only)", 
             location.WardId, location.HouseId, location.RoomId);
@@ -341,16 +334,16 @@ public partial class HousingOwnershipService
     }
     
     // Remove a verified property from persistent storage
-    public async void RemoveVerifiedOwnedProperty(LocationInfo location)
+    public async Task RemoveVerifiedOwnedProperty(LocationInfo location)
     {
         try
         {
             // Try to remove from server first
-            var success = await _apiController.UserDeleteHousingProperty(location);
+            var success = await _apiController.UserDeleteHousingProperty(location).ConfigureAwait(false);
             if (success)
             {
                 // Update local cache
-                await SyncWithServer();
+                await SyncWithServer().ConfigureAwait(false);
                 
                 // Also clear from session cache
                 var locationKey = GetLocationKey(location);
@@ -389,11 +382,11 @@ public partial class HousingOwnershipService
     public void RemoveOwnedProperty(LocationInfo location)
     {
         var ownedProperties = _configService.Current.OwnedHousingProperties?.ToList() ?? new List<LocationInfo>();
-        var toRemove = ownedProperties.FirstOrDefault(owned => LocationsMatch(owned, location));
+        var index = ownedProperties.FindIndex(owned => LocationsMatch(owned, location));
         
-        if (toRemove != null)
+        if (index >= 0)
         {
-            ownedProperties.Remove(toRemove);
+            ownedProperties.RemoveAt(index);
             _configService.Current.OwnedHousingProperties = ownedProperties;
             _configService.Save();
             
@@ -414,15 +407,15 @@ public partial class HousingOwnershipService
     }
     
     // Clear all verified properties (for testing or if user wants to re-verify)
-    public async void ClearAllVerifiedProperties()
+    public async Task ClearAllVerifiedProperties()
     {
         try
         {
             // Clear from server first
-            var serverProperties = await GetVerifiedOwnedPropertiesAsync();
+            var serverProperties = await GetVerifiedOwnedPropertiesAsync().ConfigureAwait(false);
             foreach (var property in serverProperties)
             {
-                await _apiController.UserDeleteHousingProperty(property.Location);
+                await _apiController.UserDeleteHousingProperty(property.Location).ConfigureAwait(false);
             }
             
             _logger.LogInformation("Cleared all verified properties from server");
@@ -443,7 +436,7 @@ public partial class HousingOwnershipService
     public async Task<List<VerifiedHousingProperty>> GetVerifiedOwnedPropertiesAsync()
     {
         // Sync with server if needed
-        await SyncWithServer();
+        await SyncWithServer().ConfigureAwait(false);
         
         var result = new List<VerifiedHousingProperty>();
         
@@ -500,7 +493,7 @@ public partial class HousingOwnershipService
                 return; // Skip if synced recently
             }
             
-            _serverHousingProperties = await _apiController.UserGetHousingProperties();
+            _serverHousingProperties = await _apiController.UserGetHousingProperties().ConfigureAwait(false);
             _lastServerSync = DateTime.UtcNow;
             
             _logger.LogDebug("Synced {Count} housing properties from server", _serverHousingProperties?.Count ?? 0);
@@ -517,6 +510,3 @@ public partial class HousingOwnershipService
         return _configService.Current.OwnedHousingProperties?.ToList() ?? new List<LocationInfo>();
     }
 }
-
-// Result of ownership verification
-public record OwnershipVerificationResult(bool IsOwner, string Reason);

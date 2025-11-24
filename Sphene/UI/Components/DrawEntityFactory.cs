@@ -14,7 +14,6 @@ namespace Sphene.UI;
 
 public class DrawEntityFactory
 {
-    private readonly ILogger<DrawEntityFactory> _logger;
     private readonly ApiController _apiController;
     private readonly SpheneMediator _mediator;
     private readonly SelectPairForTagUi _selectPairForTagUi;
@@ -36,7 +35,6 @@ public class DrawEntityFactory
         PlayerPerformanceConfigService playerPerformanceConfigService, CharaDataManager charaDataManager,
         PairManager pairManager, SpheneConfigService configService, AreaBoundSyncshellService areaBoundSyncshellService)
     {
-        _logger = logger;
         _apiController = apiController;
         _uidDisplayHandler = uidDisplayHandler;
         _selectTagForPairUi = selectTagForPairUi;
@@ -66,7 +64,7 @@ public class DrawEntityFactory
         IImmutableList<Pair> allPairs)
     {
         return new(tag, filteredPairs.Select(u => CreateDrawPair(tag, u.Key, u.Value, null)).ToImmutableList(),
-            allPairs, _tagHandler, _apiController, _selectPairForTagUi, _uiSharedService, _configService);
+            allPairs, _tagHandler, _apiController, _selectPairForTagUi, _uiSharedService);
     }
 
     public DrawUserPair CreateDrawPair(string id, Pair user, List<GroupFullInfoDto> groups, GroupFullInfoDto? currentGroup)

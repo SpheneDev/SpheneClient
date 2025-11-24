@@ -122,7 +122,7 @@ public sealed class PerformanceCollectorService : IHostedService
         sb.Append("-Counter Name".PadRight(longestCounterName, '-'));
         sb.AppendLine();
         var orderedData = data.OrderBy(k => k.Key, StringComparer.OrdinalIgnoreCase).ToList();
-        var previousCaller = orderedData[0].Key.Split(_counterSplit, StringSplitOptions.RemoveEmptyEntries)[0];
+        var previousCaller = orderedData.Count > 0 ? orderedData[0].Key.Split(_counterSplit, StringSplitOptions.RemoveEmptyEntries)[0] : string.Empty;
         foreach (var entry in orderedData)
         {
             var newCaller = entry.Key.Split(_counterSplit, StringSplitOptions.RemoveEmptyEntries)[0];
@@ -135,13 +135,15 @@ public sealed class PerformanceCollectorService : IHostedService
 
             if (pastEntries.Any())
             {
-                sb.Append((" " + TimeSpan.FromTicks(pastEntries.LastOrDefault() == default ? 0 : pastEntries.Last().Item2).TotalMilliseconds.ToString("0.00000", CultureInfo.InvariantCulture)).PadRight(15));
+                var lastTicks = pastEntries.Count == 0 ? 0 : pastEntries[^1].Item2;
+                sb.Append((" " + TimeSpan.FromTicks(lastTicks).TotalMilliseconds.ToString("0.00000", CultureInfo.InvariantCulture)).PadRight(15));
                 sb.Append('|');
                 sb.Append((" " + TimeSpan.FromTicks(pastEntries.Max(m => m.Item2)).TotalMilliseconds.ToString("0.00000", CultureInfo.InvariantCulture)).PadRight(15));
                 sb.Append('|');
                 sb.Append((" " + TimeSpan.FromTicks((long)pastEntries.Average(m => m.Item2)).TotalMilliseconds.ToString("0.00000", CultureInfo.InvariantCulture)).PadRight(15));
                 sb.Append('|');
-                sb.Append((" " + (pastEntries.LastOrDefault() == default ? "-" : pastEntries.Last().Item1.ToString("HH:mm:ss.ffff", CultureInfo.InvariantCulture))).PadRight(15, ' '));
+                var lastTime = pastEntries.Count == 0 ? "-" : pastEntries[^1].Item1.ToString("HH:mm:ss.ffff", CultureInfo.InvariantCulture);
+                sb.Append((" " + lastTime).PadRight(15, ' '));
                 sb.Append('|');
                 sb.Append((" " + pastEntries.Count).PadRight(10));
                 sb.Append('|');
@@ -183,7 +185,11 @@ public sealed class PerformanceCollectorService : IHostedService
             {
                 try
                 {
-                    var last = entries.Value.ToList().Last();
+                    var list = entries.Value;
+                    var count = list.Count;
+                    if (count == 0)
+                        continue;
+                    var last = list[count - 1];
                     if (last.Item1.AddMinutes(10) < TimeOnly.FromDateTime(DateTime.Now) && !PerformanceCounters.TryRemove(entries.Key, out _))
                     {
                         _logger.LogDebug("Could not remove performance counter {counter}", entries.Key);

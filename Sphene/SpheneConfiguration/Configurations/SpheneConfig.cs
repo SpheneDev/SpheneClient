@@ -94,8 +94,8 @@ public class SpheneConfig : ISpheneConfiguration
     
     // Incognito Mode Settings
     public bool IsIncognitoModeActive { get; set; } = false;
-    public HashSet<string> PrePausedPairs { get; set; } = new();
-    public HashSet<string> PrePausedSyncshells { get; set; } = new();
+    public HashSet<string> PrePausedPairs { get; set; } = new(StringComparer.Ordinal);
+    public HashSet<string> PrePausedSyncshells { get; set; } = new(StringComparer.Ordinal);
     
     // Housing Ownership Settings
     public List<LocationInfo> OwnedHousingProperties { get; set; } = new();

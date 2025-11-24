@@ -23,9 +23,9 @@ using Sphene.UI.Theme;
 
 namespace Sphene.UI.Components;
 
-public class SpheneIcon : WindowMediatorSubscriberBase, IDisposable
+public class SpheneIcon : WindowMediatorSubscriberBase
 {
-    private readonly ILogger<SpheneIcon> _logger;
+    private new readonly ILogger<SpheneIcon> _logger;
     private readonly SpheneMediator _mediator;
     private readonly SpheneConfigService _configService;
     private readonly UiSharedService _uiSharedService;
@@ -37,7 +37,6 @@ public class SpheneIcon : WindowMediatorSubscriberBase, IDisposable
     // Built-in ShrinkU integration
     private readonly ShrinkU.Configuration.ShrinkUConfigService _shrinkuConfig;
     private readonly ShrinkU.UI.ConversionUI _shrinkuConversion;
-    private readonly ShrinkU.UI.SettingsUI _shrinkuSettings;
     private readonly ShrinkU.UI.FirstRunSetupUI _shrinkuFirstRun;
     
     private Vector2 _iconPosition = new Vector2(100, 100);
@@ -81,7 +80,7 @@ public class SpheneIcon : WindowMediatorSubscriberBase, IDisposable
         _shrinkuHostService = shrinkuHostService;
         _shrinkuConfig = shrinkuConfig;
         _shrinkuConversion = shrinkuConversion;
-        _shrinkuSettings = shrinkuSettings;
+        _ = shrinkuSettings;
         _shrinkuFirstRun = shrinkuFirstRun;
         
         LoadIconPositionFromConfig();
@@ -301,7 +300,7 @@ public class SpheneIcon : WindowMediatorSubscriberBase, IDisposable
         }
     }
     
-    private class PluginInfo
+    private sealed class PluginInfo
     {
         public string Name { get; }
         public string InternalName { get; }
@@ -386,17 +385,12 @@ public class SpheneIcon : WindowMediatorSubscriberBase, IDisposable
             var elapsedMs = (DateTime.UtcNow - _mouseDownAt).TotalMilliseconds;
             var currentMouse = ImGui.GetMousePos();
 
-            if (!_isDragging)
+            if (!_isDragging && elapsedMs >= DragStartDelayMs)
             {
-                // Do not start dragging until the hold delay passes
-                if (elapsedMs >= DragStartDelayMs)
-                {
-                    _isDragging = true;
-                    _wasClicked = false; // prevent click action when we start dragging
-                    // Re-anchor drag start to current positions to avoid a position jump
-                    _dragStartMousePos = currentMouse;
-                    _dragStartIconPos = ImGui.GetWindowPos();
-                }
+                _isDragging = true;
+                _wasClicked = false;
+                _dragStartMousePos = currentMouse;
+                _dragStartIconPos = ImGui.GetWindowPos();
             }
 
             if (_isDragging)
@@ -543,7 +537,7 @@ public class SpheneIcon : WindowMediatorSubscriberBase, IDisposable
     }
 
     // Draw a green arrow overlay indicating an available update
-    private void DrawUpdateIndicator(ImDrawListPtr drawList, Vector2 iconPos, float iconSize)
+    private static void DrawUpdateIndicator(ImDrawListPtr drawList, Vector2 iconPos, float iconSize)
     {
         // Position near bottom-right corner and make it visually prominent
         var arrowText = FontAwesomeIcon.ArrowCircleUp.ToIconString();
@@ -585,7 +579,7 @@ public class SpheneIcon : WindowMediatorSubscriberBase, IDisposable
         }
     }
     
-    private Vector4 GetStatusColor(ServerState serverState)
+    private static Vector4 GetStatusColor(ServerState serverState)
     {
         var t = Sphene.UI.Theme.SpheneCustomTheme.CurrentTheme;
         return serverState switch
@@ -608,7 +602,7 @@ public class SpheneIcon : WindowMediatorSubscriberBase, IDisposable
         };
     }
     
-    private string GetStatusText(ServerState serverState)
+    private static string GetStatusText(ServerState serverState)
     {
         return serverState switch
         {
@@ -636,10 +630,14 @@ public class SpheneIcon : WindowMediatorSubscriberBase, IDisposable
         IsOpen = _configService.Current.ShowSpheneIcon;
     }
     
-    public void Dispose()
+    protected override void Dispose(bool disposing)
     {
-        _configService.ConfigSave -= OnConfigurationChanged;
-        _spheneLogoTexture?.Dispose();
-        _logger.LogDebug("SpheneIcon disposed");
+        if (disposing)
+        {
+            _configService.ConfigSave -= OnConfigurationChanged;
+            _spheneLogoTexture?.Dispose();
+            _logger.LogDebug("SpheneIcon disposed");
+        }
+        base.Dispose(disposing);
     }
 }

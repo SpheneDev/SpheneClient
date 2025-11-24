@@ -98,7 +98,7 @@ public class PlayerDataFactory
         return await _dalamudUtil.RunOnFrameworkThread(() => CheckForNullDrawObjectUnsafe(playerPointer)).ConfigureAwait(false);
     }
 
-    private unsafe bool CheckForNullDrawObjectUnsafe(IntPtr playerPointer)
+    private static unsafe bool CheckForNullDrawObjectUnsafe(IntPtr playerPointer)
     {
         return ((Character*)playerPointer)->GameObject.DrawObject == null;
     }
@@ -251,8 +251,7 @@ public class PlayerDataFactory
             }
             catch (OperationCanceledException e)
             {
-                _logger.LogDebug(e, "Cancelled during player animation verification");
-                throw;
+                throw new OperationCanceledException("Cancelled during player animation verification", e);
             }
             catch (Exception e)
             {
@@ -327,7 +326,7 @@ public class PlayerDataFactory
 
         if (noValidationFailed > 0)
         {
-            var firstFailedAnimation = failedAnimations.First();
+            var firstFailedAnimation = failedAnimations[0];
             string detailedMessage = $"Animation skeleton mismatch detected! The animation requires {firstFailedAnimation.animationBones} bones, " +
                 $"but your current player skeleton only supports {firstFailedAnimation.playerBones} bones.\n\n" +
                 $"This suggests an incorrect skeleton is loaded. Try the following:\n" +

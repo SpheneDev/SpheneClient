@@ -15,7 +15,7 @@ public class EventAggregator : MediatorSubscriberBase, IHostedService
     public Lazy<List<Event>> EventList { get; private set; }
     public bool NewEventsAvailable => !EventList.IsValueCreated;
     public string EventLogFolder => Path.Combine(_configDirectory, "eventlog");
-    private string CurrentLogName => $"{DateTime.Now:yyyy-MM-dd}-events.log";
+    private static string CurrentLogName => $"{DateTime.UtcNow:yyyy-MM-dd}-events.log";
     private DateTime _currentTime;
 
     public EventAggregator(string configDirectory, ILogger<EventAggregator> logger, SpheneMediator spheneMediator) : base(logger, spheneMediator)
@@ -40,7 +40,7 @@ public class EventAggregator : MediatorSubscriberBase, IHostedService
         EventList = CreateEventLazy();
         _configDirectory = configDirectory;
         _logger = logger;
-        _currentTime = DateTime.Now - TimeSpan.FromDays(1);
+        _currentTime = DateTime.UtcNow - TimeSpan.FromDays(1);
     }
 
     private void RecreateLazy()
@@ -68,11 +68,11 @@ public class EventAggregator : MediatorSubscriberBase, IHostedService
 
     private void WriteToFile(Event receivedEvent)
     {
-        if (DateTime.Now.Day != _currentTime.Day)
+        if (DateTime.UtcNow.Day != _currentTime.Day)
         {
             try
             {
-                _currentTime = DateTime.Now;
+                _currentTime = DateTime.UtcNow;
                 var filesInDirectory = Directory.EnumerateFiles(EventLogFolder, "*.log");
                 if (filesInDirectory.Skip(10).Any())
                 {
@@ -93,7 +93,7 @@ public class EventAggregator : MediatorSubscriberBase, IHostedService
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, $"Could not write to event file {eventLogFile}");
+            _logger.LogWarning(ex, "Could not write to event file {file}", eventLogFile);
         }
     }
 

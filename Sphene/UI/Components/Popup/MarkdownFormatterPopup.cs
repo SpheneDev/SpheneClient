@@ -60,7 +60,6 @@ public static class MarkdownFormatterPopup
             ImGui.Text("Input Text:");
             ImGui.Separator();
             
-            string previousText = _inputText;
             if (ImGui.InputTextMultiline("##input", ref _inputText, 10000, new Vector2(-1, -1)))
             {
                 // Text changed, update formatted output
@@ -227,12 +226,9 @@ public static class MarkdownFormatterPopup
         }
         ImGui.SameLine();
         
-        if (ImGui.Button("Copy Raw Text"))
+        if (ImGui.Button("Copy Raw Text") && !string.IsNullOrEmpty(_inputText))
         {
-            if (!string.IsNullOrEmpty(_inputText))
-            {
-                ImGui.SetClipboardText(_inputText);
-            }
+            ImGui.SetClipboardText(_inputText);
         }
         ImGui.SameLine();
         

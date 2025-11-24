@@ -25,10 +25,8 @@ public class CharaDataGposeTogetherManager : DisposableMediatorSubscriberBase
     private readonly VfxSpawnManager _vfxSpawnManager;
     private (CharacterData ApiData, CharaDataDownloadDto Dto)? _lastCreatedCharaData;
     private PoseData? _lastDeltaPoseData;
-    private PoseData? _lastFullPoseData;
     private WorldData? _lastWorldData;
     private CancellationTokenSource _lobbyCts = new();
-    private int _poseGenerationExecutions = 0;
 
     public CharaDataGposeTogetherManager(ILogger<CharaDataGposeTogetherManager> logger, SpheneMediator mediator,
             ApiController apiController, IpcCallerBrio brio, DalamudUtilService dalamudUtil, VfxSpawnManager vfxSpawnManager,
@@ -220,7 +218,7 @@ public class CharaDataGposeTogetherManager : DisposableMediatorSubscriberBase
         _usersInLobby.Clear();
     }
 
-    private string CreateJsonFromPoseData(PoseData? poseData)
+    private static string CreateJsonFromPoseData(PoseData? poseData)
     {
         if (poseData == null) return "{}";
 
@@ -357,9 +355,9 @@ public class CharaDataGposeTogetherManager : DisposableMediatorSubscriberBase
 
     private async Task GposePoseDataBackgroundTask(CancellationToken ct)
     {
-        _lastFullPoseData = null;
+        PoseData? lastFullPoseData = null;
         _lastDeltaPoseData = null;
-        _poseGenerationExecutions = 0;
+        var poseGenerationExecutions = 0;
 
         while (!ct.IsCancellationRequested)
         {
@@ -379,15 +377,15 @@ public class CharaDataGposeTogetherManager : DisposableMediatorSubscriberBase
                 var poseJson = await _brio.GetPoseAsync(chara.Address).ConfigureAwait(false);
                 if (string.IsNullOrEmpty(poseJson)) continue;
 
-                var lastFullData = _poseGenerationExecutions++ >= 12 ? null : _lastFullPoseData;
-                lastFullData = _forceResendFullPose ? _lastFullPoseData : lastFullData;
+                var lastFullData = poseGenerationExecutions++ >= 12 ? null : lastFullPoseData;
+                lastFullData = _forceResendFullPose ? lastFullPoseData : lastFullData;
 
                 var poseData = CreatePoseDataFromJson(poseJson, lastFullData);
                 if (!poseData.IsDelta)
                 {
-                    _lastFullPoseData = poseData;
+                    lastFullPoseData = poseData;
                     _lastDeltaPoseData = null;
-                    _poseGenerationExecutions = 0;
+                    poseGenerationExecutions = 0;
                 }
 
                 bool deltaIsSame = _lastDeltaPoseData != null &&
@@ -572,7 +570,6 @@ public class CharaDataGposeTogetherManager : DisposableMediatorSubscriberBase
 
     private void ResetOwnData()
     {
-        _poseGenerationExecutions = 0;
         _lastCreatedCharaData = null;
     }
 

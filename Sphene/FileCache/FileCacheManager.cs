@@ -8,6 +8,7 @@ using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
 using System.Globalization;
 using System.Text;
+using System.Threading;
 
 namespace Sphene.FileCache;
 
@@ -21,7 +22,7 @@ public sealed class FileCacheManager : IHostedService
     private readonly string _csvPath;
     private readonly ConcurrentDictionary<string, List<FileCacheEntity>> _fileCaches = new(StringComparer.Ordinal);
     private readonly SemaphoreSlim _getCachesByPathsSemaphore = new(1, 1);
-    private readonly object _fileWriteLock = new();
+    private readonly Lock _fileWriteLock = new();
     private readonly IpcManager _ipcManager;
     private readonly ILogger<FileCacheManager> _logger;
     public string CacheFolder => _configService.Current.CacheFolder;
@@ -69,7 +70,7 @@ public sealed class FileCacheManager : IHostedService
         List<FileCacheEntity> output = [];
         if (_fileCaches.TryGetValue(hash, out var fileCacheEntities))
         {
-            foreach (var fileCache in fileCacheEntities.Where(c => ignoreCacheEntries ? !c.IsCacheEntry : true).ToList())
+            foreach (var fileCache in fileCacheEntities.Where(c => !ignoreCacheEntries || !c.IsCacheEntry).ToList())
             {
                 if (!validate) output.Add(fileCache);
                 else
@@ -109,7 +110,7 @@ public sealed class FileCacheManager : IHostedService
                 var computedHash = Crypto.GetFileHash(fileCache.ResolvedFilepath);
                 if (!string.Equals(computedHash, fileCache.Hash, StringComparison.Ordinal))
                 {
-                    _logger.LogInformation("Failed to validate {file}, got hash {hash}, expected hash {hash}", fileCache.ResolvedFilepath, computedHash, fileCache.Hash);
+                    _logger.LogInformation("Failed to validate {file}, got hash {gotHash}, expected hash {expectedHash}", fileCache.ResolvedFilepath, computedHash, fileCache.Hash);
                     brokenEntities.Add(fileCache);
                 }
             }
@@ -198,7 +199,7 @@ public sealed class FileCacheManager : IHostedService
 
             foreach (var entry in cleanedPaths)
             {
-                //_logger.LogDebug("Checking {path}", entry.Value);
+                
 
                 if (dict.TryGetValue(entry.Value, out var entity))
                 {
@@ -231,7 +232,7 @@ public sealed class FileCacheManager : IHostedService
 
             if (caches?.Count == 0)
             {
-                _fileCaches.Remove(hash, out var entity);
+                _fileCaches.Remove(hash, out _);
             }
         }
     }
@@ -271,7 +272,8 @@ public sealed class FileCacheManager : IHostedService
 
     public void WriteOutFullCsv()
     {
-        lock (_fileWriteLock)
+        _fileWriteLock.Enter();
+        try
         {
             StringBuilder sb = new();
             var snapshot = _fileCaches.Values
@@ -298,6 +300,7 @@ public sealed class FileCacheManager : IHostedService
                 File.WriteAllText(CsvBakPath, sb.ToString());
             }
         }
+        finally { _fileWriteLock.Exit(); }
     }
 
     internal FileCacheEntity MigrateFileHashToExtension(FileCacheEntity fileCache, string ext)
@@ -334,7 +337,7 @@ public sealed class FileCacheManager : IHostedService
 
         if (!entries.Exists(u => string.Equals(u.PrefixedFilePath, fileCache.PrefixedFilePath, StringComparison.OrdinalIgnoreCase)))
         {
-            //_logger.LogTrace("Adding to DB: {hash} => {path}", fileCache.Hash, fileCache.PrefixedFilePath);
+            
             entries.Add(fileCache);
         }
     }
@@ -345,10 +348,9 @@ public sealed class FileCacheManager : IHostedService
         var entity = new FileCacheEntity(hash, prefixedPath, fileInfo.LastWriteTimeUtc.Ticks.ToString(CultureInfo.InvariantCulture), fileInfo.Length);
         entity = ReplacePathPrefixes(entity);
         AddHashedFile(entity);
-        lock (_fileWriteLock)
-        {
-            File.AppendAllLines(_csvPath, new[] { entity.CsvEntry });
-        }
+        _fileWriteLock.Enter();
+        try { File.AppendAllLines(_csvPath, new[] { entity.CsvEntry }); }
+        finally { _fileWriteLock.Exit(); }
         var result = GetFileCacheByPath(fileInfo.FullName);
         _logger.LogTrace("Creating cache entity for {name} success: {success}", fileInfo.FullName, (result != null));
         return result;
@@ -357,7 +359,7 @@ public sealed class FileCacheManager : IHostedService
     private FileCacheEntity? GetValidatedFileCache(FileCacheEntity fileCache)
     {
         var resultingFileCache = ReplacePathPrefixes(fileCache);
-        //_logger.LogTrace("Validating {path}", fileCache.PrefixedFilePath);
+        
         resultingFileCache = Validate(resultingFileCache);
         return resultingFileCache;
     }
@@ -397,7 +399,8 @@ public sealed class FileCacheManager : IHostedService
     {
         _logger.LogInformation("Starting FileCacheManager");
 
-        lock (_fileWriteLock)
+        _fileWriteLock.Enter();
+        try
         {
             try
             {
@@ -424,6 +427,7 @@ public sealed class FileCacheManager : IHostedService
                 }
             }
         }
+        finally { _fileWriteLock.Exit(); }
 
         if (File.Exists(_csvPath))
         {

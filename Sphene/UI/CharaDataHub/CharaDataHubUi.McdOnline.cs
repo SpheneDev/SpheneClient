@@ -462,7 +462,7 @@ internal sealed partial class CharaDataHubUi
             }
             else
             {
-                var desc = pose.Description;
+                var desc = pose.Description ?? string.Empty;
                 if (ImGui.InputTextWithHint("##description", "Description", ref desc, 100))
                 {
                     pose.Description = desc;
@@ -509,7 +509,7 @@ internal sealed partial class CharaDataHubUi
                 ImGuiHelpers.ScaledDummy(10, 1);
                 ImGui.SameLine();
                 var worldData = pose.WorldData;
-                bool hasWorldData = (worldData ?? default) != default;
+                bool hasWorldData = worldData.HasValue;
                 _uiSharedService.IconText(FontAwesomeIcon.Globe, UiSharedService.GetBoolColor(hasWorldData));
                 var tooltipText = !hasWorldData ? "This Pose has no world data attached." : "This Pose has world data attached.";
                 if (hasWorldData)
@@ -519,8 +519,9 @@ internal sealed partial class CharaDataHubUi
                 UiSharedService.AttachToolTip(tooltipText);
                 if (hasWorldData && ImGui.IsItemClicked(ImGuiMouseButton.Left))
                 {
-                    _dalamudUtilService.SetMarkerAndOpenMap(position: new Vector3(worldData.Value.PositionX, worldData.Value.PositionY, worldData.Value.PositionZ),
-                        _dalamudUtilService.MapData.Value[worldData.Value.LocationInfo.MapId].Map);
+                    var wd = worldData.GetValueOrDefault();
+                    _dalamudUtilService.SetMarkerAndOpenMap(position: new Vector3(wd.PositionX, wd.PositionY, wd.PositionZ),
+                        _dalamudUtilService.MapData.Value[wd.LocationInfo.MapId].Map);
                 }
                 ImGui.SameLine();
                 using (ImRaii.Disabled(!_uiSharedService.IsInGpose || !(_charaDataManager.AttachingPoseTask?.IsCompleted ?? true) || !_charaDataManager.BrioAvailable))
@@ -573,7 +574,8 @@ internal sealed partial class CharaDataHubUi
         {
             if (_uiSharedService.IconTextButton(FontAwesomeIcon.ArrowCircleDown, "Download your Character Data from Server"))
             {
-                _ = _charaDataManager.GetAllData(_disposalCts.Token);
+                var token = _disposalCts?.Token ?? CancellationToken.None;
+                _ = _charaDataManager.GetAllData(token);
             }
         }
         if (_charaDataManager.DataGetTimeoutTask != null && !_charaDataManager.DataGetTimeoutTask.IsCompleted)
@@ -738,7 +740,8 @@ internal sealed partial class CharaDataHubUi
         {
             if (_uiSharedService.IconTextButton(FontAwesomeIcon.Plus, "New Character Data Entry"))
             {
-                _charaDataManager.CreateCharaDataEntry(_closalCts.Token);
+                var token2 = _closalCts?.Token ?? CancellationToken.None;
+                _charaDataManager.CreateCharaDataEntry(token2);
                 _selectNewEntry = true;
             }
         }

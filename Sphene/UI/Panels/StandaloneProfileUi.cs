@@ -139,7 +139,7 @@ public class StandaloneProfileUi : WindowMediatorSubscriberBase
                 }
             }
 
-            if (Pair.UserPair.Groups.Any())
+            if (Pair.UserPair != null && Pair.UserPair.Groups.Any())
             {
                 ImGui.TextUnformatted("Paired through Syncshells:");
                 foreach (var group in Pair.UserPair.Groups)

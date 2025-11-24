@@ -53,7 +53,7 @@ public class UiFactory
     public SyncshellAdminUI CreateSyncshellAdminUi(GroupFullInfoDto dto)
     {
         return new SyncshellAdminUI(_loggerFactory.CreateLogger<SyncshellAdminUI>(), _spheneMediator,
-            _apiController, _uiSharedService, _pairManager, _dalamudUtilService, dto, _performanceCollectorService, _fileDialogManager, this, _housingOwnershipService);
+            _apiController, _uiSharedService, _pairManager, _dalamudUtilService, dto, _performanceCollectorService, _fileDialogManager, _housingOwnershipService);
     }
 
     public StandaloneProfileUi CreateStandaloneProfileUi(Pair pair)

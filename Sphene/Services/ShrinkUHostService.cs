@@ -27,7 +27,6 @@ public sealed class ShrinkUHostService : IHostedService
     private bool _registered;
     private readonly ShrinkU.Services.TextureBackupService _backupService;
     private readonly ShrinkU.Services.TextureConversionService _shrinkuConversionService;
-    private readonly Sphene.Interop.Ipc.IpcManager _ipcManager;
     private CancellationTokenSource? _refreshCts;
 
     public ShrinkUHostService(
@@ -57,16 +56,18 @@ public sealed class ShrinkUHostService : IHostedService
         _shrinkuConfigService = shrinkuConfigService;
         _backupService = backupService;
         _shrinkuConversionService = shrinkuConversionService;
-        _ipcManager = ipcManager;
+        _ = ipcManager;
 
-        try { _configService.ConfigSave += OnConfigSaved; } catch { }
+        try { _configService.ConfigSave += OnConfigSaved; }
+        catch (Exception ex) { _logger.LogDebug(ex, "Failed to subscribe to ConfigSave event"); }
     }
 
     public bool IsConversionUiOpen
     {
         get
         {
-            try { return _conversionUi != null && _conversionUi.IsOpen; } catch { return false; }
+            try { return _conversionUi != null && _conversionUi.IsOpen; }
+            catch (Exception ex) { _logger.LogDebug(ex, "Failed to read ConversionUI IsOpen"); return false; }
         }
     }
 
@@ -90,10 +91,12 @@ public sealed class ShrinkUHostService : IHostedService
                     _shrinkuConfigService.Save();
                     _logger.LogDebug("Set ShrinkU AutomaticControllerName to Sphene on integration start");
                 }
-                catch { }
+                catch (Exception ex) { _logger.LogDebug(ex, "Failed to set ShrinkU automatic controller on start"); }
                 CleanupDuplicateShrinkUConfig();
-                try { _conversionUi.GetType().GetMethod("SetStartupRefreshInProgress", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public)?.Invoke(_conversionUi, new object[] { true }); } catch { }
-                try { _shrinkuConversionService.SetEnabled(true); } catch { }
+                try { _conversionUi.SetStartupRefreshInProgress(true); }
+                catch (Exception ex) { _logger.LogDebug(ex, "Failed to set startup refresh in progress"); }
+                try { _shrinkuConversionService.SetEnabled(true); }
+                catch (Exception ex) { _logger.LogDebug(ex, "Failed to enable ShrinkU conversion"); }
             }
             if (enable)
             {
@@ -102,16 +105,19 @@ public sealed class ShrinkUHostService : IHostedService
                     _refreshCts?.Cancel();
                     _refreshCts = new CancellationTokenSource();
                     var token = _refreshCts.Token;
-                    try { _startupProgressUi.ResetAll(); _startupProgressUi.IsOpen = true; } catch { }
+                    try { _startupProgressUi.ResetAll(); _startupProgressUi.IsOpen = true; }
+                    catch (Exception ex) { _logger.LogDebug(ex, "Failed to open StartupProgressUI"); }
                     _ = Task.Run(async () =>
                     {
                         try
                         {
-                            try { _logger.LogDebug("ShrinkU startup via Sphene: skipping Penumbra wait"); } catch { }
-                            try { _backupService.SetSavingEnabled(false); } catch { }
+                            _logger.LogDebug("ShrinkU startup via Sphene: skipping Penumbra wait");
+                            try { _backupService.SetSavingEnabled(false); }
+                            catch (Exception ex) { _logger.LogDebug(ex, "Failed to disable backup saving at startup"); }
                             await Task.Delay(TimeSpan.FromSeconds(1), token).ConfigureAwait(false);
                             if (token.IsCancellationRequested) return;
-                            try { _startupProgressUi.SetStep(1); } catch { }
+                            try { _startupProgressUi.SetStep(1); }
+                            catch (Exception ex) { _logger.LogDebug(ex, "Failed to set StartupProgressUI step 1"); }
                             var maxBackupSeconds = 5;
                             var refreshTask = _backupService.RefreshAllBackupStateAsync();
                             var completed = await Task.WhenAny(refreshTask, Task.Delay(TimeSpan.FromSeconds(maxBackupSeconds), token)).ConfigureAwait(false);
@@ -121,17 +127,26 @@ public sealed class ShrinkUHostService : IHostedService
                             }
                             else
                             {
-                                try { await refreshTask.ConfigureAwait(false); } catch { }
+                                try { await refreshTask.ConfigureAwait(false); }
+                                catch (Exception ex) { _logger.LogDebug(ex, "RefreshAllBackupStateAsync completed with error"); }
                             }
-                            try { _startupProgressUi.MarkBackupDone(); _startupProgressUi.SetStep(3); } catch { }
+                            try { _startupProgressUi.MarkBackupDone(); _startupProgressUi.SetStep(3); }
+                            catch (Exception ex) { _logger.LogDebug(ex, "Failed to mark backup done / set step 3"); }
                             await _backupService.PopulateMissingOriginalBytesAsync(token).ConfigureAwait(false);
-                            try { _startupProgressUi.SetStep(4); } catch { }
-                            try { await _shrinkuConversionService.UpdateAllModUsedTextureFilesAsync().ConfigureAwait(false); } catch { }
-                            try { _startupProgressUi.MarkUsedDone(); _startupProgressUi.SetStep(5); } catch { }
-                            try { _backupService.SetSavingEnabled(true); } catch { }
-                            try { _backupService.SaveModState(); } catch { }
-                            try { _startupProgressUi.MarkSaveDone(); } catch { }
-                            try { _conversionUi.TriggerStartupRescan(); } catch { }
+                            try { _startupProgressUi.SetStep(4); }
+                            catch (Exception ex) { _logger.LogDebug(ex, "Failed to set StartupProgressUI step 4"); }
+                            try { await _shrinkuConversionService.UpdateAllModUsedTextureFilesAsync().ConfigureAwait(false); }
+                            catch (Exception ex) { _logger.LogDebug(ex, "Failed to update used texture files"); }
+                            try { _startupProgressUi.MarkUsedDone(); _startupProgressUi.SetStep(5); }
+                            catch (Exception ex) { _logger.LogDebug(ex, "Failed to mark used done / set step 5"); }
+                            try { _backupService.SetSavingEnabled(true); }
+                            catch (Exception ex) { _logger.LogDebug(ex, "Failed to re-enable backup saving"); }
+                            try { _backupService.SaveModState(); }
+                            catch (Exception ex) { _logger.LogDebug(ex, "Failed to save mod state"); }
+                            try { _startupProgressUi.MarkSaveDone(); }
+                            catch (Exception ex) { _logger.LogDebug(ex, "Failed to mark save done"); }
+                            try { _conversionUi.TriggerStartupRescan(); }
+                            catch (Exception ex) { _logger.LogDebug(ex, "Failed to trigger startup rescan"); }
                             var threads = Math.Max(1, _shrinkuConfigService.Current.MaxStartupThreads);
                             await _shrinkuConversionService.RunInitialParallelUpdateAsync(threads, token).ConfigureAwait(false);
                             _logger.LogDebug("Initial ShrinkU startup update completed");
@@ -142,12 +157,14 @@ public sealed class ShrinkUHostService : IHostedService
                         }
                         finally
                         {
-                            try { _conversionUi.SetStartupRefreshInProgress(false); } catch { }
-                            try { _startupProgressUi.IsOpen = false; } catch { }
+                            try { _conversionUi.SetStartupRefreshInProgress(false); }
+                            catch (Exception ex) { _logger.LogDebug(ex, "Failed to clear startup refresh flag"); }
+                            try { _startupProgressUi.IsOpen = false; }
+                            catch (Exception ex) { _logger.LogDebug(ex, "Failed to close StartupProgressUI"); }
                         }
                     }, token);
                 }
-                catch { }
+                catch (Exception ex) { _logger.LogDebug(ex, "Failed to start ShrinkU startup refresh task"); }
             }
         }
         catch (Exception ex)
@@ -162,24 +179,29 @@ public sealed class ShrinkUHostService : IHostedService
         try
         {
             _logger.LogDebug("ShrinkUHostService StopAsync: removing windows");
-            try { _conversionUi.DisableModStateSaving(); } catch { }
-            try { _conversionUi.ShutdownBackgroundWork(); } catch { }
+            try { _conversionUi.DisableModStateSaving(); }
+            catch (Exception ex) { _logger.LogDebug(ex, "Failed to disable mod state saving"); }
+            try { _conversionUi.ShutdownBackgroundWork(); }
+            catch (Exception ex) { _logger.LogDebug(ex, "Failed to shutdown background work"); }
             UnregisterWindows();
         }
-        catch
+        catch (Exception ex)
         {
-            // ignore
+            _logger.LogDebug(ex, "Error during StopAsync window removal");
         }
-        try { _refreshCts?.Cancel(); } catch { }
-        try { _refreshCts?.Dispose(); } catch { }
-        try { _configService.ConfigSave -= OnConfigSaved; } catch { }
+        try { _refreshCts?.Cancel(); }
+        catch (Exception ex) { _logger.LogDebug(ex, "Failed to cancel refresh CTS in StopAsync"); }
+        try { _refreshCts?.Dispose(); }
+        catch (Exception ex) { _logger.LogDebug(ex, "Failed to dispose refresh CTS in StopAsync"); }
+        try { _configService.ConfigSave -= OnConfigSaved; }
+        catch (Exception ex) { _logger.LogDebug(ex, "Failed to unsubscribe ConfigSave in StopAsync"); }
         try
         {
             _shrinkuConfigService.Current.AutomaticHandledBySphene = false;
             _shrinkuConfigService.Current.AutomaticControllerName = string.Empty;
             _shrinkuConfigService.Save();
         }
-        catch { }
+        catch (Exception ex) { _logger.LogDebug(ex, "Failed to clear ShrinkU automatic controller settings on StopAsync"); }
         return Task.CompletedTask;
     }
 
@@ -199,22 +221,22 @@ public sealed class ShrinkUHostService : IHostedService
                     else
                         _firstRunUi.IsOpen = true;
                 }
-                catch { }
+                catch (Exception ex) { _logger.LogDebug(ex, "Failed to open ShrinkU window on enable"); }
             }
             else
             {
-                try { _refreshCts?.Cancel(); } catch { }
-                try { _refreshCts?.Dispose(); } catch { }
+                try { _refreshCts?.Cancel(); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to cancel refresh CTS"); }
+                try { _refreshCts?.Dispose(); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to dispose refresh CTS"); }
                 _refreshCts = null;
                 UnregisterWindows();
-                try { _shrinkuConversionService.SetEnabled(false); } catch { }
+                try { _shrinkuConversionService.SetEnabled(false); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to disable ShrinkU conversion"); }
                 try
                 {
                     _shrinkuConfigService.Current.AutomaticHandledBySphene = false;
                     _shrinkuConfigService.Current.AutomaticControllerName = string.Empty;
                     _shrinkuConfigService.Save();
                 }
-                catch { }
+                catch (Exception ex) { _logger.LogDebug(ex, "Failed to clear ShrinkU automatic controller settings on disable"); }
             }
         }
         catch (Exception ex)
@@ -252,7 +274,7 @@ public sealed class ShrinkUHostService : IHostedService
                 _shrinkuConfigService.Save();
                 _logger.LogDebug("Cleared ShrinkU AutomaticControllerName on integration stop");
             }
-            catch { }
+            catch (Exception ex) { _logger.LogDebug(ex, "Failed clearing ShrinkU automatic controller settings"); }
     }
 
     // Open ShrinkU release notes window from Sphene settings
@@ -286,28 +308,28 @@ public sealed class ShrinkUHostService : IHostedService
             var defaultPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "ShrinkU", "Backups");
             var isDefault = string.Equals(current, defaultPath, StringComparison.OrdinalIgnoreCase);
 
-            if (_shrinkuConfigService.Current.FirstRunCompleted == false || isDefault || string.IsNullOrWhiteSpace(current))
+            if (!_shrinkuConfigService.Current.FirstRunCompleted || isDefault || string.IsNullOrWhiteSpace(current))
             {
-                try { Directory.CreateDirectory(target); } catch { }
+                try { Directory.CreateDirectory(target); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to ensure backup target directory"); }
                 _shrinkuConfigService.Current.BackupFolderPath = target;
                 _shrinkuConfigService.Current.FirstRunCompleted = true;
-                try { _shrinkuConfigService.Save(); } catch { }
+                try { _shrinkuConfigService.Save(); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to save ShrinkU backup path configuration"); }
                 _logger.LogDebug("Configured ShrinkU backup path to Sphene texture_backups on setup completion: {path}", target);
             }
             else
             {
                 try
                 {
-                    try { Directory.CreateDirectory(target); } catch { }
+                    try { Directory.CreateDirectory(target); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to ensure backup target directory"); }
                     var test = Path.Combine(target, ".shrinku_write_test.tmp");
-                    try { File.WriteAllText(test, "ok"); } catch { }
-                    try { if (File.Exists(test)) File.Delete(test); } catch { }
+                    try { File.WriteAllText(test, "ok"); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to write ShrinkU backup write test file"); }
+                    try { if (File.Exists(test)) File.Delete(test); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to delete ShrinkU backup write test file"); }
                 }
                 catch
                 {
-                    try { Directory.CreateDirectory(target); } catch { }
+                    try { Directory.CreateDirectory(target); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to ensure backup target directory after write test failure"); }
                     _shrinkuConfigService.Current.BackupFolderPath = target;
-                    try { _shrinkuConfigService.Save(); } catch { }
+                    try { _shrinkuConfigService.Save(); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to save ShrinkU backup path configuration after write test failure"); }
                     _logger.LogDebug("Backup path not writable; switched to Sphene texture_backups: {path}", target);
                 }
             }
@@ -335,7 +357,7 @@ public sealed class ShrinkUHostService : IHostedService
                     _shrinkuConfigService.Save();
                     _logger.LogDebug("Set ShrinkU AutomaticControllerName to Sphene on config save");
                 }
-                catch { }
+                catch (Exception ex) { _logger.LogDebug(ex, "Failed setting ShrinkU automatic controller settings on enable"); }
                 CleanupDuplicateShrinkUConfig();
             }
             else
@@ -347,10 +369,10 @@ public sealed class ShrinkUHostService : IHostedService
                     _shrinkuConfigService.Current.AutomaticControllerName = string.Empty;
                     _shrinkuConfigService.Save();
                 }
-                catch { }
+                catch (Exception ex) { _logger.LogDebug(ex, "Failed clearing ShrinkU automatic controller settings on disable"); }
             }
         }
-        catch { }
+        catch (Exception ex) { _logger.LogDebug(ex, "Failed handling ShrinkU OnConfigSaved"); }
     }
 
     private void CleanupDuplicateShrinkUConfig()
@@ -363,10 +385,10 @@ public sealed class ShrinkUHostService : IHostedService
                 return;
             var spheneRootPath = Path.Combine(baseDir, "Sphene.json");
             var spheneSubPath = Path.Combine(baseDir, "Sphene", "Sphene.json");
-            try { if (File.Exists(spheneRootPath)) File.Delete(spheneRootPath); } catch { }
-            try { if (File.Exists(spheneSubPath)) File.Delete(spheneSubPath); } catch { }
+            try { if (File.Exists(spheneRootPath)) File.Delete(spheneRootPath); } catch (Exception ex) { _logger.LogDebug(ex, "Failed deleting Sphene root config during ShrinkU cleanup"); }
+            try { if (File.Exists(spheneSubPath)) File.Delete(spheneSubPath); } catch (Exception ex) { _logger.LogDebug(ex, "Failed deleting Sphene subpath config during ShrinkU cleanup"); }
             _logger.LogDebug("CleanupDuplicateShrinkUConfig executed");
         }
-        catch { }
+        catch (Exception ex) { _logger.LogDebug(ex, "Failed cleaning up duplicate ShrinkU config"); }
     }
 }

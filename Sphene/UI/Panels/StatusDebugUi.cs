@@ -18,8 +18,8 @@ namespace Sphene.UI.Panels;
 
 public class StatusDebugUi : WindowMediatorSubscriberBase
 {
-    private readonly ILogger<StatusDebugUi> _logger;
-    private readonly UiSharedService _uiSharedService;
+    private new readonly ILogger<StatusDebugUi> _logger;
+    
     private readonly PairManager _pairManager;
     private readonly ApiController _apiController;
     private readonly ConnectionHealthMonitor _healthMonitor;
@@ -29,7 +29,6 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
     
     private string _communicationLog = "Communication Log:\n";
     private bool _autoScroll = true;
-    private Vector2 _logScrollPosition = Vector2.Zero;
     private bool _showHealthChecks = true;
     private bool _showAcknowledgments = true;
     private bool _showCircuitBreaker = true;
@@ -44,7 +43,6 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         : base(logger, mediator, "Sphene Status Debug###SpheneStatusDebug", performanceCollectorService)
     {
         _logger = logger;
-        _uiSharedService = uiSharedService;
         _pairManager = pairManager;
         _apiController = apiController;
         _healthMonitor = healthMonitor;
@@ -81,7 +79,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         LogCommunication("Status Debug UI initialized", "INFO");
     }
     
-    private Timer? _healthStatusTimer;
+    private readonly Timer _healthStatusTimer;
     private bool _lastHealthyState = true;
     private CircuitBreakerState _lastCircuitBreakerState = CircuitBreakerState.Closed;
     private int _lastConsecutiveFailures = 0;
@@ -137,7 +135,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
     {
         if (disposing)
         {
-            _healthStatusTimer?.Dispose();
+            _healthStatusTimer.Dispose();
         }
         base.Dispose(disposing);
     }

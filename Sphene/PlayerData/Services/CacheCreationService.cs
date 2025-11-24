@@ -95,7 +95,7 @@ public sealed class CacheCreationService : DisposableMediatorSubscriberBase
         {
             if (_isZoning) return;
             var changedType = _playerRelatedObjects.FirstOrDefault(f => f.Value.Address == msg.Address);
-            if (!default(KeyValuePair<ObjectKind, GameObjectHandler>).Equals(changedType))
+            if (changedType.Value != null)
             {
                 Logger.LogDebug("Received GlamourerChangedMessage for {kind}", changedType);
                 Mediator.Publish(new CharacterDataBuildStartedMessage());
@@ -117,7 +117,7 @@ public sealed class CacheCreationService : DisposableMediatorSubscriberBase
         {
             if (_isZoning) return;
             var changedType = _playerRelatedObjects.FirstOrDefault(f => f.Value.Address == msg.Address);
-            if (!default(KeyValuePair<ObjectKind, GameObjectHandler>).Equals(changedType) && changedType.Key == ObjectKind.Player)
+            if (changedType.Value != null && changedType.Key == ObjectKind.Player)
             {
                 Logger.LogDebug("Received Moodles change, updating player");
                 AddCacheToCreate(ObjectKind.Player);
@@ -231,7 +231,7 @@ public sealed class CacheCreationService : DisposableMediatorSubscriberBase
                 var newData = _playerData.ToAPI();
                 var newHash = newData.DataHash?.Value;
                 
-                if (newHash != _lastDataHash)
+                if (!string.Equals(newHash, _lastDataHash, StringComparison.Ordinal))
                 {
                     Logger.LogDebug("Character data changed, publishing update. Old hash: {oldHash}, New hash: {newHash}", _lastDataHash ?? "null", newHash ?? "null");
                     _lastDataHash = newHash;

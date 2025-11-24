@@ -19,11 +19,10 @@ public class AreaBoundDetectionService : IDisposable
     private readonly DalamudUtilService _dalamudUtilService;
     private readonly ApiController _apiController;
     private readonly SpheneMediator _mediator;
-    private readonly IFramework _framework;
     
     private LocationInfo? _lastLocation;
-    private readonly Dictionary<string, AreaBoundSyncshellDto> _areaBoundSyncshells = new();
-    private readonly HashSet<string> _currentlyJoinedAreaSyncshells = new();
+    private readonly Dictionary<string, AreaBoundSyncshellDto> _areaBoundSyncshells = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _currentlyJoinedAreaSyncshells = new(StringComparer.Ordinal);
     private CancellationTokenSource? _cancellationTokenSource;
     private Task? _locationMonitoringTask;
     private bool _isEnabled = true;
@@ -32,14 +31,12 @@ public class AreaBoundDetectionService : IDisposable
         ILogger<AreaBoundDetectionService> logger,
         DalamudUtilService dalamudUtilService,
         ApiController apiController,
-        SpheneMediator mediator,
-        IFramework framework)
+        SpheneMediator mediator)
     {
         _logger = logger;
         _dalamudUtilService = dalamudUtilService;
         _apiController = apiController;
         _mediator = mediator;
-        _framework = framework;
         
         StartLocationMonitoring();
     }
@@ -80,7 +77,7 @@ public class AreaBoundDetectionService : IDisposable
             return;
             
         _cancellationTokenSource = new CancellationTokenSource();
-        _locationMonitoringTask = Task.Run(async () => await LocationMonitoringLoop(_cancellationTokenSource.Token));
+        _locationMonitoringTask = Task.Run(async () => await LocationMonitoringLoop(_cancellationTokenSource.Token).ConfigureAwait(false));
         _logger.LogDebug("Started location monitoring");
     }
     
@@ -96,17 +93,17 @@ public class AreaBoundDetectionService : IDisposable
         {
             try
             {
-                await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
+                await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken).ConfigureAwait(false);
                 
                 if (!_apiController.IsConnected)
                     continue;
                     
-                var currentLocation = await _dalamudUtilService.GetMapDataAsync();
+                var currentLocation = await _dalamudUtilService.GetMapDataAsync().ConfigureAwait(false);
                 
                 if (_lastLocation == null || !LocationsEqual(_lastLocation.Value, currentLocation))
                 {
                     _logger.LogDebug("Location changed: {location}", currentLocation);
-                    await HandleLocationChange(currentLocation);
+                    await HandleLocationChange(currentLocation).ConfigureAwait(false);
                     _lastLocation = currentLocation;
                 }
             }
@@ -126,7 +123,7 @@ public class AreaBoundDetectionService : IDisposable
         // Request broadcast of area-bound syncshells for the new location
         try
         {
-            await _apiController.BroadcastAreaBoundSyncshells(newLocation);
+            await _apiController.BroadcastAreaBoundSyncshells(newLocation).ConfigureAwait(false);
             _logger.LogDebug("Requested area-bound syncshell broadcast for location: {location}", newLocation);
         }
         catch (Exception ex)
@@ -135,22 +132,22 @@ public class AreaBoundDetectionService : IDisposable
         }
 
         var matchingSyncshells = GetMatchingAreaBoundSyncshells(newLocation);
-        var currentlyMatching = matchingSyncshells.Select(s => s.GID).ToHashSet();
+        var currentlyMatching = matchingSyncshells.Select(s => s.GID).ToHashSet(StringComparer.Ordinal);
         
         // Leave syncshells that no longer match
-        var toLeave = _currentlyJoinedAreaSyncshells.Except(currentlyMatching).ToList();
+        var toLeave = _currentlyJoinedAreaSyncshells.Except(currentlyMatching, StringComparer.Ordinal).ToList();
         foreach (var gid in toLeave)
         {
-            await LeaveAreaBoundSyncshell(gid);
+            await LeaveAreaBoundSyncshell(gid).ConfigureAwait(false);
             _currentlyJoinedAreaSyncshells.Remove(gid);
         }
         
         // Join new matching syncshells
-        var toJoin = currentlyMatching.Except(_currentlyJoinedAreaSyncshells).ToList();
+        var toJoin = currentlyMatching.Except(_currentlyJoinedAreaSyncshells, StringComparer.Ordinal).ToList();
         foreach (var gid in toJoin)
         {
             var syncshell = _areaBoundSyncshells[gid];
-            if (await JoinAreaBoundSyncshell(syncshell))
+            if (await JoinAreaBoundSyncshell(syncshell).ConfigureAwait(false))
             {
                 _currentlyJoinedAreaSyncshells.Add(gid);
             }
@@ -228,7 +225,7 @@ public class AreaBoundDetectionService : IDisposable
         try
         {
             _logger.LogDebug("Attempting to join area-bound syncshell: {gid}", syncshell.GID);
-            await _apiController.AreaBoundJoinRequest(syncshell.GID);
+            await _apiController.AreaBoundJoinRequest(syncshell.GID).ConfigureAwait(false);
             return true;
         }
         catch (Exception ex)
@@ -244,7 +241,7 @@ public class AreaBoundDetectionService : IDisposable
         {
             _logger.LogDebug("Leaving area-bound syncshell: {gid}", gid);
             // Use regular group leave functionality
-            await _apiController.GroupLeave(new GroupDto(new GroupData(gid)));
+            await _apiController.GroupLeave(new GroupDto(new GroupData(gid))).ConfigureAwait(false);
             
             // Publish leave event to notify UI components
             _mediator.Publish(new AreaBoundSyncshellLeftMessage(gid));
@@ -267,9 +264,23 @@ public class AreaBoundDetectionService : IDisposable
                loc1.IsIndoor == loc2.IsIndoor;
     }
     
+    private bool _disposed;
+
+    protected virtual void Dispose(bool disposing)
+    {
+        if (_disposed) return;
+        if (disposing)
+        {
+            StopLocationMonitoring();
+            _cancellationTokenSource?.Dispose();
+            _cancellationTokenSource = null;
+        }
+        _disposed = true;
+    }
+
     public void Dispose()
     {
-        StopLocationMonitoring();
-        _cancellationTokenSource?.Dispose();
+        Dispose(true);
+        GC.SuppressFinalize(this);
     }
 }

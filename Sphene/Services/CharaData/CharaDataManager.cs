@@ -97,9 +97,9 @@ public sealed partial class CharaDataManager : DisposableMediatorSubscriberBase
         });
 
         // After character data analysis finishes (size indicator updated), trigger automatic conversion if enabled
-        spheneMediator.Subscribe<CharacterDataAnalyzedMessage>(this, (_) =>
+        spheneMediator.Subscribe<CharacterDataAnalyzedMessage>(this, (msg) =>
         {
-            Task.Run(async () =>
+            _ = Task.Run(async () =>
             {
                 try
                 {
@@ -127,7 +127,7 @@ public sealed partial class CharaDataManager : DisposableMediatorSubscriberBase
                     }
 
                     Logger.LogDebug("Starting automatic conversion post-analysis with backups enabled");
-                    _shrinkuConversionService.StartConversionAsync(candidates).ContinueWith(t =>
+                    _ = _shrinkuConversionService.StartConversionAsync(candidates).ContinueWith(t =>
                     {
                         if (t.IsFaulted)
                         {
@@ -136,7 +136,8 @@ public sealed partial class CharaDataManager : DisposableMediatorSubscriberBase
                         }
                         else
                         {
-                            try { _shrinkuConversionService.NotifyExternalTextureChange("ipc-auto-conversion-complete"); } catch { }
+                            try { _shrinkuConversionService.NotifyExternalTextureChange("ipc-auto-conversion-complete"); }
+                            catch (Exception ex) { Logger.LogDebug(ex, "Notify external texture change failed (post-analysis conversion complete)"); }
                             Logger.LogDebug("Automatic conversion after analysis completed");
                         }
                     });
@@ -281,8 +282,8 @@ public sealed partial class CharaDataManager : DisposableMediatorSubscriberBase
     {
         return UiBlockingComputation = Task.Run(async () =>
         {
-            var apply = await CanApplyInGpose().ConfigureAwait(false);
-            if (pose.WorldData == default || !(await CanApplyInGpose().ConfigureAwait(false)).CanApply) return;
+            var canApply = (await CanApplyInGpose().ConfigureAwait(false)).CanApply;
+            if (pose.WorldData == default || !canApply) return;
             var gposeChara = await _dalamudUtilService.GetGposeCharacterFromObjectTableByNameAsync(targetName, true).ConfigureAwait(false);
             if (gposeChara == null) return;
 
@@ -567,7 +568,7 @@ public sealed partial class CharaDataManager : DisposableMediatorSubscriberBase
             catch (Exception ex)
             {
                 Logger.LogWarning(ex, "Failed to extract MCDF");
-                throw;
+                throw new InvalidOperationException("Failed to extract MCDF", ex);
             }
             finally
             {
@@ -666,6 +667,11 @@ public sealed partial class CharaDataManager : DisposableMediatorSubscriberBase
         return extended;
     }
 
+    private void CacheData(CharaDataMetaInfoExtendedDto charaData)
+    {
+        _metaInfoCache[charaData.FullId] = charaData;
+    }
+
     private readonly SemaphoreSlim _distributionSemaphore = new(1, 1);
 
     private void DistributeMetaInfo()
@@ -674,11 +680,6 @@ public sealed partial class CharaDataManager : DisposableMediatorSubscriberBase
         _nearbyManager.UpdateSharedData(_metaInfoCache.ToDictionary());
         _characterHandler.UpdateHandledData(_metaInfoCache.ToDictionary());
         _distributionSemaphore.Release();
-    }
-
-    private void CacheData(CharaDataMetaInfoExtendedDto charaData)
-    {
-        _metaInfoCache[charaData.FullId] = charaData;
     }
 
     public bool TryGetMetaInfo(string key, out CharaDataMetaInfoExtendedDto? metaInfo)
@@ -812,7 +813,7 @@ public sealed partial class CharaDataManager : DisposableMediatorSubscriberBase
             await Task.Delay(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
             unsafe
             {
-                _dalamudUtilService.GposeTarget = (FFXIVClientStructs.FFXIV.Client.Game.Object.GameObject*)newActor.Address;
+                DalamudUtilService.GposeTarget = (FFXIVClientStructs.FFXIV.Client.Game.Object.GameObject*)newActor.Address;
             }
 
             await McdfApplyToGposeTarget().ConfigureAwait(false);
@@ -857,7 +858,7 @@ public sealed partial class CharaDataManager : DisposableMediatorSubscriberBase
         var gposeActor = _dalamudUtilService.GetGposeCharacterFromObjectTableByName(actor.Name, true);
         if (gposeActor != null)
         {
-            _dalamudUtilService.GposeTarget = (FFXIVClientStructs.FFXIV.Client.Game.Object.GameObject*)gposeActor.Address;
+            DalamudUtilService.GposeTarget = (FFXIVClientStructs.FFXIV.Client.Game.Object.GameObject*)gposeActor.Address;
         }
     }
 
@@ -1070,7 +1071,8 @@ public sealed partial class CharaDataManager : DisposableMediatorSubscriberBase
                             }
                             else
                             {
-                                try { _shrinkuConversionService.NotifyExternalTextureChange("ipc-auto-conversion-complete"); } catch { }
+                                try { _shrinkuConversionService.NotifyExternalTextureChange("ipc-auto-conversion-complete"); }
+                                catch (Exception ex) { Logger.LogDebug(ex, "Notify external texture change failed (auto conversion complete)"); }
                                 Logger.LogDebug("Background automatic conversion completed");
                             }
                         });
@@ -1092,19 +1094,19 @@ public sealed partial class CharaDataManager : DisposableMediatorSubscriberBase
         Logger.LogDebug("Detected outfit change during conversion; cancelling current conversion and restoring backups");
 
         var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        void onCompleted() { try { tcs.TrySetResult(true); } catch { } }
+        void onCompleted() { try { tcs.TrySetResult(true); } catch (Exception ex) { Logger.LogDebug(ex, "Failed to signal conversion completion TCS"); } }
 
         try
         {
             _shrinkuConversionService.OnConversionCompleted += onCompleted;
         }
-        catch { }
+        catch (Exception ex) { Logger.LogDebug(ex, "Failed to subscribe to conversion completed event"); }
 
         try
         {
             _shrinkuConversionService.Cancel();
         }
-        catch { }
+        catch (Exception ex) { Logger.LogDebug(ex, "Failed to cancel current conversion"); }
 
         try
         {
@@ -1112,15 +1114,18 @@ public sealed partial class CharaDataManager : DisposableMediatorSubscriberBase
         }
         finally
         {
-            try { _shrinkuConversionService.OnConversionCompleted -= onCompleted; } catch { }
+            try { _shrinkuConversionService.OnConversionCompleted -= onCompleted; }
+            catch (Exception ex) { Logger.LogDebug(ex, "Failed to unsubscribe from conversion completed event"); }
         }
 
         try
         {
             var progress = new Progress<(string, int, int)>();
             await _shrinkuBackupService.RestoreLatestAsync(progress, CancellationToken.None).ConfigureAwait(false);
-            try { await _ipcManager.Penumbra.RedrawPlayerAsync().ConfigureAwait(false); } catch { }
-            try { _shrinkuConversionService.NotifyExternalTextureChange("restore-latest"); } catch { }
+            try { await _ipcManager.Penumbra.RedrawPlayerAsync().ConfigureAwait(false); }
+            catch (Exception ex) { Logger.LogDebug(ex, "Failed to redraw player after restore"); }
+            try { _shrinkuConversionService.NotifyExternalTextureChange("restore-latest"); }
+            catch (Exception ex) { Logger.LogDebug(ex, "Failed to notify external texture change after restore"); }
             Logger.LogDebug("Restored latest backups after cancelling conversion");
         }
         catch (Exception ex)
@@ -1261,7 +1266,7 @@ public sealed partial class CharaDataManager : DisposableMediatorSubscriberBase
                     if (string.Equals(fmt, "BC7", StringComparison.Ordinal))
                         continue;
 
-                    var primaryPath = fileData.FilePaths.First();
+                    var primaryPath = fileData.FilePaths[0];
                     var duplicatePaths = fileData.FilePaths.Skip(1).ToArray();
                     result[primaryPath] = duplicatePaths;
                 }

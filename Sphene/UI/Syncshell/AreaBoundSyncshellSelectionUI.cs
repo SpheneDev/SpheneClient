@@ -162,7 +162,11 @@ public class AreaBoundSyncshellSelectionUI : WindowMediatorSubscriberBase
         {
             if (ImGui.Button("Join Selected", new Vector2(buttonWidth, 0)))
             {
-                HandleJoin();
+                _ = Task.Run(async () =>
+                {
+                    try { await HandleJoin().ConfigureAwait(false); }
+                    catch (Exception ex) { _logger.LogError(ex, "Background error joining selected area-bound syncshell"); }
+                });
             }
         }
         
@@ -176,7 +180,11 @@ public class AreaBoundSyncshellSelectionUI : WindowMediatorSubscriberBase
         // Join All button
         if (ImGui.Button("Join All", new Vector2(buttonWidth, 0)))
         {
-            HandleJoinAll();
+            _ = Task.Run(async () =>
+            {
+                try { await HandleJoinAll().ConfigureAwait(false); }
+                catch (Exception ex) { _logger.LogError(ex, "Background error joining all area-bound syncshells"); }
+            });
         }
         
         if (ImGui.IsItemHovered())
@@ -204,7 +212,7 @@ public class AreaBoundSyncshellSelectionUI : WindowMediatorSubscriberBase
         base.Dispose(disposing);
     }
 
-    private async void HandleJoin()
+    private async Task HandleJoin()
     {
         if (_selectedIndex < 0 || _selectedIndex >= _availableSyncshells!.Count) return;
         
@@ -214,13 +222,13 @@ public class AreaBoundSyncshellSelectionUI : WindowMediatorSubscriberBase
         try
         {
             // Always check if user already has valid consent (for auto-rejoin)
-            var hasValidConsent = await _apiController.GroupCheckAreaBoundConsent(selectedSyncshell.Group.GID);
+            var hasValidConsent = await _apiController.GroupCheckAreaBoundConsent(selectedSyncshell.Group.GID).ConfigureAwait(false);
             
             if (hasValidConsent)
             {
                 // Auto-join without showing consent UI
                 _logger.LogDebug("User has valid consent for syncshell {SyncshellId}, auto-joining", selectedSyncshell.Group.GID);
-                await _areaBoundService.JoinAreaBoundSyncshell(selectedSyncshell.Group.GID, true, selectedSyncshell.Settings.RulesVersion);
+                await _areaBoundService.JoinAreaBoundSyncshell(selectedSyncshell.Group.GID, true, selectedSyncshell.Settings.RulesVersion).ConfigureAwait(false);
             }
             else
             {
@@ -237,7 +245,7 @@ public class AreaBoundSyncshellSelectionUI : WindowMediatorSubscriberBase
                 else
                 {
                     // Join directly without consent
-                    await _areaBoundService.JoinAreaBoundSyncshell(selectedSyncshell.Group.GID, false, 0);
+                    await _areaBoundService.JoinAreaBoundSyncshell(selectedSyncshell.Group.GID, false, 0).ConfigureAwait(false);
                 }
             }
             
@@ -252,7 +260,7 @@ public class AreaBoundSyncshellSelectionUI : WindowMediatorSubscriberBase
         }
     }
 
-    private async void HandleJoinAll()
+    private async Task HandleJoinAll()
     {
         _logger.LogDebug("User chose to join all {count} syncshells", _availableSyncshells!.Count);
         
@@ -261,13 +269,13 @@ public class AreaBoundSyncshellSelectionUI : WindowMediatorSubscriberBase
             foreach (var syncshell in _availableSyncshells)
             {
                 // Always check if user already has valid consent (for auto-rejoin)
-                var hasValidConsent = await _apiController.GroupCheckAreaBoundConsent(syncshell.Group.GID);
+                var hasValidConsent = await _apiController.GroupCheckAreaBoundConsent(syncshell.Group.GID).ConfigureAwait(false);
                 
                 if (hasValidConsent)
                 {
                     // Auto-join without showing consent UI
                     _logger.LogDebug("User has valid consent for syncshell {SyncshellId}, auto-joining", syncshell.Group.GID);
-                    await _areaBoundService.JoinAreaBoundSyncshell(syncshell.Group.GID, true, syncshell.Settings.RulesVersion);
+                    await _areaBoundService.JoinAreaBoundSyncshell(syncshell.Group.GID, true, syncshell.Settings.RulesVersion).ConfigureAwait(false);
                 }
                 else
                 {
@@ -284,7 +292,7 @@ public class AreaBoundSyncshellSelectionUI : WindowMediatorSubscriberBase
                     else
                     {
                         // Join directly without consent
-                        await _areaBoundService.JoinAreaBoundSyncshell(syncshell.Group.GID, false, 0);
+                        await _areaBoundService.JoinAreaBoundSyncshell(syncshell.Group.GID, false, 0).ConfigureAwait(false);
                     }
                 }
             }

@@ -28,7 +28,6 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
     private readonly SpheneConfigService _configurationService;
     private readonly IContextMenu _dalamudContextMenu;
     private readonly PairFactory _pairFactory;
-    private readonly ServerConfigurationManager _serverConfigurationManager;
     private readonly Lazy<ApiController> _apiController;
     private readonly MessageService _messageService;
     private readonly AcknowledgmentTimeoutManager _acknowledgmentTimeoutManager;
@@ -43,7 +42,7 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
 
     public PairManager(ILogger<PairManager> logger, PairFactory pairFactory,
                 SpheneConfigService configurationService, SpheneMediator mediator,
-                IContextMenu dalamudContextMenu, ServerConfigurationManager serverConfigurationManager,
+                IContextMenu dalamudContextMenu,
                 Lazy<ApiController> apiController, SessionAcknowledgmentManager sessionAcknowledgmentManager,
                 MessageService messageService, AcknowledgmentTimeoutManager acknowledgmentTimeoutManager,
                 Lazy<AreaBoundSyncshellService> areaBoundSyncshellService,
@@ -52,7 +51,6 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         _pairFactory = pairFactory;
         _configurationService = configurationService;
         _dalamudContextMenu = dalamudContextMenu;
-        _serverConfigurationManager = serverConfigurationManager;
         _apiController = apiController;
         _sessionAcknowledgmentManager = sessionAcknowledgmentManager;
         _messageService = messageService;
@@ -101,7 +99,7 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
 
     public Pair? GetPairByUID(string uid)
     {
-        var existingPair = _allClientPairs.FirstOrDefault(f => f.Key.UID == uid);
+        var existingPair = _allClientPairs.FirstOrDefault(f => string.Equals(f.Key.UID, uid, StringComparison.Ordinal));
         if (!Equals(existingPair, default(KeyValuePair<UserData, Pair>)))
         {
             return existingPair.Value;
@@ -599,7 +597,7 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         {
             if (_allClientPairs.TryGetValue(userData, out var pair))
             {
-                pair.SetPendingAcknowledgment(acknowledgmentId);
+                _ = pair.SetPendingAcknowledgment(acknowledgmentId);
                 Logger.LogDebug("Set pending acknowledgment for user {user} with ID {id}", userData.AliasOrUID, acknowledgmentId);
                 
                 // Start timeout tracking for this acknowledgment
@@ -647,7 +645,7 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         {
             if (_allClientPairs.TryGetValue(recipient, out var pair))
             {
-                pair.SetPendingAcknowledgment(acknowledgmentId);
+                _ = pair.SetPendingAcknowledgment(acknowledgmentId);
                 Logger.LogDebug("Set pending acknowledgment on pair for recipient {user} with ID {id}", recipient.AliasOrUID, acknowledgmentId);
                 
                 // Start timeout tracking for this acknowledgment

@@ -14,8 +14,8 @@ public class AcknowledgmentBatchingService : IDisposable
     private readonly ILogger<AcknowledgmentBatchingService> _logger;
     private readonly SpheneMediator _mediator;
     private readonly MessageService _messageService;
-    private readonly ConcurrentDictionary<string, BatchedAcknowledgment> _pendingBatches = new();
-    private readonly ConcurrentDictionary<string, FailedBatch> _deadLetterQueue = new();
+    private readonly ConcurrentDictionary<string, BatchedAcknowledgment> _pendingBatches = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, FailedBatch> _deadLetterQueue = new(StringComparer.Ordinal);
     private readonly System.Timers.Timer _batchTimer;
     private readonly System.Timers.Timer _retryTimer;
     private readonly TimeSpan _batchWindow = TimeSpan.FromMilliseconds(500); // 500ms batch window
@@ -266,64 +266,31 @@ public class AcknowledgmentBatchingService : IDisposable
 
     public void Dispose()
     {
+        Dispose(true);
+        GC.SuppressFinalize(this);
+    }
+
+    protected virtual void Dispose(bool disposing)
+    {
         if (_disposed) return;
-        _disposed = true;
-
-        _batchTimer?.Stop();
-        _batchTimer?.Dispose();
-        
-        _retryTimer?.Stop();
-        _retryTimer?.Dispose();
-
-        // Process any remaining batches
-        foreach (var kvp in _pendingBatches)
+        if (disposing)
         {
-            ProcessBatch(kvp.Key, kvp.Value);
+            _batchTimer?.Stop();
+            _batchTimer?.Dispose();
+
+            _retryTimer?.Stop();
+            _retryTimer?.Dispose();
+
+            foreach (var kvp in _pendingBatches)
+            {
+                ProcessBatch(kvp.Key, kvp.Value);
+            }
+
+            _pendingBatches.Clear();
+            _deadLetterQueue.Clear();
         }
-        
-        _pendingBatches.Clear();
-        _deadLetterQueue.Clear();
+        _disposed = true;
     }
 }
 
-// Batched acknowledgment data structure
-public class BatchedAcknowledgment
-{
-    public string BatchKey { get; set; } = string.Empty;
-    public List<UserData> Users { get; set; } = new();
-    public string AcknowledgmentId { get; set; } = string.Empty;
-    public Action<List<UserData>, string> ProcessBatch { get; set; } = null!;
-    public DateTime CreatedAt { get; set; }
-    public DateTime LastUpdated { get; set; }
-}
-
-// Batch statistics for monitoring
-public class BatchStatistics
-{
-    public int PendingBatches { get; set; }
-    public int TotalPendingUsers { get; set; }
-    public TimeSpan OldestBatchAge { get; set; }
-    public TimeSpan BatchWindow { get; set; }
-    public int MaxBatchSize { get; set; }
-    public int FailedBatches { get; set; }
-    public int TotalFailedUsers { get; set; }
-}
-
-// Failed batch data structure for retry logic
-public class FailedBatch
-{
-    public string BatchKey { get; set; } = string.Empty;
-    public BatchedAcknowledgment Batch { get; set; } = null!;
-    public int FailureCount { get; set; }
-    public DateTime LastFailureTime { get; set; }
-    public DateTime NextRetryTime { get; set; }
-    public Exception? Exception { get; set; }
-}
-
-// Event for when a batch is processed
-public record AcknowledgmentBatchProcessedMessage(
-    string BatchKey,
-    List<UserData> Users,
-    string AcknowledgmentId,
-    DateTime Timestamp
-) : MessageBase;
+ 

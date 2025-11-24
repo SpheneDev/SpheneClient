@@ -34,6 +34,7 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
     private readonly Dictionary<UserData, DateTime> _delayedReloadUsers = new();
     private readonly Timer _delayedPushTimer;
     private readonly Timer _characterReloadTimer;
+    
     private const int DELAYED_PUSH_SECONDS = 3;
     private const int CHARACTER_RELOAD_DELAY_SECONDS = 3;
 
@@ -67,7 +68,7 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
             _lastCreatedData = msg.CharacterData;
             
             // Only push if hash actually changed or if we have users waiting for data
-            if (previousHash != newHash || _usersToPushDataTo.Count > 0)
+            if (!string.Equals(previousHash, newHash, StringComparison.Ordinal) || _usersToPushDataTo.Count > 0)
             {
                 Logger.LogDebug("Character data hash changed from {oldHash} to {newHash}, pushing to users", 
                     previousHash ?? "null", newHash ?? "null");
@@ -107,7 +108,7 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
         if (string.IsNullOrEmpty(currentHash)) return;
         
         // Always validate the current hash for the current user to ensure it's stored in the database
-        Task.Run(async () => {
+        _ = Task.Run(async () => {
             try {
                 var currentUserUID = _apiController.UID;
                 if (!string.IsNullOrEmpty(currentUserUID)) {
@@ -119,8 +120,6 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
                         Logger.LogWarning("Hash validation returned null response for user {userUID} and hash {hash}", 
                             currentUserUID, currentHash);
                     }
-                } else {
-                    //Logger.LogWarning("Cannot validate hash - current user UID is null or empty");
                 }
             } catch (Exception ex) {
                 Logger.LogError(ex, "Failed to validate current user hash for {hash}", currentHash);
@@ -146,7 +145,7 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
         if (_usersToPushDataTo.Count > 0)
         {
             Logger.LogDebug("Pushing data {hash} for {count} visible players (out of {total} total)", 
-                currentHash, _usersToPushDataTo.Count, _pairManager.GetVisibleUsers().Count());
+                currentHash, _usersToPushDataTo.Count, _pairManager.GetVisibleUsers().Count);
             PushCharacterData(forced);
         }
         else
@@ -213,7 +212,7 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
                             // Validate if the hash is still valid on the client side
                             try {
                                 var validationResponse = await _apiController.ValidateCharaDataHash(user.UID, lastSentHash).ConfigureAwait(false);
-                                if (validationResponse != null && validationResponse.IsValid && lastSentHash == currentHash)
+                                if (validationResponse != null && validationResponse.IsValid && string.Equals(lastSentHash, currentHash, StringComparison.Ordinal))
                                 {
                                     Logger.LogTrace("Hash still valid for user {user}, skipping push", user.AliasOrUID);
                                     continue;
@@ -237,6 +236,7 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
                     // Create hash key for acknowledgment tracking
                     var hashKey = dataToSend.DataHash.Value;
                     _pairManager.SetPendingAcknowledgmentForSender([.. usersNeedingData], hashKey);
+                    _sessionAcknowledgmentManager.SetPendingAcknowledgmentForHashVersion([.. usersNeedingData], hashKey);
                     
                     // Track the hash sent to each user
                     foreach (var user in usersNeedingData)
@@ -343,7 +343,7 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
             // Trigger character data recreation by creating a temporary handler and sending CreateCacheForObjectMessage
             try
             {
-                var tempHandler = await _gameObjectHandlerFactory.Create(ObjectKind.Player, () => _dalamudUtil.GetPlayerPtr(), isWatched: false);
+                var tempHandler = await _gameObjectHandlerFactory.Create(ObjectKind.Player, () => _dalamudUtil.GetPlayerPtr(), isWatched: false).ConfigureAwait(false);
                 Mediator.Publish(new CreateCacheForObjectMessage(tempHandler));
                 tempHandler.Dispose();
             }

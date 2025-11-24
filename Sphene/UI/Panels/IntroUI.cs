@@ -37,16 +37,13 @@ public partial class IntroUi : WindowMediatorSubscriberBase
     private bool _useLegacyLogin = false;
 
     // ShrinkU integration dependencies
-    private readonly ShrinkUHostService _shrinkuHostService;
-    private readonly ShrinkUConfigService _shrinkuConfig;
-    private readonly ConversionUI _shrinkuConversion;
-    private readonly FirstRunSetupUI _shrinkuFirstRun;
+    
 
     // Page navigation flag
     private bool _showShrinkUPage = false;
 
     // Modern UI constants - Optimized for reduced scrolling
-    private const float SECTION_SPACING = 12.0f;
+    
     private const float CARD_PADDING = 12.0f;
     private const float BUTTON_HEIGHT = 32.0f;
     private const float HEADER_HEIGHT = 32.0f;
@@ -63,10 +60,10 @@ public partial class IntroUi : WindowMediatorSubscriberBase
         _cacheMonitor = fileCacheManager;
         _serverConfigurationManager = serverConfigurationManager;
         _dalamudUtilService = dalamudUtilService;
-        _shrinkuHostService = shrinkuHostService;
-        _shrinkuConfig = shrinkuConfig;
-        _shrinkuConversion = shrinkuConversion;
-        _shrinkuFirstRun = shrinkuFirstRun;
+        _ = shrinkuHostService;
+        _ = shrinkuConfig;
+        _ = shrinkuConversion;
+        _ = shrinkuFirstRun;
         IsOpen = false;
         ShowCloseButton = false;
         RespectCloseHotkey = false;
@@ -196,7 +193,7 @@ public partial class IntroUi : WindowMediatorSubscriberBase
                                  "Ensure all your customizations flow through Penumbra's systems for perfect synchronization.", ImGuiColors.DalamudYellow);
         });
 
-        if (!_uiShared.DrawOtherPluginState()) return;
+        _uiShared.DrawOtherPluginState();
     }
 
     private void DrawShrinkUPageContent()
@@ -220,7 +217,6 @@ public partial class IntroUi : WindowMediatorSubscriberBase
     {
         
             // Language selector in top right
-            var languageSize = ImGui.CalcTextSize(Strings.ToS.LanguageLabel);
             ImGui.SetCursorPosX(ImGui.GetWindowContentRegionMax().X - 120);
             ImGui.TextUnformatted(Strings.ToS.LanguageLabel);
             ImGui.SameLine();
@@ -317,69 +313,7 @@ public partial class IntroUi : WindowMediatorSubscriberBase
         }
     }
 
-    private void DrawSyncshellSettingsPageContent()
-    {
-        DrawModernCard(() =>
-        {
-            DrawSectionHeader("Notification Preferences", Dalamud.Interface.FontAwesomeIcon.Bell);
-            
-            ImGui.Spacing();
-            UiSharedService.TextWrapped("Configure how you want to be notified about syncshell activities before connecting to the Network.");
-        });
-
-        ImGui.Spacing();
-        
-        // Area Bound Syncshells
-        DrawModernCard(() =>
-        {
-            DrawSubsectionHeader("Area-Bound Syncshells", Dalamud.Interface.FontAwesomeIcon.MapMarkerAlt);
-            
-            var showAreaBoundNotifications = _configService.Current.ShowAreaBoundSyncshellNotifications;
-            if (ImGui.Checkbox("Show area-bound syncshell notifications", ref showAreaBoundNotifications))
-            {
-                _configService.Current.ShowAreaBoundSyncshellNotifications = showAreaBoundNotifications;
-                _configService.Save();
-            }
-            UiSharedService.AttachToolTip("Receive notifications when area-bound syncshells become available in your current location");
-            
-            if (_configService.Current.ShowAreaBoundSyncshellNotifications)
-            {
-                ImGui.Indent();
-                
-                var notificationLocation = _configService.Current.AreaBoundSyncshellNotification;
-                var notificationOptions = new[] { "Nowhere", "Chat", "Toast", "Both" };
-                var currentIndex = (int)notificationLocation;
-                
-                if (ImGui.Combo("Notification Location", ref currentIndex, notificationOptions, notificationOptions.Length))
-                {
-                    _configService.Current.AreaBoundSyncshellNotification = (NotificationLocation)currentIndex;
-                    _configService.Save();
-                }
-                UiSharedService.AttachToolTip("Choose where area-bound syncshell notifications should appear");
-                
-                ImGui.Unindent();
-            }
-            
-            var showAreaBoundWelcome = _configService.Current.ShowAreaBoundSyncshellWelcomeMessages;
-            if (ImGui.Checkbox("Show welcome messages", ref showAreaBoundWelcome))
-            {
-                _configService.Current.ShowAreaBoundSyncshellWelcomeMessages = showAreaBoundWelcome;
-                _configService.Save();
-            }
-            UiSharedService.AttachToolTip("Display welcome messages when joining area-bound syncshells");
-            
-            var autoShowConsent = _configService.Current.AutoShowAreaBoundSyncshellConsent;
-            if (ImGui.Checkbox("Automatically show consent dialogs", ref autoShowConsent))
-            {
-                _configService.Current.AutoShowAreaBoundSyncshellConsent = autoShowConsent;
-                _configService.Save();
-            }
-            UiSharedService.AttachToolTip("When enabled, consent dialogs for area-bound syncshells will appear automatically when entering areas. When disabled, you can manually trigger consent using the button in the Compact UI. This setting also controls city syncshell join requests.");
-        });
-
-        ImGui.Spacing();
-        
-    }
+    
 
     private void DrawNetworkAuthenticationPageContent()
     {
@@ -410,7 +344,6 @@ public partial class IntroUi : WindowMediatorSubscriberBase
             DrawSectionHeader("Network Configuration", Dalamud.Interface.FontAwesomeIcon.Cog);
             
             int serverIdx = 0;
-            var selectedServer = _serverConfigurationManager.GetServerByIndex(serverIdx);
 
             serverIdx = _uiShared.DrawServiceSelection(selectOnChange: true, showConnect: false);
             if (serverIdx != _prevIdx)
@@ -419,7 +352,7 @@ public partial class IntroUi : WindowMediatorSubscriberBase
                 _prevIdx = serverIdx;
             }
 
-            selectedServer = _serverConfigurationManager.GetServerByIndex(serverIdx);
+            var selectedServer = _serverConfigurationManager.GetServerByIndex(serverIdx);
             
             // Force legacy authentication mode by default
             _useLegacyLogin = true;
@@ -551,40 +484,36 @@ public partial class IntroUi : WindowMediatorSubscriberBase
                 _showShrinkUPage = false;
             }, new Vector4(0.25f, 0.70f, 0.35f, 1.0f), showIcon: false);
         }
-        else if (!_uiShared.ApiController.ServerAlive)
+        else if (!_uiShared.ApiController.ServerAlive && _useLegacyLogin && _secretKey.Length == 64 && Base32Regex().IsMatch(_secretKey))
         {
-            // Network authentication page button
-            if (_useLegacyLogin && _secretKey.Length == 64 && Base32Regex().IsMatch(_secretKey))
+            DrawModernButton("Save Authentication Key", Dalamud.Interface.FontAwesomeIcon.Save, () =>
             {
-                DrawModernButton("Save Authentication Key", Dalamud.Interface.FontAwesomeIcon.Save, () =>
+                if (_serverConfigurationManager.CurrentServer == null) _serverConfigurationManager.SelectServer(0);
+                if (!_serverConfigurationManager.CurrentServer!.SecretKeys.Any())
                 {
-                    if (_serverConfigurationManager.CurrentServer == null) _serverConfigurationManager.SelectServer(0);
-                    if (!_serverConfigurationManager.CurrentServer!.SecretKeys.Any())
+                    _serverConfigurationManager.CurrentServer!.SecretKeys.Add(_serverConfigurationManager.CurrentServer.SecretKeys.Select(k => k.Key).LastOrDefault() + 1, new SecretKey()
                     {
-                        _serverConfigurationManager.CurrentServer!.SecretKeys.Add(_serverConfigurationManager.CurrentServer.SecretKeys.Select(k => k.Key).LastOrDefault() + 1, new SecretKey()
-                        {
-                            FriendlyName = $"Authentication Key added on Setup ({DateTime.Now:yyyy-MM-dd})",
-                            Key = _secretKey,
-                        });
-                        _serverConfigurationManager.AddCurrentCharacterToServer();
-                    }
-                    else
+                        FriendlyName = $"Authentication Key added on Setup ({DateTime.UtcNow:yyyy-MM-dd})",
+                        Key = _secretKey,
+                    });
+                    _serverConfigurationManager.AddCurrentCharacterToServer();
+                }
+                else
+                {
+                    _serverConfigurationManager.CurrentServer!.SecretKeys[0] = new SecretKey()
                     {
-                        _serverConfigurationManager.CurrentServer!.SecretKeys[0] = new SecretKey()
-                        {
-                            FriendlyName = $"Authentication Key added on Setup ({DateTime.Now:yyyy-MM-dd})",
-                            Key = _secretKey,
-                        };
-                    }
-                    _secretKey = string.Empty;
-                    _ = Task.Run(() => _uiShared.ApiController.CreateConnectionsAsync());
-                }, new Vector4(0.25f, 0.70f, 0.35f, 1.0f), showIcon: false);
-            }
+                        FriendlyName = $"Authentication Key added on Setup ({DateTime.UtcNow:yyyy-MM-dd})",
+                        Key = _secretKey,
+                    };
+                }
+                _secretKey = string.Empty;
+                _ = Task.Run(() => _uiShared.ApiController.CreateConnectionsAsync());
+            }, new Vector4(0.25f, 0.70f, 0.35f, 1.0f), showIcon: false);
         }
     }
 
     // Modern UI Helper Methods
-    private void DrawModernCard(Action content)
+    private static void DrawModernCard(Action content)
     {
         var drawList = ImGui.GetWindowDrawList();
         var cardStart = ImGui.GetCursorScreenPos();
@@ -594,7 +523,6 @@ public partial class IntroUi : WindowMediatorSubscriberBase
         ImGui.Dummy(new Vector2(CARD_PADDING, CARD_PADDING * 0.5f));
         ImGui.Indent(CARD_PADDING);
         // Constrain text wrapping to inner width, without forcing child height
-        var innerWidth = Math.Max(0f, availableWidth - CARD_PADDING * 2);
         content();
         ImGui.PopTextWrapPos();
         
@@ -725,17 +653,17 @@ public partial class IntroUi : WindowMediatorSubscriberBase
         // Determine icon based on potential prefix in title and render using FontAwesome
         var displayTitle = title ?? string.Empty;
         var icon = Dalamud.Interface.FontAwesomeIcon.InfoCircle;
-        if (displayTitle.StartsWith("⚠ "))
+        if (displayTitle.StartsWith("⚠ ", StringComparison.Ordinal))
         {
             icon = Dalamud.Interface.FontAwesomeIcon.ExclamationTriangle;
             displayTitle = displayTitle.Substring(2).TrimStart();
         }
-        else if (displayTitle.StartsWith("❌ "))
+        else if (displayTitle.StartsWith("❌ ", StringComparison.Ordinal))
         {
             icon = Dalamud.Interface.FontAwesomeIcon.ExclamationCircle;
             displayTitle = displayTitle.Substring(2).TrimStart();
         }
-        else if (displayTitle.StartsWith("ℹ "))
+        else if (displayTitle.StartsWith("ℹ ", StringComparison.Ordinal))
         {
             icon = Dalamud.Interface.FontAwesomeIcon.InfoCircle;
             displayTitle = displayTitle.Substring(2).TrimStart();
@@ -790,6 +718,6 @@ public partial class IntroUi : WindowMediatorSubscriberBase
         _tosParagraphs = [Strings.ToS.Paragraph1, Strings.ToS.Paragraph2, Strings.ToS.Paragraph3, Strings.ToS.Paragraph4, Strings.ToS.Paragraph5, Strings.ToS.Paragraph6];
     }
 
-    [GeneratedRegex("^[A-Z0-9]{64}$")]
+    [GeneratedRegex("^[A-Z0-9]{64}$", RegexOptions.CultureInvariant | RegexOptions.NonBacktracking, matchTimeoutMilliseconds: 1000)]
     private static partial Regex Base32Regex();
 }

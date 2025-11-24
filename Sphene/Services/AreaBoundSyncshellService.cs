@@ -26,15 +26,13 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
     private readonly DalamudUtilService _dalamudUtilService;
     private readonly SpheneMediator _mediator;
     private readonly ApiController _apiController;
-    private readonly IFramework _framework;
     private readonly SpheneConfigService _configService;
     private readonly PairManager _pairManager;
-    private readonly HousingOwnershipService _housingOwnershipService;
     
     private LocationInfo? _lastLocation;
-    private readonly Dictionary<string, AreaBoundSyncshellDto> _areaBoundSyncshells = new();
-    private readonly HashSet<string> _currentlyJoinedAreaSyncshells = new();
-    private readonly HashSet<string> _notifiedSyncshells = new(); // Track which syncshells we've already notified about
+    private readonly Dictionary<string, AreaBoundSyncshellDto> _areaBoundSyncshells = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _currentlyJoinedAreaSyncshells = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _notifiedSyncshells = new(StringComparer.Ordinal); // Track which syncshells we've already notified about
     private readonly Timer _locationCheckTimer;
     private bool _isEnabled = true;
 
@@ -42,19 +40,15 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
         SpheneMediator mediator, 
         DalamudUtilService dalamudUtilService, 
         ApiController apiController,
-        IFramework framework,
         SpheneConfigService configService,
-        PairManager pairManager,
-        HousingOwnershipService housingOwnershipService) : base(logger, mediator)
+        PairManager pairManager) : base(logger, mediator)
     {
         _logger = logger;
         _dalamudUtilService = dalamudUtilService;
         _mediator = mediator;
         _apiController = apiController;
-        _framework = framework;
         _configService = configService;
         _pairManager = pairManager;
-        _housingOwnershipService = housingOwnershipService;
         
         // Check location every 1 second
         _locationCheckTimer = new Timer(CheckLocationChange, null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
@@ -85,7 +79,7 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
 
         try
         {
-            var currentLocation = await _dalamudUtilService.GetMapDataAsync();
+            var currentLocation = await _dalamudUtilService.GetMapDataAsync().ConfigureAwait(false);
             
             if (_lastLocation == null || !LocationsMatch(_lastLocation.Value, currentLocation))
             {
@@ -95,7 +89,7 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
                 _logger.LogDebug("Location changed from {OldLocation} to {NewLocation}", oldLocation, currentLocation);
                 
                 Mediator.Publish(new AreaBoundLocationChangedMessage(currentLocation, oldLocation));
-                await HandleLocationChange(oldLocation, currentLocation);
+                await HandleLocationChange(oldLocation, currentLocation).ConfigureAwait(false);
             }
         }
         catch (Exception ex)
@@ -119,40 +113,22 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
             
             foreach (var syncshellId in _currentlyJoinedAreaSyncshells)
             {
-                if (_areaBoundSyncshells.TryGetValue(syncshellId, out var syncshell))
+                if (_areaBoundSyncshells.TryGetValue(syncshellId, out var syncshell) && !IsLocationInBounds(syncshell, newLocation))
                 {
-                    // Check if location is still in bounds
-                    if (!IsLocationInBounds(syncshell, newLocation))
+                    if (await ShouldLeaveSyncshell(syncshellId).ConfigureAwait(false))
                     {
-                        // Check if current user is the owner of this syncshell
-                        bool isOwner = false;
-                        try
-                        {
-                            var allGroups = await _apiController.GroupsGetAll();
-                            var groupInfo = allGroups.FirstOrDefault(g => g.Group.GID == syncshellId);
-                            isOwner = groupInfo != null && string.Equals(groupInfo.OwnerUID, _apiController.UID, StringComparison.Ordinal);
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogError(ex, "Error checking ownership for syncshell {SyncshellId}", syncshellId);
-                        }
-                        
-                        // Only leave if not the owner
-                        if (!isOwner)
-                        {
-                            syncshellsToLeave.Add(syncshellId);
-                        }
-                        else
-                        {
-                            _logger.LogDebug("Skipping auto-leave for syncshell {SyncshellId} - user is the owner", syncshellId);
-                        }
+                        syncshellsToLeave.Add(syncshellId);
+                    }
+                    else
+                    {
+                        _logger.LogDebug("Skipping auto-leave for syncshell {SyncshellId} - user is the owner", syncshellId);
                     }
                 }
             }
 
             foreach (var syncshellId in syncshellsToLeave)
             {
-                await LeaveSyncshell(syncshellId);
+                await LeaveSyncshell(syncshellId).ConfigureAwait(false);
                 // Remove from notified list when leaving so we can notify again if we re-enter
                 _notifiedSyncshells.Remove(syncshellId);
             }
@@ -184,7 +160,7 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
         {
             try
             {
-                var hasValidConsent = await _apiController.GroupCheckAreaBoundConsent(syncshell.GID);
+                var hasValidConsent = await _apiController.GroupCheckAreaBoundConsent(syncshell.GID).ConfigureAwait(false);
                 if (hasValidConsent)
                 {
                     syncshellsWithConsent.Add(syncshell);
@@ -207,7 +183,7 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
             try
             {
                 _logger.LogDebug("User has valid consent for syncshell {SyncshellId}, auto-joining", syncshell.GID);
-                await JoinAreaBoundSyncshell(syncshell.GID, true, syncshell.Settings.RulesVersion);
+                await JoinAreaBoundSyncshell(syncshell.GID, true, syncshell.Settings.RulesVersion).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -277,6 +253,22 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
         }
     }
 
+    private async Task<bool> ShouldLeaveSyncshell(string syncshellId)
+    {
+        bool isOwner = false;
+        try
+        {
+            var allGroups = await _apiController.GroupsGetAll().ConfigureAwait(false);
+            var groupInfo = allGroups.FirstOrDefault(g => string.Equals(g.Group.GID, syncshellId, StringComparison.Ordinal));
+            isOwner = groupInfo != null && string.Equals(groupInfo.OwnerUID, _apiController.UID, StringComparison.Ordinal);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error checking ownership for syncshell {SyncshellId}", syncshellId);
+        }
+        return !isOwner;
+    }
+
     public async Task JoinAreaBoundSyncshell(string syncshellId, bool acceptRules = false, int rulesVersion = 0)
     {
         try
@@ -292,7 +284,7 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
                 RulesVersion = rulesVersion
             };
             
-            var consentResult = await _apiController.GroupSetAreaBoundConsent(consentDto);
+            var consentResult = await _apiController.GroupSetAreaBoundConsent(consentDto).ConfigureAwait(false);
             if (!consentResult)
             {
                 _logger.LogWarning("Failed to set consent for area-bound syncshell {SyncshellId}", syncshellId);
@@ -300,7 +292,7 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
             }
             
             // Now request to join
-            await _apiController.AreaBoundJoinRequest(syncshellId);
+            await _apiController.AreaBoundJoinRequest(syncshellId).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -310,7 +302,7 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
 
     public async Task LeaveAreaSyncshell(string syncshellId)
     {
-        await LeaveSyncshell(syncshellId);
+        await LeaveSyncshell(syncshellId).ConfigureAwait(false);
     }
 
     private async Task LeaveSyncshell(string syncshellId)
@@ -319,7 +311,7 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
         {
             _logger.LogDebug("Leaving area-bound syncshell {SyncshellId}. Currently joined before removal: [{Joined}]", 
                 syncshellId, string.Join(", ", _currentlyJoinedAreaSyncshells));
-            await _apiController.GroupLeave(new GroupDto(new GroupData(syncshellId)));
+            await _apiController.GroupLeave(new GroupDto(new GroupData(syncshellId))).ConfigureAwait(false);
             
             bool removed = _currentlyJoinedAreaSyncshells.Remove(syncshellId);
             _logger.LogDebug("Removed {SyncshellId} from joined list: {Removed}. Currently joined after removal: [{Joined}]", 
@@ -334,7 +326,7 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
         }
     }
 
-    private bool IsLocationInBounds(AreaBoundSyncshellDto syncshell, LocationInfo location)
+    private static bool IsLocationInBounds(AreaBoundSyncshellDto syncshell, LocationInfo location)
     {
         // Check if any of the syncshell's bound areas match the user's location
         foreach (var boundArea in syncshell.BoundAreas)
@@ -395,7 +387,7 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
         return false;
     }
 
-    private bool LocationsMatch(LocationInfo loc1, LocationInfo loc2)
+    private static bool LocationsMatch(LocationInfo loc1, LocationInfo loc2)
     {
         return loc1.ServerId == loc2.ServerId &&
                loc1.TerritoryId == loc2.TerritoryId &&
@@ -422,7 +414,7 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
                     string.Empty
                 );
                 
-                await _apiController.GroupRespondToAreaBoundJoin(response);
+                await _apiController.GroupRespondToAreaBoundJoin(response).ConfigureAwait(false);
                 _logger.LogDebug("Automatically accepted area-bound join request for syncshell {SyncshellId}", message.JoinRequest.GID);
             }
             catch (Exception ex)
@@ -444,7 +436,7 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
             {
                 try
                 {
-                    var welcomePage = await _apiController.GroupGetWelcomePage(new GroupDto(message.JoinResponse.Group));
+                    var welcomePage = await _apiController.GroupGetWelcomePage(new GroupDto(message.JoinResponse.Group)).ConfigureAwait(false);
                      // Check if welcome page should be shown based on user preference
                 if (welcomePage != null && welcomePage.IsEnabled && welcomePage.ShowOnAreaBoundJoin)
                 {
@@ -459,7 +451,7 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
                         
                         for (int retry = 0; retry < maxRetries; retry++)
                         {
-                            groupFullInfo = _pairManager.Groups.Values.FirstOrDefault(g => g.Group.GID == message.JoinResponse.Group.GID);
+                            groupFullInfo = _pairManager.Groups.Values.FirstOrDefault(g => string.Equals(g.Group.GID, message.JoinResponse.Group.GID, StringComparison.Ordinal));
                             if (groupFullInfo != null)
                             {
                                 _logger.LogDebug("Found GroupFullInfo for GID: {GID} after {Retry} retries", message.JoinResponse.Group.GID, retry);
@@ -468,7 +460,7 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
                             
                             if (retry < maxRetries - 1)
                             {
-                                await Task.Delay(delayMs);
+                                await Task.Delay(delayMs).ConfigureAwait(false);
                             }
                         }
                         
@@ -487,7 +479,7 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
                                 GroupPermissions.NoneSet, // Default permissions
                                 GroupUserPreferredPermissions.NoneSet, // Default user permissions
                                 new GroupPairUserInfo(), // Empty user info
-                                new Dictionary<string, GroupPairUserInfo>() // Empty pair user infos
+                                new Dictionary<string, GroupPairUserInfo>(StringComparer.Ordinal) // Empty pair user infos
                             );
                             Mediator.Publish(new OpenWelcomePageMessage(welcomePage, fallbackGroupFullInfo));
                         }
@@ -508,8 +500,8 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
             // This ensures the UI shows the user as a syncshell member rather than just a visible user
             _ = Task.Run(async () =>
             {
-                await Task.Delay(500); // Small delay to ensure server-side changes are propagated
-                await _apiController.UserGetOnlinePairs(null);
+                await Task.Delay(500).ConfigureAwait(false);
+                await _apiController.UserGetOnlinePairs(null).ConfigureAwait(false);
             });
         }
         else
@@ -524,8 +516,8 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
         // Add a small delay to ensure the connection is fully established
         _ = Task.Run(async () =>
         {
-            await Task.Delay(1000); // Wait 1 second
-            await RefreshAreaBoundSyncshells();
+            await Task.Delay(1000).ConfigureAwait(false);
+            await RefreshAreaBoundSyncshells().ConfigureAwait(false);
         });
     }
 
@@ -545,7 +537,7 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
         {
             try
             {
-                await RefreshAreaBoundSyncshells();
+                await RefreshAreaBoundSyncshells().ConfigureAwait(false);
                 _logger.LogDebug("Successfully refreshed area-bound syncshells after configuration update");
             }
             catch (Exception ex)
@@ -566,7 +558,7 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
                 return;
             }
 
-            var syncshells = await _apiController.GroupGetAreaBoundSyncshells();
+            var syncshells = await _apiController.GroupGetAreaBoundSyncshells().ConfigureAwait(false);
             _areaBoundSyncshells.Clear();
             
             foreach (var syncshell in syncshells)
@@ -577,13 +569,13 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
             _logger.LogDebug("Refreshed {Count} area-bound syncshells", syncshells.Count);
             
             // After reconnection, check if we're still members of area-bound syncshells that are no longer valid for our location
-            await ValidateCurrentAreaBoundMemberships();
+            await ValidateCurrentAreaBoundMemberships().ConfigureAwait(false);
             
             // Check current location against new syncshells
             // Use current location as both old and new to properly handle leaving syncshells
             if (_lastLocation != null)
             {
-                await HandleLocationChange(_lastLocation.Value, _lastLocation.Value);
+                await HandleLocationChange(_lastLocation.Value, _lastLocation.Value).ConfigureAwait(false);
             }
         }
         catch (Exception ex)
@@ -597,7 +589,7 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
         try
         {
             // Get all current syncshell memberships from server
-            var allGroups = await _apiController.GroupsGetAll();
+            var allGroups = await _apiController.GroupsGetAll().ConfigureAwait(false);
             var currentAreaBoundMemberships = allGroups
                 .Where(group => _areaBoundSyncshells.ContainsKey(group.Group.GID))
                 .ToList();
@@ -611,24 +603,17 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
             {
                 foreach (var groupInfo in currentAreaBoundMemberships)
                 {
-                    if (_areaBoundSyncshells.TryGetValue(groupInfo.Group.GID, out var syncshell))
+                    if (_areaBoundSyncshells.TryGetValue(groupInfo.Group.GID, out var syncshell) && !IsLocationInBounds(syncshell, _lastLocation.Value))
                     {
-                        // Check if current location is still valid for this syncshell
-                        if (!IsLocationInBounds(syncshell, _lastLocation.Value))
+                        bool isOwner = string.Equals(groupInfo.OwnerUID, _apiController.UID, StringComparison.Ordinal);
+                        if (!isOwner)
                         {
-                            // Check if current user is the owner of this syncshell
-                            bool isOwner = string.Equals(groupInfo.OwnerUID, _apiController.UID, StringComparison.Ordinal);
-                            
-                            // Only leave if not the owner
-                            if (!isOwner)
-                            {
-                                syncshellsToLeave.Add(groupInfo.Group.GID);
-                                _logger.LogDebug("User is no longer in valid area for syncshell {SyncshellId}, will leave", groupInfo.Group.GID);
-                            }
-                            else
-                            {
-                                _logger.LogDebug("Skipping auto-leave for syncshell {SyncshellId} after reconnection - user is the owner", groupInfo.Group.GID);
-                            }
+                            syncshellsToLeave.Add(groupInfo.Group.GID);
+                            _logger.LogDebug("User is no longer in valid area for syncshell {SyncshellId}, will leave", groupInfo.Group.GID);
+                        }
+                        else
+                        {
+                            _logger.LogDebug("Skipping auto-leave for syncshell {SyncshellId} after reconnection - user is the owner", groupInfo.Group.GID);
                         }
                     }
                 }
@@ -636,7 +621,7 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
                 // Leave invalid syncshells
                 foreach (var syncshellId in syncshellsToLeave)
                 {
-                    await LeaveSyncshell(syncshellId);
+                    await LeaveSyncshell(syncshellId).ConfigureAwait(false);
                     // Remove from notified list when leaving so we can notify again if we re-enter
                     _notifiedSyncshells.Remove(syncshellId);
                     _logger.LogDebug("Left area-bound syncshell {SyncshellId} due to invalid location after reconnection", syncshellId);
@@ -645,7 +630,7 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
 
             // Update our local tracking with the validated memberships
             _currentlyJoinedAreaSyncshells.Clear();
-            var remainingMemberships = currentAreaBoundMemberships.Select(g => g.Group.GID).Except(syncshellsToLeave);
+            var remainingMemberships = currentAreaBoundMemberships.Select(g => g.Group.GID).Except(syncshellsToLeave, StringComparer.Ordinal);
             _currentlyJoinedAreaSyncshells.UnionWith(remainingMemberships);
         }
         catch (Exception ex)
@@ -664,7 +649,7 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
         try
         {
             _logger.LogDebug("Resetting area-bound consent for syncshell: {SyncshellId}", syncshellId);
-            return await _apiController.GroupResetAreaBoundConsent(syncshellId);
+            return await _apiController.GroupResetAreaBoundConsent(syncshellId).ConfigureAwait(false);
         }
         catch (Exception ex)
         {

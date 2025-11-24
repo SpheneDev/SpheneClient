@@ -5,7 +5,7 @@ namespace Sphene.Configuration;
 
 public static class ThemePresets
 {
-    public static Dictionary<string, ThemeConfiguration> BuiltInThemes { get; } = new()
+    public static Dictionary<string, ThemeConfiguration> BuiltInThemes { get; } = new(StringComparer.Ordinal)
     {
         ["Default Sphene"] = CreateDefaultSpheneTheme(),
         ["Minimal"] = CreateMinimalTheme()
@@ -216,7 +216,7 @@ public static class ThemePresets
             CompactUpdateHintPaddingY = 0.0f,
 
             // Default Button Styles entries
-            ButtonStyles = new Dictionary<string, ButtonStyleOverride>
+            ButtonStyles = new Dictionary<string, ButtonStyleOverride>(StringComparer.Ordinal)
             {
                 // TopTab buttons
                 [ButtonStyleKeys.TopTab_User] = new ButtonStyleOverride
@@ -515,7 +515,7 @@ public static class ThemePresets
     // Method to get theme values as dictionary for easy sharing
     public static Dictionary<string, object> GetThemeValues(ThemeConfiguration theme)
     {
-        var values = new Dictionary<string, object>();
+        var values = new Dictionary<string, object>(StringComparer.Ordinal);
         var properties = typeof(ThemeConfiguration).GetProperties()
             .Where(p => p.CanRead && (p.PropertyType == typeof(float) || 
                                      p.PropertyType == typeof(Vector2) || 

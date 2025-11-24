@@ -25,11 +25,15 @@ public sealed class CharaDataCharacterHandler : DisposableMediatorSubscriberBase
         _gameObjectHandlerFactory = gameObjectHandlerFactory;
         _dalamudUtilService = dalamudUtilService;
         _ipcManager = ipcManager;
-        mediator.Subscribe<GposeEndMessage>(this, (_) =>
+        mediator.Subscribe<GposeEndMessage>(this, (msg) =>
         {
             foreach (var chara in _handledCharaData)
             {
-                RevertHandledChara(chara);
+                _ = Task.Run(async () =>
+                {
+                    try { await RevertHandledChara(chara).ConfigureAwait(false); }
+                    catch (Exception ex) { Logger.LogError(ex, "Failed to revert handled chara on Gpose end for {Name}", chara.Name); }
+                });
             }
         });
 
@@ -56,7 +60,11 @@ public sealed class CharaDataCharacterHandler : DisposableMediatorSubscriberBase
         base.Dispose(disposing);
         foreach (var chara in _handledCharaData)
         {
-            RevertHandledChara(chara);
+            _ = Task.Run(async () =>
+            {
+                try { await RevertHandledChara(chara).ConfigureAwait(false); }
+                catch (Exception ex) { Logger.LogError(ex, "Failed to revert handled chara during dispose for {Name}", chara.Name); }
+            });
         }
     }
 

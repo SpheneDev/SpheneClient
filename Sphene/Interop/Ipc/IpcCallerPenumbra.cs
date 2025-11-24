@@ -208,14 +208,15 @@ public sealed class IpcCallerPenumbra : DisposableMediatorSubscriberBase, IIpcCa
 
     private void ScheduleDebouncedRedraw(int delayMs = 600)
     {
-        try { _debouncedRedrawCts.Cancel(); } catch { }
-        try { _debouncedRedrawCts.Dispose(); } catch { }
+        try { _debouncedRedrawCts.Cancel(); } catch (Exception ex) { Logger.LogDebug(ex, "Failed to cancel debounced redraw CTS"); }
+        try { _debouncedRedrawCts.Dispose(); } catch (Exception ex) { Logger.LogDebug(ex, "Failed to dispose debounced redraw CTS"); }
         _debouncedRedrawCts = new CancellationTokenSource();
         var token = _debouncedRedrawCts.Token;
 
         _ = Task.Run(async () =>
         {
-            try { await Task.Delay(delayMs, token).ConfigureAwait(false); } catch { return; }
+            try { await Task.Delay(delayMs, token).ConfigureAwait(false); }
+            catch (Exception ex) { Logger.LogDebug(ex, "Debounced redraw delay failed or cancelled"); return; }
             if (token.IsCancellationRequested) return;
 
             try
@@ -226,7 +227,7 @@ public sealed class IpcCallerPenumbra : DisposableMediatorSubscriberBase, IIpcCa
                     _penumbraRedraw.Invoke(gameObject!.ObjectIndex, setting: RedrawType.Redraw);
                 }).ConfigureAwait(false);
             }
-            catch { }
+            catch (Exception ex) { Logger.LogDebug(ex, "Debounced redraw failed"); }
         }, token);
     }
 
@@ -237,7 +238,7 @@ public sealed class IpcCallerPenumbra : DisposableMediatorSubscriberBase, IIpcCa
         return await _dalamudUtil.RunOnFrameworkThread(() =>
         {
             var collName = "Sphene_" + uid;
-            var collId = _penumbraCreateNamedTemporaryCollection.Invoke("Sphene", collName, out var actualCollId);
+            _penumbraCreateNamedTemporaryCollection.Invoke("Sphene", collName, out var actualCollId);
             logger.LogTrace("Creating Temp Collection {collName}, GUID: {collId}", collName, actualCollId);
             return actualCollId;
 

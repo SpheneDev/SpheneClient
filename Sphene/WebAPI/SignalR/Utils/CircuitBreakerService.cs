@@ -5,17 +5,11 @@ using Microsoft.Extensions.Logging;
 
 namespace Sphene.WebAPI.SignalR.Utils;
 
-public enum CircuitBreakerState
-{
-    Closed,    // Normal operation
-    Open,      // Circuit is open, calls fail fast
-    HalfOpen   // Testing if service has recovered
-}
 
 public class CircuitBreakerService : IDisposable
 {
     private readonly ILogger<CircuitBreakerService> _logger;
-    private readonly object _lockObject = new();
+    private readonly Lock _lockObject = new();
     private readonly Timer _resetTimer;
     
     private CircuitBreakerState _state = CircuitBreakerState.Closed;
@@ -85,7 +79,8 @@ public class CircuitBreakerService : IDisposable
 
     private void OnSuccess()
     {
-        lock (_lockObject)
+        _lockObject.Enter();
+        try
         {
             if (_state == CircuitBreakerState.HalfOpen)
             {
@@ -93,22 +88,24 @@ public class CircuitBreakerService : IDisposable
                 _state = CircuitBreakerState.Closed;
                 _halfOpenAttempts = 0;
             }
-            
             _failureCount = 0;
+        }
+        finally
+        {
+            _lockObject.Exit();
         }
     }
 
     private void OnFailure(Exception exception, string operationName)
     {
-        lock (_lockObject)
+        _lockObject.Enter();
+        try
         {
             _failureCount++;
             _lastFailureTime = DateTime.UtcNow;
-            
             _logger.LogWarning(exception, 
                 "Circuit breaker recorded failure for operation: {operation}. Failure count: {count}", 
                 operationName, _failureCount);
-
             if (_state == CircuitBreakerState.HalfOpen)
             {
                 _halfOpenAttempts++;
@@ -125,13 +122,18 @@ public class CircuitBreakerService : IDisposable
                 _state = CircuitBreakerState.Open;
             }
         }
+        finally
+        {
+            _lockObject.Exit();
+        }
     }
 
     private void CheckForReset(object? state)
     {
         if (_disposed) return;
         
-        lock (_lockObject)
+        _lockObject.Enter();
+        try
         {
             if (_state == CircuitBreakerState.Open && 
                 DateTime.UtcNow - _lastFailureTime > TimeSpan.FromSeconds(TimeoutSeconds))
@@ -141,22 +143,32 @@ public class CircuitBreakerService : IDisposable
                 _halfOpenAttempts = 0;
             }
         }
+        finally
+        {
+            _lockObject.Exit();
+        }
     }
 
     public void Reset()
     {
-        lock (_lockObject)
+        _lockObject.Enter();
+        try
         {
             _logger.LogInformation("Circuit breaker manually reset");
             _state = CircuitBreakerState.Closed;
             _failureCount = 0;
             _halfOpenAttempts = 0;
         }
+        finally
+        {
+            _lockObject.Exit();
+        }
     }
 
     public CircuitBreakerStatus GetStatus()
     {
-        lock (_lockObject)
+        _lockObject.Enter();
+        try
         {
             return new CircuitBreakerStatus
             {
@@ -166,28 +178,26 @@ public class CircuitBreakerService : IDisposable
                 HalfOpenAttempts = _halfOpenAttempts
             };
         }
+        finally
+        {
+            _lockObject.Exit();
+        }
+    }
+
+    protected virtual void Dispose(bool disposing)
+    {
+        if (_disposed) return;
+        _disposed = true;
+        if (disposing)
+        {
+            _resetTimer?.Dispose();
+        }
+        _logger.LogDebug("Circuit breaker service disposed");
     }
 
     public void Dispose()
     {
-        if (_disposed) return;
-        
-        _disposed = true;
-        _resetTimer?.Dispose();
-        _logger.LogDebug("Circuit breaker service disposed");
+        Dispose(true);
+        GC.SuppressFinalize(this);
     }
-}
-
-public class CircuitBreakerOpenException : Exception
-{
-    public CircuitBreakerOpenException(string message) : base(message) { }
-    public CircuitBreakerOpenException(string message, Exception innerException) : base(message, innerException) { }
-}
-
-public class CircuitBreakerStatus
-{
-    public CircuitBreakerState State { get; set; }
-    public int FailureCount { get; set; }
-    public DateTime LastFailureTime { get; set; }
-    public int HalfOpenAttempts { get; set; }
 }

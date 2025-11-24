@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Text.Json;
+using System.Threading.Tasks;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
 using Sphene.SpheneConfiguration;
@@ -42,7 +43,7 @@ public static class ThemeManager
                 var oldThemeFiles = Directory.GetFiles(_oldThemesDirectory, "*.json");
                 if (oldThemeFiles.Length > 0)
                 {
-                    _logger?.LogDebug($"Found {oldThemeFiles.Length} themes to migrate from old location");
+                    _logger?.LogDebug("Found {themeCount} themes to migrate from old location", oldThemeFiles.Length);
                     
                     foreach (var oldFile in oldThemeFiles)
                     {
@@ -52,11 +53,11 @@ public static class ThemeManager
                         if (!File.Exists(newFile))
                         {
                             File.Copy(oldFile, newFile);
-                            _logger?.LogDebug($"Migrated theme: {fileName}");
+                            _logger?.LogDebug("Migrated theme: {fileName}", fileName);
                         }
                     }
                     
-                    _logger?.LogInformation($"Successfully migrated {oldThemeFiles.Length} themes to new location: {_themesDirectory}");
+                    _logger?.LogInformation("Successfully migrated {themeCount} themes to new location: {dir}", oldThemeFiles.Length, _themesDirectory);
                 }
             }
         }
@@ -87,8 +88,8 @@ public static class ThemeManager
                 Converters = { new Vector4JsonConverter(), new Vector2JsonConverter() }
             };
             var json = JsonSerializer.Serialize(theme, options);
-            await File.WriteAllTextAsync(filePath, json);
-            _logger?.LogDebug($"Theme '{themeName}' saved to '{filePath}'");
+            await File.WriteAllTextAsync(filePath, json).ConfigureAwait(false);
+            _logger?.LogDebug("Theme '{themeName}' saved to '{filePath}'", themeName, filePath);
             
             // Save the selected theme name to configuration
             if (_configService != null)
@@ -101,7 +102,7 @@ public static class ThemeManager
         }
         catch (Exception ex)
         {
-            _logger?.LogError(ex, $"Failed to save theme '{themeName}'");
+            _logger?.LogError(ex, "Failed to save theme '{themeName}'", themeName);
             return false;
         }
     }
@@ -121,7 +122,7 @@ public static class ThemeManager
 
             if (!File.Exists(filePath))
             {
-                _logger?.LogWarning($"Theme file not found: {filePath}");
+                _logger?.LogWarning("Theme file not found: {filePath}", filePath);
                 return null;
             }
 
@@ -133,12 +134,12 @@ public static class ThemeManager
             };
 
             var theme = JsonSerializer.Deserialize<ThemeConfiguration>(json, options);
-            _logger?.LogInformation($"Theme '{themeName}' loaded successfully from {filePath}");
+            _logger?.LogInformation("Theme '{themeName}' loaded successfully from {filePath}", themeName, filePath);
             return theme;
         }
         catch (Exception ex)
         {
-            _logger?.LogError(ex, $"Failed to load theme '{themeName}'");
+            _logger?.LogError(ex, "Failed to load theme '{themeName}'", themeName);
             return null;
         }
     }
@@ -183,29 +184,29 @@ public static class ThemeManager
 
             if (!File.Exists(filePath))
             {
-                _logger?.LogWarning($"Theme file not found: {filePath}");
+                _logger?.LogWarning("Theme file not found: {filePath}", filePath);
                 return false;
             }
 
             File.Delete(filePath);
-            _logger?.LogInformation($"Theme '{themeName}' deleted successfully");
+            _logger?.LogInformation("Theme '{themeName}' deleted successfully", themeName);
             try
             {
                 if (File.Exists(legacyFilePath))
                 {
                     File.Delete(legacyFilePath);
-                    _logger?.LogDebug($"Deleted legacy theme file: {legacyFilePath}");
+                    _logger?.LogDebug("Deleted legacy theme file: {legacyFilePath}", legacyFilePath);
                 }
             }
             catch (Exception ex)
             {
-                _logger?.LogWarning(ex, $"Failed to delete legacy theme file: {legacyFilePath}");
+                _logger?.LogWarning(ex, "Failed to delete legacy theme file: {legacyFilePath}", legacyFilePath);
             }
             return true;
         }
         catch (Exception ex)
         {
-            _logger?.LogError(ex, $"Failed to delete theme '{themeName}'");
+            _logger?.LogError(ex, "Failed to delete theme '{themeName}'", themeName);
             return false;
         }
     }
@@ -238,131 +239,5 @@ public static class ThemeManager
     public static bool ShouldAutoLoadTheme()
     {
         return _configService?.Current.AutoLoadThemeOnStartup ?? true;
-    }
-}
-
-// Custom JSON converter for Vector4 since System.Numerics.Vector4 doesn't serialize well by default
-public class Vector4JsonConverter : JsonConverter<System.Numerics.Vector4>
-{
-    public override System.Numerics.Vector4 Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
-    {
-        if (reader.TokenType != JsonTokenType.StartObject)
-            throw new JsonException();
-
-        float x = 0, y = 0, z = 0, w = 0;
-
-        while (reader.Read())
-        {
-            if (reader.TokenType == JsonTokenType.EndObject)
-                break;
-
-            if (reader.TokenType == JsonTokenType.PropertyName)
-            {
-                var propertyName = reader.GetString();
-                reader.Read();
-
-                switch (propertyName?.ToLowerInvariant())
-                {
-                    case "x":
-                        x = reader.GetSingle();
-                        break;
-                    case "y":
-                        y = reader.GetSingle();
-                        break;
-                    case "z":
-                        z = reader.GetSingle();
-                        break;
-                    case "w":
-                        w = reader.GetSingle();
-                        break;
-                }
-            }
-        }
-
-        return new System.Numerics.Vector4(x, y, z, w);
-    }
-
-    public override void Write(Utf8JsonWriter writer, System.Numerics.Vector4 value, JsonSerializerOptions options)
-    {
-        writer.WriteStartObject();
-        writer.WriteNumber("x", RoundSmallValue(value.X));
-        writer.WriteNumber("y", RoundSmallValue(value.Y));
-        writer.WriteNumber("z", RoundSmallValue(value.Z));
-        writer.WriteNumber("w", RoundSmallValue(value.W));
-        writer.WriteEndObject();
-    }
-
-    private static float RoundSmallValue(float value)
-    {
-        // Only round to zero if the value is extremely small (likely floating-point error)
-        // Otherwise preserve the precision to maintain exact color values
-        if (Math.Abs(value) < 1e-10f)
-            return 0f;
-        
-        // For very small values that might serialize as scientific notation,
-        // round to a reasonable precision (6 decimal places) to avoid E notation
-        if (Math.Abs(value) < 1e-5f)
-            return (float)Math.Round(value, 6);
-            
-        return value;
-    }
-}
-
-// Custom JSON converter for Vector2 since System.Numerics.Vector2 doesn't serialize well by default
-public class Vector2JsonConverter : JsonConverter<System.Numerics.Vector2>
-{
-    public override System.Numerics.Vector2 Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
-    {
-        if (reader.TokenType != JsonTokenType.StartObject)
-            throw new JsonException();
-
-        float x = 0, y = 0;
-
-        while (reader.Read())
-        {
-            if (reader.TokenType == JsonTokenType.EndObject)
-                break;
-
-            if (reader.TokenType == JsonTokenType.PropertyName)
-            {
-                var propertyName = reader.GetString();
-                reader.Read();
-
-                switch (propertyName?.ToLowerInvariant())
-                {
-                    case "x":
-                        x = reader.GetSingle();
-                        break;
-                    case "y":
-                        y = reader.GetSingle();
-                        break;
-                }
-            }
-        }
-
-        return new System.Numerics.Vector2(x, y);
-    }
-
-    public override void Write(Utf8JsonWriter writer, System.Numerics.Vector2 value, JsonSerializerOptions options)
-    {
-        writer.WriteStartObject();
-        writer.WriteNumber("x", RoundSmallValue(value.X));
-        writer.WriteNumber("y", RoundSmallValue(value.Y));
-        writer.WriteEndObject();
-    }
-
-    private static float RoundSmallValue(float value)
-    {
-        // Only round to zero if the value is extremely small (likely floating-point error)
-        // Otherwise preserve the precision to maintain exact color values
-        if (Math.Abs(value) < 1e-10f)
-            return 0f;
-        
-        // For very small values that might serialize as scientific notation,
-        // round to a reasonable precision (6 decimal places) to avoid E notation
-        if (Math.Abs(value) < 1e-5f)
-            return (float)Math.Round(value, 6);
-            
-        return value;
     }
 }

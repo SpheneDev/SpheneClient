@@ -20,10 +20,10 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
     private readonly AcknowledgmentBatchingService _batchingService;
     
     // Thread-safe storage for latest acknowledgment per user pair with timestamps
-    private readonly ConcurrentDictionary<string, LatestAcknowledgmentInfo> _userLatestAcknowledgments = new();
+    private readonly ConcurrentDictionary<string, LatestAcknowledgmentInfo> _userLatestAcknowledgments = new(StringComparer.Ordinal);
     
     // Helper class to store latest acknowledgment info per user
-    private class LatestAcknowledgmentInfo
+    private sealed class LatestAcknowledgmentInfo
     {
         public string AcknowledgmentId { get; set; }
         public DateTime CreatedAt { get; set; }
@@ -69,7 +69,7 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
         if (string.IsNullOrEmpty(acknowledgmentId)) return null;
         
         var parts = acknowledgmentId.Split('_');
-        if (parts.Length >= 3 && parts[0] == "session")
+        if (parts.Length >= 3 && string.Equals(parts[0], "session", StringComparison.Ordinal))
         {
             return $"{parts[0]}_{parts[1]}_{parts[2]}";
         }
@@ -78,9 +78,9 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
     }
     
     // Check if acknowledgment ID is valid hash+version format
-    public bool IsValidHashVersion(string hashVersionKey)
+    public static bool IsValidHashVersion(string hashVersionKey)
     {
-        return !string.IsNullOrEmpty(hashVersionKey) && hashVersionKey.Contains('_');
+        return !string.IsNullOrEmpty(hashVersionKey) && hashVersionKey.Contains("_", StringComparison.Ordinal);
     }
     
     // Set pending acknowledgment for hash-based system - only latest per user
@@ -117,7 +117,7 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
             try
             {
                 var pair = _getPairFunc(recipient);
-                if (pair != null && pair.LastAcknowledgmentId == existing.AcknowledgmentId)
+                if (pair != null && string.Equals(pair.LastAcknowledgmentId, existing.AcknowledgmentId, StringComparison.Ordinal))
                 {
                     // Clear previous pending state on the pair
                     pair.ClearPendingAcknowledgmentForce(_messageService);
@@ -150,7 +150,7 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
             latestInfo,
             (key, existing) => latestInfo);
         
-        if (oldInfo != null && oldInfo.AcknowledgmentId != hashVersionKey)
+        if (oldInfo != null && !string.Equals(oldInfo.AcknowledgmentId, hashVersionKey, StringComparison.Ordinal))
         {
             _logger.LogDebug("Replaced acknowledgment {oldHashVersion} with {newHashVersion} for user {user}", 
                 oldInfo.AcknowledgmentId, hashVersionKey, userKey);
@@ -184,19 +184,7 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
 
 
     
-    // Extract timestamp from acknowledgment ID for comparison
-    private static long ExtractTimestampFromAcknowledgmentId(string acknowledgmentId)
-    {
-        if (string.IsNullOrEmpty(acknowledgmentId)) return 0;
-        
-        var parts = acknowledgmentId.Split('_');
-        if (parts.Length >= 2 && parts[0] == "session" && long.TryParse(parts[1], out var timestamp))
-        {
-            return timestamp;
-        }
-        
-        return 0;
-    }
+    
     
     // Process received acknowledgment for hash-based system
     public bool ProcessReceivedAcknowledgment(string hashVersionKey, UserData acknowledgingUser)
@@ -211,7 +199,7 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
         
         // Check if this acknowledgment matches the latest one for this user
         if (!_userLatestAcknowledgments.TryGetValue(userKey, out var latestInfo) || 
-            latestInfo.AcknowledgmentId != hashVersionKey)
+            !string.Equals(latestInfo.AcknowledgmentId, hashVersionKey, StringComparison.Ordinal))
         {
             _logger.LogDebug("Acknowledgment {hashVersionKey} from {user} is not the latest or not found", hashVersionKey, acknowledgingUser.AliasOrUID);
             return false;
@@ -224,7 +212,7 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
         var pair = _getPairFunc(acknowledgingUser);
         if (pair != null)
         {
-            pair.UpdateAcknowledgmentStatus(hashVersionKey, true, DateTimeOffset.UtcNow);
+            pair.UpdateAcknowledgmentStatus(hashVersionKey, true, DateTimeOffset.UtcNow).GetAwaiter().GetResult();
             _logger.LogDebug("Updated pair acknowledgment status for user {user} - HashVersion: {hashVersionKey}", acknowledgingUser.AliasOrUID, hashVersionKey);
             
             // Add success notification
@@ -284,6 +272,8 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
             0,
             DateTime.UtcNow
         ));
+        var stats = _batchingService.GetStatistics();
+        Logger.LogDebug("Batch stats - Pending: {pending}, Users: {users}", stats.PendingBatches, stats.TotalPendingUsers);
         
         // Keep legacy RefreshUiMessage for backward compatibility
         Mediator.Publish(new RefreshUiMessage());
@@ -301,7 +291,8 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
     {
         return _userLatestAcknowledgments.ToDictionary(
             kvp => kvp.Key,
-            kvp => kvp.Value.AcknowledgmentId
+            kvp => kvp.Value.AcknowledgmentId,
+            StringComparer.Ordinal
         );
     }
     
@@ -374,7 +365,7 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
         var pair = _getPairFunc(user);
         if (pair != null)
         {
-            await pair.ClearPendingAcknowledgment(acknowledgmentId, _messageService);
+            await pair.ClearPendingAcknowledgment(acknowledgmentId, _messageService).ConfigureAwait(false);
             _logger.LogDebug("Cleared pending acknowledgment {ackId} from pair for user {user}", acknowledgmentId, user.AliasOrUID);
         }
         else
@@ -397,7 +388,7 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
             if (latestInfo.CreatedAt < cutoffTime)
             {
                 // Find the user data for this key - we need to get it from pairs
-                var allPairs = new List<UserData>();
+                
                 // Since we don't have direct access to all users, we'll use the acknowledgment ID to find the user
                 // This is a simplified approach - in practice you might need a different way to resolve users
                 var dummyUser = new UserData(userKey);
@@ -414,12 +405,12 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
             {
                 // Clear the pending acknowledgment from pair with timeout notification
                 var pair = _getPairFunc(user);
-                if (pair != null && pair.LastAcknowledgmentId == ackId)
+                if (pair != null && string.Equals(pair.LastAcknowledgmentId, ackId, StringComparison.Ordinal))
                 {
                     pair.ClearPendingAcknowledgmentForce(_messageService);
                 }
                 
-                await ClearPendingStatusFromPair(user, ackId);
+                await ClearPendingStatusFromPair(user, ackId).ConfigureAwait(false);
                 _logger.LogInformation("Removed old pending acknowledgment {ackId} for user {user}", ackId, userKey);
                 
                 // Clean up related notifications
@@ -477,7 +468,7 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
     {
         // In the new model, we don't have sessions to clean up since we only store latest acknowledgments
         // This method is kept for compatibility but delegates to CleanupOldPendingAcknowledgments
-        await CleanupOldPendingAcknowledgments(maxAge);
+        await CleanupOldPendingAcknowledgments(maxAge).ConfigureAwait(false);
     }
     
     // Get acknowledgment status for UI display
@@ -496,20 +487,7 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
         return statuses;
     }
     
-    // Extract timestamp from session ID
-    private static bool TryExtractTimestamp(string sessionId, out long timestamp)
-    {
-        timestamp = 0;
-        if (string.IsNullOrEmpty(sessionId)) return false;
-        
-        var parts = sessionId.Split('_');
-        if (parts.Length >= 2 && parts[0] == "session")
-        {
-            return long.TryParse(parts[1], out timestamp);
-        }
-        
-        return false;
-    }
+    
     
     public string CurrentSessionId => _currentSessionId;
     // Process timeout acknowledgment - mark as failed and update pair status
@@ -525,7 +503,7 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
         var timedOutUsers = new List<string>();
         foreach (var kvp in _userLatestAcknowledgments)
         {
-            if (kvp.Value.AcknowledgmentId == hashVersionKey)
+            if (string.Equals(kvp.Value.AcknowledgmentId, hashVersionKey, StringComparison.Ordinal))
             {
                 timedOutUsers.Add(kvp.Key);
             }
@@ -533,14 +511,14 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
         
         foreach (var userKey in timedOutUsers)
         {
-            if (_userLatestAcknowledgments.TryRemove(userKey, out var latestInfo))
+            if (_userLatestAcknowledgments.TryRemove(userKey, out _))
             {
                 // Try to find the user and update pair status
                 var userData = new UserData(userKey, null);
                 var pair = _getPairFunc(userData);
                 if (pair != null)
                 {
-                    pair.UpdateAcknowledgmentStatus(hashVersionKey, false, DateTimeOffset.UtcNow);
+                    pair.UpdateAcknowledgmentStatus(hashVersionKey, false, DateTimeOffset.UtcNow).GetAwaiter().GetResult();
                     _logger.LogWarning("Updated pair acknowledgment status for timeout - User: {user}, HashVersion: {hashVersionKey}", userKey, hashVersionKey);
                     
                     // Add timeout notification

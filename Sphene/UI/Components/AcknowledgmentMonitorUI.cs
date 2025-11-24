@@ -19,7 +19,6 @@ public class AcknowledgmentMonitorUI : WindowMediatorSubscriberBase
 {
     private readonly EnhancedAcknowledgmentManager _acknowledgmentManager;
     private readonly SessionAcknowledgmentManager _sessionAcknowledgmentManager;
-    private readonly UiSharedService _uiSharedService;
     private readonly ApiController _apiController;
     private AcknowledgmentConfiguration _config;
     private AcknowledgmentMetrics _metrics;
@@ -28,12 +27,11 @@ public class AcknowledgmentMonitorUI : WindowMediatorSubscriberBase
     private bool _showSessionDetails = false;
     
     public AcknowledgmentMonitorUI(ILogger<AcknowledgmentMonitorUI> logger, EnhancedAcknowledgmentManager acknowledgmentManager, 
-        SessionAcknowledgmentManager sessionAcknowledgmentManager, UiSharedService uiSharedService, SpheneMediator mediator, PerformanceCollectorService performanceCollectorService, ApiController apiController)
+        SessionAcknowledgmentManager sessionAcknowledgmentManager, SpheneMediator mediator, PerformanceCollectorService performanceCollectorService, ApiController apiController)
         : base(logger, mediator, "Acknowledgment Monitor###SpheneAckMonitor", performanceCollectorService)
     {
         _acknowledgmentManager = acknowledgmentManager;
         _sessionAcknowledgmentManager = sessionAcknowledgmentManager;
-        _uiSharedService = uiSharedService;
         _apiController = apiController;
         _config = _acknowledgmentManager.GetConfiguration();
         _metrics = _acknowledgmentManager.GetMetrics();
@@ -62,6 +60,7 @@ public class AcknowledgmentMonitorUI : WindowMediatorSubscriberBase
         
         if (ImGui.CollapsingHeader("Acknowledgment System Monitor"))
         {
+            UiSharedService.TextWrapped("Monitor and configure acknowledgment batching, retries, and sessions.");
             DrawMetricsOverview();
             ImGui.Separator();
             DrawSessionInformation();

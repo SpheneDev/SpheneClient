@@ -30,9 +30,9 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
     private readonly CharaDataGposeTogetherManager _charaDataGposeTogetherManager;
     private readonly ServerConfigurationManager _serverConfigurationManager;
     private readonly UiSharedService _uiSharedService;
-    private CancellationTokenSource _closalCts = new();
+    private CancellationTokenSource? _closalCts;
     private bool _disableUI = false;
-    private CancellationTokenSource _disposalCts = new();
+    private CancellationTokenSource? _disposalCts;
     private string _exportDescription = string.Empty;
     private string _filterCodeNote = string.Empty;
     private string _filterDescription = string.Empty;
@@ -123,7 +123,7 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
             return;
         }
 
-        _closalCts.Cancel();
+        _closalCts?.Cancel();
         SelectedDtoId = string.Empty;
         _filteredDict = null;
         _sharedWithYouOwnerFilter = string.Empty;
@@ -136,6 +136,7 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
     public override void OnOpen()
     {
         _closalCts = _closalCts.CancelRecreate();
+        _disposalCts = _disposalCts.CancelRecreate();
     }
 
     protected override void Dispose(bool disposing)
@@ -376,7 +377,7 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
                 {
                     unsafe
                     {
-                        _dalamudUtilService.GposeTarget = (FFXIVClientStructs.FFXIV.Client.Game.Object.GameObject*)actor.Address;
+                        DalamudUtilService.GposeTarget = (FFXIVClientStructs.FFXIV.Client.Game.Object.GameObject*)actor.Address;
                     }
                 }
                 ImGui.SameLine();
@@ -689,7 +690,8 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
                 {
                     if (_uiSharedService.IconTextButton(FontAwesomeIcon.ArrowCircleDown, "Download your Character Data"))
                     {
-                        _ = _charaDataManager.GetAllData(_disposalCts.Token);
+                        var token = _disposalCts?.Token ?? CancellationToken.None;
+                        _ = _charaDataManager.GetAllData(token);
                     }
                 }
                 if (_charaDataManager.DataGetTimeoutTask != null && !_charaDataManager.DataGetTimeoutTask.IsCompleted)

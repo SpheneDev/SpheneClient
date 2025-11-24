@@ -6,6 +6,7 @@ using Sphene.Utils;
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
 using System.Collections.Immutable;
+using System.Threading;
 
 namespace Sphene.FileCache;
 
@@ -103,6 +104,9 @@ public sealed class CacheMonitor : DisposableMediatorSubscriberBase
     record WatcherChange(WatcherChangeTypes ChangeType, string? OldPath = null);
     private readonly Dictionary<string, WatcherChange> _watcherChanges = new Dictionary<string, WatcherChange>(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, WatcherChange> _spheneChanges = new Dictionary<string, WatcherChange>(StringComparer.OrdinalIgnoreCase);
+    private readonly System.Threading.Lock _watcherChangesLock = new();
+    private readonly System.Threading.Lock _spheneChangesLock = new();
+    private readonly System.Threading.Lock _fileDbLock = new();
 
     public void StopMonitoring()
     {
@@ -154,9 +158,14 @@ public sealed class CacheMonitor : DisposableMediatorSubscriberBase
 
         if (!AllowedFileExtensions.Any(ext => e.FullPath.EndsWith(ext, StringComparison.OrdinalIgnoreCase))) return;
 
-        lock (_watcherChanges)
+        _spheneChangesLock.Enter();
+        try
         {
             _spheneChanges[e.FullPath] = new(e.ChangeType);
+        }
+        finally
+        {
+            _spheneChangesLock.Exit();
         }
 
         _ = SpheneWatcherExecution();
@@ -201,9 +210,14 @@ public sealed class CacheMonitor : DisposableMediatorSubscriberBase
         if (e.ChangeType is not (WatcherChangeTypes.Changed or WatcherChangeTypes.Deleted or WatcherChangeTypes.Created))
             return;
 
-        lock (_watcherChanges)
+        _watcherChangesLock.Enter();
+        try
         {
             _watcherChanges[e.FullPath] = new(e.ChangeType);
+        }
+        finally
+        {
+            _watcherChangesLock.Exit();
         }
 
         Logger.LogTrace("FSW {event}: {path}", e.ChangeType, e.FullPath);
@@ -216,28 +230,36 @@ public sealed class CacheMonitor : DisposableMediatorSubscriberBase
         if (Directory.Exists(e.FullPath))
         {
             var directoryFiles = Directory.GetFiles(e.FullPath, "*.*", SearchOption.AllDirectories);
-            lock (_watcherChanges)
+            _watcherChangesLock.Enter();
+            try
             {
                 foreach (var file in directoryFiles)
                 {
                     if (!AllowedFileExtensions.Any(ext => file.EndsWith(ext, StringComparison.OrdinalIgnoreCase))) continue;
                     var oldPath = file.Replace(e.FullPath, e.OldFullPath, StringComparison.OrdinalIgnoreCase);
-
                     _watcherChanges.Remove(oldPath);
                     _watcherChanges[file] = new(WatcherChangeTypes.Renamed, oldPath);
                     Logger.LogTrace("FSW Renamed: {path} -> {new}", oldPath, file);
-
                 }
+            }
+            finally
+            {
+                _watcherChangesLock.Exit();
             }
         }
         else
         {
             if (!AllowedFileExtensions.Any(ext => e.FullPath.EndsWith(ext, StringComparison.OrdinalIgnoreCase))) return;
 
-            lock (_watcherChanges)
+            _watcherChangesLock.Enter();
+            try
             {
                 _watcherChanges.Remove(e.OldFullPath);
                 _watcherChanges[e.FullPath] = new(WatcherChangeTypes.Renamed, e.OldFullPath);
+            }
+            finally
+            {
+                _watcherChangesLock.Exit();
             }
 
             Logger.LogTrace("FSW Renamed: {path} -> {new}", e.OldFullPath, e.FullPath);
@@ -257,8 +279,15 @@ public sealed class CacheMonitor : DisposableMediatorSubscriberBase
         var token = _spheneFswCts.Token;
         var delay = TimeSpan.FromSeconds(5);
         Dictionary<string, WatcherChange> changes;
-        lock (_spheneChanges)
+        _spheneChangesLock.Enter();
+        try
+        {
             changes = _spheneChanges.ToDictionary(t => t.Key, t => t.Value, StringComparer.Ordinal);
+        }
+        finally
+        {
+            _spheneChangesLock.Exit();
+        }
         try
         {
             do
@@ -271,12 +300,17 @@ public sealed class CacheMonitor : DisposableMediatorSubscriberBase
             return;
         }
 
-        lock (_spheneChanges)
+        _spheneChangesLock.Enter();
+        try
         {
             foreach (var key in changes.Keys)
             {
                 _spheneChanges.Remove(key);
             }
+        }
+        finally
+        {
+            _spheneChangesLock.Exit();
         }
 
         HandleChanges(changes);
@@ -284,36 +318,35 @@ public sealed class CacheMonitor : DisposableMediatorSubscriberBase
 
     private void HandleChanges(Dictionary<string, WatcherChange> changes)
     {
-        lock (_fileDbManager)
+        _fileDbLock.Enter();
+        try
         {
             var deletedEntries = changes.Where(c => c.Value.ChangeType == WatcherChangeTypes.Deleted).Select(c => c.Key);
             var renamedEntries = changes.Where(c => c.Value.ChangeType == WatcherChangeTypes.Renamed);
             var remainingEntries = changes.Where(c => c.Value.ChangeType != WatcherChangeTypes.Deleted).Select(c => c.Key);
-
             foreach (var entry in deletedEntries)
             {
                 Logger.LogDebug("FSW Change: Deletion - {val}", entry);
             }
-
             foreach (var entry in renamedEntries)
             {
                 Logger.LogDebug("FSW Change: Renamed - {oldVal} => {val}", entry.Value.OldPath, entry.Key);
             }
-
             foreach (var entry in remainingEntries)
             {
                 Logger.LogDebug("FSW Change: Creation or Change - {val}", entry);
             }
-
             var allChanges = deletedEntries
                 .Concat(renamedEntries.Select(c => c.Value.OldPath!))
                 .Concat(renamedEntries.Select(c => c.Key))
                 .Concat(remainingEntries)
                 .ToArray();
-
             _ = _fileDbManager.GetFileCachesByPathsAsync(allChanges).ConfigureAwait(false);
-
             _fileDbManager.WriteOutFullCsv();
+        }
+        finally
+        {
+            _fileDbLock.Exit();
         }
     }
 
@@ -322,8 +355,15 @@ public sealed class CacheMonitor : DisposableMediatorSubscriberBase
         _penumbraFswCts = _penumbraFswCts.CancelRecreate();
         var token = _penumbraFswCts.Token;
         Dictionary<string, WatcherChange> changes;
-        lock (_watcherChanges)
+        _watcherChangesLock.Enter();
+        try
+        {
             changes = _watcherChanges.ToDictionary(t => t.Key, t => t.Value, StringComparer.Ordinal);
+        }
+        finally
+        {
+            _watcherChangesLock.Exit();
+        }
         var delay = TimeSpan.FromSeconds(10);
         try
         {
@@ -337,12 +377,17 @@ public sealed class CacheMonitor : DisposableMediatorSubscriberBase
             return;
         }
 
-        lock (_watcherChanges)
+        _watcherChangesLock.Enter();
+        try
         {
             foreach (var key in changes.Keys)
             {
                 _watcherChanges.Remove(key);
             }
+        }
+        finally
+        {
+            _watcherChangesLock.Exit();
         }
 
         HandleChanges(changes);
@@ -439,7 +484,7 @@ public sealed class CacheMonitor : DisposableMediatorSubscriberBase
                 FileCacheSize -= _fileCompactor?.GetFileSizeOnDisk(oldestFile) ?? 0;
                 File.Delete(oldestFile.FullName);
             }
-            files.Remove(oldestFile);
+            files.RemoveAt(0);
         }
     }
 
@@ -460,11 +505,15 @@ public sealed class CacheMonitor : DisposableMediatorSubscriberBase
     {
         base.Dispose(disposing);
         _scanCancellationTokenSource?.Cancel();
+        _scanCancellationTokenSource?.Dispose();
         PenumbraWatcher?.Dispose();
         SpheneWatcher?.Dispose();
-        _penumbraFswCts?.CancelDispose();
-        _spheneFswCts?.CancelDispose();
-        _periodicCalculationTokenSource?.CancelDispose();
+        _penumbraFswCts?.Cancel();
+        _penumbraFswCts?.Dispose();
+        _spheneFswCts?.Cancel();
+        _spheneFswCts?.Dispose();
+        _periodicCalculationTokenSource?.Cancel();
+        _periodicCalculationTokenSource?.Dispose();
     }
 
     private void FullFileScan(CancellationToken ct)
@@ -542,7 +591,7 @@ public sealed class CacheMonitor : DisposableMediatorSubscriberBase
 
         List<FileCacheEntity> entitiesToRemove = [];
         List<FileCacheEntity> entitiesToUpdate = [];
-        object sync = new();
+        var sync = new Lock();
         Thread[] workerThreads = new Thread[threadCount];
 
         ConcurrentQueue<FileCacheEntity> fileCaches = new(_fileDbManager.GetAllFileCaches());
@@ -571,17 +620,23 @@ public sealed class CacheMonitor : DisposableMediatorSubscriberBase
                         var validatedCacheResult = _fileDbManager.ValidateFileCacheEntity(workload);
                         if (validatedCacheResult.State != FileState.RequireDeletion)
                         {
-                            lock (sync) { allScannedFiles[validatedCacheResult.FileCache.ResolvedFilepath] = true; }
+                            sync.Enter();
+                            try { allScannedFiles[validatedCacheResult.FileCache.ResolvedFilepath] = true; }
+                            finally { sync.Exit(); }
                         }
                         if (validatedCacheResult.State == FileState.RequireUpdate)
                         {
                             Logger.LogTrace("To update: {path}", validatedCacheResult.FileCache.ResolvedFilepath);
-                            lock (sync) { entitiesToUpdate.Add(validatedCacheResult.FileCache); }
+                            sync.Enter();
+                            try { entitiesToUpdate.Add(validatedCacheResult.FileCache); }
+                            finally { sync.Exit(); }
                         }
                         else if (validatedCacheResult.State == FileState.RequireDeletion)
                         {
                             Logger.LogTrace("To delete: {path}", validatedCacheResult.FileCache.ResolvedFilepath);
-                            lock (sync) { entitiesToRemove.Add(validatedCacheResult.FileCache); }
+                            sync.Enter();
+                            try { entitiesToRemove.Add(validatedCacheResult.FileCache); }
+                            finally { sync.Exit(); }
                         }
                     }
                     catch (Exception ex)

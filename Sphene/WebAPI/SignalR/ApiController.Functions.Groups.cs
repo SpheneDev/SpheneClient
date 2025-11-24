@@ -131,7 +131,7 @@ public partial class ApiController
         
         // Create the DTO with current user and location information
         var currentUser = new UserData(UID);
-        var currentLocation = await _dalamudUtil.GetMapDataAsync();
+        var currentLocation = await _dalamudUtil.GetMapDataAsync().ConfigureAwait(false);
         var groupData = new GroupData(gid);
         
         var joinRequestDto = new AreaBoundJoinRequestDto(groupData, currentUser, currentLocation);

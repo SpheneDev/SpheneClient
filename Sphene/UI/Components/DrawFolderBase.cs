@@ -8,7 +8,7 @@ using Sphene.UI.Theme;
 
 namespace Sphene.UI.Components;
 
-public abstract class DrawFolderBase : IDrawFolder, IDisposable
+public abstract class DrawFolderBase : IDrawFolder
 {
     public IImmutableList<DrawUserPair> DrawPairs { get; init; }
     protected readonly string _id;
@@ -91,13 +91,25 @@ public abstract class DrawFolderBase : IDrawFolder, IDisposable
         }
     }
 
-    public virtual void Dispose()
+    private bool _disposed;
+
+    protected virtual void Dispose(bool disposing)
     {
-        // Dispose all DrawUserPair instances to clean up event subscriptions
-        foreach (var drawPair in DrawPairs)
+        if (_disposed) return;
+        if (disposing)
         {
-            drawPair.Dispose();
+            foreach (var drawPair in DrawPairs)
+            {
+                drawPair.Dispose();
+            }
         }
+        _disposed = true;
+    }
+
+    public void Dispose()
+    {
+        Dispose(true);
+        GC.SuppressFinalize(this);
     }
 
     protected abstract float DrawIcon();

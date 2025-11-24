@@ -33,7 +33,6 @@ using System.Globalization;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Numerics;
-using System.Text.Json;
 using System.Text;
 using System.Text.Json;
 using Sphene.UI.CharaDataHub;
@@ -195,6 +194,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
         _speedTestTask = null;
         _speedTestCts?.Cancel();
         _speedTestCts?.Dispose();
+        _secretKeysConversionCts?.CancelDispose();
+        _secretKeysConversionCts = null;
         _speedTestCts = null;
 
         // Automatically close progress bar preview when settings are closed
@@ -224,6 +225,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             _compactUiWasOpen = null;
         }
 
+        _logger.LogTrace("SettingsUi closed, lastTab={lastTab}, compactUiSize={size}", _lastTab, _currentCompactUiSize);
         base.OnClose();
     }
 
@@ -297,36 +299,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         DrawThemeSavePrompt();
         DrawUnsavedCustomThemePrompt();
     }
-    private static bool InputDtrColors(string label, ref DtrEntry.Colors colors)
-    {
-        using var id = ImRaii.PushId(label);
-        var innerSpacing = ImGui.GetStyle().ItemInnerSpacing.X;
-        var foregroundColor = ConvertColor(colors.Foreground);
-        var glowColor = ConvertColor(colors.Glow);
-
-        var ret = ImGui.ColorEdit3("###foreground", ref foregroundColor, ImGuiColorEditFlags.NoInputs | ImGuiColorEditFlags.NoLabel | ImGuiColorEditFlags.Uint8);
-        if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("Foreground Color - Set to pure black (#000000) to use the default color");
-
-        ImGui.SameLine(0.0f, innerSpacing);
-        ret |= ImGui.ColorEdit3("###glow", ref glowColor, ImGuiColorEditFlags.NoInputs | ImGuiColorEditFlags.NoLabel | ImGuiColorEditFlags.Uint8);
-        if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("Glow Color - Set to pure black (#000000) to use the default color");
-
-        ImGui.SameLine(0.0f, innerSpacing);
-        ImGui.TextUnformatted(label);
-
-        if (ret)
-            colors = new(ConvertBackColor(foregroundColor), ConvertBackColor(glowColor));
-
-        return ret;
-
-        static Vector3 ConvertColor(uint color)
-            => unchecked(new((byte)color / 255.0f, (byte)(color >> 8) / 255.0f, (byte)(color >> 16) / 255.0f));
-
-        static uint ConvertBackColor(Vector3 color)
-            => byte.CreateSaturating(color.X * 255.0f) | ((uint)byte.CreateSaturating(color.Y * 255.0f) << 8) | ((uint)byte.CreateSaturating(color.Z * 255.0f) << 16);
-    }
+    
 
     private void DrawBlockedTransfers()
     {
@@ -499,12 +472,10 @@ public class SettingsUi : WindowMediatorSubscriberBase
             using var tree = ImRaii.TreeNode("Speed Test to Servers");
             if (tree)
             {
-                if (_downloadServersTask == null || ((_downloadServersTask?.IsCompleted ?? false) && (!_downloadServersTask?.IsCompletedSuccessfully ?? false)))
+                if ((_downloadServersTask == null || ((_downloadServersTask?.IsCompleted ?? false) && (!_downloadServersTask?.IsCompletedSuccessfully ?? false)))
+                    && _uiShared.IconTextButton(FontAwesomeIcon.GroupArrowsRotate, "Update Download Server List"))
                 {
-                    if (_uiShared.IconTextButton(FontAwesomeIcon.GroupArrowsRotate, "Update Download Server List"))
-                    {
-                        _downloadServersTask = GetDownloadServerList();
-                    }
+                    _downloadServersTask = GetDownloadServerList();
                 }
                 if (_downloadServersTask != null && _downloadServersTask.IsCompleted && !_downloadServersTask.IsCompletedSuccessfully)
                 {
@@ -703,7 +674,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to get download server list");
-            throw;
+            throw new InvalidOperationException("Failed to get download server list", ex);
         }
     }
 
@@ -1318,27 +1289,21 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 ImGuiHelpers.ScaledDummy(5f);
                 if (_apiController.IsConnected)
                 {
-                    if (ImGui.Button("Disconnect from Service"))
+                    if (ImGui.Button("Disconnect from Service") && _serverConfigurationManager.CurrentServer != null)
                     {
-                        if (_serverConfigurationManager.CurrentServer != null)
-                        {
-                            _serverConfigurationManager.CurrentServer.FullPause = true;
-                            _serverConfigurationManager.Save();
-                            _ = _uiShared.ApiController.CreateConnectionsAsync();
-                        }
+                        _serverConfigurationManager.CurrentServer.FullPause = true;
+                        _serverConfigurationManager.Save();
+                        _ = _uiShared.ApiController.CreateConnectionsAsync();
                     }
                     _uiShared.DrawHelpText("Disconnect the current session from the selected service.");
                 }
                 else
                 {
-                    if (ImGui.Button("Connect to Service"))
+                    if (ImGui.Button("Connect to Service") && _serverConfigurationManager.CurrentServer != null)
                     {
-                        if (_serverConfigurationManager.CurrentServer != null)
-                        {
-                            _serverConfigurationManager.CurrentServer.FullPause = false;
-                            _serverConfigurationManager.Save();
-                            _ = _uiShared.ApiController.CreateConnectionsAsync();
-                        }
+                        _serverConfigurationManager.CurrentServer.FullPause = false;
+                        _serverConfigurationManager.Save();
+                        _ = _uiShared.ApiController.CreateConnectionsAsync();
                     }
                     _uiShared.DrawHelpText("Establish a connection to the selected service.");
                 }
@@ -1368,7 +1333,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
                             {
                                 if (_uiShared.IconTextButton(FontAwesomeIcon.ArrowsLeftRight, "Try to Convert Secret Keys to UIDs"))
                                 {
-                                    _secretKeysConversionTask = ConvertSecretKeysToUIDs(selectedServer, _secretKeysConversionCts.Token);
+                                    var token = _secretKeysConversionCts?.Token ?? CancellationToken.None;
+                                    _secretKeysConversionTask = ConvertSecretKeysToUIDs(selectedServer, token);
                                 }
                             }
                             if (_secretKeysConversionTask != null && !_secretKeysConversionTask.IsCompleted)
@@ -1801,7 +1767,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
     private int _lastSelectedServerIndex = -1;
     private Task<(bool Success, bool PartialSuccess, string Result)>? _secretKeysConversionTask = null;
-    private CancellationTokenSource _secretKeysConversionCts = new CancellationTokenSource();
+    private CancellationTokenSource? _secretKeysConversionCts = new CancellationTokenSource();
 
     private async Task<(bool Success, bool partialSuccess, string Result)> ConvertSecretKeysToUIDs(ServerStorage serverStorage, CancellationToken token)
     {
@@ -2000,7 +1966,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         ImGui.Spacing();
         if (_uiShared.IconTextButton(FontAwesomeIcon.InfoCircle, "Open Release Notes"))
         {
-            Task.Run(async () =>
+            _ = Task.Run(async () =>
             {
                 string? text = null;
                 try
@@ -2008,7 +1974,10 @@ public class SettingsUi : WindowMediatorSubscriberBase
                     var baseVersion = version != null ? $"{version.Major}.{version.Minor}.{version.Build}" : versionString;
                     text = await _changelogService.GetChangelogTextForVersionAsync(baseVersion).ConfigureAwait(false);
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Failed to load changelog text for version {version}", versionString);
+                }
                 Mediator.Publish(new ShowReleaseChangelogMessage(versionString, text));
             });
         }
@@ -2039,7 +2008,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         {
             _configService.Current.EnableShrinkUIntegration = enableShrinkUOverview;
             _configService.Save();
-            try { _shrinkUHostService.ApplyIntegrationEnabled(enableShrinkUOverview); } catch { }
+            try { _shrinkUHostService.ApplyIntegrationEnabled(enableShrinkUOverview); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to apply ShrinkU integration setting"); }
         }
         UiSharedService.AttachToolTip("Toggle ShrinkU UI integration inside Sphene.");
 
@@ -2048,7 +2017,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         {
             if (_uiShared.IconTextButton(FontAwesomeIcon.InfoCircle, "Open ShrinkU Release Notes"))
             {
-                try { _shrinkUHostService.OpenReleaseNotes(); } catch { }
+                try { _shrinkUHostService.OpenReleaseNotes(); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to open ShrinkU release notes"); }
             }
             UiSharedService.AttachToolTip("Open recent changes and highlights for ShrinkU.");
         }
@@ -2099,7 +2068,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 {
                     _configService.Current.UseTestServerOverride = useOverride;
                     _configService.Save();
-                    _uiShared.ApiController.CreateConnectionsAsync();
+                    _ = _uiShared.ApiController.CreateConnectionsAsync();
                 }
                 UiSharedService.AttachToolTip("When enabled, the client ignores the configured service and connects to the test server URL below. Toggling this setting switches between the main and test server and triggers an immediate reconnect. Only available in test builds (disabled on release builds).");
                 if (string.IsNullOrWhiteSpace(_configService.Current.TestServerApiUrl))
@@ -2126,9 +2095,9 @@ public class SettingsUi : WindowMediatorSubscriberBase
         ImGui.Separator();
         _uiShared.BigText("Statistics");
         
-        var directPairs = _pairManager.DirectPairs.Count();
-        var groupPairs = _pairManager.GroupPairs.SelectMany(g => g.Value).Count();
-        var totalPairs = directPairs + groupPairs;
+            var directPairs = _pairManager.DirectPairs.Count;
+            var groupPairs = _pairManager.GroupPairs.SelectMany(g => g.Value).Count();
+            var totalPairs = directPairs + groupPairs;
         
         ImGui.TextUnformatted($"Direct Pairs: {directPairs}");
         ImGui.TextUnformatted($"Group Pairs: {groupPairs}");
@@ -2154,7 +2123,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 {
                     currentServer.FullPause = true;
                     _serverConfigurationManager.Save();
-                    _uiShared.ApiController.CreateConnectionsAsync();
+                    _ = _uiShared.ApiController.CreateConnectionsAsync();
                 }
                 ImGui.TextUnformatted("Temporarily disconnects from the service. Toggle back to reconnect.");
             }
@@ -2164,7 +2133,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 {
                     currentServer.FullPause = false;
                     _serverConfigurationManager.Save();
-                    _uiShared.ApiController.CreateConnectionsAsync();
+                    _ = _uiShared.ApiController.CreateConnectionsAsync();
                 }
                 ImGui.TextUnformatted("Reconnects to the configured service.");
             }
@@ -2393,7 +2362,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         _uiShared.DrawHelpText("Will show profiles that have the NSFW tag enabled");
     }
 
-    private string GetShrinkUAssemblyVersion()
+    private static string GetShrinkUAssemblyVersion()
     {
         try
         {
@@ -2401,7 +2370,10 @@ public class SettingsUi : WindowMediatorSubscriberBase
             var v = asm?.GetName()?.Version;
             return v?.ToString() ?? "unknown";
         }
-        catch { return "unknown"; }
+        catch
+        {
+            return "unknown";
+        }
     }
 
     private void DrawGeneralNotifications()
@@ -2637,6 +2609,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                     var availableRegion = ImGui.GetContentRegionAvail();
                     var tabContentHeight = availableRegion.Y;
 
+                    #pragma warning disable S1066
                     var generalTab = ImRaii.TabItem("General Theme", ImGuiTabItemFlags.None);
                     if (generalTab)
                     {
@@ -2646,8 +2619,10 @@ public class SettingsUi : WindowMediatorSubscriberBase
                             ImGui.EndChild();
                         }
                     }
+                    #pragma warning restore S1066
                     generalTab.Dispose();
 
+                    #pragma warning disable S1066
                     var panelTab = ImRaii.TabItem("Panel Theme", _preferPanelThemeTab ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None);
                     if (panelTab)
                     {
@@ -2657,6 +2632,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                             ImGui.EndChild();
                         }
                     }
+                    #pragma warning restore S1066
                     panelTab.Dispose();
                     _preferPanelThemeTab = false;
                 }
@@ -2884,111 +2860,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         }
     }
     
-    private void DrawThemeColorSettings()
-    {
-        var theme = SpheneCustomTheme.CurrentTheme;
-        bool themeChanged = false;
-        
-        ImGui.Text("General Theme Colors");
-        ImGui.Separator();
-        
-        if (ImGui.BeginTabBar("GeneralColorTabBar"))
-        {
-            if (ImGui.BeginTabItem("Basic Colors"))
-            {
-                DrawBasicColors(theme, ref themeChanged);
-                ImGui.EndTabItem();
-            }
-            
-            if (ImGui.BeginTabItem("Window Colors"))
-            {
-                DrawWindowColors(theme, ref themeChanged);
-                ImGui.EndTabItem();
-            }
-            
-            if (ImGui.BeginTabItem("Frame & Input Colors"))
-            {
-                DrawFrameInputColors(theme, ref themeChanged);
-                ImGui.EndTabItem();
-            }
-            
-            if (ImGui.BeginTabItem("Button & Header Colors"))
-            {
-                DrawButtonHeaderColors(theme, ref themeChanged);
-                ImGui.EndTabItem();
-            }
-            
-            if (ImGui.BeginTabItem("Menu & Navigation Colors"))
-            {
-                DrawMenuNavigationColors(theme, ref themeChanged);
-                ImGui.EndTabItem();
-            }
-            
-            if (ImGui.BeginTabItem("Scrollbar & Slider Colors"))
-            {
-                DrawScrollbarSliderColors(theme, ref themeChanged);
-                ImGui.EndTabItem();
-            }
-            
-            if (ImGui.BeginTabItem("Table & Tab Colors"))
-            {
-                DrawTableTabColors(theme, ref themeChanged);
-                ImGui.EndTabItem();
-            }
-            
-            ImGui.EndTabBar();
-        }
-        
-        // Apply changes in real-time
-        if (themeChanged)
-        {
-            theme.NotifyThemeChanged();
-            _hasUnsavedThemeChanges = true;
-        }
-    }
     
-    private void DrawScrollbarSettings()
-    {
-        var theme = SpheneCustomTheme.CurrentTheme;
-        bool themeChanged = false;
-        
-        ImGui.Text("Scrollbar Settings");
-        ImGui.Separator();
-        
-        var scrollbarRounding = theme.ScrollbarRounding;
-        if (ImGui.SliderFloat("Scrollbar Rounding", ref scrollbarRounding, 0.0f, 20.0f, "%.1f"))
-        {
-            theme.ScrollbarRounding = scrollbarRounding;
-            themeChanged = true;
-        }
-        
-        var grabRounding = theme.GrabRounding;
-        if (ImGui.SliderFloat("Grab Rounding", ref grabRounding, 0.0f, 20.0f, "%.1f"))
-        {
-            theme.GrabRounding = grabRounding;
-            themeChanged = true;
-        }
-        
-        var scrollbarSize = theme.ScrollbarSize;
-        if (ImGui.SliderFloat("Scrollbar Size", ref scrollbarSize, 5.0f, 30.0f, "%.1f"))
-        {
-            theme.ScrollbarSize = scrollbarSize;
-            themeChanged = true;
-        }
-        
-        ImGui.Separator();
-        ImGui.Text("Scrollbar Colors");
-        ImGui.Separator();
-        
-        DrawScrollbarSliderColors(theme, ref themeChanged);
-        
-        // Apply changes in real-time
-        if (themeChanged)
-        {
-            theme.NotifyThemeChanged();
-            _hasUnsavedThemeChanges = true;
-        }
-    }
 
     private void DrawCompactUIThemeSettings()
     {
@@ -3229,9 +3101,9 @@ public class SettingsUi : WindowMediatorSubscriberBase
             var tooltipEnd = new Vector2(tooltipStart.X + tooltipPreviewWidth, tooltipStart.Y + previewHeight);
             var contextEnd = new Vector2(contextStart.X + contextPreviewWidth, contextStart.Y + previewHeight);
             dl.AddRectFilled(tooltipStart, tooltipEnd, ImGui.ColorConvertFloat4ToU32(theme.CompactPopupBg), theme.CompactTooltipRounding);
-            dl.AddRect(tooltipStart, tooltipEnd, ImGui.ColorConvertFloat4ToU32(theme.CompactBorder), theme.CompactTooltipRounding, 0, tooltipBorder);
+            dl.AddRect(tooltipStart, tooltipEnd, ImGui.ColorConvertFloat4ToU32(theme.CompactBorder), theme.CompactTooltipRounding, ImDrawFlags.None, tooltipBorder);
             dl.AddRectFilled(contextStart, contextEnd, ImGui.ColorConvertFloat4ToU32(theme.CompactPopupBg), theme.CompactContextMenuRounding);
-            dl.AddRect(contextStart, contextEnd, ImGui.ColorConvertFloat4ToU32(theme.CompactBorder), theme.CompactContextMenuRounding, 0, contextBorder);
+            dl.AddRect(contextStart, contextEnd, ImGui.ColorConvertFloat4ToU32(theme.CompactBorder), theme.CompactContextMenuRounding, ImDrawFlags.None, contextBorder);
             var menuWidth = desiredMenuWidth;
             ImGui.SetCursorScreenPos(new Vector2(tooltipStart.X + padding.X + tooltipBorder, tooltipStart.Y + padding.Y + tooltipBorder));
             ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, padding);
@@ -3736,68 +3608,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         ButtonStyleManagerUI.SelectButtonKey(msg.ButtonStyleKey);
     }
 
-    private void DrawColorSettings()
-    {
-        var theme = SpheneCustomTheme.CurrentTheme;
-        bool themeChanged = false;
-        
-        ImGui.Text("Color Customization");
-        ImGui.Separator();
-        
-        if (ImGui.BeginTabBar("ColorTabBar"))
-        {
-            if (ImGui.BeginTabItem("Basic Colors"))
-            {
-                DrawBasicColors(theme, ref themeChanged);
-                ImGui.EndTabItem();
-            }
-            
-            if (ImGui.BeginTabItem("Window Colors"))
-            {
-                DrawWindowColors(theme, ref themeChanged);
-                ImGui.EndTabItem();
-            }
-            
-            if (ImGui.BeginTabItem("Frame & Input Colors"))
-            {
-                DrawFrameInputColors(theme, ref themeChanged);
-                ImGui.EndTabItem();
-            }
-            
-            if (ImGui.BeginTabItem("Button & Header Colors"))
-            {
-                DrawButtonHeaderColors(theme, ref themeChanged);
-                ImGui.EndTabItem();
-            }
-            
-            if (ImGui.BeginTabItem("Menu & Navigation Colors"))
-            {
-                DrawMenuNavigationColors(theme, ref themeChanged);
-                ImGui.EndTabItem();
-            }
-            
-            if (ImGui.BeginTabItem("Scrollbar & Slider Colors"))
-            {
-                DrawScrollbarSliderColors(theme, ref themeChanged);
-                ImGui.EndTabItem();
-            }
-            
-            if (ImGui.BeginTabItem("Table & Tab Colors"))
-            {
-                DrawTableTabColors(theme, ref themeChanged);
-                ImGui.EndTabItem();
-            }
-            
-            
-            ImGui.EndTabBar();
-        }
-        
-        // Apply changes in real-time
-        if (themeChanged)
-        {
-            theme.NotifyThemeChanged();
-        }
-    }
+    
     
     private void DrawBasicColors(ThemeConfiguration theme, ref bool themeChanged)
     {
@@ -4361,247 +4172,9 @@ public class SettingsUi : WindowMediatorSubscriberBase
         _uiShared.DrawHelpText("Background color for the active tab when the window is not focused.");
     }
     
-    private void DrawCompactUIColors(ThemeConfiguration theme, ref bool themeChanged)
-    {
-        ImGui.Text("Panel Colors");
-        UiSharedService.ColorTextWrapped("Adjust the colors used in the Panel interface.", ImGuiColors.DalamudGrey);
-        ImGui.Spacing();
-        
-        // Background Colors Section
-        ImGui.Text("Backgrounds");
-        ImGui.Separator();
-        
-        var compactWindowBg = theme.CompactWindowBg;
-        if (ImGui.ColorEdit4("Panel Background", ref compactWindowBg))
-        {
-            theme.CompactWindowBg = compactWindowBg;
-            themeChanged = true;
-        }
-        
-        if (theme.CompactShowImGuiHeader)
-        {
-            var compactTitleBg = theme.CompactTitleBg;
-            if (ImGui.ColorEdit4("Header Background", ref compactTitleBg))
-            {
-                theme.CompactTitleBg = compactTitleBg;
-                themeChanged = true;
-            }
-            
-            var compactTitleBgActive = theme.CompactTitleBgActive;
-            if (ImGui.ColorEdit4("Header Background (Active)", ref compactTitleBgActive))
-            {
-                theme.CompactTitleBgActive = compactTitleBgActive;
-                themeChanged = true;
-            }
-        }
-        
-        var compactFrameBg = theme.CompactFrameBg;
-        if (ImGui.ColorEdit4("Control Background", ref compactFrameBg))
-        {
-            theme.CompactFrameBg = compactFrameBg;
-            themeChanged = true;
-        }
-        
-        var compactHeaderBg = theme.CompactHeaderBg;
-        if (ImGui.ColorEdit4("Header Bar Background", ref compactHeaderBg))
-        {
-            theme.CompactHeaderBg = compactHeaderBg;
-            themeChanged = true;
-        }
-        
-        ImGui.Spacing();
-        
-        // Button Colors Section
-        ImGui.Text("Buttons");
-        ImGui.Separator();
-        
-        // Panel Buttons
-        ImGui.Text("Panel Buttons");
-        var compactButton = theme.CompactButton;
-        if (ImGui.ColorEdit4("Button", ref compactButton))
-        {
-            theme.CompactButton = compactButton;
-            themeChanged = true;
-        }
-        
-        var compactButtonHovered = theme.CompactButtonHovered;
-        if (ImGui.ColorEdit4("Button (Hovered)", ref compactButtonHovered))
-        {
-            theme.CompactButtonHovered = compactButtonHovered;
-            themeChanged = true;
-        }
-        
-        var compactButtonActive = theme.CompactButtonActive;
-        if (ImGui.ColorEdit4("Button (Active)", ref compactButtonActive))
-        {
-            theme.CompactButtonActive = compactButtonActive;
-            themeChanged = true;
-        }
-        
-        ImGui.Spacing();
-        
-        // Action Buttons
-        ImGui.Text("Action Buttons");
-        var compactActionButton = theme.CompactActionButton;
-        if (ImGui.ColorEdit4("Action Button", ref compactActionButton))
-        {
-            theme.CompactActionButton = compactActionButton;
-            themeChanged = true;
-        }
-        
-        var compactActionButtonHovered = theme.CompactActionButtonHovered;
-        if (ImGui.ColorEdit4("Action Button Hovered", ref compactActionButtonHovered))
-        {
-            theme.CompactActionButtonHovered = compactActionButtonHovered;
-            themeChanged = true;
-        }
-        
-        var compactActionButtonActive = theme.CompactActionButtonActive;
-        if (ImGui.ColorEdit4("Action Button Active", ref compactActionButtonActive))
-        {
-            theme.CompactActionButtonActive = compactActionButtonActive;
-            themeChanged = true;
-        }
-        
-        ImGui.Spacing();
-        
-        // Syncshell Buttons
-        ImGui.Text("Syncshell Buttons");
-        var compactSyncshellButton = theme.CompactSyncshellButton;
-        if (ImGui.ColorEdit4("Syncshell Button", ref compactSyncshellButton))
-        {
-            theme.CompactSyncshellButton = compactSyncshellButton;
-            themeChanged = true;
-        }
-        
-        var compactSyncshellButtonHovered = theme.CompactSyncshellButtonHovered;
-        if (ImGui.ColorEdit4("Syncshell Button Hovered", ref compactSyncshellButtonHovered))
-        {
-            theme.CompactSyncshellButtonHovered = compactSyncshellButtonHovered;
-            themeChanged = true;
-        }
-        
-        var compactSyncshellButtonActive = theme.CompactSyncshellButtonActive;
-        if (ImGui.ColorEdit4("Syncshell Button Active", ref compactSyncshellButtonActive))
-        {
-            theme.CompactSyncshellButtonActive = compactSyncshellButtonActive;
-            themeChanged = true;
-        }
-        
-        ImGui.Spacing();
-        
-        // Text Colors Section
-        ImGui.Text("Text");
-        ImGui.Separator();
-        
-        // Basic Text Colors
-        ImGui.Text("Basic Text");
-        var compactText = theme.CompactText;
-        if (ImGui.ColorEdit4("Text", ref compactText))
-        {
-            theme.CompactText = compactText;
-            themeChanged = true;
-        }
-        
-        var compactTextSecondary = theme.CompactTextSecondary;
-        if (ImGui.ColorEdit4("Text (Secondary)", ref compactTextSecondary))
-        {
-            theme.CompactTextSecondary = compactTextSecondary;
-            themeChanged = true;
-        }
-        
-        var compactHeaderText = theme.CompactHeaderText;
-        if (ImGui.ColorEdit4("Header Text", ref compactHeaderText))
-        {
-            theme.CompactHeaderText = compactHeaderText;
-            themeChanged = true;
-        }
-        
-        var compactPanelTitleText = theme.CompactPanelTitleText;
-        if (ImGui.ColorEdit4("Title Text", ref compactPanelTitleText))
-        {
-            theme.CompactPanelTitleText = compactPanelTitleText;
-            themeChanged = true;
-        }
-        
-        ImGui.Spacing();
-        
-        // Status Text Colors
-        ImGui.Text("Status Text");
-        var compactConnectedText = theme.CompactConnectedText;
-        if (ImGui.ColorEdit4("Connected Pairs Count Text", ref compactConnectedText))
-        {
-            theme.CompactConnectedText = compactConnectedText;
-            themeChanged = true;
-        }
-        
-        var compactAllSyncshellsText = theme.CompactAllSyncshellsText;
-        if (ImGui.ColorEdit4("All Syncshells Text", ref compactAllSyncshellsText))
-        {
-            theme.CompactAllSyncshellsText = compactAllSyncshellsText;
-            themeChanged = true;
-        }
-        
-        var compactOfflinePausedText = theme.CompactOfflinePausedText;
-        if (ImGui.ColorEdit4("Offline / Paused by other Text", ref compactOfflinePausedText))
-        {
-            theme.CompactOfflinePausedText = compactOfflinePausedText;
-            themeChanged = true;
-        }
-        
-        var compactOfflineSyncshellText = theme.CompactOfflineSyncshellText;
-        if (ImGui.ColorEdit4("Offline Syncshell Users Text", ref compactOfflineSyncshellText))
-        {
-            theme.CompactOfflineSyncshellText = compactOfflineSyncshellText;
-            themeChanged = true;
-        }
-        
-        var compactVisibleText = theme.CompactVisibleText;
-        if (ImGui.ColorEdit4("Visible Text", ref compactVisibleText))
-        {
-            theme.CompactVisibleText = compactVisibleText;
-            themeChanged = true;
-        }
-        
-        var compactPairsText = theme.CompactPairsText;
-        if (ImGui.ColorEdit4("Pairs Text", ref compactPairsText))
-        {
-            theme.CompactPairsText = compactPairsText;
-            themeChanged = true;
-        }
-        
-        ImGui.Spacing();
-        
-        // Other Colors Section
-        ImGui.Text("Accents & Borders");
-        ImGui.Separator();
-        
-        var compactBorder = theme.CompactBorder;
-        if (ImGui.ColorEdit4("Border", ref compactBorder))
-        {
-            theme.CompactBorder = compactBorder;
-            themeChanged = true;
-        }
-        
-        var separator = theme.Separator;
-        if (ImGui.ColorEdit4("Separator", ref separator))
-        {
-            theme.Separator = separator;
-            themeChanged = true;
-        }
-        
-        // Apply changes in real-time for CompactUI
-        if (themeChanged)
-        {
-            theme.NotifyThemeChanged();
-            _hasUnsavedThemeChanges = true;
-        }
-    }
+    
 
     private string _saveThemeName = "";
-    private string _selectedThemeToLoad = "";
-    private string[] _availableThemes = Array.Empty<string>();
-    private bool _themesLoaded = false;
     private string _selectedPresetTheme = "";
     
     // Theme change tracking
@@ -4621,24 +4194,17 @@ public class SettingsUi : WindowMediatorSubscriberBase
         
         ImGui.Spacing();
         
-        if (ImGui.Button("Save"))
+        if (ImGui.Button("Save") && !string.IsNullOrWhiteSpace(_saveThemeName))
         {
-            if (!string.IsNullOrWhiteSpace(_saveThemeName))
+            _ = Task.Run(async () =>
             {
-                // Note: We can't await in this UI context, so we'll fire and forget
-                // The SaveTheme method will handle logging any errors
-                _ = Task.Run(async () =>
+                var success = await ThemeManager.SaveTheme(SpheneCustomTheme.CurrentTheme, _saveThemeName).ConfigureAwait(false);
+                if (success)
                 {
-                    var success = await ThemeManager.SaveTheme(SpheneCustomTheme.CurrentTheme, _saveThemeName);
-                    if (success)
-                    {
-                        // Reset UI state on main thread
-                        _saveThemeName = "";
-                        _themesLoaded = false; // Force refresh of available themes
-                    }
-                });
-                ImGui.CloseCurrentPopup();
-            }
+                    _saveThemeName = "";
+                }
+            });
+            ImGui.CloseCurrentPopup();
         }
         
         ImGui.SameLine();
@@ -4650,103 +4216,9 @@ public class SettingsUi : WindowMediatorSubscriberBase
         }
     }
 
-    private void DrawLoadThemePopup()
-    {
-        ImGui.Text("Load Theme");
-        ImGui.Separator();
-        
-        // Load available themes if not already loaded
-        if (!_themesLoaded)
-        {
-            _availableThemes = ThemeManager.GetAvailableThemes();
-            _themesLoaded = true;
-        }
-        
-        if (_availableThemes.Length == 0)
-        {
-            ImGui.Text("No saved themes found.");
-        }
-        else
-        {
-            ImGui.Text("Available Themes:");
-            
-            for (int i = 0; i < _availableThemes.Length; i++)
-            {
-                var themeName = _availableThemes[i];
-                
-                if (ImGui.Selectable(themeName, _selectedThemeToLoad == themeName))
-                {
-                    _selectedThemeToLoad = themeName;
-                }
-                
-                // Double-click to load
-                if (ImGui.IsItemHovered() && ImGui.IsMouseDoubleClicked(0))
-                {
-                    LoadSelectedTheme();
-                    return;
-                }
-                
-                // Right-click context menu for delete
-                if (ImGui.BeginPopupContextItem($"ThemeContext_{i}"))
-                {
-                    using (SpheneCustomTheme.ApplyContextMenuTheme())
-                    {
-                        if (ImGui.MenuItem("Delete"))
-                        {
-                            if (ThemeManager.DeleteTheme(themeName))
-                            {
-                                _themesLoaded = false; // Force refresh
-                                _selectedThemeToLoad = "";
-                            }
-                        }
-                    }
-                    ImGui.EndPopup();
-                }
-            }
-        }
-        
-        ImGui.Spacing();
-        
-        if (ImGui.Button("Load") && !string.IsNullOrEmpty(_selectedThemeToLoad))
-        {
-            LoadSelectedTheme();
-        }
-        
-        ImGui.SameLine();
-        
-        if (ImGui.Button("Refresh"))
-        {
-            _themesLoaded = false;
-        }
-        
-        ImGui.SameLine();
-        
-        if (ImGui.Button("Cancel"))
-        {
-            _selectedThemeToLoad = "";
-            ImGui.CloseCurrentPopup();
-        }
-    }
+    
 
-    private void LoadSelectedTheme()
-    {
-        var loadedTheme = ThemeManager.LoadTheme(_selectedThemeToLoad);
-        if (loadedTheme != null)
-        {
-            // Use the ThemePropertyCopier.Copy method to copy all properties
-            ThemePropertyCopier.Copy(loadedTheme, SpheneCustomTheme.CurrentTheme);
-            
-            // Notify theme changed to apply immediately
-            SpheneCustomTheme.CurrentTheme.NotifyThemeChanged();
-            
-            // Reset change tracking when loading a theme
-            _hasUnsavedThemeChanges = false;
-            _currentThemeName = _selectedThemeToLoad;
-            
-            _selectedThemeToLoad = "";
-            ImGui.CloseCurrentPopup();
-        }
-    }
+    
 
     private void DrawThemeSelector()
     {
@@ -4785,23 +4257,20 @@ public class SettingsUi : WindowMediatorSubscriberBase
             var selectedTheme = allThemes[currentIndex];
             
             // Skip separator entries
-            if (selectedTheme.StartsWith("---")) return;
+            if (selectedTheme.StartsWith("---", StringComparison.Ordinal)) return;
             
             _selectedPresetTheme = selectedTheme;
             ApplySelectedPresetTheme(selectedTheme, builtInThemes);
         }
         
         ImGui.SameLine();
-        var canDelete = !string.IsNullOrEmpty(_selectedPresetTheme) && !builtInThemes.Contains(_selectedPresetTheme) && !_selectedPresetTheme.StartsWith("---");
+        var canDelete = !string.IsNullOrEmpty(_selectedPresetTheme) && !builtInThemes.Contains(_selectedPresetTheme, StringComparer.Ordinal) && !_selectedPresetTheme.StartsWith("---", StringComparison.Ordinal);
         using (ImRaii.Disabled(!canDelete || !UiSharedService.CtrlPressed()))
         {
-            if (_uiShared.IconButton(FontAwesomeIcon.Trash))
+            if (_uiShared.IconButton(FontAwesomeIcon.Trash) && ThemeManager.DeleteTheme(_selectedPresetTheme))
             {
-                if (ThemeManager.DeleteTheme(_selectedPresetTheme))
-                {
-                    _selectedPresetTheme = "Default Sphene";
-                    ApplySelectedPresetTheme("Default Sphene", builtInThemes);
-                }
+                _selectedPresetTheme = "Default Sphene";
+                ApplySelectedPresetTheme("Default Sphene", builtInThemes);
             }
             UiSharedService.AttachToolTip(canDelete
                 ? ($"Hold CTRL to delete selected custom theme: '{_selectedPresetTheme}'")
@@ -4828,11 +4297,11 @@ public class SettingsUi : WindowMediatorSubscriberBase
         if (!_hasUnsavedThemeChanges) ImGui.BeginDisabled();
         if (ImGui.Button("Save Theme Changes"))
         {
-            if (!string.IsNullOrEmpty(_currentThemeName) && !builtInThemes.Contains(_currentThemeName))
+            if (!string.IsNullOrEmpty(_currentThemeName) && !builtInThemes.Contains(_currentThemeName, StringComparer.Ordinal))
             {
                 _ = Task.Run(async () =>
                 {
-                    var success = await ThemeManager.SaveTheme(SpheneCustomTheme.CurrentTheme, _currentThemeName);
+                    var success = await ThemeManager.SaveTheme(SpheneCustomTheme.CurrentTheme, _currentThemeName).ConfigureAwait(false);
                     if (success)
                     {
                         _hasUnsavedThemeChanges = false;
@@ -4878,7 +4347,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
     {
         var currentTheme = SpheneCustomTheme.CurrentTheme;
         
-        if (builtInThemes.Contains(themeName))
+        if (builtInThemes.Contains(themeName, StringComparer.Ordinal))
         {
             // Apply built-in theme
             var presetTheme = ThemePresets.BuiltInThemes[themeName];
@@ -4901,15 +4370,15 @@ public class SettingsUi : WindowMediatorSubscriberBase
         _hasUnsavedThemeChanges = false;
         _currentThemeName = themeName;
         _originalThemeState = currentTheme.Clone();
-        var builtIn = builtInThemes.Contains(themeName);
+        var builtIn = builtInThemes.Contains(themeName, StringComparer.Ordinal);
         if (!builtIn)
         {
             _ = Task.Run(async () =>
             {
-                var success = await ThemeManager.SaveTheme(currentTheme, themeName);
+                var success = await ThemeManager.SaveTheme(currentTheme, themeName).ConfigureAwait(false);
                 if (success)
                 {
-                    _logger.LogDebug($"Auto-saved theme: {themeName}");
+                    _logger.LogDebug("Auto-saved theme: {themeName}", themeName);
                 }
             });
         }
@@ -4925,7 +4394,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             
         // Check if current theme is a custom theme (not built-in)
         var builtInThemes = ThemePresets.BuiltInThemes.Keys.ToList();
-        var isCustomTheme = !builtInThemes.Contains(_currentThemeName);
+        var isCustomTheme = !builtInThemes.Contains(_currentThemeName, StringComparer.Ordinal);
         
         if (isCustomTheme)
         {
@@ -4938,6 +4407,16 @@ public class SettingsUi : WindowMediatorSubscriberBase
             _showThemeSavePrompt = true;
             return true; // Show prompt, keep window open
         }
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _secretKeysConversionCts?.Cancel();
+            _secretKeysConversionCts?.Dispose();
+        }
+        base.Dispose(disposing);
     }
     
     private void DrawThemeSavePrompt()
@@ -4977,26 +4456,23 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 var offsetY = System.Math.Max(0f, availY - buttonHeight - bottomPadding);
                 ImGui.Dummy(new System.Numerics.Vector2(1, offsetY));
                 ImGui.SetCursorPosX(ImGui.GetCursorPosX() + startX);
-                if (ImGui.Button(btn1))
+                if (ImGui.Button(btn1) && !string.IsNullOrWhiteSpace(_saveThemeName))
                 {
-                    if (!string.IsNullOrWhiteSpace(_saveThemeName))
+                    var themeNameToSave = _saveThemeName;
+                    _ = Task.Run(async () =>
                     {
-                        var themeNameToSave = _saveThemeName;
-                        _ = Task.Run(async () =>
+                        var success = await ThemeManager.SaveTheme(SpheneCustomTheme.CurrentTheme, themeNameToSave).ConfigureAwait(false);
+                        if (success)
                         {
-                            var success = await ThemeManager.SaveTheme(SpheneCustomTheme.CurrentTheme, themeNameToSave);
-                            if (success)
-                            {
-                                _logger.LogDebug($"Created new custom theme: {themeNameToSave}");
-                                _currentThemeName = themeNameToSave;
-                                ThemeManager.SetSelectedTheme(themeNameToSave);
-                                _hasUnsavedThemeChanges = false;
-                            }
-                        });
-                        _saveThemeName = "";
-                        _showThemeSavePrompt = false;
-                        IsOpen = false;
-                    }
+                            _logger.LogDebug("Created new custom theme: {ThemeName}", themeNameToSave);
+                            _currentThemeName = themeNameToSave;
+                            ThemeManager.SetSelectedTheme(themeNameToSave);
+                            _hasUnsavedThemeChanges = false;
+                        }
+                    });
+                    _saveThemeName = "";
+                    _showThemeSavePrompt = false;
+                    IsOpen = false;
                 }
                 ImGui.SameLine(0, spacingX);
                 if (ImGui.Button(btn2))
@@ -5063,7 +4539,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                         var themeNameToSave = _currentThemeName;
                         _ = Task.Run(async () =>
                         {
-                            var success = await ThemeManager.SaveTheme(SpheneCustomTheme.CurrentTheme, themeNameToSave);
+                            var success = await ThemeManager.SaveTheme(SpheneCustomTheme.CurrentTheme, themeNameToSave).ConfigureAwait(false);
                             if (success)
                             {
                                 _hasUnsavedThemeChanges = false;

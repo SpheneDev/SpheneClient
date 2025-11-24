@@ -7,10 +7,11 @@ using Microsoft.Extensions.Logging;
 namespace Sphene.Services;
 
 // Service for publishing selective icon updates to optimize UI performance
-public class IconUpdateService : IMediatorSubscriber
+public class IconUpdateService : IMediatorSubscriber, IDisposable
 {
     private readonly SpheneMediator _mediator;
     private readonly ILogger<IconUpdateService> _logger;
+    private bool _disposed;
     
     public SpheneMediator Mediator => _mediator;
     
@@ -89,8 +90,19 @@ public class IconUpdateService : IMediatorSubscriber
             message.LastAcknowledgmentSuccess, message.LastAcknowledgmentTime);
     }
     
+    protected virtual void Dispose(bool disposing)
+    {
+        if (_disposed) return;
+        _disposed = true;
+        if (disposing)
+        {
+            _mediator.UnsubscribeAll(this);
+        }
+    }
+
     public void Dispose()
     {
-        _mediator.UnsubscribeAll(this);
+        Dispose(true);
+        GC.SuppressFinalize(this);
     }
 }

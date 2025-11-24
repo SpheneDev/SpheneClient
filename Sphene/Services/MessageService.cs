@@ -4,53 +4,16 @@ using Microsoft.Extensions.Logging;
 using Sphene.SpheneConfiguration.Models;
 using Sphene.SpheneConfiguration;
 using Sphene.Services.Mediator;
+using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Collections;
 using NotificationType = Sphene.SpheneConfiguration.Models.NotificationType;
+using System.Threading;
 
 namespace Sphene.Services;
 
-// Notification class for acknowledgment feedback
-public class Notification
-{
-    public string Content { get; }
-    public NotificationType Type { get; }
-    public string? Title { get; }
-    public TimeSpan? MinimumDuration { get; }
-    public bool RespectUiHidden { get; }
-    public DateTime CreatedAt { get; }
-    public string? Tag { get; }
-
-    public Notification(string content, NotificationType type = NotificationType.Info, string? title = null, 
-        TimeSpan? minimumDuration = null, bool respectUiHidden = true, string? tag = null)
-    {
-        Content = content;
-        Type = type;
-        Title = title;
-        MinimumDuration = minimumDuration;
-        RespectUiHidden = respectUiHidden;
-        CreatedAt = DateTime.UtcNow;
-        Tag = tag;
-    }
-
-    public INotification ToINotification()
-    {
-        var dalType = Type == NotificationType.Info ? Dalamud.Interface.ImGuiNotification.NotificationType.Info :
-                     Type == NotificationType.Warning ? Dalamud.Interface.ImGuiNotification.NotificationType.Warning :
-                     Type == NotificationType.Error ? Dalamud.Interface.ImGuiNotification.NotificationType.Error :
-                     Dalamud.Interface.ImGuiNotification.NotificationType.Success;
-        
-        var notification = new Dalamud.Interface.ImGuiNotification.Notification()
-        {
-            Content = Content,
-            Type = dalType,
-            Title = Title,
-            InitialDuration = MinimumDuration ?? TimeSpan.FromSeconds(3),
-            RespectUiHidden = RespectUiHidden
-        };
-        return notification;
-    }
-}
+ 
 
 // Message service for managing acknowledgment notifications
 public class MessageService : IEnumerable<KeyValuePair<string, Notification>>
@@ -59,9 +22,9 @@ public class MessageService : IEnumerable<KeyValuePair<string, Notification>>
     private readonly INotificationManager? _notificationManager;
     private readonly SpheneConfigService? _configService;
     private readonly SpheneMediator? _mediator;
-    private readonly ConcurrentDictionary<string, Notification> _messages = new();
-    private readonly ConcurrentDictionary<string, List<Notification>> _taggedMessages = new();
-    private readonly object _lock = new();
+    private readonly ConcurrentDictionary<string, Notification> _messages = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, List<Notification>> _taggedMessages = new(StringComparer.Ordinal);
+    private readonly Lock _lock = new();
 
     public MessageService(ILogger<MessageService> logger, INotificationManager? notificationManager = null, SpheneConfigService? configService = null, SpheneMediator? mediator = null)
     {
@@ -98,10 +61,8 @@ public class MessageService : IEnumerable<KeyValuePair<string, Notification>>
         lock (_lock)
         {
             _messages[messageId] = notification;
-            
             if (!_taggedMessages.ContainsKey(tag))
                 _taggedMessages[tag] = new List<Notification>();
-            
             _taggedMessages[tag].Add(notification);
         }
 
@@ -141,23 +102,20 @@ public class MessageService : IEnumerable<KeyValuePair<string, Notification>>
     {
         lock (_lock)
         {
-            if (_taggedMessages.TryGetValue(tag, out var notifications))
+            if (_taggedMessages.TryGetValue(tag, out _))
             {
                 var toRemove = new List<string>();
-                
                 foreach (var kvp in _messages)
                 {
-                    if (kvp.Value.Tag == tag)
+                    if (string.Equals(kvp.Value.Tag, tag, StringComparison.Ordinal))
                     {
                         toRemove.Add(kvp.Key);
                     }
                 }
-                
                 foreach (var key in toRemove)
                 {
                     _messages.TryRemove(key, out _);
                 }
-                
                 _taggedMessages.TryRemove(tag, out _);
                 _logger.LogInformation("Cleaned {count} messages with tag: {tag}", toRemove.Count, tag);
             }
@@ -222,19 +180,21 @@ public class MessageService : IEnumerable<KeyValuePair<string, Notification>>
     }
     
     // Check if a message tag indicates it's acknowledgment-related
-    private bool IsAcknowledgmentMessage(string tag)
+    private static bool IsAcknowledgmentMessage(string tag)
     {
-        return tag.StartsWith("ack_") || 
-               tag.StartsWith("pair_clear_") || 
-               tag.StartsWith("pair_force_clear_") || 
-               tag.StartsWith("build_start_pending") ||
+        return tag.StartsWith("ack_", StringComparison.Ordinal) || 
+               tag.StartsWith("pair_clear_", StringComparison.Ordinal) || 
+               tag.StartsWith("pair_force_clear_", StringComparison.Ordinal) || 
+               tag.StartsWith("build_start_pending", StringComparison.Ordinal) ||
                tag.Contains("acknowledgment", StringComparison.OrdinalIgnoreCase);
     }
     
     // Check if a message tag indicates it's a "waiting for acknowledgment" message
-    private bool IsWaitingForAcknowledgmentMessage(string tag)
+    private static bool IsWaitingForAcknowledgmentMessage(string tag)
     {
-        return tag.StartsWith("ack_") && !tag.Contains("success") && !tag.Contains("complete");
+        return tag.StartsWith("ack_", StringComparison.Ordinal) && 
+               !tag.Contains("success", StringComparison.Ordinal) && 
+               !tag.Contains("complete", StringComparison.Ordinal);
     }
     
     // Check if acknowledgment notifications should be shown based on settings

@@ -33,7 +33,10 @@ public class CitySyncshellExplanationUI : WindowMediatorSubscriberBase
         
         _logger.LogDebug("CitySyncshellExplanationUI constructor called, subscribing to CitySyncshellExplanationRequestMessage");
         _logger.LogDebug("Mediator instance: {mediator}", Mediator?.GetType().Name ?? "null");
-        Mediator.Subscribe<CitySyncshellExplanationRequestMessage>(this, OnExplanationRequest);
+        if (Mediator != null)
+        {
+            Mediator.Subscribe<CitySyncshellExplanationRequestMessage>(this, OnExplanationRequest);
+        }
         _logger.LogDebug("CitySyncshellExplanationUI subscription completed - subscribed to CitySyncshellExplanationRequestMessage");
     }
 
@@ -183,6 +186,3 @@ public class CitySyncshellExplanationUI : WindowMediatorSubscriberBase
         IsOpen = false;
     }
 }
-
-public record CitySyncshellExplanationRequestMessage(string CityName) : MessageBase;
-public record CitySyncshellExplanationResponseMessage(string CityName, bool ShouldJoin) : MessageBase;

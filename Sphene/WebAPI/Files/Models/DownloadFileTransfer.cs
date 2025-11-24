@@ -14,7 +14,7 @@ public class DownloadFileTransfer : FileTransfer
     {
         set
         {
-            // nothing to set
+            _ = value;
         }
         get => Dto.Size;
     }

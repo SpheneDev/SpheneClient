@@ -8,9 +8,9 @@ namespace Sphene.Services;
 public partial class HousingOwnershipService
 {
     // Public method to add verified property with outdoor/indoor preferences and syncshell preferences
-    public void AddVerifiedOwnedPropertyWithPreferences(LocationInfo location, bool allowOutdoor, bool allowIndoor, bool preferOutdoorSyncshells = true, bool preferIndoorSyncshells = true)
+    public async Task AddVerifiedOwnedPropertyWithPreferences(LocationInfo location, bool allowOutdoor, bool allowIndoor, bool preferOutdoorSyncshells = true, bool preferIndoorSyncshells = true)
     {
-        AddVerifiedOwnedProperty(location, allowOutdoor, allowIndoor, preferOutdoorSyncshells, preferIndoorSyncshells);
+        await AddVerifiedOwnedProperty(location, allowOutdoor, allowIndoor, preferOutdoorSyncshells, preferIndoorSyncshells).ConfigureAwait(false);
     }
     
     // Check if a location is verified and allowed for area syncshells based on outdoor/indoor preferences
@@ -48,7 +48,7 @@ public partial class HousingOwnershipService
     }
     
     // Update outdoor/indoor preferences for an existing verified property
-    public async void UpdateVerifiedPropertyPreferences(LocationInfo location, bool allowOutdoor, bool allowIndoor, bool preferOutdoorSyncshells = true, bool preferIndoorSyncshells = true)
+    public async Task UpdateVerifiedPropertyPreferences(LocationInfo location, bool allowOutdoor, bool allowIndoor, bool preferOutdoorSyncshells = true, bool preferIndoorSyncshells = true)
     {
         // Immediately update local cache for instant UI feedback
         if (_serverHousingProperties != null)
@@ -66,7 +66,7 @@ public partial class HousingOwnershipService
         }
         
         // Use the server-first approach
-        AddVerifiedOwnedProperty(location, allowOutdoor, allowIndoor, preferOutdoorSyncshells, preferIndoorSyncshells);
+        await AddVerifiedOwnedProperty(location, allowOutdoor, allowIndoor, preferOutdoorSyncshells, preferIndoorSyncshells).ConfigureAwait(false);
         
         // Force immediate cache refresh to update UI
         _lastServerSync = DateTime.MinValue;
@@ -77,9 +77,9 @@ public partial class HousingOwnershipService
     }
     
     // Public method to add verified room property without outdoor/indoor preferences
-    public void AddVerifiedOwnedRoom(LocationInfo location)
+    public async Task AddVerifiedOwnedRoom(LocationInfo location)
     {
-        AddVerifiedOwnedPropertyForRoom(location);
+        await AddVerifiedOwnedPropertyForRoom(location).ConfigureAwait(false);
     }
     
     // Force a refresh of verified properties from the server

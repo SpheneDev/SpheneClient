@@ -194,7 +194,7 @@ public partial class FileDownloadManager : DisposableMediatorSubscriberBase
         {
             throw;
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             try
             {

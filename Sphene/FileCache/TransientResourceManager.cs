@@ -13,7 +13,7 @@ namespace Sphene.FileCache;
 
 public sealed class TransientResourceManager : DisposableMediatorSubscriberBase
 {
-    private readonly object _cacheAdditionLock = new();
+    private readonly System.Threading.Lock _cacheAdditionLock = new();
     private readonly HashSet<string> _cachedHandledPaths = new(StringComparer.Ordinal);
     private readonly TransientConfigService _configurationService;
     private readonly DalamudUtilService _dalamudUtil;
@@ -246,9 +246,14 @@ public sealed class TransientResourceManager : DisposableMediatorSubscriberBase
     private void DalamudUtil_FrameworkUpdate()
     {
         _cachedFrameAddresses = new(_playerRelatedPointers.Where(k => k.Address != nint.Zero).ToDictionary(c => c.Address, c => c.ObjectKind));
-        lock (_cacheAdditionLock)
+        _cacheAdditionLock.Enter();
+        try
         {
             _cachedHandledPaths.Clear();
+        }
+        finally
+        {
+            _cacheAdditionLock.Exit();
         }
 
         if (_lastClassJobId != _dalamudUtil.ClassJobId)
@@ -301,9 +306,14 @@ public sealed class TransientResourceManager : DisposableMediatorSubscriberBase
         // ignore files already processed this frame
         if (_cachedHandledPaths.Contains(gamePath)) return;
 
-        lock (_cacheAdditionLock)
+        _cacheAdditionLock.Enter();
+        try
         {
             _cachedHandledPaths.Add(gamePath);
+        }
+        finally
+        {
+            _cacheAdditionLock.Exit();
         }
 
         // replace individual mtrl stuff
@@ -325,9 +335,14 @@ public sealed class TransientResourceManager : DisposableMediatorSubscriberBase
         var handledTypes = IsTransientRecording ? _handledRecordingFileTypes.Concat(_handledFileTypes) : _handledFileTypes;
         if (!handledTypes.Any(type => gamePath.EndsWith(type, StringComparison.OrdinalIgnoreCase)))
         {
-            lock (_cacheAdditionLock)
+            _cacheAdditionLock.Enter();
+            try
             {
                 _cachedHandledPaths.Add(gamePath);
+            }
+            finally
+            {
+                _cacheAdditionLock.Exit();
             }
             return;
         }
@@ -335,9 +350,14 @@ public sealed class TransientResourceManager : DisposableMediatorSubscriberBase
         // ignore files not belonging to anything player related
         if (!_cachedFrameAddresses.TryGetValue(gameObjectAddress, out var objectKind))
         {
-            lock (_cacheAdditionLock)
+            _cacheAdditionLock.Enter();
+            try
             {
                 _cachedHandledPaths.Add(gamePath);
+            }
+            finally
+            {
+                _cacheAdditionLock.Exit();
             }
             return;
         }

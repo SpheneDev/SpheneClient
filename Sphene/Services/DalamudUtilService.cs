@@ -141,14 +141,14 @@ public class DalamudUtilService : IHostedService, IMediatorSubscriber
 
     public bool IsWine { get; init; }
 
-    public unsafe GameObject* GposeTarget
+    public static unsafe GameObject* GposeTarget
     {
         get => TargetSystem.Instance()->GPoseTarget;
         set => TargetSystem.Instance()->GPoseTarget = value;
     }
 
-    private unsafe bool HasGposeTarget => GposeTarget != null;
-    private unsafe int GPoseTargetIdx => !HasGposeTarget ? -1 : GposeTarget->ObjectIndex;
+    private static unsafe bool HasGposeTarget => GposeTarget != null;
+    private static unsafe int GPoseTargetIdx => !HasGposeTarget ? -1 : GposeTarget->ObjectIndex;
 
     public async Task<IGameObject?> GetGposeTargetGameObjectAsync()
     {
@@ -355,8 +355,7 @@ public class DalamudUtilService : IHostedService, IMediatorSubscriber
         uint wardId = houseMan == null ? 0 : (uint)(houseMan->GetCurrentWard() + 1);
         uint houseId = 0;
         var tempHouseId = houseMan == null ? 0 : (houseMan->GetCurrentPlot());
-        // Don't reset plot ID when outside - we want to detect outdoor plots too
-        // if (!houseMan->IsInside()) tempHouseId = 0;
+        
         if (tempHouseId < -1)
         {
             divisionId = tempHouseId == -127 ? 2 : (uint)1;
@@ -513,11 +512,7 @@ public class DalamudUtilService : IHostedService, IMediatorSubscriber
 
             logger.LogTrace("[{redrawId}] Finished drawing after {curWaitTime}ms", redrawId, curWaitTime);
         }
-        catch (NullReferenceException ex)
-        {
-            logger.LogWarning(ex, "Error accessing {handler}, object does not exist anymore?", handler);
-        }
-        catch (AccessViolationException ex)
+        catch (Exception ex)
         {
             logger.LogWarning(ex, "Error accessing {handler}, object does not exist anymore?", handler);
         }
@@ -824,13 +819,10 @@ public class DalamudUtilService : IHostedService, IMediatorSubscriber
         for (int i = 0; i < _partyList.Length; i++)
         {
             var member = _partyList[i];
-            if (member != null && !string.IsNullOrEmpty(member.Name?.TextValue))
+            if (member != null && !string.IsNullOrEmpty(member.Name?.TextValue) &&
+                member.EntityId != _clientState.LocalPlayer?.EntityId)
             {
-                // Skip the local player
-                if (member.ObjectId != (uint?)_clientState.LocalPlayer?.GameObjectId)
-                {
-                    members.Add(member.Name.TextValue);
-                }
+                members.Add(member.Name.TextValue);
             }
         }
         return members;

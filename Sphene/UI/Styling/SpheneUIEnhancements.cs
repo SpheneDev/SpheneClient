@@ -15,10 +15,10 @@ namespace Sphene.UI.Styling;
 public static class SpheneUIEnhancements
 {
     private static readonly float BorderRadius = 4.0f;
-    private static readonly float ShadowOffset = 2.0f;
+    
     
     // Static dictionary to store resize state per window
-    private static readonly ConcurrentDictionary<string, Vector2> _pendingWindowSizes = new();
+    private static readonly ConcurrentDictionary<string, Vector2> _pendingWindowSizes = new(StringComparer.Ordinal);
     
     /// <summary>
     /// Draws a modern card-style container with Sphene theming
@@ -58,24 +58,9 @@ public static class SpheneUIEnhancements
         }
     }
     
-    /// <summary>
-    /// Draws a Sphene-themed card container with modern styling
-    /// </summary>
-    public static void DrawSpheneCard(string title, Action content, bool collapsible = false, float? maxHeight = null)
-    {
-        DrawSpheneCard(title, content, collapsible, maxHeight, null);
-    }
-    
-    /// <summary>
-    /// Draws a Sphene-themed card container with modern styling and optional header buttons
-    /// </summary>
-    public static void DrawSpheneCard(string title, Action content, bool collapsible = false, float? maxHeight = null, Action headerButtons = null)
-    {
-        DrawSpheneCard(title, content, collapsible, maxHeight, headerButtons, false, null, null, 0);
-    }
     
     // Draws a Sphene-themed card container with modern styling, optional header buttons, resize handle, and custom header background
-    public static void DrawSpheneCard(string title, Action content, bool collapsible = false, float? maxHeight = null, Action headerButtons = null, bool withResizeHandle = false, Vector2? minSize = null, Vector2? maxSize = null, uint customHeaderBg = 0, Action bottomOverlay = null)
+    public static void DrawSpheneCard(string title, Action content, bool collapsible = false, float? maxHeight = null, Action? headerButtons = null, bool withResizeHandle = false, Vector2? minSize = null, Vector2? maxSize = null, uint customHeaderBg = 0, Action? bottomOverlay = null)
     {
         // Apply pending window size if available
         if (_pendingWindowSizes.TryGetValue(title, out var pendingSize))
@@ -241,13 +226,7 @@ public static class SpheneUIEnhancements
         ImGui.Spacing();
     }
     
-    /// <summary>
-    /// Draws a Sphene-themed card container with modern styling, optional header buttons and resize handle
-    /// </summary>
-    public static void DrawSpheneCard(string title, Action content, bool collapsible = false, float? maxHeight = null, Action headerButtons = null, bool withResizeHandle = false, Vector2? minSize = null, Vector2? maxSize = null)
-    {
-        DrawSpheneCard(title, content, collapsible, maxHeight, headerButtons, withResizeHandle, minSize, maxSize, 0, null);
-    }
+    
     
     /// <summary>
     /// Draws a Sphene-themed button with crystal aesthetics
@@ -500,7 +479,7 @@ public static class SpheneUIEnhancements
         return new ColorRestorer(originalColors);
     }
     
-    private class ColorRestorer : IDisposable
+    private sealed class ColorRestorer : IDisposable
     {
         private readonly Dictionary<ImGuiCol, Vector4> _originalColors;
         
@@ -519,31 +498,11 @@ public static class SpheneUIEnhancements
         }
     }
     
-    private class LocalColorRestorer : IDisposable
-    {
-        private readonly List<IDisposable> _colorStack;
-        
-        public LocalColorRestorer(List<IDisposable> colorStack)
-        {
-            _colorStack = colorStack;
-        }
-        
-        public void Dispose()
-        {
-            // Dispose in reverse order to properly restore the color stack
-            for (int i = _colorStack.Count - 1; i >= 0; i--)
-            {
-                _colorStack[i]?.Dispose();
-            }
-        }
-    }
     
-    private class NoOpDisposable : IDisposable
+    
+    private readonly struct NoOpDisposable : IDisposable
     {
-        public void Dispose()
-        {
-            // No operation - this is used when we don't want to apply any theme
-        }
+        public void Dispose() { }
     }
     
     /// <summary>

@@ -9,7 +9,7 @@ namespace Sphene.Services.Mediator;
 
 public sealed class SpheneMediator : IHostedService
 {
-    private readonly object _addRemoveLock = new();
+    private readonly System.Threading.Lock _addRemoveLock = new();
     private readonly ConcurrentDictionary<object, DateTime> _lastErrorTime = [];
     private readonly ILogger<SpheneMediator> _logger;
     private readonly CancellationTokenSource _loopCts = new();
@@ -98,37 +98,45 @@ public sealed class SpheneMediator : IHostedService
 
     public void Subscribe<T>(IMediatorSubscriber subscriber, Action<T> action) where T : MessageBase
     {
-        lock (_addRemoveLock)
+        _addRemoveLock.Enter();
+        try
         {
             _subscriberDict.TryAdd(typeof(T), []);
-
             var subscriberAction = new SubscriberAction(subscriber, action);
             _logger.LogDebug("Subscribing {subscriber} to {messageType}", subscriber.GetType().Name, typeof(T).Name);
-            
             if (!_subscriberDict[typeof(T)].Add(subscriberAction))
             {
                 throw new InvalidOperationException("Already subscribed");
             }
-            
             _logger.LogDebug("Successfully subscribed {subscriber} to {messageType}. Total subscribers for this message: {count}", 
                 subscriber.GetType().Name, typeof(T).Name, _subscriberDict[typeof(T)].Count);
+        }
+        finally
+        {
+            _addRemoveLock.Exit();
         }
     }
 
     public void Unsubscribe<T>(IMediatorSubscriber subscriber) where T : MessageBase
     {
-        lock (_addRemoveLock)
+        _addRemoveLock.Enter();
+        try
         {
             if (_subscriberDict.ContainsKey(typeof(T)))
             {
                 _subscriberDict[typeof(T)].RemoveWhere(p => p.Subscriber == subscriber);
             }
         }
+        finally
+        {
+            _addRemoveLock.Exit();
+        }
     }
 
     internal void UnsubscribeAll(IMediatorSubscriber subscriber)
     {
-        lock (_addRemoveLock)
+        _addRemoveLock.Enter();
+        try
         {
             foreach (Type kvp in _subscriberDict.Select(k => k.Key))
             {
@@ -138,6 +146,10 @@ public sealed class SpheneMediator : IHostedService
                     _logger.LogDebug("{sub} unsubscribed from {msg}", subscriber.GetType().Name, kvp.Name);
                 }
             }
+        }
+        finally
+        {
+            _addRemoveLock.Exit();
         }
     }
 
@@ -150,9 +162,14 @@ public sealed class SpheneMediator : IHostedService
         }
 
         List<SubscriberAction> subscribersCopy = [];
-        lock (_addRemoveLock)
+        _addRemoveLock.Enter();
+        try
         {
             subscribersCopy = subscribers?.Where(s => s.Subscriber != null).OrderBy(k => k.Subscriber is IHighPriorityMediatorSubscriber ? 0 : 1).ToList() ?? [];
+        }
+        finally
+        {
+            _addRemoveLock.Exit();
         }
 
 #pragma warning disable S3011 // Reflection should not be used to increase accessibility of classes, methods, or fields

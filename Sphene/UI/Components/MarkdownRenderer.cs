@@ -12,7 +12,7 @@ namespace Sphene.UI.Components;
 
 public static class MarkdownRenderer
 {
-    private static readonly Dictionary<string, Vector4> ColorMap = new()
+    private static readonly Dictionary<string, Vector4> ColorMap = new(StringComparer.OrdinalIgnoreCase)
     {
         { "red", ImGuiColors.DalamudRed },
         { "green", ImGuiColors.HealerGreen },
@@ -51,25 +51,29 @@ public static class MarkdownRenderer
         }
 
         // Check for headers
-        if (line.StartsWith("# "))
+        if (line.StartsWith("# ", StringComparison.Ordinal))
         {
             RenderHeader(line.Substring(2), 1.5f);
             return;
         }
-        if (line.StartsWith("## "))
+        if (line.StartsWith("## ", StringComparison.Ordinal))
         {
             RenderHeader(line.Substring(3), 1.3f);
             return;
         }
-        if (line.StartsWith("### "))
+        if (line.StartsWith("### ", StringComparison.Ordinal))
         {
             RenderHeader(line.Substring(4), 1.1f);
             return;
         }
 
         // Parse inline formatting
+        if (wrapPos > 0)
+            ImGui.PushTextWrapPos(wrapPos);
         var segments = ParseInlineFormatting(line);
-        RenderSegments(segments, wrapPos);
+        RenderSegments(segments);
+        if (wrapPos > 0)
+            ImGui.PopTextWrapPos();
         // Try completely removing any spacing between lines
     }
 
@@ -81,7 +85,7 @@ public static class MarkdownRenderer
         
         // Parse inline formatting for headers too
         var segments = ParseInlineFormatting(text);
-        RenderSegments(segments, 0);
+        RenderSegments(segments);
         
         ImGui.SetWindowFontScale(1.0f);
         // Use smaller spacing after headers instead of full Spacing
@@ -119,15 +123,15 @@ public static class MarkdownRenderer
         return segments;
     }
 
-    private static TextSegment ParseNextSegment(string text, int startPos)
+    private static TextSegment? ParseNextSegment(string text, int startPos)
     {
         if (startPos >= text.Length)
             return null;
 
         // Check for bold italic formatting (***text***)
-        if (startPos + 2 < text.Length && text.Substring(startPos, 3) == "***")
+        if (startPos + 2 < text.Length && text[startPos] == '*' && text[startPos + 1] == '*' && text[startPos + 2] == '*')
         {
-            var endPos = text.IndexOf("***", startPos + 3);
+            var endPos = text.IndexOf("***", startPos + 3, StringComparison.Ordinal);
             if (endPos != -1)
             {
                 var content = text.Substring(startPos + 3, endPos - startPos - 3);
@@ -145,9 +149,9 @@ public static class MarkdownRenderer
         }
 
         // Check for bold formatting
-        if (startPos + 1 < text.Length && text.Substring(startPos, 2) == "**")
+        if (startPos + 1 < text.Length && text[startPos] == '*' && text[startPos + 1] == '*')
         {
-            var endPos = text.IndexOf("**", startPos + 2);
+            var endPos = text.IndexOf("**", startPos + 2, StringComparison.Ordinal);
             if (endPos != -1)
             {
                 var content = text.Substring(startPos + 2, endPos - startPos - 2);
@@ -185,15 +189,15 @@ public static class MarkdownRenderer
         }
 
         // Check for color formatting
-        var colorRegex = new Regex(@"<color=([#\w]+)>(.+?)</color>");
+        var colorRegex = new Regex(@"<color=(?<color>[#\w]+)>(?<text>.+?)</color>", RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture, TimeSpan.FromMilliseconds(50));
         var match = colorRegex.Match(text, startPos);
         if (match.Success && match.Index == startPos)
         {
-            var colorValue = match.Groups[1].Value.ToLower();
-            var colorText = match.Groups[2].Value;
+            var colorValue = match.Groups["color"].Value.ToLower();
+            var colorText = match.Groups["text"].Value;
             Vector4 color;
             
-            if (colorValue.StartsWith("#"))
+            if (colorValue.StartsWith('#'))
             {
                 color = ParseHexColor(colorValue);
             }
@@ -215,11 +219,11 @@ public static class MarkdownRenderer
         }
 
         // Check for underline formatting
-        var underlineRegex = new Regex(@"<u>(.+?)</u>");
+        var underlineRegex = new Regex(@"<u>(?<text>.+?)</u>", RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture, TimeSpan.FromMilliseconds(50));
         var underlineMatch = underlineRegex.Match(text, startPos);
         if (underlineMatch.Success && underlineMatch.Index == startPos)
         {
-            var underlineText = underlineMatch.Groups[1].Value;
+            var underlineText = underlineMatch.Groups["text"].Value;
             var (finalText, formatType, color) = ParseNestedFormatting(underlineText, FormatType.Underline);
             
             return new TextSegment
@@ -280,13 +284,13 @@ public static class MarkdownRenderer
         var color = ImGuiColors.DalamudWhite;
         
         // Check for color formatting
-        var colorMatch = Regex.Match(content, @"<color=([#\w]+)>(.+?)</color>");
+        var colorMatch = Regex.Match(content, @"<color=(?<color>[#\w]+)>(?<text>.+?)</color>", RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture, TimeSpan.FromMilliseconds(50));
         if (colorMatch.Success)
         {
-            var colorValue = colorMatch.Groups[1].Value.ToLower();
-            finalText = colorMatch.Groups[2].Value;
+            var colorValue = colorMatch.Groups["color"].Value.ToLower();
+            finalText = colorMatch.Groups["text"].Value;
             
-            if (colorValue.StartsWith("#"))
+            if (colorValue.StartsWith('#'))
             {
                 color = ParseHexColor(colorValue);
             }
@@ -300,10 +304,10 @@ public static class MarkdownRenderer
         }
         
         // Check for underline formatting
-        var underlineMatch = Regex.Match(finalText, @"<u>(.+?)</u>");
+        var underlineMatch = Regex.Match(finalText, @"<u>(?<text>.+?)</u>", RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture, TimeSpan.FromMilliseconds(50));
         if (underlineMatch.Success)
         {
-            finalText = underlineMatch.Groups[1].Value;
+            finalText = underlineMatch.Groups["text"].Value;
             formatType = CombineFormatTypes(formatType, FormatType.Underline);
         }
         
@@ -376,68 +380,13 @@ public static class MarkdownRenderer
         return -1;
     }
 
-    private static TextSegment FindNextMatch(string text, int startPos, dynamic[] patterns)
-    {
-        TextSegment earliestMatch = null;
-        var earliestIndex = int.MaxValue;
-
-        foreach (var pattern in patterns)
-        {
-            var regex = new Regex(pattern.Pattern);
-            var match = regex.Match(text, startPos);
-            
-            if (match.Success && match.Index < earliestIndex)
-            {
-                earliestIndex = match.Index;
-                
-                if (pattern.Type == FormatType.Color)
-                {
-                    var colorValue = match.Groups[1].Value.ToLower();
-                    var colorText = match.Groups[2].Value;
-                    Vector4 color;
-                    
-                    if (colorValue.StartsWith("#"))
-                    {
-                        // Parse hex color
-                        color = ParseHexColor(colorValue);
-                    }
-                    else
-                    {
-                        // Use named color
-                        color = ColorMap.ContainsKey(colorValue) ? ColorMap[colorValue] : ImGuiColors.DalamudWhite;
-                    }
-                    
-                    earliestMatch = new TextSegment
-                    {
-                        Text = colorText,
-                        Type = FormatType.Color,
-                        Color = color,
-                        Index = match.Index,
-                        Length = match.Length
-                    };
-                }
-                else
-                {
-                    earliestMatch = new TextSegment
-                    {
-                        Text = match.Groups[1].Value,
-                        Type = pattern.Type,
-                        Index = match.Index,
-                        Length = match.Length
-                    };
-                }
-            }
-        }
-
-        return earliestMatch;
-    }
 
     private static Vector4 ParseHexColor(string hexColor)
     {
         try
         {
             // Remove # if present
-            if (hexColor.StartsWith("#"))
+            if (hexColor.StartsWith('#'))
                 hexColor = hexColor.Substring(1);
             
             // Parse RGB components
@@ -457,7 +406,7 @@ public static class MarkdownRenderer
         return ImGuiColors.DalamudWhite;
     }
 
-    private static void RenderSegments(List<TextSegment> segments, float wrapPos)
+    private static void RenderSegments(List<TextSegment> segments)
     {
         foreach (var segment in segments)
         {
@@ -679,9 +628,9 @@ public static class MarkdownRenderer
         }
     }
 
-    private class TextSegment
+    private sealed class TextSegment
     {
-        public string Text { get; set; }
+        public string Text { get; set; } = string.Empty;
         public FormatType Type { get; set; }
         public Vector4 Color { get; set; }
         public int Index { get; set; }

@@ -486,6 +486,7 @@ public class ServerConfigurationManager
         int debugServerIndex = -1;
         List<int> duplicateDebugServerIndices = new();
 #endif
+        List<int> indicesToRemove = new();
 
         // Find existing servers and collect duplicates
         for (int i = 0; i < servers.Count; i++)
@@ -514,13 +515,11 @@ public class ServerConfigurationManager
                 }
             }
 #else
-            // In release builds, remove any test servers
             if (server.ServerUri.Contains("test.sphene.online") ||
                 string.Equals(server.ServerName, "Sphene Test Server", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(server.ServerName, "Sphene Debug Server", StringComparison.OrdinalIgnoreCase))
             {
-                servers.RemoveAt(i);
-                i--; // Adjust index after removal
+                indicesToRemove.Add(i);
                 continue;
             }
 #endif
@@ -528,21 +527,13 @@ public class ServerConfigurationManager
             // Check for main server - improved duplicate detection
             bool isMainServer = false;
             
-            // Primary identification: exact name or URI match
             if (string.Equals(server.ServerName, mainServerName, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(server.ServerUri, mainServerUri, StringComparison.OrdinalIgnoreCase))
+                string.Equals(server.ServerUri, mainServerUri, StringComparison.OrdinalIgnoreCase) ||
+                (server.ServerUri.Contains("sphene.online") && !server.ServerUri.Contains("test") &&
+                 server.ServerName.Contains("Sphene") && server.ServerName.Contains("Server") &&
+                 !server.ServerName.Contains("Test") && !server.ServerName.Contains("Debug")))
             {
                 isMainServer = true;
-            }
-            // Secondary identification: URI contains sphene.online (but not test) and name is similar
-            else if (server.ServerUri.Contains("sphene.online") && !server.ServerUri.Contains("test"))
-            {
-                // Check if the server name is similar to avoid creating duplicates
-                if (server.ServerName.Contains("Sphene") && server.ServerName.Contains("Server") && 
-                    !server.ServerName.Contains("Test") && !server.ServerName.Contains("Debug"))
-                {
-                    isMainServer = true;
-                }
             }
             
             if (isMainServer)
@@ -563,6 +554,12 @@ public class ServerConfigurationManager
             }
         }
 
+        foreach (int idx in indicesToRemove.OrderByDescending(x => x))
+        {
+            servers.RemoveAt(idx);
+        }
+
+        
         // Consolidate SecretKeys and Authentications from duplicate servers
         ConsolidateServerData(servers, mainServerIndex, duplicateMainServerIndices);
 #if DEBUG
@@ -743,7 +740,7 @@ public class ServerConfigurationManager
         Save();
     }
 
-    private void ConsolidateServerData(List<ServerStorage> servers, int targetServerIndex, List<int> duplicateIndices)
+    private static void ConsolidateServerData(List<ServerStorage> servers, int targetServerIndex, List<int> duplicateIndices)
     {
         if (targetServerIndex < 0 || targetServerIndex >= servers.Count || duplicateIndices.Count == 0)
             return;

@@ -281,7 +281,7 @@ public class ThemeConfiguration
     public event Action? ThemeChanged;
 
     // Per-button style overrides
-    public Dictionary<string, ButtonStyleOverride> ButtonStyles { get; set; } = new();
+    public Dictionary<string, ButtonStyleOverride> ButtonStyles { get; set; } = new(StringComparer.Ordinal);
     
     // Method to trigger theme change notification
     public void NotifyThemeChanged()
@@ -534,7 +534,7 @@ public class ThemeConfiguration
                 Icon = kv.Value.Icon,
                 Border = kv.Value.Border,
                 BorderSize = kv.Value.BorderSize
-            })
+            }, StringComparer.Ordinal)
         };
     }
     
