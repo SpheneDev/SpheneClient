@@ -341,6 +341,20 @@ public sealed class ShrinkUHostService : IHostedService, IDisposable
         }
     }
 
+    public void OpenConversion()
+    {
+        try
+        {
+            if (!_registered && _configService.Current.EnableShrinkUIntegration)
+                RegisterWindows();
+            _conversionUi.IsOpen = true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to open ShrinkU ConversionUI");
+        }
+    }
+
     public void OpenConversionForMods(IEnumerable<string> mods)
     {
         try

@@ -473,9 +473,8 @@ public class TopTabMenu
 
     private async Task GlobalControlCountdown(int countdown)
     {
-#if DEBUG
-        return;
-#endif
+        if (System.Diagnostics.Debugger.IsAttached)
+            return;
 
         _globalControlCountdown = countdown;
         while (_globalControlCountdown > 0)

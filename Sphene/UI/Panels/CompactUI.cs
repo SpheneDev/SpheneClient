@@ -42,6 +42,7 @@ namespace Sphene.UI.Panels;
 
 public class CompactUi : WindowMediatorSubscriberBase
 {
+
     private readonly ApiController _apiController;
     private readonly SpheneConfigService _configService;
     private readonly ConcurrentDictionary<GameObjectHandler, Dictionary<string, FileDownloadStatus>> _currentDownloads = new();
@@ -92,7 +93,6 @@ public class CompactUi : WindowMediatorSubscriberBase
     private CancellationTokenSource _conversionCancellationTokenSource = new();
     private readonly Progress<(string fileName, int progress)> _conversionProgress = new();
     private int _conversionCurrentFileProgress;
-    private string _conversionCurrentFileName = string.Empty;
     private DateTime _conversionStartTime = DateTime.MinValue;
     private string _currentModName = string.Empty;
     private int _currentModIndex = 0;
@@ -106,7 +106,6 @@ public class CompactUi : WindowMediatorSubscriberBase
     private int _backupTotalCount = 0;
     private DateTime _backupStartTime = DateTime.MinValue;
     private readonly List<string> _backupStepLog = new();
-    private string _backupCurrentStep = string.Empty;
     private int _backupTextureCount = 0;
     private int _backupZipCount = 0;
     private int _backupPmpCount = 0;
@@ -128,7 +127,6 @@ public class CompactUi : WindowMediatorSubscriberBase
     private CancellationTokenSource _restoreCancellationTokenSource = new();
     private readonly Progress<(string fileName, int current, int total)> _restoreProgress = new();
     
-    private string _restoreCurrentFileName = string.Empty;
     private int _restoreCurrentIndex = 0;
     private int _restoreTotalCount = 0;
     private DateTime _restoreStartTime = DateTime.MinValue;
@@ -209,14 +207,12 @@ public class CompactUi : WindowMediatorSubscriberBase
         _conversionProgress.ProgressChanged += (sender, progress) =>
         {
             _conversionCurrentFileProgress = progress.progress;
-            _conversionCurrentFileName = progress.fileName;
         };
         _shrinkuConversionService.OnConversionProgress += e =>
         {
             try
             {
                 _conversionCurrentFileProgress = e.Item2;
-                _conversionCurrentFileName = e.Item1;
             }
             catch (Exception ex)
             {
@@ -283,7 +279,6 @@ public class CompactUi : WindowMediatorSubscriberBase
         {
             try
             {
-                _restoreCurrentFileName = progress.fileName;
                 _restoreCurrentIndex = progress.current;
                 _restoreTotalCount = progress.total;
                 _restoreWindowOpen = true;
@@ -555,6 +550,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                     {
                         foreach (var f in Directory.EnumerateFiles(sess.SourcePath, "*", SearchOption.AllDirectories))
                         {
+
                             try { total += new FileInfo(f).Length; count++; }
                             catch (Exception ex) { _logger.LogDebug(ex, "Failed to read file size during backup storage info"); }
                         }
@@ -1774,9 +1770,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                     ImGui.TextColored(SpheneCustomTheme.Colors.Warning, "• 300-600 MB: Large");
                     ImGui.TextColored(SpheneCustomTheme.Colors.Error, "• 600+ MB: Very Large");
                     ImGui.Spacing();
-                    ImGui.Text("Use Data Analysis to optimize textures.");
-                    ImGui.Spacing();
-                    ImGui.TextColored(SpheneCustomTheme.Colors.SpheneGold, "💡 Tip: Click the archive button for quick conversion!");
+                    ImGui.TextColored(SpheneCustomTheme.Colors.SpheneGold, "Tip: Click the button for quick conversion!");
                     ImGui.EndTooltip();
                 }
             }
@@ -1802,9 +1796,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                     ImGui.TextColored(SpheneCustomTheme.Colors.Warning, "• 300-600 MB: Large");
                     ImGui.TextColored(SpheneCustomTheme.Colors.Error, "• 600+ MB: Very Large");
                     ImGui.Spacing();
-                    ImGui.Text("Use Data Analysis to optimize textures.");
-                    ImGui.Spacing();
-                    ImGui.TextColored(SpheneCustomTheme.Colors.SpheneGold, "💡 Tip: Click the archive button for quick conversion!");
+                    ImGui.TextColored(SpheneCustomTheme.Colors.SpheneGold, "Tip: Click the button for quick conversion!");
                     ImGui.EndTooltip();
                 }
             }
@@ -1818,9 +1810,8 @@ public class CompactUi : WindowMediatorSubscriberBase
 
         using (SpheneCustomTheme.ApplyContextMenuTheme())
         {
-            // Fixed-size compact window to keep all controls visible
-            ImGui.SetNextWindowSize(new Vector2(520, 360), ImGuiCond.Always);
-            if (ImGui.Begin("Texture Conversion", ref _conversionWindowOpen, ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoResize))
+            // Dynamic window size for better flexibility
+            if (ImGui.Begin("Texture Conversion", ref _conversionWindowOpen, ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.AlwaysAutoResize))
             {
                 // Ensure character data analysis is triggered and completed before popup is usable
                 if ((_popupAnalysisTask == null || _popupAnalysisTask.IsCompleted) && NeedsPopupAnalysis())
@@ -2016,48 +2007,62 @@ public class CompactUi : WindowMediatorSubscriberBase
                 _autoConvertKey = candidateKey;
             }
 
-            // Compact header and statistics row
-            ImGui.TextColored(SpheneCustomTheme.Colors.SpheneGold, "Texture Conversion");
-            ImGui.Separator();
-            ImGui.Text($"Textures: {totalTextures}");
-            ImGui.SameLine();
-            ImGui.Text($"BC7: {bc7Textures}");
-            ImGui.SameLine();
-            ImGui.TextColored(SpheneCustomTheme.Colors.Warning, $"Convert: {nonBc7Textures.Count}");
-            // Ensure storage info task is started or refreshed periodically
-            try
+            var totalSizeBytes = (nonBc7Textures?.Sum(t => t.OriginalSize) ?? 0L);
+            var totalSizeMB = totalSizeBytes / (1024.0 * 1024.0);
+
+            // Redesigned Layout using Tables
+            if (ImGui.BeginTable("ConversionOverview", 2, ImGuiTableFlags.BordersInnerV | ImGuiTableFlags.SizingStretchProp))
             {
-                var now = DateTime.UtcNow;
-                if (_storageInfoTask == null || (((now - _lastStorageInfoUpdate) > TimeSpan.FromSeconds(5)) && _storageInfoTask.IsCompleted))
+                ImGui.TableSetupColumn("Statistics", ImGuiTableColumnFlags.WidthStretch);
+                ImGui.TableSetupColumn("Storage", ImGuiTableColumnFlags.WidthStretch);
+                ImGui.TableNextRow();
+
+                ImGui.TableSetColumnIndex(0);
+                ImGui.TextColored(SpheneCustomTheme.Colors.SpheneGold, "Statistics");
+                ImGui.Text($"Total Textures: {totalTextures}");
+                ImGui.Text($"BC7 Optimized: {bc7Textures}");
+                ImGui.TextColored(SpheneCustomTheme.Colors.Warning, $"To Convert: {nonBc7Textures?.Count ?? 0} ({totalSizeMB:F1} MB)");
+
+                ImGui.TableSetColumnIndex(1);
+                ImGui.TextColored(SpheneCustomTheme.Colors.SpheneGold, "Storage");
+                
+                // Ensure storage info task is started or refreshed periodically
+                try
                 {
-                    _storageInfoTask = GetShrinkUStorageInfoAsync();
-                    _lastStorageInfoUpdate = now;
+                    var now = DateTime.UtcNow;
+                    if (_storageInfoTask != null && _storageInfoTask.IsCompleted && _storageInfoTask.Status == TaskStatus.RanToCompletion)
+                        _cachedStorageInfo = _storageInfoTask.Result;
+
+                    if (_storageInfoTask == null || (((now - _lastStorageInfoUpdate) > TimeSpan.FromSeconds(5)) && _storageInfoTask.IsCompleted))
+                    {
+                        _storageInfoTask = GetShrinkUStorageInfoAsync();
+                        _lastStorageInfoUpdate = now;
+                    }
                 }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogDebug(ex, "Failed to refresh ShrinkU storage info task");
-            }
-            var (totalSize, fileCount) = _cachedStorageInfo;
-            // Compact storage info line
-            if (fileCount > 0)
-            {
-                var sizeInMB = totalSize / (1024.0 * 1024.0);
-                var updating = _storageInfoTask != null && !_storageInfoTask.IsCompleted;
-                var suffix = updating ? " [Updating...]" : string.Empty;
-                ImGui.TextColored(SpheneCustomTheme.Colors.Warning, $"Storage: {sizeInMB:F2} MB ({fileCount} files){suffix}");
-            }
-            else
-            {
-                ImGui.TextColored(SpheneCustomTheme.CurrentTheme.TextSecondary, "Storage: calculating...");
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Failed to refresh ShrinkU storage info task");
+                }
+                var (totalSize, fileCount) = _cachedStorageInfo;
+                // Compact storage info line
+                if (fileCount > 0)
+                {
+                    var sizeInMB = totalSize / (1024.0 * 1024.0);
+                    ImGui.TextColored(SpheneCustomTheme.Colors.Warning, $"Storage: {sizeInMB:F2} MB ({fileCount} files)");
+                }
+                else
+                {
+                    ImGui.TextColored(SpheneCustomTheme.CurrentTheme.TextSecondary, "Calculating...");
+                }
+                ImGui.EndTable();
             }
 
-            // Backup management (compact): preference + status + actions inline
+            ImGui.Spacing();
             ImGui.Separator();
-            ImGui.TextUnformatted("Backups:");
-            // Render backup status area inline to simplify layout
-            
-            
+            ImGui.Spacing();
+
+            // Backups Section (Redesigned)
+            ImGui.TextColored(SpheneCustomTheme.Colors.SpheneGold, "Backups");
             var availableBackups = GetCachedBackupsForCurrentAnalysis();
             // Compute counts and gate status text updates on changes in number/type
             var textureBackupCount = availableBackups.Count(kvp => !kvp.Key.StartsWith("[ShrinkU Mod:", StringComparison.Ordinal));
@@ -2190,15 +2195,12 @@ public class CompactUi : WindowMediatorSubscriberBase
             
             
             
-            // Always render stable storage info text to avoid layout flicker when the task refreshes
-            if (_storageInfoTask != null && _storageInfoTask.IsCompleted)
-            {
-                _cachedStorageInfo = _storageInfoTask.Result;
-            }
-
-            // Texture conversion controls
+            ImGui.Spacing();
             ImGui.Separator();
-            ImGui.TextUnformatted("Conversion:");
+            ImGui.Spacing();
+
+            // Conversion Section
+            ImGui.TextColored(SpheneCustomTheme.Colors.SpheneGold, "Conversion Options");
             // Sync checkbox state with ShrinkU config to reflect external changes
             try
             {
@@ -2271,9 +2273,6 @@ public class CompactUi : WindowMediatorSubscriberBase
             
             if ((nonBc7Textures?.Count ?? 0) > 0)
             {
-                var totalSizeBytes = (nonBc7Textures?.Sum(t => t.OriginalSize) ?? 0L);
-                var totalSizeMB = totalSizeBytes / (1024.0 * 1024.0);
-                ImGui.Text($"To convert: {totalSizeMB:F1} MB");
                 try
                 {
                     var mods = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -2303,27 +2302,37 @@ public class CompactUi : WindowMediatorSubscriberBase
                         }
                         catch (Exception ex) { _logger.LogDebug(ex, "Excluded mods count check failed"); }
                     }
-                    ImGui.SameLine();
-                    ImGui.TextColored(SpheneCustomTheme.CurrentTheme.TextSecondary, $"Excluded: {excludedCount}");
-                    if (mods.Count > 0 && ImGui.TreeNodeEx("Affected mods", ImGuiTreeNodeFlags.FramePadding))
+                    if (mods.Count > 0)
                     {
-                        foreach (var m in mods)
+                        ImGui.TextColored(SpheneCustomTheme.Colors.SpheneGold, $"Affected Mods (Excluded: {excludedCount})");
+                        // Use a child window to make the list scrollable
+                        var requiredHeight = Math.Max(50, mods.Count * ImGui.GetTextLineHeightWithSpacing() + 10);
+                        var childHeight = Math.Min(requiredHeight, 300.0f);
+                        
+                        // Use fixed width to prevent auto-resize animation issues
+                        ImGui.Separator();
+                        if (ImGui.BeginChild("AffectedModsList", new Vector2(300, childHeight), false))
                         {
-                            bool isExcluded = false;
-                            try { isExcluded = _shrinkuConfigService.Current.ExcludedMods != null && _shrinkuConfigService.Current.ExcludedMods.Contains(m); } catch (Exception ex) { _logger.LogDebug(ex, "Excluded state eval failed for {mod}", m); }
-                            ImGui.Checkbox($"Exclude {m}", ref isExcluded);
-                            if (ImGui.IsItemDeactivatedAfterEdit())
+                            foreach (var m in mods)
                             {
-                                try
+                                bool isExcluded = false;
+                                try { isExcluded = _shrinkuConfigService.Current.ExcludedMods != null && _shrinkuConfigService.Current.ExcludedMods.Contains(m); } catch (Exception ex) { _logger.LogDebug(ex, "Excluded state eval failed for {mod}", m); }
+                                ImGui.Checkbox($"Exclude {m}", ref isExcluded);
+                                if (ImGui.IsItemDeactivatedAfterEdit())
                                 {
-                                    _shrinkuConfigService.Current.ExcludedMods ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                                    if (isExcluded) _shrinkuConfigService.Current.ExcludedMods.Add(m); else _shrinkuConfigService.Current.ExcludedMods.Remove(m);
-                                    _shrinkuConfigService.Save();
+                                    try
+                                    {
+                                        _shrinkuConfigService.Current.ExcludedMods ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                                        if (isExcluded) _shrinkuConfigService.Current.ExcludedMods.Add(m); else _shrinkuConfigService.Current.ExcludedMods.Remove(m);
+                                        _shrinkuConfigService.Save();
+                                    }
+                                    catch (Exception ex) { _logger.LogDebug(ex, "Failed to toggle exclude for {mod}", m); }
                                 }
-                                catch (Exception ex) { _logger.LogDebug(ex, "Failed to toggle exclude for {mod}", m); }
                             }
-                        }
-                        ImGui.TreePop();
+                            }
+                        ImGui.EndChild();
+                        ImGui.Separator();
+                        ImGui.Spacing();
                     }
                 }
                 catch (Exception ex) { _logger.LogDebug(ex, "Failed computing affected mods"); }
@@ -2338,33 +2347,18 @@ public class CompactUi : WindowMediatorSubscriberBase
                 }
 
                 ImGui.SameLine();
-                if (_uiSharedService.IconTextButton(FontAwesomeIcon.ExternalLinkAlt, "Review in ShrinkU"))
+                if (_uiSharedService.IconTextButton(FontAwesomeIcon.ExternalLinkAlt, "Open ShrinkU"))
                 {
                     try
                     {
-                        var mods = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                        var root = _ipcManager.Penumbra.ModDirectory ?? string.Empty;
-                        if (nonBc7Textures != null)
-                        {
-                            foreach (var texture in nonBc7Textures)
-                            {
-                                var paths = texture.FilePaths ?? new List<string>();
-                                if (paths.Count == 0) continue;
-                                var primary = paths[0] ?? string.Empty;
-                                if (string.IsNullOrWhiteSpace(primary)) continue;
-                                var rel = !string.IsNullOrWhiteSpace(root) ? Path.GetRelativePath(root, primary) : primary;
-                                rel = rel.Replace('/', '\\');
-                                var idx = rel.IndexOf('\\');
-                                var mod = idx >= 0 ? rel.Substring(0, idx) : rel;
-                                if (!string.IsNullOrWhiteSpace(mod)) mods.Add(mod);
-                            }
-                            if (mods.Count > 0)
-                                _shrinkuHostService.OpenConversionForMods(mods);
-                        }
+                        // Enable Penumbra Used Only filter and open ShrinkU
+                        _shrinkuConfigService.Current.FilterPenumbraUsedOnly = true;
+                        _shrinkuConfigService.Save();
+                        _shrinkuHostService.OpenConversion();
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogDebug(ex, "Failed to open ShrinkU for affected mods");
+                        _logger.LogDebug(ex, "Failed to open ShrinkU");
                     }
                 }
 
@@ -2425,7 +2419,6 @@ public class CompactUi : WindowMediatorSubscriberBase
             }
 
             var stamped = $"{DateTime.UtcNow:HH:mm:ss.fff} | {msg}";
-            _backupCurrentStep = stamped;
 
             // De-duplicate consecutive identical messages
             if (_backupStepLog.Count == 0 || !string.Equals(_backupStepLog[^1], stamped, StringComparison.Ordinal))
@@ -2454,33 +2447,53 @@ public class CompactUi : WindowMediatorSubscriberBase
 
         using (SpheneCustomTheme.ApplyContextMenuTheme())
         {
-            ImGui.SetNextWindowSize(new Vector2(690, 420), ImGuiCond.Always);
-            if (ImGui.Begin("Conversion Progress", ref _conversionProgressWindowOpen, ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoResize))
+            ImGui.SetNextWindowSize(new Vector2(350, 0), ImGuiCond.FirstUseEver);
+            ImGui.SetNextWindowSizeConstraints(new Vector2(350, 0), new Vector2(350, float.MaxValue));
+            if (ImGui.Begin("Conversion Progress", ref _conversionProgressWindowOpen, ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.AlwaysAutoResize))
             {
                 // Title and batch mod progress
-                ImGui.TextColored(SpheneCustomTheme.Colors.SpheneGold, "Converting Mods");
+                ImGui.TextColored(new Vector4(0.40f, 0.85f, 0.40f, 1f), "Converting Mods");
                 ImGui.Separator();
-                var modsPercent = _totalMods > 0 ? (float)Math.Clamp(_currentModIndex / (double)_totalMods, 0.0, 1.0) : 0f;
-                ImGui.Text($"Batch progress: {_currentModIndex} / {_totalMods} mods");
-                ImGui.ProgressBar(modsPercent, new Vector2(-1, 0), $"{modsPercent * 100:F1}%");
-                if (_conversionStartTime != DateTime.MinValue && _currentModIndex >= 0)
+                
+                var doneCount = Math.Max(0, _currentModIndex - 1);
+                float currentModFrac = (_currentModTotalFiles > 0) ? Math.Min(_conversionCurrentFileProgress, _currentModTotalFiles) / (float)_currentModTotalFiles : 0f;
+                float modsPercent = _totalMods > 0 ? (doneCount + currentModFrac) / _totalMods : 0f;
+                var doneDisplay = Math.Max(0, _currentModIndex);
+                
+                // 1. Batch Progress
+                if (_totalMods > 0)
                 {
-                    var elapsedMods = DateTime.UtcNow - _conversionStartTime;
-                    var rateMods = _currentModIndex / Math.Max(1.0, elapsedMods.TotalSeconds);
-                    var secsRemainingMods = rateMods > 0 ? (_totalMods - _currentModIndex) / rateMods : 0.0;
-                    var etaMods = TimeSpan.FromSeconds(secsRemainingMods);
-                    ImGui.Text($"ETA: {etaMods:mm\\:ss}");
+                    ImGui.Text($"Overall Progress: {doneDisplay} of {_totalMods} Mods");
+                    ImGui.ProgressBar(modsPercent, new Vector2(-1, 0), $"{modsPercent:P0}");
+                    
+                    var elapsed = (_conversionStartTime == DateTime.MinValue) ? TimeSpan.Zero : (DateTime.UtcNow - _conversionStartTime);
+                    var etaSec = 0.0;
+                    if (_currentModIndex > 0)
+                    {
+                        var rate = _currentModIndex / Math.Max(1.0, elapsed.TotalSeconds);
+                         etaSec = (_totalMods - _currentModIndex) / rate;
+                    }
+                    
+                    var m = (int)etaSec / 60;
+                    var s = (int)etaSec % 60;
+                    
+                    ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1f), $"Backups created: {_backupZipCount + _backupPmpCount + _backupTextureCount} • Elapsed: {elapsed.Hours:D2}:{elapsed.Minutes:D2}:{elapsed.Seconds:D2} • ETA: {m}:{s:D2}");
                 }
+
                 ImGui.Spacing();
+                ImGui.Separator();
+                ImGui.Spacing();
+                // 2. Current Mod / File Progress
                 if (!string.IsNullOrEmpty(_currentModName))
-                    ImGui.Text($"Current mod: {_currentModName}");
+                    ImGui.Text($"Current Mod: {_currentModName}");
 
                 // Backup progress section (shows while backups run or if completed with steps)
                 var backupActive = _backupTotalCount > 0 && _backupCurrentIndex < _backupTotalCount;
                 var backupCompleted = _backupTotalCount > 0 && _backupCurrentIndex >= _backupTotalCount;
                 if (backupActive || (_backupStepLog.Count > 0 && (converting || backupCompleted)))
                 {
-                    ImGui.TextColored(SpheneCustomTheme.Colors.SpheneGold, "Backup Progress");
+                    ImGui.TextColored(new Vector4(0.40f, 0.85f, 0.40f, 1f), "Backing up Mods");
+                    ImGui.Separator();
 
                     bool expectPmp = false;
                     try { expectPmp = _shrinkuConfigService.Current.EnableFullModBackupBeforeConversion; }
@@ -2500,101 +2513,39 @@ public class CompactUi : WindowMediatorSubscriberBase
 
                     float stepPercent = effectiveExpected > 0 ? Math.Clamp((float)effectiveCompleted / effectiveExpected, 0f, 1f) : 0f;
 
-                    ImGui.ProgressBar(stepPercent, new Vector2(-1, 0), $"{stepPercent * 100:F1}%");
-                    ImGui.Text($"Steps: {effectiveCompleted} / {effectiveExpected}");
-
                     if (!string.IsNullOrEmpty(_backupCurrentFileName))
-                        ImGui.Text($"Current: {_backupCurrentFileName}");
-                    if (!string.IsNullOrEmpty(_backupCurrentStep))
-                    {
-                        var stepText = _backupCurrentStep;
-                        try
-                        {
-                            // Remove common timestamp formats
-                            stepText = System.Text.RegularExpressions.Regex.Replace(stepText, @"\[\d{2}:\d{2}:\d{2}\]", "", System.Text.RegularExpressions.RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(50));
-                            stepText = System.Text.RegularExpressions.Regex.Replace(stepText, @"\[\d{2}:\d{2}:\d{2}\.\d{3}\]", "", System.Text.RegularExpressions.RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(50));
-                            stepText = System.Text.RegularExpressions.Regex.Replace(stepText, @"\b\d{2}:\d{2}:\d{2}\b", "", System.Text.RegularExpressions.RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(50));
-                            stepText = System.Text.RegularExpressions.Regex.Replace(stepText, @"\b\d{2}:\d{2}:\d{2}\.\d{1,4}\b", "", System.Text.RegularExpressions.RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(50));
-                            stepText = System.Text.RegularExpressions.Regex.Replace(stepText, @"\b\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\b", "", System.Text.RegularExpressions.RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(50));
-                            // Remove orphan millisecond tokens left after HH:MM:SS removal
-                            stepText = System.Text.RegularExpressions.Regex.Replace(stepText, @"^\.\d{1,6}\b", "", System.Text.RegularExpressions.RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(50));
-                            stepText = System.Text.RegularExpressions.Regex.Replace(stepText, @"(?<=\s|:)\.\d{1,6}\b", "", System.Text.RegularExpressions.RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(50));
-                            // Remove leading pipe from log formatting
-                            stepText = System.Text.RegularExpressions.Regex.Replace(stepText, @"^\|\s*", "", System.Text.RegularExpressions.RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(50));
-                            // Clean leftover separators
-                            stepText = stepText.Trim();
-                            stepText = System.Text.RegularExpressions.Regex.Replace(stepText, @"\s{2,}", " ", System.Text.RegularExpressions.RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(50));
-                            stepText = stepText.Trim('-', ' ', '\t');
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogDebug(ex, "Failed to analyze used texture path for owning mod");
-                        }
-                        UiSharedService.ColorTextWrapped($"Current step: {stepText}", SpheneCustomTheme.Colors.Warning);
-                    }
-                    // Show detailed breakdown
-                    ImGui.Text($"ZIPs: {_backupZipCount} · PMPs: {_backupPmpCount} · Textures: {_backupTextureCount}");
-                    if (_backupStartTime != DateTime.MinValue && (_backupCurrentIndex > 0 || aggregatedCompleted > 0))
-                    {
-                        var elapsedB = DateTime.UtcNow - _backupStartTime;
-                        ImGui.Text($"Elapsed: {elapsedB:mm\\:ss}");
-                    }
-                    ImGui.Separator();
+                         ImGui.Text($"Current Backup: {_backupCurrentFileName}");
+                    
+                    ImGui.ProgressBar(stepPercent, new Vector2(-1, 0), $"{stepPercent:P0}");
                 }
 
-                var totalFiles = _currentModTotalFiles > 0 ? _currentModTotalFiles : _texturesToConvert.Count;
-                var currentFile = _conversionCurrentFileProgress;
-                var progressPercentage = totalFiles > 0 ? (float)currentFile / totalFiles : 0f;
-                var remainingFiles = Math.Max(0, totalFiles - currentFile);
 
-                ImGui.Text($"Current mod progress: {currentFile} / {totalFiles} files");
-                ImGui.Text($"Remaining: {remainingFiles} files");
-                ImGui.Text($"Percentage: {progressPercentage * 100:F1}%");
 
-                if (currentFile > 0 && _currentModStartedAt != DateTime.MinValue)
+
+
+
+
+
+
+
+
+                
+
+                if (_currentModTotalFiles > 0)
                 {
-                    var elapsed = DateTime.UtcNow - _currentModStartedAt;
-                    var avgTimePerFile = elapsed.TotalSeconds / currentFile;
-                    var estimatedRemainingSeconds = avgTimePerFile * remainingFiles;
-                    var estimatedRemaining = TimeSpan.FromSeconds(estimatedRemainingSeconds);
-                    ImGui.Text($"Elapsed: {elapsed:mm\\:ss}");
-                    if (remainingFiles > 0)
-                        ImGui.Text($"Estimated remaining: {estimatedRemaining:mm\\:ss}");
+                     var current = Math.Min(_conversionCurrentFileProgress, _currentModTotalFiles);
+                     float perMod = (float)current / _currentModTotalFiles;
+                     ImGui.ProgressBar(perMod, new Vector2(-1, 0), $"{current}/{_currentModTotalFiles}");
+                     
+                     var modElapsed = (_currentModStartedAt == DateTime.MinValue) ? TimeSpan.Zero : (DateTime.UtcNow - _currentModStartedAt);
+                     ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1f), $"Mod Elapsed: {modElapsed.Hours:D2}:{modElapsed.Minutes:D2}:{modElapsed.Seconds:D2}");
                 }
-
-                // Progress bar themed
-                var theme = SpheneCustomTheme.CurrentTheme;
-                var barSize = new Vector2(theme.CompactTransmissionBarWidth, theme.CompactTransmissionBarHeight);
-                ImGui.PushStyleColor(ImGuiCol.PlotHistogram, ImGui.ColorConvertFloat4ToU32(theme.CompactTransmissionBarForeground));
-                ImGui.PushStyleColor(ImGuiCol.FrameBg, ImGui.ColorConvertFloat4ToU32(theme.CompactTransmissionBarBackground));
-                ImGui.ProgressBar(progressPercentage, barSize, $"{progressPercentage * 100:F1}%");
-                ImGui.PopStyleColor(2);
+                else 
+                {
+                     ImGui.ProgressBar(0f, new Vector2(-1, 0), "Preparing...");
+                }
 
                 ImGui.Spacing();
-
-                // Current file information
-                if (!string.IsNullOrEmpty(_conversionCurrentFileName))
-                {
-                    ImGui.TextColored(SpheneCustomTheme.CurrentTheme.TextSecondary, "Currently processing:");
-                    var fileName = Path.GetFileName(_conversionCurrentFileName);
-                    var directory = Path.GetDirectoryName(_conversionCurrentFileName);
-                    ImGui.Text($"File: {fileName}");
-                    if (!string.IsNullOrEmpty(directory))
-                        ImGui.TextColored(SpheneCustomTheme.CurrentTheme.TextSecondary, $"Path: {directory}");
-                    try
-                    {
-                        if (File.Exists(_conversionCurrentFileName))
-                        {
-                            var fileInfo = new FileInfo(_conversionCurrentFileName);
-                            var sizeInMB = fileInfo.Length / (1024.0 * 1024.0);
-                            ImGui.TextColored(SpheneCustomTheme.CurrentTheme.TextSecondary, $"Size: {sizeInMB:F2} MB");
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogDebug(ex, "Failed to read file info for conversion progress");
-                    }
-                }
 
                 ImGui.Spacing();
                 ImGui.Separator();
@@ -2633,7 +2584,6 @@ public class CompactUi : WindowMediatorSubscriberBase
             _backupTotalCount = 0;
             _backupStartTime = DateTime.MinValue;
             _backupStepLog.Clear();
-            _backupCurrentStep = string.Empty;
             _backupTextureCount = 0;
             _backupZipCount = 0;
             _backupPmpCount = 0;
@@ -2654,37 +2604,35 @@ public class CompactUi : WindowMediatorSubscriberBase
         {
             using (SpheneCustomTheme.ApplyContextMenuTheme())
             {
-                ImGui.SetNextWindowSize(new Vector2(520, 0), ImGuiCond.FirstUseEver);
-                if (ImGui.Begin("Restore Progress", ref _restoreWindowOpen, ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse | ImGuiWindowFlags.NoCollapse))
+                ImGui.SetNextWindowSize(new Vector2(350, 0), ImGuiCond.FirstUseEver);
+                ImGui.SetNextWindowSizeConstraints(new Vector2(350, 0), new Vector2(350, float.MaxValue));
+                if (ImGui.Begin("Restore Progress", ref _restoreWindowOpen, ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.AlwaysAutoResize))
                 {
-                    ImGui.TextColored(SpheneCustomTheme.Colors.SpheneGold, "Restoring Mods");
+                    ImGui.TextColored(new Vector4(0.40f, 0.85f, 0.40f, 1f), "Restoring Mods");
                     ImGui.Separator();
 
                     var batchTotal = _restoreModsTotal;
                     var batchDone = _restoreModsDone;
                     var batchPercent = batchTotal > 0 ? (float)batchDone / batchTotal : 0f;
-                    ImGui.Text($"Batch progress: {batchDone} / {batchTotal} mods");
-                    ImGui.ProgressBar(batchPercent, new Vector2(-1, 0), $"{batchPercent * 100:F1}%");
+                    ImGui.Text($"Overall Progress: {batchDone} of {batchTotal} Mods");
+                    ImGui.ProgressBar(batchPercent, new Vector2(-1, 0), $"{batchPercent:P0}");
                     if (_restoreStartTime != DateTime.MinValue && batchDone >= 0)
                     {
                         var elapsed = DateTime.UtcNow - _restoreStartTime;
                         var rate = batchDone / Math.Max(1.0, elapsed.TotalSeconds);
                         var secsRemaining = rate > 0 ? (batchTotal - batchDone) / rate : 0.0;
                         var eta = TimeSpan.FromSeconds(secsRemaining);
-                        ImGui.Text($"ETA: {eta:mm\\:ss}");
+                        ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1f), $"Elapsed: {elapsed.Hours:D2}:{elapsed.Minutes:D2}:{elapsed.Seconds:D2} • ETA: {eta.Minutes}:{eta.Seconds:D2}");
                     }
 
                     ImGui.Spacing();
                     if (!string.IsNullOrEmpty(_currentRestoreMod))
-                        ImGui.Text($"Current mod: {_currentRestoreMod}");
+                        ImGui.Text($"Current Mod: {_currentRestoreMod}");
 
                     var fileTotal = _restoreTotalCount;
                     var fileCurrent = _restoreCurrentIndex;
                     var filePercent = fileTotal > 0 ? (float)fileCurrent / fileTotal : 0f;
-                    ImGui.Text($"File progress: {fileCurrent} / {fileTotal}");
-                    ImGui.ProgressBar(filePercent, new Vector2(-1, 0), $"{filePercent * 100:F1}%");
-                    if (!string.IsNullOrEmpty(_restoreCurrentFileName))
-                        ImGui.Text($"Current texture: {_restoreCurrentFileName}");
+                    ImGui.ProgressBar(filePercent, new Vector2(-1, 0), $"{fileCurrent}/{fileTotal}");
 
                     if (!string.IsNullOrEmpty(_restoreStepText))
                     {
@@ -2695,7 +2643,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                     ImGui.Spacing();
                     if (restoreRunning)
                     {
-                        if (ImGui.Button("Cancel Restore"))
+                        if (_uiSharedService.IconTextButton(FontAwesomeIcon.StopCircle, "Cancel Restore"))
                         {
                             try { _restoreCancellationTokenSource.Cancel(); }
                             catch (Exception ex) { _logger.LogDebug(ex, "Failed to cancel restore operation"); }
@@ -3057,7 +3005,6 @@ public class CompactUi : WindowMediatorSubscriberBase
     {
         _restoreCancellationTokenSource = _restoreCancellationTokenSource.CancelRecreate();
         _restoreStartTime = DateTime.UtcNow;
-        _restoreCurrentFileName = string.Empty;
         _restoreCurrentIndex = 0;
         _restoreTotalCount = 0;
         _restoreWindowOpen = true;
