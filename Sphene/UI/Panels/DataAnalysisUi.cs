@@ -31,7 +31,7 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
     private readonly ShrinkU.Services.TextureConversionService _shrinkuConversionService;
     private readonly Dictionary<string, string[]> _texturesToConvert = new(StringComparer.Ordinal);
     private Dictionary<ObjectKind, Dictionary<string, CharacterAnalyzer.FileDataEntry>>? _cachedAnalysis;
-    private CancellationTokenSource _conversionCancellationTokenSource = new();
+    private readonly CancellationTokenSource _conversionCancellationTokenSource = new();
     private string _conversionCurrentFileName = string.Empty;
     private int _conversionCurrentFileProgress = 0;
     private Task? _conversionTask;
@@ -39,8 +39,6 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
     private bool _enableBackupBeforeConversion = true;
     private bool _hasUpdate = false;
     private bool _modalOpen = false;
-    
-    private readonly Progress<(string, int, int)> _backupProgress = new();
     
     private readonly Progress<(string, int, int)> _revertProgress = new();
     private CancellationTokenSource _revertCancellationTokenSource = new();
@@ -54,6 +52,13 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
     private ObjectKind _selectedObjectTab;
     private bool _showModal = false;
     private CancellationTokenSource _transientRecordCts = new();
+    private Action<(string, int)>? _onShrinkuConversionProgress;
+    private Action<(string modName, int current, int total, int fileTotal)>? _onShrinkuModProgress;
+    private string _currentModName = string.Empty;
+    private int _currentModIndex = 0;
+    private int _totalMods = 0;
+    private int _currentModTotalFiles = 0;
+    private DateTime _currentModStartedAt = DateTime.MinValue;
 
     public DataAnalysisUi(ILogger<DataAnalysisUi> logger, SpheneMediator mediator,
         CharacterAnalyzer characterAnalyzer, IpcManager ipcManager,
@@ -92,6 +97,36 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
         };
 
         _conversionProgress.ProgressChanged += ConversionProgress_ProgressChanged;
+        _onShrinkuConversionProgress = e =>
+        {
+            try
+            {
+                _conversionCurrentFileName = e.Item1;
+                _conversionCurrentFileProgress = e.Item2;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to update conversion progress (service)");
+            }
+        };
+        _shrinkuConversionService.OnConversionProgress += _onShrinkuConversionProgress;
+        _onShrinkuModProgress = e =>
+        {
+            try
+            {
+                _currentModName = e.modName;
+                _currentModIndex = e.current;
+                _totalMods = e.total;
+                _currentModTotalFiles = e.fileTotal;
+                _conversionCurrentFileProgress = 0;
+                _currentModStartedAt = DateTime.UtcNow;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to update mod-level conversion progress (analysis)");
+            }
+        };
+        _shrinkuConversionService.OnModProgress += _onShrinkuModProgress;
     }
 
     protected override void DrawInternal()
@@ -103,11 +138,30 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
             {
                 using (SpheneCustomTheme.ApplyContextMenuTheme())
                 {
-                ImGui.TextUnformatted("BC7 Conversion in progress: " + _conversionCurrentFileProgress + "/" + _texturesToConvert.Count);
-                UiSharedService.TextWrapped("Current file: " + _conversionCurrentFileName);
+                ImGui.TextColored(SpheneCustomTheme.Colors.SpheneGold, "Converting Mods");
+                ImGui.Separator();
+                var modsPercent = _totalMods > 0 ? (float)Math.Clamp(_currentModIndex / (double)_totalMods, 0.0, 1.0) : 0f;
+                ImGui.Text($"Batch progress: {_currentModIndex} / {_totalMods} mods");
+                ImGui.ProgressBar(modsPercent, new Vector2(-1, 0), $"{modsPercent * 100:F1}%");
+                if (_currentModStartedAt != DateTime.MinValue && _currentModIndex >= 0)
+                {
+                    var elapsedMods = DateTime.UtcNow - _currentModStartedAt;
+                    ImGui.Text($"Current mod elapsed: {elapsedMods:mm\\:ss}");
+                }
+                ImGui.Spacing();
+                if (!string.IsNullOrEmpty(_currentModName))
+                    ImGui.Text($"Current mod: {_currentModName}");
+                var totalFiles = _currentModTotalFiles > 0 ? _currentModTotalFiles : _texturesToConvert.Count;
+                var currentFile = _conversionCurrentFileProgress;
+                var progressPercentage = totalFiles > 0 ? (float)currentFile / totalFiles : 0f;
+                ImGui.Text($"Current mod progress: {currentFile} / {totalFiles} files");
+                ImGui.ProgressBar(progressPercentage, new Vector2(-1, 0), $"{progressPercentage * 100:F1}%");
+                if (!string.IsNullOrEmpty(_conversionCurrentFileName))
+                    UiSharedService.TextWrapped("Current file: " + _conversionCurrentFileName);
                 if (_uiSharedService.IconTextButton(FontAwesomeIcon.StopCircle, "Cancel conversion"))
                 {
-                    _conversionCancellationTokenSource.Cancel();
+                    try { _shrinkuConversionService.Cancel(); }
+                    catch (Exception ex) { _logger.LogDebug(ex, "Failed to cancel ShrinkU conversion"); }
                 }
                 UiSharedService.SetScaledWindowSize(500);
                 }
@@ -813,17 +867,12 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                             
                             if (_texturesToConvert.Count > 0 && _uiSharedService.IconTextButton(FontAwesomeIcon.PlayCircle, "Start conversion of " + _texturesToConvert.Count + " texture(s)"))
                             {
-                                if (_enableBackupBeforeConversion)
+                                _conversionTask = Task.Run(async () =>
                                 {
-                                    StartBackupAndConversion();
-                                }
-                                else
-                                {
-                                    _conversionCancellationTokenSource = _conversionCancellationTokenSource.CancelRecreate();
-                                    _conversionTask = _ipcManager.Penumbra.ConvertTextureFiles(_logger, _texturesToConvert, _conversionProgress, _conversionCancellationTokenSource.Token);
-                                    // Notify ShrinkU when conversion finishes
-                                    _ = _conversionTask.ContinueWith(t => { try { _shrinkuConversionService.NotifyExternalTextureChange("conversion-completed"); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to notify ShrinkU after conversion-completed"); } }, TaskScheduler.Default);
-                                }
+                                    var dict = await BuildFullModConversionDictionaryFromSelection().ConfigureAwait(false);
+                                    await _shrinkuConversionService.StartConversionAsync(dict).ConfigureAwait(false);
+                                });
+                                _ = _conversionTask.ContinueWith(t => { }, TaskScheduler.Default);
                             }
                         }
                     }
@@ -883,6 +932,10 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
     {
         base.Dispose(disposing);
         _conversionProgress.ProgressChanged -= ConversionProgress_ProgressChanged;
+        try { if (_onShrinkuConversionProgress != null) _shrinkuConversionService.OnConversionProgress -= _onShrinkuConversionProgress; } catch (Exception ex) { _logger.LogDebug(ex, "Unsubscribe OnConversionProgress failed"); }
+        try { if (_onShrinkuModProgress != null) _shrinkuConversionService.OnModProgress -= _onShrinkuModProgress; } catch (Exception ex) { _logger.LogDebug(ex, "Unsubscribe OnModProgress failed"); }
+        _onShrinkuConversionProgress = null;
+        _onShrinkuModProgress = null;
         _conversionCancellationTokenSource.Cancel();
         _conversionCancellationTokenSource.Dispose();
         _revertCancellationTokenSource.Cancel();
@@ -895,6 +948,37 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
     {
         _conversionCurrentFileName = e.Item1;
         _conversionCurrentFileProgress = e.Item2;
+    }
+
+    private async Task<Dictionary<string, string[]>> BuildFullModConversionDictionaryFromSelection()
+    {
+        var dict = new Dictionary<string, string[]>(StringComparer.Ordinal);
+        try
+        {
+            var root = _ipcManager.Penumbra.ModDirectory ?? string.Empty;
+            var mods = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var kvp in _texturesToConvert)
+            {
+                var source = kvp.Key ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(source)) continue;
+                var rel = !string.IsNullOrWhiteSpace(root) ? Path.GetRelativePath(root, source) : source;
+                rel = rel.Replace('/', '\\');
+                var idx = rel.IndexOf('\\');
+                var mod = idx >= 0 ? rel.Substring(0, idx) : rel;
+                if (!string.IsNullOrWhiteSpace(mod)) mods.Add(mod);
+            }
+            foreach (var mod in mods)
+            {
+                var files = await _shrinkuConversionService.GetModTextureFilesAsync(mod).ConfigureAwait(false);
+                foreach (var f in files)
+                {
+                    if (string.IsNullOrWhiteSpace(f)) continue;
+                    if (!dict.ContainsKey(f)) dict[f] = Array.Empty<string>();
+                }
+            }
+        }
+        catch (Exception ex) { _logger.LogDebug(ex, "Failed to build full mod conversion dictionary"); }
+        return dict;
     }
 
     private void DrawTable(IGrouping<string, CharacterAnalyzer.FileDataEntry> fileGroup)
@@ -1030,41 +1114,7 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
         return fileGroup.Where(item => !string.Equals(item.Format.Value, "BC7", StringComparison.Ordinal)).ToList();
     }
 
-    private void StartBackupAndConversion()
-    {
-        _conversionCancellationTokenSource = _conversionCancellationTokenSource.CancelRecreate();
-        
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                // Create backups first - backup primary paths and all duplicates
-                var allTexturePaths = _texturesToConvert.SelectMany(kvp => new[] { kvp.Key }.Concat(kvp.Value)).ToArray();
-                _logger.LogDebug("Starting backup for {Count} texture paths", allTexturePaths.Length);
-                await _shrinkuBackupService.BackupAsync(_texturesToConvert, _backupProgress, _conversionCancellationTokenSource.Token).ConfigureAwait(false);
-                
-                // Start conversion after backup is complete
-                _logger.LogDebug("Backup completed, starting texture conversion");
-                _conversionTask = _ipcManager.Penumbra.ConvertTextureFiles(_logger, _texturesToConvert, _conversionProgress, _conversionCancellationTokenSource.Token);
-                
-                try
-                {
-                    await _conversionTask.ConfigureAwait(false);
-                    _logger.LogDebug("Texture conversion completed successfully");
-                    try { _shrinkuConversionService.NotifyExternalTextureChange("conversion-completed"); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to notify ShrinkU after conversion-completed"); }
-                }
-                catch (Exception conversionEx)
-                {
-                    _logger.LogError(conversionEx, "Error during texture conversion: {ErrorMessage}", conversionEx.Message);
-                    _logger.LogDebug("Full exception details: {Exception}", conversionEx.ToString());
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error during backup process");
-            }
-        }, _conversionCancellationTokenSource.Token);
-    }
+    
 
     private void StartTextureRevert(Dictionary<string, List<string>> availableBackups)
     {
@@ -1084,8 +1134,8 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                         await _shrinkuBackupService.RestoreLatestAsync(_revertProgress, _revertCancellationTokenSource.Token).ConfigureAwait(false);
                         _storageInfoTask = null;
                         _cachedBackupsForAnalysis = null;
-                        try { await _ipcManager.Penumbra.RedrawPlayerAsync().ConfigureAwait(false); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to redraw player after restore-latest"); }
-                        try { _shrinkuConversionService.NotifyExternalTextureChange("restore-latest"); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to notify ShrinkU after restore-latest"); }
+                        try { _shrinkuBackupService.RedrawPlayer(); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to redraw player after restore-latest"); }
+                            // ShrinkU service is responsible for external texture change notifications on restore
                         return;
                     }
                 }

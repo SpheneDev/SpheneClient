@@ -126,6 +126,17 @@ public sealed class ShrinkUHostService : IHostedService, IDisposable
                     _logger.LogDebug("Set ShrinkU AutomaticControllerName to Sphene on integration start");
                 }
                 catch (Exception ex) { _logger.LogDebug(ex, "Failed to set ShrinkU automatic controller on start"); }
+                try
+                {
+                    if (!_shrinkuConfigService.Current.EnableFullModBackupBeforeConversion)
+                    {
+                        _shrinkuConfigService.Current.EnableFullModBackupBeforeConversion = true;
+                        _shrinkuConfigService.Current.EnableBackupBeforeConversion = false;
+                        _shrinkuConfigService.Save();
+                        _logger.LogDebug("Enforced default: EnableFullModBackupBeforeConversion=true (integrated)");
+                    }
+                }
+                catch (Exception ex) { _logger.LogDebug(ex, "Failed to enforce PMP backup default in integrated mode"); }
                 CleanupDuplicateShrinkUConfig();
                 try { _conversionUi.SetStartupRefreshInProgress(true); }
                 catch (Exception ex) { _logger.LogDebug(ex, "Failed to set startup refresh in progress"); }

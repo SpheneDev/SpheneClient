@@ -93,8 +93,12 @@ public class CompactUi : WindowMediatorSubscriberBase
     private readonly Progress<(string fileName, int progress)> _conversionProgress = new();
     private int _conversionCurrentFileProgress;
     private string _conversionCurrentFileName = string.Empty;
-    private bool _enableBackupBeforeConversion;
     private DateTime _conversionStartTime = DateTime.MinValue;
+    private string _currentModName = string.Empty;
+    private int _currentModIndex = 0;
+    private int _totalMods = 0;
+    private int _currentModTotalFiles = 0;
+    private DateTime _currentModStartedAt = DateTime.MinValue;
     // Backup progress fields for progress UI
     private readonly Progress<(string fileName, int current, int total)> _backupProgress = new();
     private string _backupCurrentFileName = string.Empty;
@@ -130,6 +134,10 @@ public class CompactUi : WindowMediatorSubscriberBase
     private DateTime _restoreStartTime = DateTime.MinValue;
     private bool _restoreWindowOpen = false;
     private string _restoreStepText = string.Empty;
+    private volatile bool _isRestoreInProgress = false;
+    private int _restoreModsTotal = 0;
+    private int _restoreModsDone = 0;
+    private string _currentRestoreMod = string.Empty;
 
     // Async ShrinkU mod backup detection cache
     private Dictionary<string, List<string>>? _cachedShrinkUModBackups;
@@ -191,12 +199,10 @@ public class CompactUi : WindowMediatorSubscriberBase
         try
         {
             _automaticModeEnabled = _shrinkuConfigService.Current.TextureProcessingMode == TextureProcessingMode.Automatic;
-            _enableBackupBeforeConversion = _shrinkuConfigService.Current.EnableBackupBeforeConversion;
         }
         catch (Exception ex)
         {
             _logger.LogDebug(ex, "Failed to read ShrinkU configuration for automatic mode");
-            _enableBackupBeforeConversion = true;
         }
         
         // Setup conversion progress handler
@@ -215,6 +221,24 @@ public class CompactUi : WindowMediatorSubscriberBase
             catch (Exception ex)
             {
                 _logger.LogDebug(ex, "Failed to update conversion progress");
+            }
+        };
+        _shrinkuConversionService.OnModProgress += e =>
+        {
+            try
+            {
+                _currentModName = e.modName;
+                _currentModIndex = e.current;
+                _totalMods = e.total;
+                _currentModTotalFiles = e.fileTotal;
+                _conversionCurrentFileProgress = 0;
+                _currentModStartedAt = DateTime.UtcNow;
+                if (!_autoSilentConversion && !_automaticModeEnabled && !(_shrinkuHostService?.IsConversionUiOpen ?? false))
+                    _conversionProgressWindowOpen = true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to update mod-level conversion progress");
             }
         };
         // Setup backup progress handlers (local + ShrinkU service)
@@ -430,17 +454,22 @@ public class CompactUi : WindowMediatorSubscriberBase
         {
             _shrinkuConversionService.OnPenumbraModsChanged += () =>
             {
+                if (_isRestoreInProgress) return;
                 try { TriggerImmediateBackupScan("penumbra-mods-changed"); }
                 catch (Exception ex) { _logger.LogDebug(ex, "Failed to trigger backup scan: penumbra-mods-changed"); }
             };
             _shrinkuConversionService.OnPenumbraModSettingChanged += (change, collectionId, modDir, inherited) =>
             {
+                if (_isRestoreInProgress) return;
                 try { TriggerImmediateBackupScan("penumbra-mod-setting-changed"); }
                 catch (Exception ex) { _logger.LogDebug(ex, "Failed to trigger backup scan: penumbra-mod-setting-changed"); }
             };
             _shrinkuConversionService.OnExternalTexturesChanged += reason =>
             {
-                try { TriggerImmediateBackupScan("external-textures-changed:" + (reason ?? string.Empty)); }
+                var r = reason ?? string.Empty;
+                if (_isRestoreInProgress) return;
+                if (r.StartsWith("restore", StringComparison.OrdinalIgnoreCase)) return;
+                try { TriggerImmediateBackupScan("external-textures-changed:" + r); }
                 catch (Exception ex) { _logger.LogDebug(ex, "Failed to trigger backup scan: external-textures-changed"); }
             };
         }
@@ -1824,22 +1853,6 @@ public class CompactUi : WindowMediatorSubscriberBase
                 ImGui.Spacing();
                 ImGui.Separator();
                 ImGui.TextUnformatted("Backup Management:");
-                // Prefer PMP restore when available (synced with ShrinkU setting)
-                try
-                {
-                    var preferPmp = _shrinkuConfigService.Current.PreferPmpRestoreWhenAvailable;
-                    if (ImGui.Checkbox("Prefer PMP restore when available", ref preferPmp))
-                    {
-                        _shrinkuConfigService.Current.PreferPmpRestoreWhenAvailable = preferPmp;
-                        _shrinkuConfigService.Save();
-                        _logger.LogDebug("Updated PMP restore preference (Sphene popup): {value}", preferPmp);
-                    }
-                    UiSharedService.AttachToolTip("If a full Penumbra Mod Package *.pmp backup exists, Sphene will restore it directly instead of just the texture backups.");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Failed to update PMP restore preference (popup)");
-        }
         
         // Backup info block: render inline to simplify layout
         var allCount = _textureBackupService.GetBackupsByOriginalFile().Count;
@@ -2043,22 +2056,7 @@ public class CompactUi : WindowMediatorSubscriberBase
             ImGui.Separator();
             ImGui.TextUnformatted("Backups:");
             // Render backup status area inline to simplify layout
-            // Prefer PMP restore when available (synced with ShrinkU setting)
-            try
-            {
-                var preferPmp = _shrinkuConfigService.Current.PreferPmpRestoreWhenAvailable;
-                if (ImGui.Checkbox("Prefer PMP restore", ref preferPmp))
-                {
-                    _shrinkuConfigService.Current.PreferPmpRestoreWhenAvailable = preferPmp;
-                    _shrinkuConfigService.Save();
-                    _logger.LogDebug("Updated PMP restore preference (Sphene popup): {value}", preferPmp);
-                }
-                UiSharedService.AttachToolTip("If a full Penumbra Mod Package backup exists, Sphene will restore it instead of just the texture backups.");
-            }
-            catch (Exception ex)
-            {
-                _logger.LogDebug(ex, "Failed to update PMP restore preference (inline)");
-            }
+            
             
             var availableBackups = GetCachedBackupsForCurrentAnalysis();
             // Compute counts and gate status text updates on changes in number/type
@@ -2226,6 +2224,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                         _shrinkuConfigService.Current.AutomaticHandledBySphene = _automaticModeEnabled;
                         _shrinkuConfigService.Save();
                         _logger.LogDebug("Propagated automatic mode to ShrinkU: {Mode}", newMode);
+                        try { _shrinkuConversionService.OnProcessingModeChanged(newMode); } catch (Exception ex) { _logger.LogDebug(ex, "Notify processing mode changed failed"); }
                     }
                 }
                 catch (Exception ex)
@@ -2233,91 +2232,41 @@ public class CompactUi : WindowMediatorSubscriberBase
                     _logger.LogDebug(ex, "Failed to propagate automatic mode to ShrinkU");
                 }
 
-                // Immediately start background conversion when enabling Automatic mode
+                // Immediately start background conversion when enabling Automatic mode, but only for analyzed textures
                 try
                 {
-                    if (_automaticModeEnabled && !_shrinkuConversionService.IsConverting)
+                    if (_automaticModeEnabled && !_shrinkuConversionService.IsConverting && nonBc7Textures != null && nonBc7Textures.Count > 0)
                     {
-                        // Use current analysis results to convert non-BC7 textures
-                        if (nonBc7Textures != null && nonBc7Textures.Count > 0)
-                        {
-                            _ = StartTextureConversion(nonBc7Textures);
-                            _conversionWindowOpen = false;
-                            _cachedAnalysisForPopup = null; // Clear cached analysis when window closes
-                            _autoSilentConversion = true; // suppress progress window for automatic background conversions
-                        }
-                        else
-                        {
-                            // If analysis data is not available, trigger external texture change so ShrinkU watcher can pick up
-                            try { _shrinkuConversionService.NotifyExternalTextureChange("automatic-mode-enabled"); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to notify automatic-mode-enabled"); }
-                        }
+                        _autoSilentConversion = true; // suppress progress window for automatic background conversions
+                        _ = StartTextureConversion(nonBc7Textures!);
+                        _conversionWindowOpen = false;
+                        _cachedAnalysisForPopup = null;
                     }
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogDebug(ex, "Failed to start automatic conversion");
+                    _logger.LogDebug(ex, "Failed to start automatic conversion on mode enable");
                 }
             }
             UiSharedService.AttachToolTip(_automaticModeEnabled
                 ? "Automatic conversion is enabled. Revert actions are disabled."
                 : "Enable automatic on-the-fly conversion of non-BC7 textures.");
 
-            // Backup mode selection via dropdown (Texture / Full Mod / Both)
             try
             {
-                var texturesBackup = _shrinkuConfigService.Current.EnableBackupBeforeConversion;
                 var fullModBackup = _shrinkuConfigService.Current.EnableFullModBackupBeforeConversion;
-                if (_enableBackupBeforeConversion != texturesBackup)
-                    _enableBackupBeforeConversion = texturesBackup;
-
-                string currentMode = (texturesBackup, fullModBackup) switch
-                {
-                    (true, false) => "Texture",
-                    (false, true) => "Full Mod",
-                    (true, true) => "Both",
-                    _ => "Texture",
-                };
-                if (!texturesBackup && !fullModBackup)
-                {
-                    _shrinkuConfigService.Current.EnableBackupBeforeConversion = true;
-                    _shrinkuConfigService.Current.EnableFullModBackupBeforeConversion = false;
-                    _shrinkuConfigService.Save();
-                    currentMode = "Texture";
-                }
-
-                ImGui.TextUnformatted("Backup Mode:");
+                ImGui.TextUnformatted("Backups:");
                 ImGui.SameLine();
-                if (ImGui.BeginCombo("##BackupModeCombo", currentMode))
+                if (ImGui.Checkbox("Create full mod PMP before conversion", ref fullModBackup))
                 {
-                    if (ImGui.Selectable("Texture", string.Equals(currentMode, "Texture", StringComparison.Ordinal)))
-                    {
-                        _shrinkuConfigService.Current.EnableBackupBeforeConversion = true;
-                        _shrinkuConfigService.Current.EnableFullModBackupBeforeConversion = false;
-                        _shrinkuConfigService.Save();
-                        _logger.LogDebug("Set backup mode to Texture");
-                    }
-                    if (ImGui.Selectable("Full Mod", string.Equals(currentMode, "Full Mod", StringComparison.Ordinal)))
-                    {
-                        _shrinkuConfigService.Current.EnableBackupBeforeConversion = false;
-                        _shrinkuConfigService.Current.EnableFullModBackupBeforeConversion = true;
-                        _shrinkuConfigService.Save();
-                        _logger.LogDebug("Set backup mode to Full Mod");
-                    }
-                    if (ImGui.Selectable("Both", string.Equals(currentMode, "Both", StringComparison.Ordinal)))
-                    {
-                        _shrinkuConfigService.Current.EnableBackupBeforeConversion = true;
-                        _shrinkuConfigService.Current.EnableFullModBackupBeforeConversion = true;
-                        _shrinkuConfigService.Save();
-                        _logger.LogDebug("Set backup mode to Both");
-                    }
-                    ImGui.EndCombo();
+                    _shrinkuConfigService.Current.EnableFullModBackupBeforeConversion = fullModBackup;
+                    _shrinkuConfigService.Current.EnableBackupBeforeConversion = false;
+                    _shrinkuConfigService.Save();
                 }
-
-                UiSharedService.AttachToolTip("Backup Modes:\n- Texture: smaller storage; per-file restore\n- Full Mod: larger storage; safer full restore\n- Both: combines advantages; highest storage use");
             }
             catch (Exception ex)
             {
-                _logger.LogDebug(ex, "Failed to render backup mode UI");
+                _logger.LogDebug(ex, "Failed to render backup UI");
             }
             
             if ((nonBc7Textures?.Count ?? 0) > 0)
@@ -2424,9 +2373,23 @@ public class CompactUi : WindowMediatorSubscriberBase
             ImGui.SetNextWindowSize(new Vector2(690, 420), ImGuiCond.Always);
             if (ImGui.Begin("Conversion Progress", ref _conversionProgressWindowOpen, ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoResize))
             {
-                // Title and overall progress
-                ImGui.TextColored(SpheneCustomTheme.Colors.SpheneGold, "Converting Textures to BC7 Format");
+                // Title and batch mod progress
+                ImGui.TextColored(SpheneCustomTheme.Colors.SpheneGold, "Converting Mods");
                 ImGui.Separator();
+                var modsPercent = _totalMods > 0 ? (float)Math.Clamp(_currentModIndex / (double)_totalMods, 0.0, 1.0) : 0f;
+                ImGui.Text($"Batch progress: {_currentModIndex} / {_totalMods} mods");
+                ImGui.ProgressBar(modsPercent, new Vector2(-1, 0), $"{modsPercent * 100:F1}%");
+                if (_conversionStartTime != DateTime.MinValue && _currentModIndex >= 0)
+                {
+                    var elapsedMods = DateTime.UtcNow - _conversionStartTime;
+                    var rateMods = _currentModIndex / Math.Max(1.0, elapsedMods.TotalSeconds);
+                    var secsRemainingMods = rateMods > 0 ? (_totalMods - _currentModIndex) / rateMods : 0.0;
+                    var etaMods = TimeSpan.FromSeconds(secsRemainingMods);
+                    ImGui.Text($"ETA: {etaMods:mm\\:ss}");
+                }
+                ImGui.Spacing();
+                if (!string.IsNullOrEmpty(_currentModName))
+                    ImGui.Text($"Current mod: {_currentModName}");
 
                 // Backup progress section (shows while backups run or if completed with steps)
                 var backupActive = _backupTotalCount > 0 && _backupCurrentIndex < _backupTotalCount;
@@ -2435,15 +2398,10 @@ public class CompactUi : WindowMediatorSubscriberBase
                 {
                     ImGui.TextColored(SpheneCustomTheme.Colors.SpheneGold, "Backup Progress");
 
-                    // Compute step-oriented progress: textures + optional ZIP + optional PMP
-                    int expectedTextures = _texturesToConvert.Count;
-                    bool expectZip = false;
                     bool expectPmp = false;
-                    try { expectZip = _shrinkuConfigService.Current.EnableZipCompressionForBackups; }
-                    catch (Exception ex) { _logger.LogDebug(ex, "Failed to read ShrinkU zip compression setting"); }
                     try { expectPmp = _shrinkuConfigService.Current.EnableFullModBackupBeforeConversion; }
                     catch (Exception ex) { _logger.LogDebug(ex, "Failed to read ShrinkU full mod backup setting"); }
-                    int expectedFromConfig = Math.Max(0, expectedTextures) + (expectZip ? 1 : 0) + (expectPmp ? 1 : 0);
+                    int expectedFromConfig = (expectPmp ? 1 : 0);
 
                     // Prefer service-provided total when available; fallback to config-based estimate
                     int effectiveExpected = _backupTotalCount > 0 ? _backupTotalCount : expectedFromConfig;
@@ -2500,18 +2458,18 @@ public class CompactUi : WindowMediatorSubscriberBase
                     ImGui.Separator();
                 }
 
-                var totalFiles = _texturesToConvert.Count;
+                var totalFiles = _currentModTotalFiles > 0 ? _currentModTotalFiles : _texturesToConvert.Count;
                 var currentFile = _conversionCurrentFileProgress;
                 var progressPercentage = totalFiles > 0 ? (float)currentFile / totalFiles : 0f;
                 var remainingFiles = Math.Max(0, totalFiles - currentFile);
 
-                ImGui.Text($"Progress: {currentFile} / {totalFiles} files");
+                ImGui.Text($"Current mod progress: {currentFile} / {totalFiles} files");
                 ImGui.Text($"Remaining: {remainingFiles} files");
                 ImGui.Text($"Percentage: {progressPercentage * 100:F1}%");
 
-                if (currentFile > 0 && _conversionStartTime != DateTime.MinValue)
+                if (currentFile > 0 && _currentModStartedAt != DateTime.MinValue)
                 {
-                    var elapsed = DateTime.UtcNow - _conversionStartTime;
+                    var elapsed = DateTime.UtcNow - _currentModStartedAt;
                     var avgTimePerFile = elapsed.TotalSeconds / currentFile;
                     var estimatedRemainingSeconds = avgTimePerFile * remainingFiles;
                     var estimatedRemaining = TimeSpan.FromSeconds(estimatedRemainingSeconds);
@@ -2561,7 +2519,8 @@ public class CompactUi : WindowMediatorSubscriberBase
                 {
                     if (_uiSharedService.IconTextButton(FontAwesomeIcon.StopCircle, "Cancel Conversion"))
                     {
-                        _conversionCancellationTokenSource.Cancel();
+                        try { _shrinkuConversionService.Cancel(); }
+                        catch (Exception ex) { _logger.LogDebug(ex, "Failed to cancel ShrinkU conversion"); }
                     }
                     ImGui.SameLine();
                     UiSharedService.ColorText("Conversion is running…", SpheneCustomTheme.Colors.Warning);
@@ -2611,36 +2570,42 @@ public class CompactUi : WindowMediatorSubscriberBase
         {
             using (SpheneCustomTheme.ApplyContextMenuTheme())
             {
-                ImGui.SetNextWindowSize(new Vector2(420, 0), ImGuiCond.FirstUseEver);
+                ImGui.SetNextWindowSize(new Vector2(520, 0), ImGuiCond.FirstUseEver);
                 if (ImGui.Begin("Restore Progress", ref _restoreWindowOpen, ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse | ImGuiWindowFlags.NoCollapse))
                 {
-                    var total = _restoreTotalCount;
-                    var current = _restoreCurrentIndex;
-                    var percent = total > 0 ? (float)current / total : 0f;
-                    var remaining = total > 0 ? (total - current) : 0;
-
-                    ImGui.TextColored(SpheneCustomTheme.Colors.SpheneGold, "Restoring Textures from Backups");
+                    ImGui.TextColored(SpheneCustomTheme.Colors.SpheneGold, "Restoring Mods");
                     ImGui.Separator();
-                    ImGui.Text($"Progress: {current} / {total} items");
-                    ImGui.Text($"Remaining: {remaining} items");
-                    ImGui.Text($"Percentage: {percent * 100:F1}%");
-                    ImGui.ProgressBar(percent, new Vector2(-1, 0), $"{percent * 100:F1}%");
+
+                    var batchTotal = _restoreModsTotal;
+                    var batchDone = _restoreModsDone;
+                    var batchPercent = batchTotal > 0 ? (float)batchDone / batchTotal : 0f;
+                    ImGui.Text($"Batch progress: {batchDone} / {batchTotal} mods");
+                    ImGui.ProgressBar(batchPercent, new Vector2(-1, 0), $"{batchPercent * 100:F1}%");
+                    if (_restoreStartTime != DateTime.MinValue && batchDone >= 0)
+                    {
+                        var elapsed = DateTime.UtcNow - _restoreStartTime;
+                        var rate = batchDone / Math.Max(1.0, elapsed.TotalSeconds);
+                        var secsRemaining = rate > 0 ? (batchTotal - batchDone) / rate : 0.0;
+                        var eta = TimeSpan.FromSeconds(secsRemaining);
+                        ImGui.Text($"ETA: {eta:mm\\:ss}");
+                    }
+
+                    ImGui.Spacing();
+                    if (!string.IsNullOrEmpty(_currentRestoreMod))
+                        ImGui.Text($"Current mod: {_currentRestoreMod}");
+
+                    var fileTotal = _restoreTotalCount;
+                    var fileCurrent = _restoreCurrentIndex;
+                    var filePercent = fileTotal > 0 ? (float)fileCurrent / fileTotal : 0f;
+                    ImGui.Text($"File progress: {fileCurrent} / {fileTotal}");
+                    ImGui.ProgressBar(filePercent, new Vector2(-1, 0), $"{filePercent * 100:F1}%");
                     if (!string.IsNullOrEmpty(_restoreCurrentFileName))
-                        ImGui.Text($"Current: {_restoreCurrentFileName}");
+                        ImGui.Text($"Current texture: {_restoreCurrentFileName}");
 
                     if (!string.IsNullOrEmpty(_restoreStepText))
                     {
                         ImGui.Spacing();
                         UiSharedService.ColorText(_restoreStepText, SpheneCustomTheme.Colors.TextSecondary);
-                    }
-
-                    if (current > 0 && _restoreStartTime != DateTime.MinValue && total > 0)
-                    {
-                        var elapsed = DateTime.UtcNow - _restoreStartTime;
-                        var rate = current / Math.Max(1.0, elapsed.TotalSeconds);
-                        var secsRemaining = rate > 0 ? (total - current) / rate : 0.0;
-                        var eta = TimeSpan.FromSeconds(secsRemaining);
-                        ImGui.Text($"ETA: {eta:mm\\:ss}");
                     }
 
                     ImGui.Spacing();
@@ -2736,114 +2701,16 @@ public class CompactUi : WindowMediatorSubscriberBase
         _conversionStartTime = DateTime.UtcNow;
         _conversionCancellationTokenSource = new CancellationTokenSource();
 
-        if (_enableBackupBeforeConversion || _shrinkuConfigService.Current.EnableFullModBackupBeforeConversion)
+        _conversionTask = Task.Run(async () =>
         {
-            StartBackupAndConversion();
-            return Task.CompletedTask;
-        }
-        else
-        {
-            _conversionTask = _ipcManager.Penumbra.ConvertTextureFiles(_logger, _texturesToConvert, _conversionProgress, _conversionCancellationTokenSource.Token);
-            _ = _conversionTask.ContinueWith(t =>
-            {
-                try { _shrinkuConversionService.NotifyExternalTextureChange("conversion-completed"); }
-                catch (Exception ex) { _logger.LogDebug(ex, "Failed to notify ShrinkU after conversion-completed"); }
-                finally { _autoSilentConversion = false; }
-            }, TaskScheduler.Default);
-            return Task.CompletedTask;
-        }
+            var dict = await BuildFullModConversionDictionaryFromSelection().ConfigureAwait(false);
+            await _shrinkuConversionService.StartConversionAsync(dict).ConfigureAwait(false);
+        });
+        _ = _conversionTask.ContinueWith(t => { _autoSilentConversion = false; }, TaskScheduler.Default);
+        return Task.CompletedTask;
     }
 
-        private void StartBackupAndConversion()
-        {
-            _conversionTask = Task.Run(async () =>
-            {
-                try
-                {
-                    var traceUiTotal = PerfTrace.Step(_logger, "UI Backup+Conversion total");
-                    if (_shrinkuConfigService.Current.EnableFullModBackupBeforeConversion)
-                    {
-                        try
-                        {
-                            var penumbraRoot = _ipcManager.Penumbra.ModDirectory ?? string.Empty;
-                            var mods = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                            foreach (var kvp in _texturesToConvert)
-                            {
-                                var paths = new List<string> { kvp.Key };
-                                if (kvp.Value != null && kvp.Value.Length > 0)
-                                    paths.AddRange(kvp.Value);
-                                foreach (var p in paths)
-                                {
-                                    try
-                                    {
-                                        var rel = !string.IsNullOrWhiteSpace(penumbraRoot) ? Path.GetRelativePath(penumbraRoot, p) : p;
-                                        rel = rel.Replace('/', '\\');
-                                        if (!string.IsNullOrWhiteSpace(rel) && !rel.StartsWith("..", StringComparison.Ordinal))
-                                        {
-                                            var idx = rel.IndexOf('\\');
-                                            var mod = idx >= 0 ? rel.Substring(0, idx) : rel;
-                                            if (!string.IsNullOrWhiteSpace(mod))
-                                                mods.Add(mod);
-                                        }
-                                    }
-                                    catch (Exception ex)
-                                    {
-                                        _logger.LogDebug(ex, "Failed to infer owning mod from path {path}", p);
-                                    }
-                                }
-                            }
-
-                            _logger.LogDebug("Ensuring full mod backups for {Count} mods before conversion", mods.Count);
-                            foreach (var mod in mods)
-                            {
-                                bool hasPmp = false;
-                                try { hasPmp = await _shrinkuBackupService.HasPmpBackupForModAsync(mod).ConfigureAwait(false); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to check PMP backup for {mod}", mod); }
-                                if (!hasPmp)
-                                {
-                                    try
-                                    {
-                                        _logger.LogDebug("Creating full mod PMP backup for {mod}", mod);
-                                        await _shrinkuBackupService.CreateFullModBackupAsync(mod, _backupProgress, _conversionCancellationTokenSource.Token).ConfigureAwait(false);
-                                    }
-                                    catch (Exception ex)
-                                    {
-                                        _logger.LogDebug(ex, "Failed to create full mod PMP backup for {mod}", mod);
-                                    }
-                                }
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogDebug(ex, "Failed during mod backup preparation loop");
-                        }
-                    }
-
-                    // Create backups first
-                    var allTexturePaths = _texturesToConvert.SelectMany(kvp => new[] { kvp.Key }.Concat(kvp.Value)).ToArray();
-                    _logger.LogDebug("Starting backup for {Count} texture paths", allTexturePaths.Length);
-                    _backupStartTime = DateTime.UtcNow;
-                    var traceUiBackup = PerfTrace.Step(_logger, "UI Backup");
-                    await _shrinkuBackupService.BackupAsync(_texturesToConvert, _backupProgress, _conversionCancellationTokenSource.Token).ConfigureAwait(false);
-                    traceUiBackup.Dispose();
-
-                // Start conversion after backup is complete
-                _logger.LogDebug("Backup completed, starting texture conversion");
-                var traceUiConvert = PerfTrace.Step(_logger, "UI Convert");
-                var conversionTask = _ipcManager.Penumbra.ConvertTextureFiles(_logger, _texturesToConvert, _conversionProgress, _conversionCancellationTokenSource.Token);
-                await conversionTask.ConfigureAwait(false);
-                traceUiConvert.Dispose();
-                try { _shrinkuConversionService.NotifyExternalTextureChange("conversion-completed"); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to notify ShrinkU after conversion-completed"); }
-                _autoSilentConversion = false;
-                
-                _logger.LogDebug("Texture conversion completed successfully");
-                traceUiTotal.Dispose();
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Error during backup and conversion process");
-                }
-            }, _conversionCancellationTokenSource.Token);
-        }
+        
     
     private Dictionary<string, List<string>> GetCachedBackupsForCurrentAnalysis()
     {
@@ -3111,6 +2978,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         _restoreTotalCount = 0;
         _restoreWindowOpen = true;
         _restoreStepText = "Preparing restore (detecting owning mods and backups)";
+        _isRestoreInProgress = true;
         
         _restoreTask = Task.Run(async () =>
         {
@@ -3151,32 +3019,33 @@ public class CompactUi : WindowMediatorSubscriberBase
 
                     // Try restore latest backup per owning mod, preferring those with available backups
                     bool anyTargetedRestoreSucceeded = false;
-                    int restoredModCount = 0;
+                    var modsWithBackup = new List<string>();
                     foreach (var mod in owningMods)
                     {
-                        bool hasBackup = false;
-                        try { hasBackup = await _shrinkuBackupService.HasBackupForModAsync(mod).ConfigureAwait(false); } catch (Exception ex) { _logger.LogDebug(ex, "Backup availability check failed for {mod}", mod); }
-                        _logger.LogInformation("Backup availability for mod {mod}: {hasBackup}", mod, hasBackup);
-                        if (!hasBackup)
-                            continue;
+                        try { if (await _shrinkuBackupService.HasBackupForModAsync(mod).ConfigureAwait(false)) modsWithBackup.Add(mod); }
+                        catch (Exception ex) { _logger.LogDebug(ex, "Backup availability check failed for {mod}", mod); }
+                    }
+                    _restoreModsTotal = modsWithBackup.Count;
+                    _restoreModsDone = 0;
+                    int restoredModCount = 0;
+                    foreach (var mod in modsWithBackup)
+                    {
+                        _currentRestoreMod = mod;
+                        if (_restoreStartTime == DateTime.MinValue)
+                            _restoreStartTime = DateTime.UtcNow;
 
                         _logger.LogInformation("Attempting targeted restore for mod {mod} ({current}/{total})", mod, restoredModCount + 1, owningMods.Count(m => { try { return _shrinkuBackupService.HasBackupForModAsync(m).Result; } catch { return false; } }));
 
-                        // Prefer PMP restore when enabled and Penumbra Mod Package backups exist
                         bool ok = false;
                         try
                         {
-                            var preferPmp = _shrinkuConfigService.Current.PreferPmpRestoreWhenAvailable;
-                            if (preferPmp)
+                            var pmpList = await _shrinkuBackupService.GetPmpBackupsForModAsync(mod).ConfigureAwait(false);
+                            var latestPmp = pmpList?.FirstOrDefault();
+                            if (!string.IsNullOrEmpty(latestPmp))
                             {
-                                var pmpList = await _shrinkuBackupService.GetPmpBackupsForModAsync(mod).ConfigureAwait(false);
-                                var latestPmp = pmpList?.FirstOrDefault();
-                                if (!string.IsNullOrEmpty(latestPmp))
-                                {
-                                    _restoreStepText = $"Restoring PMP archive for mod '{mod}'";
-                                    _logger.LogDebug("Prefer PMP is enabled; restoring PMP for mod {mod}: {pmp}", mod, latestPmp);
-                                    ok = await _shrinkuBackupService.RestorePmpAsync(mod, latestPmp, _restoreProgress, _restoreCancellationTokenSource.Token).ConfigureAwait(false);
-                                }
+                                _restoreStepText = $"Restoring PMP archive for mod '{mod}'";
+                                _logger.LogDebug("Restoring PMP for mod {mod}: {pmp}", mod, latestPmp);
+                                ok = await _shrinkuBackupService.RestorePmpAsync(mod, latestPmp, _restoreProgress, _restoreCancellationTokenSource.Token).ConfigureAwait(false);
                             }
                         }
                         catch (Exception ex)
@@ -3195,6 +3064,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                             _logger.LogDebug("Targeted restore succeeded for mod {mod}", mod);
                             anyTargetedRestoreSucceeded = true;
                             restoredModCount++;
+                            _restoreModsDone = restoredModCount;
                         }
                         else
                         {
@@ -3202,25 +3072,12 @@ public class CompactUi : WindowMediatorSubscriberBase
                         }
                     }
 
-                    // If any targeted restore succeeded, validate and clear cache and redraw character once at the end
+                    // If any targeted restore succeeded, clear cache and redraw via ShrinkU once at the end
                     if (anyTargetedRestoreSucceeded)
                     {
-                        _restoreStepText = "Validating restored files and redrawing character";
-                        _logger.LogInformation("Batch targeted restore completed. Restored {count} mods. Validating file placement.", restoredModCount);
-                        
-                        // Validate that restored files are in the correct locations
-                        try
-                        {
-                            await ValidateRestoredFiles(owningMods, penumbraRoot).ConfigureAwait(false);
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogWarning(ex, "File validation after restore failed, but continuing with character redraw");
-                        }
-                        
                         _cachedBackupsForAnalysis = null;
-                        try { await _ipcManager.Penumbra.RedrawPlayerAsync().ConfigureAwait(false); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to redraw player after targeted restore"); }
-                        try { _shrinkuConversionService.NotifyExternalTextureChange("restore-targeted"); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to notify external texture change after targeted restore"); }
+                        try { _shrinkuBackupService.RedrawPlayer(); } catch (Exception ex) { _logger.LogDebug(ex, "Redraw after targeted restore failed"); }
+                        
                         _restoreStepText = "Restore completed (targeted mods)";
                         return;
                     }
@@ -3231,6 +3088,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                 }
 
                 // Prefer restoring via ShrinkU and choose the best-matching session for current textures
+                var performedShrinkuRestore = false;
                 try
                 {
                     _restoreStepText = "Selecting best matching ShrinkU session";
@@ -3356,8 +3214,10 @@ public class CompactUi : WindowMediatorSubscriberBase
                             }
 
                             _cachedBackupsForAnalysis = null;
-                            try { await _ipcManager.Penumbra.RedrawPlayerAsync().ConfigureAwait(false); } catch (Exception ex) { _logger.LogDebug(ex, "Redraw after restore (session) failed"); }
-                            try { _shrinkuConversionService.NotifyExternalTextureChange("restore-session"); } catch (Exception ex) { _logger.LogDebug(ex, "Notify external texture change (session) failed"); }
+                            _restoreModsTotal = 1;
+                            _restoreModsDone = 1;
+                            try { _shrinkuBackupService.RedrawPlayer(); } catch (Exception ex) { _logger.LogDebug(ex, "Redraw after session restore failed"); }
+                            performedShrinkuRestore = true;
                             _restoreStepText = "Restore completed (session)";
                         }
                         else
@@ -3366,8 +3226,10 @@ public class CompactUi : WindowMediatorSubscriberBase
                             _restoreStepText = "Restoring latest session (no match)";
                             await _shrinkuBackupService.RestoreLatestAsync(_restoreProgress, _restoreCancellationTokenSource.Token).ConfigureAwait(false);
                             _cachedBackupsForAnalysis = null;
-                            try { await _ipcManager.Penumbra.RedrawPlayerAsync().ConfigureAwait(false); } catch (Exception ex) { _logger.LogDebug(ex, "Redraw after restore (latest) failed"); }
-                            try { _shrinkuConversionService.NotifyExternalTextureChange("restore-latest"); } catch (Exception ex) { _logger.LogDebug(ex, "Notify external texture change (latest) failed"); }
+                            _restoreModsTotal = 1;
+                            _restoreModsDone = 1;
+                            try { _shrinkuBackupService.RedrawPlayer(); } catch (Exception ex) { _logger.LogDebug(ex, "Redraw after latest restore failed"); }
+                            performedShrinkuRestore = true;
                             _restoreStepText = "Restore completed (latest)";
                         }
                     }
@@ -3376,64 +3238,48 @@ public class CompactUi : WindowMediatorSubscriberBase
                 {
                     _logger.LogWarning(shrEx, "ShrinkU restore failed or unavailable, falling back to Sphene per-file restore.");
                 }
-                // Create mapping of backup files to their target locations
-                _restoreStepText = "Mapping backups to current texture locations";
-                var backupToTargetMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                
-                foreach (var kvp in availableBackups)
+                if (!performedShrinkuRestore)
                 {
-                    var originalFileName = kvp.Key;
-                    var backupFiles = kvp.Value;
-                    
-                    // Use the most recent backup (first in the list since they're ordered by creation time)
-                    if (backupFiles.Count > 0)
+                    // Create mapping of backup files to their target locations
+                    _restoreStepText = "Mapping backups to current texture locations";
+                    var backupToTargetMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var kvp in availableBackups)
                     {
-                        var mostRecentBackup = backupFiles[0];
-                        
-                        // Try to find the current location of this texture in the loaded data
-                        var targetPath = FindCurrentTextureLocation(originalFileName);
-                        if (!string.IsNullOrEmpty(targetPath))
+                        var originalFileName = kvp.Key;
+                        var backupFiles = kvp.Value;
+                        if (backupFiles.Count > 0)
                         {
-                            backupToTargetMap[mostRecentBackup] = targetPath;
-                            _logger.LogDebug("Will restore {backup} to {target}", mostRecentBackup, targetPath);
-                        }
-                        else
-                        {
-                            _logger.LogWarning("Could not find current location for texture: {originalFileName}", originalFileName);
+                            var mostRecentBackup = backupFiles[0];
+                            var targetPath = FindCurrentTextureLocation(originalFileName);
+                            if (!string.IsNullOrEmpty(targetPath))
+                            {
+                                backupToTargetMap[mostRecentBackup] = targetPath;
+                                _logger.LogDebug("Will restore {backup} to {target}", mostRecentBackup, targetPath);
+                            }
+                            else
+                            {
+                                _logger.LogWarning("Could not find current location for texture: {originalFileName}", originalFileName);
+                            }
                         }
                     }
-                }
-                
-                if (backupToTargetMap.Count > 0)
-                {
-                    _logger.LogDebug("Starting texture restore for {count} texture(s) from current analysis", backupToTargetMap.Count);
-                    _restoreStepText = "Restoring textures per-file from analysis";
-                    var results = await _textureBackupService.RestoreTexturesAsync(backupToTargetMap, deleteBackupsAfterRestore: true, _restoreProgress, _restoreCancellationTokenSource.Token).ConfigureAwait(false);
-                    
-                    var successCount = results.Values.Count(success => success);
-                    _logger.LogInformation("Texture restore completed: {successCount}/{totalCount} textures restored successfully. Backup files have been automatically deleted.", successCount, results.Count);
-                    
-                    // Invalidate backup cache after restore
-                    if (successCount > 0)
+                    if (backupToTargetMap.Count > 0)
                     {
-                        _cachedBackupsForAnalysis = null;
-                        
-                        // Trigger character redraw to reload restored textures in Penumbra
-                        try
+                        _logger.LogDebug("Starting texture restore for {count} texture(s) from current analysis", backupToTargetMap.Count);
+                        _restoreStepText = "Restoring textures per-file from analysis";
+                        var results = await _textureBackupService.RestoreTexturesAsync(backupToTargetMap, deleteBackupsAfterRestore: true, _restoreProgress, _restoreCancellationTokenSource.Token).ConfigureAwait(false);
+                        var successCount = results.Values.Count(success => success);
+                        _logger.LogInformation("Texture restore completed: {successCount}/{totalCount} textures restored successfully. Backup files have been automatically deleted.", successCount, results.Count);
+                        if (successCount > 0)
                         {
-                            await _ipcManager.Penumbra.RedrawPlayerAsync().ConfigureAwait(false);
+                            _cachedBackupsForAnalysis = null;
+                            _restoreStepText = "Restore completed (per-file)";
                         }
-                        catch (Exception ex)
-                        {
-                            _logger.LogWarning(ex, "Failed to trigger character redraw after texture restore");
-                        }
-                        _restoreStepText = "Restore completed (per-file)";
                     }
-                }
-                else
-                {
-                    _restoreStepText = "No textures could be mapped for restoration";
-                    _logger.LogWarning("No textures from current analysis could be mapped for restoration");
+                    else
+                    {
+                        _restoreStepText = "No textures could be mapped for restoration";
+                        _logger.LogWarning("No textures from current analysis could be mapped for restoration");
+                    }
                 }
             }
             catch (Exception ex)
@@ -3445,6 +3291,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         {
             // Auto-close window after completion; user can reopen via next restore
             _restoreWindowOpen = false;
+            _isRestoreInProgress = false;
         }, TaskScheduler.Default);
     }
     
@@ -3504,6 +3351,37 @@ public class CompactUi : WindowMediatorSubscriberBase
         {
             return name;
         }
+    }
+
+    private async Task<Dictionary<string, string[]>> BuildFullModConversionDictionaryFromSelection()
+    {
+        var dict = new Dictionary<string, string[]>(StringComparer.Ordinal);
+        try
+        {
+            var root = _ipcManager.Penumbra.ModDirectory ?? string.Empty;
+            var mods = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var kvp in _texturesToConvert)
+            {
+                var source = kvp.Key ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(source)) continue;
+                var rel = !string.IsNullOrWhiteSpace(root) ? Path.GetRelativePath(root, source) : source;
+                rel = rel.Replace('/', '\\');
+                var idx = rel.IndexOf('\\');
+                var mod = idx >= 0 ? rel.Substring(0, idx) : rel;
+                if (!string.IsNullOrWhiteSpace(mod)) mods.Add(mod);
+            }
+            foreach (var mod in mods)
+            {
+                var files = await _shrinkuConversionService.GetModTextureFilesAsync(mod).ConfigureAwait(false);
+                foreach (var f in files)
+                {
+                    if (string.IsNullOrWhiteSpace(f)) continue;
+                    if (!dict.ContainsKey(f)) dict[f] = Array.Empty<string>();
+                }
+            }
+        }
+        catch (Exception ex) { _logger.LogDebug(ex, "Failed to build full mod conversion dictionary"); }
+        return dict;
     }
     
     private void DrawWindowHeader()
@@ -3593,53 +3471,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         ImGui.SetCursorScreenPos(new Vector2(contentStart.X, headerEnd.Y));
     }
     
-    private Task ValidateRestoredFiles(HashSet<string> restoredMods, string penumbraRoot)
-    {
-        if (restoredMods == null || restoredMods.Count == 0 || string.IsNullOrWhiteSpace(penumbraRoot))
-        {
-            _logger.LogDebug("No mods to validate or invalid Penumbra root");
-            return Task.CompletedTask;
-        }
-        
-        _logger.LogDebug("Validating restored files for {count} mods", restoredMods.Count);
-        
-        int validatedMods = 0;
-        int totalFilesFound = 0;
-        
-        foreach (var mod in restoredMods)
-        {
-            try
-            {
-                var modPath = Path.Combine(penumbraRoot, mod);
-                if (Directory.Exists(modPath))
-                {
-                    // Count texture files in the mod directory
-                    var textureFiles = Directory.GetFiles(modPath, "*.*", SearchOption.AllDirectories)
-                        .Where(f => f.EndsWith(".tex", StringComparison.OrdinalIgnoreCase) || 
-                                   f.EndsWith(".dds", StringComparison.OrdinalIgnoreCase) ||
-                                   f.EndsWith(".png", StringComparison.OrdinalIgnoreCase))
-                        .ToList();
-                    
-                    totalFilesFound += textureFiles.Count;
-                    validatedMods++;
-                    
-                    _logger.LogDebug("Validated mod {mod}: Found {count} texture files in {path}", mod, textureFiles.Count, modPath);
-                }
-                else
-                {
-                    _logger.LogWarning("Mod directory not found after restore: {path}", modPath);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to validate restored files for mod: {mod}", mod);
-            }
-        }
-        
-        _logger.LogInformation("File validation completed: {validatedMods}/{totalMods} mods validated, {totalFiles} texture files found", 
-            validatedMods, restoredMods.Count, totalFilesFound);
-        return Task.CompletedTask;
-    }
+    
     
     
     
