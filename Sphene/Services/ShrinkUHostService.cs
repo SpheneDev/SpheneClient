@@ -29,7 +29,8 @@ public sealed class ShrinkUHostService : IHostedService, IDisposable
     private readonly ShrinkU.Services.TextureBackupService _backupService;
     private readonly ShrinkU.Services.TextureConversionService _shrinkuConversionService;
     private CancellationTokenSource? _refreshCts;
-    private readonly PenumbraExtensionService? _penumbraExtension;
+    private readonly PenumbraIpc _penumbraIpc;
+    private PenumbraExtensionService? _penumbraExtension;
 
     public ShrinkUHostService(
         ILogger<ShrinkUHostService> logger,
@@ -60,17 +61,7 @@ public sealed class ShrinkUHostService : IHostedService, IDisposable
         _backupService = backupService;
         _shrinkuConversionService = shrinkuConversionService;
         _ = ipcManager;
-
-        PenumbraExtensionService? ext = null;
-        try
-        {
-            ext = new PenumbraExtensionService(penumbraIpc, _conversionUi, _logger);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to initialize ShrinkU Penumbra integration");
-        }
-        _penumbraExtension = ext;
+        _penumbraIpc = penumbraIpc;
 
         try { _configService.ConfigSave += OnConfigSaved; }
         catch (Exception ex) { _logger.LogDebug(ex, "Failed to subscribe to ConfigSave event"); }
@@ -82,6 +73,34 @@ public sealed class ShrinkUHostService : IHostedService, IDisposable
         {
             try { return _conversionUi != null && _conversionUi.IsOpen; }
             catch (Exception ex) { _logger.LogDebug(ex, "Failed to read ConversionUI IsOpen"); return false; }
+        }
+    }
+
+    private void SetPenumbraIntegration(bool enable)
+    {
+        try
+        {
+            if (enable)
+            {
+                if (_penumbraExtension == null)
+                {
+                    _penumbraExtension = new PenumbraExtensionService(_penumbraIpc, _conversionUi, _logger);
+                    _logger.LogDebug("Initialized ShrinkU Penumbra integration");
+                }
+            }
+            else
+            {
+                if (_penumbraExtension != null)
+                {
+                    _penumbraExtension.Dispose();
+                    _penumbraExtension = null;
+                    _logger.LogDebug("Disposed ShrinkU Penumbra integration");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to update ShrinkU Penumbra integration state to {Enable}", enable);
         }
     }
 
@@ -97,6 +116,7 @@ public sealed class ShrinkUHostService : IHostedService, IDisposable
             if (enable)
             {
                 RegisterWindows();
+                SetPenumbraIntegration(true);
                 // Mark ShrinkU as integrated with Sphene for UI gating
                 try
                 {
@@ -228,6 +248,7 @@ public sealed class ShrinkUHostService : IHostedService, IDisposable
             if (enabled)
             {
                 RegisterWindows();
+                SetPenumbraIntegration(true);
                 try
                 {
                     if (_shrinkuConfigService.Current.FirstRunCompleted)
@@ -243,6 +264,7 @@ public sealed class ShrinkUHostService : IHostedService, IDisposable
                 try { _refreshCts?.Dispose(); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to dispose refresh CTS"); }
                 _refreshCts = null;
                 UnregisterWindows();
+                SetPenumbraIntegration(false);
                 try { _shrinkuConversionService.SetEnabled(false); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to disable ShrinkU conversion"); }
                 try
                 {
@@ -364,6 +386,7 @@ public sealed class ShrinkUHostService : IHostedService, IDisposable
             if (enable)
             {
                 RegisterWindows();
+                SetPenumbraIntegration(true);
                 try
                 {
                     _shrinkuConfigService.Current.AutomaticControllerName = "Sphene";
@@ -377,6 +400,7 @@ public sealed class ShrinkUHostService : IHostedService, IDisposable
             else
             {
                 UnregisterWindows();
+                SetPenumbraIntegration(false);
                 try
                 {
                     _shrinkuConfigService.Current.AutomaticHandledBySphene = false;
