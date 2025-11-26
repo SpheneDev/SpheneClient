@@ -9,10 +9,11 @@ using ShrinkU.Configuration;
 using ShrinkU.UI;
 using Sphene.SpheneConfiguration.Configurations;
 using Sphene.SpheneConfiguration;
+using ShrinkU.Services;
 
 namespace Sphene.Services;
 
-public sealed class ShrinkUHostService : IHostedService
+public sealed class ShrinkUHostService : IHostedService, IDisposable
 {
     private readonly ILogger<ShrinkUHostService> _logger;
     private readonly WindowSystem _windowSystem;
@@ -28,6 +29,7 @@ public sealed class ShrinkUHostService : IHostedService
     private readonly ShrinkU.Services.TextureBackupService _backupService;
     private readonly ShrinkU.Services.TextureConversionService _shrinkuConversionService;
     private CancellationTokenSource? _refreshCts;
+    private readonly PenumbraExtensionService? _penumbraExtension;
 
     public ShrinkUHostService(
         ILogger<ShrinkUHostService> logger,
@@ -42,7 +44,8 @@ public sealed class ShrinkUHostService : IHostedService
         ShrinkU.Services.TextureBackupService backupService,
         ShrinkU.Services.TextureConversionService shrinkuConversionService,
         ShrinkU.UI.StartupProgressUI startupProgressUi,
-        Sphene.Interop.Ipc.IpcManager ipcManager)
+        Sphene.Interop.Ipc.IpcManager ipcManager,
+        PenumbraIpc penumbraIpc)
     {
         _logger = logger;
         _windowSystem = windowSystem;
@@ -57,6 +60,17 @@ public sealed class ShrinkUHostService : IHostedService
         _backupService = backupService;
         _shrinkuConversionService = shrinkuConversionService;
         _ = ipcManager;
+
+        PenumbraExtensionService? ext = null;
+        try
+        {
+            ext = new PenumbraExtensionService(penumbraIpc, _conversionUi, _logger);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to initialize ShrinkU Penumbra integration");
+        }
+        _penumbraExtension = ext;
 
         try { _configService.ConfigSave += OnConfigSaved; }
         catch (Exception ex) { _logger.LogDebug(ex, "Failed to subscribe to ConfigSave event"); }
@@ -390,5 +404,10 @@ public sealed class ShrinkUHostService : IHostedService
             _logger.LogDebug("CleanupDuplicateShrinkUConfig executed");
         }
         catch (Exception ex) { _logger.LogDebug(ex, "Failed cleaning up duplicate ShrinkU config"); }
+    }
+
+    public void Dispose()
+    {
+        _penumbraExtension?.Dispose();
     }
 }
