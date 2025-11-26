@@ -341,6 +341,21 @@ public sealed class ShrinkUHostService : IHostedService, IDisposable
         }
     }
 
+    public void OpenConversionForMods(IEnumerable<string> mods)
+    {
+        try
+        {
+            if (!_registered && _configService.Current.EnableShrinkUIntegration)
+                RegisterWindows();
+            _conversionUi.OpenForMods(mods);
+            _conversionUi.IsOpen = true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to open ShrinkU ConversionUI for mods");
+        }
+    }
+
     // Configure ShrinkU backup folder to Sphene's cache when available
     private void TryConfigureShrinkUBackupPath()
     {

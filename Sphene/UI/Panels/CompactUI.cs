@@ -2274,6 +2274,59 @@ public class CompactUi : WindowMediatorSubscriberBase
                 var totalSizeBytes = (nonBc7Textures?.Sum(t => t.OriginalSize) ?? 0L);
                 var totalSizeMB = totalSizeBytes / (1024.0 * 1024.0);
                 ImGui.Text($"To convert: {totalSizeMB:F1} MB");
+                try
+                {
+                    var mods = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    var root = _ipcManager.Penumbra.ModDirectory ?? string.Empty;
+                    if (nonBc7Textures != null)
+                    {
+                        foreach (var texture in nonBc7Textures)
+                        {
+                            var paths = texture.FilePaths ?? new List<string>();
+                            if (paths.Count == 0) continue;
+                            var primary = paths[0] ?? string.Empty;
+                            if (string.IsNullOrWhiteSpace(primary)) continue;
+                            var rel = !string.IsNullOrWhiteSpace(root) ? Path.GetRelativePath(root, primary) : primary;
+                            rel = rel.Replace('/', '\\');
+                            var idx = rel.IndexOf('\\');
+                            var mod = idx >= 0 ? rel.Substring(0, idx) : rel;
+                            if (!string.IsNullOrWhiteSpace(mod)) mods.Add(mod);
+                        }
+                    }
+                    var excludedCount = 0;
+                    foreach (var m in mods)
+                    {
+                        try
+                        {
+                            if (_shrinkuConfigService.Current.ExcludedMods != null && _shrinkuConfigService.Current.ExcludedMods.Contains(m))
+                                excludedCount++;
+                        }
+                        catch (Exception ex) { _logger.LogDebug(ex, "Excluded mods count check failed"); }
+                    }
+                    ImGui.SameLine();
+                    ImGui.TextColored(SpheneCustomTheme.CurrentTheme.TextSecondary, $"Excluded: {excludedCount}");
+                    if (mods.Count > 0 && ImGui.TreeNodeEx("Affected mods", ImGuiTreeNodeFlags.FramePadding))
+                    {
+                        foreach (var m in mods)
+                        {
+                            bool isExcluded = false;
+                            try { isExcluded = _shrinkuConfigService.Current.ExcludedMods != null && _shrinkuConfigService.Current.ExcludedMods.Contains(m); } catch (Exception ex) { _logger.LogDebug(ex, "Excluded state eval failed for {mod}", m); }
+                            ImGui.Checkbox($"Exclude {m}", ref isExcluded);
+                            if (ImGui.IsItemDeactivatedAfterEdit())
+                            {
+                                try
+                                {
+                                    _shrinkuConfigService.Current.ExcludedMods ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                                    if (isExcluded) _shrinkuConfigService.Current.ExcludedMods.Add(m); else _shrinkuConfigService.Current.ExcludedMods.Remove(m);
+                                    _shrinkuConfigService.Save();
+                                }
+                                catch (Exception ex) { _logger.LogDebug(ex, "Failed to toggle exclude for {mod}", m); }
+                            }
+                        }
+                        ImGui.TreePop();
+                    }
+                }
+                catch (Exception ex) { _logger.LogDebug(ex, "Failed computing affected mods"); }
 
                 if (_uiSharedService.IconTextButton(FontAwesomeIcon.FileArchive, $"Convert {(nonBc7Textures?.Count ?? 0)} to BC7"))
                 {
@@ -2282,6 +2335,37 @@ public class CompactUi : WindowMediatorSubscriberBase
                     _cachedAnalysisForPopup = null; // Clear cached analysis when window closes
                     _autoSilentConversion = false; // show progress for manual conversion
                     _conversionProgressWindowOpen = true;
+                }
+
+                ImGui.SameLine();
+                if (_uiSharedService.IconTextButton(FontAwesomeIcon.ExternalLinkAlt, "Review in ShrinkU"))
+                {
+                    try
+                    {
+                        var mods = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                        var root = _ipcManager.Penumbra.ModDirectory ?? string.Empty;
+                        if (nonBc7Textures != null)
+                        {
+                            foreach (var texture in nonBc7Textures)
+                            {
+                                var paths = texture.FilePaths ?? new List<string>();
+                                if (paths.Count == 0) continue;
+                                var primary = paths[0] ?? string.Empty;
+                                if (string.IsNullOrWhiteSpace(primary)) continue;
+                                var rel = !string.IsNullOrWhiteSpace(root) ? Path.GetRelativePath(root, primary) : primary;
+                                rel = rel.Replace('/', '\\');
+                                var idx = rel.IndexOf('\\');
+                                var mod = idx >= 0 ? rel.Substring(0, idx) : rel;
+                                if (!string.IsNullOrWhiteSpace(mod)) mods.Add(mod);
+                            }
+                            if (mods.Count > 0)
+                                _shrinkuHostService.OpenConversionForMods(mods);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug(ex, "Failed to open ShrinkU for affected mods");
+                    }
                 }
 
                 // Visual indicator: show spinning arrows when automatic conversion is active
