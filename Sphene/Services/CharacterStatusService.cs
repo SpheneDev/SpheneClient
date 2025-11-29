@@ -19,7 +19,7 @@ namespace Sphene.Services;
 
 public class CharacterStatusService : MediatorSubscriberBase, IHostedService
 {
-    private readonly IClientState _clientState;
+    private readonly IObjectTable _objectTable;
     private readonly ICondition _condition;
     private readonly IDataManager _dataManager;
 
@@ -39,10 +39,10 @@ public class CharacterStatusService : MediatorSubscriberBase, IHostedService
     public const uint OnlineStatusPvPMentor = 30;
     public const uint OnlineStatusTradeMentor = 29;
 
-    public CharacterStatusService(ILogger<CharacterStatusService> logger, IClientState clientState, 
+    public CharacterStatusService(ILogger<CharacterStatusService> logger, IObjectTable objectTable,
         ICondition condition, IDataManager dataManager, SpheneMediator mediator) : base(logger, mediator)
     {
-        _clientState = clientState;
+        _objectTable = objectTable;
         _condition = condition;
         _dataManager = dataManager;
     }
@@ -62,7 +62,7 @@ public class CharacterStatusService : MediatorSubscriberBase, IHostedService
     // Get current online status ID
     public uint GetCurrentOnlineStatusId()
     {
-        return _clientState.LocalPlayer?.OnlineStatus.RowId ?? OnlineStatusOnline;
+        return _objectTable.LocalPlayer?.OnlineStatus.RowId ?? OnlineStatusOnline;
     }
 
     // Get current online status name
@@ -195,7 +195,7 @@ public class CharacterStatusService : MediatorSubscriberBase, IHostedService
             // Special handling for "Looking for Party" status - set job mask
             if (statusId == OnlineStatusLookingForParty && infoProxyDetail->UpdateData.LookingForPartyClassJobIdMask == 0)
             {
-                var jobId = _clientState.LocalPlayer?.ClassJob.RowId ?? 0;
+                var jobId = _objectTable.LocalPlayer?.ClassJob.RowId ?? 0;
                 if (jobId > 0)
                 {
                     var jobMask = (ulong)(1u << ((int)jobId - 1));

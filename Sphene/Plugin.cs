@@ -262,7 +262,7 @@ public sealed class Plugin : IDalamudPlugin
                 s.GetRequiredService<BlockedCharacterHandler>(), s.GetRequiredService<SpheneMediator>(), s.GetRequiredService<PerformanceCollectorService>(),
                 s.GetRequiredService<SpheneConfigService>()));
             collection.AddSingleton((s) => new CharacterStatusService(s.GetRequiredService<ILogger<CharacterStatusService>>(),
-                clientState, condition, gameData, s.GetRequiredService<SpheneMediator>()));
+                objectTable, condition, gameData, s.GetRequiredService<SpheneMediator>()));
             collection.AddSingleton((s) => new DtrEntry(s.GetRequiredService<ILogger<DtrEntry>>(), dtrBar, s.GetRequiredService<SpheneConfigService>(),
                 s.GetRequiredService<SpheneMediator>(), s.GetRequiredService<PairManager>(), s.GetRequiredService<ApiController>()));
             collection.AddSingleton<Lazy<ApiController>>(s => new Lazy<ApiController>(() => s.GetRequiredService<ApiController>()));
