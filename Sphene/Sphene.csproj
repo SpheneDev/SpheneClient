@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<Project Sdk="Dalamud.NET.Sdk/13.1.0">
+<Project Sdk="Dalamud.NET.Sdk/14.0.0">
   <PropertyGroup>
     <Authors></Authors>
     <Company></Company>
@@ -46,6 +46,10 @@
     <PathMap>$(MSBuildProjectDirectory)=.</PathMap>
   </PropertyGroup>
 
+  <PropertyGroup>
+    <MSBuildWarningsAsMessages>$(MSBuildWarningsAsMessages);MSB3277</MSBuildWarningsAsMessages>
+  </PropertyGroup>
+
   <ItemGroup>
     <Compile Remove="PlayerData\Export\**" />
     <EmbeddedResource Remove="PlayerData\Export\**" />
@@ -88,6 +92,10 @@
     <ProjectReference Include="..\..\ShrinkU\ShrinkU.csproj" Condition="Exists('..\..\ShrinkU\ShrinkU.csproj')" />
     <!-- GitHub Actions - ShrinkU is checked out to SpheneClient/ShrinkU -->
     <ProjectReference Include="..\ShrinkU\ShrinkU.csproj" Condition="!Exists('..\..\ShrinkU\ShrinkU.csproj') And Exists('..\ShrinkU\ShrinkU.csproj')" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.WindowsDesktop.App" />
   </ItemGroup>
 
   <ItemGroup>
