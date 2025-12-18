@@ -50,6 +50,7 @@ public class DalamudUtilService : IHostedService, IMediatorSubscriber
     private readonly List<string> _notUpdatedCharas = [];
     private bool _sentBetweenAreas = false;
     private Lazy<ulong> _cid;
+    private const int StillRenderingFlagMask = 1 << 11;
 
     public DalamudUtilService(ILogger<DalamudUtilService> logger, IClientState clientState, IObjectTable objectTable, IFramework framework,
         IGameGui gameGui, ICondition condition, IDataManager gameData, ITargetManager targetManager, IGameConfig gameConfig, IPartyList partyList,
@@ -524,8 +525,8 @@ public class DalamudUtilService : IHostedService, IMediatorSubscriber
         var obj = (GameObject*)characterAddress;
         const int tick = 250;
         int curWaitTime = 0;
-        _logger.LogTrace("RenderFlags: {flags}", obj->RenderFlags.ToString("X"));
-        while (obj->RenderFlags != 0x00 && curWaitTime < timeOut)
+        _logger.LogTrace("RenderFlags: {flags}", ((int)obj->RenderFlags).ToString("X"));
+        while (obj->RenderFlags != default && curWaitTime < timeOut)
         {
             _logger.LogTrace($"Waiting for gpose actor to finish drawing");
             curWaitTime += tick;
@@ -555,7 +556,8 @@ public class DalamudUtilService : IHostedService, IMediatorSubscriber
         bool isDrawingChanged = false;
         if ((nint)drawObj != IntPtr.Zero)
         {
-            isDrawing = gameObj->RenderFlags == 0b100000000000;
+            var renderFlags = (int)gameObj->RenderFlags;
+            isDrawing = (renderFlags & StillRenderingFlagMask) != 0;
             if (!isDrawing)
             {
                 isDrawing = ((CharacterBase*)drawObj)->HasModelInSlotLoaded != 0;

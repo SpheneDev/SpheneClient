@@ -376,7 +376,7 @@ public sealed class GameObjectHandler : DisposableMediatorSubscriberBase, IHighP
     {
         if (Address == IntPtr.Zero) return DrawCondition.ObjectZero;
         if (DrawObjectAddress == IntPtr.Zero) return DrawCondition.DrawObjectZero;
-        var renderFlags = (((FFXIVClientStructs.FFXIV.Client.Game.Object.GameObject*)Address)->RenderFlags) != 0x0;
+        var renderFlags = (((FFXIVClientStructs.FFXIV.Client.Game.Object.GameObject*)Address)->RenderFlags) != default;
         if (renderFlags) return DrawCondition.RenderFlags;
 
         if (ObjectKind == ObjectKind.Player)
