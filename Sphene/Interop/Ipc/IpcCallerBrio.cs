@@ -11,6 +11,8 @@ namespace Sphene.Interop.Ipc;
 
 public sealed class IpcCallerBrio : IIpcCaller
 {
+    private const int RequiredApiMajorVersion = 3;
+
     private readonly ILogger<IpcCallerBrio> _logger;
     private readonly DalamudUtilService _dalamudUtilService;
     private readonly ICallGateSubscriber<(int, int)> _brioApiVersion;
@@ -51,7 +53,7 @@ public sealed class IpcCallerBrio : IIpcCaller
         try
         {
             var version = _brioApiVersion.InvokeFunc();
-            APIAvailable = version.Item1 == 3 && version.Item2 >= 0;
+            APIAvailable = version.Item1 == RequiredApiMajorVersion && version.Item2 >= 0;
         }
         catch
         {

@@ -731,17 +731,16 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
 
     private TimeSpan CalculateRetryDelay(int failureCount)
     {
-        // Exponential backoff with jitter
-        var baseDelaySeconds = 2;
-        var maxDelaySeconds = 60;
-        var jitterFactor = 0.1;
-        
-        var exponentialDelay = Math.Min(baseDelaySeconds * Math.Pow(2, failureCount), maxDelaySeconds);
-        var jitter = exponentialDelay * jitterFactor * (new Random().NextDouble() * 2 - 1);
-        var finalDelay = exponentialDelay + jitter;
-        
-        Logger.LogDebug("Calculated retry delay: {delay}s (failure count: {count})", finalDelay, failureCount);
-        return TimeSpan.FromSeconds(Math.Max(1, finalDelay));
+        const double baseDelaySeconds = 2;
+        const double maxDelaySeconds = 60;
+        const double jitterFactor = 0.1;
+
+        var exponentialDelaySeconds = Math.Min(baseDelaySeconds * Math.Pow(2, failureCount), maxDelaySeconds);
+        var jitterSeconds = exponentialDelaySeconds * jitterFactor * (Random.Shared.NextDouble() * 2 - 1);
+        var finalDelaySeconds = exponentialDelaySeconds + jitterSeconds;
+
+        Logger.LogDebug("Calculated retry delay: {delay}s (failure count: {count})", finalDelaySeconds, failureCount);
+        return TimeSpan.FromSeconds(Math.Max(1, finalDelaySeconds));
     }
 }
 #pragma warning restore MA0040

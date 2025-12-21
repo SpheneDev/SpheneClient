@@ -31,6 +31,7 @@ public class CitySyncshellService : DisposableMediatorSubscriberBase, IHostedSer
     private LocationInfo? _lastLocation;
     private readonly Timer _locationCheckTimer;
     private readonly bool _isEnabled = true;
+    private int _locationCheckInProgress = 0;
     
     // Define the main cities with their territory IDs
     private readonly Dictionary<uint, string> _mainCities = new()
@@ -86,6 +87,11 @@ public class CitySyncshellService : DisposableMediatorSubscriberBase, IHostedSer
             return;
         }
 
+        if (Interlocked.Exchange(ref _locationCheckInProgress, 1) == 1)
+        {
+            return;
+        }
+
         try
         {
             var currentLocation = await _dalamudUtilService.GetMapDataAsync().ConfigureAwait(false);
@@ -102,6 +108,10 @@ public class CitySyncshellService : DisposableMediatorSubscriberBase, IHostedSer
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error checking location change");
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _locationCheckInProgress, 0);
         }
     }
 
@@ -225,7 +235,7 @@ public class CitySyncshellService : DisposableMediatorSubscriberBase, IHostedSer
             _logger.LogError(ex, "Error joining city syncshell for {cityName}", cityName);
         }
     }
-    
+
     private async Task<string> GetCityAliasAsync(string cityName)
     {
         // Get the current world name
@@ -260,7 +270,7 @@ public class CitySyncshellService : DisposableMediatorSubscriberBase, IHostedSer
     {
         if (disposing)
         {
-            _locationCheckTimer?.Dispose();
+            _locationCheckTimer.Dispose();
         }
         base.Dispose(disposing);
     }

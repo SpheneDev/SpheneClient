@@ -1,4 +1,3 @@
-using Dalamud.Game.ClientState.Objects.SubKinds;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Ipc;
 using Sphene.Services;
@@ -9,8 +8,9 @@ namespace Sphene.Interop.Ipc;
 
 public sealed class IpcCallerMoodles : IIpcCaller
 {
+    private const int MinimumApiVersion = 4;
     private readonly ICallGateSubscriber<int> _moodlesApiVersion;
-    private readonly ICallGateSubscriber<IPlayerCharacter, object> _moodlesOnChange;
+    private readonly ICallGateSubscriber<nint, object> _moodlesOnChange;
     private readonly ICallGateSubscriber<nint, string> _moodlesGetStatus;
     private readonly ICallGateSubscriber<nint, string, object> _moodlesSetStatus;
     private readonly ICallGateSubscriber<nint, object> _moodlesRevertStatus;
@@ -26,7 +26,7 @@ public sealed class IpcCallerMoodles : IIpcCaller
         _spheneMediator = spheneMediator;
 
         _moodlesApiVersion = pi.GetIpcSubscriber<int>("Moodles.Version");
-        _moodlesOnChange = pi.GetIpcSubscriber<IPlayerCharacter, object>("Moodles.StatusManagerModified");
+        _moodlesOnChange = pi.GetIpcSubscriber<nint, object>("Moodles.StatusManagerModified");
         _moodlesGetStatus = pi.GetIpcSubscriber<nint, string>("Moodles.GetStatusManagerByPtrV2");
         _moodlesSetStatus = pi.GetIpcSubscriber<nint, string, object>("Moodles.SetStatusManagerByPtrV2");
         _moodlesRevertStatus = pi.GetIpcSubscriber<nint, object>("Moodles.ClearStatusManagerByPtrV2");
@@ -36,9 +36,9 @@ public sealed class IpcCallerMoodles : IIpcCaller
         CheckAPI();
     }
 
-    private void OnMoodlesChange(IPlayerCharacter character)
+    private void OnMoodlesChange(nint characterAddress)
     {
-        _spheneMediator.Publish(new MoodlesMessage(character.Address));
+        _spheneMediator.Publish(new MoodlesMessage(characterAddress));
     }
 
     public bool APIAvailable { get; private set; } = false;
@@ -47,7 +47,7 @@ public sealed class IpcCallerMoodles : IIpcCaller
     {
         try
         {
-            APIAvailable = _moodlesApiVersion.InvokeFunc() == 3;
+            APIAvailable = _moodlesApiVersion.InvokeFunc() >= MinimumApiVersion;
         }
         catch
         {
@@ -98,7 +98,7 @@ public sealed class IpcCallerMoodles : IIpcCaller
         }
         catch (Exception e)
         {
-            _logger.LogWarning(e, "Could not Set Moodles Status");
+            _logger.LogWarning(e, "Could not Revert Moodles Status");
         }
     }
 }
