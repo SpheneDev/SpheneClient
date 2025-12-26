@@ -373,8 +373,8 @@ public class CompactUi : WindowMediatorSubscriberBase
 
         RefreshDrawFolders();
 
-#if DEBUG
-        string dev = "Dev Build";
+#if IS_TEST_BUILD
+        string dev = "Dev/Test Build";
         var ver = Assembly.GetExecutingAssembly().GetName().Version!;
         WindowName = $"Sphene {dev} ({ver.Major}.{ver.Minor}.{ver.Build})###SpheneMainUI";
         Toggle();

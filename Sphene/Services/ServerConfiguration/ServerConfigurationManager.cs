@@ -466,83 +466,87 @@ public class ServerConfigurationManager
 
     private void EnsureMainExists()
     {
-#if DEBUG
-        const string mainServerName = "Sphene Debug Server";
-        const string mainServerUri = "ws://test.sphene.online:6000";
-        const string debugServerName = "Sphene Server";
-        const string debugServerUri = "ws://sphene.online:6000";
-#else
         const string mainServerName = "Sphene Server";
         const string mainServerUri = "ws://sphene.online:6000";
-#endif
 
         var servers = _configService.Current.ServerStorage;
         bool hasMainServer = false;
         int mainServerIndex = -1;
         List<int> duplicateMainServerIndices = new();
-
-#if DEBUG
-        bool hasDebugServer = false;
-        int debugServerIndex = -1;
-        List<int> duplicateDebugServerIndices = new();
-#endif
         List<int> indicesToRemove = new();
 
-        // Find existing servers and collect duplicates
         for (int i = 0; i < servers.Count; i++)
         {
             var server = servers[i];
-            
-#if DEBUG
-            // Check for debug server (also check for old "Debug Server" name)
-            if (string.Equals(server.ServerName, debugServerName, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(server.ServerName, "Sphene Debug Server", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(server.ServerUri, debugServerUri, StringComparison.OrdinalIgnoreCase) ||
-                server.ServerUri.Contains("test.sphene.online"))
-            {
-                if (!hasDebugServer)
-                {
-                    hasDebugServer = true;
-                    debugServerIndex = i;
-                    // Update debug server configuration
-                    server.ServerName = debugServerName;
-                    server.ServerUri = debugServerUri;
-                    server.UseOAuth2 = false;
-                }
-                else
-                {
-                    duplicateDebugServerIndices.Add(i);
-                }
-            }
-#else
-            if (server.ServerUri.Contains("test.sphene.online") ||
+
+            if (server.ServerUri.Contains("test.sphene.online", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(server.ServerName, "Sphene Test Server", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(server.ServerName, "Sphene Debug Server", StringComparison.OrdinalIgnoreCase))
             {
                 indicesToRemove.Add(i);
                 continue;
             }
-#endif
-            
-            // Check for main server - improved duplicate detection
-            bool isMainServer = false;
-            
-            if (string.Equals(server.ServerName, mainServerName, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(server.ServerUri, mainServerUri, StringComparison.OrdinalIgnoreCase) ||
-                (server.ServerUri.Contains("sphene.online") && !server.ServerUri.Contains("test") &&
-                 server.ServerName.Contains("Sphene") && server.ServerName.Contains("Server") &&
-                 !server.ServerName.Contains("Test") && !server.ServerName.Contains("Debug")))
+
+            bool isMainServer = string.Equals(server.ServerName, mainServerName, StringComparison.OrdinalIgnoreCase) ||
+                                string.Equals(server.ServerUri, mainServerUri, StringComparison.OrdinalIgnoreCase) ||
+                                (server.ServerUri.Contains("sphene.online", StringComparison.OrdinalIgnoreCase) &&
+                                 !server.ServerUri.Contains("test", StringComparison.OrdinalIgnoreCase) &&
+                                 server.ServerName.Contains("Sphene", StringComparison.OrdinalIgnoreCase) &&
+                                 server.ServerName.Contains("Server", StringComparison.OrdinalIgnoreCase) &&
+                                 !server.ServerName.Contains("Test", StringComparison.OrdinalIgnoreCase) &&
+                                 !server.ServerName.Contains("Debug", StringComparison.OrdinalIgnoreCase));
+
+            if (!isMainServer)
+                continue;
+
+            if (!hasMainServer)
             {
-                isMainServer = true;
+                hasMainServer = true;
+                mainServerIndex = i;
+                server.ServerName = mainServerName;
+                server.ServerUri = mainServerUri;
+                server.UseOAuth2 = false;
             }
-            
-            if (isMainServer)
+            else
             {
+                duplicateMainServerIndices.Add(i);
+            }
+        }
+
+        foreach (int idx in indicesToRemove.Distinct().OrderByDescending(x => x))
+        {
+            if (idx < 0 || idx >= servers.Count)
+                continue;
+
+            servers.RemoveAt(idx);
+        }
+
+        if (indicesToRemove.Count > 0)
+        {
+            hasMainServer = false;
+            mainServerIndex = -1;
+            duplicateMainServerIndices.Clear();
+
+            for (int i = 0; i < servers.Count; i++)
+            {
+                var server = servers[i];
+
+                bool isMainServer = string.Equals(server.ServerName, mainServerName, StringComparison.OrdinalIgnoreCase) ||
+                                    string.Equals(server.ServerUri, mainServerUri, StringComparison.OrdinalIgnoreCase) ||
+                                    (server.ServerUri.Contains("sphene.online", StringComparison.OrdinalIgnoreCase) &&
+                                     !server.ServerUri.Contains("test", StringComparison.OrdinalIgnoreCase) &&
+                                     server.ServerName.Contains("Sphene", StringComparison.OrdinalIgnoreCase) &&
+                                     server.ServerName.Contains("Server", StringComparison.OrdinalIgnoreCase) &&
+                                     !server.ServerName.Contains("Test", StringComparison.OrdinalIgnoreCase) &&
+                                     !server.ServerName.Contains("Debug", StringComparison.OrdinalIgnoreCase));
+
+                if (!isMainServer)
+                    continue;
+
                 if (!hasMainServer)
                 {
                     hasMainServer = true;
                     mainServerIndex = i;
-                    // Update main server configuration to ensure consistency
                     server.ServerName = mainServerName;
                     server.ServerUri = mainServerUri;
                     server.UseOAuth2 = false;
@@ -554,95 +558,35 @@ public class ServerConfigurationManager
             }
         }
 
-        foreach (int idx in indicesToRemove.OrderByDescending(x => x))
+        if (hasMainServer && (mainServerIndex < 0 || mainServerIndex >= servers.Count))
         {
-            servers.RemoveAt(idx);
+            hasMainServer = false;
+            mainServerIndex = -1;
+            duplicateMainServerIndices.Clear();
         }
 
-        
-        // Consolidate SecretKeys and Authentications from duplicate servers
         ConsolidateServerData(servers, mainServerIndex, duplicateMainServerIndices);
-#if DEBUG
-        ConsolidateServerData(servers, debugServerIndex, duplicateDebugServerIndices);
-#endif
 
-        // Remove duplicate servers (in reverse order to maintain indices)
-        foreach (int duplicateIndex in duplicateMainServerIndices.OrderByDescending(x => x))
+        foreach (int duplicateIndex in duplicateMainServerIndices.Distinct().OrderByDescending(x => x))
         {
+            if (duplicateIndex < 0 || duplicateIndex >= servers.Count)
+                continue;
+
             servers.RemoveAt(duplicateIndex);
-            // Adjust indices after removal
             if (mainServerIndex > duplicateIndex) mainServerIndex--;
-#if DEBUG
-            if (debugServerIndex > duplicateIndex) debugServerIndex--;
-            for (int i = 0; i < duplicateDebugServerIndices.Count; i++)
-            {
-                if (duplicateDebugServerIndices[i] > duplicateIndex) duplicateDebugServerIndices[i]--;
-            }
-#endif
         }
 
-#if DEBUG
-        foreach (int duplicateIndex in duplicateDebugServerIndices.OrderByDescending(x => x))
-        {
-            servers.RemoveAt(duplicateIndex);
-            // Adjust indices after removal
-            if (mainServerIndex > duplicateIndex) mainServerIndex--;
-            if (debugServerIndex > duplicateIndex) debugServerIndex--;
-        }
-#endif
-
-        // Ensure main server exists at index 0 (default selection)
         if (!hasMainServer)
         {
             servers.Insert(0, new ServerStorage() { ServerUri = mainServerUri, ServerName = mainServerName, UseOAuth2 = false });
-#if DEBUG
-            // Adjust debug server index if it was found
-            if (debugServerIndex >= 0) debugServerIndex++;
-#endif
         }
         else if (mainServerIndex != 0)
         {
-            // Move main server to index 0
             var mainServer = servers[mainServerIndex];
             servers.RemoveAt(mainServerIndex);
             servers.Insert(0, mainServer);
-#if DEBUG
-            // Adjust debug server index
-            if (debugServerIndex > mainServerIndex) debugServerIndex--;
-            else if (debugServerIndex < mainServerIndex) debugServerIndex++;
-#endif
         }
 
-#if DEBUG
-        // Ensure debug server exists at index 1 (only in DEBUG builds)
-        if (!hasDebugServer)
-        {
-            if (servers.Count < 2)
-            {
-                servers.Add(new ServerStorage() { ServerUri = debugServerUri, ServerName = debugServerName, UseOAuth2 = false });
-            }
-            else
-            {
-                servers.Insert(1, new ServerStorage() { ServerUri = debugServerUri, ServerName = debugServerName, UseOAuth2 = false });
-            }
-        }
-        else if (debugServerIndex != 1)
-        {
-            // Move debug server to index 1
-            var debugServer = servers[debugServerIndex];
-            servers.RemoveAt(debugServerIndex);
-            if (servers.Count < 2)
-            {
-                servers.Add(debugServer);
-            }
-            else
-            {
-                servers.Insert(1, debugServer);
-            }
-        }
-#endif
-
-        // Ensure CurrentServerIndex is set to 0 (main server) by default
         if (_configService.Current.CurrentServer < 0 || _configService.Current.CurrentServer >= servers.Count)
         {
             _configService.Current.CurrentServer = 0;

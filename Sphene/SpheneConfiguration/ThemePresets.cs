@@ -212,7 +212,7 @@ public static class ThemePresets
             
             CompactShowImGuiHeader = false,
             CompactUpdateHintColor = new Vector4(1.0f, 0.8f, 0.2f, 1.0f),
-            CompactUpdateHintHeight = 11.9f,
+            CompactUpdateHintHeight = 35.0f,
             CompactUpdateHintPaddingY = 0.0f,
 
             // Default Button Styles entries

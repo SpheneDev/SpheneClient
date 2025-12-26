@@ -680,10 +680,19 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
     private void DrawDebug()
     {
-        _lastTab = "Debug";
+        string pageLabel;
+        string title;
+#if IS_TEST_BUILD
+        pageLabel = "Dev/Test Build";
+        title = "Dev/Test Build & Diagnostics";
+#else
+        pageLabel = "Diagnostics";
+        title = "Diagnostics";
+#endif
 
-        _uiShared.BigText("Debug & Diagnostics");
-#if DEBUG
+        _lastTab = pageLabel;
+        _uiShared.BigText(title);
+#if IS_TEST_BUILD
         if (LastCreatedCharacterData != null && ImGui.TreeNode("Last created character data"))
         {
             foreach (var l in JsonSerializer.Serialize(LastCreatedCharacterData, new JsonSerializerOptions() { WriteIndented = true }).Split('\n'))
@@ -750,8 +759,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
         ImGui.Separator();
         ImGuiHelpers.ScaledDummy(10);
         
-        _uiShared.BigText("Debug Windows");
-        UiSharedService.TextWrapped("Open debug windows for monitoring and troubleshooting.");
+        _uiShared.BigText("Diagnostic Windows");
+        UiSharedService.TextWrapped("Open diagnostic windows for monitoring and troubleshooting.");
         ImGuiHelpers.ScaledDummy(5);
         
         if (_uiShared.IconTextButton(FontAwesomeIcon.Desktop, "Open Acknowledgment Monitor"))
@@ -1845,9 +1854,16 @@ public class SettingsUi : WindowMediatorSubscriberBase
     {
         // Split layout: Sidebar navigation + Content pane
         var available = ImGui.GetContentRegionAvail();
+
+        string diagnosticsPageLabel;
+#if IS_TEST_BUILD
+        diagnosticsPageLabel = "Dev/Test Build";
+#else
+        diagnosticsPageLabel = "Diagnostics";
+#endif
         
         // Calculate optimal sidebar width based on longest button text + reduced padding
-        var buttonLabels = new[] { "Home", "Connectivity", "People & Notes", "Appearance", "Theme", "Notifications", "Performance", "Transfers", "Storage", "Acknowledgment", "Debug" };
+        var buttonLabels = new[] { "Home", "Connectivity", "People & Notes", "Appearance", "Theme", "Notifications", "Performance", "Transfers", "Storage", "Acknowledgment", diagnosticsPageLabel };
         var maxTextWidth = 0f;
         foreach (var label in buttonLabels)
         {
@@ -1882,7 +1898,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         SidebarButton("Transfers", SettingsPage.Transfers);
         SidebarButton("Storage", SettingsPage.Storage);
         SidebarButton("Acknowledgment", SettingsPage.Acknowledgment);
-        SidebarButton("Debug", SettingsPage.Debug);
+        SidebarButton(diagnosticsPageLabel, SettingsPage.Debug);
 
         ImGui.EndChild();
 
@@ -1950,9 +1966,9 @@ public class SettingsUi : WindowMediatorSubscriberBase
         ImGui.SameLine();
         ImGui.TextColored(ImGuiColors.ParsedGreen, versionString);
         
-#if DEBUG
+#if IS_TEST_BUILD
         ImGui.SameLine();
-        ImGui.TextColored(ImGuiColors.DalamudYellow, "(Debug Build)");
+        ImGui.TextColored(ImGuiColors.DalamudYellow, "(Dev/Test Build)");
 #endif
 
         ImGui.TextUnformatted("Author:");
@@ -2045,7 +2061,13 @@ public class SettingsUi : WindowMediatorSubscriberBase
         {
             ImGui.TextUnformatted("Current Service:");
             ImGui.SameLine();
-            var displayName = (_configService.Current.UseTestServerOverride && ((Assembly.GetExecutingAssembly().GetName().Version?.Revision ?? 0) != 0)) ? "Test Server" : currentServer.ServerName;
+            var displayName = currentServer.ServerName;
+#if IS_TEST_BUILD
+            if (_configService.Current.UseTestServerOverride)
+            {
+                displayName = "Test Server";
+            }
+#endif
             ImGui.TextColored(ImGuiColors.ParsedGreen, displayName);
 
             ImGui.TextUnformatted("Connection State:");
@@ -2060,35 +2082,34 @@ public class SettingsUi : WindowMediatorSubscriberBase
             };
             ImGui.TextColored(stateColor, connectionState);
 
-            var isTestBuild = (Assembly.GetExecutingAssembly().GetName().Version?.Revision ?? 0) != 0;
-            if (isTestBuild)
+#if IS_TEST_BUILD
+            var useOverride = _configService.Current.UseTestServerOverride;
+            if (ImGui.Checkbox("Use test server override", ref useOverride))
             {
-                var useOverride = _configService.Current.UseTestServerOverride;
-                if (ImGui.Checkbox("Use test server override", ref useOverride))
-                {
-                    _configService.Current.UseTestServerOverride = useOverride;
-                    _configService.Save();
-                    _ = _uiShared.ApiController.CreateConnectionsAsync();
-                }
-                UiSharedService.AttachToolTip("When enabled, the client ignores the configured service and connects to the test server URL below. Toggling this setting switches between the main and test server and triggers an immediate reconnect. Only available in test builds (disabled on release builds).");
-                if (string.IsNullOrWhiteSpace(_configService.Current.TestServerApiUrl))
-                {
-                    _configService.Current.TestServerApiUrl = "ws://test.sphene.online:6000";
-                    _configService.Save();
-                }
-                ImGui.SameLine();
-                var overrideUrl = _configService.Current.TestServerApiUrl ?? string.Empty;
-                if (ImGui.InputText("", ref overrideUrl, 50))
-                {
-                    _configService.Current.TestServerApiUrl = overrideUrl;
-                    _configService.Save();
-                }
+                _configService.Current.UseTestServerOverride = useOverride;
+                _configService.Save();
+                _ = _uiShared.ApiController.CreateConnectionsAsync();
             }
-            else if (_configService.Current.UseTestServerOverride)
+            UiSharedService.AttachToolTip("When enabled, the client ignores the configured service and connects to the test server URL below. Toggling this setting switches between the main and test server and triggers an immediate reconnect. Only available in Dev/Test builds (disabled on release builds).");
+            if (string.IsNullOrWhiteSpace(_configService.Current.TestServerApiUrl))
+            {
+                _configService.Current.TestServerApiUrl = "ws://test.sphene.online:6000";
+                _configService.Save();
+            }
+            ImGui.SameLine();
+            var overrideUrl = _configService.Current.TestServerApiUrl ?? string.Empty;
+            if (ImGui.InputText("", ref overrideUrl, 50))
+            {
+                _configService.Current.TestServerApiUrl = overrideUrl;
+                _configService.Save();
+            }
+#else
+            if (_configService.Current.UseTestServerOverride)
             {
                 _configService.Current.UseTestServerOverride = false;
                 _configService.Save();
             }
+#endif
         }
 
         // Statistics Section

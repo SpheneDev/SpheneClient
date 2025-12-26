@@ -24,6 +24,18 @@ public class HubFactory : MediatorSubscriberBase
     private bool _isDisposed = false;
     private readonly bool _isWine = false;
 
+    private static bool IsDevTestBuild
+    {
+        get
+        {
+#if IS_TEST_BUILD
+            return true;
+#else
+            return false;
+#endif
+        }
+    }
+
     public HubFactory(ILogger<HubFactory> logger, SpheneMediator mediator,
         ServerConfigurationManager serverConfigurationManager,
         TokenProvider tokenProvider, ILoggerProvider pluginLog,
@@ -134,8 +146,7 @@ public class HubFactory : MediatorSubscriberBase
     {
         try
         {
-            var isTestBuild = (Assembly.GetExecutingAssembly().GetName().Version?.Revision ?? 0) != 0;
-            if (isTestBuild && _configService.Current.UseTestServerOverride && !string.IsNullOrWhiteSpace(_configService.Current.TestServerApiUrl))
+            if (IsDevTestBuild && _configService.Current.UseTestServerOverride && !string.IsNullOrWhiteSpace(_configService.Current.TestServerApiUrl))
             {
                 return _configService.Current.TestServerApiUrl.TrimEnd('/');
             }

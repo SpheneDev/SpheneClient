@@ -46,6 +46,18 @@ public sealed class TokenProvider : IDisposable, IMediatorSubscriber
 
     private JwtIdentifier? _lastJwtIdentifier;
 
+    private static bool IsDevTestBuild
+    {
+        get
+        {
+#if IS_TEST_BUILD
+            return true;
+#else
+            return false;
+#endif
+        }
+    }
+
     public void Dispose()
     {
         Mediator.UnsubscribeAll(this);
@@ -76,8 +88,7 @@ public sealed class TokenProvider : IDisposable, IMediatorSubscriber
     {
         try
         {
-            var isTestBuild = (Assembly.GetExecutingAssembly().GetName().Version?.Revision ?? 0) != 0;
-            if (isTestBuild && _configService.Current.UseTestServerOverride && !string.IsNullOrWhiteSpace(_configService.Current.TestServerApiUrl))
+            if (IsDevTestBuild && _configService.Current.UseTestServerOverride && !string.IsNullOrWhiteSpace(_configService.Current.TestServerApiUrl))
             {
                 return _configService.Current.TestServerApiUrl.TrimEnd('/');
             }

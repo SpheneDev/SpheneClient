@@ -12,6 +12,12 @@ on:
         - patch
         - minor
         - major
+        - build
+      is_testbuild:
+        description: 'Publish as Testbuild (updates DownloadLinkTesting/TestingAssemblyVersion)'
+        required: true
+        default: false
+        type: boolean
 
 jobs:
   release:
@@ -64,7 +70,7 @@ jobs:
           Write-Host "Latest version found: $latestVersion"
         } catch {
           Write-Host "No previous releases found, starting with 0.0.0"
-          $latestVersion = "0.0.0"
+          $latestVersion = "0.0.0.0"
         }
         
         # Parse version components
@@ -72,24 +78,37 @@ jobs:
         $major = [int]$versionParts[0]
         $minor = [int]$versionParts[1]
         $patch = [int]$versionParts[2]
+        $build = if ($versionParts.Length -ge 4) { [int]$versionParts[3] } else { 0 }
+
+        $incrementType = "${{ github.event.inputs.increment_type }}"
+        $isTestBuildInput = "${{ github.event.inputs.is_testbuild }}"
+        if ($isTestBuildInput -eq "true") {
+          $incrementType = "build"
+        }
         
         # Increment based on input
-        switch ("${{ github.event.inputs.increment_type }}") {
+        switch ($incrementType) {
           "major" {
             $major++
             $minor = 0
             $patch = 0
+            $build = 0
           }
           "minor" {
             $minor++
             $patch = 0
+            $build = 0
           }
           "patch" {
             $patch++
+            $build = 0
+          }
+          "build" {
+            $build++
           }
         }
         
-        $newVersion = "$major.$minor.$patch"
+        $newVersion = "$major.$minor.$patch.$build"
         $newTag = "v$newVersion"
         
         echo "version=$newVersion" >> $env:GITHUB_OUTPUT
@@ -104,8 +123,8 @@ jobs:
         $csprojPath = "Sphene/Sphene.csproj"
         $content = Get-Content $csprojPath -Raw
         $content = $content -replace '<Version>.*?</Version>', "<Version>$version</Version>"
-        $content = $content -replace '<AssemblyVersion>.*?</AssemblyVersion>', "<AssemblyVersion>$version.0</AssemblyVersion>"
-        $content = $content -replace '<FileVersion>.*?</FileVersion>', "<FileVersion>$version.0</FileVersion>"
+        $content = $content -replace '<AssemblyVersion>.*?</AssemblyVersion>', "<AssemblyVersion>$version</AssemblyVersion>"
+        $content = $content -replace '<FileVersion>.*?</FileVersion>', "<FileVersion>$version</FileVersion>"
         Set-Content $csprojPath $content
       shell: powershell
       
@@ -113,7 +132,8 @@ jobs:
       run: dotnet restore Sphene.Actions.sln
       
     - name: Build Release
-      run: dotnet build Sphene.Actions.sln --configuration Release --no-restore
+      run: dotnet build Sphene.Actions.sln --configuration Release --no-restore /p:IsTestBuild=${{ github.event.inputs.is_testbuild }}
+      shell: powershell
       
     - name: Create release package
       run: |
@@ -163,10 +183,15 @@ jobs:
           exit 1
         }
         
-        # Update only Sphene fields, keep other plugins untouched
-        $spheneEntry.AssemblyVersion = $version
-        $spheneEntry.DownloadLinkInstall = "https://github.com/SpheneDev/SpheneClient/releases/download/$newTag/latest.zip"
-        $spheneEntry.DownloadLinkUpdate = "https://github.com/SpheneDev/SpheneClient/releases/download/$newTag/latest.zip"
+        $isTestBuildInput = "${{ github.event.inputs.is_testbuild }}"
+        if ($isTestBuildInput -eq "true") {
+          $spheneEntry.TestingAssemblyVersion = $version
+          $spheneEntry.DownloadLinkTesting = "https://github.com/SpheneDev/SpheneClient/releases/download/$newTag/latest.zip"
+        } else {
+          $spheneEntry.AssemblyVersion = $version
+          $spheneEntry.DownloadLinkInstall = "https://github.com/SpheneDev/SpheneClient/releases/download/$newTag/latest.zip"
+          $spheneEntry.DownloadLinkUpdate = "https://github.com/SpheneDev/SpheneClient/releases/download/$newTag/latest.zip"
+        }
         
         # Write back the full array, preserving all entries
         $jsonArray | ConvertTo-Json -Depth 10 | Set-Content "plogonmaster.json" -Encoding UTF8
@@ -184,7 +209,7 @@ jobs:
       uses: softprops/action-gh-release@v2
       with:
         tag_name: ${{ steps.get_version.outputs.tag }}
-        name: Sphene Client v${{ steps.get_version.outputs.version }}
+        name: ${{ github.event.inputs.is_testbuild == 'true' && format('Sphene Client Testbuild v{0}', steps.get_version.outputs.version) || format('Sphene Client v{0}', steps.get_version.outputs.version) }}
         body: |
           ## Sphene Client Release v${{ steps.get_version.outputs.version }}
           
@@ -211,6 +236,6 @@ jobs:
         files: |
           ${{ steps.package.outputs.zip_name }}
         draft: false
-        prerelease: ${{ contains(steps.get_version.outputs.version, '-') }}
+        prerelease: ${{ github.event.inputs.is_testbuild == 'true' || contains(steps.get_version.outputs.version, '-') }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

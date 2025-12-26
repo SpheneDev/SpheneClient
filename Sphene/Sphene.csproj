@@ -3,9 +3,9 @@
   <PropertyGroup>
     <Authors></Authors>
     <Company></Company>
-    <Version>1.1.9</Version>
-    <AssemblyVersion>1.1.9.0</AssemblyVersion>
-    <FileVersion>1.1.9.0</FileVersion>
+    <Version>1.1.10.1</Version>
+    <AssemblyVersion>1.1.10.1</AssemblyVersion>
+    <FileVersion>1.1.10.1</FileVersion>
     <Description></Description>
     <Copyright></Copyright>
     <PackageProjectUrl>https://github.com/SpheneDev/client</PackageProjectUrl>
@@ -21,7 +21,16 @@
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <CopyLocalLockfileAssemblies>true</CopyLocalLockfileAssemblies>
     <AssemblyName>Sphene</AssemblyName>
+    <IsTestBuild>false</IsTestBuild>
   </PropertyGroup>
+
+  <PropertyGroup Condition="'$(IsTestBuild)' == 'true'">
+    <DefineConstants>$(DefineConstants);IS_TEST_BUILD</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(IsTestBuild)' == 'true'">
+    <AssemblyMetadata Include="IsTestBuild" Value="true" />
+  </ItemGroup>
 
   <!-- Debug configuration with build timestamp -->
   <PropertyGroup Condition="'$(Configuration)' == 'Debug'">
@@ -32,7 +41,6 @@
     <AssemblyVersion>0.16.$(BuildDate).$(BuildTime)</AssemblyVersion>
     <FileVersion>0.16.$(BuildDate).$(BuildTime)</FileVersion>
     <DefineConstants>$(DefineConstants);BUILD_TIMESTAMP</DefineConstants>
-    <AssemblyName>SpheneDebug</AssemblyName>
   </PropertyGroup>
   
   <ItemGroup Condition="'$(Configuration)' == 'Debug'">
