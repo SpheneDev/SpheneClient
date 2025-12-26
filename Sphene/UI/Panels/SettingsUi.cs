@@ -683,8 +683,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
         string pageLabel;
         string title;
 #if IS_TEST_BUILD
-        pageLabel = "Dev/Test Build";
-        title = "Dev/Test Build & Diagnostics";
+        pageLabel = "Debug Diagnostics";
+        title = "Debug Build & Diagnostics";
 #else
         pageLabel = "Diagnostics";
         title = "Diagnostics";
@@ -1857,7 +1857,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
         string diagnosticsPageLabel;
 #if IS_TEST_BUILD
-        diagnosticsPageLabel = "Dev/Test Build";
+        diagnosticsPageLabel = "Debug Build";
 #else
         diagnosticsPageLabel = "Diagnostics";
 #endif
