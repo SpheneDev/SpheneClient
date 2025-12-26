@@ -376,14 +376,17 @@ public class CompactUi : WindowMediatorSubscriberBase
 #if IS_TEST_BUILD
         string dev = "Dev/Test Build";
         var ver = Assembly.GetExecutingAssembly().GetName().Version!;
-        WindowName = $"Sphene {dev} ({ver.Major}.{ver.Minor}.{ver.Build})###SpheneMainUI";
+        var revision = ver.Revision < 0 ? 0 : ver.Revision;
+        WindowName = $"Sphene {dev} ({ver.Major}.{ver.Minor}.{ver.Build}.{revision})###SpheneMainUI";
         Toggle();
 #else
         var ver = Assembly.GetExecutingAssembly().GetName().Version;
         var major = ver?.Major ?? 0;
         var minor = ver?.Minor ?? 0;
         var build = ver?.Build ?? 0;
-        WindowName = "Sphene " + major + "." + minor + "." + build + "###SpheneMainUI";
+        var revision = ver?.Revision ?? 0;
+        if (revision < 0) revision = 0;
+        WindowName = "Sphene " + major + "." + minor + "." + build + "." + revision + "###SpheneMainUI";
 #endif
         Mediator.Subscribe<SwitchToMainUiMessage>(this, (_) => IsOpen = true);
         Mediator.Subscribe<SwitchToIntroUiMessage>(this, (_) => { _logger.LogDebug("SwitchToIntroUiMessage received, closing CompactUI"); IsOpen = false; });
@@ -1399,7 +1402,8 @@ public class CompactUi : WindowMediatorSubscriberBase
         var ver = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
         if (ver is not null)
         {
-            return $"Sphene Control Panel {ver.Major}.{ver.Minor}.{ver.Build}";
+            var revision = ver.Revision < 0 ? 0 : ver.Revision;
+            return $"Sphene Control Panel {ver.Major}.{ver.Minor}.{ver.Build}.{revision}";
         }
         return "Sphene Control Panel";
     }
