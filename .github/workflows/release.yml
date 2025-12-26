@@ -6,13 +6,13 @@ on:
       increment_type:
         description: 'Version increment type'
         required: true
-        default: 'patch'
+        default: 'build'
         type: choice
         options:
+        - build
         - patch
         - minor
         - major
-        - build
       is_testbuild:
         description: 'Publish as Testbuild (updates DownloadLinkTesting/TestingAssemblyVersion)'
         required: true
