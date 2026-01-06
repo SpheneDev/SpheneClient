@@ -80,15 +80,15 @@
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
-    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="9.0.3" />
-    <PackageReference Include="Microsoft.AspNetCore.SignalR.Protocols.MessagePack" Version="9.0.3" />
-    <PackageReference Include="Microsoft.Extensions.Hosting" Version="9.0.3" />
-    <PackageReference Include="Glamourer.Api" Version="2.7.0" />
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.1" />
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Protocols.MessagePack" Version="10.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.1" />
+    <PackageReference Include="Glamourer.Api" Version="2.8.0" />
     <PackageReference Include="NReco.Logging.File" Version="1.2.2" />
-    <PackageReference Include="Penumbra.Api" Version="5.12.0" />
-    <PackageReference Include="Penumbra.String" Version="1.0.5" />
+    <PackageReference Include="Penumbra.Api" Version="5.13.1" />
+    <PackageReference Include="Penumbra.String" Version="1.0.7" />
     <PackageReference Include="SixLabors.ImageSharp" Version="3.1.12" />
-    <PackageReference Include="SonarAnalyzer.CSharp" Version="10.16.0.128591">
+    <PackageReference Include="SonarAnalyzer.CSharp" Version="10.17.0.131074">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
