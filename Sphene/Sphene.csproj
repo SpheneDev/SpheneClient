@@ -6,9 +6,18 @@
     <Version>1.1.10.1</Version>
     <AssemblyVersion>1.1.10.1</AssemblyVersion>
     <FileVersion>1.1.10.1</FileVersion>
-    <Description></Description>
+    <Description>Through the power of Living Memory, this plugin harmonizes your Penumbra modifications and Glamourer configurations across all connected souls, ensuring endless synchronization in your shared digital realm.</Description>
     <Copyright></Copyright>
     <PackageProjectUrl>https://github.com/SpheneDev/client</PackageProjectUrl>
+    <Author>SpheneDev</Author>
+    <Name>Sphene</Name>
+    <InternalName>sphene</InternalName>
+    <Punchline>Become Endless. Return to Living Memory.</Punchline>
+    <RepoUrl>https://github.com/SpheneDev/client</RepoUrl>
+    <Tags>customization</Tags>
+    <IconUrl>https://raw.githubusercontent.com/SpheneDev/repo/main/images/Sphene.png</IconUrl>
+    <ApplicableVersion>any</ApplicableVersion>
+    <DalamudApiLevel>14</DalamudApiLevel>
   </PropertyGroup>
 
   <PropertyGroup>
