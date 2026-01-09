@@ -68,6 +68,8 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         Mediator.Subscribe<ZoneSwitchStartMessage>(this, (_) => ApplyLocalVisibilityGate(true, "ZoneSwitchStart"));
         Mediator.Subscribe<ZoneSwitchEndMessage>(this, (_) => ClearLocalVisibilityGate("ZoneSwitchEnd"));
         Mediator.Subscribe<CharacterDataBuildStartedMessage>(this, (_) => SetPendingAcknowledgmentForBuildStart());
+        Mediator.Subscribe<GposeStartMessage>(this, (msg) => { _ = _apiController.Value.UserUpdateGposeState(true); });
+        Mediator.Subscribe<GposeEndMessage>(this, (msg) => { _ = _apiController.Value.UserUpdateGposeState(false); });
         _directPairsInternal = DirectPairsLazy();
         _groupPairsInternal = GroupPairsLazy();
         _pairsWithGroupsInternal = PairsWithGroupsLazy();
@@ -315,6 +317,28 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         catch (Exception ex)
         {
             Logger.LogDebug(ex, "Failed to update mutual visibility");
+        }
+    }
+
+    public void UpdateGposeState(UserGposeStateDto dto)
+    {
+        try
+        {
+            if (dto == null) return;
+
+            if (!_allClientPairs.TryGetValue(dto.User, out var pair))
+            {
+                pair = GetPairByUID(dto.User.UID);
+            }
+
+            if (pair == null) return;
+
+            pair.SetGposeState(dto.IsInGpose);
+            Mediator.Publish(new RefreshUiMessage());
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Failed to update GPose state");
         }
     }
 

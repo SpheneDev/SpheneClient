@@ -47,6 +47,8 @@ public class Pair : DisposableMediatorSubscriberBase
         
         // Subscribe to character data application completion messages
         Mediator.Subscribe<CharacterDataApplicationCompletedMessage>(this, message => { _ = OnCharacterDataApplicationCompleted(message); });
+        Mediator.Subscribe<GposeStartMessage>(this, _ => { WasMutuallyVisibleInGpose = IsMutuallyVisible; });
+        Mediator.Subscribe<GposeEndMessage>(this, _ => { WasMutuallyVisibleInGpose = false; });
     }
 
     public bool HasCachedPlayer => CachedPlayer != null && !string.IsNullOrEmpty(CachedPlayer.PlayerName) && _onlineUserIdentDto != null;
@@ -59,6 +61,8 @@ public class Pair : DisposableMediatorSubscriberBase
     public bool IsPaused => UserPair.OwnPermissions.IsPaused();
     public bool IsVisible => CachedPlayer?.IsVisible ?? false;
     public bool IsMutuallyVisible { get; private set; } = false;
+    public bool WasMutuallyVisibleInGpose { get; private set; } = false;
+    public bool IsInGpose { get; private set; } = false;
     public CharacterData? LastReceivedCharacterData { get; set; }
     public string? PlayerName => CachedPlayer?.PlayerName ?? string.Empty;
     public long LastAppliedDataBytes => CachedPlayer?.LastAppliedDataBytes ?? -1;
@@ -90,6 +94,13 @@ public class Pair : DisposableMediatorSubscriberBase
     {
         if (IsMutuallyVisible == isMutual) return;
         IsMutuallyVisible = isMutual;
+        Mediator.Publish(new StructuralRefreshUiMessage());
+    }
+
+    internal void SetGposeState(bool isInGpose)
+    {
+        if (IsInGpose == isInGpose) return;
+        IsInGpose = isInGpose;
         Mediator.Publish(new StructuralRefreshUiMessage());
     }
 
@@ -333,6 +344,7 @@ public class Pair : DisposableMediatorSubscriberBase
             CachedPlayer = null;
             player?.Dispose();
             _onlineUserIdentDto = null;
+            IsInGpose = false;
         }
         finally
         {

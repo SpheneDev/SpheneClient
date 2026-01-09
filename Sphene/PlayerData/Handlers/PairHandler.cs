@@ -630,115 +630,110 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
     {
         try
         {
-        if (string.IsNullOrEmpty(PlayerName))
-        {
-            var pc = _dalamudUtil.FindPlayerByNameHash(Pair.Ident);
-            if (pc == default((string, nint)))
+            if (string.IsNullOrEmpty(PlayerName))
             {
-                if (!_initIdentMissingLogged)
+                var pc = _dalamudUtil.FindPlayerByNameHash(Pair.Ident);
+                if (pc == default((string, nint)))
                 {
-                    _initIdentMissingLogged = true;
-                    Logger.LogDebug("Initialize deferred for {alias} - ident not found in cache: {ident}", Pair.UserData.AliasOrUID, Pair.Ident);
-                }
-                return;
-            }
-            Logger.LogDebug("One-Time Initializing {this}", this);
-            Initialize(pc.Name);
-            Logger.LogDebug("One-Time Initialized {this}", this);
-            Mediator.Publish(new EventMessage(new Event(PlayerName, Pair.UserData, nameof(PairHandler), EventSeverity.Informational,
-                $"Initializing User For Character {pc.Name}")));
-        }
-
-        if (_charaHandler?.Address != nint.Zero)
-        {
-            var gameObj = _charaHandler!.GetGameObject();
-            var self = _dalamudUtil.GetPlayerCharacter();
-            bool inSameParty = _dalamudUtil.IsPlayerInParty(PlayerName ?? string.Empty);
-            var currentLocation = _dalamudUtil.GetMapData();
-            float maxRange = _dalamudUtil.GetDynamicAroundRangeMetersForLocation(currentLocation);
-            var selfPos = self?.Position ?? Vector3.Zero;
-            var gamePos = gameObj?.Position ?? Vector3.Zero;
-            float distance = Vector3.Distance(selfPos, gamePos);
-            bool withinPartyRange = !inSameParty || distance <= maxRange;
-
-            if (DateTime.UtcNow < _postZoneCheckUntil)
-            {
-                var now = DateTime.UtcNow;
-                if ((now - _postZoneLastCheck) > TimeSpan.FromSeconds(1))
-                {
-                    _postZoneLastCheck = now;
-                    var screenPos = gameObj != null ? _dalamudUtil.WorldToScreen(gameObj) : Vector2.Zero;
-                    bool onScreen = screenPos != Vector2.Zero;
-                    bool shouldReportVisible = onScreen && withinPartyRange && !_localVisibilityGateActive;
-                    if (shouldReportVisible && !_proximityReportedVisible)
+                    if (!_initIdentMissingLogged)
                     {
-
-                        Pair.ReportVisibility(true);
-                        _proximityReportedVisible = true;
+                        _initIdentMissingLogged = true;
+                        Logger.LogDebug("Initialize deferred for {alias} - ident not found in cache: {ident}", Pair.UserData.AliasOrUID, Pair.Ident);
                     }
-                    else if (shouldReportVisible && _proximityReportedVisible && !Pair.IsMutuallyVisible && !_postZoneReaffirmDone)
+                    return;
+                }
+                Logger.LogDebug("One-Time Initializing {this}", this);
+                Initialize(pc.Name);
+                Logger.LogDebug("One-Time Initialized {this}", this);
+                Mediator.Publish(new EventMessage(new Event(PlayerName, Pair.UserData, nameof(PairHandler), EventSeverity.Informational,
+                    $"Initializing User For Character {pc.Name}")));
+            }
+
+            if (_charaHandler?.Address != nint.Zero)
+            {
+                var gameObj = _charaHandler!.GetGameObject();
+                var self = _dalamudUtil.GetPlayerCharacter();
+                bool inSameParty = _dalamudUtil.IsPlayerInParty(PlayerName ?? string.Empty);
+                var currentLocation = _dalamudUtil.GetMapData();
+                float maxRange = _dalamudUtil.GetDynamicAroundRangeMetersForLocation(currentLocation);
+                var selfPos = self?.Position ?? Vector3.Zero;
+                var gamePos = gameObj?.Position ?? Vector3.Zero;
+                float distance = Vector3.Distance(selfPos, gamePos);
+                bool withinPartyRange = !inSameParty || distance <= maxRange;
+
+                if (DateTime.UtcNow < _postZoneCheckUntil)
+                {
+                    var now = DateTime.UtcNow;
+                    if ((now - _postZoneLastCheck) > TimeSpan.FromSeconds(1))
                     {
-                        // Reaffirm proximity once post-zone when partner becomes visible on screen
-                        Logger.LogDebug("Post-zone reaffirm visibility for {this}: onScreen=true distance={dist:F1}m", this, distance);
-                        Pair.ReportVisibility(true);
-                        _postZoneReaffirmDone = true;
+                        _postZoneLastCheck = now;
+                        var screenPos = gameObj != null ? _dalamudUtil.WorldToScreen(gameObj) : Vector2.Zero;
+                        bool onScreen = screenPos != Vector2.Zero;
+                        bool shouldReportVisible = onScreen && withinPartyRange && !_localVisibilityGateActive;
+                        if (shouldReportVisible && !_proximityReportedVisible)
+                        {
+                            Pair.ReportVisibility(true);
+                            _proximityReportedVisible = true;
+                        }
+                        else if (shouldReportVisible && _proximityReportedVisible && !Pair.IsMutuallyVisible && !_postZoneReaffirmDone)
+                        {
+                            Logger.LogDebug("Post-zone reaffirm visibility for {this}: onScreen=true distance={dist:F1}m", this, distance);
+                            Pair.ReportVisibility(true);
+                            _postZoneReaffirmDone = true;
+                        }
                     }
                 }
-            }
 
-            // Ensure we proactively report regained local proximity to the server
-            if (!_proximityReportedVisible && !_localVisibilityGateActive && withinPartyRange)
-            {
-                Pair.ReportVisibility(true);
-                _proximityReportedVisible = true;
-            }
-            if (_proximityReportedVisible && !withinPartyRange)
-            {
-                Pair.ReportVisibility(false);
-                _proximityReportedVisible = false;
-            }
-
-            bool allowed = Pair.IsMutuallyVisible && withinPartyRange;
-
-            if (allowed && !IsVisible)
-            {
-                Guid appData = Guid.NewGuid();
-                IsVisible = true;
-                if (_cachedData != null)
+                if (!_proximityReportedVisible && !_localVisibilityGateActive && withinPartyRange)
                 {
-                    Logger.LogDebug("[BASE-{appBase}] {this} visibility changed (mutual), cached data exists", appData, this);
-                    _ = Task.Run(() =>
+                    Pair.ReportVisibility(true);
+                    _proximityReportedVisible = true;
+                }
+                if (_proximityReportedVisible && !withinPartyRange && !_dalamudUtil.IsInGpose)
+                {
+                    Pair.ReportVisibility(false);
+                    _proximityReportedVisible = false;
+                }
+
+                bool allowed = Pair.IsMutuallyVisible && withinPartyRange;
+
+                if (allowed && !IsVisible)
+                {
+                    Guid appData = Guid.NewGuid();
+                    IsVisible = true;
+                    if (_cachedData != null)
                     {
-                        ApplyCharacterData(appData, _cachedData!, forceApplyCustomization: true);
-                    });
+                        Logger.LogDebug("[BASE-{appBase}] {this} visibility changed (mutual), cached data exists", appData, this);
+                        _ = Task.Run(() =>
+                        {
+                            ApplyCharacterData(appData, _cachedData!, forceApplyCustomization: true);
+                        });
+                    }
+                    else
+                    {
+                        Logger.LogDebug("{this} visibility changed (mutual), no cached data exists", this);
+                    }
                 }
-                else
+                else if (!allowed && IsVisible)
                 {
-                    Logger.LogDebug("{this} visibility changed (mutual), no cached data exists", this);
+                    IsVisible = false;
+                    _downloadCancellationTokenSource?.CancelDispose();
+                    _downloadCancellationTokenSource = null;
+                    Pair.ReportVisibility(false);
+                    _proximityReportedVisible = false;
+                    Logger.LogDebug("{this} visibility changed (not mutual), now: {visi}", this, IsVisible);
                 }
             }
-            else if (!allowed && IsVisible)
+            else if (_charaHandler != null && _charaHandler.Address == nint.Zero && IsVisible)
             {
                 IsVisible = false;
+                _charaHandler.Invalidate();
                 _downloadCancellationTokenSource?.CancelDispose();
                 _downloadCancellationTokenSource = null;
-                // Immediately report loss of proximity visibility to the server
                 Pair.ReportVisibility(false);
                 _proximityReportedVisible = false;
-                Logger.LogDebug("{this} visibility changed (not mutual), now: {visi}", this, IsVisible);
+                Logger.LogTrace("{this} visibility changed, now: {visi}", this, IsVisible);
             }
-        }
-        else if (_charaHandler != null && _charaHandler.Address == nint.Zero && IsVisible)
-        {
-            IsVisible = false;
-            _charaHandler.Invalidate();
-            _downloadCancellationTokenSource?.CancelDispose();
-            _downloadCancellationTokenSource = null;
-            // Immediately report loss of proximity visibility to the server
-            Pair.ReportVisibility(false);
-            _proximityReportedVisible = false;
-            Logger.LogTrace("{this} visibility changed, now: {visi}", this, IsVisible);
-        }
         }
         catch (Exception ex)
         {

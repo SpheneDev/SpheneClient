@@ -23,11 +23,12 @@ public class CharacterStatusService : MediatorSubscriberBase, IHostedService
     private readonly ICondition _condition;
     private readonly IDataManager _dataManager;
 
-    private static readonly uint[] AcceptedOnlineStatusIds = { 0, 32, 31, 27, 28, 29, 30, 12, 17, 21, 22, 23 };
+    private static readonly uint[] AcceptedOnlineStatusIds = { 0, 32, 31, 27, 28, 29, 30, 12, 17, 18, 21, 22, 23 };
 
     // Online status constants
     public const uint OnlineStatusOnline = 0;
     public const uint OnlineStatusAway = 17;
+    public const uint OnlineStatusGpose = 18;
     public const uint OnlineStatusBusy = 12;
     public const uint OnlineStatusRolePlay = 22;
     public const uint OnlineStatusLookingToMeld = 23;

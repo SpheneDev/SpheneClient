@@ -135,6 +135,20 @@ public partial class ApiController
         await _spheneHub!.InvokeAsync(nameof(UserUpdateAckYou), ackYou).ConfigureAwait(false);
     }
 
+    public async Task UserUpdateGposeState(bool isInGpose)
+    {
+        if (!IsConnected) return;
+
+        try
+        {
+            await _spheneHub!.InvokeAsync(nameof(UserUpdateGposeState), isInGpose).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Failed to update GPose state to {isInGpose}", isInGpose);
+        }
+    }
+
     // UserUpdateAckOther method removed - AckOther is controlled by other player's AckYou
 
     public async Task UserSendCharacterDataAcknowledgment(CharacterDataAcknowledgmentDto acknowledgmentDto)

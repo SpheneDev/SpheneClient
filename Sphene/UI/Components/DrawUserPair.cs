@@ -422,6 +422,8 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
 
         ImGui.AlignTextToFramePadding();
 
+        var isVisibleForIcon = _pair.IsMutuallyVisible || (_uiSharedService.IsInGpose && _pair.WasMutuallyVisibleInGpose);
+
         if (_pair.IsPaused)
         {
             using var _ = ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.DalamudYellow);
@@ -437,9 +439,8 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
                     ? FontAwesomeIcon.User : FontAwesomeIcon.Users));
             userPairText = _pair.UserData.AliasOrUID + " is offline";
         }
-        else if (_pair.IsMutuallyVisible)
+        else if (isVisibleForIcon)
         {
-            // Add syncshell indicator for visible pairs that are NOT directly paired
             if (_syncedGroups.Any() && _pair.IndividualPairStatus == API.Data.Enum.IndividualPairStatus.None)
             {
                 using var _ = ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.ParsedGreen);
@@ -447,15 +448,14 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
                 ImGui.SameLine();
             }
             
-            // Show eye icon with color based on partner's AckYou status
             var partnerAckYou = _pair.UserPair.OtherPermissions.IsAckYou();
-            var eyeColor = partnerAckYou ? ImGuiColors.ParsedGreen : ImGuiColors.DalamudYellow;
-            _uiSharedService.IconText(FontAwesomeIcon.Eye, eyeColor);
+            var iconColor = partnerAckYou ? ImGuiColors.ParsedGreen : ImGuiColors.DalamudYellow;
+            var icon = (_uiSharedService.IsInGpose || _pair.IsInGpose) ? FontAwesomeIcon.Camera : FontAwesomeIcon.Eye;
+            _uiSharedService.IconText(icon, iconColor);
             
             var ackStatus = partnerAckYou ? "acknowledges your data" : "does not acknowledge your data";
             userPairText = _pair.UserData.AliasOrUID + " is visible: " + _pair.PlayerName + Environment.NewLine + "This user " + ackStatus + Environment.NewLine + "Click to target this player";
             
-            // Handle reload timer based on partner's AckYou status
             HandleReloadTimer(partnerAckYou);
             
             if (ImGui.IsItemClicked())
@@ -466,9 +466,17 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         else
         {
             using var _ = ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.HealerGreen);
-            _uiSharedService.IconText(_pair.IndividualPairStatus == API.Data.Enum.IndividualPairStatus.Bidirectional
-                ? FontAwesomeIcon.User : FontAwesomeIcon.Users);
-            userPairText = _pair.UserData.AliasOrUID + " is online";
+            if (_pair.IsInGpose)
+            {
+                _uiSharedService.IconText(FontAwesomeIcon.Camera);
+                userPairText = _pair.UserData.AliasOrUID + " is in GPose" + Environment.NewLine + "No data is shared while in GPose";
+            }
+            else
+            {
+                _uiSharedService.IconText(_pair.IndividualPairStatus == API.Data.Enum.IndividualPairStatus.Bidirectional
+                    ? FontAwesomeIcon.User : FontAwesomeIcon.Users);
+                userPairText = _pair.UserData.AliasOrUID + " is online";
+            }
         }
 
         // Add synchronization status indicator - only show for mutually visible pairs

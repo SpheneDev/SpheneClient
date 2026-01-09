@@ -226,6 +226,13 @@ public partial class ApiController
         return Task.CompletedTask;
     }
 
+    public Task Client_UserGposeStateUpdate(UserGposeStateDto dto)
+    {
+        Logger.LogDebug("Client_UserGposeStateUpdate: {dto}", dto);
+        ExecuteSafely(() => _pairManager.UpdateGposeState(dto));
+        return Task.CompletedTask;
+    }
+
     // Client_UserAckOtherUpdate method removed - AckOther is controlled by other player's AckYou
 
     public Task Client_GposeLobbyJoin(UserData userData)
@@ -410,6 +417,12 @@ public partial class ApiController
     {
         if (_initialized) return;
         _spheneHub!.On(nameof(Client_UserMutualVisibilityUpdate), act);
+    }
+
+    public void OnUserGposeStateUpdate(Action<UserGposeStateDto> act)
+    {
+        if (_initialized) return;
+        _spheneHub!.On(nameof(Client_UserGposeStateUpdate), act);
     }
 
     // OnUserAckOtherUpdate method removed - AckOther is controlled by other player's AckYou
