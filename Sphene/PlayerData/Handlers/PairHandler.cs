@@ -600,6 +600,14 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                 token.ThrowIfCancellationRequested();
             }
 
+            if (_charaHandler != null
+                && updatedData.TryGetValue(ObjectKind.Player, out var playerChanges)
+                && playerChanges.Contains(PlayerChanges.ModFiles)
+                && !playerChanges.Contains(PlayerChanges.ForcedRedraw))
+            {
+                await _ipcManager.Penumbra.RedrawAsync(Logger, _charaHandler, _applicationId, token).ConfigureAwait(false);
+            }
+
             _cachedData = charaData;
 
             Logger.LogDebug("[{applicationId}] Application finished", _applicationId);

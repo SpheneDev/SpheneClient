@@ -32,7 +32,6 @@ public sealed class IpcCallerPenumbra : DisposableMediatorSubscriberBase, IIpcCa
         }
     }
 
-    private readonly ConcurrentDictionary<IntPtr, bool> _penumbraRedrawRequests = new();
     private CancellationTokenSource _debouncedRedrawCts = new();
 
     private readonly EventSubscriber _penumbraDispose;
@@ -344,14 +343,11 @@ public sealed class IpcCallerPenumbra : DisposableMediatorSubscriberBase, IIpcCa
 
     private void RedrawEvent(IntPtr objectAddress, int objectTableIndex)
     {
-        bool wasRequested = false;
-        if (_penumbraRedrawRequests.TryGetValue(objectAddress, out var redrawRequest) && redrawRequest)
+        var wasRequested = _redrawManager.TryConsumeRequestedRedraw(objectAddress);
+        _redrawManager.NotifyGameObjectRedrawn(objectAddress, objectTableIndex);
+        if (!wasRequested)
         {
-            _penumbraRedrawRequests[objectAddress] = false;
-        }
-        else
-        {
-            _spheneMediator.Publish(new PenumbraRedrawMessage(objectAddress, objectTableIndex, wasRequested));
+            _spheneMediator.Publish(new PenumbraRedrawMessage(objectAddress, objectTableIndex, WasRequested: false));
         }
     }
 
