@@ -120,6 +120,7 @@ public class SpheneConfig : ISpheneConfiguration
     // Release Changelog
     public string LastSeenVersionChangelog { get; set; } = string.Empty;
     public string ReleaseChangelogUrl { get; set; } = string.Empty;
+    public bool ShowTestBuildChangelogs { get; set; } = false;
 
     public bool UseTestServerOverride { get; set; } = false;
     public string TestServerApiUrl { get; set; } = string.Empty;

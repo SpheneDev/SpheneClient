@@ -123,6 +123,7 @@ public record SendCharacterDataAcknowledgmentMessage(CharacterDataAcknowledgment
 public record ShowUpdateNotificationMessage(UpdateInfo UpdateInfo) : MessageBase;
 public record CheckForUpdatesMessage : MessageBase;
 public record ShowReleaseChangelogMessage(string CurrentVersion, string? ChangelogText) : MessageBase;
+public record UiServiceInitializedMessage : MessageBase;
 
 public record ThemePickerModeToggleMessage(bool IsEnabled) : MessageBase;
 public record ThemeNavigateToButtonSettingsMessage(string ButtonStyleKey) : MessageBase;

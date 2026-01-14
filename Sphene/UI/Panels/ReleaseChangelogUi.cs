@@ -22,6 +22,7 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
     private volatile bool _loading;
     private List<ReleaseChangelogViewEntry> _entries = new();
     private bool _showAll;
+    private bool _showTestBuildReleases;
     private string _defaultExpandedVersion = string.Empty;
 
     public ReleaseChangelogUi(
@@ -57,27 +58,46 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
             _defaultExpandedVersion = string.Empty;
             IsOpen = true;
 
-            _ = Task.Run(async () =>
+#if IS_TEST_BUILD
+            _showTestBuildReleases = true;
+#else
+            _showTestBuildReleases = _configService.Current.ShowTestBuildChangelogs;
+#endif
+
+            StartLoadingEntries();
+        });
+    }
+
+    private void StartLoadingEntries()
+    {
+        _loading = true;
+        _entries = new List<ReleaseChangelogViewEntry>();
+        _defaultExpandedVersion = string.Empty;
+
+        _ = Task.Run(async () =>
+        {
+            try
             {
-                try
+                var list = await _changelogService.GetChangelogEntriesAsync().ConfigureAwait(false);
+                var currentVersion = ParseVersionSafe(_version);
+                var filtered = list.Where(e => ParseVersionSafe(e.Version) <= currentVersion);
+                if (!_showTestBuildReleases)
                 {
-                    var list = await _changelogService.GetChangelogEntriesAsync().ConfigureAwait(false);
-                    var currentVersion = ParseVersionSafe(_version);
-                    var isRelease = currentVersion.Revision <= 0;
-                    var filtered = list.Where(e => ParseVersionSafe(e.Version) <= currentVersion);
-                    if (isRelease)
-                        filtered = filtered.Where(e => ParseVersionSafe(e.Version).Revision <= 0);
-                    _entries = filtered
-                        .OrderByDescending(e => ParseVersionSafe(e.Version))
-                        .ToList();
-                    _defaultExpandedVersion = _entries.FirstOrDefault()?.Version ?? string.Empty;
+                    filtered = filtered.Where(e => !e.IsPrerelease);
                 }
-                catch (Exception ex)
-                {
-                    _logger.LogDebug(ex, "Failed to load release changelog entries");
-                }
-                finally { _loading = false; }
-            });
+                _entries = filtered
+                    .OrderByDescending(e => ParseVersionSafe(e.Version))
+                    .ToList();
+                _defaultExpandedVersion = _entries.FirstOrDefault()?.Version ?? string.Empty;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to load release changelog entries");
+            }
+            finally
+            {
+                _loading = false;
+            }
         });
     }
 
@@ -125,9 +145,24 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
         }
         ImGui.SameLine();
         UiSharedService.AttachToolTip("Toggle between last five releases and all releases.");
+
+#if !IS_TEST_BUILD
+        ImGui.SameLine();
+        if (_uiShared.IconTextButton(FontAwesomeIcon.Eye, _showTestBuildReleases ? "Hide testbuild releases" : "Show testbuild releases"))
+        {
+            _showTestBuildReleases = !_showTestBuildReleases;
+            _configService.Current.ShowTestBuildChangelogs = _showTestBuildReleases;
+            _configService.Save();
+            StartLoadingEntries();
+        }
+        ImGui.SameLine();
+        UiSharedService.AttachToolTip("Toggle whether prerelease/testbuild releases are visible.");
+#endif
         ImGui.Spacing();
 
-        using (var child = ImRaii.Child("ChangelogPane", new Vector2(-1, 350), true, ImGuiWindowFlags.NoNav))
+        var footerHeight = ImGui.GetFrameHeightWithSpacing() + (ImGui.GetStyle().ItemSpacing.Y * 2f) + (ImGuiHelpers.GlobalScale * 6f);
+        var changelogPaneHeight = Math.Max(0f, ImGui.GetContentRegionAvail().Y - footerHeight);
+        using (var child = ImRaii.Child("ChangelogPane", new Vector2(-1, changelogPaneHeight), true, ImGuiWindowFlags.NoNav))
         {
             if (child)
             {
@@ -156,10 +191,23 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
                             }
 
                             var headerLabel = $"{e.Version} - {e.Title}###ch_{e.Version}";
+                            if (e.IsPrerelease)
+                            {
+                                var baseColor = ImGuiColors.DalamudYellow;
+                                ImGui.PushStyleColor(ImGuiCol.Text, baseColor);
+                                ImGui.PushStyleColor(ImGuiCol.Header, new Vector4(baseColor.X, baseColor.Y, baseColor.Z, 0.18f));
+                                ImGui.PushStyleColor(ImGuiCol.HeaderHovered, new Vector4(baseColor.X, baseColor.Y, baseColor.Z, 0.25f));
+                                ImGui.PushStyleColor(ImGuiCol.HeaderActive, new Vector4(baseColor.X, baseColor.Y, baseColor.Z, 0.30f));
+                            }
                             var opened = ImGui.CollapsingHeader(headerLabel, flags);
+                            if (e.IsPrerelease)
+                            {
+                                ImGui.PopStyleColor(4);
+                                DrawTestBuildIndicator($"##testbuild_icon_{e.Version}", ImGuiColors.DalamudYellow, "Testbuild release notes.");
+                            }
                             if (opened)
                             {
-                                    ImGui.Dummy(new Vector2(0, 2));
+                                ImGui.Dummy(new Vector2(0, 2));
 
                                 if (!string.IsNullOrEmpty(e.Description))
                                     UiSharedService.TextWrapped(e.Description);
@@ -224,10 +272,7 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
             }
         }
 
-        ImGui.Spacing();
         ImGui.Separator();
-
-        // Footer actions
         if (_uiShared.IconTextButton(FontAwesomeIcon.Check, "Okay close!"))
         {
             // Close will persist the last seen version
@@ -240,7 +285,18 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
         if (string.IsNullOrWhiteSpace(v)) return new Version(0,0,0,0);
         try
         {
-            return Version.Parse(v);
+            var core = v.Trim();
+            var dashIndex = core.IndexOf('-', StringComparison.Ordinal);
+            if (dashIndex >= 0)
+            {
+                core = core[..dashIndex];
+            }
+            core = core.Trim();
+            if (core.StartsWith("v", StringComparison.OrdinalIgnoreCase))
+            {
+                core = core[1..].Trim();
+            }
+            return Version.Parse(core);
         }
         catch
         {
@@ -252,5 +308,34 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
             }
             return new Version(nums[0], nums[1], nums[2], nums[3]);
         }
+    }
+
+    private static void DrawTestBuildIndicator(string id, Vector4 color, string tooltip)
+    {
+        var iconText = FontAwesomeIcon.Bug.ToIconString();
+        Vector2 iconSize;
+        using (ImRaii.PushFont(UiBuilder.IconFont))
+            iconSize = ImGui.CalcTextSize(iconText);
+
+        var headerMin = ImGui.GetItemRectMin();
+        var headerMax = ImGui.GetItemRectMax();
+        var padding = ImGui.GetStyle().FramePadding;
+        var iconPos = new Vector2(
+            headerMax.X - padding.X - iconSize.X,
+            headerMin.Y + (headerMax.Y - headerMin.Y - iconSize.Y) * 0.5f);
+
+        ImGui.GetWindowDrawList().AddText(
+            UiBuilder.IconFont,
+            UiBuilder.IconFont.FontSize,
+            iconPos,
+            ImGui.GetColorU32(color),
+            iconText);
+
+        var cursor = ImGui.GetCursorScreenPos();
+        ImGui.SetCursorScreenPos(iconPos);
+        ImGui.InvisibleButton(id, iconSize);
+        if (ImGui.IsItemHovered())
+            UiSharedService.AttachToolTip(tooltip);
+        ImGui.SetCursorScreenPos(cursor);
     }
 }

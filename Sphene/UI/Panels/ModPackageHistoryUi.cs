@@ -10,6 +10,7 @@ using Sphene.API.Routes;
 using Sphene.FileCache;
 using Sphene.PlayerData.Factories;
 using Sphene.Services;
+using Sphene.Services.ServerConfiguration;
 using Sphene.Services.Mediator;
 using Sphene.SpheneConfiguration;
 using Sphene.Utils;
@@ -33,12 +34,14 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
     private readonly FileDownloadManagerFactory _fileDownloadManagerFactory;
     private readonly FileCacheManager _fileCacheManager;
     private readonly SpheneConfigService _configService;
+    private readonly ServerConfigurationManager _serverConfigurationManager;
     private readonly ShrinkU.Services.TextureBackupService _backupService;
     private readonly ShrinkU.Services.PenumbraIpc _penumbraIpc;
 
     private Task<List<ModUploadHistoryEntryDto>?>? _modUploadHistoryTask;
     private Task<List<ModDownloadHistoryEntryDto>?>? _modDownloadHistoryTask;
     private Task<List<ModShareHistoryEntryDto>?>? _modShareHistoryTask;
+    private Task<List<ModReceivedHistoryEntryDto>?>? _modReceivedHistoryTask;
     private Task<List<PenumbraModBackupSummaryDto>?>? _backupListTask;
     private Task<PenumbraModBackupDto?>? _selectedBackupTask;
 
@@ -64,6 +67,7 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
     private int _uploadCurrentPage = 1;
     private int _downloadCurrentPage = 1;
     private int _shareCurrentPage = 1;
+    private int _receivedCurrentPage = 1;
     private int _historyItemsPerPage = 25;
 
     public ModPackageHistoryUi(
@@ -75,6 +79,7 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
         FileDownloadManagerFactory fileDownloadManagerFactory,
         FileCacheManager fileCacheManager,
         SpheneConfigService configService,
+        ServerConfigurationManager serverConfigurationManager,
         ShrinkU.Services.TextureBackupService backupService,
         ShrinkU.Services.PenumbraIpc penumbraIpc,
         PerformanceCollectorService performanceCollectorService)
@@ -86,6 +91,7 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
         _fileDownloadManagerFactory = fileDownloadManagerFactory;
         _fileCacheManager = fileCacheManager;
         _configService = configService;
+        _serverConfigurationManager = serverConfigurationManager;
         _backupService = backupService;
         _penumbraIpc = penumbraIpc;
 
@@ -177,6 +183,12 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
             if (ImGui.BeginTabItem("Shared History"))
             {
                 DrawModPackageShareHistory();
+                ImGui.EndTabItem();
+            }
+
+            if (ImGui.BeginTabItem("Received History"))
+            {
+                DrawModPackageReceivedHistory();
                 ImGui.EndTabItem();
             }
 
@@ -790,13 +802,17 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
 
         foreach (var entry in pagedHistory)
         {
+            var recipientDisplayName = _serverConfigurationManager.GetPreferredUserDisplayName(
+                entry.RecipientUID,
+                !string.IsNullOrWhiteSpace(entry.RecipientAlias) ? entry.RecipientAlias : entry.RecipientUID);
+
             ImGui.TableNextRow();
             ImGui.TableNextColumn();
             ImGui.Selectable(string.IsNullOrWhiteSpace(entry.Name) ? entry.Hash : entry.Name, false, ImGuiSelectableFlags.SpanAllColumns);
 
             if (ImGui.BeginPopupContextItem($"ShareHistoryContext{entry.Hash}{entry.SharedAt.Ticks}"))
             {
-                if (ImGui.MenuItem($"Send again to {(!string.IsNullOrWhiteSpace(entry.RecipientAlias) ? entry.RecipientAlias : entry.RecipientUID)}"))
+                if (ImGui.MenuItem($"Send again to {(string.IsNullOrWhiteSpace(recipientDisplayName) ? "-" : recipientDisplayName)}"))
                 {
                     _ = ReshareModAsync(entry);
                 }
@@ -812,12 +828,94 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
             ImGui.TableNextColumn();
             ImGui.TextUnformatted(entry.Author ?? "-");
             ImGui.TableNextColumn();
-            var recipient = !string.IsNullOrWhiteSpace(entry.RecipientAlias) ? entry.RecipientAlias : entry.RecipientUID;
-            ImGui.TextUnformatted(recipient ?? "-");
+            ImGui.TextUnformatted(string.IsNullOrWhiteSpace(recipientDisplayName) ? "-" : recipientDisplayName);
             ImGui.TableNextColumn();
             ImGui.TextUnformatted(UiSharedService.ByteToString(entry.Size));
             ImGui.TableNextColumn();
             ImGui.TextUnformatted(entry.SharedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm"));
+        }
+
+        ImGui.EndTable();
+    }
+
+    private void DrawModPackageReceivedHistory()
+    {
+        ImGui.Separator();
+        _uiShared.BigText("Received Mod Packages");
+
+        if (!_fileTransferOrchestrator.IsInitialized)
+        {
+            UiSharedService.ColorTextWrapped("File transfer service is not initialized. Connect to a server first.", ImGuiColors.DalamudYellow);
+            return;
+        }
+
+        if (_uiShared.IconTextButton(FontAwesomeIcon.Inbox, "Load my received mod packages"))
+        {
+            _modReceivedHistoryTask = GetModReceivedHistory(CancellationToken.None);
+        }
+
+        if (_modReceivedHistoryTask != null && !_modReceivedHistoryTask.IsCompleted)
+        {
+            UiSharedService.ColorTextWrapped("Loading received mod package history…", ImGuiColors.DalamudGrey);
+            return;
+        }
+
+        if (_modReceivedHistoryTask == null || !_modReceivedHistoryTask.IsCompleted)
+        {
+            return;
+        }
+
+        if (!_modReceivedHistoryTask.IsCompletedSuccessfully || _modReceivedHistoryTask.Result == null)
+        {
+            UiSharedService.ColorTextWrapped("Failed to load received mod package history. See /xllog for details.", ImGuiColors.DalamudRed);
+            return;
+        }
+
+        var history = _modReceivedHistoryTask.Result;
+        if (history.Count == 0)
+        {
+            UiSharedService.ColorTextWrapped("No received mod packages found for this account.", ImGuiColors.DalamudGrey);
+            return;
+        }
+
+        DrawPaginationControls("Received", history.Count, ref _receivedCurrentPage, ref _historyItemsPerPage);
+
+        var startIndex = (_receivedCurrentPage - 1) * _historyItemsPerPage;
+        var pagedHistory = history.Skip(startIndex).Take(_historyItemsPerPage).ToList();
+
+        if (!ImGui.BeginTable("ModReceivedHistoryTable", 6, ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerV))
+        {
+            return;
+        }
+
+        ImGui.TableSetupColumn("Name", ImGuiTableColumnFlags.WidthStretch);
+        ImGui.TableSetupColumn("Version", ImGuiTableColumnFlags.WidthFixed, 80);
+        ImGui.TableSetupColumn("Author", ImGuiTableColumnFlags.WidthFixed, 120);
+        ImGui.TableSetupColumn("Sender", ImGuiTableColumnFlags.WidthFixed, 120);
+        ImGui.TableSetupColumn("Size", ImGuiTableColumnFlags.WidthFixed, 100);
+        ImGui.TableSetupColumn("Received At", ImGuiTableColumnFlags.WidthFixed, 160);
+        ImGui.TableHeadersRow();
+
+        foreach (var entry in pagedHistory)
+        {
+            var senderDisplayName = _serverConfigurationManager.GetPreferredUserDisplayName(
+                entry.SenderUID,
+                !string.IsNullOrWhiteSpace(entry.SenderAlias) ? entry.SenderAlias : entry.SenderUID);
+
+            ImGui.TableNextRow();
+            ImGui.TableNextColumn();
+            ImGui.Selectable(string.IsNullOrWhiteSpace(entry.Name) ? entry.Hash : entry.Name, false, ImGuiSelectableFlags.SpanAllColumns);
+
+            ImGui.TableNextColumn();
+            ImGui.TextUnformatted(entry.Version ?? "-");
+            ImGui.TableNextColumn();
+            ImGui.TextUnformatted(entry.Author ?? "-");
+            ImGui.TableNextColumn();
+            ImGui.TextUnformatted(string.IsNullOrWhiteSpace(senderDisplayName) ? "-" : senderDisplayName);
+            ImGui.TableNextColumn();
+            ImGui.TextUnformatted(UiSharedService.ByteToString(entry.Size));
+            ImGui.TableNextColumn();
+            ImGui.TextUnformatted(entry.ReceivedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm"));
         }
 
         ImGui.EndTable();
@@ -875,6 +973,28 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
         {
             _logger.LogWarning(ex, "Failed to get mod share history");
             throw new InvalidOperationException("Failed to get mod share history", ex);
+        }
+    }
+
+    private async Task<List<ModReceivedHistoryEntryDto>?> GetModReceivedHistory(CancellationToken ct)
+    {
+        try
+        {
+            if (!_fileTransferOrchestrator.IsInitialized)
+            {
+                throw new InvalidOperationException("File transfer service is not initialized");
+            }
+
+            var uri = SpheneFiles.ServerFilesModReceivedHistoryFullPath(_fileTransferOrchestrator.FilesCdnUri!);
+            var response = await _fileTransferOrchestrator.SendRequestAsync(HttpMethod.Get, uri, ct).ConfigureAwait(false);
+            response.EnsureSuccessStatusCode();
+            var stream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false);
+            return await JsonSerializer.DeserializeAsync<List<ModReceivedHistoryEntryDto>>(stream, cancellationToken: ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to get mod received history");
+            throw new InvalidOperationException("Failed to get mod received history", ex);
         }
     }
 

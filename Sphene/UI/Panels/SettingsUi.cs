@@ -2011,8 +2011,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 string? text = null;
                 try
                 {
-                    var baseVersion = version != null ? $"{version.Major}.{version.Minor}.{version.Build}" : versionString;
-                    text = await _changelogService.GetChangelogTextForVersionAsync(baseVersion).ConfigureAwait(false);
+                    text = await _changelogService.GetChangelogTextForVersionAsync(versionString).ConfigureAwait(false);
                 }
                 catch (Exception ex)
                 {

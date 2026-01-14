@@ -52,6 +52,8 @@ public sealed class UiService : DisposableMediatorSubscriberBase
             _windowSystem.AddWindow(window);
         }
 
+        Mediator.Publish(new UiServiceInitializedMessage());
+
         Mediator.Subscribe<ProfileOpenStandaloneMessage>(this, (msg) =>
         {
             if (!_createdWindows.Exists(p => p is StandaloneProfileUi ui

@@ -36,7 +36,8 @@ public async Task<string?> GetChangelogTextForVersionAsync(string version, Cance
             }
 
             JsonElement? selected = null;
-            Version bestVersion = new Version(0,0,0,0);
+            var requestedVersion = ParseVersionSafe(version);
+            Version bestVersion = new Version(0, 0, 0, 0);
             foreach (var item in changelogs.EnumerateArray())
             {
                 if (item.ValueKind != JsonValueKind.Object)
@@ -53,7 +54,7 @@ public async Task<string?> GetChangelogTextForVersionAsync(string version, Cance
                 }
 
                 var parsed = ParseVersionSafe(v);
-                if (parsed > bestVersion)
+                if (parsed <= requestedVersion && parsed > bestVersion)
                 {
                     bestVersion = parsed;
                     selected = item;
@@ -231,8 +232,13 @@ public async Task<List<ReleaseChangelogViewEntry>> GetChangelogEntriesAsync(Canc
         try
         {
             // Support versions like 1.2.3
-            var parts = v.Split('-', StringSplitOptions.RemoveEmptyEntries);
-            return Version.Parse(parts[0]);
+            var parts = v.Trim().Split('-', StringSplitOptions.RemoveEmptyEntries);
+            var core = parts[0].Trim();
+            if (core.StartsWith("v", StringComparison.OrdinalIgnoreCase))
+            {
+                core = core[1..].Trim();
+            }
+            return Version.Parse(core);
         }
         catch
         {
