@@ -65,56 +65,36 @@ public class NotificationService : DisposableMediatorSubscriberBase, IHostedServ
             return;
         }
 
-        if (string.IsNullOrWhiteSpace(notification.ModFolderName))
-        {
-            if (notification.ModInfo != null && notification.ModInfo.Count > 0)
-            {
-                foreach (var mod in notification.ModInfo)
-                {
-                    var hash = (mod.Hash ?? string.Empty).Trim();
-                    if (string.IsNullOrWhiteSpace(hash))
-                    {
-                        continue;
-                    }
-
-                    var modFolderName = string.IsNullOrWhiteSpace(mod.Name) ? hash : mod.Name;
-                    var splitNotification = new FileTransferNotificationDto
-                    {
-                        Sender = notification.Sender,
-                        Recipient = notification.Recipient,
-                        Hash = hash,
-                        FileName = notification.FileName,
-                        ModFolderName = modFolderName,
-                        Description = notification.Description,
-                        ModInfo = new List<ModInfoDto>(1) { mod }
-                    };
-
-                    _ = PreparePenumbraModPopupAsync(splitNotification);
-                }
-
-                return;
-            }
-
-            var title = "Received file from " + GetSenderDisplayName(notification);
-            var content = "New file is available for download.";
-
-            var toast = new Notification(
-                content,
-                NotificationType.Info,
-                title,
-                TimeSpan.FromSeconds(10),
-                respectUiHidden: false,
-                tag: "FileTransfer");
-
-            var dalamudNotification = toast.ToINotification() as Dalamud.Interface.ImGuiNotification.Notification;
-            if (dalamudNotification != null)
-            {
-                _notificationManager.AddNotification(dalamudNotification);
-            }
-        }
-        else
+        if (!string.IsNullOrWhiteSpace(notification.ModFolderName))
         {
             _ = PreparePenumbraModPopupAsync(notification);
+            return;
+        }
+
+        if (notification.ModInfo != null && notification.ModInfo.Count > 0)
+        {
+            foreach (var mod in notification.ModInfo)
+            {
+                var hash = (mod.Hash ?? string.Empty).Trim();
+                if (string.IsNullOrWhiteSpace(hash))
+                {
+                    continue;
+                }
+
+                var modFolderName = string.IsNullOrWhiteSpace(mod.Name) ? hash : mod.Name;
+                var splitNotification = new FileTransferNotificationDto
+                {
+                    Sender = notification.Sender,
+                    Recipient = notification.Recipient,
+                    Hash = hash,
+                    FileName = notification.FileName,
+                    ModFolderName = modFolderName,
+                    Description = notification.Description,
+                    ModInfo = new List<ModInfoDto>(1) { mod }
+                };
+
+                _ = PreparePenumbraModPopupAsync(splitNotification);
+            }
         }
     }
 
