@@ -50,6 +50,11 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
     private float? _backupProgress;
     private bool _isBackupBusy;
     private CancellationTokenSource? _backupCts;
+    private CancellationTokenSource? _redownloadCts;
+    private string _redownloadStatusText = string.Empty;
+    private bool _redownloadStatusIsError;
+    private float? _redownloadProgress;
+    private bool _isRedownloadBusy;
     private int _backupCreateCurrentPage = 1;
     private int _installedBackupCreateCurrentPage = 1;
     private string _installedModFilter = string.Empty;
@@ -280,6 +285,8 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
             return;
         }
 
+        DrawRedownloadStatus();
+
         if (_uiShared.IconTextButton(FontAwesomeIcon.Download, "Load my downloaded mod packages"))
         {
             _modDownloadHistoryTask = GetModDownloadHistory(CancellationToken.None);
@@ -314,7 +321,7 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
         var startIndex = (_downloadCurrentPage - 1) * _historyItemsPerPage;
         var pagedHistory = history.Skip(startIndex).Take(_historyItemsPerPage).ToList();
 
-        if (!ImGui.BeginTable("ModDownloadHistoryTable", 5, ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerV))
+        if (!ImGui.BeginTable("ModDownloadHistoryTable", 6, ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerV))
         {
             return;
         }
@@ -324,13 +331,18 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
         ImGui.TableSetupColumn("Author", ImGuiTableColumnFlags.WidthFixed, 120);
         ImGui.TableSetupColumn("Size", ImGuiTableColumnFlags.WidthFixed, 100);
         ImGui.TableSetupColumn("Downloaded", ImGuiTableColumnFlags.WidthFixed, 160);
+        ImGui.TableSetupColumn("Actions", ImGuiTableColumnFlags.WidthFixed, 120);
         ImGui.TableHeadersRow();
 
         foreach (var entry in pagedHistory)
         {
             ImGui.TableNextRow();
             ImGui.TableNextColumn();
-            ImGui.Selectable(string.IsNullOrWhiteSpace(entry.Name) ? entry.Hash : entry.Name, false, ImGuiSelectableFlags.SpanAllColumns);
+            ImGui.Selectable(
+                string.IsNullOrWhiteSpace(entry.Name) ? entry.Hash : entry.Name,
+                false,
+                ImGuiSelectableFlags.SpanAllColumns);
+            ImGui.SetItemAllowOverlap();
 
             if (ImGui.BeginPopupContextItem($"DownloadHistoryContext{entry.Hash}{entry.DownloadedAt.Ticks}"))
             {
@@ -349,9 +361,329 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
             ImGui.TextUnformatted(UiSharedService.ByteToString(entry.Size));
             ImGui.TableNextColumn();
             ImGui.TextUnformatted(entry.DownloadedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm"));
+            ImGui.TableNextColumn();
+            using (ImRaii.Disabled(_isRedownloadBusy))
+            {
+                if (ImGui.SmallButton($"Re-download##redownload_{entry.Hash}_{entry.DownloadedAt.Ticks}"))
+                {
+                    StartRedownload(entry);
+                }
+            }
         }
 
         ImGui.EndTable();
+    }
+
+    private void DrawRedownloadStatus()
+    {
+        if (string.IsNullOrWhiteSpace(_redownloadStatusText) && !_isRedownloadBusy)
+        {
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(_redownloadStatusText))
+        {
+            UiSharedService.ColorTextWrapped(_redownloadStatusText, _redownloadStatusIsError ? ImGuiColors.DalamudRed : ImGuiColors.DalamudGrey);
+        }
+
+        if (_redownloadProgress is >= 0f and <= 1f)
+        {
+            ImGui.ProgressBar(_redownloadProgress.Value, new Vector2(-1, 0), string.Empty);
+        }
+
+        if (_isRedownloadBusy)
+        {
+            ImGui.Spacing();
+            if (ImGui.SmallButton("Cancel re-download"))
+            {
+                _redownloadCts?.Cancel();
+            }
+        }
+
+        ImGui.Separator();
+    }
+
+    private void StartRedownload(ModDownloadHistoryEntryDto entry)
+    {
+        if (entry == null || string.IsNullOrWhiteSpace(entry.Hash))
+        {
+            return;
+        }
+
+        _redownloadCts = _redownloadCts.CancelRecreate();
+        var token = _redownloadCts.Token;
+
+        _isRedownloadBusy = true;
+        _redownloadStatusIsError = false;
+        _redownloadProgress = 0f;
+
+        var displayName = string.IsNullOrWhiteSpace(entry.Name) ? entry.Hash : entry.Name;
+        _redownloadStatusText = $"Re-downloading: {displayName}";
+
+        _ = Task.Run(async () => await RedownloadAsync(entry, displayName, token).ConfigureAwait(false), token);
+    }
+
+    private async Task RedownloadAsync(ModDownloadHistoryEntryDto entry, string displayName, CancellationToken token)
+    {
+        try
+        {
+            using var fileDownloadManager = _fileDownloadManagerFactory.Create();
+
+            var downloadProgress = new Progress<(long TransferredBytes, long TotalBytes)>(tuple =>
+            {
+                if (tuple.TotalBytes <= 0)
+                {
+                    return;
+                }
+
+                _redownloadProgress = Math.Clamp((float)tuple.TransferredBytes / tuple.TotalBytes, 0f, 1f);
+            });
+
+            var pmpPath = await fileDownloadManager.DownloadPmpToCacheAsync(entry.Hash, token, downloadProgress).ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(pmpPath) || !File.Exists(pmpPath))
+            {
+                _redownloadStatusIsError = true;
+                _redownloadStatusText = $"Re-download failed: {displayName}";
+                return;
+            }
+
+            token.ThrowIfCancellationRequested();
+
+            var modFolderName = await ResolveRedownloadInstallFolderNameAsync(entry, token).ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(modFolderName))
+            {
+                _redownloadStatusIsError = true;
+                _redownloadStatusText = $"Failed to resolve mod folder name: {displayName}";
+                return;
+            }
+
+            _redownloadProgress = 0f;
+            _redownloadStatusIsError = false;
+            _redownloadStatusText = $"Installing: {displayName}";
+
+            var installProgress = new Progress<(string, int, int)>(tuple =>
+            {
+                if (tuple.Item3 > 0)
+                {
+                    _redownloadProgress = Math.Clamp((float)tuple.Item2 / tuple.Item3, 0f, 1f);
+                }
+
+                _redownloadStatusText = string.IsNullOrWhiteSpace(tuple.Item1)
+                    ? $"Installing: {displayName}… ({tuple.Item2}/{tuple.Item3})"
+                    : tuple.Item1;
+            });
+
+            var ok = await _backupService.RestorePmpAsync(
+                modFolderName,
+                pmpPath,
+                installProgress,
+                token,
+                cleanupBackupsAfterRestore: false,
+                deregisterDuringRestore: true).ConfigureAwait(false);
+
+            if (!ok)
+            {
+                _redownloadStatusIsError = true;
+                _redownloadStatusText = $"Install failed: {displayName}";
+                return;
+            }
+
+            if (_configService.Current.DeletePenumbraModAfterInstall)
+            {
+                try { File.Delete(pmpPath); }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Failed to delete downloaded PMP after install: {path}", pmpPath);
+                }
+            }
+
+            _redownloadProgress = 1.0f;
+            _redownloadStatusIsError = false;
+            _redownloadStatusText = $"Installed: {displayName}";
+        }
+        catch (OperationCanceledException)
+        {
+            _redownloadStatusIsError = true;
+            _redownloadStatusText = "Re-download cancelled.";
+        }
+        catch (Exception ex)
+        {
+            _redownloadStatusIsError = true;
+            _redownloadStatusText = "Re-download failed. See /xllog for details.";
+            _logger.LogWarning(ex, "Failed to re-download mod package {hash}", entry.Hash);
+        }
+        finally
+        {
+            _isRedownloadBusy = false;
+        }
+    }
+
+    private async Task<string> ResolveRedownloadInstallFolderNameAsync(ModDownloadHistoryEntryDto entry, CancellationToken token)
+    {
+        var preferred = entry.Name?.Trim() ?? string.Empty;
+        var hash = entry.Hash?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(preferred) && !string.IsNullOrWhiteSpace(hash))
+        {
+            preferred = hash;
+        }
+
+        try
+        {
+            var mods = _penumbraIpc.GetModList();
+            if (mods.TryGetValue(preferred, out _))
+            {
+                return preferred;
+            }
+
+            var matches = new List<string>();
+            foreach (var kvp in mods)
+            {
+                if (!string.IsNullOrWhiteSpace(kvp.Value) &&
+                    string.Equals(kvp.Value.Trim(), preferred, StringComparison.OrdinalIgnoreCase) &&
+                    !string.IsNullOrWhiteSpace(kvp.Key))
+                {
+                    matches.Add(kvp.Key);
+                }
+            }
+
+            if (matches.Count == 1)
+            {
+                return matches[0];
+            }
+
+            if (matches.Count > 1)
+            {
+                string? best = null;
+                var bestScore = int.MinValue;
+                foreach (var folder in matches.OrderBy(m => m, StringComparer.OrdinalIgnoreCase))
+                {
+                    token.ThrowIfCancellationRequested();
+
+                    var score = 0;
+                    try
+                    {
+                        var meta = await _penumbraIpc.GetModMetadataAsync(folder).ConfigureAwait(false);
+                        if (!string.IsNullOrWhiteSpace(meta?.Name) &&
+                            string.Equals(meta.Name.Trim(), preferred, StringComparison.OrdinalIgnoreCase))
+                        {
+                            score += 2;
+                        }
+
+                        if (!string.IsNullOrWhiteSpace(entry.Author) &&
+                            !string.IsNullOrWhiteSpace(meta?.Author) &&
+                            string.Equals(meta.Author.Trim(), entry.Author.Trim(), StringComparison.OrdinalIgnoreCase))
+                        {
+                            score += 2;
+                        }
+
+                        if (!string.IsNullOrWhiteSpace(entry.Version) &&
+                            !string.IsNullOrWhiteSpace(meta?.Version) &&
+                            string.Equals(meta.Version.Trim(), entry.Version.Trim(), StringComparison.OrdinalIgnoreCase))
+                        {
+                            score += 1;
+                        }
+                    }
+                    catch
+                    {
+                        score -= 1;
+                    }
+
+                    if (score > bestScore)
+                    {
+                        bestScore = score;
+                        best = folder;
+                    }
+                }
+
+                if (!string.IsNullOrWhiteSpace(best))
+                {
+                    return best;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to resolve Penumbra folder by installed mod list");
+        }
+
+        var sanitized = SanitizePenumbraFolderName(preferred);
+        if (string.IsNullOrWhiteSpace(sanitized))
+        {
+            sanitized = !string.IsNullOrWhiteSpace(hash) ? hash : "UnknownMod";
+        }
+
+        try
+        {
+            if (_penumbraIpc.ModExists(sanitized))
+            {
+                return sanitized;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to check whether mod exists in Penumbra: {modFolder}", sanitized);
+        }
+
+        try
+        {
+            var mods = _penumbraIpc.GetModList();
+            if (mods.TryGetValue(sanitized, out _))
+            {
+                return sanitized;
+            }
+
+            if (mods.Keys.Any(k => string.Equals(k, sanitized, StringComparison.OrdinalIgnoreCase)))
+            {
+                return mods.Keys.First(k => string.Equals(k, sanitized, StringComparison.OrdinalIgnoreCase));
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to query Penumbra mod list while resolving folder name");
+        }
+
+        if (!string.IsNullOrWhiteSpace(hash) && sanitized.Length > 0)
+        {
+            try
+            {
+                var root = _penumbraIpc.ModDirectory ?? string.Empty;
+                if (!string.IsNullOrWhiteSpace(root))
+                {
+                    var candidatePath = Path.Combine(root, sanitized);
+                    if (Directory.Exists(candidatePath))
+                    {
+                        return sanitized;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to probe Penumbra mod directory for folder: {modFolder}", sanitized);
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(hash) && hash.Length >= 8)
+        {
+            return $"{sanitized}-{hash.Substring(0, 8)}";
+        }
+
+        return sanitized;
+    }
+
+    private static string SanitizePenumbraFolderName(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var result = value.Trim();
+        foreach (var c in Path.GetInvalidFileNameChars())
+        {
+            result = result.Replace(c, '_');
+        }
+        result = result.Trim().TrimEnd('.');
+        return result;
     }
 
     private async Task<List<ModUploadHistoryEntryDto>?> GetModUploadHistory(CancellationToken ct)

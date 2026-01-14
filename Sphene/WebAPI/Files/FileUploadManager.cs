@@ -219,7 +219,19 @@ public sealed class FileUploadManager : DisposableMediatorSubscriberBase
             }
 
             await UploadFile(data.Item2, fileToUpload.Hash, true, ct).ConfigureAwait(false);
-            return true;
+
+            progress.Report("Upload completed, notifying recipient...");
+
+            var remaining = await FilesSend([hash], [recipientUid], ct,
+                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { { hash, modFolderName } },
+                [modInfo]).ConfigureAwait(false);
+
+            if (remaining.Exists(f => f.IsForbidden))
+            {
+                throw new InvalidOperationException("File is forbidden on server.");
+            }
+
+            return remaining.Count == 0;
         }
         finally
         {
@@ -344,6 +356,37 @@ public sealed class FileUploadManager : DisposableMediatorSubscriberBase
         {
             var lastResult = await uploadTask.ConfigureAwait(false);
             AddUploadResult(uploadTaskHash, lastResult, skippedTooLarge, failed);
+        }
+
+        var failedSet = new HashSet<string>(failed, StringComparer.Ordinal);
+        var skippedTooLargeSet = new HashSet<string>(skippedTooLarge, StringComparer.Ordinal);
+        var successfulHashes = new List<string>(uniqueFilesToUpload.Count);
+        foreach (var file in uniqueFilesToUpload)
+        {
+            if (failedSet.Contains(file.Hash) || skippedTooLargeSet.Contains(file.Hash))
+            {
+                continue;
+            }
+
+            successfulHashes.Add(file.Hash);
+        }
+
+        if (successfulHashes.Count > 0 && uids.Count > 0)
+        {
+            var remaining = await FilesSend(successfulHashes, uids, ct, modFolderNames, modInfo).ConfigureAwait(false);
+            foreach (var file in remaining)
+            {
+                if (file.IsForbidden)
+                {
+                    continue;
+                }
+
+                if (!failedSet.Contains(file.Hash))
+                {
+                    failed.Add(file.Hash);
+                    failedSet.Add(file.Hash);
+                }
+            }
         }
 
         CurrentUploads.Clear();
