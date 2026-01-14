@@ -11,11 +11,14 @@ public static class ButtonStyleKeys
     public const string Compact_IncognitoOff = "CompactUI.IncognitoOff";
     public const string Compact_AreaSelect = "CompactUI.AreaSelect";
     public const string Compact_Settings = "CompactUI.Settings";
+    public const string Compact_ModSharing = "CompactUI.ModSharing";
     public const string Compact_Close = "CompactUI.Close";
+    public const string Compact_TestServer = "CompactUI.TestServer";
 
     // TopTabMenu buttons
     public const string TopTab_User = "TopTabMenu.User";
     public const string TopTab_Users = "TopTabMenu.Users";
+    public const string TopTab_ModSharing = "TopTabMenu.ModSharing";
     public const string TopTab_Filter = "TopTabMenu.Filter";
     public const string TopTab_Settings = "TopTabMenu.Settings";
 

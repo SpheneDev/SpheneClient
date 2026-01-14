@@ -71,6 +71,9 @@ public static class ButtonStyleManagerUI
         (ButtonStyleKeys.TopTab_SyncshellVFX, "Syncshell VFX", FontAwesomeIcon.Sun, "Navigation: Syncshell"),
         (ButtonStyleKeys.TopTab_SyncshellAlign, "Syncshell Align", FontAwesomeIcon.Check, "Navigation: Syncshell"),
 
+        // Navigation - Mod Sharing
+        (ButtonStyleKeys.TopTab_ModSharing, "Mod Sharing", FontAwesomeIcon.Share, "Navigation: Mod Sharing"),
+
         // Navigation - Filter
         (ButtonStyleKeys.TopTab_Filter, "Filter", FontAwesomeIcon.Filter, "Navigation: Filter"),
 

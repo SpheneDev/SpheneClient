@@ -4,7 +4,9 @@ using Dalamud.Interface.Utility;
 using Dalamud.Interface.Utility.Raii;
 using Sphene.Services;
 using Sphene.Services.Mediator;
+using Sphene.Services.Events;
 using Sphene.UI.Theme;
+using Sphene.SpheneConfiguration;
 using Microsoft.Extensions.Logging;
 using System.Numerics;
 
@@ -18,7 +20,8 @@ public class PopupHandler : WindowMediatorSubscriberBase
     private IPopupHandler? _currentHandler = null;
 
     public PopupHandler(ILogger<PopupHandler> logger, SpheneMediator mediator, IEnumerable<IPopupHandler> popupHandlers,
-        PerformanceCollectorService performanceCollectorService, UiSharedService uiSharedService)
+        PerformanceCollectorService performanceCollectorService, UiSharedService uiSharedService,
+        SpheneConfigService configService)
         : base(logger, mediator, "SphenePopupHandler", performanceCollectorService)
     {
         Flags = ImGuiWindowFlags.NoBringToFrontOnFocus
@@ -59,23 +62,27 @@ public class PopupHandler : WindowMediatorSubscriberBase
 
         if (_openPopup)
         {
+            var size = _currentHandler.PopupSize * ImGuiHelpers.GlobalScale;
+            ImGui.SetNextWindowSize(size, ImGuiCond.Appearing);
+
+            var viewportSize = ImGui.GetWindowViewport().Size;
+            ImGui.SetNextWindowPos(viewportSize / 2, ImGuiCond.Appearing, new Vector2(0.5f));
+
             ImGui.OpenPopup(WindowName);
             _openPopup = false;
         }
-
-        var viewportSize = ImGui.GetWindowViewport().Size;
-        ImGui.SetNextWindowSize(_currentHandler!.PopupSize * ImGuiHelpers.GlobalScale);
-        ImGui.SetNextWindowPos(viewportSize / 2, ImGuiCond.Always, new Vector2(0.5f));
-        using var popup = ImRaii.Popup(WindowName, ImGuiWindowFlags.Modal);
-        if (!popup) return;
-        _currentHandler.DrawContent();
-        if (_currentHandler.ShowClose)
+        if (ImGui.BeginPopup(WindowName))
         {
-            ImGui.Separator();
-    if (_uiSharedService.IconTextButton(FontAwesomeIcon.Times, "Close", null, false, ButtonStyleKeys.Popup_Close))
-    {
-                ImGui.CloseCurrentPopup();
+            _currentHandler.DrawContent();
+            if (_currentHandler.ShowClose)
+            {
+                ImGui.Separator();
+                if (_uiSharedService.IconTextButton(FontAwesomeIcon.Times, "Close", null, false, ButtonStyleKeys.Popup_Close))
+                {
+                    ImGui.CloseCurrentPopup();
+                }
             }
+            ImGui.EndPopup();
         }
     }
 }

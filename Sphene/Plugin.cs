@@ -306,7 +306,10 @@ public sealed class Plugin : IDalamudPlugin
                 s.GetRequiredService<MessageService>()));
             collection.AddSingleton((s) => new NotificationService(s.GetRequiredService<ILogger<NotificationService>>(),
                 s.GetRequiredService<SpheneMediator>(), s.GetRequiredService<DalamudUtilService>(),
-                notificationManager, chatGui, s.GetRequiredService<SpheneConfigService>()));
+                notificationManager, chatGui, s.GetRequiredService<SpheneConfigService>(),
+                s.GetRequiredService<FileDownloadManagerFactory>(),
+                s.GetRequiredService<ShrinkU.Services.TextureBackupService>(),
+                s.GetRequiredService<ServerConfigurationManager>()));
             collection.AddSingleton((s) =>
             {
                 var httpClient = new HttpClient();
@@ -358,10 +361,18 @@ public sealed class Plugin : IDalamudPlugin
             collection.AddScoped<WindowMediatorSubscriberBase, EventViewerUI>();
             collection.AddScoped<WindowMediatorSubscriberBase, CharaDataHubUi>();
             collection.AddScoped<WindowMediatorSubscriberBase, StatusDebugUi>();
+            collection.AddScoped<PenumbraSendModUi>();
+            collection.AddScoped<WindowMediatorSubscriberBase>(s => s.GetRequiredService<PenumbraSendModUi>());
+            collection.AddScoped<PenumbraReceiveModUi>();
+            collection.AddScoped<WindowMediatorSubscriberBase>(s => s.GetRequiredService<PenumbraReceiveModUi>());
+            collection.AddScoped<ModPackageHistoryUi>();
+            collection.AddScoped<WindowMediatorSubscriberBase>(s => s.GetRequiredService<ModPackageHistoryUi>());
+            collection.AddScoped<ModSharingUi>();
+            collection.AddScoped<WindowMediatorSubscriberBase>(s => s.GetRequiredService<ModSharingUi>());
 
             collection.AddScoped<WindowMediatorSubscriberBase, AreaBoundSyncshellConsentUI>();
             collection.AddScoped<WindowMediatorSubscriberBase, AreaBoundSyncshellSelectionUI>();
-            collection.AddSingleton<WindowMediatorSubscriberBase, CitySyncshellExplanationUI>((s) =>
+            collection.AddSingleton<CitySyncshellExplanationUI>((s) =>
             {
                 var logger = s.GetRequiredService<ILogger<CitySyncshellExplanationUI>>();
                 logger.LogDebug("CitySyncshellExplanationUI factory method called - creating instance");
@@ -373,6 +384,7 @@ public sealed class Plugin : IDalamudPlugin
                 logger.LogDebug("CitySyncshellExplanationUI factory method completed - instance created");
                 return instance;
             });
+            collection.AddSingleton<WindowMediatorSubscriberBase>(s => s.GetRequiredService<CitySyncshellExplanationUI>());
             collection.AddScoped<WindowMediatorSubscriberBase, WelcomePageLivePreviewUI>();
             collection.AddSingleton<WindowMediatorSubscriberBase, UpdateNotificationUi>((s) => new UpdateNotificationUi(
                 s.GetRequiredService<ILogger<UpdateNotificationUi>>(),
@@ -448,9 +460,7 @@ public sealed class Plugin : IDalamudPlugin
             // Initialize CitySyncshellExplanationUI early as hosted service to ensure it's created before CitySyncshellService
             collection.AddHostedService(p => 
             {
-                // Force creation of CitySyncshellExplanationUI singleton - get it as WindowMediatorSubscriberBase
-                var windows = p.GetServices<WindowMediatorSubscriberBase>();
-                _ = windows.OfType<CitySyncshellExplanationUI>().FirstOrDefault();
+                _ = p.GetRequiredService<CitySyncshellExplanationUI>();
                 return new DummyHostedService();
             });
             collection.AddHostedService(p => p.GetRequiredService<AreaBoundSyncshellService>());
@@ -460,7 +470,12 @@ public sealed class Plugin : IDalamudPlugin
         })
         .Build();
 
-        _ = _host.StartAsync();
+        var startTask = _host.StartAsync();
+        _ = startTask.ContinueWith(t =>
+        {
+            var logger = _host.Services.GetService<ILogger<Plugin>>();
+            logger?.LogCritical(t.Exception, "Host StartAsync failed");
+        }, TaskContinuationOptions.OnlyOnFaulted);
     }
 
     public void Dispose()

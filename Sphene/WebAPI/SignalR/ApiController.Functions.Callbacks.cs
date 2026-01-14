@@ -4,8 +4,10 @@ using Sphene.API.Dto;
 using Sphene.API.Dto.CharaData;
 using Sphene.API.Dto.Group;
 using Sphene.API.Dto.User;
+using Sphene.API.Dto.Files;
 using Sphene.SpheneConfiguration.Models;
 using Sphene.Services.Mediator;
+using Sphene.Services.Events;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Logging;
 using static FFXIVClientStructs.FFXIV.Client.Game.UI.MapMarkerData.Delegates;
@@ -219,6 +221,19 @@ public partial class ApiController
         return Task.CompletedTask;
     }
 
+    public Task Client_UserPenumbraReceivePreferenceUpdate(UserPenumbraReceivePreferenceDto dto)
+    {
+        Logger.LogDebug("Client_UserPenumbraReceivePreferenceUpdate: {dto}", dto);
+        ExecuteSafely(() => _pairManager.UpdatePenumbraReceivePreference(dto));
+        return Task.CompletedTask;
+    }
+
+    public void OnUserPenumbraReceivePreferenceUpdate(Action<UserPenumbraReceivePreferenceDto> act)
+    {
+        if (_initialized) return;
+        _spheneHub!.On(nameof(Client_UserPenumbraReceivePreferenceUpdate), act);
+    }
+
     public Task Client_UserMutualVisibilityUpdate(Sphene.API.Dto.Visibility.MutualVisibilityDto dto)
     {
         Logger.LogDebug("Client_UserMutualVisibilityUpdate: {dto}", dto);
@@ -230,6 +245,15 @@ public partial class ApiController
     {
         Logger.LogDebug("Client_UserGposeStateUpdate: {dto}", dto);
         ExecuteSafely(() => _pairManager.UpdateGposeState(dto));
+        return Task.CompletedTask;
+    }
+
+    public Task Client_UserReceiveFileNotification(FileTransferNotificationDto notification)
+    {
+        ExecuteSafely(() =>
+        {
+            Mediator.Publish(new FileTransferNotificationMessage(notification));
+        });
         return Task.CompletedTask;
     }
 
@@ -423,6 +447,12 @@ public partial class ApiController
     {
         if (_initialized) return;
         _spheneHub!.On(nameof(Client_UserGposeStateUpdate), act);
+    }
+
+    public void OnUserReceiveFileNotification(Action<FileTransferNotificationDto> act)
+    {
+        if (_initialized) return;
+        _spheneHub!.On(nameof(Client_UserReceiveFileNotification), act);
     }
 
     // OnUserAckOtherUpdate method removed - AckOther is controlled by other player's AckYou

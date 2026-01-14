@@ -1,5 +1,6 @@
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface;
+using Dalamud.Interface.Colors;
 using Dalamud.Interface.Utility;
 using Dalamud.Interface.Utility.Raii;
 using Dalamud.Utility;
@@ -74,9 +75,14 @@ public class TopTabMenu
     }
     public void Draw()
     {
+        Draw(0);
+    }
+
+    public void Draw(int pendingModSharingCount)
+    {
         var availableWidth = ImGui.GetWindowContentRegionMax().X - ImGui.GetWindowContentRegionMin().X;
         var spacing = ImGui.GetStyle().ItemSpacing;
-        var buttonX = (availableWidth - (spacing.X * 3)) / 4f;
+        var buttonX = (availableWidth - (spacing.X * 4)) / 5f;
         var buttonY = _uiSharedService.GetIconButtonSize(FontAwesomeIcon.Pause).Y;
         var buttonSize = new Vector2(buttonX, buttonY);
         var drawList = ImGui.GetWindowDrawList();
@@ -91,6 +97,10 @@ public class TopTabMenu
 
         DrawTabButton(FontAwesomeIcon.Users, SelectedTab.Syncshell, ButtonStyleKeys.TopTab_Users, buttonSize, spacing, underlineColor, drawList);
         UiSharedService.AttachToolTip("Syncshell Menu");
+
+        ImGui.SameLine();
+        DrawModSharingButton(buttonSize, pendingModSharingCount, drawList);
+        UiSharedService.AttachToolTip("Open Mod Sharing");
 
         ImGui.SameLine();
         DrawTabButton(FontAwesomeIcon.Filter, SelectedTab.Filter, ButtonStyleKeys.TopTab_Filter, buttonSize, spacing, underlineColor, drawList);
@@ -143,6 +153,47 @@ public class TopTabMenu
                 xAfter with { Y = xAfter.Y + buttonSize.Y + spacing.Y, X = xAfter.X - spacing.X },
                 underlineColor, 2);
         }
+    }
+
+    private void DrawModSharingButton(Vector2 buttonSize, int pendingModSharingCount, ImDrawListPtr drawList)
+    {
+        var buttonStart = ImGui.GetCursorScreenPos();
+        if (_uiSharedService.IconButton(FontAwesomeIcon.Share, buttonSize.Y, null, null, buttonSize.X, ButtonStyleKeys.TopTab_ModSharing))
+        {
+            var tab = pendingModSharingCount > 0 ? ModSharingTab.Receive : ModSharingTab.Send;
+            _spheneMediator.Publish(new OpenModSharingWindow(tab));
+        }
+
+        if (pendingModSharingCount > 0)
+        {
+            DrawBadge(drawList, buttonStart, buttonSize, pendingModSharingCount);
+        }
+    }
+
+    private static void DrawBadge(ImDrawListPtr drawList, Vector2 buttonStart, Vector2 buttonSize, int count)
+    {
+        var scale = ImGuiHelpers.GlobalScale;
+        var badgeText = count > 99 ? "99+" : count.ToString();
+        var padX = 5f * scale;
+        var padY = 2f * scale;
+        var textSize = ImGui.CalcTextSize(badgeText);
+        var height = textSize.Y + padY * 2f;
+        var width = MathF.Max(height, textSize.X + padX * 2f);
+        var rounding = height / 2f;
+
+        var margin = 3f * scale;
+        var min = new Vector2(buttonStart.X + buttonSize.X - width - margin, buttonStart.Y + margin);
+        var max = new Vector2(min.X + width, min.Y + height);
+
+        var background = ImGui.ColorConvertFloat4ToU32(ImGuiColors.DalamudRed);
+        var foreground = ImGui.ColorConvertFloat4ToU32(ImGuiColors.DalamudWhite);
+
+        drawList.AddRectFilled(min, max, background, rounding);
+        var textPos = new Vector2(
+            min.X + (width - textSize.X) / 2f,
+            min.Y + (height - textSize.Y) / 2f
+        );
+        drawList.AddText(textPos, foreground, badgeText);
     }
 
     private void DrawAddPair(float availableXWidth, float spacingX)

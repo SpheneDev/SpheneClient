@@ -70,6 +70,7 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         Mediator.Subscribe<CharacterDataBuildStartedMessage>(this, (_) => SetPendingAcknowledgmentForBuildStart());
         Mediator.Subscribe<GposeStartMessage>(this, (msg) => { _ = _apiController.Value.UserUpdateGposeState(true); });
         Mediator.Subscribe<GposeEndMessage>(this, (msg) => { _ = _apiController.Value.UserUpdateGposeState(false); });
+        Mediator.Subscribe<PenumbraModTransferCompletedMessage>(this, OnPenumbraModTransferCompleted);
         _directPairsInternal = DirectPairsLazy();
         _groupPairsInternal = GroupPairsLazy();
         _pairsWithGroupsInternal = PairsWithGroupsLazy();
@@ -421,12 +422,45 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         RecreateLazy();
     }
 
+    public void UpdatePenumbraReceivePreference(UserPenumbraReceivePreferenceDto dto)
+    {
+        if (!_allClientPairs.TryGetValue(dto.User, out var pair))
+        {
+            return;
+        }
+
+        if (pair.UserPair.OtherAllowsReceivingPenumbraMods == dto.AllowReceivingPenumbraMods)
+        {
+            return;
+        }
+
+        pair.UserPair.OtherAllowsReceivingPenumbraMods = dto.AllowReceivingPenumbraMods;
+        Mediator.Publish(new StructuralRefreshUiMessage());
+    }
+
     internal void ReceiveUploadStatus(UserDto dto)
     {
         if (_allClientPairs.TryGetValue(dto.User, out var existingPair) && existingPair.IsVisible)
         {
             existingPair.SetIsUploading();
         }
+    }
+
+    private void OnPenumbraModTransferCompleted(PenumbraModTransferCompletedMessage message)
+    {
+        var senderUid = message.Notification.Sender?.UID ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(senderUid))
+        {
+            return;
+        }
+
+        var pair = GetPairByUID(senderUid);
+        if (pair == null)
+        {
+            return;
+        }
+
+        pair.SetIsUploading(isUploading: false);
     }
 
     internal void SetGroupPairStatusInfo(GroupPairUserInfoDto dto)

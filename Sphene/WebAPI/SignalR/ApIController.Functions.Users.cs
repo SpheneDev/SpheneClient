@@ -3,6 +3,7 @@ using Sphene.API.Dto;
 using Sphene.API.Dto.User;
 using Sphene.API.Dto.Visibility;
 using Sphene.API.Dto.CharaData;
+using Sphene.Services.Mediator;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Logging;
 using System.Text;
@@ -135,6 +136,12 @@ public partial class ApiController
         await _spheneHub!.InvokeAsync(nameof(UserUpdateAckYou), ackYou).ConfigureAwait(false);
     }
 
+    public async Task UserUpdatePenumbraReceivePreference(bool allowMods)
+    {
+        CheckConnection();
+        await _spheneHub!.InvokeAsync(nameof(UserUpdatePenumbraReceivePreference), allowMods).ConfigureAwait(false);
+    }
+
     public async Task UserUpdateGposeState(bool isInGpose)
     {
         if (!IsConnected) return;
@@ -253,6 +260,19 @@ public partial class ApiController
         }
 
         await UserPushData(new(visibleCharacters, character, censusDto)).ConfigureAwait(false);
+    }
+
+    public async Task UserAckFileTransfer(FileTransferAckMessage msg)
+    {
+        if (!IsConnected) return;
+        try
+        {
+            await _spheneHub!.InvokeAsync("UserAckFileTransfer", msg.Hash, msg.SenderUID).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to send file transfer acknowledgment");
+        }
     }
 }
 #pragma warning restore MA0040

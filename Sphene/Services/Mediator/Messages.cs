@@ -11,6 +11,7 @@ using Sphene.PlayerData.Pairs;
 using Sphene.Services.Events;
 using Sphene.Services;
 using Sphene.WebAPI.Files.Models;
+using Sphene.API.Dto.Files;
 using System.Numerics;
 
 namespace Sphene.Services.Mediator;
@@ -83,8 +84,24 @@ public record RefreshUiMessage : MessageBase;
 public record StructuralRefreshUiMessage : MessageBase;
 public record OpenBanUserPopupMessage(Pair PairToBan, GroupFullInfoDto GroupFullInfoDto) : MessageBase;
 public record OpenCensusPopupMessage() : MessageBase;
+public record OpenPenumbraModInstallPopupMessage(FileTransferNotificationDto Notification) : MessageBase;
+public record InstallReceivedPenumbraModMessage(FileTransferNotificationDto Notification) : SameThreadMessage;
+public record PenumbraModTransferAvailableMessage(FileTransferNotificationDto Notification) : MessageBase;
+public record PenumbraModTransferCompletedMessage(FileTransferNotificationDto Notification, bool Success) : MessageBase;
+public record PenumbraModTransferDiscardedMessage(FileTransferNotificationDto Notification) : MessageBase;
+public record FileTransferAckMessage(string Hash, string SenderUID) : MessageBase;
+public record PenumbraModTransferProgressMessage(FileTransferNotificationDto Notification, string Status, float? Progress) : SameThreadMessage;
+public record OpenPenumbraReceiveModWindow(List<FileTransferNotificationDto> Notifications) : MessageBase;
 public record OpenSyncshellAdminPanel(GroupFullInfoDto GroupInfo) : MessageBase;
 public record OpenPermissionWindow(Pair Pair) : MessageBase;
+public record OpenSendPenumbraModWindow(Pair? Pair, string? PreselectedModFolderName = null) : MessageBase;
+public enum ModSharingTab
+{
+    Send = 0,
+    Receive = 1,
+    History = 2
+}
+public record OpenModSharingWindow(ModSharingTab Tab) : MessageBase;
 public record DownloadLimitChangedMessage() : SameThreadMessage;
 public record CensusUpdateMessage(byte Gender, byte RaceId, byte TribeId) : MessageBase;
 public record TargetPairMessage(Pair Pair) : MessageBase;

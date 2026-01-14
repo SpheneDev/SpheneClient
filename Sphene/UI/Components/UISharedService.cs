@@ -70,11 +70,16 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
     private bool _isDirectoryWritable = false;
     private bool _isOneDrive = false;
     private bool _isPenumbraDirectory = false;
+    private bool _downloadFolderIsValidPath = true;
+    private bool _isDownloadFolderWritable = false;
+    private bool _isDownloadFolderOneDrive = false;
+    private bool _isDownloadFolderPenumbra = false;
     private bool _moodlesExists = false;
     private Dictionary<string, DateTime> _oauthTokenExpiry = new(StringComparer.Ordinal);
     private bool _penumbraExists = false;
     private bool _petNamesExists = false;
     private int _serverSelectionIndex = -1;
+
     public UiSharedService(ILogger<UiSharedService> logger, IpcManager ipcManager, ApiController apiController,
         CacheMonitor cacheMonitor, FileDialogManager fileDialogManager,
         SpheneConfigService configService, DalamudUtilService dalamudUtil, IDalamudPluginInterface pluginInterface,
@@ -137,6 +142,11 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
     public IFontHandle UidFont { get; init; }
     public Dictionary<ushort, string> WorldData => _dalamudUtil.WorldData.Value;
     public uint WorldId => _dalamudUtil.GetHomeWorldId();
+
+    public string GetPreferredUserDisplayName(string? uid, string? aliasOrUid)
+    {
+        return _serverConfigurationManager.GetPreferredUserDisplayName(uid, aliasOrUid);
+    }
 
     public static void AttachToolTip(string text)
     {
@@ -562,6 +572,69 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
             _configService.Save();
         }
         DrawHelpText("The storage is automatically governed by Sphene. It will clear itself automatically once it reaches the set capacity by removing the oldest unused files. You typically do not need to clear it yourself.");
+    }
+
+    public void DrawPenumbraModDownloadFolderSetting()
+    {
+        var downloadFolder = _configService.Current.PenumbraModDownloadFolder;
+        ImGui.InputText("Mod Download Folder##download", ref downloadFolder, 255, ImGuiInputTextFlags.ReadOnly);
+
+        ImGui.SameLine();
+        if (IconButton(FontAwesomeIcon.Folder))
+        {
+            FileDialogManager.OpenFolderDialog("Pick Mod Download Folder", (success, path) =>
+            {
+                if (!success) return;
+
+                _isDownloadFolderOneDrive = path.Contains("onedrive", StringComparison.OrdinalIgnoreCase);
+                _isDownloadFolderPenumbra = string.Equals(path.ToLowerInvariant(), _ipcManager.Penumbra.ModDirectory?.ToLowerInvariant(), StringComparison.Ordinal);
+
+                _isDownloadFolderWritable = IsDirectoryWritable(path);
+                _downloadFolderIsValidPath = PathRegex().IsMatch(path);
+
+                if (!string.IsNullOrEmpty(path)
+                    && _isDownloadFolderWritable
+                    && !_isDownloadFolderPenumbra
+                    && !_isDownloadFolderOneDrive
+                    && _downloadFolderIsValidPath)
+                {
+                    _configService.Current.PenumbraModDownloadFolder = path;
+                    _configService.Save();
+                }
+            }, _dalamudUtil.IsWine ? @"Z:\" : @"C:\");
+        }
+        
+        // Add a clear button to reset to default (empty)
+        if (!string.IsNullOrEmpty(downloadFolder))
+        {
+            ImGui.SameLine();
+            if (IconButton(FontAwesomeIcon.Trash))
+            {
+                _configService.Current.PenumbraModDownloadFolder = string.Empty;
+                _configService.Save();
+            }
+            AttachToolTip("Reset to default (use Cache folder)");
+        }
+
+        if (_isDownloadFolderPenumbra)
+        {
+            ColorTextWrapped("Do not point the download path directly to the Penumbra directory.", ImGuiColors.DalamudRed);
+        }
+        else if (_isDownloadFolderOneDrive)
+        {
+            ColorTextWrapped("Do not point the download path to a folder in OneDrive.", ImGuiColors.DalamudRed);
+        }
+        else if (!_isDownloadFolderWritable)
+        {
+            ColorTextWrapped("The folder you selected does not exist or cannot be written to. Please provide a valid path.", ImGuiColors.DalamudRed);
+        }
+        else if (!_downloadFolderIsValidPath)
+        {
+            ColorTextWrapped("Your selected directory contains illegal characters unreadable by FFXIV. " +
+                             "Restrict yourself to latin letters (A-Z), underscores (_), dashes (-) and arabic numbers (0-9).", ImGuiColors.DalamudRed);
+        }
+
+        DrawHelpText("Optional: Select a folder where downloaded mod files (PMP) will be stored. If left empty, the default cache folder will be used.");
     }
 
     public T? DrawCombo<T>(string comboName, IEnumerable<T> comboItems, Func<T?, string> toName,

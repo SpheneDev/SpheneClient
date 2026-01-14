@@ -81,6 +81,7 @@ public class Pair : DisposableMediatorSubscriberBase
     private volatile int _acknowledgmentSequence = 0;
 
     public UserData UserData => UserPair.User;
+    public bool OtherAllowsReceivingPenumbraMods => UserPair.OtherAllowsReceivingPenumbraMods;
 
     public UserFullPairDto UserPair { get; set; }
     private PairHandler? CachedPlayer { get; set; }
@@ -358,9 +359,9 @@ public class Pair : DisposableMediatorSubscriberBase
         _serverConfigurationManager.SetNoteForUid(UserData.UID, note);
     }
 
-    internal void SetIsUploading()
+    internal void SetIsUploading(bool isUploading = true)
     {
-        CachedPlayer?.SetUploading();
+        CachedPlayer?.SetUploading(isUploading);
     }
 
     private CharacterData? RemoveNotSyncedFiles(CharacterData? data)

@@ -68,6 +68,7 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
         Mediator.Subscribe<CensusUpdateMessage>(this, (msg) => _lastCensus = msg);
         Mediator.Subscribe<PauseMessage>(this, (msg) => _ = PauseAsync(msg.UserData));
         Mediator.Subscribe<SendCharacterDataAcknowledgmentMessage>(this, (msg) => _ = UserSendCharacterDataAcknowledgment(msg.AcknowledgmentDto));
+        Mediator.Subscribe<FileTransferAckMessage>(this, (msg) => _ = UserAckFileTransfer(msg));
 
         ServerState = ServerState.Offline;
 
@@ -486,12 +487,14 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
         OnUserUpdateOtherPairPermissions(dto => _ = Client_UserUpdateOtherPairPermissions(dto));
         OnUserUpdateSelfPairPermissions(dto => _ = Client_UserUpdateSelfPairPermissions(dto));
         OnUserAckYouUpdate(dto => _ = Client_UserAckYouUpdate(dto));
+        OnUserPenumbraReceivePreferenceUpdate(dto => _ = Client_UserPenumbraReceivePreferenceUpdate(dto));
         OnUserMutualVisibilityUpdate(dto => _ = Client_UserMutualVisibilityUpdate(dto));
         OnUserGposeStateUpdate(dto => _ = Client_UserGposeStateUpdate(dto));
         OnUserReceiveUploadStatus(dto => _ = Client_UserReceiveUploadStatus(dto));
         OnUserUpdateProfile(dto => _ = Client_UserUpdateProfile(dto));
         OnUserDefaultPermissionUpdate(dto => _ = Client_UserUpdateDefaultPermissions(dto));
         OnUpdateUserIndividualPairStatusDto(dto => _ = Client_UpdateUserIndividualPairStatusDto(dto));
+        OnUserReceiveFileNotification(dto => _ = Client_UserReceiveFileNotification(dto));
         OnUserReceiveCharacterDataAcknowledgment(dto => _ = Client_UserReceiveCharacterDataAcknowledgment(dto));
 
         OnGroupChangePermissions((dto) => _ = Client_GroupChangePermissions(dto));

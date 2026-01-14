@@ -69,11 +69,16 @@ public class CompactUi : WindowMediatorSubscriberBase
     private DateTime _lastIncognitoButtonClick = DateTime.MinValue;
     private readonly HashSet<string> _prePausedPairs;
     private readonly HashSet<string> _prePausedSyncshells;
+    private readonly System.Threading.Lock _pendingModSharingLock = new();
+    private readonly HashSet<string> _pendingModSharingHashes = new(StringComparer.Ordinal);
     private Sphene.Services.UpdateInfo? _updateBannerInfo;
     private DateTime _lastReconnectButtonClick = DateTime.MinValue;
  private Vector2 _lastSize = Vector2.One;
  // One-time check to correct persisted width below minimum
  private bool _widthCorrectionChecked = false;
+    private const string TestServerDisclaimerPopupName = "Test Server Disclaimer";
+    private bool _showTestServerDisclaimerPopup;
+    private DateTime _testServerDisclaimerOpenedAt = DateTime.MinValue;
     
     private bool _showModalForUserAddition;
     private float _transferPartHeight;
@@ -289,6 +294,11 @@ public class CompactUi : WindowMediatorSubscriberBase
             }
         };
         _tabMenu = new TopTabMenu(Mediator, _apiController, _pairManager, _uiSharedService);
+
+        Mediator.Subscribe<PenumbraModTransferAvailableMessage>(this, OnModSharingTransferAvailable);
+        Mediator.Subscribe<PenumbraModTransferCompletedMessage>(this, OnModSharingTransferCompleted);
+        Mediator.Subscribe<PenumbraModTransferDiscardedMessage>(this, OnModSharingTransferDiscarded);
+        Mediator.Subscribe<DisconnectedMessage>(this, _ => ClearPendingModSharing());
 
         Mediator.Subscribe<CompactUiStickToSettingsMessage>(this, msg =>
         {
@@ -700,6 +710,199 @@ public class CompactUi : WindowMediatorSubscriberBase
         base.PostDraw();
     }
 
+    private void OnModSharingTransferAvailable(PenumbraModTransferAvailableMessage message)
+    {
+        var hash = message.Notification.Hash;
+        if (string.IsNullOrWhiteSpace(hash))
+        {
+            return;
+        }
+
+        _pendingModSharingLock.Enter();
+        try
+        {
+            _pendingModSharingHashes.Add(hash);
+        }
+        finally
+        {
+            _pendingModSharingLock.Exit();
+        }
+    }
+
+#if IS_TEST_BUILD
+    private void DrawTestServerToggleButton()
+    {
+        if (_uiSharedService.IconButton(FontAwesomeIcon.Bug, null, null, null, null, ButtonStyleKeys.Compact_TestServer))
+        {
+            ToggleTestServerConnection();
+        }
+
+        var isEnabled = _configService.Current.UseTestServerOverride;
+        var tooltip = isEnabled
+            ? "Test Server: Enabled\nClick to switch back to the main server."
+            : "Test Server: Disabled\nClick to switch to the test server.\nA disclaimer will be shown once.";
+        UiSharedService.AttachToolTip(tooltip);
+    }
+
+    private void ToggleTestServerConnection()
+    {
+        var isEnabled = _configService.Current.UseTestServerOverride;
+        if (isEnabled)
+        {
+            _configService.Current.UseTestServerOverride = false;
+            _configService.Save();
+            _ = _apiController.CreateConnectionsAsync();
+            return;
+        }
+
+        if (_configService.Current.HasAcceptedTestServerDisclaimer)
+        {
+            EnableTestServerOverrideAndReconnect();
+            return;
+        }
+
+        _testServerDisclaimerOpenedAt = DateTime.UtcNow;
+        _showTestServerDisclaimerPopup = true;
+        ImGui.OpenPopup(TestServerDisclaimerPopupName);
+    }
+
+    private void DrawTestServerDisclaimerPopup()
+    {
+        if (_showTestServerDisclaimerPopup)
+        {
+            ImGui.OpenPopup(TestServerDisclaimerPopupName);
+        }
+
+        using (SpheneCustomTheme.ApplyContextMenuTheme())
+        {
+            var isOpen = _showTestServerDisclaimerPopup;
+            if (ImGui.BeginPopupModal(TestServerDisclaimerPopupName, ref isOpen, UiSharedService.PopupWindowFlags))
+            {
+                var elapsedSeconds = (DateTime.UtcNow - _testServerDisclaimerOpenedAt).TotalSeconds;
+                var remainingSeconds = Math.Max(0.0, 20.0 - elapsedSeconds);
+                var canConfirm = remainingSeconds <= 0.0;
+
+                SpheneCustomTheme.DrawStyledText("Test Server Disclaimer", SpheneCustomTheme.CurrentTheme.CompactHeaderText);
+                ImGui.Separator();
+                UiSharedService.TextWrapped("You are about to connect to the Test Server.");
+                UiSharedService.TextWrapped("On the Test Server, a new UID is created automatically for you.");
+                UiSharedService.TextWrapped("Anything you do there has no effect on your main server account.");
+                UiSharedService.TextWrapped("If you find bugs, please report them on Discord.");
+
+                ImGui.Spacing();
+                if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.Users, "Open Discord"))
+                {
+                    Util.OpenLink("https://discord.gg/GbnwsP2XsF");
+                }
+
+                ImGui.Spacing();
+                if (!canConfirm)
+                {
+                    UiSharedService.ColorTextWrapped($"Please wait {Math.Ceiling(remainingSeconds)} seconds before confirming.", ImGuiColors.DalamudYellow);
+                }
+
+                using (ImRaii.Disabled(!canConfirm))
+                {
+                    if (_uiSharedService.IconTextButton(FontAwesomeIcon.Check, "I Understand, Connect"))
+                    {
+                        _configService.Current.HasAcceptedTestServerDisclaimer = true;
+                        _configService.Save();
+                        EnableTestServerOverrideAndReconnect();
+                        isOpen = false;
+                    }
+                }
+
+                ImGui.SameLine();
+                if (_uiSharedService.IconTextButton(FontAwesomeIcon.Times, "Cancel"))
+                {
+                    isOpen = false;
+                }
+
+                UiSharedService.SetScaledWindowSize(420);
+                ImGui.EndPopup();
+            }
+
+            _showTestServerDisclaimerPopup = isOpen;
+        }
+    }
+
+    private void EnableTestServerOverrideAndReconnect()
+    {
+        if (string.IsNullOrWhiteSpace(_configService.Current.TestServerApiUrl))
+        {
+            _configService.Current.TestServerApiUrl = "ws://test.sphene.online:6000";
+        }
+
+        _configService.Current.UseTestServerOverride = true;
+        _configService.Save();
+        _ = _apiController.CreateConnectionsAsync();
+    }
+#endif
+
+    private void OnModSharingTransferCompleted(PenumbraModTransferCompletedMessage message)
+    {
+        var hash = message.Notification.Hash;
+        if (string.IsNullOrWhiteSpace(hash))
+        {
+            return;
+        }
+
+        _pendingModSharingLock.Enter();
+        try
+        {
+            _pendingModSharingHashes.Remove(hash);
+        }
+        finally
+        {
+            _pendingModSharingLock.Exit();
+        }
+    }
+
+    private void OnModSharingTransferDiscarded(PenumbraModTransferDiscardedMessage message)
+    {
+        var hash = message.Notification.Hash;
+        if (string.IsNullOrWhiteSpace(hash))
+        {
+            return;
+        }
+
+        _pendingModSharingLock.Enter();
+        try
+        {
+            _pendingModSharingHashes.Remove(hash);
+        }
+        finally
+        {
+            _pendingModSharingLock.Exit();
+        }
+    }
+
+    private void ClearPendingModSharing()
+    {
+        _pendingModSharingLock.Enter();
+        try
+        {
+            _pendingModSharingHashes.Clear();
+        }
+        finally
+        {
+            _pendingModSharingLock.Exit();
+        }
+    }
+
+    private int GetPendingModSharingCount()
+    {
+        _pendingModSharingLock.Enter();
+        try
+        {
+            return _pendingModSharingHashes.Count;
+        }
+        finally
+        {
+            _pendingModSharingLock.Exit();
+        }
+    }
+
     protected override void DrawInternal()
     {
         // Theme is already applied in PreDraw, no need to apply it again here
@@ -776,11 +979,20 @@ public class CompactUi : WindowMediatorSubscriberBase
         var disconnectSize = _uiSharedService.GetIconButtonSize(FontAwesomeIcon.Unlink);
         var connectSize = _uiSharedService.GetIconButtonSize(FontAwesomeIcon.Link);
         var reconnectSize = _uiSharedService.GetIconButtonSize(FontAwesomeIcon.Redo);
+#if IS_TEST_BUILD
+        var testServerSize = _uiSharedService.GetIconButtonSize(FontAwesomeIcon.Bug);
+#endif
         
         // Calculate positions from right to left: status indicator + text, disconnect button, reconnect button
         var statusIndicatorWidth = 25.0f; // Approximate width for status indicator
-        var rightButtonsTotalWidth = (_apiController.IsConnected ? disconnectSize.X : connectSize.X) + reconnectSize.X + (ImGui.GetStyle().ItemSpacing.X * 0.5f);
-        var totalRightContentWidth = statusTextSize.X + statusIndicatorWidth + (_apiController.IsConnected ? disconnectSize.X : connectSize.X) + reconnectSize.X + (ImGui.GetStyle().ItemSpacing.X * 2);
+        var connectOrDisconnectSize = _apiController.IsConnected ? disconnectSize : connectSize;
+#if IS_TEST_BUILD
+        var rightButtonsTotalWidth = connectOrDisconnectSize.X + testServerSize.X + reconnectSize.X + (ImGui.GetStyle().ItemSpacing.X * 2);
+        var totalRightContentWidth = statusTextSize.X + statusIndicatorWidth + connectOrDisconnectSize.X + testServerSize.X + reconnectSize.X + (ImGui.GetStyle().ItemSpacing.X * 3);
+#else
+        var rightButtonsTotalWidth = connectOrDisconnectSize.X + reconnectSize.X + (ImGui.GetStyle().ItemSpacing.X * 0.5f);
+        var totalRightContentWidth = statusTextSize.X + statusIndicatorWidth + connectOrDisconnectSize.X + reconnectSize.X + (ImGui.GetStyle().ItemSpacing.X * 2);
+#endif
         
         ImGui.AlignTextToFramePadding();
         SpheneCustomTheme.DrawStyledText("Character Status", SpheneCustomTheme.CurrentTheme.CompactHeaderText);
@@ -810,6 +1022,11 @@ public class CompactUi : WindowMediatorSubscriberBase
         }
         
         // Position reconnect button (rightmost) - use SameLine() for natural spacing
+#if IS_TEST_BUILD
+        ImGui.SameLine();
+        DrawTestServerToggleButton();
+#endif
+
         ImGui.SameLine();
         
         var reconnectCurrentTime = DateTime.UtcNow;
@@ -852,7 +1069,7 @@ public class CompactUi : WindowMediatorSubscriberBase
             // Navigation Section
             SpheneCustomTheme.DrawStyledText("Navigation", SpheneCustomTheme.CurrentTheme.CompactHeaderText);
             ImGui.Separator();
-            _tabMenu.Draw();
+            _tabMenu.Draw(GetPendingModSharingCount());
 
             ImGui.Spacing();
 
@@ -941,6 +1158,10 @@ public class CompactUi : WindowMediatorSubscriberBase
                 ImGui.EndPopup();
             }
         }
+
+#if IS_TEST_BUILD
+        DrawTestServerDisclaimerPopup();
+#endif
 
         // Conversion windows (non-blocking)
         DrawConversionWindow();
@@ -1141,7 +1362,9 @@ public class CompactUi : WindowMediatorSubscriberBase
 
     private void DrawTransfers()
     {
-        var currentUploads = _fileTransferManager.CurrentUploads.ToList();
+        var currentUploads = _fileTransferManager.CurrentUploads
+            .Where(u => !_fileTransferManager.IsPenumbraModUpload(u.Hash))
+            .ToList();
         var currentDownloads = _currentDownloads.SelectMany(d => d.Value.Values).ToList();
         
         // Only show upload progress if there are active uploads
@@ -3459,11 +3682,6 @@ public class CompactUi : WindowMediatorSubscriberBase
         
         // Position settings button with reduced spacing from close button
         var settingsButtonX = closeButtonX - buttonWidth - buttonSpacing;
-        
-        
-        
-        
-        
         
         // Position settings button centered vertically in header
         ImGui.SetCursorScreenPos(new Vector2(contentStart.X + settingsButtonX, buttonY));

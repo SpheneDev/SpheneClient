@@ -233,6 +233,13 @@ public static class ThemePresets
                     ButtonActive = new Vector4(0.24696356f, 0.582996f, 1.0f, 0.54901963f),
                     BorderSize = 0f
                 },
+                [ButtonStyleKeys.TopTab_ModSharing] = new ButtonStyleOverride
+                {
+                    Button = new Vector4(0.23921569f, 0.5647059f, 0.96862745f, 0.14901961f),
+                    ButtonHovered = new Vector4(0.24696356f, 0.582996f, 1.0f, 0.34901962f),
+                    ButtonActive = new Vector4(0.24696356f, 0.582996f, 1.0f, 0.54901963f),
+                    BorderSize = 0f
+                },
                 [ButtonStyleKeys.TopTab_Filter] = new ButtonStyleOverride
                 {
                     Button = new Vector4(0.23921569f, 0.5647059f, 0.96862745f, 0.14901961f),
@@ -382,6 +389,17 @@ public static class ThemePresets
                     WidthDelta = 0.0f,
                     HeightDelta = 0.0f,
                     IconOffset = new Vector2(0.0f, 0.0f),
+                    BorderSize = 0f
+                },
+                [ButtonStyleKeys.Compact_TestServer] = new ButtonStyleOverride
+                {
+                    WidthDelta = 0.0f,
+                    HeightDelta = 0.0f,
+                    IconOffset = new Vector2(0.0f, 0.0f),
+                    Button = new Vector4(0.98f, 0.26f, 0.26f, 0.45f),
+                    ButtonHovered = new Vector4(1.0f, 0.26530612f, 0.26530612f, 0.65f),
+                    ButtonActive = new Vector4(1.0f, 0.26530612f, 0.26530612f, 0.85f),
+                    Icon = new Vector4(1.0f, 0.85f, 0.25f, 1.0f),
                     BorderSize = 0f
                 }
             }

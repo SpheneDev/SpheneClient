@@ -4,7 +4,9 @@ using Dalamud.Interface.Colors;
 using Dalamud.Interface.Utility;
 using Dalamud.Interface.Utility.Raii;
 using Sphene.API.Data.Extensions;
+using Sphene.API.Data.Comparer;
 using Sphene.API.Dto.Group;
+using Sphene.API.Dto.Files;
 using Sphene.API.Dto.User;
 using Sphene.PlayerData.Pairs;
 using Sphene.Services;
@@ -15,6 +17,12 @@ using Sphene.SpheneConfiguration;
 using Sphene.UI.Handlers;
 using Sphene.UI.Theme;
 using Sphene.WebAPI;
+using Sphene.FileCache;
+using Sphene.WebAPI.Files;
+using Microsoft.Extensions.Logging;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 using System.Numerics;
 
 namespace Sphene.UI.Components;
@@ -50,6 +58,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
     
     // Cache acknowledgment status - updated only via events
     private bool _cachedHasPendingAck = false;
+    private readonly List<FileTransferNotificationDto> _pendingModNotifications = new();
     public DrawUserPair(string id, Pair entry, List<GroupFullInfoDto> syncedGroups,
         GroupFullInfoDto? currentGroup,
         ApiController apiController, IdDisplayHandler uIDDisplayHandler,
@@ -82,16 +91,19 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         
         // Subscribe to selective icon updates for performance optimization
         _mediator.Subscribe<UserPairIconUpdateMessage>(this, OnIconUpdate);
+        _mediator.Subscribe<PenumbraModTransferAvailableMessage>(this, OnPenumbraModTransferAvailable);
+        _mediator.Subscribe<PenumbraModTransferCompletedMessage>(this, OnPenumbraModTransferCompleted);
+        _mediator.Subscribe<PenumbraModTransferDiscardedMessage>(this, OnPenumbraModTransferDiscarded);
         
         // Initialize cache once during construction to avoid frequent PairManager calls
         _cachedHasPendingAck = _pairManager.HasPendingAcknowledgmentForUser(_pair.UserData);
         
-        
+        var userUID = _pair.UserData.UID ?? string.Empty;
+
         // Initialize global status tracking for this user to prevent initial spam
         _globalAckYouLock.Enter();
         try
         {
-            var userUID = _pair.UserData.UID;
             if (!_globalLastSentAckYouStatus.ContainsKey(userUID))
             {
                 _globalLastSentAckYouStatus[userUID] = _pair.UserPair.OwnPermissions.IsAckYou();
@@ -139,45 +151,76 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
     
     private void OnIconUpdate(UserPairIconUpdateMessage message)
     {
-        // Only handle events for this specific pair
         if (!string.Equals(message.User.UID, _pair.UserData.UID, StringComparison.Ordinal)) return;
-        
-        // Handle specific icon updates without full UI rebuild
+
         switch (message.UpdateType)
         {
             case IconUpdateType.AcknowledgmentStatus:
                 if (message.UpdateData is AcknowledgmentStatusData ackData)
                 {
                     _cachedHasPendingAck = ackData.HasPending;
-                    
                 }
                 break;
-                
+
             case IconUpdateType.ConnectionStatus:
-                // Connection status is read directly from pair data, no caching needed
                 break;
-                
+
             case IconUpdateType.PermissionStatus:
-                // Permission status is read directly from pair data, no caching needed
                 break;
-                
+
             case IconUpdateType.IndividualPermissions:
-                // Individual permissions are read directly from pair data, no caching needed
                 break;
-                
+
             case IconUpdateType.GroupRole:
-                // Group role is read directly from group data, no caching needed
                 break;
-                
+
             case IconUpdateType.ReloadTimer:
-                // Reload timer status is managed by static dictionaries, no caching needed
                 break;
         }
-        
-        // Note: UI will automatically update on next frame since ImGui redraws continuously
-        // No explicit redraw trigger needed for icon-only updates
     }
-    
+
+    private void OnPenumbraModTransferAvailable(PenumbraModTransferAvailableMessage message)
+    {
+        var senderUid = message.Notification.Sender?.UID ?? string.Empty;
+        var pairUid = _pair.UserData.UID ?? string.Empty;
+        if (!string.Equals(senderUid, pairUid, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        if (!_pendingModNotifications.Any(n => string.Equals(n.Hash, message.Notification.Hash, StringComparison.Ordinal)))
+        {
+            _pendingModNotifications.Add(message.Notification);
+        }
+    }
+
+    private void OnPenumbraModTransferCompleted(PenumbraModTransferCompletedMessage message)
+    {
+        var senderUid = message.Notification.Sender?.UID ?? string.Empty;
+        var pairUid = _pair.UserData.UID ?? string.Empty;
+        if (!string.Equals(senderUid, pairUid, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        if (message.Success)
+        {
+            _pendingModNotifications.RemoveAll(n => string.Equals(n.Hash, message.Notification.Hash, StringComparison.Ordinal));
+        }
+    }
+
+    private void OnPenumbraModTransferDiscarded(PenumbraModTransferDiscardedMessage message)
+    {
+        var senderUid = message.Notification.Sender?.UID ?? string.Empty;
+        var pairUid = _pair.UserData.UID ?? string.Empty;
+        if (!string.Equals(senderUid, pairUid, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _pendingModNotifications.RemoveAll(n => string.Equals(n.Hash, message.Notification.Hash, StringComparison.Ordinal));
+    }
+
     private void HandleReloadTimer(bool isAckYou)
     {
         var userUID = _pair.UserData.UID;
@@ -232,6 +275,36 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
             }
             UiSharedService.AttachToolTip("Opens the profile for this user in a new window");
         }
+
+        var canSendPenumbraMod = _pair.IndividualPairStatus == API.Data.Enum.IndividualPairStatus.Bidirectional
+                                 && _pair.OtherAllowsReceivingPenumbraMods;
+        using (ImRaii.Disabled(!canSendPenumbraMod))
+        {
+            if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.BoxOpen, "Send Penumbra Mod", _menuWidth, ButtonStyleKeys.ContextMenu_Item) && canSendPenumbraMod)
+            {
+                _mediator.Publish(new OpenSendPenumbraModWindow(_pair));
+                ImGui.CloseCurrentPopup();
+            }
+        }
+        UiSharedService.AttachToolTip(_pair.OtherAllowsReceivingPenumbraMods
+            ? "Opens a dialog to send a Penumbra mod package to this user. Available only for online, individually paired users."
+            : "This user has disabled receiving Penumbra mod packages. You cannot send mods to them.");
+
+        var pendingCount = _pendingModNotifications.Count;
+        var hasPendingModTransfer = pendingCount > 0;
+        using (ImRaii.Disabled(!hasPendingModTransfer))
+        {
+            var text = pendingCount > 1 ? $"Install received Penumbra Mods ({pendingCount})" : "Install received Penumbra Mod";
+            if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.Download, text, _menuWidth, ButtonStyleKeys.ContextMenu_Item) && hasPendingModTransfer)
+            {
+                _mediator.Publish(new OpenPenumbraReceiveModWindow(_pendingModNotifications.ToList()));
+                ImGui.CloseCurrentPopup();
+            }
+        }
+        UiSharedService.AttachToolTip(hasPendingModTransfer
+            ? "Opens the panel to install the received Penumbra mod package from this user."
+            : "No pending Penumbra mod package available from this user.");
+
         if (_pair.IsVisible)
         {
             if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.Sync, "Reload last data", _menuWidth, ButtonStyleKeys.ContextMenu_Item))
@@ -353,6 +426,9 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         if (_disposed) return;
         if (disposing)
         {
+            _mediator.Unsubscribe<PenumbraModTransferAvailableMessage>(this);
+            _mediator.Unsubscribe<PenumbraModTransferCompletedMessage>(this);
+            _mediator.Unsubscribe<PenumbraModTransferDiscardedMessage>(this);
             _mediator.Unsubscribe<PairAcknowledgmentStatusChangedMessage>(this);
             _mediator.Unsubscribe<AcknowledgmentPendingMessage>(this);
             _timerLock.Enter();
@@ -479,11 +555,9 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
             }
         }
 
-        // Add synchronization status indicator - only show for mutually visible pairs
         if (_pair.IsOnline && _pair.IsMutuallyVisible)
         {
             ImGui.SameLine();
-            // Show clock for any pending acknowledgment (including build start without a specific acknowledgment ID)
             if (_pair.HasPendingAcknowledgment)
             {
                 using var _ = ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.DalamudYellow);
@@ -779,6 +853,20 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
                         ImGui.EndTooltip();
                     }
                 }
+            }
+
+            if (_pendingModNotifications.Count > 0)
+            {
+                var modIconWidth = _uiSharedService.GetIconSize(FontAwesomeIcon.BoxOpen).X;
+                currentRightSide -= (modIconWidth + spacingX);
+                ImGui.SameLine(currentRightSide);
+                using (ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.ParsedGreen))
+                    _uiSharedService.IconText(FontAwesomeIcon.BoxOpen);
+                
+                var tooltip = _pendingModNotifications.Count > 1 
+                    ? $"This user has {_pendingModNotifications.Count} Penumbra mod packages ready to install."
+                    : "This user has a Penumbra mod package ready to install.";
+                UiSharedService.AttachToolTip(tooltip);
             }
         }
 

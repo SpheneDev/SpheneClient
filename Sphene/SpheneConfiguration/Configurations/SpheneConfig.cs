@@ -4,6 +4,7 @@ using Sphene.UI.Components;
 using Microsoft.Extensions.Logging;
 using Sphene.API.Data;
 using Sphene.API.Dto.CharaData;
+using Sphene.API.Dto.Files;
 
 namespace Sphene.SpheneConfiguration.Configurations;
 
@@ -65,6 +66,7 @@ public class SpheneConfig : ISpheneConfiguration
     public bool ShowUploading { get; set; } = true;
     public bool ShowUploadingBigText { get; set; } = true;
     public bool ShowVisibleUsersSeparately { get; set; } = true;
+    public bool AllowReceivingPenumbraMods { get; set; } = true;
     public int TimeSpanBetweenScansInSeconds { get; set; } = 30;
     public int TransferBarsHeight { get; set; } = 12;
     public bool TransferBarsShowText { get; set; } = true;
@@ -80,9 +82,18 @@ public class SpheneConfig : ISpheneConfiguration
     public float IconPositionY { get; set; } = 100f;
     public bool ShowSpheneIcon { get; set; } = true;
     public bool LockSpheneIcon { get; set; } = false;
+    public float PenumbraSendPopupPosX { get; set; } = 0f;
+    public float PenumbraSendPopupPosY { get; set; } = 0f;
+    public bool PenumbraSendPopupUseCustomPosition { get; set; } = false;
+    public float PenumbraReceivePopupPosX { get; set; } = 0f;
+    public float PenumbraReceivePopupPosY { get; set; } = 0f;
+    public bool PenumbraReceivePopupUseCustomPosition { get; set; } = false;
     // Enable or disable integration of ShrinkU UI inside Sphene
     public bool EnableShrinkUIntegration { get; set; } = true;
-    
+    public string PenumbraModDownloadFolder { get; set; } = string.Empty;
+    public bool DeletePenumbraModAfterInstall { get; set; } = false;
+    public List<FileTransferNotificationDto> PendingPenumbraModTransfers { get; set; } = new();
+
     // Acknowledgment System Settings
     public bool ShowAcknowledgmentPopups { get; set; } = false;
     public bool ShowWaitingForAcknowledgmentPopups { get; set; } = false;
@@ -112,5 +123,6 @@ public class SpheneConfig : ISpheneConfiguration
 
     public bool UseTestServerOverride { get; set; } = false;
     public string TestServerApiUrl { get; set; } = string.Empty;
+    public bool HasAcceptedTestServerDisclaimer { get; set; } = false;
 
 }

@@ -5,6 +5,7 @@ using Dalamud.Interface.Utility;
 using Dalamud.Interface.Utility.Raii;
 using Dalamud.Utility;
 using Sphene.API.Data;
+using Sphene.API.Dto.Files;
 using Sphene.API.Data.Comparer;
 using Sphene.API.Routes;
 using Sphene.FileCache;
@@ -378,6 +379,15 @@ public class SettingsUi : WindowMediatorSubscriberBase
             _configService.Save();
         }
 
+        bool allowPenumbraMods = _configService.Current.AllowReceivingPenumbraMods;
+        if (ImGui.Checkbox("Allow receiving Penumbra mod packages", ref allowPenumbraMods))
+        {
+            _configService.Current.AllowReceivingPenumbraMods = allowPenumbraMods;
+            _configService.Save();
+            _ = ApiController.UserUpdatePenumbraReceivePreference(allowPenumbraMods);
+        }
+        _uiShared.DrawHelpText("When disabled, incoming Penumbra mod packages are ignored and no install popups are shown.");
+
         if (ImGui.Checkbox("Use Alternative Transmission Method", ref useAlternativeUpload))
         {
             _configService.Current.UseAlternativeFileUpload = useAlternativeUpload;
@@ -663,6 +673,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
         return speedTestResults;
     }
 
+    // History drawing moved to ModPackageHistoryUi
+
     private async Task<List<string>?> GetDownloadServerList()
     {
         try
@@ -860,6 +872,18 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
         _uiShared.DrawCacheDirectorySetting();
         _uiShared.DrawHelpText("Configure cache location and size. The storage manages itself by clearing old data beyond the set size.");
+        
+        ImGuiHelpers.ScaledDummy(5);
+        _uiShared.DrawPenumbraModDownloadFolderSetting();
+
+        bool deleteAfterInstall = _configService.Current.DeletePenumbraModAfterInstall;
+        if (ImGui.Checkbox("Delete downloaded mods after successful install", ref deleteAfterInstall))
+        {
+            _configService.Current.DeletePenumbraModAfterInstall = deleteAfterInstall;
+            _configService.Save();
+        }
+        _uiShared.DrawHelpText("If enabled, the downloaded .pmp file will be deleted automatically after it has been successfully imported into Penumbra.");
+
         ImGui.AlignTextToFramePadding();
         if (_cacheMonitor.FileCacheSize >= 0)
             ImGui.TextUnformatted($"Currently utilized local storage: {UiSharedService.ByteToString(_cacheMonitor.FileCacheSize)}");

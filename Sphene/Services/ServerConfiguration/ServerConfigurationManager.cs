@@ -346,6 +346,25 @@ public class ServerConfigurationManager
         return null;
     }
 
+    internal string GetPreferredUserDisplayName(string? uid, string? aliasOrUid)
+    {
+        if (!string.IsNullOrWhiteSpace(uid))
+        {
+            var note = GetNoteForUid(uid);
+            if (!string.IsNullOrWhiteSpace(note))
+            {
+                return note;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(aliasOrUid))
+        {
+            return aliasOrUid;
+        }
+
+        return uid ?? string.Empty;
+    }
+
     internal HashSet<string> GetServerAvailablePairTags()
     {
         return CurrentServerTagStorage().ServerAvailablePairTags;

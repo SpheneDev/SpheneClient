@@ -7,7 +7,6 @@ using Sphene.Services.ServerConfiguration;
 using Sphene.UI.Components;
 using Sphene.UI.Handlers;
 using Sphene.WebAPI;
-using Microsoft.Extensions.Logging;
 using System.Collections.Immutable;
 
 namespace Sphene.UI;
@@ -28,7 +27,7 @@ public class DrawEntityFactory
     private readonly PairManager _pairManager;
     private readonly AreaBoundSyncshellService _areaBoundSyncshellService;
 
-    public DrawEntityFactory(ILogger<DrawEntityFactory> logger, ApiController apiController, IdDisplayHandler uidDisplayHandler,
+    public DrawEntityFactory(ApiController apiController, IdDisplayHandler uidDisplayHandler,
         SelectTagForPairUi selectTagForPairUi, SpheneMediator mediator,
         TagHandler tagHandler, SelectPairForTagUi selectPairForTagUi,
         ServerConfigurationManager serverConfigurationManager, UiSharedService uiSharedService,
@@ -69,8 +68,20 @@ public class DrawEntityFactory
 
     public DrawUserPair CreateDrawPair(string id, Pair user, List<GroupFullInfoDto> groups, GroupFullInfoDto? currentGroup)
     {
-        return new DrawUserPair(id + user.UserData.UID, user, groups, currentGroup, _apiController, _uidDisplayHandler,
-            _mediator, _selectTagForPairUi, _serverConfigurationManager, _uiSharedService, _playerPerformanceConfigService,
-            _charaDataManager, _pairManager, _configService);
+        return new DrawUserPair(
+            id + user.UserData.UID,
+            user,
+            groups,
+            currentGroup,
+            _apiController,
+            _uidDisplayHandler,
+            _mediator,
+            _selectTagForPairUi,
+            _serverConfigurationManager,
+            _uiSharedService,
+            _playerPerformanceConfigService,
+            _charaDataManager,
+            _pairManager,
+            _configService);
     }
 }

@@ -57,6 +57,144 @@ public partial class FileDownloadManager : DisposableMediatorSubscriberBase
         }
     }
 
+    public async Task<string?> DownloadPmpToCacheAsync(string hash, CancellationToken ct, IProgress<(long TransferredBytes, long TotalBytes)>? progress = null, string? destinationPath = null)
+    {
+        if (string.IsNullOrWhiteSpace(hash)) throw new ArgumentException("hash must not be null or empty", nameof(hash));
+        if (!_orchestrator.IsInitialized) throw new InvalidOperationException("FileTransferManager is not initialized");
+
+        var sizeInfo = await FilesGetSizes([hash], ct).ConfigureAwait(false);
+        var dto = sizeInfo.FirstOrDefault(d => string.Equals(d.Hash, hash, StringComparison.OrdinalIgnoreCase));
+        if (dto == null || dto.IsForbidden || dto.Size <= 0 || string.IsNullOrWhiteSpace(dto.Url))
+        {
+            Logger.LogWarning("DownloadPmpToCacheAsync: file {hash} not available or forbidden", hash);
+            return null;
+        }
+
+        var transfer = new DownloadFileTransfer(dto);
+        var downloadGroup = transfer.DownloadUri.Host + ":" + transfer.DownloadUri.Port;
+
+        _downloadStatus[downloadGroup] = new FileDownloadStatus
+        {
+            DownloadStatus = DownloadStatus.Initializing,
+            TotalBytes = transfer.Total,
+            TotalFiles = 1,
+            TransferredBytes = 0,
+            TransferredFiles = 0
+        };
+
+        Guid requestId;
+        var blockFile = string.Empty;
+
+        try
+        {
+            var requestIdResponse = await _orchestrator.SendRequestAsync(HttpMethod.Post, SpheneFiles.RequestEnqueueFullPath(transfer.DownloadUri), new List<string> { hash }, ct).ConfigureAwait(false);
+            var requestContent = await requestIdResponse.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            requestId = Guid.Parse(requestContent.Trim('"'));
+
+            blockFile = _fileDbManager.GetCacheFilePath(requestId.ToString("N"), "blk");
+
+            Progress<long> internalProgress = new((bytesDownloaded) =>
+            {
+                try
+                {
+                    if (_downloadStatus.TryGetValue(downloadGroup, out var status))
+                    {
+                        status.TransferredBytes += bytesDownloaded;
+                        progress?.Report((status.TransferredBytes, status.TotalBytes));
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogWarning(ex, "Could not set PMP download progress");
+                }
+            });
+
+            await DownloadAndMungeFileHttpClient(downloadGroup, requestId, [transfer], blockFile, internalProgress, ct).ConfigureAwait(false);
+
+            if (_downloadStatus.TryGetValue(downloadGroup, out var statusAfterDownload))
+            {
+                statusAfterDownload.TransferredFiles = 1;
+                statusAfterDownload.DownloadStatus = DownloadStatus.Decompressing;
+            }
+
+            using var fileBlockStream = File.OpenRead(blockFile);
+            if (fileBlockStream.Length <= 0)
+            {
+                Logger.LogWarning("DownloadPmpToCacheAsync: empty block file for {hash}", hash);
+                return null;
+            }
+
+            (string fileHash, long fileLengthBytes) = ReadBlockFileHeader(fileBlockStream);
+            if (!string.Equals(fileHash, hash, StringComparison.OrdinalIgnoreCase))
+            {
+                Logger.LogWarning("DownloadPmpToCacheAsync: hash mismatch in block header, expected {expected}, got {actual}", hash, fileHash);
+                return null;
+            }
+
+            var compressedFileContent = new byte[fileLengthBytes];
+            var readBytes = await fileBlockStream.ReadAsync(compressedFileContent, 0, compressedFileContent.Length, CancellationToken.None).ConfigureAwait(false);
+            if (readBytes != fileLengthBytes)
+            {
+                throw new EndOfStreamException();
+            }
+
+            MungeBuffer(compressedFileContent);
+            var decompressedFile = LZ4Wrapper.Unwrap(compressedFileContent);
+            var filePath = !string.IsNullOrWhiteSpace(destinationPath) 
+                ? destinationPath 
+                : _fileDbManager.GetCacheFilePath(hash, "pmp");
+            var dir = Path.GetDirectoryName(filePath);
+            if (!string.IsNullOrWhiteSpace(dir))
+            {
+                Directory.CreateDirectory(dir);
+            }
+
+            await _fileCompactor.WriteAllBytesAsync(filePath, decompressedFile, CancellationToken.None).ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(destinationPath))
+            {
+                PersistFileToStorage(hash, filePath);
+            }
+
+            return filePath;
+        }
+        catch (OperationCanceledException)
+        {
+            Logger.LogDebug("DownloadPmpToCacheAsync: cancelled for {hash}", hash);
+            throw;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "DownloadPmpToCacheAsync: error while downloading PMP {hash}", hash);
+            return null;
+        }
+        finally
+        {
+            if (!string.IsNullOrEmpty(blockFile))
+            {
+                try
+                {
+                    File.Delete(blockFile);
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogDebug(ex, "Failed to delete temporary block file {file}", blockFile);
+                }
+            }
+
+            _downloadStatus.Remove(downloadGroup);
+        }
+    }
+
+    public async Task<bool> IsFileAvailableAsync(string hash, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(hash)) throw new ArgumentException("hash must not be null or empty", nameof(hash));
+        if (!_orchestrator.IsInitialized) throw new InvalidOperationException("FileTransferManager is not initialized");
+
+        var sizeInfo = await FilesGetSizes([hash], ct).ConfigureAwait(false);
+        var dto = sizeInfo.FirstOrDefault(d => string.Equals(d.Hash, hash, StringComparison.OrdinalIgnoreCase));
+        return dto != null && !dto.IsForbidden && dto.Size > 0 && !string.IsNullOrWhiteSpace(dto.Url);
+    }
+
     public void ClearDownload()
     {
         CurrentDownloads.Clear();
