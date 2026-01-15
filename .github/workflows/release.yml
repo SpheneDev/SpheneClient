@@ -58,40 +58,14 @@ jobs:
     - name: Get latest version and increment
       id: get_version
       run: |
-        # Get latest version from GitHub releases (includes prereleases/testbuilds)
-        $headers = @{
-          'Authorization' = 'Bearer ${{ secrets.GITHUB_TOKEN }}'
-          'Accept' = 'application/vnd.github.v3+json'
-        }
-        
-        try {
-          $releases = Invoke-RestMethod -Uri "https://api.github.com/repos/${{ github.repository }}/releases?per_page=100" -Headers $headers
-          $best = @(0, 0, 0, 0)
-          foreach ($r in $releases) {
-            $tag = [string]$r.tag_name
-            if ([string]::IsNullOrWhiteSpace($tag)) { continue }
-            $v = $tag -replace '^v', ''
-            if ($v -notmatch '^\d+\.\d+\.\d+(\.\d+)?$') { continue }
-            $parts = $v.Split('.')
-            $a = [int]$parts[0]
-            $b = [int]$parts[1]
-            $c = [int]$parts[2]
-            $d = if ($parts.Length -ge 4) { [int]$parts[3] } else { 0 }
-            $candidate = @($a, $b, $c, $d)
-            $isGreater = $false
-            for ($i = 0; $i -lt 4; $i++) {
-              if ($candidate[$i] -gt $best[$i]) { $isGreater = $true; break }
-              if ($candidate[$i] -lt $best[$i]) { break }
-            }
-            if ($isGreater) { $best = $candidate }
-          }
+        $csprojPath = "Sphene/Sphene.csproj"
+        $content = Get-Content $csprojPath -Raw
+        $match = [regex]::Match($content, '<Version>([^<]+)</Version>')
+        if (-not $match.Success) { throw "No <Version> found in $csprojPath" }
 
-          $latestVersion = "$($best[0]).$($best[1]).$($best[2]).$($best[3])"
-          Write-Host "Latest version found: $latestVersion"
-        } catch {
-          Write-Host "No previous releases found, starting with 0.0.0"
-          $latestVersion = "0.0.0.0"
-        }
+        $latestVersion = $match.Groups[1].Value.Trim()
+        if ($latestVersion -notmatch '^\d+\.\d+\.\d+\.\d+$') { throw "Version '$latestVersion' in $csprojPath is not a 4-part version" }
+        Write-Host "Base version from csproj: $latestVersion"
         
         # Parse version components
         $versionParts = $latestVersion.Split('.')
@@ -128,7 +102,7 @@ jobs:
           }
         }
         
-        $newVersion = "$major.$minor.$patch.$build"
+        $newVersion = "{0}.{1}.{2}.{3}" -f $major, $minor, $patch, $build
         $newTag = "v$newVersion"
         
         echo "version=$newVersion" >> $env:GITHUB_OUTPUT
@@ -152,7 +126,7 @@ jobs:
       run: dotnet restore Sphene.Actions.sln
       
     - name: Build Release
-      run: dotnet build Sphene.Actions.sln --configuration Release --no-restore /p:IsTestBuild=${{ github.event.inputs.is_testbuild }}
+      run: dotnet build Sphene.Actions.sln --configuration Release --no-restore /p:IsTestBuild=${{ github.event.inputs.is_testbuild }} /p:AutoIncrementVersion=false
       shell: powershell
       
     - name: Create release package

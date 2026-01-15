@@ -358,6 +358,50 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
             return false;
         }
     }
+
+    public bool ResolvePendingAcknowledgmentFromRemoteAckYou(UserData user, string? acknowledgmentId)
+    {
+        try
+        {
+            var userKey = user.UID;
+            if (string.IsNullOrEmpty(userKey))
+            {
+                Logger.LogWarning("ResolvePendingAcknowledgmentFromRemoteAckYou called with empty user UID");
+                return false;
+            }
+
+            if (!_userLatestAcknowledgments.TryGetValue(userKey, out var latestInfo))
+            {
+                return false;
+            }
+
+            if (!string.IsNullOrEmpty(acknowledgmentId) &&
+                !string.Equals(latestInfo.AcknowledgmentId, acknowledgmentId, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            if (!_userLatestAcknowledgments.TryRemove(userKey, out var removedInfo))
+            {
+                return false;
+            }
+
+            _messageService.CleanTaggedMessages($"ack_{removedInfo.AcknowledgmentId}");
+
+            Mediator.Publish(new AcknowledgmentUiRefreshMessage(
+                AcknowledgmentId: removedInfo.AcknowledgmentId,
+                User: user
+            ));
+
+            Mediator.Publish(new RefreshUiMessage());
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Failed to resolve pending acknowledgment for user {user} from remote AckYou", user.AliasOrUID);
+            return false;
+        }
+    }
     
     // Clear pending status from pair when acknowledgment is removed
     private async Task ClearPendingStatusFromPair(UserData user, string acknowledgmentId)

@@ -264,14 +264,20 @@ public partial class ApiController
 
     public async Task UserAckFileTransfer(FileTransferAckMessage msg)
     {
-        if (!IsConnected) return;
-        try
+        if (string.IsNullOrWhiteSpace(msg.Hash) || string.IsNullOrWhiteSpace(msg.SenderUID))
         {
-            await _spheneHub!.InvokeAsync("UserAckFileTransfer", msg.Hash, msg.SenderUID).ConfigureAwait(false);
+            return;
         }
-        catch (Exception ex)
+
+        if (!IsConnected || _spheneHub == null)
         {
-            Logger.LogWarning(ex, "Failed to send file transfer acknowledgment");
+            EnqueueFileTransferAck(msg);
+            return;
+        }
+
+        if (!await TrySendFileTransferAckAsync(msg).ConfigureAwait(false))
+        {
+            EnqueueFileTransferAck(msg);
         }
     }
 }

@@ -16,6 +16,7 @@ using Sphene.WebAPI.SignalR;
 using Sphene.WebAPI.SignalR.Utils;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Logging;
+using System.Collections.Concurrent;
 using System.Reflection;
 
 namespace Sphene.WebAPI;
@@ -43,6 +44,7 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
     private HubConnection? _spheneHub;
     private ServerState _serverState;
     private CensusUpdateMessage? _lastCensus;
+    private readonly ConcurrentDictionary<string, FileTransferAckMessage> _pendingFileTransferAcks = new(StringComparer.Ordinal);
 
     public ApiController(ILogger<ApiController> logger, HubFactory hubFactory, DalamudUtilService dalamudUtil,
         PairManager pairManager, ServerConfigurationManager serverManager, SpheneMediator mediator,
@@ -276,6 +278,8 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
                         $"Please keep your Sphene client up-to-date.",
                         NotificationType.Warning));
                 }
+
+                await FlushPendingFileTransferAcksAsync().ConfigureAwait(false);
 
                 if (_dalamudUtil.HasModifiedGameFiles)
                 {
@@ -588,6 +592,7 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
                 return;
             }
             ServerState = ServerState.Connected;
+            await FlushPendingFileTransferAcksAsync().ConfigureAwait(false);
             await LoadIninitialPairsAsync().ConfigureAwait(false);
             await LoadOnlinePairsAsync().ConfigureAwait(false);
             Mediator.Publish(new ConnectedMessage(_connectionDto));
@@ -707,6 +712,109 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
         });
         return Task.CompletedTask;
     }
+
+    private static string BuildFileTransferAckKey(string hash, string senderUid)
+        => senderUid + "|" + hash;
+
+    private static string NormalizeFileTransferHash(string hash)
+    {
+        if (string.IsNullOrWhiteSpace(hash))
+        {
+            return string.Empty;
+        }
+
+        var candidate = hash.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).FirstOrDefault() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(candidate))
+        {
+            return string.Empty;
+        }
+
+        Span<char> buffer = stackalloc char[candidate.Length];
+        var length = 0;
+        foreach (var c in candidate)
+        {
+            if (!char.IsAsciiLetterOrDigit(c))
+            {
+                continue;
+            }
+
+            buffer[length++] = char.ToUpperInvariant(c);
+            if (length > 40)
+            {
+                return candidate.Trim();
+            }
+        }
+
+        if (length == 40)
+        {
+            return new string(buffer[..length]);
+        }
+
+        return candidate.Trim();
+    }
+
+    private static string NormalizeFileTransferSenderUid(string senderUid)
+        => senderUid?.Trim() ?? string.Empty;
+
+    private void EnqueueFileTransferAck(FileTransferAckMessage msg)
+    {
+        var normalizedHash = NormalizeFileTransferHash(msg.Hash);
+        var normalizedSenderUid = NormalizeFileTransferSenderUid(msg.SenderUID);
+
+        if (string.IsNullOrWhiteSpace(normalizedHash) || string.IsNullOrWhiteSpace(normalizedSenderUid))
+        {
+            return;
+        }
+
+        var normalizedMsg = msg with { Hash = normalizedHash, SenderUID = normalizedSenderUid };
+        var key = BuildFileTransferAckKey(normalizedHash, normalizedSenderUid);
+        _pendingFileTransferAcks[key] = normalizedMsg;
+    }
+
+    private async Task<bool> TrySendFileTransferAckAsync(FileTransferAckMessage msg)
+    {
+        if (!IsConnected || _spheneHub == null)
+        {
+            return false;
+        }
+
+        var normalizedHash = NormalizeFileTransferHash(msg.Hash);
+        var normalizedSenderUid = NormalizeFileTransferSenderUid(msg.SenderUID);
+        if (string.IsNullOrWhiteSpace(normalizedHash) || string.IsNullOrWhiteSpace(normalizedSenderUid))
+        {
+            return true;
+        }
+
+        try
+        {
+            await _spheneHub.InvokeAsync("UserAckFileTransfer", normalizedHash, normalizedSenderUid).ConfigureAwait(false);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Failed to send file transfer acknowledgment (queued for retry)");
+            return false;
+        }
+    }
+
+    private async Task FlushPendingFileTransferAcksAsync()
+    {
+        if (!IsConnected || _spheneHub == null || _pendingFileTransferAcks.IsEmpty)
+        {
+            return;
+        }
+
+        foreach (var kvp in _pendingFileTransferAcks.ToArray())
+        {
+            if (!await TrySendFileTransferAckAsync(kvp.Value).ConfigureAwait(false))
+            {
+                return;
+            }
+
+            _pendingFileTransferAcks.TryRemove(kvp.Key, out _);
+        }
+    }
+
 
     public Task Client_AreaBoundSyncshellConfigurationUpdate()
     {

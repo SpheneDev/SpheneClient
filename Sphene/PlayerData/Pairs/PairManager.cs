@@ -390,6 +390,13 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
             pair.UserPair.OtherPermissions.IsDisableSounds(),
             pair.UserPair.OtherPermissions.IsDisableVFX());
 
+        var currentOtherAckYou = pair.UserPair.OtherPermissions.IsAckYou();
+        if (currentOtherAckYou && pair.HasPendingAcknowledgment)
+        {
+            _sessionAcknowledgmentManager.ResolvePendingAcknowledgmentFromRemoteAckYou(dto.User, pair.LastAcknowledgmentId);
+            pair.ResolvePendingAcknowledgmentFromRemoteAckYou();
+        }
+
         if (!pair.IsPaused)
             pair.ApplyLastReceivedData();
 
@@ -522,10 +529,10 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
     private void DisposePairs()
     {
         Logger.LogDebug("Disposing all Pairs");
-        Parallel.ForEach(_allClientPairs, item =>
+        foreach (var item in _allClientPairs)
         {
-            item.Value.MarkOffline(wait: false);
-        });
+            item.Value.MarkOffline(wait: true);
+        }
 
         RecreateLazy();
     }

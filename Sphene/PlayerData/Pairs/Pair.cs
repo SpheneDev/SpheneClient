@@ -514,6 +514,47 @@ public class Pair : DisposableMediatorSubscriberBase
         ));
     }
 
+    public void ResolvePendingAcknowledgmentFromRemoteAckYou()
+    {
+        if (!HasPendingAcknowledgment)
+        {
+            return;
+        }
+
+        var acknowledgmentId = LastAcknowledgmentId;
+        Logger.LogDebug("Resolving pending acknowledgment from remote AckYou for user {user} (AckId: {ackId})", UserData.AliasOrUID, acknowledgmentId);
+
+        HasPendingAcknowledgment = false;
+        LastAcknowledgmentSuccess = true;
+        LastAcknowledgmentTime = DateTimeOffset.UtcNow;
+
+        Mediator.Publish(new PairAcknowledgmentStatusChangedMessage(
+            UserData,
+            acknowledgmentId,
+            HasPendingAcknowledgment,
+            LastAcknowledgmentSuccess,
+            LastAcknowledgmentTime
+        ));
+
+        var ackData = new AcknowledgmentStatusData(HasPendingAcknowledgment, LastAcknowledgmentSuccess, LastAcknowledgmentTime);
+        Mediator.Publish(new UserPairIconUpdateMessage(UserData, IconUpdateType.AcknowledgmentStatus, ackData));
+
+        Mediator.Publish(new AcknowledgmentUiRefreshMessage(
+            AcknowledgmentId: acknowledgmentId,
+            User: UserData
+        ));
+
+        if (!string.IsNullOrEmpty(acknowledgmentId))
+        {
+            Mediator.Publish(new AcknowledgmentStatusChangedMessage(
+                acknowledgmentId,
+                UserData,
+                AcknowledgmentStatus.Received,
+                DateTime.UtcNow
+            ));
+        }
+    }
+
     public void SetBuildStartPendingStatus()
     {
         Logger.LogInformation("Setting build start pending status for user {user}", UserData.AliasOrUID);
