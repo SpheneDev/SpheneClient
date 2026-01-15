@@ -3,16 +3,6 @@ name: Release SpheneClient
 on:
   workflow_dispatch:
     inputs:
-      increment_type:
-        description: 'Version increment type'
-        required: true
-        default: 'build'
-        type: choice
-        options:
-        - build
-        - patch
-        - minor
-        - major
       is_testbuild:
         description: 'Publish as Testbuild (updates DownloadLinkTesting/TestingAssemblyVersion)'
         required: true
@@ -55,7 +45,7 @@ jobs:
         Invoke-WebRequest -Uri "https://goatcorp.github.io/dalamud-distrib/stg/latest.zip" -OutFile latest.zip
         Expand-Archive -Force latest.zip "$env:AppData\XIVLauncher\addon\Hooks\dev"
         
-    - name: Get latest version and increment
+    - name: Get version from CSProj
       id: get_version
       run: |
         $csprojPath = "Sphene/Sphene.csproj"
@@ -63,51 +53,13 @@ jobs:
         $match = [regex]::Match($content, '<Version>([^<]+)</Version>')
         if (-not $match.Success) { throw "No <Version> found in $csprojPath" }
 
-        $latestVersion = $match.Groups[1].Value.Trim()
-        if ($latestVersion -notmatch '^\d+\.\d+\.\d+\.\d+$') { throw "Version '$latestVersion' in $csprojPath is not a 4-part version" }
-        Write-Host "Base version from csproj: $latestVersion"
+        $version = $match.Groups[1].Value.Trim()
+        if ($version -notmatch '^\d+\.\d+\.\d+\.\d+$') { throw "Version '$version' in $csprojPath is not a 4-part version" }
+        $newTag = "v$version"
         
-        # Parse version components
-        $versionParts = $latestVersion.Split('.')
-        $major = [int]$versionParts[0]
-        $minor = [int]$versionParts[1]
-        $patch = [int]$versionParts[2]
-        $build = if ($versionParts.Length -ge 4) { [int]$versionParts[3] } else { 0 }
-
-        $incrementType = "${{ github.event.inputs.increment_type }}"
-        $isTestBuildInput = "${{ github.event.inputs.is_testbuild }}"
-        if ($isTestBuildInput -eq "true") {
-          $incrementType = "build"
-        }
-        
-        # Increment based on input
-        switch ($incrementType) {
-          "major" {
-            $major++
-            $minor = 0
-            $patch = 0
-            $build = 0
-          }
-          "minor" {
-            $minor++
-            $patch = 0
-            $build = 0
-          }
-          "patch" {
-            $patch++
-            $build = 0
-          }
-          "build" {
-            $build++
-          }
-        }
-        
-        $newVersion = "{0}.{1}.{2}.{3}" -f $major, $minor, $patch, $build
-        $newTag = "v$newVersion"
-        
-        echo "version=$newVersion" >> $env:GITHUB_OUTPUT
+        echo "version=$version" >> $env:GITHUB_OUTPUT
         echo "tag=$newTag" >> $env:GITHUB_OUTPUT
-        echo "New version: $newVersion"
+        echo "Version: $version"
         echo "New tag: $newTag"
       shell: powershell
         
