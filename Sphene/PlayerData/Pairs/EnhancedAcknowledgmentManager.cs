@@ -18,7 +18,6 @@ namespace Sphene.PlayerData.Pairs;
 public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
 {
     private readonly ApiController _apiController;
-    private readonly DalamudUtilService _dalamudUtilService;
     private readonly AcknowledgmentConfiguration _config;
     private readonly AcknowledgmentMetrics _metrics = new();
     
@@ -45,7 +44,6 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
     private readonly SessionAcknowledgmentManager _sessionManager;
 
     private volatile bool _isInDuty;
-    private int _dutyWarningShown = 0;
     
     // Thread safety
     private readonly SemaphoreSlim _batchSemaphore = new(1, 1);
@@ -65,7 +63,6 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
         SessionAcknowledgmentManager sessionManager) : base(logger, mediator)
     {
         _apiController = apiController;
-        _dalamudUtilService = dalamudUtilService;
         _config = config;
         _sessionManager = sessionManager;
         _config.Validate();
@@ -98,12 +95,10 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
         Mediator.Subscribe<DutyStartMessage>(this, _ =>
         {
             _isInDuty = true;
-            Interlocked.Exchange(ref _dutyWarningShown, 0);
         });
         Mediator.Subscribe<DutyEndMessage>(this, _ =>
         {
             _isInDuty = false;
-            Interlocked.Exchange(ref _dutyWarningShown, 0);
         });
     }
     
@@ -425,11 +420,6 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
                 {
                     if (_pendingAcknowledgments.TryRemove(ackId, out var pendingAck))
                     {
-                        if (_isInDuty)
-                        {
-                            ShowDutyAcknowledgmentWarningOnce();
-                        }
-
                         Logger.LogWarning("Acknowledgment {ackId} timed out", ackId);
                         pendingAck.Acknowledgment.MarkAsFailed(AcknowledgmentErrorCode.Timeout);
                         _metrics.RecordFailure(pendingAck.Acknowledgment.Priority, AcknowledgmentErrorCode.Timeout);
@@ -449,25 +439,6 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
                 Logger.LogError(ex, "Error in timeout check timer");
             }
         });
-    }
-
-    private void ShowDutyAcknowledgmentWarningOnce()
-    {
-        if (!_dalamudUtilService.IsLoggedIn)
-        {
-            return;
-        }
-
-        if (Interlocked.Exchange(ref _dutyWarningShown, 1) == 1)
-        {
-            return;
-        }
-
-        Mediator.Publish(new NotificationMessage(
-            "Acknowledgments in duty",
-            "You are in duty. Character data acknowledgments can be delayed or fail during combat; this is expected.",
-            Sphene.SpheneConfiguration.Models.NotificationType.Warning,
-            TimeSpan.FromSeconds(6)));
     }
     
     

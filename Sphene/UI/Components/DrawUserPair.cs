@@ -641,6 +641,11 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
             }
         }
 
+        if (_pair.IsInDuty)
+        {
+            userPairText += UiSharedService.TooltipSeparator + "Info: In duty, acknowledgments can be delayed or fail during combat.";
+        }
+
         if (_syncedGroups.Any())
         {
             userPairText += UiSharedService.TooltipSeparator + string.Join(Environment.NewLine,
