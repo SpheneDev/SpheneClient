@@ -379,6 +379,17 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         }
         UiSharedService.AttachToolTip("Changes VFX sync permissions with this user." + (individual ? individualText : string.Empty));
 
+        var isDisableVfxInDuty = _pair.UserPair!.OwnPermissions.IsDisableVFXInDuty();
+        string disableVfxInDutyText = isDisableVfxInDuty ? "Enable VFX sync in duty" : "Disable VFX sync in duty";
+        var disableVfxInDutyIcon = isDisableVfxInDuty ? FontAwesomeIcon.Sun : FontAwesomeIcon.ShieldAlt;
+        if (_uiSharedService.IconTextActionButton(disableVfxInDutyIcon, disableVfxInDutyText, _menuWidth, ButtonStyleKeys.ContextMenu_Item))
+        {
+            var permissions = _pair.UserPair.OwnPermissions;
+            permissions.SetDisableVFXInDuty(!isDisableVfxInDuty);
+            _ = _apiController.UserSetPairPermissions(new UserPermissionsDto(_pair.UserData, permissions));
+        }
+        UiSharedService.AttachToolTip("When enabled, VFX files from this user will be removed while you are in duty." + (individual ? individualText : string.Empty));
+
         ImGui.Separator();
         ImGui.TextUnformatted("Performance Functions");
         

@@ -316,7 +316,7 @@ public static class ThemePresets
                 [ButtonStyleKeys.Compact_AreaSelect] = new ButtonStyleOverride
                 {
                     WidthDelta = 0.0f,
-                    HeightDelta = -4.5f,
+                    HeightDelta = 0.0f,
                     IconOffset = new Vector2(0.0f, 0.0f)
                 },
                 [ButtonStyleKeys.Compact_Settings] = new ButtonStyleOverride

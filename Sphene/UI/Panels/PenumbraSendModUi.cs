@@ -133,7 +133,11 @@ public class PenumbraSendModUi : WindowMediatorSubscriberBase
         var scale = ImGuiHelpers.GlobalScale;
         var idSuffix = isEmbedded ? "Embedded" : "Window";
 
-        using (ImRaii.Child("SendModsRoot" + idSuffix, new Vector2(0f, 0f), false))
+        using (ImRaii.Child(
+                   "SendModsRoot" + idSuffix,
+                   new Vector2(0f, 0f),
+                   false,
+                   isEmbedded ? ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse : ImGuiWindowFlags.None))
         {
             UiSharedService.ColorText("Send Mods", ImGuiColors.DalamudWhite);
             UiSharedService.TextWrapped("Select one or more Penumbra mods, then choose who should receive them.");

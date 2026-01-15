@@ -49,6 +49,7 @@ public class DalamudUtilService : IHostedService, IMediatorSubscriber
     private readonly Dictionary<string, (string Name, nint Address)> _playerCharas = new(StringComparer.Ordinal);
     private readonly List<string> _notUpdatedCharas = [];
     private bool _sentBetweenAreas = false;
+    private bool _wasInDuty = false;
     private Lazy<ulong> _cid;
     private const int StillRenderingFlagMask = 1 << 11;
 
@@ -468,6 +469,7 @@ public class DalamudUtilService : IHostedService, IMediatorSubscriber
     public Task StartAsync(CancellationToken cancellationToken)
     {
         _logger.LogInformation("Starting DalamudUtilService");
+        _wasInDuty = IsInDuty;
         _framework.Update += FrameworkOnUpdate;
         if (IsLoggedIn)
         {
@@ -707,6 +709,20 @@ public class DalamudUtilService : IHostedService, IMediatorSubscriber
             {
                 Mediator.Publish(new CutsceneFrameworkUpdateMessage());
                 return;
+            }
+
+            bool isInDuty = _condition[ConditionFlag.BoundByDuty];
+            if (isInDuty && !_wasInDuty)
+            {
+                _logger.LogDebug("Duty start");
+                _wasInDuty = true;
+                Mediator.Publish(new DutyStartMessage());
+            }
+            else if (!isInDuty && _wasInDuty)
+            {
+                _logger.LogDebug("Duty end");
+                _wasInDuty = false;
+                Mediator.Publish(new DutyEndMessage());
             }
 
             if ((_condition[ConditionFlag.BetweenAreas] || _condition[ConditionFlag.BetweenAreas51]) && !_sentBetweenAreas)

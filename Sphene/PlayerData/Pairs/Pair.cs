@@ -29,14 +29,16 @@ public class Pair : DisposableMediatorSubscriberBase
     private readonly ServerConfigurationManager _serverConfigurationManager;
     private readonly PlayerPerformanceConfigService _playerPerformanceConfigService;
     private readonly Lazy<ApiController> _apiController;
+    private readonly DalamudUtilService _dalamudUtilService;
     private CancellationTokenSource _applicationCts = new();
     private OnlineUserIdentDto? _onlineUserIdentDto = null;
     private readonly VisibilityGateService _visibilityGateService;
+    private int _ackDutyWarningShown = 0;
 
     public Pair(ILogger<Pair> logger, UserFullPairDto userPair, PairHandlerFactory cachedPlayerFactory,
         SpheneMediator mediator, ServerConfigurationManager serverConfigurationManager,
         PlayerPerformanceConfigService playerPerformanceConfigService, Lazy<ApiController> apiController,
-        VisibilityGateService visibilityGateService) : base(logger, mediator)
+        VisibilityGateService visibilityGateService, DalamudUtilService dalamudUtilService) : base(logger, mediator)
     {
         UserPair = userPair;
         _cachedPlayerFactory = cachedPlayerFactory;
@@ -44,11 +46,13 @@ public class Pair : DisposableMediatorSubscriberBase
         _playerPerformanceConfigService = playerPerformanceConfigService;
         _apiController = apiController;
         _visibilityGateService = visibilityGateService;
+        _dalamudUtilService = dalamudUtilService;
         
         // Subscribe to character data application completion messages
         Mediator.Subscribe<CharacterDataApplicationCompletedMessage>(this, message => { _ = OnCharacterDataApplicationCompleted(message); });
         Mediator.Subscribe<GposeStartMessage>(this, _ => { WasMutuallyVisibleInGpose = IsMutuallyVisible; });
         Mediator.Subscribe<GposeEndMessage>(this, _ => { WasMutuallyVisibleInGpose = false; });
+        Mediator.Subscribe<DutyEndMessage>(this, _ => Interlocked.Exchange(ref _ackDutyWarningShown, 0));
     }
 
     public bool HasCachedPlayer => CachedPlayer != null && !string.IsNullOrEmpty(CachedPlayer.PlayerName) && _onlineUserIdentDto != null;
@@ -376,6 +380,12 @@ public class Pair : DisposableMediatorSubscriberBase
         bool disableIndividualAnimations = (UserPair.OtherPermissions.IsDisableAnimations() || UserPair.OwnPermissions.IsDisableAnimations());
         bool disableIndividualVFX = (UserPair.OtherPermissions.IsDisableVFX() || UserPair.OwnPermissions.IsDisableVFX());
         bool disableIndividualSounds = (UserPair.OtherPermissions.IsDisableSounds() || UserPair.OwnPermissions.IsDisableSounds());
+
+        if (_dalamudUtilService.IsInDuty
+            && (UserPair.OtherPermissions.IsDisableVFXInDuty() || UserPair.OwnPermissions.IsDisableVFXInDuty()))
+        {
+            disableIndividualVFX = true;
+        }
 
         Logger.LogTrace("Disable: Sounds: {disableIndividualSounds}, Anims: {disableIndividualAnims}; " +
             "VFX: {disableGroupSounds}",
@@ -804,8 +814,15 @@ public class Pair : DisposableMediatorSubscriberBase
                 {
                     try
                     {
-                        // Verify that the applied data hash matches the received data hash
-                        var verificationSuccess = VerifyDataHashIntegrity(latestAcknowledgment);
+                        var verificationSuccess = true;
+                        if (!_dalamudUtilService.IsInDuty && !_dalamudUtilService.IsInCombatOrPerforming)
+                        {
+                            verificationSuccess = VerifyDataHashIntegrity(latestAcknowledgment);
+                        }
+                        else
+                        {
+                            ShowDutyAcknowledgmentWarningOnce();
+                        }
                         
                         Logger.LogDebug("Sending acknowledgment - Application success: {appSuccess}, Hash verification: {hashSuccess}", 
                             message.Success, verificationSuccess);
@@ -858,6 +875,25 @@ public class Pair : DisposableMediatorSubscriberBase
              return false;
          }
      }
+
+    private void ShowDutyAcknowledgmentWarningOnce()
+    {
+        if (!_dalamudUtilService.IsInDuty || !_dalamudUtilService.IsLoggedIn)
+        {
+            return;
+        }
+
+        if (Interlocked.Exchange(ref _ackDutyWarningShown, 1) == 1)
+        {
+            return;
+        }
+
+        Mediator.Publish(new NotificationMessage(
+            "Acknowledgments in duty",
+            "You are in duty. Character data acknowledgments can be delayed or fail during combat; this is expected.",
+            NotificationType.Warning,
+            TimeSpan.FromSeconds(6)));
+    }
 
     protected override void Dispose(bool disposing)
     {

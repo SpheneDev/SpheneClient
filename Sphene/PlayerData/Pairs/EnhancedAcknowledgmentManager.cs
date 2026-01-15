@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Sphene.API.Dto.User;
+using Sphene.Services;
 using Sphene.Services.Mediator;
 using Sphene.Utils;
 using Sphene.WebAPI;
@@ -17,7 +18,7 @@ namespace Sphene.PlayerData.Pairs;
 public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
 {
     private readonly ApiController _apiController;
-    // Removed DalamudUtilService dependency - not needed for acknowledgment management
+    private readonly DalamudUtilService _dalamudUtilService;
     private readonly AcknowledgmentConfiguration _config;
     private readonly AcknowledgmentMetrics _metrics = new();
     
@@ -42,23 +43,33 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
     
     // Session acknowledgment manager for cleanup
     private readonly SessionAcknowledgmentManager _sessionManager;
+
+    private volatile bool _isInDuty;
+    private int _dutyWarningShown = 0;
     
     // Thread safety
     private readonly SemaphoreSlim _batchSemaphore = new(1, 1);
     private readonly CancellationTokenSource _cancellationTokenSource = new();
+
+    private const double DutyTimeoutMultiplier = 3.0;
+    private static readonly TimeSpan DefaultOldPendingMaxAge = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan DutyOldPendingMaxAge = TimeSpan.FromMinutes(3);
+    private static readonly TimeSpan DefaultSessionMaxAge = TimeSpan.FromMinutes(2);
+    private static readonly TimeSpan DutySessionMaxAge = TimeSpan.FromMinutes(10);
     
     public EnhancedAcknowledgmentManager(ILogger<EnhancedAcknowledgmentManager> logger, 
         ApiController apiController, 
-        // DalamudUtilService dalamudUtil, // Removed - not needed
+        DalamudUtilService dalamudUtilService,
         SpheneMediator mediator,
         AcknowledgmentConfiguration config,
         SessionAcknowledgmentManager sessionManager) : base(logger, mediator)
     {
         _apiController = apiController;
-        // _dalamudUtil = dalamudUtil; // Removed - not needed
+        _dalamudUtilService = dalamudUtilService;
         _config = config;
         _sessionManager = sessionManager;
         _config.Validate();
+        _isInDuty = dalamudUtilService.IsInDuty;
         
         // Initialize timers
         _batchProcessingTimer = new Timer(ProcessBatches, null, 
@@ -84,6 +95,16 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
         
         // Subscribe to mediator messages
         Mediator.Subscribe<SendCharacterDataAcknowledgmentMessage>(this, (msg) => _ = HandleSendAcknowledgment(msg));
+        Mediator.Subscribe<DutyStartMessage>(this, _ =>
+        {
+            _isInDuty = true;
+            Interlocked.Exchange(ref _dutyWarningShown, 0);
+        });
+        Mediator.Subscribe<DutyEndMessage>(this, _ =>
+        {
+            _isInDuty = false;
+            Interlocked.Exchange(ref _dutyWarningShown, 0);
+        });
     }
     
     
@@ -185,7 +206,8 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
     private async Task<bool> SendSingleAcknowledgmentAsync(EnhancedAcknowledgmentDto acknowledgment)
     {
         var startTime = DateTime.UtcNow;
-        var timeout = TimeSpan.FromSeconds(_config.GetTimeoutForPriority(acknowledgment.Priority));
+        var baseTimeoutSeconds = _config.GetTimeoutForPriority(acknowledgment.Priority);
+        var timeout = TimeSpan.FromSeconds(_isInDuty ? baseTimeoutSeconds * DutyTimeoutMultiplier : baseTimeoutSeconds);
         
         try
         {
@@ -364,11 +386,11 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
             try
             {
                 // Cleanup old pending acknowledgments (older than 30 seconds)
-                var maxAge = TimeSpan.FromSeconds(30);
+                var maxAge = _isInDuty ? DutyOldPendingMaxAge : DefaultOldPendingMaxAge;
                 await _sessionManager.CleanupOldPendingAcknowledgments(maxAge).ConfigureAwait(false);
                 
                 // Cleanup old sessions (older than 2 minutes)
-                var sessionMaxAge = TimeSpan.FromMinutes(2);
+                var sessionMaxAge = _isInDuty ? DutySessionMaxAge : DefaultSessionMaxAge;
                 await _sessionManager.CleanupOldSessions(sessionMaxAge).ConfigureAwait(false);
                 
                 Logger.LogDebug("Completed cleanup of old acknowledgments and sessions");
@@ -403,6 +425,11 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
                 {
                     if (_pendingAcknowledgments.TryRemove(ackId, out var pendingAck))
                     {
+                        if (_isInDuty)
+                        {
+                            ShowDutyAcknowledgmentWarningOnce();
+                        }
+
                         Logger.LogWarning("Acknowledgment {ackId} timed out", ackId);
                         pendingAck.Acknowledgment.MarkAsFailed(AcknowledgmentErrorCode.Timeout);
                         _metrics.RecordFailure(pendingAck.Acknowledgment.Priority, AcknowledgmentErrorCode.Timeout);
@@ -422,6 +449,25 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
                 Logger.LogError(ex, "Error in timeout check timer");
             }
         });
+    }
+
+    private void ShowDutyAcknowledgmentWarningOnce()
+    {
+        if (!_dalamudUtilService.IsLoggedIn)
+        {
+            return;
+        }
+
+        if (Interlocked.Exchange(ref _dutyWarningShown, 1) == 1)
+        {
+            return;
+        }
+
+        Mediator.Publish(new NotificationMessage(
+            "Acknowledgments in duty",
+            "You are in duty. Character data acknowledgments can be delayed or fail during combat; this is expected.",
+            Sphene.SpheneConfiguration.Models.NotificationType.Warning,
+            TimeSpan.FromSeconds(6)));
     }
     
     

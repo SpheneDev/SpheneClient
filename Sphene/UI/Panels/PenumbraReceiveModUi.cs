@@ -404,7 +404,10 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
 
     internal void DrawEmbedded()
     {
-        DrawPendingTab(isEmbedded: true);
+        using (ImRaii.Child("ReceiveModsRootEmbedded", new Vector2(0f, 0f), false, ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse))
+        {
+            DrawPendingTab(isEmbedded: true);
+        }
     }
 
     private void DrawPendingTab(bool isEmbedded)
@@ -482,7 +485,7 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
 
             // LEFT COLUMN: List
             var buttonHeight = ImGui.GetFrameHeightWithSpacing();
-            var listHeight = -buttonHeight * 2;
+            var listHeight = -(buttonHeight * 2f + (ImGui.GetStyle().ItemSpacing.Y * 2f));
 
             using (ImRaii.Child("LeftList", new Vector2(0f, listHeight), false))
             {

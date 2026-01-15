@@ -29,6 +29,8 @@ public record ClassJobChangedMessage(GameObjectHandler GameObjectHandler) : Mess
 public record DelayedFrameworkUpdateMessage : SameThreadMessage;
 public record ZoneSwitchStartMessage : MessageBase;
 public record ZoneSwitchEndMessage : MessageBase;
+public record DutyStartMessage : MessageBase;
+public record DutyEndMessage : MessageBase;
 public record CutsceneStartMessage : MessageBase;
 public record GposeStartMessage : SameThreadMessage;
 public record GposeEndMessage : MessageBase;

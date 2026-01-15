@@ -44,6 +44,7 @@ public class PermissionWindowUI : WindowMediatorSubscriberBase
         var disableSounds = _ownPermissions.IsDisableSounds();
         var disableAnimations = _ownPermissions.IsDisableAnimations();
         var disableVfx = _ownPermissions.IsDisableVFX();
+        var disableVfxInDuty = _ownPermissions.IsDisableVFXInDuty();
         var style = ImGui.GetStyle();
         var indentSize = ImGui.GetFrameHeight() + style.ItemSpacing.X;
 
@@ -71,6 +72,7 @@ public class PermissionWindowUI : WindowMediatorSubscriberBase
         var otherDisableSounds = otherPerms.IsDisableSounds();
         var otherDisableAnimations = otherPerms.IsDisableAnimations();
         var otherDisableVFX = otherPerms.IsDisableVFX();
+        var otherDisableVfxInDuty = otherPerms.IsDisableVFXInDuty();
 
         using (ImRaii.PushIndent(indentSize, false))
         {
@@ -126,6 +128,20 @@ public class PermissionWindowUI : WindowMediatorSubscriberBase
             ImGui.Text(Pair.UserData.AliasOrUID + " has " + (!otherDisableVFX ? "not " : string.Empty) + "disabled VFX sync with you");
         }
 
+        if (ImGui.Checkbox("Disable VFX in Duty", ref disableVfxInDuty))
+        {
+            _ownPermissions.SetDisableVFXInDuty(disableVfxInDuty);
+        }
+        _uiSharedService.DrawHelpText("When enabled, VFX files from this user will be removed while you are in duty." + UiSharedService.TooltipSeparator
+            + "Note: this is bidirectional, either user enabling this will stop duty VFX sync on both sides.");
+        using (ImRaii.PushIndent(indentSize, false))
+        {
+            _uiSharedService.BooleanToColoredIcon(!otherDisableVfxInDuty, false);
+            ImGui.SameLine();
+            ImGui.AlignTextToFramePadding();
+            ImGui.Text(Pair.UserData.AliasOrUID + " has " + (!otherDisableVfxInDuty ? "not " : string.Empty) + "disabled VFX sync in duty with you");
+        }
+
         ImGuiHelpers.ScaledDummy(0.5f);
         ImGui.Separator();
         ImGuiHelpers.ScaledDummy(0.5f);
@@ -165,6 +181,7 @@ public class PermissionWindowUI : WindowMediatorSubscriberBase
             _ownPermissions.SetSticky(Pair.IsDirectlyPaired || defaultPermissions.IndividualIsSticky);
             _ownPermissions.SetPaused(false);
             _ownPermissions.SetDisableVFX(Pair.IsDirectlyPaired ? defaultPermissions.DisableIndividualVFX : defaultPermissions.DisableGroupVFX);
+            _ownPermissions.SetDisableVFXInDuty(false);
             _ownPermissions.SetDisableSounds(Pair.IsDirectlyPaired ? defaultPermissions.DisableIndividualSounds : defaultPermissions.DisableGroupSounds);
             _ownPermissions.SetDisableAnimations(Pair.IsDirectlyPaired ? defaultPermissions.DisableIndividualAnimations : defaultPermissions.DisableGroupAnimations);
             _ = _apiController.SetBulkPermissions(new(
