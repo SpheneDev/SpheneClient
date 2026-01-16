@@ -153,7 +153,7 @@ public sealed class ShrinkUHostService : IHostedService, IDisposable
                     var showStartupUi = true;
                     try { showStartupUi = !_backupService.IsBackupFolderFingerprintUnchanged(); }
                     catch (Exception ex) { _logger.LogDebug(ex, "Failed to determine ShrinkU backup fingerprint state"); }
-                    _logger.LogDebug("[ShrinkU][Fingerprint] Startup UI decision: show={show} backupPath={path}", showStartupUi, _shrinkuConfigService.Current.BackupFolderPath ?? string.Empty);
+                    _logger.LogDebug("ShrinkU startup UI decision: show={show}", showStartupUi);
                     if (showStartupUi)
                     {
                         try { _startupProgressUi.ResetAll(); _startupProgressUi.IsOpen = true; }
