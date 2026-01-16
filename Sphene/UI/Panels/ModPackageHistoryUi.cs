@@ -212,6 +212,8 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
             return;
         }
 
+        DrawRedownloadStatus();
+
         if (_uiShared.IconTextButton(FontAwesomeIcon.History, "Load my uploaded mod packages"))
         {
             _modUploadHistoryTask = GetModUploadHistory(CancellationToken.None);
@@ -246,7 +248,7 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
         var startIndex = (_uploadCurrentPage - 1) * _historyItemsPerPage;
         var pagedHistory = history.Skip(startIndex).Take(_historyItemsPerPage).ToList();
 
-        if (!ImGui.BeginTable("ModUploadHistoryTable", 5, ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerV))
+        if (!ImGui.BeginTable("ModUploadHistoryTable", 6, ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerV))
         {
             return;
         }
@@ -256,6 +258,7 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
         ImGui.TableSetupColumn("Author", ImGuiTableColumnFlags.WidthFixed, 120);
         ImGui.TableSetupColumn("Size", ImGuiTableColumnFlags.WidthFixed, 100);
         ImGui.TableSetupColumn("Uploaded", ImGuiTableColumnFlags.WidthFixed, 160);
+        ImGui.TableSetupColumn("Actions", ImGuiTableColumnFlags.WidthFixed, 120);
         ImGui.TableHeadersRow();
 
         foreach (var entry in pagedHistory)
@@ -281,6 +284,14 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
             ImGui.TextUnformatted(UiSharedService.ByteToString(entry.Size));
             ImGui.TableNextColumn();
             ImGui.TextUnformatted(entry.UploadedDate.ToLocalTime().ToString("yyyy-MM-dd HH:mm"));
+            ImGui.TableNextColumn();
+            using (ImRaii.Disabled(_isRedownloadBusy))
+            {
+                if (ImGui.SmallButton($"Re-download##redownload_upload_{entry.Hash}_{entry.UploadedDate.Ticks}"))
+                {
+                    StartRedownload(entry);
+                }
+            }
         }
 
         ImGui.EndTable();
@@ -422,6 +433,36 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
             return;
         }
 
+        StartRedownload(entry.Hash, entry.Name, entry.Author, entry.Version);
+    }
+
+    private void StartRedownload(ModUploadHistoryEntryDto entry)
+    {
+        if (entry == null || string.IsNullOrWhiteSpace(entry.Hash))
+        {
+            return;
+        }
+
+        StartRedownload(entry.Hash, entry.Name, entry.Author, entry.Version);
+    }
+
+    private void StartRedownload(ModShareHistoryEntryDto entry)
+    {
+        if (entry == null || string.IsNullOrWhiteSpace(entry.Hash))
+        {
+            return;
+        }
+
+        StartRedownload(entry.Hash, entry.Name, entry.Author, entry.Version);
+    }
+
+    private void StartRedownload(string hash, string? name, string? author, string? version)
+    {
+        if (string.IsNullOrWhiteSpace(hash))
+        {
+            return;
+        }
+
         _redownloadCts = _redownloadCts.CancelRecreate();
         var token = _redownloadCts.Token;
 
@@ -429,13 +470,13 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
         _redownloadStatusIsError = false;
         _redownloadProgress = 0f;
 
-        var displayName = string.IsNullOrWhiteSpace(entry.Name) ? entry.Hash : entry.Name;
+        var displayName = string.IsNullOrWhiteSpace(name) ? hash : name;
         _redownloadStatusText = $"Re-downloading: {displayName}";
 
-        _ = Task.Run(async () => await RedownloadAsync(entry, displayName, token).ConfigureAwait(false), token);
+        _ = Task.Run(async () => await RedownloadAsync(hash, name, author, version, displayName, token).ConfigureAwait(false), token);
     }
 
-    private async Task RedownloadAsync(ModDownloadHistoryEntryDto entry, string displayName, CancellationToken token)
+    private async Task RedownloadAsync(string hash, string? name, string? author, string? version, string displayName, CancellationToken token)
     {
         try
         {
@@ -451,7 +492,7 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
                 _redownloadProgress = Math.Clamp((float)tuple.TransferredBytes / tuple.TotalBytes, 0f, 1f);
             });
 
-            var pmpPath = await fileDownloadManager.DownloadPmpToCacheAsync(entry.Hash, token, downloadProgress).ConfigureAwait(false);
+            var pmpPath = await fileDownloadManager.DownloadPmpToCacheAsync(hash, token, downloadProgress).ConfigureAwait(false);
             if (string.IsNullOrWhiteSpace(pmpPath) || !File.Exists(pmpPath))
             {
                 _redownloadStatusIsError = true;
@@ -461,7 +502,7 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
 
             token.ThrowIfCancellationRequested();
 
-            var modFolderName = await ResolveRedownloadInstallFolderNameAsync(entry, token).ConfigureAwait(false);
+            var modFolderName = await ResolveRedownloadInstallFolderNameAsync(hash, name, author, version, token).ConfigureAwait(false);
             if (string.IsNullOrWhiteSpace(modFolderName))
             {
                 _redownloadStatusIsError = true;
@@ -522,7 +563,7 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
         {
             _redownloadStatusIsError = true;
             _redownloadStatusText = "Re-download failed. See /xllog for details.";
-            _logger.LogWarning(ex, "Failed to re-download mod package {hash}", entry.Hash);
+            _logger.LogWarning(ex, "Failed to re-download mod package {hash}", hash);
         }
         finally
         {
@@ -530,10 +571,10 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
         }
     }
 
-    private async Task<string> ResolveRedownloadInstallFolderNameAsync(ModDownloadHistoryEntryDto entry, CancellationToken token)
+    private async Task<string> ResolveRedownloadInstallFolderNameAsync(string hash, string? name, string? author, string? version, CancellationToken token)
     {
-        var preferred = entry.Name?.Trim() ?? string.Empty;
-        var hash = entry.Hash?.Trim() ?? string.Empty;
+        var preferred = name?.Trim() ?? string.Empty;
+        hash = hash?.Trim() ?? string.Empty;
         if (string.IsNullOrWhiteSpace(preferred) && !string.IsNullOrWhiteSpace(hash))
         {
             preferred = hash;
@@ -581,16 +622,16 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
                             score += 2;
                         }
 
-                        if (!string.IsNullOrWhiteSpace(entry.Author) &&
+                        if (!string.IsNullOrWhiteSpace(author) &&
                             !string.IsNullOrWhiteSpace(meta?.Author) &&
-                            string.Equals(meta.Author.Trim(), entry.Author.Trim(), StringComparison.OrdinalIgnoreCase))
+                            string.Equals(meta.Author.Trim(), author.Trim(), StringComparison.OrdinalIgnoreCase))
                         {
                             score += 2;
                         }
 
-                        if (!string.IsNullOrWhiteSpace(entry.Version) &&
+                        if (!string.IsNullOrWhiteSpace(version) &&
                             !string.IsNullOrWhiteSpace(meta?.Version) &&
-                            string.Equals(meta.Version.Trim(), entry.Version.Trim(), StringComparison.OrdinalIgnoreCase))
+                            string.Equals(meta.Version.Trim(), version.Trim(), StringComparison.OrdinalIgnoreCase))
                         {
                             score += 1;
                         }
@@ -753,6 +794,8 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
             return;
         }
 
+        DrawRedownloadStatus();
+
         if (_uiShared.IconTextButton(FontAwesomeIcon.Share, "Load my shared mod packages"))
         {
             _modShareHistoryTask = GetModShareHistory(CancellationToken.None);
@@ -787,7 +830,7 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
         var startIndex = (_shareCurrentPage - 1) * _historyItemsPerPage;
         var pagedHistory = history.Skip(startIndex).Take(_historyItemsPerPage).ToList();
 
-        if (!ImGui.BeginTable("ModShareHistoryTable", 6, ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerV))
+        if (!ImGui.BeginTable("ModShareHistoryTable", 7, ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerV))
         {
             return;
         }
@@ -798,6 +841,7 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
         ImGui.TableSetupColumn("Recipient", ImGuiTableColumnFlags.WidthFixed, 120);
         ImGui.TableSetupColumn("Size", ImGuiTableColumnFlags.WidthFixed, 100);
         ImGui.TableSetupColumn("Shared At", ImGuiTableColumnFlags.WidthFixed, 160);
+        ImGui.TableSetupColumn("Actions", ImGuiTableColumnFlags.WidthFixed, 120);
         ImGui.TableHeadersRow();
 
         foreach (var entry in pagedHistory)
@@ -833,6 +877,14 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
             ImGui.TextUnformatted(UiSharedService.ByteToString(entry.Size));
             ImGui.TableNextColumn();
             ImGui.TextUnformatted(entry.SharedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm"));
+            ImGui.TableNextColumn();
+            using (ImRaii.Disabled(_isRedownloadBusy))
+            {
+                if (ImGui.SmallButton($"Re-download##redownload_share_{entry.Hash}_{entry.SharedAt.Ticks}"))
+                {
+                    StartRedownload(entry);
+                }
+            }
         }
 
         ImGui.EndTable();

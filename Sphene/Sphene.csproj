@@ -3,9 +3,9 @@
   <PropertyGroup>
     <Authors></Authors>
     <Company></Company>
-    <Version>1.1.10.24</Version>
-    <AssemblyVersion>1.1.10.24</AssemblyVersion>
-    <FileVersion>1.1.10.24</FileVersion>
+    <Version>1.1.10.34</Version>
+    <AssemblyVersion>1.1.10.34</AssemblyVersion>
+    <FileVersion>1.1.10.34</FileVersion>
     <Description>Through the power of Living Memory, this plugin harmonizes your Penumbra modifications and Glamourer configurations across all connected souls, ensuring endless synchronization in your shared digital realm.</Description>
     <Copyright></Copyright>
     <PackageProjectUrl>https://github.com/SpheneDev/client</PackageProjectUrl>

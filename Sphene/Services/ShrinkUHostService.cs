@@ -150,8 +150,20 @@ public sealed class ShrinkUHostService : IHostedService, IDisposable
                     _refreshCts?.Cancel();
                     _refreshCts = new CancellationTokenSource();
                     var token = _refreshCts.Token;
-                    try { _startupProgressUi.ResetAll(); _startupProgressUi.IsOpen = true; }
-                    catch (Exception ex) { _logger.LogDebug(ex, "Failed to open StartupProgressUI"); }
+                    var showStartupUi = true;
+                    try { showStartupUi = !_backupService.IsBackupFolderFingerprintUnchanged(); }
+                    catch (Exception ex) { _logger.LogDebug(ex, "Failed to determine ShrinkU backup fingerprint state"); }
+                    _logger.LogDebug("[ShrinkU][Fingerprint] Startup UI decision: show={show} backupPath={path}", showStartupUi, _shrinkuConfigService.Current.BackupFolderPath ?? string.Empty);
+                    if (showStartupUi)
+                    {
+                        try { _startupProgressUi.ResetAll(); _startupProgressUi.IsOpen = true; }
+                        catch (Exception ex) { _logger.LogDebug(ex, "Failed to open StartupProgressUI"); }
+                    }
+                    else
+                    {
+                        try { _startupProgressUi.IsOpen = false; }
+                        catch (Exception ex) { _logger.LogDebug(ex, "Failed to close StartupProgressUI"); }
+                    }
                     _ = Task.Run(async () =>
                     {
                         try
@@ -408,6 +420,17 @@ public sealed class ShrinkUHostService : IHostedService, IDisposable
                     try { _shrinkuConfigService.Save(); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to save ShrinkU backup path configuration after write test failure"); }
                     _logger.LogDebug("Backup path not writable; switched to Sphene texture_backups: {path}", target);
                 }
+            }
+
+            try
+            {
+                var finalPath = _shrinkuConfigService.Current.BackupFolderPath ?? string.Empty;
+                if (!string.IsNullOrWhiteSpace(finalPath))
+                    _backupService.ConfigureBackupFolderPath(finalPath);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to sync ShrinkU backup folder path to backup service");
             }
         }
         catch (Exception ex)
