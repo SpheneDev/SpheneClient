@@ -14,6 +14,7 @@ using Sphene.Services.ServerConfiguration;
 using Sphene.Services.Mediator;
 using Sphene.SpheneConfiguration;
 using Sphene.Utils;
+using Sphene.WebAPI;
 using Sphene.WebAPI.Files;
 using System;
 using System.Collections.Generic;
@@ -29,6 +30,7 @@ namespace Sphene.UI.Panels;
 public class ModPackageHistoryUi : WindowMediatorSubscriberBase
 {
     private readonly UiSharedService _uiShared;
+    private readonly ApiController _apiController;
     private readonly FileTransferOrchestrator _fileTransferOrchestrator;
     private readonly FileUploadManager _fileUploadManager;
     private readonly FileDownloadManagerFactory _fileDownloadManagerFactory;
@@ -74,6 +76,7 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
         ILogger<ModPackageHistoryUi> logger,
         SpheneMediator mediator,
         UiSharedService uiShared,
+        ApiController apiController,
         FileTransferOrchestrator fileTransferOrchestrator,
         FileUploadManager fileUploadManager,
         FileDownloadManagerFactory fileDownloadManagerFactory,
@@ -86,6 +89,7 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
         : base(logger, mediator, "Mod Packages###SpheneModPackageHistory", performanceCollectorService)
     {
         _uiShared = uiShared;
+        _apiController = apiController;
         _fileTransferOrchestrator = fileTransferOrchestrator;
         _fileUploadManager = fileUploadManager;
         _fileDownloadManagerFactory = fileDownloadManagerFactory;
@@ -192,7 +196,7 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
                 ImGui.EndTabItem();
             }
 
-            if (ImGui.BeginTabItem("Backups"))
+            if (_apiController.IsAdmin && ImGui.BeginTabItem("Backups"))
             {
                 DrawPenumbraBackups();
                 ImGui.EndTabItem();
