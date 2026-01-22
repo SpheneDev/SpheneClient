@@ -19,6 +19,8 @@ using System.IO;
 using System.IO.Compression;
 using System.Linq;
 using System.Numerics;
+using System.Security.Cryptography;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -27,6 +29,7 @@ namespace Sphene.UI.Panels;
 public class PenumbraSendModUi : WindowMediatorSubscriberBase
 {
     private const char WebsiteBacktick = '`';
+    private static readonly byte[] _newLineUtf8 = [(byte)'\n'];
 
     private readonly UiSharedService _uiSharedService;
     private readonly PairManager _pairManager;
@@ -596,6 +599,20 @@ public class PenumbraSendModUi : WindowMediatorSubscriberBase
 
                         if (!modInfoByHash.ContainsKey(hash))
                         {
+                            string? folderHash = null;
+                            try
+                            {
+                                var modAbsolutePath = _shrinkuBackupService.GetModAbsolutePath(modFolderName);
+                                if (!string.IsNullOrWhiteSpace(modAbsolutePath))
+                                {
+                                    folderHash = ComputeModFolderHash(modAbsolutePath, token);
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogDebug(ex, "Failed to compute folder hash for mod {modFolderName}", modFolderName);
+                            }
+
                             var metadata = await _shrinkuPenumbraIpc.GetModMetadataAsync(modFolderName).ConfigureAwait(false);
                             if (metadata != null)
                             {
@@ -606,11 +623,12 @@ public class PenumbraSendModUi : WindowMediatorSubscriberBase
                                     NormalizeOptionalText(metadata.Author, removeBackticks: false),
                                     NormalizeOptionalText(metadata.Version, removeBackticks: false),
                                     NormalizeOptionalText(metadata.Description, removeBackticks: false),
-                                    NormalizeOptionalText(metadata.Website, removeBackticks: true));
+                                    NormalizeOptionalText(metadata.Website, removeBackticks: true),
+                                    folderHash);
                             }
                             else
                             {
-                                modInfoByHash[hash] = new ModInfoDto(hash, NormalizeRequiredText(modFolderName, modFolderName, removeBackticks: false), null, null, null, null);
+                                modInfoByHash[hash] = new ModInfoDto(hash, NormalizeRequiredText(modFolderName, modFolderName, removeBackticks: false), null, null, null, null, folderHash);
                             }
                         }
 
@@ -902,5 +920,71 @@ public class PenumbraSendModUi : WindowMediatorSubscriberBase
 
         normalized = NormalizeOptionalText(fallback, removeBackticks: false);
         return normalized ?? string.Empty;
+    }
+
+    private static string? ComputeModFolderHash(string modAbsolutePath, CancellationToken token)
+    {
+        if (string.IsNullOrWhiteSpace(modAbsolutePath))
+        {
+            return null;
+        }
+
+        var root = Path.GetFullPath(modAbsolutePath);
+        if (!Directory.Exists(root))
+        {
+            return null;
+        }
+
+        var files = new List<string>(4096);
+        foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
+        {
+            files.Add(file);
+        }
+
+        files.Sort(StringComparer.Ordinal);
+
+        using var sha1 = SHA1.Create();
+        for (int i = 0; i < files.Count; i++)
+        {
+            token.ThrowIfCancellationRequested();
+
+            var file = files[i];
+            var relative = Path.GetRelativePath(root, file).Replace('\\', '/');
+
+            long length;
+            try
+            {
+                length = new FileInfo(file).Length;
+            }
+            catch
+            {
+                length = 0;
+            }
+
+            var fileHash = ComputeFileSha1HexUpper(file, token);
+            var line = $"{relative}|{length}|{fileHash}";
+            var bytes = Encoding.UTF8.GetBytes(line);
+            sha1.TransformBlock(bytes, 0, bytes.Length, null, 0);
+            sha1.TransformBlock(_newLineUtf8, 0, _newLineUtf8.Length, null, 0);
+        }
+
+        sha1.TransformFinalBlock(Array.Empty<byte>(), 0, 0);
+        return Convert.ToHexString(sha1.Hash ?? Array.Empty<byte>());
+    }
+
+    private static string ComputeFileSha1HexUpper(string filePath, CancellationToken token)
+    {
+        using var sha1 = SHA1.Create();
+        using var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, FileOptions.SequentialScan);
+        var buffer = new byte[1024 * 1024];
+        int read;
+        while ((read = fs.Read(buffer, 0, buffer.Length)) > 0)
+        {
+            token.ThrowIfCancellationRequested();
+            sha1.TransformBlock(buffer, 0, read, null, 0);
+        }
+
+        sha1.TransformFinalBlock(Array.Empty<byte>(), 0, 0);
+        return Convert.ToHexString(sha1.Hash ?? Array.Empty<byte>());
     }
 }
