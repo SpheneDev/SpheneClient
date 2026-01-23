@@ -44,6 +44,10 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
     private bool _isVisible;
     private Guid _penumbraCollection;
     private bool _redrawOnNextApplication = false;
+    private string? _inProgressDataHash;
+    private bool _forceRedrawAfterCurrentApplication = false;
+    private string? _lastSuccessfullyAppliedDataHash;
+    private nint _lastSuccessfullyAppliedCharacterAddress = nint.Zero;
     private bool _initIdentMissingLogged = false;
     private bool _proximityReportedVisible = false;
     private DateTime _postZoneCheckUntil = DateTime.MinValue;
@@ -227,9 +231,23 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         Logger.LogDebug("[BASE-{appbase}] Applying data for {player}, forceApplyCustomization: {forced}, forceApplyMods: {forceMods}", applicationBase, this, forceApplyCustomization, _forceApplyMods);
         Logger.LogDebug("[BASE-{appbase}] Hash for data is {newHash}, current cache hash is {oldHash}", applicationBase, characterData.DataHash.Value, _cachedData?.DataHash.Value ?? "NODATA");
 
+        if (_applicationTask != null
+            && !_applicationTask.IsCompleted
+            && string.Equals(_inProgressDataHash, characterData.DataHash.Value, StringComparison.Ordinal)
+            )
+        {
+            if (forceApplyCustomization || _forceApplyMods || _redrawOnNextApplication)
+            {
+                _forceRedrawAfterCurrentApplication = true;
+                _redrawOnNextApplication = false;
+            }
+            Logger.LogDebug("[BASE-{appbase}] Skipping application - hash already in progress ({hash})", applicationBase, characterData.DataHash.Value);
+            return;
+        }
+
         // Check if data hash is identical and no forced application is required
         var hashesAreEqual = string.Equals(characterData.DataHash.Value, _cachedData?.DataHash.Value ?? string.Empty, StringComparison.Ordinal);
-        if (hashesAreEqual && !forceApplyCustomization) 
+        if (hashesAreEqual && !forceApplyCustomization && !_forceApplyMods && !_redrawOnNextApplication) 
         {
             Logger.LogTrace("[BASE-{appbase}] Skipping application - hash unchanged and no forced customization", applicationBase);
             return;
@@ -253,6 +271,8 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             "Applying Character Data")));
 
         _forceApplyMods |= forceApplyCustomization;
+
+        _inProgressDataHash = characterData.DataHash.Value;
 
         var charaDataToUpdate = characterData.CheckUpdatedData(applicationBase, _cachedData?.DeepClone() ?? new(), Logger, this, forceApplyCustomization, _forceApplyMods);
 
@@ -608,7 +628,22 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                 await _ipcManager.Penumbra.RedrawAsync(Logger, _charaHandler, _applicationId, token).ConfigureAwait(false);
             }
 
+            if (_forceRedrawAfterCurrentApplication
+                && _charaHandler != null
+                && (!updatedData.TryGetValue(ObjectKind.Player, out var playerUpdates)
+                    || (!playerUpdates.Contains(PlayerChanges.ForcedRedraw) && !playerUpdates.Contains(PlayerChanges.ModFiles))))
+            {
+                _forceRedrawAfterCurrentApplication = false;
+                await _ipcManager.Penumbra.RedrawAsync(Logger, _charaHandler, _applicationId, token).ConfigureAwait(false);
+            }
+            else
+            {
+                _forceRedrawAfterCurrentApplication = false;
+            }
+
             _cachedData = charaData;
+            _lastSuccessfullyAppliedDataHash = charaData.DataHash.Value;
+            _lastSuccessfullyAppliedCharacterAddress = _charaHandler?.Address ?? nint.Zero;
 
             Logger.LogDebug("[{applicationId}] Application finished", _applicationId);
             
@@ -711,11 +746,20 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                     IsVisible = true;
                     if (_cachedData != null)
                     {
-                        Logger.LogDebug("[BASE-{appBase}] {this} visibility changed (mutual), cached data exists", appData, this);
-                        _ = Task.Run(() =>
+                        var cachedHash = _cachedData.DataHash.Value;
+                        var currentAddress = _charaHandler!.Address;
+                        var alreadyApplied =
+                            _lastSuccessfullyAppliedCharacterAddress == currentAddress
+                            && string.Equals(_lastSuccessfullyAppliedDataHash, cachedHash, StringComparison.Ordinal);
+
+                        if (!alreadyApplied)
                         {
-                            ApplyCharacterData(appData, _cachedData!, forceApplyCustomization: true);
-                        });
+                            Logger.LogDebug("[BASE-{appBase}] {this} visibility changed (mutual), cached data exists", appData, this);
+                            _ = Task.Run(() =>
+                            {
+                                ApplyCharacterData(appData, _cachedData!, forceApplyCustomization: false);
+                            });
+                        }
                     }
                     else
                     {

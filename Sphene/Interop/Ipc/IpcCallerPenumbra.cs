@@ -202,7 +202,7 @@ public sealed class IpcCallerPenumbra : DisposableMediatorSubscriberBase, IIpcCa
         }
         _spheneMediator.Publish(new ResumeScanMessage(nameof(ConvertTextureFiles)));
 
-        ScheduleDebouncedRedraw();
+        await RedrawPlayerAsync().ConfigureAwait(false);
     }
 
     private void ScheduleDebouncedRedraw(int delayMs = 600)
@@ -298,18 +298,12 @@ public sealed class IpcCallerPenumbra : DisposableMediatorSubscriberBase, IIpcCa
         return await _penumbraResolvePaths.Invoke(forward, reverse).ConfigureAwait(false);
     }
 
-    public async Task RedrawPlayerAsync()
+    public Task RedrawPlayerAsync(int delayMs = 600)
     {
-        if (!APIAvailable || _dalamudUtil.IsZoning) return;
-        
-        await _dalamudUtil.RunOnFrameworkThread(async () =>
-        {
-            var gameObject = await _dalamudUtil.CreateGameObjectAsync(await _dalamudUtil.GetPlayerPointerAsync().ConfigureAwait(false)).ConfigureAwait(false);
-            if (gameObject != null)
-            {
-                _penumbraRedraw.Invoke(gameObject.ObjectIndex, setting: RedrawType.Redraw);
-            }
-        }).ConfigureAwait(false);
+        if (!APIAvailable || _dalamudUtil.IsZoning) return Task.CompletedTask;
+
+        ScheduleDebouncedRedraw(delayMs);
+        return Task.CompletedTask;
     }
 
     public async Task SetManipulationDataAsync(ILogger logger, Guid applicationId, Guid collId, string manipulationData)
