@@ -1,15 +1,17 @@
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface;
 using Dalamud.Interface.Colors;
+using Dalamud.Interface.Textures.TextureWraps;
 using Dalamud.Interface.Utility;
 using Dalamud.Interface.Utility.Raii;
 using Microsoft.Extensions.Logging;
 using Sphene.Services;
 using Sphene.Services.Mediator;
 using Sphene.SpheneConfiguration;
+using Sphene.UI.Components;
 using System.Numerics;
 using System.Linq;
-using System.Text.RegularExpressions;
+using System.Text;
 
 namespace Sphene.UI.Panels;
 
@@ -18,7 +20,9 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
     private readonly UiSharedService _uiShared;
     private readonly SpheneConfigService _configService;
     private readonly ChangelogService _changelogService;
+    private IDalamudTextureWrap? _spheneLogoTextureWrap;
     private string _version = string.Empty;
+    private string _lastSeenVersionBeforeUpdate = string.Empty;
     private volatile bool _loading;
     private List<ReleaseChangelogViewEntry> _entries = new();
     private bool _showAll;
@@ -50,6 +54,9 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
 
         Mediator.Subscribe<ShowReleaseChangelogMessage>(this, (msg) =>
         {
+            _lastSeenVersionBeforeUpdate = string.IsNullOrWhiteSpace(msg.LastSeenVersionBeforeUpdate)
+                ? _configService.Current.LastSeenVersionChangelog ?? string.Empty
+                : msg.LastSeenVersionBeforeUpdate;
             _version = msg.CurrentVersion;
             WindowName = $"Sphene Release Notes - {_version}";
             _loading = true;
@@ -116,9 +123,8 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
         if (_uiShared.IsInGpose)
             return;
 
-        // Header
-        _uiShared.BigText("What’s New in Sphene");
-        ImGui.Separator();
+        var childBg = ImGui.GetStyle().Colors[(int)ImGuiCol.ChildBg];
+        var opaqueChildBg = new Vector4(childBg.X, childBg.Y, childBg.Z, 1f);
 
         using (var table = ImRaii.Table("ReleaseInfo", 2, ImGuiTableFlags.None))
         {
@@ -126,6 +132,13 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
             {
                 ImGui.TableSetupColumn("Label", ImGuiTableColumnFlags.WidthFixed, 120);
                 ImGui.TableSetupColumn("Value", ImGuiTableColumnFlags.WidthStretch);
+
+                ImGui.TableNextRow();
+                ImGui.TableNextColumn();
+                ImGui.Text("Last seen:");
+                ImGui.TableNextColumn();
+                var lastSeen = _lastSeenVersionBeforeUpdate;
+                ImGui.TextColored(ImGuiColors.DalamudGrey, string.IsNullOrWhiteSpace(lastSeen) ? "Unknown" : lastSeen);
 
                 ImGui.TableNextRow();
                 ImGui.TableNextColumn();
@@ -162,10 +175,15 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
 
         var footerHeight = ImGui.GetFrameHeightWithSpacing() + (ImGui.GetStyle().ItemSpacing.Y * 2f) + (ImGuiHelpers.GlobalScale * 6f);
         var changelogPaneHeight = Math.Max(0f, ImGui.GetContentRegionAvail().Y - footerHeight);
+        using (ImRaii.PushColor(ImGuiCol.ChildBg, ImGui.GetColorU32(opaqueChildBg)))
         using (var child = ImRaii.Child("ChangelogPane", new Vector2(-1, changelogPaneHeight), true, ImGuiWindowFlags.NoNav))
         {
             if (child)
             {
+                var childWindowPos = ImGui.GetWindowPos();
+                var childWindowSize = ImGui.GetWindowSize();
+                DrawSpheneWatermark(ImGui.GetWindowDrawList(), childWindowPos, childWindowPos + childWindowSize, 0.09f, -0.06f);
+
                 using (ImRaii.PushStyle(ImGuiStyleVar.FrameRounding, 6f))
                 using (ImRaii.PushStyle(ImGuiStyleVar.FramePadding, new Vector2(4, 3)))
                 using (ImRaii.PushStyle(ImGuiStyleVar.ItemSpacing, new Vector2(8, 4)))
@@ -209,13 +227,26 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
                             {
                                 ImGui.Dummy(new Vector2(0, 2));
 
-                                if (!string.IsNullOrEmpty(e.Description))
-                                    UiSharedService.TextWrapped(e.Description);
+                                if (!string.IsNullOrWhiteSpace(e.Description))
+                                {
+                                    ImGui.TextColored(ImGuiColors.DalamudYellow, "Description");
+                                    using (ImRaii.PushIndent(ImGuiHelpers.GlobalScale * 10f))
+                                    {
+                                        UiSharedService.TextWrapped(NormalizeDescription(e.Description));
+                                    }
+                                }
 
                                 ImGuiHelpers.ScaledDummy(2f);
 
+                                if (e.Changes is { Count: > 0 })
+                                {
+                                    ImGui.TextColored(ImGuiColors.ParsedBlue, "Changes");
+                                    ImGuiHelpers.ScaledDummy(1f);
+                                }
+
                                 using (ImRaii.PushIndent(10f))
                                 {
+                                    float bulletGap = ImGui.GetStyle().ItemInnerSpacing.X + ImGuiHelpers.GlobalScale * 8f;
                                     foreach (var change in e.Changes)
                                     {
                                         if (change == null)
@@ -223,11 +254,9 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
 
                                         var trimmedMain = (change.Text ?? string.Empty).Trim();
                                         if (trimmedMain.StartsWith("- ", StringComparison.Ordinal)) trimmedMain = trimmedMain.Substring(2);
+                                        if (trimmedMain.StartsWith("* ", StringComparison.Ordinal)) trimmedMain = trimmedMain.Substring(2);
                                         if (trimmedMain.StartsWith("• ", StringComparison.Ordinal)) trimmedMain = trimmedMain.Substring(2);
 
-                                        ImGui.Bullet();
-                                        float bulletGap = ImGui.GetStyle().ItemInnerSpacing.X + ImGuiHelpers.GlobalScale * 8f;
-                                        ImGui.SameLine(0, bulletGap);
                                         if (change.Sub is { Count: > 0 })
                                         {
                                             var baseColor = ImGuiColors.ParsedBlue;
@@ -251,6 +280,7 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
 
                                                 var trimmedSub = sub.Trim();
                                                 if (trimmedSub.StartsWith("- ", StringComparison.Ordinal)) trimmedSub = trimmedSub.Substring(2);
+                                                if (trimmedSub.StartsWith("* ", StringComparison.Ordinal)) trimmedSub = trimmedSub.Substring(2);
                                                 if (trimmedSub.StartsWith("• ", StringComparison.Ordinal)) trimmedSub = trimmedSub.Substring(2);
 
                                                 ImGui.Bullet();
@@ -260,6 +290,10 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
                                             ImGui.Unindent(ImGuiHelpers.GlobalScale * 18f);
                                             // add gap only after structured entries with sub-items
                                             ImGuiHelpers.ScaledDummy(3f);
+                                        }
+                                        else
+                                        {
+                                            ImGuiHelpers.ScaledDummy(2f);
                                         }
                                     }
                                 }
@@ -277,6 +311,48 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
         {
             // Close will persist the last seen version
             IsOpen = false;
+        }
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _spheneLogoTextureWrap?.Dispose();
+            _spheneLogoTextureWrap = null;
+        }
+        base.Dispose(disposing);
+    }
+
+    private void DrawSpheneWatermark(ImDrawListPtr drawList, Vector2 rectMin, Vector2 rectMax, float alpha, float verticalOffsetFactor)
+    {
+        try
+        {
+            if (_spheneLogoTextureWrap == null)
+            {
+                var imageData = System.Convert.FromBase64String(SpheneImages.SpheneLogoBase64);
+                _spheneLogoTextureWrap = _uiShared.LoadImage(imageData);
+            }
+
+            if (_spheneLogoTextureWrap == null)
+                return;
+
+            var regionSize = rectMax - rectMin;
+            if (regionSize.X <= 1f || regionSize.Y <= 1f)
+                return;
+
+            var side = MathF.Min(regionSize.X, regionSize.Y) * 0.9f;
+            var center = rectMin + (regionSize * 0.5f) + new Vector2(0f, regionSize.Y * verticalOffsetFactor);
+            var half = new Vector2(side * 0.5f, side * 0.5f);
+            var pMin = center - half;
+            var pMax = center + half;
+
+            var tint = new Vector4(1f, 1f, 1f, Math.Clamp(alpha, 0f, 1f));
+            drawList.AddImage(_spheneLogoTextureWrap.Handle, pMin, pMax, Vector2.Zero, Vector2.One, ImGui.GetColorU32(tint));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to draw Sphene watermark");
         }
     }
 
@@ -337,5 +413,30 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
         if (ImGui.IsItemHovered())
             UiSharedService.AttachToolTip(tooltip);
         ImGui.SetCursorScreenPos(cursor);
+    }
+
+    private static string NormalizeDescription(string description)
+    {
+        var normalized = description.Replace("\r\n", "\n").Trim();
+        if (normalized.Length == 0)
+            return string.Empty;
+
+        var sb = new StringBuilder(normalized.Length);
+        var newlineRun = 0;
+        foreach (var ch in normalized)
+        {
+            if (ch == '\n')
+            {
+                newlineRun++;
+                if (newlineRun <= 2)
+                    sb.Append('\n');
+                continue;
+            }
+
+            newlineRun = 0;
+            sb.Append(ch);
+        }
+
+        return sb.ToString();
     }
 }

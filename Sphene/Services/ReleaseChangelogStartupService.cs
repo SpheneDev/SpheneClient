@@ -102,7 +102,8 @@ public sealed class ReleaseChangelogStartupService : IHostedService, IMediatorSu
             }
 
             _logger.LogInformation("Publishing ShowReleaseChangelogMessage for version {version}", versionString);
-            _mediator.Publish(new ShowReleaseChangelogMessage(versionString, text));
+            var lastSeenBeforeUpdate = _configService.Current.LastSeenVersionChangelog ?? string.Empty;
+            _mediator.Publish(new ShowReleaseChangelogMessage(versionString, text, lastSeenBeforeUpdate));
             _configService.Current.LastSeenVersionChangelog = versionString;
             _configService.Save();
             _pendingVersionString = string.Empty;

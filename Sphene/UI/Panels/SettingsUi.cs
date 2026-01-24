@@ -2017,7 +2017,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 {
                     _logger.LogDebug(ex, "Failed to load changelog text for version {version}", versionString);
                 }
-                Mediator.Publish(new ShowReleaseChangelogMessage(versionString, text));
+                Mediator.Publish(new ShowReleaseChangelogMessage(versionString, text, _configService.Current.LastSeenVersionChangelog));
             });
         }
         UiSharedService.AttachToolTip("Open recent changes and highlights for this Sphene version.");

@@ -79,9 +79,9 @@ public sealed class IpcCallerHonorific : IIpcCaller
 
     public async Task<string> GetTitle()
     {
-        if (!APIAvailable) return string.Empty;
-        string title = await _dalamudUtil.RunOnFrameworkThread(() => _honorificGetLocalCharacterTitle.InvokeFunc()).ConfigureAwait(false);
-        return string.IsNullOrEmpty(title) ? string.Empty : Convert.ToBase64String(Encoding.UTF8.GetBytes(title));
+        var result = await TryGetTitleAsync().ConfigureAwait(false);
+        if (!result.Success) return string.Empty;
+        return string.IsNullOrEmpty(result.Title) ? string.Empty : Convert.ToBase64String(Encoding.UTF8.GetBytes(result.Title));
     }
 
     public async Task SetTitleAsync(IntPtr character, string honorificDataB64)
@@ -128,5 +128,34 @@ public sealed class IpcCallerHonorific : IIpcCaller
     {
         CheckAPI();
         _spheneMediator.Publish(new HonorificReadyMessage());
+        _ = PublishCurrentTitleAsync();
+    }
+
+    private async Task PublishCurrentTitleAsync()
+    {
+        var result = await TryGetTitleAsync().ConfigureAwait(false);
+        if (!result.Success) return;
+        string titleData = string.IsNullOrEmpty(result.Title) ? string.Empty : Convert.ToBase64String(Encoding.UTF8.GetBytes(result.Title));
+        _spheneMediator.Publish(new HonorificMessage(titleData));
+    }
+
+    private async Task<(bool Success, string Title)> TryGetTitleAsync()
+    {
+        if (!APIAvailable)
+        {
+            CheckAPI();
+            if (!APIAvailable) return (false, string.Empty);
+        }
+
+        try
+        {
+            string title = await _dalamudUtil.RunOnFrameworkThread(() => _honorificGetLocalCharacterTitle.InvokeFunc()).ConfigureAwait(false);
+            return (true, title ?? string.Empty);
+        }
+        catch (Exception e)
+        {
+            _logger.LogWarning(e, "Failed to fetch Honorific title");
+            return (false, string.Empty);
+        }
     }
 }

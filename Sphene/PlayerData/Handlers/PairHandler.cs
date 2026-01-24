@@ -53,6 +53,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
     private DateTime _postZoneCheckUntil = DateTime.MinValue;
     private DateTime _postZoneLastCheck = DateTime.MinValue;
     private bool _postZoneReaffirmDone = false;
+    private bool _forceHonorificReapply = false;
     private DateTime _lastFrameworkUpdateError = DateTime.MinValue;
 
     public PairHandler(ILogger<PairHandler> logger, Pair pair,
@@ -111,6 +112,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             // Ensure we will re-report proximity when encountering the player after zoning
             _proximityReportedVisible = false;
             _postZoneReaffirmDone = false;
+            _forceHonorificReapply = true;
         });
         Mediator.Subscribe<CutsceneStartMessage>(this, (_) =>
         {
@@ -774,6 +776,12 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                     Pair.ReportVisibility(false);
                     _proximityReportedVisible = false;
                     Logger.LogDebug("{this} visibility changed (not mutual), now: {visi}", this, IsVisible);
+                }
+
+                if (allowed && IsVisible && _forceHonorificReapply && !string.IsNullOrEmpty(_cachedData?.HonorificData))
+                {
+                    _forceHonorificReapply = false;
+                    _ = _ipcManager.Honorific.SetTitleAsync(PlayerCharacter, _cachedData.HonorificData).ConfigureAwait(false);
                 }
             }
             else if (_charaHandler != null && _charaHandler.Address == nint.Zero && IsVisible)

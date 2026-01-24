@@ -30,7 +30,16 @@ public sealed class CacheCreationService : DisposableMediatorSubscriberBase
         _characterDataFactory = characterDataFactory;
 
         Mediator.Subscribe<ZoneSwitchStartMessage>(this, (msg) => _isZoning = true);
-        Mediator.Subscribe<ZoneSwitchEndMessage>(this, (msg) => _isZoning = false);
+        Mediator.Subscribe<ZoneSwitchEndMessage>(this, (msg) =>
+        {
+            _isZoning = false;
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(TimeSpan.FromSeconds(2)).ConfigureAwait(false);
+                if (_isZoning) return;
+                AddCacheToCreate(ObjectKind.Player);
+            });
+        });
 
         Mediator.Subscribe<HaltCharaDataCreation>(this, (msg) =>
         {
