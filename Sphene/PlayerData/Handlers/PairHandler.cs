@@ -13,6 +13,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Threading;
 using ObjectKind = Sphene.API.Data.Enum.ObjectKind;
 using System.Numerics;
 
@@ -36,6 +37,10 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
     private Guid _applicationId;
     private Task? _applicationTask;
     private CharacterData? _cachedData = null;
+    private CharacterData? _lastKnownMinionData = null;
+    private readonly ConcurrentDictionary<string, string> _lastKnownMinionFileOverrides = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, string> _lastKnownMinionScdOverrides = new(StringComparer.OrdinalIgnoreCase);
+    private string? _lastKnownMinionOverrideHash;
     private GameObjectHandler? _charaHandler;
     private readonly Dictionary<ObjectKind, Guid?> _customizeIds = [];
     private CombatData? _dataReceivedInDowntime;
@@ -44,17 +49,38 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
     private bool _isVisible;
     private Guid _penumbraCollection;
     private bool _redrawOnNextApplication = false;
-    private string? _inProgressDataHash;
     private bool _forceRedrawAfterCurrentApplication = false;
+    private string? _inProgressPenumbraHash;
+    private string? _inProgressGlamourerHash;
+    private string? _inProgressRestHash;
+    private string? _inProgressDataHash;
+    private string? _lastSuccessfullyAppliedPenumbraHash;
+    private string? _lastSuccessfullyAppliedGlamourerHash;
+    private string? _lastSuccessfullyAppliedRestHash;
     private string? _lastSuccessfullyAppliedDataHash;
     private nint _lastSuccessfullyAppliedCharacterAddress = nint.Zero;
+    private nint _lastBoundMinionAddress = nint.Zero;
+    private nint _lastAppliedMinionAddress = nint.Zero;
+    private bool _minionReapplyInProgress = false;
     private bool _initIdentMissingLogged = false;
     private bool _proximityReportedVisible = false;
     private DateTime _postZoneCheckUntil = DateTime.MinValue;
     private DateTime _postZoneLastCheck = DateTime.MinValue;
     private bool _postZoneReaffirmDone = false;
     private bool _forceHonorificReapply = false;
+    private bool _pendingPenumbraReapply = false;
     private DateTime _lastFrameworkUpdateError = DateTime.MinValue;
+    private DateTime _lastMinionReapplyAttempt = DateTime.MinValue;
+    private DateTime _lastMinionCollectionBindAttempt = DateTime.MinValue;
+    private DateTime _lastPlayerCollectionBindAttempt = DateTime.MinValue;
+    private DateTime _lastMinionScdOverrideAttempt = DateTime.MinValue;
+    private DateTime _lastMinionTempModsApplyAttempt = DateTime.MinValue;
+    private nint _lastMinionTempModsAddress = nint.Zero;
+    private int _lastMinionTempModsHash;
+    private int _minionTempModsApplyInProgress;
+    private const int MinionReapplyRetryDelayMs = 500;
+    private const int MinionCollectionBindRetryDelayMs = 1500;
+    private const int MinionTempModsCooldownMs = 2000;
 
     public PairHandler(ILogger<PairHandler> logger, Pair pair,
         GameObjectHandlerFactory gameObjectHandlerFactory,
@@ -91,6 +117,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         });
 
         Mediator.Subscribe<FrameworkUpdateMessage>(this, (_) => FrameworkUpdate());
+        Mediator.Subscribe<PenumbraResourceLoadMessage>(this, OnPenumbraResourceLoad);
         Mediator.Subscribe<ZoneSwitchStartMessage>(this, (_) =>
         {
             _localVisibilityGateActive = true;
@@ -143,12 +170,25 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                         _charaHandler.Dispose();
                         _charaHandler = null;
                     }
+                    else if (IsVisible && _cachedData != null && _charaHandler != null && _charaHandler.Address != nint.Zero)
+                    {
+                        ApplyCharacterData(Guid.NewGuid(), _cachedData, forceApplyCustomization: true);
+                        _pendingPenumbraReapply = false;
+                    }
+                    else if (_cachedData != null)
+                    {
+                        _pendingPenumbraReapply = true;
+                    }
                 }
                 catch (Exception ex)
                 {
                     Logger.LogError(ex, "Failed to recreate Penumbra collection for {uid}", Pair.UserData.UID);
                 }
             });
+        });
+        Mediator.Subscribe<PenumbraDisposedMessage>(this, _ =>
+        {
+            _pendingPenumbraReapply = true;
         });
         Mediator.Subscribe<ClassJobChangedMessage>(this, (msg) =>
         {
@@ -201,6 +241,33 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
     public string? PlayerName { get; private set; }
     public string PlayerNameHash => Pair.Ident;
 
+    internal bool IsCharacterDataAppliedForCurrentCharacter(CharacterData data)
+    {
+        if (_charaHandler == null || _charaHandler.Address == nint.Zero)
+        {
+            return false;
+        }
+
+        if (_lastSuccessfullyAppliedCharacterAddress != _charaHandler.Address)
+        {
+            return false;
+        }
+
+        var hasComponentHashes = !string.IsNullOrEmpty(_lastSuccessfullyAppliedPenumbraHash)
+            && !string.IsNullOrEmpty(_lastSuccessfullyAppliedGlamourerHash)
+            && !string.IsNullOrEmpty(_lastSuccessfullyAppliedRestHash);
+
+        if (hasComponentHashes
+            && string.Equals(_lastSuccessfullyAppliedPenumbraHash, data.PenumbraHash.Value, StringComparison.Ordinal)
+            && string.Equals(_lastSuccessfullyAppliedGlamourerHash, data.GlamourerHash.Value, StringComparison.Ordinal)
+            && string.Equals(_lastSuccessfullyAppliedRestHash, data.RestHash.Value, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        return AreDataHashesEqual(data, _lastSuccessfullyAppliedDataHash);
+    }
+
     public void ApplyCharacterData(Guid applicationBase, CharacterData characterData, bool forceApplyCustomization = false)
     {
         if (_dalamudUtil.IsInCombatOrPerforming)
@@ -235,24 +302,29 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
 
         if (_applicationTask != null
             && !_applicationTask.IsCompleted
-            && string.Equals(_inProgressDataHash, characterData.DataHash.Value, StringComparison.Ordinal)
-            )
+            && (AreComponentHashesEqual(characterData, _inProgressPenumbraHash, _inProgressGlamourerHash, _inProgressRestHash)
+                || AreDataHashesEqual(characterData, _inProgressDataHash)))
         {
             if (forceApplyCustomization || _forceApplyMods || _redrawOnNextApplication)
             {
                 _forceRedrawAfterCurrentApplication = true;
                 _redrawOnNextApplication = false;
             }
-            Logger.LogDebug("[BASE-{appbase}] Skipping application - hash already in progress ({hash})", applicationBase, characterData.DataHash.Value);
+            Logger.LogDebug("[BASE-{appbase}] Skipping application - component hashes already in progress", applicationBase);
             return;
         }
 
-        // Check if data hash is identical and no forced application is required
-        var hashesAreEqual = string.Equals(characterData.DataHash.Value, _cachedData?.DataHash.Value ?? string.Empty, StringComparison.Ordinal);
-        if (hashesAreEqual && !forceApplyCustomization && !_forceApplyMods && !_redrawOnNextApplication) 
+        var hashesAreEqual = AreComponentHashesEqual(characterData, _cachedData) || AreDataHashesEqual(characterData, _cachedData);
+        var hasNewCharacterAddress = _charaHandler != null && _charaHandler.Address != _lastSuccessfullyAppliedCharacterAddress;
+        if (hashesAreEqual && !forceApplyCustomization && !_forceApplyMods && !_redrawOnNextApplication && !hasNewCharacterAddress)
         {
             Logger.LogTrace("[BASE-{appbase}] Skipping application - hash unchanged and no forced customization", applicationBase);
             return;
+        }
+        if (hashesAreEqual && hasNewCharacterAddress && !forceApplyCustomization)
+        {
+            Logger.LogDebug("[BASE-{appbase}] Reapplying customization for new character address", applicationBase);
+            forceApplyCustomization = true;
         }
         
         // Log when we're applying despite same hash (due to forced application)
@@ -274,7 +346,10 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
 
         _forceApplyMods |= forceApplyCustomization;
 
-        _inProgressDataHash = characterData.DataHash.Value;
+        _inProgressPenumbraHash = characterData.PenumbraHash.Value;
+        _inProgressGlamourerHash = characterData.GlamourerHash.Value;
+        _inProgressRestHash = characterData.RestHash.Value;
+        _inProgressDataHash = characterData.DataHash?.Value;
 
         var charaDataToUpdate = characterData.CheckUpdatedData(applicationBase, _cachedData?.DeepClone() ?? new(), Logger, this, forceApplyCustomization, _forceApplyMods);
 
@@ -409,7 +484,10 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             }
 
             Logger.LogDebug("[{applicationId}] Applying Customization Data for {handler}", applicationId, handler);
-            await _dalamudUtil.WaitWhileCharacterIsDrawing(Logger, handler, applicationId, 30000, token).ConfigureAwait(false);
+            if (handler.ObjectKind != ObjectKind.MinionOrMount)
+            {
+                await _dalamudUtil.WaitWhileCharacterIsDrawing(Logger, handler, applicationId, 30000, token).ConfigureAwait(false);
+            }
             token.ThrowIfCancellationRequested();
             foreach (var change in changes.Value.OrderBy(p => (int)p))
             {
@@ -439,6 +517,13 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                     case PlayerChanges.Glamourer:
                         if (charaData.GlamourerData.TryGetValue(changes.Key, out var glamourerData))
                         {
+                            if (changes.Key == ObjectKind.MinionOrMount
+                                && _penumbraCollection != Guid.Empty
+                                && charaData.FileReplacements.TryGetValue(ObjectKind.MinionOrMount, out var minionFileReplacements)
+                                && minionFileReplacements.Count > 0)
+                            {
+                                await EnsureMinionCollectionBindingsAsync(handler.Address).ConfigureAwait(false);
+                            }
                             await _ipcManager.Glamourer.ApplyAllAsync(Logger, handler, glamourerData, applicationId, token).ConfigureAwait(false);
                         }
                         break;
@@ -452,6 +537,13 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                         break;
 
                     case PlayerChanges.ForcedRedraw:
+                        if (changes.Key == ObjectKind.MinionOrMount
+                            && _penumbraCollection != Guid.Empty
+                            && charaData.FileReplacements.TryGetValue(ObjectKind.MinionOrMount, out var minionReplacements)
+                            && minionReplacements.Count > 0)
+                        {
+                            await EnsureMinionCollectionBindingsAsync(handler.Address).ConfigureAwait(false);
+                        }
                         await _ipcManager.Penumbra.RedrawAsync(Logger, handler, applicationId, token).ConfigureAwait(false);
                         break;
 
@@ -460,6 +552,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                 }
                 token.ThrowIfCancellationRequested();
             }
+
         }
         finally
         {
@@ -467,12 +560,165 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         }
     }
 
+    private static bool AreComponentHashesEqual(CharacterData newData, CharacterData? cachedData)
+    {
+        if (cachedData == null) return false;
+        return string.Equals(newData.PenumbraHash.Value, cachedData.PenumbraHash.Value, StringComparison.Ordinal)
+            && string.Equals(newData.GlamourerHash.Value, cachedData.GlamourerHash.Value, StringComparison.Ordinal)
+            && string.Equals(newData.RestHash.Value, cachedData.RestHash.Value, StringComparison.Ordinal);
+    }
+
+    private static bool AreComponentHashesEqual(CharacterData cachedData, string? penumbraHash, string? glamourerHash, string? restHash)
+    {
+        if (string.IsNullOrEmpty(penumbraHash) || string.IsNullOrEmpty(glamourerHash) || string.IsNullOrEmpty(restHash))
+        {
+            return false;
+        }
+
+        return string.Equals(cachedData.PenumbraHash.Value, penumbraHash, StringComparison.Ordinal)
+            && string.Equals(cachedData.GlamourerHash.Value, glamourerHash, StringComparison.Ordinal)
+            && string.Equals(cachedData.RestHash.Value, restHash, StringComparison.Ordinal);
+    }
+
+    private static bool AreDataHashesEqual(CharacterData newData, CharacterData? cachedData)
+    {
+        if (cachedData == null) return false;
+        var newHash = newData.DataHash?.Value;
+        var oldHash = cachedData.DataHash?.Value;
+        if (string.IsNullOrEmpty(newHash) || string.IsNullOrEmpty(oldHash))
+        {
+            return false;
+        }
+
+        return string.Equals(newHash, oldHash, StringComparison.Ordinal);
+    }
+
+    private static bool AreDataHashesEqual(CharacterData newData, string? dataHash)
+    {
+        if (string.IsNullOrEmpty(dataHash))
+        {
+            return false;
+        }
+
+        var newHash = newData.DataHash?.Value;
+        if (string.IsNullOrEmpty(newHash))
+        {
+            return false;
+        }
+
+        return string.Equals(newHash, dataHash, StringComparison.Ordinal);
+    }
+
+    private static bool HasMinionData(CharacterData data)
+    {
+        if (data.CustomizePlusData.TryGetValue(ObjectKind.MinionOrMount, out var customizeData) && !string.IsNullOrEmpty(customizeData))
+        {
+            return true;
+        }
+
+        if (data.GlamourerData.TryGetValue(ObjectKind.MinionOrMount, out var glamourerData) && !string.IsNullOrEmpty(glamourerData))
+        {
+            return true;
+        }
+
+        if (data.FileReplacements.TryGetValue(ObjectKind.MinionOrMount, out var replacements) && replacements.Count > 0)
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private void UpdateLastKnownMinionData(CharacterData data)
+    {
+        if (HasMinionData(data))
+        {
+            _lastKnownMinionData = data;
+            RefreshMinionFileOverrides(data);
+        }
+    }
+
+    private void RefreshMinionFileOverrides(CharacterData data)
+    {
+        var dataHash = data.DataHash?.Value ?? string.Empty;
+        if (string.Equals(_lastKnownMinionOverrideHash, dataHash, StringComparison.Ordinal)
+            && !_lastKnownMinionFileOverrides.IsEmpty)
+        {
+            return;
+        }
+
+        _lastKnownMinionOverrideHash = dataHash;
+        _lastKnownMinionFileOverrides.Clear();
+        _lastKnownMinionScdOverrides.Clear();
+
+        if (!data.FileReplacements.TryGetValue(ObjectKind.MinionOrMount, out var minionReplacements) || minionReplacements.Count == 0)
+        {
+            return;
+        }
+
+        var missingFiles = TryCalculateModdedDictionary(Guid.NewGuid(), data, out var moddedPaths, CancellationToken.None);
+        if (missingFiles.Count > 0 || moddedPaths.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var entry in moddedPaths)
+        {
+            var normalizedGamePath = entry.Key.GamePath.Replace('\\', '/').ToLowerInvariant();
+            _lastKnownMinionFileOverrides[normalizedGamePath] = entry.Value;
+            if (normalizedGamePath.EndsWith(".scd", StringComparison.OrdinalIgnoreCase))
+            {
+                _lastKnownMinionScdOverrides[normalizedGamePath] = entry.Value;
+            }
+        }
+
+        if (_ipcManager.Penumbra.APIAvailable && !_dalamudUtil.IsInCutscene && !_dalamudUtil.IsInGpose)
+        {
+            var tempMods = new Dictionary<string, string>(_lastKnownMinionFileOverrides, StringComparer.Ordinal);
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await ApplyMinionTempModsToCollectionAsync(tempMods).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogDebug(ex, "Minion temp mods preapply failed for {this}", this);
+                }
+            });
+        }
+    }
+
+    private CharacterData? GetMinionReapplyData()
+    {
+        if (_cachedData != null && HasMinionData(_cachedData))
+        {
+            return _cachedData;
+        }
+
+        if (_lastKnownMinionData != null && HasMinionData(_lastKnownMinionData))
+        {
+            return _lastKnownMinionData;
+        }
+
+        return null;
+    }
+
     private void DownloadAndApplyCharacter(Guid applicationBase, CharacterData charaData, Dictionary<ObjectKind, HashSet<PlayerChanges>> updatedData)
     {
         if (!updatedData.Any())
         {
             Logger.LogDebug("[BASE-{appBase}] Nothing to update for {obj}", applicationBase, this);
-            // Still publish completion message even when no changes are detected
+            _cachedData = charaData;
+            UpdateLastKnownMinionData(charaData);
+            if (_charaHandler != null)
+            {
+                _lastSuccessfullyAppliedPenumbraHash = charaData.PenumbraHash.Value;
+                _lastSuccessfullyAppliedGlamourerHash = charaData.GlamourerHash.Value;
+                _lastSuccessfullyAppliedRestHash = charaData.RestHash.Value;
+            _lastSuccessfullyAppliedDataHash = charaData.DataHash?.Value;
+                _lastSuccessfullyAppliedCharacterAddress = _charaHandler.Address;
+            }
             Mediator.Publish(new CharacterDataApplicationCompletedMessage(PlayerName ?? string.Empty, Pair.UserData.UID, applicationBase, true));
             return;
         }
@@ -573,6 +819,22 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
 
         if (downloadToken.IsCancellationRequested || (appToken?.IsCancellationRequested ?? false)) return;
 
+        if (updateModdedPaths && moddedPaths.Count > 0 && charaData.FileReplacements.TryGetValue(ObjectKind.MinionOrMount, out var minionRepls) && minionRepls.Count > 0)
+        {
+            _lastKnownMinionFileOverrides.Clear();
+            _lastKnownMinionScdOverrides.Clear();
+            foreach (var entry in moddedPaths)
+            {
+                var normalizedGamePath = entry.Key.GamePath.Replace('\\', '/').ToLowerInvariant();
+                _lastKnownMinionFileOverrides[normalizedGamePath] = entry.Value;
+                if (normalizedGamePath.EndsWith(".scd", StringComparison.OrdinalIgnoreCase))
+                {
+                    _lastKnownMinionScdOverrides[normalizedGamePath] = entry.Value;
+                }
+            }
+            _lastKnownMinionOverrideHash = charaData.DataHash?.Value ?? string.Empty;
+        }
+
         _applicationCancellationTokenSource = _applicationCancellationTokenSource.CancelRecreate() ?? new CancellationTokenSource();
         var token = _applicationCancellationTokenSource.Token;
 
@@ -644,7 +906,11 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             }
 
             _cachedData = charaData;
-            _lastSuccessfullyAppliedDataHash = charaData.DataHash.Value;
+            UpdateLastKnownMinionData(charaData);
+            _lastSuccessfullyAppliedPenumbraHash = charaData.PenumbraHash.Value;
+            _lastSuccessfullyAppliedGlamourerHash = charaData.GlamourerHash.Value;
+            _lastSuccessfullyAppliedRestHash = charaData.RestHash.Value;
+            _lastSuccessfullyAppliedDataHash = charaData.DataHash?.Value;
             _lastSuccessfullyAppliedCharacterAddress = _charaHandler?.Address ?? nint.Zero;
 
             Logger.LogDebug("[{applicationId}] Application finished", _applicationId);
@@ -668,6 +934,13 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             
             // Publish message that character data application failed
             Mediator.Publish(new CharacterDataApplicationCompletedMessage(PlayerName ?? string.Empty, Pair.UserData.UID, _applicationId, false));
+        }
+        finally
+        {
+            _inProgressPenumbraHash = null;
+            _inProgressGlamourerHash = null;
+            _inProgressRestHash = null;
+            _inProgressDataHash = null;
         }
     }
 
@@ -748,11 +1021,12 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                     IsVisible = true;
                     if (_cachedData != null)
                     {
-                        var cachedHash = _cachedData.DataHash.Value;
                         var currentAddress = _charaHandler!.Address;
-                        var alreadyApplied =
-                            _lastSuccessfullyAppliedCharacterAddress == currentAddress
-                            && string.Equals(_lastSuccessfullyAppliedDataHash, cachedHash, StringComparison.Ordinal);
+                        if (!string.IsNullOrEmpty(_cachedData.HonorificData))
+                        {
+                            _ = _ipcManager.Honorific.SetTitleAsync(currentAddress, _cachedData.HonorificData).ConfigureAwait(false);
+                        }
+                        var alreadyApplied = _cachedData != null && IsCharacterDataAppliedForCurrentCharacter(_cachedData);
 
                         if (!alreadyApplied)
                         {
@@ -776,6 +1050,46 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                     Pair.ReportVisibility(false);
                     _proximityReportedVisible = false;
                     Logger.LogDebug("{this} visibility changed (not mutual), now: {visi}", this, IsVisible);
+                }
+
+                if (allowed && IsVisible && _pendingPenumbraReapply && _cachedData != null)
+                {
+                    _pendingPenumbraReapply = false;
+                    ApplyCharacterData(Guid.NewGuid(), _cachedData, forceApplyCustomization: true);
+                }
+
+                if (allowed && IsVisible)
+                {
+                    if (!_dalamudUtil.IsInCutscene
+                        && !_dalamudUtil.IsInGpose
+                        && _ipcManager.Penumbra.APIAvailable
+                        && DateTime.UtcNow - _lastPlayerCollectionBindAttempt > TimeSpan.FromMilliseconds(MinionCollectionBindRetryDelayMs))
+                    {
+                        _lastPlayerCollectionBindAttempt = DateTime.UtcNow;
+                        _ = Task.Run(async () =>
+                        {
+                            try
+                            {
+                                await EnsurePenumbraCollectionAsync().ConfigureAwait(false);
+                                if (_penumbraCollection == Guid.Empty || _charaHandler == null || _charaHandler.Address == nint.Zero)
+                                {
+                                    return;
+                                }
+
+                                var playerIndex = await _dalamudUtil.RunOnFrameworkThread(() => _charaHandler.GetGameObject()?.ObjectIndex).ConfigureAwait(false);
+                                if (playerIndex.HasValue)
+                                {
+                                    await _ipcManager.Penumbra.AssignTemporaryCollectionAsync(Logger, _penumbraCollection, playerIndex.Value).ConfigureAwait(false);
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                Logger.LogDebug(ex, "Player collection binding failed for {this}", this);
+                            }
+                        });
+                    }
+
+                    TryQueueMinionReapply();
                 }
 
                 if (allowed && IsVisible && _forceHonorificReapply && !string.IsNullOrEmpty(_cachedData?.HonorificData))
@@ -870,6 +1184,449 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         });
 
         _ipcManager.Penumbra.AssignTemporaryCollectionAsync(Logger, _penumbraCollection, _charaHandler.GetGameObject()!.ObjectIndex).GetAwaiter().GetResult();
+    }
+
+    private void TryQueueMinionReapply()
+    {
+        if (_minionReapplyInProgress || _charaHandler == null || _charaHandler.Address == nint.Zero)
+        {
+            return;
+        }
+
+        if (_dalamudUtil.IsInCutscene || _dalamudUtil.IsInGpose || !_ipcManager.Penumbra.APIAvailable || !_ipcManager.Glamourer.APIAvailable)
+        {
+            return;
+        }
+
+        var minionAddress = _dalamudUtil.GetMinionOrMountPtr(PlayerCharacter);
+        if (minionAddress == nint.Zero)
+        {
+            _lastAppliedMinionAddress = nint.Zero;
+            _lastBoundMinionAddress = nint.Zero;
+            return;
+        }
+
+        if (minionAddress == _lastAppliedMinionAddress)
+        {
+            return;
+        }
+
+        if (DateTime.UtcNow - _lastMinionReapplyAttempt < TimeSpan.FromMilliseconds(MinionReapplyRetryDelayMs))
+        {
+            return;
+        }
+
+        var minionData = GetMinionReapplyData();
+        if (minionData == null)
+        {
+            return;
+        }
+
+        if (!TryGetMinionReapplyChanges(minionData, out var changes, out var hasCustomize, out var hasGlamourer, out var hasFileReplacements))
+        {
+            return;
+        }
+
+        if (DateTime.UtcNow - _lastMinionCollectionBindAttempt > TimeSpan.FromMilliseconds(MinionCollectionBindRetryDelayMs))
+        {
+            _lastMinionCollectionBindAttempt = DateTime.UtcNow;
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await EnsureMinionCollectionBindingsAsync(minionAddress).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogDebug(ex, "Minion collection binding failed for {this}", this);
+                }
+            });
+        }
+
+        if (minionAddress != _lastBoundMinionAddress && hasFileReplacements)
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    var bound = await TryApplyMinionFileReplacementsAsync(minionAddress, minionData, CancellationToken.None).ConfigureAwait(false);
+                    if (bound)
+                    {
+                        _lastBoundMinionAddress = minionAddress;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogDebug(ex, "Early minion bind failed for {this}", this);
+                }
+            });
+        }
+
+        Logger.LogDebug("Queueing minion reapply for {this} address {address:X} (customize:{customize}, glamourer:{glamourer}, files:{files})",
+            this, minionAddress, hasCustomize, hasGlamourer, hasFileReplacements);
+
+        _minionReapplyInProgress = true;
+        _lastMinionReapplyAttempt = DateTime.UtcNow;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                Logger.LogDebug("Reapplying cached minion data for {this}", this);
+                var localChanges = new HashSet<PlayerChanges>(changes);
+                var appliedFiles = false;
+                if (hasFileReplacements)
+                {
+                    appliedFiles = await TryApplyMinionFileReplacementsAsync(minionAddress, minionData, CancellationToken.None).ConfigureAwait(false);
+                }
+
+                await ApplyCustomizationDataAsync(Guid.NewGuid(),
+                    new KeyValuePair<ObjectKind, HashSet<PlayerChanges>>(ObjectKind.MinionOrMount, localChanges),
+                    minionData,
+                    CancellationToken.None).ConfigureAwait(false);
+
+                if (appliedFiles)
+                {
+                    _lastBoundMinionAddress = minionAddress;
+                }
+
+                if (!hasFileReplacements || appliedFiles)
+                {
+                    _lastAppliedMinionAddress = minionAddress;
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogDebug(ex, "Minion reapply failed for {this}", this);
+            }
+            finally
+            {
+                _minionReapplyInProgress = false;
+            }
+        });
+    }
+
+    private async Task<bool> TryApplyMinionFileReplacementsAsync(nint minionAddress, CharacterData minionData, CancellationToken token)
+    {
+        var hasCollection = await EnsureMinionCollectionBindingsAsync(minionAddress).ConfigureAwait(false);
+        if (!hasCollection)
+        {
+            return false;
+        }
+
+        if (_penumbraCollection == Guid.Empty)
+        {
+            return false;
+        }
+
+        var missingFiles = TryCalculateModdedDictionary(Guid.NewGuid(), minionData, out var moddedPaths, token);
+        if (missingFiles.Count > 0 || moddedPaths.Count == 0)
+        {
+            return false;
+        }
+
+        var tempMods = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in moddedPaths)
+        {
+            var normalizedGamePath = entry.Key.GamePath.Replace('\\', '/').ToLowerInvariant();
+            tempMods[normalizedGamePath] = entry.Value;
+        }
+        return await ApplyMinionTempModsAsync(minionAddress, tempMods, token).ConfigureAwait(false);
+    }
+
+    private async Task<bool> ApplyMinionTempModsToCollectionAsync(Dictionary<string, string> tempMods)
+    {
+        if (tempMods.Count == 0)
+        {
+            return false;
+        }
+
+        await EnsurePenumbraCollectionAsync().ConfigureAwait(false);
+        if (_penumbraCollection == Guid.Empty)
+        {
+            return false;
+        }
+
+        var tempModsHash = ComputeTempModsHash(tempMods);
+        if (tempModsHash == _lastMinionTempModsHash
+            && DateTime.UtcNow - _lastMinionTempModsApplyAttempt < TimeSpan.FromMilliseconds(MinionTempModsCooldownMs))
+        {
+            return true;
+        }
+
+        if (Interlocked.Exchange(ref _minionTempModsApplyInProgress, 1) == 1)
+        {
+            return true;
+        }
+
+        try
+        {
+            await _ipcManager.Penumbra.SetTemporaryModsAsync(Logger, Guid.NewGuid(), _penumbraCollection, tempMods).ConfigureAwait(false);
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _minionTempModsApplyInProgress, 0);
+        }
+
+        _lastMinionTempModsApplyAttempt = DateTime.UtcNow;
+        _lastMinionTempModsAddress = nint.Zero;
+        _lastMinionTempModsHash = tempModsHash;
+
+        return true;
+    }
+
+    private async Task<bool> ApplyMinionTempModsAsync(nint minionAddress, Dictionary<string, string> tempMods, CancellationToken token)
+    {
+        if (tempMods.Count == 0)
+        {
+            return false;
+        }
+
+        var hasCollection = await EnsureMinionCollectionBindingsAsync(minionAddress).ConfigureAwait(false);
+        if (!hasCollection || _penumbraCollection == Guid.Empty)
+        {
+            return false;
+        }
+
+        var tempModsHash = ComputeTempModsHash(tempMods);
+        if (minionAddress == _lastMinionTempModsAddress
+            && tempModsHash == _lastMinionTempModsHash
+            && DateTime.UtcNow - _lastMinionTempModsApplyAttempt < TimeSpan.FromMilliseconds(MinionTempModsCooldownMs))
+        {
+            return true;
+        }
+
+        if (Interlocked.Exchange(ref _minionTempModsApplyInProgress, 1) == 1)
+        {
+            return true;
+        }
+
+        using var minionHandler = await _gameObjectHandlerFactory.Create(ObjectKind.MinionOrMount, () => minionAddress, isWatched: false).ConfigureAwait(false);
+        try
+        {
+            await _ipcManager.Penumbra.SetTemporaryModsAsync(Logger, Guid.NewGuid(), _penumbraCollection, tempMods).ConfigureAwait(false);
+            await _ipcManager.Penumbra.RedrawAsync(Logger, minionHandler, Guid.NewGuid(), token).ConfigureAwait(false);
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _minionTempModsApplyInProgress, 0);
+        }
+
+        _lastMinionTempModsApplyAttempt = DateTime.UtcNow;
+        _lastMinionTempModsAddress = minionAddress;
+        _lastMinionTempModsHash = tempModsHash;
+
+        return true;
+    }
+
+    private static int ComputeTempModsHash(Dictionary<string, string> tempMods)
+    {
+        var keys = new string[tempMods.Count];
+        var index = 0;
+        foreach (var key in tempMods.Keys)
+        {
+            keys[index] = key;
+            index++;
+        }
+
+        Array.Sort(keys, StringComparer.Ordinal);
+
+        var hash = new HashCode();
+        foreach (var key in keys)
+        {
+            hash.Add(key, StringComparer.Ordinal);
+            hash.Add(tempMods[key], StringComparer.Ordinal);
+        }
+
+        return hash.ToHashCode();
+    }
+
+    private void OnPenumbraResourceLoad(PenumbraResourceLoadMessage msg)
+    {
+        if (!_ipcManager.Penumbra.APIAvailable || _lastKnownMinionScdOverrides.Count == 0)
+        {
+            return;
+        }
+
+        if (_dalamudUtil.IsInCutscene || _dalamudUtil.IsInGpose)
+        {
+            return;
+        }
+
+        var gamePath = msg.GamePath.Replace('\\', '/').ToLowerInvariant();
+        if (!gamePath.EndsWith(".scd", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        if (!_lastKnownMinionScdOverrides.ContainsKey(gamePath))
+        {
+            return;
+        }
+
+        Logger.LogDebug("Detected Minion SCD load: {path} for GameObject {ptr:X}", gamePath, msg.GameObject);
+
+        if (DateTime.UtcNow - _lastMinionScdOverrideAttempt < TimeSpan.FromMilliseconds(MinionCollectionBindRetryDelayMs))
+        {
+            Logger.LogDebug("Skipping SCD override due to cooldown");
+            return;
+        }
+
+        var resourceAddress = msg.GameObject;
+        if (resourceAddress == nint.Zero)
+        {
+            return;
+        }
+
+        var playerAddress = _charaHandler?.Address ?? nint.Zero;
+        var minionAddress = _dalamudUtil.GetMinionOrMountPtr(PlayerCharacter);
+        
+        Logger.LogDebug("SCD Load Addresses - Resource: {res:X}, Player: {plr:X}, Minion: {min:X}", resourceAddress, playerAddress, minionAddress);
+
+        if (resourceAddress != playerAddress)
+        {
+            minionAddress = resourceAddress;
+        }
+        else if (minionAddress == nint.Zero)
+        {
+            return;
+        }
+
+        if (_lastKnownMinionFileOverrides.Count == 0)
+        {
+            return;
+        }
+
+        if (DateTime.UtcNow - _lastMinionTempModsApplyAttempt < TimeSpan.FromMilliseconds(MinionTempModsCooldownMs))
+        {
+            Logger.LogDebug("Skipping TempMods apply due to cooldown");
+            return;
+        }
+
+        _lastMinionScdOverrideAttempt = DateTime.UtcNow;
+        var tempMods = new Dictionary<string, string>(_lastKnownMinionFileOverrides, StringComparer.OrdinalIgnoreCase);
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                Logger.LogDebug("Attempting to bind collection to {addr:X} and apply temp mods", resourceAddress);
+                await TryBindCollectionToGameObjectAsync(resourceAddress).ConfigureAwait(false);
+                await ApplyMinionTempModsAsync(minionAddress, tempMods, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogDebug(ex, "Minion SCD override retry failed for {this}", this);
+            }
+        });
+    }
+
+    private async Task<bool> TryBindCollectionToGameObjectAsync(nint address)
+    {
+        if (address == nint.Zero)
+        {
+            return false;
+        }
+
+        await EnsurePenumbraCollectionAsync().ConfigureAwait(false);
+        if (_penumbraCollection == Guid.Empty)
+        {
+            Logger.LogDebug("Failed to bind collection: PenumbraCollection is Empty");
+            return false;
+        }
+
+        var objectIndex = await _dalamudUtil.RunOnFrameworkThread(() => _dalamudUtil.CreateGameObject(address)?.ObjectIndex).ConfigureAwait(false);
+        if (!objectIndex.HasValue)
+        {
+            Logger.LogDebug("Failed to bind collection: Could not find object index for address {addr:X}", address);
+            return false;
+        }
+
+        Logger.LogDebug("Binding collection {coll} to object index {idx} (Address: {addr:X})", _penumbraCollection, objectIndex.Value, address);
+        await _ipcManager.Penumbra.AssignTemporaryCollectionAsync(Logger, _penumbraCollection, objectIndex.Value).ConfigureAwait(false);
+        return true;
+    }
+
+    private async Task<bool> EnsureMinionCollectionBindingsAsync(nint minionAddress)
+    {
+        await EnsurePenumbraCollectionAsync().ConfigureAwait(false);
+        if (_penumbraCollection == Guid.Empty)
+        {
+            return false;
+        }
+
+        int? playerIndex = null;
+        if (_charaHandler != null && _charaHandler.Address != nint.Zero)
+        {
+            playerIndex = await _dalamudUtil.RunOnFrameworkThread(() => _charaHandler.GetGameObject()!.ObjectIndex).ConfigureAwait(false);
+            await _ipcManager.Penumbra.AssignTemporaryCollectionAsync(Logger, _penumbraCollection, playerIndex.Value).ConfigureAwait(false);
+        }
+
+        int? minionIndex = null;
+        using (var minionHandler = await _gameObjectHandlerFactory.Create(ObjectKind.MinionOrMount, () => minionAddress, isWatched: false).ConfigureAwait(false))
+        {
+            minionIndex = await _dalamudUtil.RunOnFrameworkThread(() => minionHandler.GetGameObject()?.ObjectIndex).ConfigureAwait(false);
+        }
+
+        if (!minionIndex.HasValue && playerIndex.HasValue)
+        {
+            minionIndex = playerIndex.Value + 1;
+        }
+
+        if (!minionIndex.HasValue)
+        {
+            return false;
+        }
+
+        await _ipcManager.Penumbra.AssignTemporaryCollectionAsync(Logger, _penumbraCollection, minionIndex.Value).ConfigureAwait(false);
+        return true;
+    }
+
+    private async Task EnsurePenumbraCollectionAsync()
+    {
+        if (_penumbraCollection != Guid.Empty)
+        {
+            return;
+        }
+
+        try
+        {
+            _penumbraCollection = await _ipcManager.Penumbra.CreateTemporaryCollectionAsync(Logger, Pair.UserData.UID).ConfigureAwait(false);
+            if (_charaHandler != null && _charaHandler.Address != nint.Zero)
+            {
+                var idx = await _dalamudUtil.RunOnFrameworkThread(() => _charaHandler.GetGameObject()!.ObjectIndex).ConfigureAwait(false);
+                await _ipcManager.Penumbra.AssignTemporaryCollectionAsync(Logger, _penumbraCollection, idx).ConfigureAwait(false);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to create Penumbra collection for {uid}", Pair.UserData.UID);
+        }
+    }
+    private static bool TryGetMinionReapplyChanges(CharacterData data, out HashSet<PlayerChanges> changes, out bool hasCustomize, out bool hasGlamourer, out bool hasFileReplacements)
+    {
+        changes = [];
+        hasCustomize = false;
+        hasGlamourer = false;
+        hasFileReplacements = false;
+
+        if (data.CustomizePlusData.TryGetValue(ObjectKind.MinionOrMount, out var customizeData) && !string.IsNullOrEmpty(customizeData))
+        {
+            changes.Add(PlayerChanges.Customize);
+            hasCustomize = true;
+        }
+
+        if (data.GlamourerData.TryGetValue(ObjectKind.MinionOrMount, out var glamourerData) && !string.IsNullOrEmpty(glamourerData))
+        {
+            changes.Add(PlayerChanges.Glamourer);
+            hasGlamourer = true;
+        }
+
+        if (data.FileReplacements.TryGetValue(ObjectKind.MinionOrMount, out var replacements) && replacements.Count > 0)
+        {
+            changes.Add(PlayerChanges.ForcedRedraw);
+            hasFileReplacements = true;
+        }
+
+        return changes.Count > 0;
     }
 
     private async Task RevertCustomizationDataAsync(ObjectKind objectKind, string name, Guid applicationId, CancellationToken cancelToken)

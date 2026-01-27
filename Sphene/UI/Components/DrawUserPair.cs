@@ -510,6 +510,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         ImGui.AlignTextToFramePadding();
 
         var isVisibleForIcon = _pair.IsMutuallyVisible || (_uiSharedService.IsInGpose && _pair.WasMutuallyVisibleInGpose);
+        var partnerAckYou = _pair.UserPair.OtherPermissions.IsAckYou();
 
         if (_pair.IsPaused)
         {
@@ -535,7 +536,6 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
                 ImGui.SameLine();
             }
             
-            var partnerAckYou = _pair.UserPair.OtherPermissions.IsAckYou();
             var iconColor = partnerAckYou ? ImGuiColors.ParsedGreen : ImGuiColors.DalamudYellow;
             var icon = (_uiSharedService.IsInGpose || _pair.IsInGpose) ? FontAwesomeIcon.Camera : FontAwesomeIcon.Eye;
             _uiSharedService.IconText(icon, iconColor);
@@ -569,7 +569,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         if (_pair.IsOnline && _pair.IsMutuallyVisible)
         {
             ImGui.SameLine();
-            if (_pair.HasPendingAcknowledgment)
+            if (!partnerAckYou || _pair.HasPendingAcknowledgment)
             {
                 using var _ = ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.DalamudYellow);
                 _uiSharedService.IconText(FontAwesomeIcon.Clock);

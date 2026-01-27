@@ -707,7 +707,12 @@ public class SettingsUi : WindowMediatorSubscriberBase
 #if IS_TEST_BUILD
         if (LastCreatedCharacterData != null && ImGui.TreeNode("Last created character data"))
         {
-            foreach (var l in JsonSerializer.Serialize(LastCreatedCharacterData, new JsonSerializerOptions() { WriteIndented = true }).Split('\n'))
+            var lastCreatedJson = JsonSerializer.Serialize(LastCreatedCharacterData, new JsonSerializerOptions() { WriteIndented = true });
+            if (_uiShared.IconTextButton(FontAwesomeIcon.Copy, "Copy to clipboard##lastCreatedCharacterData"))
+            {
+                ImGui.SetClipboardText(lastCreatedJson);
+            }
+            foreach (var l in lastCreatedJson.Split('\n'))
             {
                 ImGui.TextUnformatted($"{l}");
             }

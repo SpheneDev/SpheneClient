@@ -233,6 +233,11 @@ public sealed class CacheCreationService : DisposableMediatorSubscriberBase
 
                 foreach (var kvp in createdData)
                 {
+                    if (kvp.Key == ObjectKind.MinionOrMount && kvp.Value == null)
+                    {
+                        continue;
+                    }
+
                     _playerData.SetFragment(kvp.Key, kvp.Value);
                 }
 

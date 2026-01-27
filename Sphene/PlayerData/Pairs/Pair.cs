@@ -33,6 +33,13 @@ public class Pair : DisposableMediatorSubscriberBase
     private CancellationTokenSource _applicationCts = new();
     private OnlineUserIdentDto? _onlineUserIdentDto = null;
     private readonly VisibilityGateService _visibilityGateService;
+    private const int BaseApplyRetryDelaySeconds = 2;
+    private const int MaxApplyRetryDelaySeconds = 30;
+    private const int MaxApplyRetryBackoffSteps = 5;
+    private CancellationTokenSource _applyRetryCts = new();
+    private int _applyRetryCount = 0;
+    private const int MaxApplyDebugLines = 200;
+    private readonly ConcurrentQueue<string> _applyDebugLog = new();
 
     public Pair(ILogger<Pair> logger, UserFullPairDto userPair, PairHandlerFactory cachedPlayerFactory,
         SpheneMediator mediator, ServerConfigurationManager serverConfigurationManager,
@@ -66,12 +73,18 @@ public class Pair : DisposableMediatorSubscriberBase
     public bool IsMutuallyVisible { get; private set; } = false;
     public bool WasMutuallyVisibleInGpose { get; private set; } = false;
     public bool IsInGpose { get; private set; } = false;
-    public CharacterData? LastReceivedCharacterData { get; set; }
+    public CharacterData? LastReceivedCharacterData { get; private set; }
+    public CharacterData? PreviousReceivedCharacterData { get; private set; }
+    public string? LastReceivedCharacterDataHash { get; private set; }
+    public string? PreviousReceivedCharacterDataHash { get; private set; }
+    public DateTimeOffset? LastReceivedCharacterDataTime { get; private set; }
+    public DateTimeOffset? LastReceivedCharacterDataChangeTime { get; private set; }
     public string? PlayerName => CachedPlayer?.PlayerName ?? string.Empty;
     public long LastAppliedDataBytes => CachedPlayer?.LastAppliedDataBytes ?? -1;
     public long LastAppliedDataTris { get; set; } = -1;
     public long LastAppliedApproximateVRAMBytes { get; set; } = -1;
     public string Ident => _onlineUserIdentDto?.Ident ?? string.Empty;
+    internal int ApplyRetryCount => _applyRetryCount;
     
     // Data synchronization status properties
     public bool? LastAcknowledgmentSuccess { get; private set; } = null;
@@ -229,7 +242,25 @@ public class Pair : DisposableMediatorSubscriberBase
     public void ApplyData(OnlineUserCharaDataDto data)
     {
         _applicationCts = _applicationCts.CancelRecreate();
-        LastReceivedCharacterData = data.CharaData;
+        UpdateReceivedCharacterDataCache(data);
+        ResetApplyRetry();
+        bool shouldApply = CachedPlayer == null
+            || LastReceivedCharacterData == null
+            || !CachedPlayer.IsCharacterDataAppliedForCurrentCharacter(LastReceivedCharacterData);
+
+        var hash = data.DataHash;
+        var shortHash = string.IsNullOrEmpty(hash) ? "NONE" : hash[..Math.Min(8, hash.Length)];
+        AddApplyDebug($"Data received hash={shortHash} requiresAck={data.RequiresAcknowledgment}");
+
+        if (!shouldApply)
+        {
+            if (data.RequiresAcknowledgment && !string.IsNullOrEmpty(data.DataHash))
+            {
+                _ = SendAcknowledgmentIfRequired(data, true, true);
+            }
+
+            return;
+        }
 
         // Assign sequence number for tracking order
         var currentSequence = Interlocked.Increment(ref _acknowledgmentSequence);
@@ -251,7 +282,10 @@ public class Pair : DisposableMediatorSubscriberBase
                 if (!combined.IsCancellationRequested)
                 {
                     Logger.LogDebug("Applying delayed data for {uid}", data.User.UID);
-                    ApplyLastReceivedData();
+                    if (shouldApply)
+                    {
+                        ApplyLastReceivedData();
+                    }
                     
                     // Enqueue acknowledgment data for delayed sending after application completes
                     if (data.RequiresAcknowledgment && !string.IsNullOrEmpty(data.DataHash))
@@ -272,7 +306,10 @@ public class Pair : DisposableMediatorSubscriberBase
             return;
         }
 
-        ApplyLastReceivedData();
+        if (shouldApply)
+        {
+            ApplyLastReceivedData();
+        }
         
         // Enqueue acknowledgment data for delayed sending after application completes
         if (data.RequiresAcknowledgment && !string.IsNullOrEmpty(data.DataHash))
@@ -286,11 +323,40 @@ public class Pair : DisposableMediatorSubscriberBase
         }
     }
 
+    private void UpdateReceivedCharacterDataCache(OnlineUserCharaDataDto data)
+    {
+        var previousHash = LastReceivedCharacterData?.DataHash?.Value;
+        var newHash = data.CharaData?.DataHash?.Value;
+        var now = DateTimeOffset.UtcNow;
+
+        if (!string.Equals(previousHash, newHash, StringComparison.Ordinal))
+        {
+            PreviousReceivedCharacterData = LastReceivedCharacterData;
+            PreviousReceivedCharacterDataHash = previousHash;
+            LastReceivedCharacterDataChangeTime = now;
+        }
+
+        LastReceivedCharacterData = data.CharaData;
+        LastReceivedCharacterDataHash = newHash;
+        LastReceivedCharacterDataTime = now;
+    }
+
     public void ApplyLastReceivedData(bool forced = false)
     {
         if (CachedPlayer == null) return;
         if (LastReceivedCharacterData == null) return;
 
+        if (!forced && CachedPlayer.IsCharacterDataAppliedForCurrentCharacter(LastReceivedCharacterData))
+        {
+            var hash = LastReceivedCharacterData.DataHash.Value;
+            var shortHash = string.IsNullOrEmpty(hash) ? "NONE" : hash[..Math.Min(8, hash.Length)];
+            AddApplyDebug($"Apply skipped hash already applied hash={shortHash}");
+            return;
+        }
+
+        var applyHash = LastReceivedCharacterData.DataHash.Value;
+        var applyShortHash = string.IsNullOrEmpty(applyHash) ? "NONE" : applyHash[..Math.Min(8, applyHash.Length)];
+        AddApplyDebug($"Apply start forced={forced} hash={applyShortHash}");
         CachedPlayer.ApplyCharacterData(Guid.NewGuid(), RemoveNotSyncedFiles(LastReceivedCharacterData.DeepClone())!, forced);
     }
 
@@ -343,7 +409,13 @@ public class Pair : DisposableMediatorSubscriberBase
         {
             if (wait)
                 _creationSemaphore.Wait();
+            ResetApplyRetry();
             LastReceivedCharacterData = null;
+            PreviousReceivedCharacterData = null;
+            LastReceivedCharacterDataHash = null;
+            PreviousReceivedCharacterDataHash = null;
+            LastReceivedCharacterDataTime = null;
+            LastReceivedCharacterDataChangeTime = null;
             var player = CachedPlayer;
             CachedPlayer = null;
             player?.Dispose();
@@ -775,6 +847,14 @@ public class Pair : DisposableMediatorSubscriberBase
         if (string.Equals(message.UserUID, UserPair.User.UID, StringComparison.Ordinal))
         {
             Logger.LogDebug("Character data application completed for {playerName} - processing acknowledgment queue", message.PlayerName);
+            if (message.Success)
+            {
+                ResetApplyRetry();
+            }
+            else
+            {
+                ScheduleApplyRetry(increment: true);
+            }
             
             // Process acknowledgment queue and send only the latest acknowledgment
             if (!_pendingAcknowledgmentQueue.IsEmpty)
@@ -837,6 +917,86 @@ public class Pair : DisposableMediatorSubscriberBase
         }
     }
 
+    private void ScheduleApplyRetry(bool increment)
+    {
+        if (LastReceivedCharacterData == null || CachedPlayer == null) return;
+        if (!IsVisible || !IsMutuallyVisible) return;
+
+        if (increment && _applyRetryCount < MaxApplyRetryBackoffSteps)
+        {
+            _applyRetryCount++;
+        }
+
+        if (_applyRetryCount <= 0)
+        {
+            _applyRetryCount = 1;
+        }
+
+        _applyRetryCts.Cancel();
+        _applyRetryCts.Dispose();
+        _applyRetryCts = new CancellationTokenSource();
+        var token = _applyRetryCts.Token;
+        var delaySeconds = Math.Min(BaseApplyRetryDelaySeconds * (1 << (_applyRetryCount - 1)), MaxApplyRetryDelaySeconds);
+        AddApplyDebug($"Retry scheduled in {delaySeconds}s attempt={_applyRetryCount}");
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(delaySeconds), token).ConfigureAwait(false);
+            }
+            catch
+            {
+                return;
+            }
+
+            if (token.IsCancellationRequested) return;
+            if (LastReceivedCharacterData == null || CachedPlayer == null) return;
+            if (!IsVisible || !IsMutuallyVisible) return;
+
+            if (_dalamudUtilService.IsInCombatOrPerforming || _dalamudUtilService.IsInGpose || _dalamudUtilService.IsInCutscene)
+            {
+                ScheduleApplyRetry(increment: false);
+                return;
+            }
+
+            CachedPlayer.ApplyCharacterData(Guid.NewGuid(),
+                RemoveNotSyncedFiles(LastReceivedCharacterData.DeepClone())!,
+                forceApplyCustomization: true);
+        }, token);
+    }
+
+    private void ResetApplyRetry()
+    {
+        _applyRetryCount = 0;
+        _applyRetryCts.Cancel();
+        _applyRetryCts.Dispose();
+        _applyRetryCts = new CancellationTokenSource();
+    }
+
+    internal string[] GetApplyDebugLines()
+    {
+        return _applyDebugLog.ToArray();
+    }
+
+    internal void ClearApplyDebug()
+    {
+        _applyDebugLog.Clear();
+    }
+
+    internal void AddApplyDebug(string message)
+    {
+        var timestamp = DateTime.Now.ToString("HH:mm:ss.fff");
+        _applyDebugLog.Enqueue($"[{timestamp}] {message}");
+        while (_applyDebugLog.Count > MaxApplyDebugLines)
+        {
+            if (!_applyDebugLog.TryDequeue(out _))
+            {
+                break;
+            }
+        }
+    }
+
     private bool VerifyDataHashIntegrity(OnlineUserCharaDataDto acknowledgmentData)
      {
          try
@@ -877,6 +1037,8 @@ public class Pair : DisposableMediatorSubscriberBase
         {
             _applicationCts?.Cancel();
             _applicationCts?.Dispose();
+            _applyRetryCts.Cancel();
+            _applyRetryCts.Dispose();
             _creationSemaphore.Dispose();
             CachedPlayer?.Dispose();
             CachedPlayer = null;
