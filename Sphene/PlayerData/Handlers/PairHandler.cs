@@ -640,21 +640,24 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
 
     private void RefreshMinionFileOverrides(CharacterData data)
     {
-        var dataHash = data.DataHash?.Value ?? string.Empty;
-        if (string.Equals(_lastKnownMinionOverrideHash, dataHash, StringComparison.Ordinal)
+        if (!data.FileReplacements.TryGetValue(ObjectKind.MinionOrMount, out var minionReplacements) || minionReplacements.Count == 0)
+        {
+            _lastKnownMinionOverrideHash = null;
+            _lastKnownMinionFileOverrides.Clear();
+            _lastKnownMinionScdOverrides.Clear();
+            return;
+        }
+
+        var minionHash = ComputeMinionDataHash(minionReplacements);
+        if (string.Equals(_lastKnownMinionOverrideHash, minionHash, StringComparison.Ordinal)
             && !_lastKnownMinionFileOverrides.IsEmpty)
         {
             return;
         }
 
-        _lastKnownMinionOverrideHash = dataHash;
+        _lastKnownMinionOverrideHash = minionHash;
         _lastKnownMinionFileOverrides.Clear();
         _lastKnownMinionScdOverrides.Clear();
-
-        if (!data.FileReplacements.TryGetValue(ObjectKind.MinionOrMount, out var minionReplacements) || minionReplacements.Count == 0)
-        {
-            return;
-        }
 
         var missingFiles = TryCalculateModdedDictionary(Guid.NewGuid(), data, out var moddedPaths, CancellationToken.None);
         if (missingFiles.Count > 0 || moddedPaths.Count == 0)
@@ -687,6 +690,25 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                 }
             });
         }
+    }
+
+    private static string ComputeMinionDataHash(List<FileReplacementData> minionReplacements)
+    {
+        if (minionReplacements == null || minionReplacements.Count == 0) return string.Empty;
+        var hash = new HashCode();
+        foreach (var item in minionReplacements.OrderBy(x => x.Hash, StringComparer.Ordinal))
+        {
+            hash.Add(item.Hash, StringComparer.Ordinal);
+            if (item.GamePaths != null)
+            {
+                foreach (var path in item.GamePaths.OrderBy(x => x, StringComparer.Ordinal))
+                {
+                    hash.Add(path, StringComparer.Ordinal);
+                }
+            }
+            hash.Add(item.FileSwapPath, StringComparer.Ordinal);
+        }
+        return hash.ToHashCode().ToString();
     }
 
     private CharacterData? GetMinionReapplyData()
@@ -821,18 +843,22 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
 
         if (updateModdedPaths && moddedPaths.Count > 0 && charaData.FileReplacements.TryGetValue(ObjectKind.MinionOrMount, out var minionRepls) && minionRepls.Count > 0)
         {
-            _lastKnownMinionFileOverrides.Clear();
-            _lastKnownMinionScdOverrides.Clear();
-            foreach (var entry in moddedPaths)
+            var minionHash = ComputeMinionDataHash(minionRepls);
+            if (!string.Equals(_lastKnownMinionOverrideHash, minionHash, StringComparison.Ordinal))
             {
-                var normalizedGamePath = entry.Key.GamePath.Replace('\\', '/').ToLowerInvariant();
-                _lastKnownMinionFileOverrides[normalizedGamePath] = entry.Value;
-                if (normalizedGamePath.EndsWith(".scd", StringComparison.OrdinalIgnoreCase))
+                _lastKnownMinionFileOverrides.Clear();
+                _lastKnownMinionScdOverrides.Clear();
+                foreach (var entry in moddedPaths)
                 {
-                    _lastKnownMinionScdOverrides[normalizedGamePath] = entry.Value;
+                    var normalizedGamePath = entry.Key.GamePath.Replace('\\', '/').ToLowerInvariant();
+                    _lastKnownMinionFileOverrides[normalizedGamePath] = entry.Value;
+                    if (normalizedGamePath.EndsWith(".scd", StringComparison.OrdinalIgnoreCase))
+                    {
+                        _lastKnownMinionScdOverrides[normalizedGamePath] = entry.Value;
+                    }
                 }
+                _lastKnownMinionOverrideHash = minionHash;
             }
-            _lastKnownMinionOverrideHash = charaData.DataHash?.Value ?? string.Empty;
         }
 
         _applicationCancellationTokenSource = _applicationCancellationTokenSource.CancelRecreate() ?? new CancellationTokenSource();
