@@ -480,6 +480,7 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
     {
         ColorTextWrapped("Note: The storage folder should be somewhere close to root (i.e. C:\\SpheneStorage) in a new empty folder. DO NOT point this to your game folder. DO NOT point this to your Penumbra folder.", ImGuiColors.DalamudYellow);
         var cacheDirectory = _configService.Current.CacheFolder;
+        ScaledNextItemWidth(350);
         ImGui.InputText("Storage Folder##cache", ref cacheDirectory, 255, ImGuiInputTextFlags.ReadOnly);
 
         ImGui.SameLine();
@@ -566,6 +567,7 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
         }
 
         float maxCacheSize = (float)_configService.Current.MaxLocalCacheInGiB;
+        ScaledNextItemWidth(350);
         if (ImGui.SliderFloat("Maximum Storage Size in GiB", ref maxCacheSize, 1f, 200f, "%.2f GiB"))
         {
             _configService.Current.MaxLocalCacheInGiB = maxCacheSize;
@@ -577,9 +579,11 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
     public void DrawPenumbraModDownloadFolderSetting()
     {
         var downloadFolder = _configService.Current.PenumbraModDownloadFolder;
+        ScaledNextItemWidth(350);
         ImGui.InputText("Mod Download Folder##download", ref downloadFolder, 255, ImGuiInputTextFlags.ReadOnly);
 
         ImGui.SameLine();
+        ImGui.PushID("penumbraDownloadFolder");
         if (IconButton(FontAwesomeIcon.Folder))
         {
             FileDialogManager.OpenFolderDialog("Pick Mod Download Folder", (success, path) =>
@@ -603,6 +607,7 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
                 }
             }, _dalamudUtil.IsWine ? @"Z:\" : @"C:\");
         }
+        ImGui.PopID();
         
         // Add a clear button to reset to default (empty)
         if (!string.IsNullOrEmpty(downloadFolder))
@@ -624,7 +629,7 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
         {
             ColorTextWrapped("Do not point the download path to a folder in OneDrive.", ImGuiColors.DalamudRed);
         }
-        else if (!_isDownloadFolderWritable)
+        else if (!string.IsNullOrEmpty(downloadFolder) && !_isDownloadFolderWritable)
         {
             ColorTextWrapped("The folder you selected does not exist or cannot be written to. Please provide a valid path.", ImGuiColors.DalamudRed);
         }
@@ -632,6 +637,11 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
         {
             ColorTextWrapped("Your selected directory contains illegal characters unreadable by FFXIV. " +
                              "Restrict yourself to latin letters (A-Z), underscores (_), dashes (-) and arabic numbers (0-9).", ImGuiColors.DalamudRed);
+        }
+
+        if (string.IsNullOrEmpty(downloadFolder))
+        {
+            ColorTextWrapped("No folder selected. Using default Sphene Storage folder.", ImGuiColors.HealerGreen);
         }
 
         DrawHelpText("Optional: Select a folder where downloaded mod files (PMP) will be stored. If left empty, the default cache folder will be used.");

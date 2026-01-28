@@ -795,25 +795,6 @@ public class SettingsUi : WindowMediatorSubscriberBase
     {
         _lastTab = "FileCache";
 
-        _uiShared.BigText("Export MCDF");
-
-        ImGuiHelpers.ScaledDummy(10);
-
-        UiSharedService.ColorTextWrapped("Exporting MCDF has moved.", ImGuiColors.DalamudYellow);
-        ImGuiHelpers.ScaledDummy(5);
-        UiSharedService.TextWrapped("It is now found in the Main UI under \"Your User Menu\" (");
-        ImGui.SameLine();
-        _uiShared.IconText(FontAwesomeIcon.UserCog);
-        ImGui.SameLine();
-        UiSharedService.TextWrapped(") -> \"Character Data Hub\".");
-        if (_uiShared.IconTextButton(FontAwesomeIcon.Running, "Open Sphene Character Data Hub"))
-        {
-            Mediator.Publish(new UiToggleMessage(typeof(CharaDataHubUi)));
-        }
-        UiSharedService.TextWrapped("Note: this entry will be removed in the near future. Please use the Main UI to open the Character Data Hub.");
-        ImGuiHelpers.ScaledDummy(5);
-        ImGui.Separator();
-
         _uiShared.BigText("Storage & Cache");
 
         UiSharedService.TextWrapped("Sphene stores downloaded files from paired people permanently. This is to improve loading performance and requiring less downloads. " +
