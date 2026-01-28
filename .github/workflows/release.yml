@@ -8,6 +8,11 @@ on:
         required: true
         default: false
         type: boolean
+      api_branch:
+        description: 'SpheneAPI Branch'
+        required: false
+        default: 'main'
+        type: string
 
 jobs:
   release:
@@ -27,6 +32,7 @@ jobs:
         repository: SpheneDev/SpheneAPI  # Replace with actual API repository
         path: ./SpheneAPI
         token: ${{ secrets.GITHUB_TOKEN }}  # Use PAT if private repo: ${{ secrets.API_ACCESS_TOKEN }}
+        ref: ${{ github.event.inputs.api_branch }}
         
     - name: Checkout ShrinkU
       uses: actions/checkout@v4
