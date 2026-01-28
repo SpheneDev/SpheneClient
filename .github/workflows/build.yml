@@ -4,9 +4,8 @@ on:
   workflow_dispatch:
     inputs:
       api_branch:
-        description: 'SpheneAPI Branch'
+        description: 'SpheneAPI Branch (Leave empty to use same as Client)'
         required: false
-        default: 'main'
         type: string
 
 jobs:
@@ -25,7 +24,7 @@ jobs:
         repository: SpheneDev/SpheneAPI  # Replace with actual API repository
         path: ./SpheneAPI
         token: ${{ secrets.GITHUB_TOKEN }}  # Use PAT if private repo: ${{ secrets.API_ACCESS_TOKEN }}
-        ref: ${{ github.event.inputs.api_branch }}
+        ref: ${{ github.event.inputs.api_branch || github.ref_name }}
         
     - name: Checkout ShrinkU
       uses: actions/checkout@v4
