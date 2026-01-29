@@ -235,6 +235,12 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
                     
                     // Create hash key for acknowledgment tracking
                     var hashKey = dataToSend.DataHash.Value;
+
+                    // Revoke AckYou for all users before pushing new data
+                    // This ensures partners see a yellow eye indicating that the sender has changed state
+                    Logger.LogDebug("Revoking AckYou status before pushing new data hash: {hash}", hashKey);
+                    _ = _apiController.UserUpdateAckYou(false);
+
                     _pairManager.SetPendingAcknowledgmentForSender([.. usersNeedingData], hashKey);
                     _sessionAcknowledgmentManager.SetPendingAcknowledgmentForHashVersion([.. usersNeedingData], hashKey);
                     

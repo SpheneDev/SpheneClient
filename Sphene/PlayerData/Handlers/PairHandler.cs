@@ -778,10 +778,11 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
     {
         Dictionary<(string GamePath, string? Hash), string> moddedPaths = [];
 
+        List<FileReplacementData> toDownloadReplacements = [];
         if (updateModdedPaths)
         {
             int attempts = 0;
-            List<FileReplacementData> toDownloadReplacements = TryCalculateModdedDictionary(applicationBase, charaData, out moddedPaths, downloadToken);
+            toDownloadReplacements = TryCalculateModdedDictionary(applicationBase, charaData, out moddedPaths, downloadToken);
 
             while (toDownloadReplacements.Count > 0 && attempts++ <= 10 && !downloadToken.IsCancellationRequested)
             {
@@ -821,6 +822,13 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                 }
 
                 await Task.Delay(TimeSpan.FromSeconds(2), downloadToken).ConfigureAwait(false);
+            }
+
+            if (toDownloadReplacements.Count > 0)
+            {
+                Logger.LogWarning("[BASE-{appBase}] Missing {count} files after download attempts for player {name}, {kind}", applicationBase, toDownloadReplacements.Count, PlayerName, updatedData);
+                Mediator.Publish(new CharacterDataApplicationCompletedMessage(PlayerName ?? string.Empty, Pair.UserData.UID, applicationBase, false));
+                return;
             }
 
             if (!await _playerPerformanceService.CheckBothThresholds(this, charaData).ConfigureAwait(false))

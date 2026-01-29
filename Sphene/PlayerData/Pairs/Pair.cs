@@ -486,9 +486,9 @@ public class Pair : DisposableMediatorSubscriberBase
         return data;
     }
 
-    public async Task UpdateAcknowledgmentStatus(string acknowledgmentId, bool success, DateTimeOffset timestamp)
+    public async Task UpdateAcknowledgmentStatus(string? acknowledgmentId, bool success, DateTimeOffset timestamp)
     {
-        Logger.LogDebug("Updating acknowledgment status: {acknowledgmentId} - Success: {success} for user {user}", acknowledgmentId, success, UserData.AliasOrUID);
+        Logger.LogDebug("Updating acknowledgment status: {acknowledgmentId} - Success: {success} for user {user}", acknowledgmentId ?? "null", success, UserData.AliasOrUID);
         LastAcknowledgmentId = acknowledgmentId;
         LastAcknowledgmentSuccess = success;
         LastAcknowledgmentTime = timestamp;
@@ -913,6 +913,14 @@ public class Pair : DisposableMediatorSubscriberBase
             else
             {
                 Logger.LogInformation("No pending acknowledgment data, but character data application completed for {playerName}", message.PlayerName);
+
+                // Fix for stuck Clock/AckYou status after redraw/rebuild (e.g. after SetPendingAcknowledgmentForBuildStart)
+                // If we successfully re-applied data but still have pending status or AckYou=false, we need to resolve it
+                if (HasPendingAcknowledgment || (message.Success && !UserPair.OwnPermissions.IsAckYou()))
+                {
+                    Logger.LogDebug("Auto-completing acknowledgment after data application (re-apply/redraw) - Success: {success}", message.Success);
+                    await UpdateAcknowledgmentStatus(LastAcknowledgmentId, message.Success, DateTime.UtcNow).ConfigureAwait(false);
+                }
             }
         }
     }

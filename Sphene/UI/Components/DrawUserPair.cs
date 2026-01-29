@@ -56,8 +56,8 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
     private static readonly System.Threading.Lock _globalAckYouLock = new();
     
     
-    // Cache acknowledgment status - updated only via events
     private bool _cachedHasPendingAck = false;
+    private DateTime _lastAckStatusPoll = DateTime.MinValue;
     private readonly List<FileTransferNotificationDto> _pendingModNotifications = new();
     public DrawUserPair(string id, Pair entry, List<GroupFullInfoDto> syncedGroups,
         GroupFullInfoDto? currentGroup,
@@ -249,6 +249,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
 
     public void DrawPairedClient()
     {
+        RefreshAckStatusIfDue();
         using var id = ImRaii.PushId(GetType() + _id);
         var color = ImRaii.PushColor(ImGuiCol.ChildBg, ImGui.GetColorU32(ImGuiCol.FrameBgHovered), _wasHovered);
         var baseFolderWidth = UiSharedService.GetBaseFolderWidth() + 9.0f;
@@ -569,11 +570,11 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         if (_pair.IsOnline && _pair.IsMutuallyVisible)
         {
             ImGui.SameLine();
-            if (!partnerAckYou || _pair.HasPendingAcknowledgment)
+            if (_pair.HasPendingAcknowledgment)
             {
                 using var _ = ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.DalamudYellow);
                 _uiSharedService.IconText(FontAwesomeIcon.Clock);
-                UiSharedService.AttachToolTip("Waiting for acknowledgment from this user...");
+                UiSharedService.AttachToolTip("Processing character data...");
             }
             else if (_pair.LastAcknowledgmentSuccess.HasValue)
             {
@@ -1022,15 +1023,24 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
     
     private bool GetCachedHasPendingAcknowledgment()
     {
-        // Return cached value without initializing from PairManager to avoid frequent calls
-        // Cache is updated only through event handlers
         return _cachedHasPendingAck;
+    }
+
+    private void RefreshAckStatusIfDue()
+    {
+        var now = DateTime.UtcNow;
+        if (now - _lastAckStatusPoll < TimeSpan.FromMilliseconds(500))
+        {
+            return;
+        }
+
+        _lastAckStatusPoll = now;
+        _cachedHasPendingAck = _pairManager.HasPendingAcknowledgmentForUser(_pair.UserData);
     }
 
     public void RefreshIcon()
     {
-        // Force refresh of cached icon data without recreating the entire DrawUserPair instance
-        // This method is called when only icons need to be updated
-        // The actual icon rendering will pick up the latest data on next draw
+        _cachedHasPendingAck = _pairManager.HasPendingAcknowledgmentForUser(_pair.UserData);
+        _lastAckStatusPoll = DateTime.UtcNow;
     }
 }
