@@ -135,6 +135,12 @@ public partial class ApiController
         return Task.CompletedTask;
     }
 
+    public Task Client_UserReceiveBypassEmote(BypassEmoteUpdateDto dto)
+    {
+        ExecuteSafely(() => _pairManager.ReceiveBypassEmote(dto));
+        return Task.CompletedTask;
+    }
+
     public Task Client_UserReceiveCharacterDataAcknowledgment(CharacterDataAcknowledgmentDto acknowledgmentDto)
     {
         var processed = false;
@@ -381,6 +387,12 @@ public partial class ApiController
     {
         if (_initialized) return;
         _spheneHub!.On(nameof(Client_UserReceiveCharacterData), act);
+    }
+
+    public void OnUserReceiveBypassEmote(Action<BypassEmoteUpdateDto> act)
+    {
+        if (_initialized) return;
+        _spheneHub!.On(nameof(Client_UserReceiveBypassEmote), act);
     }
 
     public void OnUserReceiveCharacterDataAcknowledgment(Action<CharacterDataAcknowledgmentDto> act)

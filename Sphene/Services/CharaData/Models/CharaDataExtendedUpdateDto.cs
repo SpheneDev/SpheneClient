@@ -33,6 +33,11 @@ public sealed record CharaDataExtendedUpdateDto : CharaDataUpdateDto
         GlamourerData = base.GlamourerData,
         ShareType = base.ShareType,
         ManipulationData = base.ManipulationData,
+        HeelsData = base.HeelsData,
+        HonorificData = base.HonorificData,
+        MoodlesData = base.MoodlesData,
+        PetNamesData = base.PetNamesData,
+        BypassEmoteData = base.BypassEmoteData,
         Poses = Poses
     };
 
@@ -180,6 +185,86 @@ public sealed record CharaDataExtendedUpdateDto : CharaDataUpdateDto
             if (string.Equals(base.CustomizeData, _charaDataFullDto.CustomizeData, StringComparison.Ordinal))
             {
                 base.CustomizeData = null;
+            }
+        }
+    }
+
+    public new string? HeelsData
+    {
+        get
+        {
+            return base.HeelsData ?? _charaDataFullDto.HeelsData;
+        }
+        set
+        {
+            base.HeelsData = value;
+            if (string.Equals(base.HeelsData, _charaDataFullDto.HeelsData, StringComparison.Ordinal))
+            {
+                base.HeelsData = null;
+            }
+        }
+    }
+
+    public new string? HonorificData
+    {
+        get
+        {
+            return base.HonorificData ?? _charaDataFullDto.HonorificData;
+        }
+        set
+        {
+            base.HonorificData = value;
+            if (string.Equals(base.HonorificData, _charaDataFullDto.HonorificData, StringComparison.Ordinal))
+            {
+                base.HonorificData = null;
+            }
+        }
+    }
+
+    public new string? MoodlesData
+    {
+        get
+        {
+            return base.MoodlesData ?? _charaDataFullDto.MoodlesData;
+        }
+        set
+        {
+            base.MoodlesData = value;
+            if (string.Equals(base.MoodlesData, _charaDataFullDto.MoodlesData, StringComparison.Ordinal))
+            {
+                base.MoodlesData = null;
+            }
+        }
+    }
+
+    public new string? PetNamesData
+    {
+        get
+        {
+            return base.PetNamesData ?? _charaDataFullDto.PetNamesData;
+        }
+        set
+        {
+            base.PetNamesData = value;
+            if (string.Equals(base.PetNamesData, _charaDataFullDto.PetNamesData, StringComparison.Ordinal))
+            {
+                base.PetNamesData = null;
+            }
+        }
+    }
+
+    public new string? BypassEmoteData
+    {
+        get
+        {
+            return base.BypassEmoteData ?? _charaDataFullDto.BypassEmoteData;
+        }
+        set
+        {
+            base.BypassEmoteData = value;
+            if (string.Equals(base.BypassEmoteData, _charaDataFullDto.BypassEmoteData, StringComparison.Ordinal))
+            {
+                base.BypassEmoteData = null;
             }
         }
     }

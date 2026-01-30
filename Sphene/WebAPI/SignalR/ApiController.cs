@@ -499,6 +499,7 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
         OnUserDefaultPermissionUpdate(dto => _ = Client_UserUpdateDefaultPermissions(dto));
         OnUpdateUserIndividualPairStatusDto(dto => _ = Client_UpdateUserIndividualPairStatusDto(dto));
         OnUserReceiveFileNotification(dto => _ = Client_UserReceiveFileNotification(dto));
+        OnUserReceiveBypassEmote(dto => _ = Client_UserReceiveBypassEmote(dto));
         OnUserReceiveCharacterDataAcknowledgment(dto => _ = Client_UserReceiveCharacterDataAcknowledgment(dto));
 
         OnGroupChangePermissions((dto) => _ = Client_GroupChangePermissions(dto));

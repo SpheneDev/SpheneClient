@@ -7,7 +7,8 @@ public sealed partial class IpcManager : DisposableMediatorSubscriberBase
 {
     public IpcManager(ILogger<IpcManager> logger, SpheneMediator mediator,
         IpcCallerPenumbra penumbraIpc, IpcCallerGlamourer glamourerIpc, IpcCallerCustomize customizeIpc, IpcCallerHeels heelsIpc,
-        IpcCallerHonorific honorificIpc, IpcCallerMoodles moodlesIpc, IpcCallerPetNames ipcCallerPetNames, IpcCallerBrio ipcCallerBrio) : base(logger, mediator)
+        IpcCallerHonorific honorificIpc, IpcCallerMoodles moodlesIpc, IpcCallerPetNames ipcCallerPetNames, IpcCallerBypassEmote bypassEmoteIpc,
+        IpcCallerBrio ipcCallerBrio) : base(logger, mediator)
     {
         CustomizePlus = customizeIpc;
         Heels = heelsIpc;
@@ -16,6 +17,7 @@ public sealed partial class IpcManager : DisposableMediatorSubscriberBase
         Honorific = honorificIpc;
         Moodles = moodlesIpc;
         PetNames = ipcCallerPetNames;
+        BypassEmote = bypassEmoteIpc;
         Brio = ipcCallerBrio;
 
         if (Initialized)
@@ -44,6 +46,7 @@ public sealed partial class IpcManager : DisposableMediatorSubscriberBase
     public IpcCallerPenumbra Penumbra { get; }
     public IpcCallerMoodles Moodles { get; }
     public IpcCallerPetNames PetNames { get; }
+    public IpcCallerBypassEmote BypassEmote { get; }
 
     public IpcCallerBrio Brio { get; }
 
@@ -57,6 +60,7 @@ public sealed partial class IpcManager : DisposableMediatorSubscriberBase
         Honorific.CheckAPI();
         Moodles.CheckAPI();
         PetNames.CheckAPI();
+        BypassEmote.CheckAPI();
         Brio.CheckAPI();
     }
 }

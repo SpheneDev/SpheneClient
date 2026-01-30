@@ -2,6 +2,7 @@ using Dalamud.Plugin.Services;
 using Sphene.API.Data;
 using Sphene.API.Data.Comparer;
 using Sphene.API.Data.Extensions;
+using Sphene.API.Dto.CharaData;
 using Sphene.API.Dto.Group;
 using Sphene.API.Dto.User;
 using Sphene.SpheneConfiguration;
@@ -206,6 +207,26 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         pair.CreateCachedPlayer(dto);
 
         RecreateLazy();
+    }
+
+    public void ReceiveBypassEmote(BypassEmoteUpdateDto dto)
+    {
+        if (dto.Sender == null)
+        {
+             Logger.LogWarning("Received BypassEmote update with null Sender");
+             return;
+        }
+
+        Logger.LogDebug("Received BypassEmote update from {User}. Data Length: {Len}", dto.Sender.AliasOrUID, dto.BypassEmoteData.Length);
+
+        if (_allClientPairs.TryGetValue(dto.Sender, out var pair))
+        {
+            pair.ApplyBypassEmote(dto.BypassEmoteData);
+        }
+        else
+        {
+            Logger.LogDebug("BypassEmote sender {User} not found in client pairs", dto.Sender.AliasOrUID);
+        }
     }
 
     public void ReceiveCharaData(OnlineUserCharaDataDto dto)

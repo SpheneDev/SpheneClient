@@ -54,6 +54,9 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
     private string? _inProgressGlamourerHash;
     private string? _inProgressRestHash;
     private string? _inProgressDataHash;
+    private string? _lastAppliedBypassEmoteData;
+    private nint _lastAppliedBypassEmoteAddress = nint.Zero;
+    private DateTime _lastAppliedBypassEmoteTime = DateTime.MinValue;
     private string? _lastSuccessfullyAppliedPenumbraHash;
     private string? _lastSuccessfullyAppliedGlamourerHash;
     private string? _lastSuccessfullyAppliedRestHash;
@@ -123,6 +126,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             _localVisibilityGateActive = true;
             _downloadCancellationTokenSource?.CancelDispose();
             _charaHandler?.Invalidate();
+            _lastAppliedBypassEmoteAddress = nint.Zero;
             if (IsVisible)
             {
                 IsVisible = false;
@@ -146,6 +150,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             _localVisibilityGateActive = true;
             _downloadCancellationTokenSource?.CancelDispose();
             _charaHandler?.Invalidate();
+            _lastAppliedBypassEmoteAddress = nint.Zero;
             if (IsVisible)
             {
                 IsVisible = false;
@@ -268,6 +273,69 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         return AreDataHashesEqual(data, _lastSuccessfullyAppliedDataHash);
     }
 
+    public async Task ApplyBypassEmoteDataAsync(string data)
+    {
+        if (_charaHandler == null || _charaHandler.Address == nint.Zero) return;
+
+        try
+        {
+            var parts = data.Split('|');
+            var cleanData = parts[0];
+            long senderTicks = 0;
+            var hasTimestamp = parts.Length > 1 && long.TryParse(parts[1], out senderTicks);
+            
+            if (hasTimestamp)
+            {
+                var latency = TimeSpan.FromTicks(DateTime.UtcNow.Ticks - senderTicks).TotalMilliseconds;
+                Logger.LogInformation("Applying BypassEmote data. Latency from sender to application: {latency:F2} ms", latency);
+            }
+            else 
+            {
+                Logger.LogDebug("Applying bypass emote fast path: {data} (No timestamp)", data);
+            }
+
+            var startApply = DateTime.UtcNow;
+            
+            // Check if we already applied this data
+            // We compare the FULL data string (including timestamp) to distinguish repeated emotes from duplicate packets
+            if (string.Equals(data, _lastAppliedBypassEmoteData, StringComparison.Ordinal) && _charaHandler.Address == _lastAppliedBypassEmoteAddress)
+            {
+                // If it has a timestamp, it's a unique event ID, so strict equality means it's a duplicate packet -> Skip
+                if (hasTimestamp)
+                {
+                    Logger.LogDebug("Skipping BypassEmote fast path application (already applied unique event): {data}", data);
+                    return;
+                }
+                
+                // If no timestamp, we use a timeout to allow re-application after 2 seconds
+                if ((DateTime.UtcNow - _lastAppliedBypassEmoteTime).TotalSeconds < 2.0)
+                {
+                    Logger.LogDebug("Skipping BypassEmote fast path application (duplicate within cooldown): {data}", data);
+                    return;
+                }
+            }
+
+            await _ipcManager.BypassEmote.SetStateForCharacterAsync(_charaHandler.Address, cleanData).ConfigureAwait(false);
+            _lastAppliedBypassEmoteData = data;
+            _lastAppliedBypassEmoteAddress = _charaHandler.Address;
+            _lastAppliedBypassEmoteTime = DateTime.UtcNow;
+
+            var applyDuration = (DateTime.UtcNow - startApply).TotalMilliseconds;
+            if (applyDuration > 100)
+            {
+                 Logger.LogWarning("BypassEmote IPC application took {Duration:F2} ms", applyDuration);
+            }
+            else
+            {
+                 Logger.LogTrace("BypassEmote IPC application took {Duration:F2} ms", applyDuration);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to apply bypass emote data (fast path)");
+        }
+    }
+
     public void ApplyCharacterData(Guid applicationBase, CharacterData characterData, bool forceApplyCustomization = false)
     {
         if (_dalamudUtil.IsInCombatOrPerforming)
@@ -374,6 +442,8 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         DownloadAndApplyCharacter(applicationBase, characterData.DeepClone(), charaDataToUpdate);
     }
 
+
+
     public override string ToString()
     {
         return Pair == null
@@ -409,6 +479,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             _downloadManager.Dispose();
             _charaHandler?.Dispose();
             _charaHandler = null;
+            _lastAppliedBypassEmoteAddress = nint.Zero;
 
             if (!string.IsNullOrEmpty(name))
             {
@@ -534,6 +605,40 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
 
                     case PlayerChanges.PetNames:
                         await _ipcManager.PetNames.SetPlayerData(handler.Address, charaData.PetNamesData).ConfigureAwait(false);
+                        break;
+
+                    case PlayerChanges.BypassEmote:
+                        if (!string.IsNullOrEmpty(charaData.BypassEmoteData))
+                        {
+                            var data = charaData.BypassEmoteData;
+                            var parts = data.Split('|');
+                            var cleanData = parts[0];
+                            var hasTimestamp = parts.Length > 1 && long.TryParse(parts[1], out _);
+
+                            // Prevent double application if Fast Path already applied it
+                            // We compare the FULL data string (including timestamp)
+                            if (string.Equals(data, _lastAppliedBypassEmoteData, StringComparison.Ordinal) && handler.Address == _lastAppliedBypassEmoteAddress)
+                            {
+                                 // If it has a timestamp, it's a unique event ID -> strict equality means it's a duplicate packet -> Skip
+                                 if (hasTimestamp)
+                                 {
+                                     Logger.LogDebug("Skipping BypassEmote application (already applied via Fast Path - unique event): {data}", data);
+                                     break;
+                                 }
+                                 
+                                 // If no timestamp, use timeout
+                                 if ((DateTime.UtcNow - _lastAppliedBypassEmoteTime).TotalSeconds < 2.0)
+                                 {
+                                     Logger.LogDebug("Skipping BypassEmote application (already applied via Fast Path - cooldown): {data}", data);
+                                     break;
+                                 }
+                            }
+
+                            await _ipcManager.BypassEmote.SetStateForCharacterAsync(handler.Address, cleanData).ConfigureAwait(false);
+                            _lastAppliedBypassEmoteData = data;
+                            _lastAppliedBypassEmoteAddress = handler.Address;
+                            _lastAppliedBypassEmoteTime = DateTime.UtcNow;
+                        }
                         break;
 
                     case PlayerChanges.ForcedRedraw:
@@ -1217,6 +1322,14 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             _ = _ipcManager.PetNames.SetPlayerData(PlayerCharacter, _cachedData.PetNamesData).ConfigureAwait(false);
         });
 
+        Mediator.Subscribe<BypassEmoteReadyMessage>(this, msg =>
+        {
+            if (string.IsNullOrEmpty(_cachedData?.BypassEmoteData)) return;
+            Logger.LogTrace("Reapplying BypassEmote data for {this}", this);
+            var cleanData = _cachedData.BypassEmoteData.Split('|')[0];
+            _ = _ipcManager.BypassEmote.SetStateForCharacterAsync(PlayerCharacter, cleanData).ConfigureAwait(false);
+        });
+
         _ipcManager.Penumbra.AssignTemporaryCollectionAsync(Logger, _penumbraCollection, _charaHandler.GetGameObject()!.ObjectIndex).GetAwaiter().GetResult();
     }
 
@@ -1694,6 +1807,8 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             await _ipcManager.Moodles.RevertStatusAsync(address).ConfigureAwait(false);
             Logger.LogDebug("[{applicationId}] Restoring Pet Nicknames for {alias}/{name}", applicationId, Pair.UserData.AliasOrUID, name);
             await _ipcManager.PetNames.ClearPlayerData(address).ConfigureAwait(false);
+            Logger.LogDebug("[{applicationId}] Restoring BypassEmote for {alias}/{name}", applicationId, Pair.UserData.AliasOrUID, name);
+            await _ipcManager.BypassEmote.SetStateForCharacterAsync(address, string.Empty).ConfigureAwait(false);
         }
         else if (objectKind == ObjectKind.MinionOrMount)
         {

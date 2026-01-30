@@ -102,6 +102,12 @@ public class Pair : DisposableMediatorSubscriberBase
     public UserFullPairDto UserPair { get; set; }
     private PairHandler? CachedPlayer { get; set; }
     
+    public void ApplyBypassEmote(string data)
+    {
+        if (CachedPlayer == null) return;
+        _ = CachedPlayer.ApplyBypassEmoteDataAsync(data);
+    }
+
     public string? GetCurrentDataHash()
     {
         return LastReceivedCharacterData?.DataHash?.Value;

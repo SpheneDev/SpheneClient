@@ -201,6 +201,7 @@ public class PlayerDataFactory
         Task<string> getGlamourerData = _ipcManager.Glamourer.GetCharacterCustomizationAsync(playerRelatedObject.Address);
         Task<string?> getCustomizeData = _ipcManager.CustomizePlus.GetScaleAsync(playerRelatedObject.Address);
         Task<string> getHonorificTitle = _ipcManager.Honorific.GetTitle();
+        Task<string> getBypassEmoteData = _ipcManager.BypassEmote.GetStateForCharacterAsync(playerRelatedObject.Address);
         fragment.GlamourerString = await getGlamourerData.ConfigureAwait(false);
         _logger.LogDebug("Glamourer is now: {data}", fragment.GlamourerString);
         var customizeScale = await getCustomizeData.ConfigureAwait(false);
@@ -223,6 +224,9 @@ public class PlayerDataFactory
 
             playerFragment!.PetNamesData = _ipcManager.PetNames.GetLocalNames();
             _logger.LogDebug("Pet Nicknames is now: {petnames}", playerFragment!.PetNamesData);
+
+            playerFragment!.BypassEmoteData = await getBypassEmoteData.ConfigureAwait(false);
+            _logger.LogDebug("BypassEmote is now: {bypassEmote}", playerFragment!.BypassEmoteData);
         }
 
         ct.ThrowIfCancellationRequested();
