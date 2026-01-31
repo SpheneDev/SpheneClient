@@ -926,8 +926,18 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
         }
     }
 
+    public enum RepoAddResult
+    {
+        NoChange,
+        Added,
+        Enabled
+    }
+
+    [StructLayout(LayoutKind.Auto)]
+    public readonly record struct PluginInstallState(bool IsInstalled, bool IsEnabled);
+
     [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarQube", "S3011:Reflection should not be used to increase accessibility of classes, methods, or fields", Justification = "Accessing internal Dalamud methods for plugin management.")]
-    public async Task AddRepoViaReflectionAsync(string url, string name)
+    public async Task<RepoAddResult> AddRepoViaReflectionAsync(string url, string name)
     {
         try
         {
@@ -941,7 +951,7 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
             if (serviceType == null || configType == null || pluginManagerType == null)
             {
                 Logger.LogError("Could not find Service<>, DalamudConfiguration, or PluginManager types.");
-                return;
+                return RepoAddResult.NoChange;
             }
 
             var configService = serviceType.MakeGenericType(configType);
@@ -950,14 +960,14 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
             if (configGetter == null)
             {
                 Logger.LogError("Could not find Service.Get() method.");
-                return;
+                return RepoAddResult.NoChange;
             }
 
             var dalamudConfig = configGetter.Invoke(null, null);
             if (dalamudConfig == null)
             {
                 Logger.LogError("Could not retrieve DalamudConfiguration instance.");
-                return;
+                return RepoAddResult.NoChange;
             }
 
             var repoListProp = configType.GetProperty("ThirdPartyRepositories", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
@@ -966,18 +976,19 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
             if (repoListProp == null)
             {
                 Logger.LogError("Could not find ThirdPartyRepositories or ThirdRepoList property.");
-                return;
+                return RepoAddResult.NoChange;
             }
 
             var repoList = repoListProp.GetValue(dalamudConfig) as IList;
             if (repoList == null)
             {
                 Logger.LogError("ThirdPartyRepositories is null or not an IList.");
-                return;
+                return RepoAddResult.NoChange;
             }
 
             // Check if already exists
             bool alreadyExists = false;
+            bool wasEnabled = false;
             foreach (var repo in repoList)
             {
                 var urlProp = repo.GetType().GetProperty("Url");
@@ -987,10 +998,20 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
                     Logger.LogDebug("Repository already exists in runtime config.");
                     alreadyExists = true;
                     // Ensure it is enabled
-                    repo.GetType().GetProperty("IsEnabled")?.SetValue(repo, true);
+                    var enabledProp = repo.GetType().GetProperty("IsEnabled");
+                    if (enabledProp?.GetValue(repo) is bool isEnabled)
+                    {
+                        wasEnabled = isEnabled;
+                        if (!isEnabled)
+                        {
+                            enabledProp.SetValue(repo, true);
+                        }
+                    }
                     break;
                 }
             }
+
+            var result = RepoAddResult.NoChange;
 
             if (!alreadyExists)
             {
@@ -1001,7 +1022,7 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
                 if (newRepo == null)
                 {
                     Logger.LogError("Could not create ThirdPartyRepository instance.");
-                    return;
+                    return RepoAddResult.NoChange;
                 }
 
                 repoType.GetProperty("Url")?.SetValue(newRepo, url);
@@ -1017,6 +1038,17 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
 
                 repoList.Add(newRepo);
                 Logger.LogDebug("Added new repo to list.");
+                result = RepoAddResult.Added;
+            }
+            else if (!wasEnabled)
+            {
+                Logger.LogDebug("Repository existed but was disabled. Enabled it.");
+                result = RepoAddResult.Enabled;
+            }
+
+            if (result == RepoAddResult.NoChange)
+            {
+                return RepoAddResult.NoChange;
             }
 
             var queueSaveMethod = configType.GetMethod("QueueSave", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
@@ -1067,11 +1099,232 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
                     }
                 }
             }
+            return result;
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Failed to add repo via reflection.");
+            return RepoAddResult.NoChange;
         }
+    }
+
+    public PluginInstallState GetPluginInstallState(params string[] internalNames)
+    {
+        foreach (var internalName in internalNames)
+        {
+            var plugin = _pluginInterface.InstalledPlugins
+                .FirstOrDefault(p => string.Equals(p.InternalName, internalName, StringComparison.OrdinalIgnoreCase));
+            if (plugin == null) continue;
+
+            var enabledProp = plugin.GetType().GetProperty("IsEnabled");
+            if (enabledProp?.GetValue(plugin) is bool enabledValue)
+            {
+                return new PluginInstallState(true, enabledValue);
+            }
+
+            var loadedProp = plugin.GetType().GetProperty("IsLoaded");
+            if (loadedProp?.GetValue(plugin) is bool loadedValue)
+            {
+                return new PluginInstallState(true, loadedValue);
+            }
+
+            return new PluginInstallState(true, true);
+        }
+
+        return new PluginInstallState(false, false);
+    }
+
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarQube", "S3011:Reflection should not be used to increase accessibility of classes, methods, or fields", Justification = "Accessing internal Dalamud methods for plugin management.")]
+    public async Task<bool> EnablePluginViaReflectionAsync(params string[] internalNames)
+    {
+        try
+        {
+            var assembly = typeof(IDalamudPluginInterface).Assembly;
+            var serviceType = assembly.DefinedTypes.FirstOrDefault(t => string.Equals(t.Name, "Service`1", StringComparison.Ordinal) && t.IsGenericType);
+            var pluginManagerType = assembly.DefinedTypes.FirstOrDefault(t => string.Equals(t.Name, "PluginManager", StringComparison.Ordinal));
+
+            if (serviceType == null || pluginManagerType == null)
+            {
+                Logger.LogError("Could not find Service<> or PluginManager types.");
+                return false;
+            }
+
+            var pluginManagerService = serviceType.MakeGenericType(pluginManagerType);
+            var pluginManagerGetter = pluginManagerService.GetMethod("Get", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+            if (pluginManagerGetter == null)
+            {
+                Logger.LogError("Could not find Service.Get() method for PluginManager.");
+                return false;
+            }
+
+            var pluginManager = pluginManagerGetter.Invoke(null, null);
+            if (pluginManager == null)
+            {
+                Logger.LogError("Could not retrieve PluginManager instance.");
+                return false;
+            }
+
+            var installedPluginsProp = pluginManagerType.GetProperty("InstalledPlugins", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            if (installedPluginsProp == null)
+            {
+                Logger.LogError("Could not find InstalledPlugins property.");
+                return false;
+            }
+
+            var installedPlugins = installedPluginsProp.GetValue(pluginManager) as IEnumerable;
+            if (installedPlugins == null)
+            {
+                Logger.LogError("InstalledPlugins is null.");
+                return false;
+            }
+
+            foreach (var internalName in internalNames)
+            {
+                foreach (var plugin in installedPlugins)
+                {
+                    var nameProp = plugin.GetType().GetProperty("InternalName");
+                    var currentName = nameProp?.GetValue(plugin)?.ToString();
+                    if (!string.Equals(currentName, internalName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    var isLoadedProp = plugin.GetType().GetProperty("IsLoaded");
+                    if (isLoadedProp?.GetValue(plugin) is bool isLoaded && isLoaded)
+                    {
+                        return true;
+                    }
+
+                    var loadMethod = plugin.GetType().GetMethod("LoadAsync", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                    if (loadMethod == null)
+                    {
+                        Logger.LogError("Could not find LoadAsync on LocalPlugin.");
+                        return false;
+                    }
+
+                    var parameters = loadMethod.GetParameters();
+                    object? result = parameters.Length switch
+                    {
+                        1 => loadMethod.Invoke(plugin, new object[] { PluginLoadReason.Installer }),
+                        2 => loadMethod.Invoke(plugin, new object[] { PluginLoadReason.Installer, false }),
+                        _ => null
+                    };
+
+                    if (result is Task task) await task.ConfigureAwait(false);
+                    return result != null;
+                }
+            }
+
+            Logger.LogDebug("EnablePluginViaReflectionAsync: plugin not found in InstalledPlugins.");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to enable plugin via reflection.");
+        }
+
+        return false;
+    }
+
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarQube", "S3011:Reflection should not be used to increase accessibility of classes, methods, or fields", Justification = "Accessing internal Dalamud methods for plugin management.")]
+    public async Task<bool> DisablePluginViaReflectionAsync(params string[] internalNames)
+    {
+        try
+        {
+            var assembly = typeof(IDalamudPluginInterface).Assembly;
+            var serviceType = assembly.DefinedTypes.FirstOrDefault(t => string.Equals(t.Name, "Service`1", StringComparison.Ordinal) && t.IsGenericType);
+            var pluginManagerType = assembly.DefinedTypes.FirstOrDefault(t => string.Equals(t.Name, "PluginManager", StringComparison.Ordinal));
+
+            if (serviceType == null || pluginManagerType == null)
+            {
+                Logger.LogError("Could not find Service<> or PluginManager types.");
+                return false;
+            }
+
+            var pluginManagerService = serviceType.MakeGenericType(pluginManagerType);
+            var pluginManagerGetter = pluginManagerService.GetMethod("Get", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+            if (pluginManagerGetter == null)
+            {
+                Logger.LogError("Could not find Service.Get() method for PluginManager.");
+                return false;
+            }
+
+            var pluginManager = pluginManagerGetter.Invoke(null, null);
+            if (pluginManager == null)
+            {
+                Logger.LogError("Could not retrieve PluginManager instance.");
+                return false;
+            }
+
+            var installedPluginsProp = pluginManagerType.GetProperty("InstalledPlugins", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            if (installedPluginsProp == null)
+            {
+                Logger.LogError("Could not find InstalledPlugins property.");
+                return false;
+            }
+
+            var installedPlugins = installedPluginsProp.GetValue(pluginManager) as IEnumerable;
+            if (installedPlugins == null)
+            {
+                Logger.LogError("InstalledPlugins is null.");
+                return false;
+            }
+
+            foreach (var internalName in internalNames)
+            {
+                foreach (var plugin in installedPlugins)
+                {
+                    var nameProp = plugin.GetType().GetProperty("InternalName");
+                    var currentName = nameProp?.GetValue(plugin)?.ToString();
+                    if (!string.Equals(currentName, internalName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    var isLoadedProp = plugin.GetType().GetProperty("IsLoaded");
+                    if (isLoadedProp?.GetValue(plugin) is bool isLoaded && !isLoaded)
+                    {
+                        return true;
+                    }
+
+                    var unloadMethod = plugin.GetType().GetMethod("UnloadAsync", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                    if (unloadMethod == null)
+                    {
+                        Logger.LogError("Could not find UnloadAsync on LocalPlugin.");
+                        return false;
+                    }
+
+                    object? result;
+                    var parameters = unloadMethod.GetParameters();
+                    if (parameters.Length == 0)
+                    {
+                        result = unloadMethod.Invoke(plugin, null);
+                    }
+                    else if (parameters.Length == 1)
+                    {
+                        var paramType = parameters[0].ParameterType;
+                        object? paramValue = paramType.IsEnum
+                            ? Enum.Parse(paramType, "WaitBeforeDispose")
+                            : Activator.CreateInstance(paramType);
+                        result = unloadMethod.Invoke(plugin, new[] { paramValue });
+                    }
+                    else
+                    {
+                        result = null;
+                    }
+
+                    if (result is Task task) await task.ConfigureAwait(false);
+                    return result != null;
+                }
+            }
+
+            Logger.LogDebug("DisablePluginViaReflectionAsync: plugin not found in InstalledPlugins.");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to disable plugin via reflection.");
+        }
+
+        return false;
     }
 
     [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarQube", "S3011:Reflection should not be used to increase accessibility of classes, methods, or fields", Justification = "Accessing internal Dalamud methods for plugin management.")]

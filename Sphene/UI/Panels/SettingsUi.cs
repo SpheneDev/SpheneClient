@@ -38,6 +38,7 @@ using System.Text;
 using System.Text.Json;
 using Sphene.UI.CharaDataHub;
 using System.Reflection;
+using System.Threading;
 
 namespace Sphene.UI.Panels;
 
@@ -64,6 +65,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
     private readonly string _shrinkUVersion;
     private readonly IProgress<(int, int, FileCacheEntity)> _validationProgress;
     private (int, int, FileCacheEntity) _currentProgress;
+    private const string SeaOfStarsRepoUrl = "https://raw.githubusercontent.com/Ottermandias/SeaOfStars/refs/heads/main/repo.json";
+    private const string SeaOfStarsRepoName = "SeaOfStars Repo";
     private bool _deleteAccountPopupModalShown = false;
     private bool _deleteFilesPopupModalShown = false;
     private string _lastTab = string.Empty;
@@ -78,6 +81,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
     private Vector2 _currentCompactUiSize = new Vector2(370, 400); // Default CompactUI size
     private bool _compactUiHasLayoutInfo = false;
     private bool? _compactUiWasOpen = null;
+    private int _pluginInstallInProgress = 0;
+    private string? _installingPluginName;
     // New navigation state for redesigned Settings layout
     private enum SettingsPage
     {
@@ -1945,7 +1950,94 @@ public class SettingsUi : WindowMediatorSubscriberBase
         ImGui.EndChild();
     }
 
-    private static void DrawPluginListRow(string name, string description, string version, bool isInstalled, Action? onInstallAction = null, Action? onOpenSettings = null, string? settingsLabel = null)
+    private bool IsPluginInstallInProgress => Volatile.Read(ref _pluginInstallInProgress) == 1;
+    private string? InstallingPluginName => Volatile.Read(ref _installingPluginName);
+
+    private void StartPluginInstall(string pluginName, Func<Task> installAction)
+    {
+        if (Interlocked.CompareExchange(ref _pluginInstallInProgress, 1, 0) != 0)
+        {
+            return;
+        }
+
+        Volatile.Write(ref _installingPluginName, pluginName);
+
+        try
+        {
+            var task = installAction();
+
+            if (task.IsCompleted)
+            {
+                if (task.IsFaulted)
+                {
+                    _logger.LogError(task.Exception, "Plugin installation failed for {plugin}", pluginName);
+                }
+                Volatile.Write(ref _installingPluginName, null);
+                Interlocked.Exchange(ref _pluginInstallInProgress, 0);
+                return;
+            }
+
+            _ = task.ContinueWith(t =>
+            {
+                if (t.IsFaulted)
+                {
+                    _logger.LogError(t.Exception, "Plugin installation failed for {plugin}", pluginName);
+                }
+                Volatile.Write(ref _installingPluginName, null);
+                Interlocked.Exchange(ref _pluginInstallInProgress, 0);
+            }, TaskScheduler.Default);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Plugin installation failed for {plugin}", pluginName);
+            Volatile.Write(ref _installingPluginName, null);
+            Interlocked.Exchange(ref _pluginInstallInProgress, 0);
+        }
+    }
+
+    private static void DrawRotatingSpinner(Vector2 center, float radius, float thickness)
+    {
+        var drawList = ImGui.GetWindowDrawList();
+        var theme = SpheneCustomTheme.CurrentTheme;
+        var color = theme.TextPrimary;
+        var u32 = ImGui.ColorConvertFloat4ToU32(color);
+        var bgColor = ImGui.ColorConvertFloat4ToU32(new Vector4(color.X, color.Y, color.Z, 0.25f));
+        drawList.AddCircle(center, radius, bgColor, 48, thickness);
+
+        var t = (float)ImGui.GetTime();
+        var speed = 3.0f;
+        var baseAngle = t * speed;
+        var arcLen = 1.35f;
+        drawList.PathClear();
+        drawList.PathArcTo(center, radius, baseAngle, baseAngle + arcLen, 32);
+        drawList.PathStroke(u32, ImDrawFlags.None, thickness);
+    }
+
+    private static bool DrawToggleSwitch(string id, bool value)
+    {
+        var height = ImGui.GetFrameHeight();
+        var width = height * 1.8f;
+        var position = ImGui.GetCursorScreenPos();
+        ImGui.InvisibleButton(id, new Vector2(width, height));
+
+        if (ImGui.IsItemClicked())
+        {
+            value = !value;
+        }
+
+        var drawList = ImGui.GetWindowDrawList();
+        var radius = height * 0.5f;
+        var bgColor = ImGui.GetColorU32(ImGuiCol.FrameBg);
+        drawList.AddRectFilled(position, new Vector2(position.X + width, position.Y + height), bgColor, height * 0.5f);
+
+        var circleX = value ? position.X + width - radius : position.X + radius;
+        var circleColor = ImGui.GetColorU32(ImGuiCol.CheckMark);
+        drawList.AddCircleFilled(new Vector2(circleX, position.Y + radius), radius - 1.0f, circleColor);
+
+        return value;
+    }
+
+    private void DrawPluginListRow(string name, string description, string statusOrVersion, bool isInstalled, bool isEnabled, Func<Task>? onInstallAction = null, Func<Task>? onEnableAction = null, Func<Task>? onDisableAction = null, Action? onOpenSettings = null, string? settingsLabel = null)
     {
         using var id = ImRaii.PushId("PluginRow_" + name);
         var startPos = ImGui.GetCursorScreenPos();
@@ -1954,8 +2046,11 @@ public class SettingsUi : WindowMediatorSubscriberBase
         // Use Avail width for alignment, safer than absolute WindowContentRegionMax in groups/children
         var availWidth = ImGui.GetContentRegionAvail().X;
         
-        // Name & Version
-        var nameColor = isInstalled ? ImGuiColors.ParsedGreen : ImGuiColors.DalamudRed;
+        var nameColor = !isInstalled
+            ? ImGuiColors.DalamudRed
+            : isEnabled
+                ? ImGuiColors.ParsedGreen
+                : ImGuiColors.DalamudYellow;
         
         var textHeight = ImGui.GetTextLineHeight();
         var textY = startPos.Y + (rowHeight - textHeight) / 2;
@@ -1965,36 +2060,100 @@ public class SettingsUi : WindowMediatorSubscriberBase
         if (ImGui.IsItemHovered()) ImGui.SetTooltip(description);
         
         ImGui.SameLine();
-        ImGui.TextColored(ImGuiColors.DalamudGrey, $"({version})");
+        ImGui.TextColored(ImGuiColors.DalamudGrey, $"({statusOrVersion})");
         
-        // Button Logic
-        bool showSettings = isInstalled && onOpenSettings != null;
+        bool showSettings = isInstalled && isEnabled && onOpenSettings != null;
         bool showInstall = !isInstalled && onInstallAction != null;
+        bool showToggle = isInstalled && onEnableAction != null && onDisableAction != null;
+        bool isInstalling = showInstall && IsPluginInstallInProgress && string.Equals(InstallingPluginName, name, StringComparison.Ordinal);
+        bool disableInstall = showInstall && IsPluginInstallInProgress && !isInstalling;
 
-        if (showSettings || showInstall)
+        if (showSettings || showInstall || showToggle)
         {
-            var btnText = showSettings ? (settingsLabel ?? "Settings") : "Install";
-            var btnSize = ImGui.CalcTextSize(btnText) + new Vector2(20, 0);
+            var btnText = showSettings ? (settingsLabel ?? "Settings") : (isInstalling ? "Installing..." : "Install");
+            var displayText = btnText;
+            var spinnerSize = 0f;
+            var spinnerAreaWidth = 0f;
+
+            if (isInstalling)
+            {
+                spinnerSize = ImGui.GetTextLineHeight();
+                var spaceWidth = Math.Max(1e-3f, ImGui.CalcTextSize(" ").X);
+                spinnerAreaWidth = spinnerSize + ImGui.GetStyle().ItemInnerSpacing.X;
+                var spaces = Math.Max(2, (int)MathF.Ceiling(spinnerAreaWidth / spaceWidth));
+                displayText = new string(' ', spaces) + btnText;
+            }
+
+            var btnSize = ImGui.CalcTextSize(displayText) + new Vector2(20, 0);
             var btnHeight = 22f * ImGuiHelpers.GlobalScale;
             var btnY = startPos.Y + (rowHeight - btnHeight) / 2;
             
-            // Align to right side of available region
-            // Ensure we don't overlap with text if region is very small
-            var minBtnX = startPos.X + 200; // Minimal text space
+            var minBtnX = startPos.X + 200;
             var targetBtnX = startPos.X + availWidth - btnSize.X - 10;
             
             if (targetBtnX < minBtnX) targetBtnX = minBtnX;
             
             ImGui.SetCursorScreenPos(new Vector2(targetBtnX, btnY));
-            
-            if (ImGui.Button(btnText, new Vector2(btnSize.X, btnHeight)))
+
+            if (showSettings)
             {
-                if (showSettings) onOpenSettings!.Invoke();
-                else onInstallAction!.Invoke();
+                if (ImGui.Button(displayText, new Vector2(btnSize.X, btnHeight)))
+                {
+                    onOpenSettings!.Invoke();
+                }
             }
-            
-            if (showInstall && ImGui.IsItemHovered()) 
-                ImGui.SetTooltip("Adds repository. Install via Plugin Installer.");
+            else if (showInstall)
+            {
+                using (ImRaii.Disabled(disableInstall || isInstalling))
+                {
+                    if (ImGui.Button(displayText, new Vector2(btnSize.X, btnHeight)))
+                    {
+                        StartPluginInstall(name, onInstallAction!);
+                    }
+                }
+
+                if (isInstalling)
+                {
+                    var rectMin = ImGui.GetItemRectMin();
+                    var rectMax = ImGui.GetItemRectMax();
+                    var radius = spinnerSize * 0.45f;
+                    var thickness = Math.Max(2.0f * ImGuiHelpers.GlobalScale, spinnerSize * 0.08f);
+                    var center = new Vector2(
+                        rectMin.X + ImGui.GetStyle().FramePadding.X + spinnerAreaWidth * 0.5f,
+                        rectMin.Y + (rectMax.Y - rectMin.Y) * 0.5f);
+                    DrawRotatingSpinner(center, radius, thickness);
+                }
+                else if (!disableInstall && ImGui.IsItemHovered())
+                {
+                    ImGui.SetTooltip("Adds repository. Install via Plugin Installer.");
+                }
+            }
+            else if (showToggle)
+            {
+                var toggleHeight = ImGui.GetFrameHeight();
+                var toggleWidth = toggleHeight * 1.8f;
+                var toggleY = startPos.Y + (rowHeight - toggleHeight) / 2;
+                var toggleTargetX = startPos.X + availWidth - toggleWidth - 10;
+                if (toggleTargetX < minBtnX) toggleTargetX = minBtnX;
+
+                ImGui.SetCursorScreenPos(new Vector2(toggleTargetX, toggleY));
+                var toggled = DrawToggleSwitch("EnabledToggle", isEnabled);
+                if (toggled != isEnabled)
+                {
+                    if (toggled)
+                    {
+                        _ = onEnableAction!.Invoke();
+                    }
+                    else
+                    {
+                        _ = onDisableAction!.Invoke();
+                    }
+                }
+                if (ImGui.IsItemHovered())
+                {
+                    ImGui.SetTooltip("Enable or disable plugin.");
+                }
+            }
         }
         
         // Move cursor past row
@@ -2023,8 +2182,6 @@ public class SettingsUi : WindowMediatorSubscriberBase
         if (max.X < availMaxX) max.X = availMaxX;
 
         drawList.ChannelsSetCurrent(0); // Background
-        drawList.AddRectFilled(min, max, ImGui.ColorConvertFloat4ToU32(ImGui.GetStyle().Colors[(int)ImGuiCol.FrameBg]), 5f);
-        drawList.AddRect(min, max, ImGui.ColorConvertFloat4ToU32(ImGui.GetStyle().Colors[(int)ImGuiCol.Border]), 5f);
 
         drawList.ChannelsMerge();
 
@@ -2036,9 +2193,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
     {
         _lastTab = "Overview";
         
-        // --- Server Connection Section ---
-        _uiShared.BigText("Server Connection");
-        
+        // --- Server Connection Section ---        
         // Discord Button (Right Aligned)
         var rightButtonWidth = _uiShared.GetIconTextButtonSize(FontAwesomeIcon.Users, "Join Discord Community");
         ImGui.SameLine(ImGui.GetContentRegionAvail().X - rightButtonWidth);
@@ -2114,6 +2269,11 @@ public class SettingsUi : WindowMediatorSubscriberBase
         // --- Plugins Section ---
         ImGui.Spacing();
 
+        string GetPluginStatusLabel(UiSharedService.PluginInstallState state)
+        {
+            return !state.IsInstalled ? "Missing" : state.IsEnabled ? "Detected" : "Deactivated";
+        }
+
         DrawPluginGroupContainer(() => {
             UiSharedService.DrawSectionSeparator("Sphene Plugins");
 
@@ -2126,123 +2286,148 @@ public class SettingsUi : WindowMediatorSubscriberBase
                     : $"{version.Major}.{version.Minor}.{version.Build}")
                 : "Unknown";
                 
-            DrawPluginListRow("Sphene", "Advanced character synchronization and networking.", versionString, true, null, () => {
-                 _ = Task.Run(async () =>
+            DrawPluginListRow("Sphene", "Advanced character synchronization and networking.", versionString, true, true,
+                onOpenSettings: () =>
                 {
-                    string? text = null;
-                    try
+                    _ = Task.Run(async () =>
                     {
-                        text = await _changelogService.GetChangelogTextForVersionAsync(versionString).ConfigureAwait(false);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogDebug(ex, "Failed to load changelog text for version {version}", versionString);
-                    }
-                    Mediator.Publish(new ShowReleaseChangelogMessage(versionString, text, _configService.Current.LastSeenVersionChangelog));
-                });
-            }, "Release Notes");
+                        string? text = null;
+                        try
+                        {
+                            text = await _changelogService.GetChangelogTextForVersionAsync(versionString).ConfigureAwait(false);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogDebug(ex, "Failed to load changelog text for version {version}", versionString);
+                        }
+                        Mediator.Publish(new ShowReleaseChangelogMessage(versionString, text, _configService.Current.LastSeenVersionChangelog));
+                    });
+                },
+                settingsLabel: "Release Notes");
 
             // 2. ShrinkU (Built-in)
             bool shrinkUEnabled = _configService.Current.EnableShrinkUIntegration;
-            DrawPluginListRow("ShrinkU", "Texture compression and optimization tool.", _shrinkUVersion, shrinkUEnabled, () => {
-                _configService.Current.EnableShrinkUIntegration = true;
-                _configService.Save();
-                try { _shrinkUHostService.ApplyIntegrationEnabled(true); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to apply ShrinkU integration setting"); }
-            }, () => {
-                 try { _shrinkUHostService.OpenReleaseNotes(); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to open ShrinkU release notes"); }
-            }, "Release Notes");
+            DrawPluginListRow("ShrinkU", "Texture compression and optimization tool.", _shrinkUVersion, shrinkUEnabled, shrinkUEnabled,
+                onInstallAction: async () =>
+                {
+                    _configService.Current.EnableShrinkUIntegration = true;
+                    _configService.Save();
+                    try { _shrinkUHostService.ApplyIntegrationEnabled(true); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to apply ShrinkU integration setting"); }
+                    await Task.CompletedTask.ConfigureAwait(false);
+                },
+                onOpenSettings: () =>
+                {
+                    try { _shrinkUHostService.OpenReleaseNotes(); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to open ShrinkU release notes"); }
+                },
+                settingsLabel: "Release Notes");
 
             UiSharedService.DrawSectionSeparator("Required Plugins");
 
             // 3. Penumbra (External)
-            bool penumbraAvailable = _ipcManager.Penumbra.APIAvailable;
-            DrawPluginListRow("Penumbra", "Mod management framework. Required for Sphene.", penumbraAvailable ? "Detected" : "Missing", penumbraAvailable, () => {
-                 _ = Task.Run(async () => {
-                     // Add Repo
-                     await _uiShared.AddRepoViaReflectionAsync("https://raw.githubusercontent.com/xiv-resource/dalamud-repository/master/pluginmaster.json", "XIV-Resource-Repo");
-                     Mediator.Publish(new NotificationMessage("Repository Added", "XIV-Resource-Repo added. Installing...", NotificationType.Info));
-                     await _uiShared.InstallPluginViaReflectionAsync("Penumbra");
-                 });
-            });
+            var penumbraState = _uiShared.GetPluginInstallState("Penumbra");
+            DrawPluginListRow("Penumbra", "Mod management framework. Required for Sphene.", GetPluginStatusLabel(penumbraState), penumbraState.IsInstalled, penumbraState.IsEnabled,
+                onInstallAction: async () =>
+                {
+                    await _uiShared.AddRepoViaReflectionAsync(SeaOfStarsRepoUrl, SeaOfStarsRepoName).ConfigureAwait(false);
+                    Mediator.Publish(new NotificationMessage("Repository Added", $"{SeaOfStarsRepoName} added. Installing...", NotificationType.Info));
+                    await _uiShared.InstallPluginViaReflectionAsync("Penumbra").ConfigureAwait(false);
+                },
+                onEnableAction: async () => await _uiShared.EnablePluginViaReflectionAsync("Penumbra").ConfigureAwait(false),
+                onDisableAction: async () => await _uiShared.DisablePluginViaReflectionAsync("Penumbra").ConfigureAwait(false));
 
             // 4. Glamourer (External)
-            bool glamourerAvailable = _ipcManager.Glamourer.APIAvailable;
-            DrawPluginListRow("Glamourer", "Appearance customization tool. Required for full functionality.", glamourerAvailable ? "Detected" : "Missing", glamourerAvailable, () => {
-                 _ = Task.Run(async () => {
-                     // Add Repo
-                     await _uiShared.AddRepoViaReflectionAsync("https://raw.githubusercontent.com/xiv-resource/dalamud-repository/master/pluginmaster.json", "XIV-Resource-Repo");
-                     Mediator.Publish(new NotificationMessage("Repository Added", "XIV-Resource-Repo added. Installing...", NotificationType.Info));
-                     await _uiShared.InstallPluginViaReflectionAsync("Glamourer");
-                 });
-            });
+            var glamourerState = _uiShared.GetPluginInstallState("Glamourer");
+            DrawPluginListRow("Glamourer", "Appearance customization tool. Required for full functionality.", GetPluginStatusLabel(glamourerState), glamourerState.IsInstalled, glamourerState.IsEnabled,
+                onInstallAction: async () =>
+                {
+                    await _uiShared.AddRepoViaReflectionAsync(SeaOfStarsRepoUrl, SeaOfStarsRepoName).ConfigureAwait(false);
+                    Mediator.Publish(new NotificationMessage("Repository Added", $"{SeaOfStarsRepoName} added. Installing...", NotificationType.Info));
+                    await _uiShared.InstallPluginViaReflectionAsync("Glamourer").ConfigureAwait(false);
+                },
+                onEnableAction: async () => await _uiShared.EnablePluginViaReflectionAsync("Glamourer").ConfigureAwait(false),
+                onDisableAction: async () => await _uiShared.DisablePluginViaReflectionAsync("Glamourer").ConfigureAwait(false));
 
             UiSharedService.DrawSectionSeparator("Optional Plugins");
 
             // 5. Customize+
-            bool cPlusAvailable = _ipcManager.CustomizePlus.APIAvailable;
-            DrawPluginListRow("Customize+", "Body scale customization.", cPlusAvailable ? "Detected" : "Missing", cPlusAvailable, () => {
-                _ = Task.Run(async () => {
-                    await _uiShared.AddRepoViaReflectionAsync("https://raw.githubusercontent.com/Aka-S/AkaRepos/main/pluginmaster.json", "Aka-S Repo");
-                    Mediator.Publish(new NotificationMessage("Repository Added", "Aka-S Repo added. Installing...", NotificationType.Info));
-                    await _uiShared.InstallPluginViaReflectionAsync("CustomizePlus");
-                });
-            });
+            var customizePlusState = _uiShared.GetPluginInstallState("CustomizePlus");
+            DrawPluginListRow("Customize+", "Body scale customization.", GetPluginStatusLabel(customizePlusState), customizePlusState.IsInstalled, customizePlusState.IsEnabled,
+                onInstallAction: async () =>
+                {
+                    await _uiShared.AddRepoViaReflectionAsync(SeaOfStarsRepoUrl, SeaOfStarsRepoName).ConfigureAwait(false);
+                    Mediator.Publish(new NotificationMessage("Repository Added", $"{SeaOfStarsRepoName} added. Installing...", NotificationType.Info));
+                    await _uiShared.InstallPluginViaReflectionAsync("CustomizePlus").ConfigureAwait(false);
+                },
+                onEnableAction: async () => await _uiShared.EnablePluginViaReflectionAsync("CustomizePlus").ConfigureAwait(false),
+                onDisableAction: async () => await _uiShared.DisablePluginViaReflectionAsync("CustomizePlus").ConfigureAwait(false));
 
             // 6. Heels
-            bool heelsAvailable = _ipcManager.Heels.APIAvailable;
-            DrawPluginListRow("Heels", "Adjusts character height based on footwear.", heelsAvailable ? "Detected" : "Missing", heelsAvailable, () => {
-                _ = Task.Run(async () => {
-                    await _uiShared.AddRepoViaReflectionAsync("https://raw.githubusercontent.com/Caraxi/DalamudPlugins/master/pluginmaster.json", "Caraxi Repo");
-                    Mediator.Publish(new NotificationMessage("Repository Added", "Caraxi Repo added. Installing...", NotificationType.Info));
-                    await _uiShared.InstallPluginViaReflectionAsync("SimpleHeels");
-                });
-            });
+            var heelsState = _uiShared.GetPluginInstallState("SimpleHeels");
+            DrawPluginListRow("Heels", "Adjusts character height based on footwear.", GetPluginStatusLabel(heelsState), heelsState.IsInstalled, heelsState.IsEnabled,
+                onInstallAction: async () =>
+                {
+                    await _uiShared.AddRepoViaReflectionAsync(SeaOfStarsRepoUrl, SeaOfStarsRepoName).ConfigureAwait(false);
+                    Mediator.Publish(new NotificationMessage("Repository Added", $"{SeaOfStarsRepoName} added. Installing...", NotificationType.Info));
+                    await _uiShared.InstallPluginViaReflectionAsync("SimpleHeels").ConfigureAwait(false);
+                },
+                onEnableAction: async () => await _uiShared.EnablePluginViaReflectionAsync("SimpleHeels").ConfigureAwait(false),
+                onDisableAction: async () => await _uiShared.DisablePluginViaReflectionAsync("SimpleHeels").ConfigureAwait(false));
 
             // 7. Honorific
-            bool honorificAvailable = _ipcManager.Honorific.APIAvailable;
-            DrawPluginListRow("Honorific", "Adds titles and plates to characters.", honorificAvailable ? "Detected" : "Missing", honorificAvailable, () => {
-                _ = Task.Run(async () => {
-                    await _uiShared.InstallPluginViaReflectionAsync("Honorific");
-                });
-            });
+            var honorificState = _uiShared.GetPluginInstallState("Honorific");
+            DrawPluginListRow("Honorific", "Adds titles and plates to characters.", GetPluginStatusLabel(honorificState), honorificState.IsInstalled, honorificState.IsEnabled,
+                onInstallAction: async () =>
+                {
+                    await _uiShared.InstallPluginViaReflectionAsync("Honorific").ConfigureAwait(false);
+                },
+                onEnableAction: async () => await _uiShared.EnablePluginViaReflectionAsync("Honorific").ConfigureAwait(false),
+                onDisableAction: async () => await _uiShared.DisablePluginViaReflectionAsync("Honorific").ConfigureAwait(false));
 
             // 8. Moodles
-            bool moodlesAvailable = _ipcManager.Moodles.APIAvailable;
-            DrawPluginListRow("Moodles", "Status icon customization.", moodlesAvailable ? "Detected" : "Missing", moodlesAvailable, () => {
-                _ = Task.Run(async () => {
-                    await _uiShared.AddRepoViaReflectionAsync("https://raw.githubusercontent.com/Moodle-Overlay/Moodles/main/repo.json", "Moodles Repo");
-                    Mediator.Publish(new NotificationMessage("Repository Added", "Moodles Repo added. Installing...", NotificationType.Info));
-                    await _uiShared.InstallPluginViaReflectionAsync("Moodles");
-                });
-            });
+            var moodlesState = _uiShared.GetPluginInstallState("Moodles");
+            DrawPluginListRow("Moodles", "Status icon customization.", GetPluginStatusLabel(moodlesState), moodlesState.IsInstalled, moodlesState.IsEnabled,
+                onInstallAction: async () =>
+                {
+                    await _uiShared.AddRepoViaReflectionAsync(SeaOfStarsRepoUrl, SeaOfStarsRepoName).ConfigureAwait(false);
+                    Mediator.Publish(new NotificationMessage("Repository Added", $"{SeaOfStarsRepoName} added. Installing...", NotificationType.Info));
+                    await _uiShared.InstallPluginViaReflectionAsync("Moodles").ConfigureAwait(false);
+                },
+                onEnableAction: async () => await _uiShared.EnablePluginViaReflectionAsync("Moodles").ConfigureAwait(false),
+                onDisableAction: async () => await _uiShared.DisablePluginViaReflectionAsync("Moodles").ConfigureAwait(false));
             
             // 9. PetNames
-            bool petNamesAvailable = _ipcManager.PetNames.APIAvailable;
-            DrawPluginListRow("PetNames", "Custom names for minions and pets.", petNamesAvailable ? "Detected" : "Missing", petNamesAvailable, () => {
-                _ = Task.Run(async () => {
-                    await _uiShared.InstallPluginViaReflectionAsync("PetRenamer");
-                });
-            });
+            var petNamesState = _uiShared.GetPluginInstallState("PetRenamer");
+            DrawPluginListRow("PetNames", "Custom names for minions and pets.", GetPluginStatusLabel(petNamesState), petNamesState.IsInstalled, petNamesState.IsEnabled,
+                onInstallAction: async () =>
+                {
+                    await _uiShared.InstallPluginViaReflectionAsync("PetRenamer").ConfigureAwait(false);
+                },
+                onEnableAction: async () => await _uiShared.EnablePluginViaReflectionAsync("PetRenamer").ConfigureAwait(false),
+                onDisableAction: async () => await _uiShared.DisablePluginViaReflectionAsync("PetRenamer").ConfigureAwait(false));
 
             // 10. Brio
-            bool brioAvailable = _ipcManager.Brio.APIAvailable;
-            DrawPluginListRow("Brio", "Animation and posing tool.", brioAvailable ? "Detected" : "Missing", brioAvailable, () => {
-                _ = Task.Run(async () => {
-                    await _uiShared.AddRepoViaReflectionAsync("https://raw.githubusercontent.com/Miza-s/DalamudPlugins/main/pluginmaster.json", "Miza Repo");
-                    Mediator.Publish(new NotificationMessage("Repository Added", "Miza Repo added. Installing...", NotificationType.Info));
-                    await _uiShared.InstallPluginViaReflectionAsync("Brio");
-                });
-            });
+            var brioState = _uiShared.GetPluginInstallState("Brio");
+            DrawPluginListRow("Brio", "Animation and posing tool.", GetPluginStatusLabel(brioState), brioState.IsInstalled, brioState.IsEnabled,
+                onInstallAction: async () =>
+                {
+                    await _uiShared.AddRepoViaReflectionAsync(SeaOfStarsRepoUrl, SeaOfStarsRepoName).ConfigureAwait(false);
+                    Mediator.Publish(new NotificationMessage("Repository Added", $"{SeaOfStarsRepoName} added. Installing...", NotificationType.Info));
+                    await _uiShared.InstallPluginViaReflectionAsync("Brio").ConfigureAwait(false);
+                },
+                onEnableAction: async () => await _uiShared.EnablePluginViaReflectionAsync("Brio").ConfigureAwait(false),
+                onDisableAction: async () => await _uiShared.DisablePluginViaReflectionAsync("Brio").ConfigureAwait(false));
             
             // 11. BypassEmote
-            bool bypassEmoteAvailable = _ipcManager.BypassEmote.APIAvailable;
-            DrawPluginListRow("BypassEmote", "Enables emote usage anywhere.", bypassEmoteAvailable ? "Detected" : "Missing", bypassEmoteAvailable, () => {
-                _ = Task.Run(async () => {
-                    await _uiShared.AddRepoViaReflectionAsync("https://raw.githubusercontent.com/Aspher0/BypassEmote/refs/heads/main/repo.json", "BypassEmote Repo");
+            var bypassEmoteState = _uiShared.GetPluginInstallState("BypassEmote");
+            DrawPluginListRow("BypassEmote", "Lets you plya any emote, without restriction.", GetPluginStatusLabel(bypassEmoteState), bypassEmoteState.IsInstalled, bypassEmoteState.IsEnabled,
+                onInstallAction: async () =>
+                {
+                    await _uiShared.AddRepoViaReflectionAsync("https://raw.githubusercontent.com/Aspher0/BypassEmote/refs/heads/main/repo.json", "BypassEmote Repo").ConfigureAwait(false);
                     Mediator.Publish(new NotificationMessage("Repository Added", "BypassEmote Repo added. Installing...", NotificationType.Info));
-                    await _uiShared.InstallPluginViaReflectionAsync("BypassEmote");
-                });
-            });
+                    await _uiShared.InstallPluginViaReflectionAsync("BypassEmote").ConfigureAwait(false);
+                },
+                onEnableAction: async () => await _uiShared.EnablePluginViaReflectionAsync("BypassEmote").ConfigureAwait(false),
+                onDisableAction: async () => await _uiShared.DisablePluginViaReflectionAsync("BypassEmote").ConfigureAwait(false));
         });
 
 
