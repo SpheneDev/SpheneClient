@@ -43,6 +43,12 @@ public partial class ApiController
     public async Task BypassEmoteUpdate(BypassEmoteUpdateDto updateDto)
     {
         if (!IsConnected) return;
+        if (_spheneHub == null || _spheneHub.State != HubConnectionState.Connected)
+        {
+            Logger.LogDebug("Skipping bypass emote update for {id} because hub is not connected (State: {State})",
+                updateDto.Id, _spheneHub?.State.ToString() ?? "null");
+            return;
+        }
 
         try
         {

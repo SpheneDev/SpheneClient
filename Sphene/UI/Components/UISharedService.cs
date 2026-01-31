@@ -35,6 +35,7 @@ using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using System.Reflection;
 using System.Collections;
+using System.IO;
 
 namespace Sphene.UI;
 
@@ -48,6 +49,34 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
     public readonly FileDialogManager FileDialogManager;
     private const string _notesEnd = "##SPHENE_USER_NOTES_END##";
     private const string _notesStart = "##SPHENE_USER_NOTES_START##";
+
+    public static void DrawSectionSeparator(string text)
+    {
+        var drawList = ImGui.GetWindowDrawList();
+        var cursor = ImGui.GetCursorScreenPos();
+        var availWidth = ImGui.GetContentRegionAvail().X;
+        var height = ImGui.GetTextLineHeightWithSpacing();
+        
+        var textSize = ImGui.CalcTextSize(text);
+        var lineY = cursor.Y + height / 2;
+        var lineColor = ImGui.GetColorU32(ImGuiCol.Separator);
+        
+        // Draw left line
+        var leftLineEnd = cursor.X + (availWidth - textSize.X) / 2 - 5;
+        if (leftLineEnd > cursor.X)
+            drawList.AddLine(new Vector2(cursor.X, lineY), new Vector2(leftLineEnd, lineY), lineColor);
+            
+        // Draw text
+        ImGui.SetCursorScreenPos(new Vector2(cursor.X + (availWidth - textSize.X) / 2, cursor.Y));
+        ImGui.TextUnformatted(text);
+        
+        // Draw right line
+        var rightLineStart = cursor.X + (availWidth + textSize.X) / 2 + 5;
+        if (rightLineStart < cursor.X + availWidth)
+            drawList.AddLine(new Vector2(rightLineStart, lineY), new Vector2(cursor.X + availWidth, lineY), lineColor);
+            
+        ImGui.SetCursorScreenPos(new Vector2(cursor.X, cursor.Y + height));
+    }
     private readonly ApiController _apiController;
     private readonly CacheMonitor _cacheMonitor;
     private readonly SpheneConfigService _configService;
@@ -122,10 +151,24 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
 
         UidFont = _pluginInterface.UiBuilder.FontAtlas.NewDelegateFontHandle(e =>
         {
-            e.OnPreBuild(tk => tk.AddDalamudAssetFont(Dalamud.DalamudAsset.NotoSansJpMedium, new()
+            e.OnPreBuild(tk =>
             {
-                SizePx = 35
-            }));
+                var fontPath = Path.Combine(_pluginInterface.AssemblyLocation.Directory?.FullName ?? string.Empty, "Resources", "Fonts", "Lato-Regular.ttf");
+                if (File.Exists(fontPath))
+                {
+                     tk.AddFontFromFile(fontPath, new SafeFontConfig
+                     {
+                         SizePx = 35
+                     });
+                }
+                else
+                {
+                    tk.AddDalamudAssetFont(Dalamud.DalamudAsset.NotoSansJpMedium, new()
+                    {
+                        SizePx = 35
+                    });
+                }
+            });
         });
         GameFont = _pluginInterface.UiBuilder.FontAtlas.NewGameFontHandle(new(GameFontFamilyAndSize.Axis12));
         IconFont = _pluginInterface.UiBuilder.IconFontFixedWidthHandle;
@@ -884,7 +927,7 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
     }
 
     [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarQube", "S3011:Reflection should not be used to increase accessibility of classes, methods, or fields", Justification = "Accessing internal Dalamud methods for plugin management.")]
-    private async Task AddRepoViaReflectionAsync(string url, string name)
+    public async Task AddRepoViaReflectionAsync(string url, string name)
     {
         try
         {
@@ -1032,7 +1075,7 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
     }
 
     [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarQube", "S3011:Reflection should not be used to increase accessibility of classes, methods, or fields", Justification = "Accessing internal Dalamud methods for plugin management.")]
-    private async Task InstallPluginViaReflection(string pluginInternalName)
+    public async Task InstallPluginViaReflectionAsync(string pluginInternalName)
     {
         try
         {
@@ -1197,8 +1240,8 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
                          }
                          
                          Logger.LogDebug("Installing {Plugin}...", internalName);
-                         await InstallPluginViaReflection(internalName).ConfigureAwait(false);
-                     }
+                        await InstallPluginViaReflectionAsync(internalName).ConfigureAwait(false);
+                    }
                      catch (Exception ex)
                      {
                          Logger.LogError(ex, "Failed to install {Plugin}", internalName);
@@ -1910,6 +1953,18 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
         {
             ImGui.SetNextWindowSize(newSize);
             _pendingWindowSizes.TryRemove(windowName, out _);
+        }
+    }
+
+    public void OpenPluginInstaller(string searchText)
+    {
+        try
+        {
+            _pluginInterface.OpenPluginInstallerTo(PluginInstallerOpenKind.AllPlugins, searchText);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to open plugin installer");
         }
     }
 
