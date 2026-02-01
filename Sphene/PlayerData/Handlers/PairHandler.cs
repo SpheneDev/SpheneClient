@@ -1629,11 +1629,16 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         
         Logger.LogDebug("SCD Load Addresses - Resource: {res:X}, Player: {plr:X}, Minion: {min:X}", resourceAddress, playerAddress, minionAddress);
 
-        if (resourceAddress != playerAddress)
+        if (resourceAddress == playerAddress)
         {
-            minionAddress = resourceAddress;
+            if (minionAddress == nint.Zero)
+            {
+                return;
+            }
+
+            resourceAddress = minionAddress;
         }
-        else if (minionAddress == nint.Zero)
+        else if (resourceAddress != minionAddress)
         {
             return;
         }
@@ -1680,7 +1685,16 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             return false;
         }
 
-        var objectIndex = await _dalamudUtil.RunOnFrameworkThread(() => _dalamudUtil.CreateGameObject(address)?.ObjectIndex).ConfigureAwait(false);
+        var objectIndex = await _dalamudUtil.RunOnFrameworkThread<ushort?>(() =>
+        {
+            var gameObject = _dalamudUtil.CreateGameObject(address);
+            if (!_dalamudUtil.IsObjectPresent(gameObject) || gameObject == null || gameObject.Address != address)
+            {
+                return null;
+            }
+
+            return gameObject.ObjectIndex;
+        }).ConfigureAwait(false);
         if (!objectIndex.HasValue)
         {
             Logger.LogDebug("Failed to bind collection: Could not find object index for address {addr:X}", address);

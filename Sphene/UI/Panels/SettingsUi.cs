@@ -2171,10 +2171,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
         drawContents();
         ImGui.EndGroup();
 
-        var min = ImGui.GetItemRectMin();
         var max = ImGui.GetItemRectMax();
         // Add padding
-        min -= new Vector2(5, 5);
         max += new Vector2(5, 5);
         
         // Ensure max width respects available content region to fix separator alignment
