@@ -36,10 +36,14 @@ public class Pair : DisposableMediatorSubscriberBase
     private const int BaseApplyRetryDelaySeconds = 2;
     private const int MaxApplyRetryDelaySeconds = 30;
     private const int MaxApplyRetryBackoffSteps = 5;
+    private const int ApplyAttemptCooldownMs = 1500;
     private CancellationTokenSource _applyRetryCts = new();
     private int _applyRetryCount = 0;
     private const int MaxApplyDebugLines = 200;
+    private const string SyncProgressTag = "[SyncProgress]";
     private readonly ConcurrentQueue<string> _applyDebugLog = new();
+    private string? _lastApplyAttemptHash;
+    private DateTimeOffset _lastApplyAttemptTime = DateTimeOffset.MinValue;
 
     public Pair(ILogger<Pair> logger, UserFullPairDto userPair, PairHandlerFactory cachedPlayerFactory,
         SpheneMediator mediator, ServerConfigurationManager serverConfigurationManager,
@@ -257,9 +261,12 @@ public class Pair : DisposableMediatorSubscriberBase
         var hash = data.DataHash;
         var shortHash = string.IsNullOrEmpty(hash) ? "NONE" : hash[..Math.Min(8, hash.Length)];
         AddApplyDebug($"Data received hash={shortHash} requiresAck={data.RequiresAcknowledgment}");
+        Logger.LogDebug("{tag} Receive: user={user} hash={hash} requiresAck={requiresAck} shouldApply={shouldApply}",
+            SyncProgressTag, data.User.AliasOrUID, shortHash, data.RequiresAcknowledgment, shouldApply);
 
         if (!shouldApply)
         {
+            Logger.LogDebug("{tag} Apply skipped: user={user} hash={hash} alreadyApplied=true", SyncProgressTag, data.User.AliasOrUID, shortHash);
             if (data.RequiresAcknowledgment && !string.IsNullOrEmpty(data.DataHash))
             {
                 _ = SendAcknowledgmentIfRequired(data, true, true);
@@ -273,7 +280,7 @@ public class Pair : DisposableMediatorSubscriberBase
         
         if (CachedPlayer == null)
         {
-            Logger.LogDebug("Received Data for {uid} but CachedPlayer does not exist, waiting", data.User.UID);
+            Logger.LogDebug("{tag} Apply deferred: cached player missing for uid={uid} hash={hash}", SyncProgressTag, data.User.UID, shortHash);
             _ = Task.Run(async () =>
             {
                 using var timeoutCts = new CancellationTokenSource();
@@ -287,7 +294,7 @@ public class Pair : DisposableMediatorSubscriberBase
 
                 if (!combined.IsCancellationRequested)
                 {
-                    Logger.LogDebug("Applying delayed data for {uid}", data.User.UID);
+                    Logger.LogDebug("{tag} Apply delayed data: uid={uid} hash={hash}", SyncProgressTag, data.User.UID, shortHash);
                     if (shouldApply)
                     {
                         ApplyLastReceivedData();
@@ -300,12 +307,14 @@ public class Pair : DisposableMediatorSubscriberBase
                         var dataWithSequence = data.DeepClone();
                         dataWithSequence.SequenceNumber = currentSequence;
                         _pendingAcknowledgmentQueue.Enqueue(dataWithSequence);
-                        Logger.LogDebug("Enqueued pending acknowledgment data for delayed sending (delayed path) - Hash: {hash}, Sequence: {sequence}", 
+                        Logger.LogDebug("{tag} Ack queued (delayed path): hash={hash} sequence={sequence}", 
+                            SyncProgressTag,
                             data.DataHash[..Math.Min(8, data.DataHash.Length)], currentSequence);
                     }
                 }
                 else
                 {
+                    Logger.LogDebug("{tag} Apply delayed path timed out: uid={uid} hash={hash}", SyncProgressTag, data.User.UID, shortHash);
                     await SendAcknowledgmentIfRequired(data, false).ConfigureAwait(false);
                 }
             });
@@ -324,7 +333,8 @@ public class Pair : DisposableMediatorSubscriberBase
             var dataWithSequence = data.DeepClone();
             dataWithSequence.SequenceNumber = currentSequence;
             _pendingAcknowledgmentQueue.Enqueue(dataWithSequence);
-            Logger.LogDebug("Enqueued pending acknowledgment data for delayed sending - Hash: {hash}, Sequence: {sequence}, Queue size: {queueSize}", 
+            Logger.LogDebug("{tag} Ack queued: hash={hash} sequence={sequence} queueSize={queueSize}", 
+                SyncProgressTag,
                 data.DataHash[..Math.Min(8, data.DataHash.Length)], currentSequence, _pendingAcknowledgmentQueue.Count);
         }
     }
@@ -345,6 +355,12 @@ public class Pair : DisposableMediatorSubscriberBase
         LastReceivedCharacterData = data.CharaData;
         LastReceivedCharacterDataHash = newHash;
         LastReceivedCharacterDataTime = now;
+        Logger.LogDebug("{tag} Cache updated: user={user} newHash={newHash} previousHash={prevHash} changed={changed}",
+            SyncProgressTag,
+            data.User.AliasOrUID,
+            string.IsNullOrEmpty(newHash) ? "NONE" : newHash[..Math.Min(8, newHash.Length)],
+            string.IsNullOrEmpty(previousHash) ? "NONE" : previousHash[..Math.Min(8, previousHash.Length)],
+            !string.Equals(previousHash, newHash, StringComparison.Ordinal));
     }
 
     public void ApplyLastReceivedData(bool forced = false)
@@ -357,12 +373,37 @@ public class Pair : DisposableMediatorSubscriberBase
             var hash = LastReceivedCharacterData.DataHash.Value;
             var shortHash = string.IsNullOrEmpty(hash) ? "NONE" : hash[..Math.Min(8, hash.Length)];
             AddApplyDebug($"Apply skipped hash already applied hash={shortHash}");
+            Logger.LogDebug("{tag} Apply skipped: already applied hash={hash} user={user}", SyncProgressTag, shortHash, UserData.AliasOrUID);
             return;
         }
 
         var applyHash = LastReceivedCharacterData.DataHash.Value;
         var applyShortHash = string.IsNullOrEmpty(applyHash) ? "NONE" : applyHash[..Math.Min(8, applyHash.Length)];
+        if (!forced)
+        {
+            if (CachedPlayer.IsApplyPipelineRunningForHash(applyHash))
+            {
+                AddApplyDebug($"Apply skipped pipeline in progress hash={applyShortHash}");
+                Logger.LogDebug("{tag} Apply skipped: pipeline in progress hash={hash} user={user}",
+                    SyncProgressTag, applyShortHash, UserData.AliasOrUID);
+                return;
+            }
+
+            var now = DateTimeOffset.UtcNow;
+            if (string.Equals(_lastApplyAttemptHash, applyHash, StringComparison.Ordinal)
+                && (now - _lastApplyAttemptTime).TotalMilliseconds < ApplyAttemptCooldownMs)
+            {
+                AddApplyDebug($"Apply skipped cooldown hash={applyShortHash}");
+                Logger.LogDebug("{tag} Apply skipped: cooldown hash={hash} user={user}",
+                    SyncProgressTag, applyShortHash, UserData.AliasOrUID);
+                return;
+            }
+        }
+
+        _lastApplyAttemptHash = applyHash;
+        _lastApplyAttemptTime = DateTimeOffset.UtcNow;
         AddApplyDebug($"Apply start forced={forced} hash={applyShortHash}");
+        Logger.LogDebug("{tag} Apply start: user={user} forced={forced} hash={hash}", SyncProgressTag, UserData.AliasOrUID, forced, applyShortHash);
         CachedPlayer.ApplyCharacterData(Guid.NewGuid(), RemoveNotSyncedFiles(LastReceivedCharacterData.DeepClone())!, forced);
     }
 
@@ -852,7 +893,10 @@ public class Pair : DisposableMediatorSubscriberBase
         // Check if this message is for this pair
         if (string.Equals(message.UserUID, UserPair.User.UID, StringComparison.Ordinal))
         {
-            Logger.LogDebug("Character data application completed for {playerName} - processing acknowledgment queue", message.PlayerName);
+            Logger.LogDebug("{tag} Apply completed: user={user} success={success} hash={hash} appId={appId}",
+                SyncProgressTag, UserData.AliasOrUID, message.Success,
+                string.IsNullOrEmpty(message.DataHash) ? "NONE" : message.DataHash[..Math.Min(8, message.DataHash.Length)],
+                message.ApplicationId);
             if (message.Success)
             {
                 ResetApplyRetry();
@@ -862,69 +906,75 @@ public class Pair : DisposableMediatorSubscriberBase
                 ScheduleApplyRetry(increment: true);
             }
             
-            // Process acknowledgment queue and send only the latest acknowledgment
             if (!_pendingAcknowledgmentQueue.IsEmpty)
             {
-                OnlineUserCharaDataDto? latestAcknowledgment = null;
+                OnlineUserCharaDataDto? matchingAcknowledgment = null;
                 var processedCount = 0;
-                var discardedCount = 0;
+                var remaining = new List<OnlineUserCharaDataDto>();
+                var appliedHash = message.DataHash;
                 
-                // Dequeue all pending acknowledgments and keep only the latest one
                 while (_pendingAcknowledgmentQueue.TryDequeue(out var acknowledgmentData))
                 {
                     processedCount++;
-                    if (latestAcknowledgment == null || acknowledgmentData.SequenceNumber > latestAcknowledgment.SequenceNumber)
+                    if (!string.IsNullOrEmpty(appliedHash)
+                        && string.Equals(acknowledgmentData.DataHash, appliedHash, StringComparison.Ordinal))
                     {
-                        if (latestAcknowledgment != null)
+                        if (matchingAcknowledgment == null || acknowledgmentData.SequenceNumber > matchingAcknowledgment.SequenceNumber)
                         {
-                            discardedCount++;
-                            Logger.LogDebug("Discarding outdated acknowledgment - Hash: {hash}, Sequence: {sequence}", 
-                                latestAcknowledgment.DataHash[..Math.Min(8, latestAcknowledgment.DataHash.Length)], latestAcknowledgment.SequenceNumber);
+                            matchingAcknowledgment = acknowledgmentData;
                         }
-                        latestAcknowledgment = acknowledgmentData;
                     }
                     else
                     {
-                        discardedCount++;
-                        Logger.LogDebug("Discarding outdated acknowledgment - Hash: {hash}, Sequence: {sequence}", 
-                            acknowledgmentData.DataHash[..Math.Min(8, acknowledgmentData.DataHash.Length)], acknowledgmentData.SequenceNumber);
+                        remaining.Add(acknowledgmentData);
                     }
                 }
-                
-                Logger.LogDebug("Processed {processedCount} acknowledgments, discarded {discardedCount}, sending latest with sequence {sequence}", 
-                    processedCount, discardedCount, latestAcknowledgment?.SequenceNumber ?? -1);
-                
-                // Send the latest acknowledgment with hash verification
-                if (latestAcknowledgment != null)
+
+                foreach (var pending in remaining)
+                {
+                    _pendingAcknowledgmentQueue.Enqueue(pending);
+                }
+
+                Logger.LogDebug("{tag} Ack queue processed: processed={processedCount} remaining={remainingCount} appliedHash={hash}",
+                    SyncProgressTag,
+                    processedCount, remaining.Count, string.IsNullOrEmpty(appliedHash) ? "NONE" : appliedHash[..Math.Min(8, appliedHash.Length)]);
+
+                if (matchingAcknowledgment != null)
                 {
                     try
                     {
                         var verificationSuccess = true;
                         if (!_dalamudUtilService.IsInDuty && !_dalamudUtilService.IsInCombatOrPerforming)
                         {
-                            verificationSuccess = VerifyDataHashIntegrity(latestAcknowledgment);
+                            verificationSuccess = VerifyDataHashIntegrity(matchingAcknowledgment, appliedHash);
                         }
                         
-                        Logger.LogDebug("Sending acknowledgment - Application success: {appSuccess}, Hash verification: {hashSuccess}", 
-                            message.Success, verificationSuccess);
+                        Logger.LogDebug("{tag} Ack sending: appSuccess={appSuccess} hashVerified={hashSuccess} hash={hash}", 
+                            SyncProgressTag,
+                            message.Success, verificationSuccess, string.IsNullOrEmpty(appliedHash) ? "NONE" : appliedHash[..Math.Min(8, appliedHash.Length)]);
                         
-                        await SendAcknowledgmentIfRequired(latestAcknowledgment, message.Success, verificationSuccess).ConfigureAwait(false);
+                        await SendAcknowledgmentIfRequired(matchingAcknowledgment, message.Success, verificationSuccess).ConfigureAwait(false);
                     }
                     catch (Exception ex)
                     {
-                        Logger.LogWarning(ex, "Failed to send delayed acknowledgment for {userUid}", message.UserUID);
+                        Logger.LogError(ex, "{tag} Ack send failed: user={userUid}", SyncProgressTag, message.UserUID);
                     }
+                }
+                else
+                {
+                    Logger.LogDebug("{tag} Ack missing: appliedHash={hash} remaining={count}",
+                        SyncProgressTag,
+                        string.IsNullOrEmpty(appliedHash) ? "NONE" : appliedHash[..Math.Min(8, appliedHash.Length)],
+                        remaining.Count);
                 }
             }
             else
             {
-                Logger.LogInformation("No pending acknowledgment data, but character data application completed for {playerName}", message.PlayerName);
+                Logger.LogDebug("{tag} Ack queue empty: playerName={playerName} success={success}", SyncProgressTag, message.PlayerName, message.Success);
 
-                // Fix for stuck Clock/AckYou status after redraw/rebuild (e.g. after SetPendingAcknowledgmentForBuildStart)
-                // If we successfully re-applied data but still have pending status or AckYou=false, we need to resolve it
                 if (HasPendingAcknowledgment || (message.Success && !UserPair.OwnPermissions.IsAckYou()))
                 {
-                    Logger.LogDebug("Auto-completing acknowledgment after data application (re-apply/redraw) - Success: {success}", message.Success);
+                    Logger.LogDebug("{tag} Ack auto-complete: success={success} lastAckId={ackId}", SyncProgressTag, message.Success, LastAcknowledgmentId ?? "null");
                     await UpdateAcknowledgmentStatus(LastAcknowledgmentId, message.Success, DateTime.UtcNow).ConfigureAwait(false);
                 }
             }
@@ -1011,36 +1061,39 @@ public class Pair : DisposableMediatorSubscriberBase
         }
     }
 
-    private bool VerifyDataHashIntegrity(OnlineUserCharaDataDto acknowledgmentData)
+    private bool VerifyDataHashIntegrity(OnlineUserCharaDataDto acknowledgmentData, string? appliedHash)
      {
          try
          {
              if (acknowledgmentData?.CharaData == null)
              {
-                 Logger.LogWarning("Cannot verify data hash integrity - acknowledgment data or character data is null");
+                Logger.LogWarning("{tag} Hash verify failed: data missing", SyncProgressTag);
                  return false;
              }
  
-             if (LastReceivedCharacterData == null)
-             {
-                 Logger.LogWarning("Cannot verify data hash integrity - no last received character data available");
-                 return false;
-             }
- 
-             // Compare data hashes using the built-in DataHash property
-             var receivedHash = acknowledgmentData.CharaData.DataHash.Value;
-             var appliedHash = LastReceivedCharacterData.DataHash.Value;
+            var receivedHash = acknowledgmentData.CharaData.DataHash.Value;
+            var expectedHash = appliedHash;
+            if (string.IsNullOrEmpty(expectedHash) && LastReceivedCharacterData != null)
+            {
+                expectedHash = LastReceivedCharacterData.DataHash.Value;
+            }
+
+            if (string.IsNullOrEmpty(expectedHash))
+            {
+                Logger.LogWarning("{tag} Hash verify failed: applied hash missing", SyncProgressTag);
+                return false;
+            }
              
-             var hashMatch = string.Equals(receivedHash, appliedHash, StringComparison.Ordinal);
+            var hashMatch = string.Equals(receivedHash, expectedHash, StringComparison.Ordinal);
              
-             Logger.LogInformation("Data hash verification - Received: {receivedHash}, Applied: {appliedHash}, Match: {hashMatch}", 
-                 receivedHash, appliedHash, hashMatch);
+            Logger.LogDebug("{tag} Hash verify: received={receivedHash} applied={appliedHash} match={hashMatch}", 
+                SyncProgressTag, receivedHash, expectedHash, hashMatch);
              
              return hashMatch;
          }
          catch (Exception ex)
          {
-             Logger.LogWarning(ex, "Failed to verify data hash integrity - assuming verification failed");
+            Logger.LogError(ex, "{tag} Hash verify failed with exception", SyncProgressTag);
              return false;
          }
      }

@@ -24,6 +24,7 @@ namespace Sphene.PlayerData.Pairs;
 
 public sealed class PairManager : DisposableMediatorSubscriberBase
 {
+    private const string SyncProgressTag = "[SyncProgress]";
     private readonly ConcurrentDictionary<UserData, Pair> _allClientPairs = new(UserDataComparer.Instance);
     private readonly ConcurrentDictionary<GroupData, GroupFullInfoDto> _allGroups = new(GroupDataComparer.Instance);
     private readonly SessionAcknowledgmentManager _sessionAcknowledgmentManager;
@@ -231,17 +232,18 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
 
     public void ReceiveCharaData(OnlineUserCharaDataDto dto)
     {
-        Logger.LogDebug("ReceiveCharaData called - User: {user}, Hash: {hash}, RequiresAck: {requiresAck}", 
+        Logger.LogDebug("{tag} Receive: user={user} hash={hash} requiresAck={requiresAck}",
+            SyncProgressTag,
             dto.User.AliasOrUID, dto.DataHash[..Math.Min(8, dto.DataHash.Length)], dto.RequiresAcknowledgment);
         
         if (!_allClientPairs.TryGetValue(dto.User, out var pair))
         {
-            Logger.LogWarning("Received character data for user {User} who is not in paired users list. This can happen during connection setup.", dto.User.AliasOrUID);
+            Logger.LogWarning("{tag} Receive dropped: user not paired user={user}", SyncProgressTag, dto.User.AliasOrUID);
             return;
         }
 
         Mediator.Publish(new EventMessage(new Event(pair.UserData, nameof(PairManager), EventSeverity.Informational, "Received Character Data")));
-        Logger.LogDebug("Calling ApplyData for user {user} with Hash {hash}", dto.User.AliasOrUID, dto.DataHash[..Math.Min(8, dto.DataHash.Length)]);
+        Logger.LogDebug("{tag} Apply enqueue: user={user} hash={hash}", SyncProgressTag, dto.User.AliasOrUID, dto.DataHash[..Math.Min(8, dto.DataHash.Length)]);
         pair.ApplyData(dto);
     }
 
@@ -252,7 +254,7 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         var currentUserUID = _apiController.Value.UID;
         if (!string.IsNullOrEmpty(currentUserUID) && string.Equals(acknowledgmentDto.User.UID, currentUserUID, StringComparison.Ordinal))
         {
-            Logger.LogDebug("Ignoring acknowledgment from sender themselves: {user}", acknowledgmentDto.User.AliasOrUID);
+            Logger.LogDebug("{tag} Ack receive ignored: sender is local user={user}", SyncProgressTag, acknowledgmentDto.User.AliasOrUID);
             return;
         }
 
@@ -260,9 +262,15 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         var processedBySession = _sessionAcknowledgmentManager.ProcessReceivedAcknowledgment(acknowledgmentDto.DataHash, acknowledgmentDto.User);
         if (!processedBySession)
         {
-            Logger.LogDebug("Ignoring non-latest acknowledgment for user {user}", acknowledgmentDto.User.AliasOrUID);
+            Logger.LogDebug("{tag} Ack receive ignored: not latest user={user} hash={hash}", 
+                SyncProgressTag, acknowledgmentDto.User.AliasOrUID, acknowledgmentDto.DataHash[..Math.Min(8, acknowledgmentDto.DataHash.Length)]);
             return;
         }
+
+        Logger.LogDebug("{tag} Ack received: user={user} hash={hash} success={success}",
+            SyncProgressTag, acknowledgmentDto.User.AliasOrUID,
+            acknowledgmentDto.DataHash[..Math.Min(8, acknowledgmentDto.DataHash.Length)],
+            acknowledgmentDto.Success);
 
         // Cancel timeout tracking since acknowledgment was received
         _acknowledgmentTimeoutManager.CancelTimeout(acknowledgmentDto.DataHash);
@@ -482,12 +490,15 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         Mediator.Publish(new StructuralRefreshUiMessage());
     }
 
-    internal void ReceiveUploadStatus(UserDto dto)
+    internal void ReceiveUploadStatus(UserUploadStatusDto dto)
     {
         if (_allClientPairs.TryGetValue(dto.User, out var existingPair) && existingPair.IsVisible)
         {
-            existingPair.SetIsUploading();
-            SetOwnAckYouForTransfer(existingPair, false);
+            existingPair.SetIsUploading(dto.IsUploading);
+            if (dto.IsUploading)
+            {
+                SetOwnAckYouForTransfer(existingPair, false);
+            }
         }
     }
 

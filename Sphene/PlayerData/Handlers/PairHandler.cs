@@ -23,6 +23,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
 {
     private sealed record CombatData(Guid ApplicationId, CharacterData CharacterData, bool Forced);
 
+    private const string SyncProgressTag = "[SyncProgress]";
     private readonly DalamudUtilService _dalamudUtil;
     private readonly FileDownloadManager _downloadManager;
     private readonly FileCacheManager _fileDbManager;
@@ -36,6 +37,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
     private CancellationTokenSource? _applicationCancellationTokenSource = new();
     private Guid _applicationId;
     private Task? _applicationTask;
+    private Task? _applyPipelineTask;
     private CharacterData? _cachedData = null;
     private CharacterData? _lastKnownMinionData = null;
     private readonly ConcurrentDictionary<string, string> _lastKnownMinionFileOverrides = new(StringComparer.OrdinalIgnoreCase);
@@ -54,6 +56,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
     private string? _inProgressGlamourerHash;
     private string? _inProgressRestHash;
     private string? _inProgressDataHash;
+    private string? _inProgressPipelineDataHash;
     private string? _lastAppliedBypassEmoteData;
     private nint _lastAppliedBypassEmoteAddress = nint.Zero;
     private DateTime _lastAppliedBypassEmoteTime = DateTime.MinValue;
@@ -125,6 +128,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         {
             _localVisibilityGateActive = true;
             _downloadCancellationTokenSource?.CancelDispose();
+            CancelApplicationTokenSource(true);
             _charaHandler?.Invalidate();
             _lastAppliedBypassEmoteAddress = nint.Zero;
             if (IsVisible)
@@ -149,6 +153,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         {
             _localVisibilityGateActive = true;
             _downloadCancellationTokenSource?.CancelDispose();
+            CancelApplicationTokenSource(true);
             _charaHandler?.Invalidate();
             _lastAppliedBypassEmoteAddress = nint.Zero;
             if (IsVisible)
@@ -161,6 +166,31 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         Mediator.Subscribe<CutsceneEndMessage>(this, (_) =>
         {
             _localVisibilityGateActive = false;
+            if (IsVisible
+                && _pendingPenumbraReapply
+                && _cachedData != null
+                && !_dalamudUtil.IsInCutscene
+                && !_dalamudUtil.IsInGpose
+                && _ipcManager.Penumbra.APIAvailable
+                && _ipcManager.Glamourer.APIAvailable)
+            {
+                _pendingPenumbraReapply = false;
+                ApplyCharacterData(Guid.NewGuid(), _cachedData, forceApplyCustomization: true);
+            }
+        });
+        Mediator.Subscribe<GposeEndMessage>(this, (_) =>
+        {
+            if (IsVisible
+                && _pendingPenumbraReapply
+                && _cachedData != null
+                && !_dalamudUtil.IsInCutscene
+                && !_dalamudUtil.IsInGpose
+                && _ipcManager.Penumbra.APIAvailable
+                && _ipcManager.Glamourer.APIAvailable)
+            {
+                _pendingPenumbraReapply = false;
+                ApplyCharacterData(Guid.NewGuid(), _cachedData, forceApplyCustomization: true);
+            }
         });
         Mediator.Subscribe<PenumbraInitializedMessage>(this, msg =>
         {
@@ -213,9 +243,15 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         });
         Mediator.Subscribe<CombatOrPerformanceStartMessage>(this, _ =>
         {
-            _dataReceivedInDowntime = null;
             _downloadCancellationTokenSource = _downloadCancellationTokenSource?.CancelRecreate();
-            _applicationCancellationTokenSource = _applicationCancellationTokenSource?.CancelRecreate();
+            if (_applyPipelineTask != null && !_applyPipelineTask.IsCompleted)
+            {
+                _applicationCancellationTokenSource?.Cancel();
+            }
+            else
+            {
+                _applicationCancellationTokenSource = _applicationCancellationTokenSource?.CancelRecreate();
+            }
         });
 
         LastAppliedDataBytes = -1;
@@ -271,6 +307,54 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         }
 
         return AreDataHashesEqual(data, _lastSuccessfullyAppliedDataHash);
+    }
+
+    internal bool IsApplyPipelineRunningForHash(string? dataHash)
+    {
+        if (string.IsNullOrEmpty(dataHash))
+        {
+            return false;
+        }
+
+        if (_applyPipelineTask == null || _applyPipelineTask.IsCompleted)
+        {
+            return false;
+        }
+
+        return string.Equals(_inProgressPipelineDataHash, dataHash, StringComparison.Ordinal);
+    }
+
+    private void CancelApplicationTokenSource(bool dispose)
+    {
+        var cts = _applicationCancellationTokenSource;
+        _applicationCancellationTokenSource = null;
+        if (cts == null)
+        {
+            return;
+        }
+
+        try
+        {
+            cts.Cancel();
+        }
+        catch (ObjectDisposedException ex)
+        {
+            Logger.LogDebug(ex, "CancelApplicationTokenSource: CTS already disposed (cancel)");
+        }
+
+        if (!dispose)
+        {
+            return;
+        }
+
+        try
+        {
+            cts.Dispose();
+        }
+        catch (ObjectDisposedException ex)
+        {
+            Logger.LogDebug(ex, "CancelApplicationTokenSource: CTS already disposed (dispose)");
+        }
     }
 
     public async Task ApplyBypassEmoteDataAsync(string data)
@@ -368,6 +452,21 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         Logger.LogDebug("[BASE-{appbase}] Applying data for {player}, forceApplyCustomization: {forced}, forceApplyMods: {forceMods}", applicationBase, this, forceApplyCustomization, _forceApplyMods);
         Logger.LogDebug("[BASE-{appbase}] Hash for data is {newHash}, current cache hash is {oldHash}", applicationBase, characterData.DataHash.Value, _cachedData?.DataHash.Value ?? "NODATA");
 
+        if (_applyPipelineTask != null
+            && !_applyPipelineTask.IsCompleted
+            && (AreComponentHashesEqual(characterData, _inProgressPenumbraHash, _inProgressGlamourerHash, _inProgressRestHash)
+                || AreDataHashesEqual(characterData, _inProgressPipelineDataHash)))
+        {
+            if (forceApplyCustomization || _forceApplyMods || _redrawOnNextApplication)
+            {
+                _forceRedrawAfterCurrentApplication = true;
+                _redrawOnNextApplication = false;
+            }
+            Logger.LogDebug("{tag} Apply pipeline skipped: already in progress hash={hash}", SyncProgressTag,
+                characterData.DataHash?.Value ?? "null");
+            return;
+        }
+
         if (_applicationTask != null
             && !_applicationTask.IsCompleted
             && (AreComponentHashesEqual(characterData, _inProgressPenumbraHash, _inProgressGlamourerHash, _inProgressRestHash)
@@ -406,6 +505,8 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             Mediator.Publish(new EventMessage(new Event(PlayerName, Pair.UserData, nameof(PairHandler), EventSeverity.Warning,
                 "Cannot apply character data: you are in GPose, a Cutscene or Penumbra/Glamourer is not available")));
             Logger.LogInformation("[BASE-{appbase}] Application of data for {player} while in cutscene/gpose or Penumbra/Glamourer unavailable, returning", applicationBase, this);
+            _cachedData = characterData;
+            _pendingPenumbraReapply = true;
             return;
         }
 
@@ -418,6 +519,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         _inProgressGlamourerHash = characterData.GlamourerHash.Value;
         _inProgressRestHash = characterData.RestHash.Value;
         _inProgressDataHash = characterData.DataHash?.Value;
+        _inProgressPipelineDataHash = characterData.DataHash?.Value;
 
         var charaDataToUpdate = characterData.CheckUpdatedData(applicationBase, _cachedData?.DeepClone() ?? new(), Logger, this, forceApplyCustomization, _forceApplyMods);
 
@@ -439,7 +541,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
 
         Logger.LogDebug("[BASE-{appbase}] Downloading and applying character for {name}", applicationBase, this);
 
-        DownloadAndApplyCharacter(applicationBase, characterData.DeepClone(), charaDataToUpdate);
+        _applyPipelineTask = DownloadAndApplyCharacter(applicationBase, characterData.DeepClone(), charaDataToUpdate, forceApplyCustomization);
     }
 
 
@@ -831,7 +933,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         return null;
     }
 
-    private void DownloadAndApplyCharacter(Guid applicationBase, CharacterData charaData, Dictionary<ObjectKind, HashSet<PlayerChanges>> updatedData)
+    private Task DownloadAndApplyCharacter(Guid applicationBase, CharacterData charaData, Dictionary<ObjectKind, HashSet<PlayerChanges>> updatedData, bool forceApplyCustomization)
     {
         if (!updatedData.Any())
         {
@@ -846,41 +948,67 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             _lastSuccessfullyAppliedDataHash = charaData.DataHash?.Value;
                 _lastSuccessfullyAppliedCharacterAddress = _charaHandler.Address;
             }
-            Mediator.Publish(new CharacterDataApplicationCompletedMessage(PlayerName ?? string.Empty, Pair.UserData.UID, applicationBase, true));
-            return;
+            Mediator.Publish(new CharacterDataApplicationCompletedMessage(PlayerName ?? string.Empty, Pair.UserData.UID, applicationBase, true, charaData.DataHash?.Value));
+            return Task.CompletedTask;
+        }
+
+        if (_dalamudUtil.IsInCombatOrPerforming)
+        {
+            Logger.LogDebug("{tag} Apply deferred: user={user} hash={hash} reason=combat",
+                SyncProgressTag, Pair.UserData.AliasOrUID, charaData.DataHash?.Value ?? "null");
+            _dataReceivedInDowntime = new(applicationBase, charaData, forceApplyCustomization);
+            return Task.CompletedTask;
         }
 
         var updateModdedPaths = updatedData.Values.Any(v => v.Any(p => p == PlayerChanges.ModFiles));
         var updateManip = updatedData.Values.Any(v => v.Any(p => p == PlayerChanges.ModManip));
+        Logger.LogDebug("{tag} Apply pipeline start: user={user} hash={hash} updates={updates} modFiles={modFiles} manip={manip}",
+            SyncProgressTag, Pair.UserData.AliasOrUID, charaData.DataHash?.Value ?? "null", updatedData.Count, updateModdedPaths, updateManip);
 
         _downloadCancellationTokenSource = _downloadCancellationTokenSource?.CancelRecreate() ?? new CancellationTokenSource();
         var downloadToken = _downloadCancellationTokenSource.Token;
 
-        _ = Task.Run(async () =>
+        Task? pipelineTask = null;
+        pipelineTask = Task.Run(async () =>
         {
             try
             {
-                await DownloadAndApplyCharacterAsync(applicationBase, charaData, updatedData, updateModdedPaths, updateManip, downloadToken).ConfigureAwait(false);
+                await DownloadAndApplyCharacterAsync(applicationBase, charaData, updatedData, updateModdedPaths, updateManip, forceApplyCustomization, downloadToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
+                Logger.LogDebug("{tag} Apply pipeline cancelled: user={user} hash={hash}",
+                    SyncProgressTag, Pair.UserData.AliasOrUID, charaData.DataHash?.Value ?? "null");
                 Logger.LogDebug("DownloadAndApplyCharacterAsync was cancelled for {obj}", this);
             }
             catch (Exception ex)
             {
+                Logger.LogDebug("{tag} Apply pipeline failed: user={user} hash={hash} type={type} message={message}",
+                    SyncProgressTag, Pair.UserData.AliasOrUID, charaData.DataHash?.Value ?? "null", ex.GetType().Name, ex.Message);
                 Logger.LogWarning(ex, "Error in DownloadAndApplyCharacterAsync for {obj}: {message}", this, ex.Message);
                 
                 // Publish failure message to notify other components
-                Mediator.Publish(new CharacterDataApplicationCompletedMessage(PlayerName ?? string.Empty, Pair.UserData.UID, applicationBase, false));
+                Mediator.Publish(new CharacterDataApplicationCompletedMessage(PlayerName ?? string.Empty, Pair.UserData.UID, applicationBase, false, charaData.DataHash?.Value));
+            }
+            finally
+            {
+                if (ReferenceEquals(_applyPipelineTask, pipelineTask))
+                {
+                    _applyPipelineTask = null;
+                    _inProgressPipelineDataHash = null;
+                }
             }
         });
+        return pipelineTask;
     }
 
     private Task? _pairDownloadTask;
 
     private async Task DownloadAndApplyCharacterAsync(Guid applicationBase, CharacterData charaData, Dictionary<ObjectKind, HashSet<PlayerChanges>> updatedData,
-        bool updateModdedPaths, bool updateManip, CancellationToken downloadToken)
+        bool updateModdedPaths, bool updateManip, bool forceApplyCustomization, CancellationToken downloadToken)
     {
+        Logger.LogDebug("{tag} Apply pipeline enter: user={user} hash={hash} modFiles={modFiles} manip={manip}",
+            SyncProgressTag, Pair.UserData.AliasOrUID, charaData.DataHash?.Value ?? "null", updateModdedPaths, updateManip);
         Dictionary<(string GamePath, string? Hash), string> moddedPaths = [];
 
         List<FileReplacementData> toDownloadReplacements = [];
@@ -888,6 +1016,8 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         {
             int attempts = 0;
             toDownloadReplacements = TryCalculateModdedDictionary(applicationBase, charaData, out moddedPaths, downloadToken);
+            Logger.LogDebug("{tag} Modded paths calculated: user={user} hash={hash} missingFiles={missing} paths={paths}",
+                SyncProgressTag, Pair.UserData.AliasOrUID, charaData.DataHash?.Value ?? "null", toDownloadReplacements.Count, moddedPaths.Count);
 
             while (toDownloadReplacements.Count > 0 && attempts++ <= 10 && !downloadToken.IsCancellationRequested)
             {
@@ -902,9 +1032,13 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                 Mediator.Publish(new EventMessage(new Event(PlayerName, Pair.UserData, nameof(PairHandler), EventSeverity.Informational,
                     $"Starting download for {toDownloadReplacements.Count} files")));
                 var toDownloadFiles = await _downloadManager.InitiateDownloadList(_charaHandler!, toDownloadReplacements, downloadToken).ConfigureAwait(false);
+                Logger.LogDebug("{tag} Download batch: user={user} hash={hash} missingFiles={count}",
+                    SyncProgressTag, Pair.UserData.AliasOrUID, charaData.DataHash?.Value ?? "null", toDownloadFiles.Count);
 
                 if (!_playerPerformanceService.ComputeAndAutoPauseOnVRAMUsageThresholds(this, charaData, toDownloadFiles))
                 {
+                    Logger.LogDebug("{tag} Download paused: user={user} hash={hash} reason=performance",
+                        SyncProgressTag, Pair.UserData.AliasOrUID, charaData.DataHash?.Value ?? "null");
                     _downloadManager.ClearDownload();
                     return;
                 }
@@ -932,27 +1066,65 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             if (toDownloadReplacements.Count > 0)
             {
                 Logger.LogWarning("[BASE-{appBase}] Missing {count} files after download attempts for player {name}, {kind}", applicationBase, toDownloadReplacements.Count, PlayerName, updatedData);
-                Mediator.Publish(new CharacterDataApplicationCompletedMessage(PlayerName ?? string.Empty, Pair.UserData.UID, applicationBase, false));
+                Logger.LogDebug("{tag} Download failed: user={user} hash={hash} missingFiles={count}",
+                    SyncProgressTag, Pair.UserData.AliasOrUID, charaData.DataHash?.Value ?? "null", toDownloadReplacements.Count);
+                Mediator.Publish(new CharacterDataApplicationCompletedMessage(PlayerName ?? string.Empty, Pair.UserData.UID, applicationBase, false, charaData.DataHash?.Value));
                 return;
             }
 
-            if (!await _playerPerformanceService.CheckBothThresholds(this, charaData).ConfigureAwait(false))
-                return;
+            if (toDownloadReplacements.Count == 0)
+            {
+                Logger.LogDebug("{tag} Download skipped: user={user} hash={hash} missingFiles=0",
+                    SyncProgressTag, Pair.UserData.AliasOrUID, charaData.DataHash?.Value ?? "null");
+            }
+
+            try
+            {
+                if (!await _playerPerformanceService.CheckBothThresholds(this, charaData).ConfigureAwait(false))
+                {
+                    Logger.LogDebug("{tag} Apply aborted: user={user} hash={hash} reason=performance",
+                        SyncProgressTag, Pair.UserData.AliasOrUID, charaData.DataHash?.Value ?? "null");
+                    return;
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogDebug("{tag} Apply performance check failed: user={user} hash={hash} type={type} message={message}",
+                    SyncProgressTag, Pair.UserData.AliasOrUID, charaData.DataHash?.Value ?? "null", ex.GetType().Name, ex.Message);
+                Logger.LogWarning(ex, "{tag} Apply performance check failed", SyncProgressTag);
+            }
         }
 
         downloadToken.ThrowIfCancellationRequested();
 
-        var appToken = _applicationCancellationTokenSource?.Token;
+        CancellationToken appToken;
+        try
+        {
+            appToken = _applicationCancellationTokenSource?.Token ?? CancellationToken.None;
+        }
+        catch (ObjectDisposedException)
+        {
+            Logger.LogDebug("{tag} Apply aborted: user={user} hash={hash} reason=appTokenDisposed",
+                SyncProgressTag, Pair.UserData.AliasOrUID, charaData.DataHash?.Value ?? "null");
+            return;
+        }
         while ((!_applicationTask?.IsCompleted ?? false)
                && !downloadToken.IsCancellationRequested
-               && (!appToken?.IsCancellationRequested ?? false))
+               && !appToken.IsCancellationRequested)
         {
             // block until current application is done
             Logger.LogDebug("[BASE-{appBase}] Waiting for current data application (Id: {id}) for player ({handler}) to finish", applicationBase, _applicationId, PlayerName);
+            Logger.LogDebug("{tag} Apply waiting: user={user} hash={hash} appId={appId}",
+                SyncProgressTag, Pair.UserData.AliasOrUID, charaData.DataHash?.Value ?? "null", _applicationId);
             await Task.Delay(250).ConfigureAwait(false);
         }
 
-        if (downloadToken.IsCancellationRequested || (appToken?.IsCancellationRequested ?? false)) return;
+        if (downloadToken.IsCancellationRequested || appToken.IsCancellationRequested)
+        {
+            Logger.LogDebug("{tag} Apply aborted: user={user} hash={hash} reason=cancellation",
+                SyncProgressTag, Pair.UserData.AliasOrUID, charaData.DataHash?.Value ?? "null");
+            return;
+        }
 
         if (updateModdedPaths && moddedPaths.Count > 0 && charaData.FileReplacements.TryGetValue(ObjectKind.MinionOrMount, out var minionRepls) && minionRepls.Count > 0)
         {
@@ -974,9 +1146,28 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             }
         }
 
+        if (_dalamudUtil.IsInCombatOrPerforming)
+        {
+            Logger.LogDebug("{tag} Apply deferred: user={user} hash={hash} reason=combat",
+                SyncProgressTag, Pair.UserData.AliasOrUID, charaData.DataHash?.Value ?? "null");
+            _dataReceivedInDowntime = new(applicationBase, charaData, forceApplyCustomization);
+            return;
+        }
+
+        if (_dalamudUtil.IsInCutscene || _dalamudUtil.IsInGpose || !_ipcManager.Penumbra.APIAvailable || !_ipcManager.Glamourer.APIAvailable)
+        {
+            Logger.LogDebug("{tag} Apply deferred: user={user} hash={hash} reason=stateOrApi",
+                SyncProgressTag, Pair.UserData.AliasOrUID, charaData.DataHash?.Value ?? "null");
+            _cachedData = charaData;
+            _pendingPenumbraReapply = true;
+            return;
+        }
+
         _applicationCancellationTokenSource = _applicationCancellationTokenSource.CancelRecreate() ?? new CancellationTokenSource();
         var token = _applicationCancellationTokenSource.Token;
 
+        Logger.LogDebug("{tag} Apply start: user={user} hash={hash} applicationBase={appBase}",
+            SyncProgressTag, Pair.UserData.AliasOrUID, charaData.DataHash?.Value ?? "null", applicationBase);
         _applicationTask = ApplyCharacterDataAsync(applicationBase, charaData, updatedData, updateModdedPaths, updateManip, moddedPaths, token);
     }
 
@@ -988,8 +1179,9 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             _applicationId = Guid.NewGuid();
             Logger.LogDebug("[BASE-{applicationId}] Starting application task for {this}: {appId}", applicationBase, this, _applicationId);
 
-            Logger.LogDebug("[{applicationId}] Waiting for initial draw for for {handler}", _applicationId, _charaHandler);
+            Logger.LogDebug("{tag} Apply wait draw start: appId={appId} handler={handler}", SyncProgressTag, _applicationId, _charaHandler?.Address ?? nint.Zero);
             await _dalamudUtil.WaitWhileCharacterIsDrawing(Logger, _charaHandler!, _applicationId, 30000, token).ConfigureAwait(false);
+            Logger.LogDebug("{tag} Apply wait draw done: appId={appId}", SyncProgressTag, _applicationId);
 
             token.ThrowIfCancellationRequested();
 
@@ -1055,7 +1247,12 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             Logger.LogDebug("[{applicationId}] Application finished", _applicationId);
             
             // Publish message that character data application is completed
-            Mediator.Publish(new CharacterDataApplicationCompletedMessage(PlayerName ?? string.Empty, Pair.UserData.UID, _applicationId, true));
+            Mediator.Publish(new CharacterDataApplicationCompletedMessage(PlayerName ?? string.Empty, Pair.UserData.UID, _applicationId, true, charaData.DataHash?.Value));
+        }
+        catch (OperationCanceledException ex)
+        {
+            Logger.LogDebug("{tag} Apply cancelled: appId={appId} message={message}", SyncProgressTag, _applicationId, ex.Message);
+            Mediator.Publish(new CharacterDataApplicationCompletedMessage(PlayerName ?? string.Empty, Pair.UserData.UID, _applicationId, false, charaData.DataHash?.Value));
         }
         catch (Exception ex)
         {
@@ -1064,15 +1261,18 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                 IsVisible = false;
                 _forceApplyMods = true;
                 _cachedData = charaData;
-                Logger.LogDebug("[{applicationId}] Cancelled, player turned null during application", _applicationId);
+                Logger.LogDebug("{tag} Apply failed: player null during application appId={appId}",
+                    SyncProgressTag, _applicationId);
             }
             else
             {
-                Logger.LogWarning(ex, "[{applicationId}] Cancelled", _applicationId);
+                Logger.LogDebug("{tag} Apply failed: appId={appId} type={type} message={message}",
+                    SyncProgressTag, _applicationId, ex.GetType().Name, ex.Message);
+                Logger.LogWarning(ex, "{tag} Apply failed: appId={appId}", SyncProgressTag, _applicationId);
             }
             
             // Publish message that character data application failed
-            Mediator.Publish(new CharacterDataApplicationCompletedMessage(PlayerName ?? string.Empty, Pair.UserData.UID, _applicationId, false));
+            Mediator.Publish(new CharacterDataApplicationCompletedMessage(PlayerName ?? string.Empty, Pair.UserData.UID, _applicationId, false, charaData.DataHash?.Value));
         }
         finally
         {
@@ -1186,12 +1386,20 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                     IsVisible = false;
                     _downloadCancellationTokenSource?.CancelDispose();
                     _downloadCancellationTokenSource = null;
+                    CancelApplicationTokenSource(true);
                     Pair.ReportVisibility(false);
                     _proximityReportedVisible = false;
                     Logger.LogDebug("{this} visibility changed (not mutual), now: {visi}", this, IsVisible);
                 }
 
-                if (allowed && IsVisible && _pendingPenumbraReapply && _cachedData != null)
+                if (allowed
+                    && IsVisible
+                    && _pendingPenumbraReapply
+                    && _cachedData != null
+                    && !_dalamudUtil.IsInCutscene
+                    && !_dalamudUtil.IsInGpose
+                    && _ipcManager.Penumbra.APIAvailable
+                    && _ipcManager.Glamourer.APIAvailable)
                 {
                     _pendingPenumbraReapply = false;
                     ApplyCharacterData(Guid.NewGuid(), _cachedData, forceApplyCustomization: true);
@@ -1243,6 +1451,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                 _charaHandler.Invalidate();
                 _downloadCancellationTokenSource?.CancelDispose();
                 _downloadCancellationTokenSource = null;
+                CancelApplicationTokenSource(true);
                 Pair.ReportVisibility(false);
                 _proximityReportedVisible = false;
                 Logger.LogTrace("{this} visibility changed, now: {visi}", this, IsVisible);

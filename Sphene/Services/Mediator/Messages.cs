@@ -63,7 +63,7 @@ public record CreateCacheForObjectMessage(GameObjectHandler ObjectToCreateFor) :
 public record ClearCacheForObjectMessage(GameObjectHandler ObjectToCreateFor) : SameThreadMessage;
 public record CharacterDataCreatedMessage(CharacterData CharacterData) : SameThreadMessage;
 public record CharacterDataBuildStartedMessage : MessageBase;
-public record CharacterDataApplicationCompletedMessage(string PlayerName, string UserUID, Guid ApplicationId, bool Success) : MessageBase;
+public record CharacterDataApplicationCompletedMessage(string PlayerName, string UserUID, Guid ApplicationId, bool Success, string? DataHash) : MessageBase;
 public record CharacterDataAnalyzedMessage : MessageBase;
 public record PenumbraStartRedrawMessage(IntPtr Address) : MessageBase;
 public record PenumbraEndRedrawMessage(IntPtr Address) : MessageBase;

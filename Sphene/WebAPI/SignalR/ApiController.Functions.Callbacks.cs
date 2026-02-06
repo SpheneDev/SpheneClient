@@ -164,7 +164,7 @@ public partial class ApiController
         return Task.CompletedTask;
     }
 
-    public Task Client_UserReceiveUploadStatus(UserDto dto)
+    public Task Client_UserReceiveUploadStatus(UserUploadStatusDto dto)
     {
         Logger.LogTrace("Client_UserReceiveUploadStatus: {dto}", dto);
         ExecuteSafely(() => _pairManager.ReceiveUploadStatus(dto));
@@ -401,7 +401,7 @@ public partial class ApiController
         _spheneHub!.On(nameof(Client_UserReceiveCharacterDataAcknowledgment), act);
     }
 
-    public void OnUserReceiveUploadStatus(Action<UserDto> act)
+    public void OnUserReceiveUploadStatus(Action<UserUploadStatusDto> act)
     {
         if (_initialized) return;
         _spheneHub!.On(nameof(Client_UserReceiveUploadStatus), act);

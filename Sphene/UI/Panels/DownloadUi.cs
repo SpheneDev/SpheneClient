@@ -15,12 +15,13 @@ namespace Sphene.UI.Panels;
 
 public class DownloadUi : WindowMediatorSubscriberBase
 {
+    private const int UploadingStaleSeconds = 30;
     private readonly SpheneConfigService _configService;
     private readonly ConcurrentDictionary<GameObjectHandler, Dictionary<string, FileDownloadStatus>> _currentDownloads = new();
     private readonly DalamudUtilService _dalamudUtilService;
     private readonly FileUploadManager _fileTransferManager;
     private readonly UiSharedService _uiShared;
-    private readonly ConcurrentDictionary<GameObjectHandler, bool> _uploadingPlayers = new();
+    private readonly ConcurrentDictionary<GameObjectHandler, DateTime> _uploadingPlayers = new();
 
     public DownloadUi(ILogger<DownloadUi> logger, DalamudUtilService dalamudUtilService, SpheneConfigService configService,
         FileUploadManager fileTransferManager, SpheneMediator mediator, UiSharedService uiShared, PerformanceCollectorService performanceCollectorService)
@@ -61,7 +62,7 @@ public class DownloadUi : WindowMediatorSubscriberBase
         {
             if (msg.IsUploading)
             {
-                _uploadingPlayers[msg.Handler] = true;
+                _uploadingPlayers[msg.Handler] = DateTime.UtcNow;
             }
             else
             {
@@ -196,6 +197,27 @@ public class DownloadUi : WindowMediatorSubscriberBase
 
             if (_configService.Current.ShowUploading)
             {
+                var now = DateTime.UtcNow;
+                foreach (var entry in _uploadingPlayers.ToList())
+                {
+                    if (entry.Key.Address == nint.Zero)
+                    {
+                        _uploadingPlayers.TryRemove(entry.Key, out _);
+                        continue;
+                    }
+
+                    if (_currentDownloads.ContainsKey(entry.Key))
+                    {
+                        _uploadingPlayers[entry.Key] = now;
+                        continue;
+                    }
+
+                    if (now - entry.Value > TimeSpan.FromSeconds(UploadingStaleSeconds))
+                    {
+                        _uploadingPlayers.TryRemove(entry.Key, out _);
+                    }
+                }
+
                 foreach (var player in _uploadingPlayers.Select(p => p.Key).ToList())
                 {
                     var screenPos = _dalamudUtilService.WorldToScreen(player.GetGameObject());

@@ -1274,9 +1274,13 @@ public class CompactUi : WindowMediatorSubscriberBase
     private void DrawTransfers()
     {
         var currentUploads = _fileTransferManager.CurrentUploads
-            .Where(u => !_fileTransferManager.IsPenumbraModUpload(u.Hash))
+            .Where(u => u != null && !string.IsNullOrWhiteSpace(u.Hash) && !_fileTransferManager.IsPenumbraModUpload(u.Hash))
             .ToList();
-        var currentDownloads = _currentDownloads.SelectMany(d => d.Value.Values).ToList();
+        var currentDownloads = _currentDownloads.Values
+            .Where(d => d != null)
+            .SelectMany(d => d.Values)
+            .Where(v => v != null)
+            .ToList();
         
         // Only show upload progress if there are active uploads
         if (currentUploads.Any())
