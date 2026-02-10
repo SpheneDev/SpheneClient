@@ -517,7 +517,8 @@ public class DalamudUtilService : IHostedService, IMediatorSubscriber
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Error accessing {handler}, object does not exist anymore?", handler);
+            _logger.LogDebug(ex, "Access lost for {handler}, object likely despawned (Zoning={zoning}, Cutscene={cutscene}, Gpose={gpose})",
+                handler, IsZoning, IsInCutscene, IsInGpose);
         }
     }
 

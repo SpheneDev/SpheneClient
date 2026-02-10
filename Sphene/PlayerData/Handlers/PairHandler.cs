@@ -624,7 +624,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         }
         catch (Exception ex)
         {
-            Logger.LogWarning(ex, "Error on disposal of {name}", name);
+            Logger.LogDebug(ex, "Disposal cleanup encountered an issue for {name}", name);
         }
         finally
         {
@@ -1796,14 +1796,24 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         return hash.ToHashCode();
     }
 
-    private void OnPenumbraResourceLoad(PenumbraResourceLoadMessage msg)
+    private async void OnPenumbraResourceLoad(PenumbraResourceLoadMessage msg)
     {
+        if (msg == null)
+        {
+            return;
+        }
+
         if (!_ipcManager.Penumbra.APIAvailable || _lastKnownMinionScdOverrides.Count == 0)
         {
             return;
         }
 
         if (_dalamudUtil.IsInCutscene || _dalamudUtil.IsInGpose)
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(msg.GamePath))
         {
             return;
         }
@@ -1834,7 +1844,16 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         }
 
         var playerAddress = _charaHandler?.Address ?? nint.Zero;
-        var minionAddress = _dalamudUtil.GetMinionOrMountPtr(PlayerCharacter);
+        nint minionAddress;
+        try
+        {
+            minionAddress = await _dalamudUtil.RunOnFrameworkThread(() => _dalamudUtil.GetMinionOrMountPtr(PlayerCharacter)).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Failed to resolve minion address for Penumbra resource load");
+            return;
+        }
         
         Logger.LogDebug("SCD Load Addresses - Resource: {res:X}, Player: {plr:X}, Minion: {min:X}", resourceAddress, playerAddress, minionAddress);
 
