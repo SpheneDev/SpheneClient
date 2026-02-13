@@ -123,7 +123,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         });
 
         Mediator.Subscribe<FrameworkUpdateMessage>(this, (_) => FrameworkUpdate());
-        Mediator.Subscribe<PenumbraResourceLoadMessage>(this, OnPenumbraResourceLoad);
+        Mediator.Subscribe<PenumbraResourceLoadMessage>(this, msg => _ = OnPenumbraResourceLoadAsync(msg));
         Mediator.Subscribe<ZoneSwitchStartMessage>(this, (_) =>
         {
             _localVisibilityGateActive = true;
@@ -1796,107 +1796,113 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         return hash.ToHashCode();
     }
 
-    private async void OnPenumbraResourceLoad(PenumbraResourceLoadMessage msg)
+    private async Task OnPenumbraResourceLoadAsync(PenumbraResourceLoadMessage msg)
     {
-        if (msg == null)
-        {
-            return;
-        }
-
-        if (!_ipcManager.Penumbra.APIAvailable || _lastKnownMinionScdOverrides.Count == 0)
-        {
-            return;
-        }
-
-        if (_dalamudUtil.IsInCutscene || _dalamudUtil.IsInGpose)
-        {
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(msg.GamePath))
-        {
-            return;
-        }
-
-        var gamePath = msg.GamePath.Replace('\\', '/').ToLowerInvariant();
-        if (!gamePath.EndsWith(".scd", StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
-
-        if (!_lastKnownMinionScdOverrides.ContainsKey(gamePath))
-        {
-            return;
-        }
-
-        Logger.LogDebug("Detected Minion SCD load: {path} for GameObject {ptr:X}", gamePath, msg.GameObject);
-
-        if (DateTime.UtcNow - _lastMinionScdOverrideAttempt < TimeSpan.FromMilliseconds(MinionCollectionBindRetryDelayMs))
-        {
-            Logger.LogDebug("Skipping SCD override due to cooldown");
-            return;
-        }
-
-        var resourceAddress = msg.GameObject;
-        if (resourceAddress == nint.Zero)
-        {
-            return;
-        }
-
-        var playerAddress = _charaHandler?.Address ?? nint.Zero;
-        nint minionAddress;
         try
         {
-            minionAddress = await _dalamudUtil.RunOnFrameworkThread(() => _dalamudUtil.GetMinionOrMountPtr(PlayerCharacter)).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            Logger.LogDebug(ex, "Failed to resolve minion address for Penumbra resource load");
-            return;
-        }
-        
-        Logger.LogDebug("SCD Load Addresses - Resource: {res:X}, Player: {plr:X}, Minion: {min:X}", resourceAddress, playerAddress, minionAddress);
-
-        if (resourceAddress == playerAddress)
-        {
-            if (minionAddress == nint.Zero)
+            if (msg == null)
             {
                 return;
             }
 
-            resourceAddress = minionAddress;
-        }
-        else if (resourceAddress != minionAddress)
-        {
-            return;
-        }
-
-        if (_lastKnownMinionFileOverrides.Count == 0)
-        {
-            return;
-        }
-
-        if (DateTime.UtcNow - _lastMinionTempModsApplyAttempt < TimeSpan.FromMilliseconds(MinionTempModsCooldownMs))
-        {
-            Logger.LogDebug("Skipping TempMods apply due to cooldown");
-            return;
-        }
-
-        _lastMinionScdOverrideAttempt = DateTime.UtcNow;
-        var tempMods = new Dictionary<string, string>(_lastKnownMinionFileOverrides, StringComparer.OrdinalIgnoreCase);
-        _ = Task.Run(async () =>
-        {
-            try
+            if (!_ipcManager.Penumbra.APIAvailable || _lastKnownMinionScdOverrides.Count == 0)
             {
-                Logger.LogDebug("Attempting to bind collection to {addr:X} and apply temp mods", resourceAddress);
-                await TryBindCollectionToGameObjectAsync(resourceAddress).ConfigureAwait(false);
-                await ApplyMinionTempModsAsync(minionAddress, tempMods, CancellationToken.None).ConfigureAwait(false);
+                return;
             }
-            catch (Exception ex)
+
+            if (_dalamudUtil.IsInCutscene || _dalamudUtil.IsInGpose)
             {
-                Logger.LogDebug(ex, "Minion SCD override retry failed for {this}", this);
+                return;
             }
-        });
+
+            if (string.IsNullOrWhiteSpace(msg.GamePath))
+            {
+                return;
+            }
+
+            var gamePath = msg.GamePath.Replace('\\', '/').ToLowerInvariant();
+            if (!gamePath.EndsWith(".scd", StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            if (!_lastKnownMinionScdOverrides.ContainsKey(gamePath))
+            {
+                return;
+            }
+
+            Logger.LogDebug("Detected Minion SCD load: {path} for GameObject {ptr:X}", gamePath, msg.GameObject);
+
+            if (DateTime.UtcNow - _lastMinionScdOverrideAttempt < TimeSpan.FromMilliseconds(MinionCollectionBindRetryDelayMs))
+            {
+                Logger.LogDebug("Skipping SCD override due to cooldown");
+                return;
+            }
+
+            var resourceAddress = msg.GameObject;
+            if (resourceAddress == nint.Zero)
+            {
+                return;
+            }
+
+            var playerAddress = _charaHandler?.Address ?? nint.Zero;
+            var minionAddress = await _dalamudUtil.RunOnFrameworkThread(() => _dalamudUtil.GetMinionOrMountPtr(PlayerCharacter)).ConfigureAwait(false);
+
+            Logger.LogDebug("SCD Load Addresses - Resource: {res:X}, Player: {plr:X}, Minion: {min:X}", resourceAddress, playerAddress, minionAddress);
+
+            if (resourceAddress == playerAddress)
+            {
+                if (minionAddress == nint.Zero)
+                {
+                    return;
+                }
+
+                resourceAddress = minionAddress;
+            }
+            else if (resourceAddress != minionAddress)
+            {
+                return;
+            }
+
+            if (_lastKnownMinionFileOverrides.Count == 0)
+            {
+                return;
+            }
+
+            if (DateTime.UtcNow - _lastMinionTempModsApplyAttempt < TimeSpan.FromMilliseconds(MinionTempModsCooldownMs))
+            {
+                Logger.LogDebug("Skipping TempMods apply due to cooldown");
+                return;
+            }
+
+            _lastMinionScdOverrideAttempt = DateTime.UtcNow;
+            var tempMods = new Dictionary<string, string>(_lastKnownMinionFileOverrides, StringComparer.OrdinalIgnoreCase);
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    Logger.LogDebug("Attempting to bind collection to {addr:X} and apply temp mods", resourceAddress);
+                    await TryBindCollectionToGameObjectAsync(resourceAddress).ConfigureAwait(false);
+                    await ApplyMinionTempModsAsync(minionAddress, tempMods, CancellationToken.None).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogDebug(ex, "Minion SCD override retry failed for {this}", this);
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex,
+                "PenumbraResourceLoad failed: path={path} file={file} res={res:X} player={plr:X} cutscene={cutscene} gpose={gpose} zoning={zoning}",
+                msg?.GamePath ?? string.Empty,
+                msg?.FilePath ?? string.Empty,
+                msg?.GameObject ?? nint.Zero,
+                _charaHandler?.Address ?? nint.Zero,
+                _dalamudUtil.IsInCutscene,
+                _dalamudUtil.IsInGpose,
+                _dalamudUtil.IsZoning);
+        }
     }
 
     private async Task<bool> TryBindCollectionToGameObjectAsync(nint address)

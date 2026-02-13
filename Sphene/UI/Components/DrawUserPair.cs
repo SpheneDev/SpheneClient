@@ -512,6 +512,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
 
         var isVisibleForIcon = _pair.IsMutuallyVisible || (_uiSharedService.IsInGpose && _pair.WasMutuallyVisibleInGpose);
         var partnerAckYou = _pair.UserPair.OtherPermissions.IsAckYou();
+        var suppressAckUi = _pair.IsInDuty;
 
         if (_pair.IsPaused)
         {
@@ -537,12 +538,19 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
                 ImGui.SameLine();
             }
             
-            var iconColor = partnerAckYou ? ImGuiColors.ParsedGreen : ImGuiColors.DalamudYellow;
+            var iconColor = suppressAckUi ? ImGuiColors.ParsedGreen : (partnerAckYou ? ImGuiColors.ParsedGreen : ImGuiColors.DalamudYellow);
             var icon = (_uiSharedService.IsInGpose || _pair.IsInGpose) ? FontAwesomeIcon.Camera : FontAwesomeIcon.Eye;
             _uiSharedService.IconText(icon, iconColor);
             
-            var ackStatus = partnerAckYou ? "acknowledges your data" : "does not acknowledge your data";
-            userPairText = _pair.UserData.AliasOrUID + " is visible: " + _pair.PlayerName + Environment.NewLine + "This user " + ackStatus + Environment.NewLine + "Click to target this player";
+            if (suppressAckUi)
+            {
+                userPairText = _pair.UserData.AliasOrUID + " is visible: " + _pair.PlayerName + Environment.NewLine + "Click to target this player";
+            }
+            else
+            {
+                var ackStatus = partnerAckYou ? "acknowledges your data" : "does not acknowledge your data";
+                userPairText = _pair.UserData.AliasOrUID + " is visible: " + _pair.PlayerName + Environment.NewLine + "This user " + ackStatus + Environment.NewLine + "Click to target this player";
+            }
             
             HandleReloadTimer(partnerAckYou);
             
@@ -567,7 +575,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
             }
         }
 
-        if (_pair.IsOnline && _pair.IsMutuallyVisible)
+        if (_pair.IsOnline && _pair.IsMutuallyVisible && !suppressAckUi)
         {
             ImGui.SameLine();
             if (_pair.HasPendingAcknowledgment)
@@ -625,7 +633,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         }
 
         // Add synchronization status information - only show for visible pairs
-        if (_pair.IsOnline && _pair.IsVisible)
+        if (_pair.IsOnline && _pair.IsVisible && !suppressAckUi)
         {
             // Show sync status for any pending acknowledgment (including build start)
             if (GetCachedHasPendingAcknowledgment())
@@ -644,7 +652,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
 
         if (_pair.IsInDuty)
         {
-            userPairText += UiSharedService.TooltipSeparator + "Info: In duty, acknowledgments can be delayed or fail during combat.";
+            userPairText += UiSharedService.TooltipSeparator + "Info: In duty, acknowledgment display is hidden.";
         }
 
         if (_syncedGroups.Any())
