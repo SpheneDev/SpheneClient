@@ -244,7 +244,7 @@ public sealed class TokenProvider : IDisposable, IMediatorSubscriber
                 return null;
             }
 
-            _logger.LogWarning(ex, "GetIdentifier: Could not get JwtIdentifier for some reason or another, reusing last identifier {identifier}", _lastJwtIdentifier);
+            _logger.LogDebug(ex, "GetIdentifier: Reusing last identifier {identifier} due to transient lookup failure", _lastJwtIdentifier);
             jwtIdentifier = _lastJwtIdentifier;
         }
 

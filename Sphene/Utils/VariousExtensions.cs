@@ -83,9 +83,15 @@ public static class VariousExtensions
                     " OldButNotNewFiles:{hasOldButNotNewFileReplacements}, NewButNotOldGlam:{hasNewButNotOldGlamourerData}, OldButNotNewGlam:{hasOldButNotNewGlamourerData}) => {change}, {change2}",
                     applicationBase,
                     cachedPlayer, objectKind, hasNewButNotOldFileReplacements, hasOldButNotNewFileReplacements, hasNewButNotOldGlamourerData, hasOldButNotNewGlamourerData, PlayerChanges.ModFiles, PlayerChanges.Glamourer);
-                charaDataToUpdate[objectKind].Add(PlayerChanges.ModFiles);
-                charaDataToUpdate[objectKind].Add(PlayerChanges.Glamourer);
-                charaDataToUpdate[objectKind].Add(PlayerChanges.ForcedRedraw);
+                if (hasNewButNotOldFileReplacements || hasOldButNotNewFileReplacements)
+                {
+                    charaDataToUpdate[objectKind].Add(PlayerChanges.ModFiles);
+                    charaDataToUpdate[objectKind].Add(PlayerChanges.ForcedRedraw);
+                }
+                if (hasNewButNotOldGlamourerData || hasOldButNotNewGlamourerData)
+                {
+                    charaDataToUpdate[objectKind].Add(PlayerChanges.Glamourer);
+                }
             }
             else
             {
@@ -167,7 +173,6 @@ public static class VariousExtensions
             {
                 logger.LogDebug("[BASE-{appBase}] Updating {object}/{kind} (Diff manip data) => {change}", applicationBase, cachedPlayer, objectKind, PlayerChanges.ModManip);
                 charaDataToUpdate[objectKind].Add(PlayerChanges.ModManip);
-                charaDataToUpdate[objectKind].Add(PlayerChanges.ForcedRedraw);
             }
 
             bool heelsOffsetDifferent = !string.Equals(oldData.HeelsData, newData.HeelsData, StringComparison.Ordinal);
@@ -196,6 +201,13 @@ public static class VariousExtensions
             {
                 logger.LogDebug("[BASE-{appBase}] Updating {object}/{kind} (Diff petnames data) => {change}", applicationBase, cachedPlayer, objectKind, PlayerChanges.PetNames);
                 charaDataToUpdate[objectKind].Add(PlayerChanges.PetNames);
+            }
+
+            bool bypassEmoteDataDifferent = !string.Equals(oldData.BypassEmoteData, newData.BypassEmoteData, StringComparison.Ordinal);
+            if (bypassEmoteDataDifferent || (forceApplyCustomization && !string.IsNullOrEmpty(newData.BypassEmoteData)))
+            {
+                logger.LogDebug("[BASE-{appBase}] Updating {object}/{kind} (Diff BypassEmote data) => {change}", applicationBase, cachedPlayer, objectKind, PlayerChanges.BypassEmote);
+                charaDataToUpdate[objectKind].Add(PlayerChanges.BypassEmote);
             }
         }
 

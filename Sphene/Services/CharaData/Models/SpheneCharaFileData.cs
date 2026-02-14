@@ -16,6 +16,7 @@ public record SpheneCharaFileData
     public string HonorificData { get; set; } = string.Empty;
     public string MoodlesData { get; set; } = string.Empty;
     public string PetNamesData { get; set; } = string.Empty;
+    public string BypassEmoteData { get; set; } = string.Empty;
     public List<FileData> Files { get; set; } = [];
     public List<FileSwap> FileSwaps { get; set; } = [];
 
@@ -36,6 +37,7 @@ public record SpheneCharaFileData
         HonorificData = dto.HonorificData;
         MoodlesData = dto.MoodlesData;
         PetNamesData = dto.PetNamesData;
+        BypassEmoteData = dto.BypassEmoteData;
 
         if (dto.FileReplacements.TryGetValue(ObjectKind.Player, out var fileReplacements))
         {

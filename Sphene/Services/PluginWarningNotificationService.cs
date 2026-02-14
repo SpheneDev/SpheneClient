@@ -32,7 +32,8 @@ public class PluginWarningNotificationService
                 ShownHeelsWarning = _SpheneConfigService.Current.DisableOptionalPluginWarnings,
                 ShownHonorificWarning = _SpheneConfigService.Current.DisableOptionalPluginWarnings,
                 ShownMoodlesWarning = _SpheneConfigService.Current.DisableOptionalPluginWarnings,
-                ShowPetNicknamesWarning = _SpheneConfigService.Current.DisableOptionalPluginWarnings
+                ShowPetNicknamesWarning = _SpheneConfigService.Current.DisableOptionalPluginWarnings,
+                ShownBypassEmoteWarning = _SpheneConfigService.Current.DisableOptionalPluginWarnings
             };
         }
 
@@ -64,6 +65,12 @@ public class PluginWarningNotificationService
         {
             missingPluginsForData.Add("PetNicknames");
             warning.ShowPetNicknamesWarning = true;
+        }
+
+        if (changes.Contains(PlayerChanges.BypassEmote) && !warning.ShownBypassEmoteWarning && !_ipcManager.BypassEmote.APIAvailable)
+        {
+            missingPluginsForData.Add("BypassEmote");
+            warning.ShownBypassEmoteWarning = true;
         }
 
         if (missingPluginsForData.Any())

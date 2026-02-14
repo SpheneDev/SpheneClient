@@ -11,6 +11,7 @@ namespace Sphene.PlayerData.Services;
 public sealed class CacheCreationService : DisposableMediatorSubscriberBase
 {
     private readonly SemaphoreSlim _cacheCreateLock = new(1);
+    private readonly System.Threading.Lock _playerDataLock = new();
     private readonly HashSet<ObjectKind> _cachesToCreate = [];
     private readonly PlayerDataFactory _characterDataFactory;
     private readonly HashSet<ObjectKind> _currentlyCreating = [];
@@ -143,6 +144,38 @@ public sealed class CacheCreationService : DisposableMediatorSubscriberBase
             }
         });
 
+        Mediator.Subscribe<BypassEmoteMessage>(this, (msg) =>
+        {
+            if (_isZoning) return;
+            
+            lock (_playerDataLock)
+            {
+                if (!string.Equals(msg.BypassEmoteData, _playerData.BypassEmoteData, StringComparison.Ordinal))
+                {
+                    Logger.LogDebug("Received BypassEmote change, fast-tracking update. Old Hash: {Hash}", _lastDataHash ?? "null");
+                    _playerData.BypassEmoteData = msg.BypassEmoteData;
+
+                    var newData = _playerData.ToAPI();
+                    var newHash = newData.DataHash?.Value;
+
+                    // Fast path: Publish immediately using the NEW hash.
+                    // The receiver (CharaDataManager) needs a valid hash to send to the server.
+                    // Even if the server doesn't have this hash yet (Slow Path hasn't arrived),
+                    // the server can still forward the message to recipients.
+                    Mediator.Publish(new BypassEmoteUpdateMessage(msg.BypassEmoteData, newHash ?? string.Empty));
+                    
+                    if (!string.Equals(newHash, _lastDataHash, StringComparison.Ordinal))
+                    {
+                        Logger.LogDebug("Character data changed (BypassEmote), publishing update. Old hash: {OldHash}, New hash: {NewHash}", _lastDataHash ?? "null", newHash ?? "null");
+                        _lastDataHash = newHash;
+                        
+                        // Slow path (consistency)
+                        Mediator.Publish(new CharacterDataCreatedMessage(newData));
+                    }
+                }
+            }
+        });
+
         Mediator.Subscribe<PenumbraModSettingChangedMessage>(this, (msg) =>
         {
             Logger.LogDebug("Received Penumbra Mod settings change, updating everything");
@@ -231,24 +264,32 @@ public sealed class CacheCreationService : DisposableMediatorSubscriberBase
                     createdData[objectKind] = await _characterDataFactory.BuildCharacterData(_playerRelatedObjects[objectKind], linkedCts.Token).ConfigureAwait(false);
                 }
 
-                foreach (var kvp in createdData)
+                lock (_playerDataLock)
                 {
-                    _playerData.SetFragment(kvp.Key, kvp.Value);
-                }
+                    foreach (var kvp in createdData)
+                    {
+                        if (kvp.Key == ObjectKind.MinionOrMount && kvp.Value == null)
+                        {
+                            continue;
+                        }
 
-                // Check if data actually changed before publishing
-                var newData = _playerData.ToAPI();
-                var newHash = newData.DataHash?.Value;
-                
-                if (!string.Equals(newHash, _lastDataHash, StringComparison.Ordinal))
-                {
-                    Logger.LogDebug("Character data changed, publishing update. Old hash: {oldHash}, New hash: {newHash}", _lastDataHash ?? "null", newHash ?? "null");
-                    _lastDataHash = newHash;
-                    Mediator.Publish(new CharacterDataCreatedMessage(newData));
-                }
-                else
-                {
-                    Logger.LogDebug("Character data unchanged, skipping update. Hash: {hash}", newHash ?? "null");
+                        _playerData.SetFragment(kvp.Key, kvp.Value);
+                    }
+
+                    // Check if data actually changed before publishing
+                    var newData = _playerData.ToAPI();
+                    var newHash = newData.DataHash?.Value;
+                    
+                    if (!string.Equals(newHash, _lastDataHash, StringComparison.Ordinal))
+                    {
+                        Logger.LogDebug("Character data changed, publishing update. Old hash: {oldHash}, New hash: {newHash}", _lastDataHash ?? "null", newHash ?? "null");
+                        _lastDataHash = newHash;
+                        Mediator.Publish(new CharacterDataCreatedMessage(newData));
+                    }
+                    else
+                    {
+                        Logger.LogDebug("Character data unchanged, skipping update. Hash: {hash}", newHash ?? "null");
+                    }
                 }
                 
                 _currentlyCreating.Clear();

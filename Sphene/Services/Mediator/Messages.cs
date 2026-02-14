@@ -51,6 +51,9 @@ public record MoodlesMessage(IntPtr Address) : MessageBase;
 public record PetNamesReadyMessage : MessageBase;
 public record PetNamesMessage(string PetNicknamesData) : MessageBase;
 public record HonorificReadyMessage : MessageBase;
+public record BypassEmoteReadyMessage : MessageBase;
+public record BypassEmoteMessage(string BypassEmoteData) : MessageBase;
+public record BypassEmoteUpdateMessage(string BypassEmoteData, string DataHash) : MessageBase;
 public record TransientResourceChangedMessage(IntPtr Address) : MessageBase;
 public record HaltScanMessage(string Source) : MessageBase;
 public record ResumeScanMessage(string Source) : MessageBase;
@@ -60,7 +63,7 @@ public record CreateCacheForObjectMessage(GameObjectHandler ObjectToCreateFor) :
 public record ClearCacheForObjectMessage(GameObjectHandler ObjectToCreateFor) : SameThreadMessage;
 public record CharacterDataCreatedMessage(CharacterData CharacterData) : SameThreadMessage;
 public record CharacterDataBuildStartedMessage : MessageBase;
-public record CharacterDataApplicationCompletedMessage(string PlayerName, string UserUID, Guid ApplicationId, bool Success) : MessageBase;
+public record CharacterDataApplicationCompletedMessage(string PlayerName, string UserUID, Guid ApplicationId, bool Success, string? DataHash) : MessageBase;
 public record CharacterDataAnalyzedMessage : MessageBase;
 public record PenumbraStartRedrawMessage(IntPtr Address) : MessageBase;
 public record PenumbraEndRedrawMessage(IntPtr Address) : MessageBase;

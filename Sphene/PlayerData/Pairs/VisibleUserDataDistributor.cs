@@ -12,6 +12,7 @@ namespace Sphene.PlayerData.Pairs;
 
 public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
 {
+    private const string SyncProgressTag = "[SyncProgress]";
     private readonly ApiController _apiController;
     private readonly DalamudUtilService _dalamudUtil;
     private readonly FileUploadManager _fileTransferManager;
@@ -66,17 +67,18 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
             var newHash = msg.CharacterData.DataHash?.Value;
             
             _lastCreatedData = msg.CharacterData;
+            Logger.LogDebug("{tag} Data created: previousHash={oldHash} newHash={newHash}", SyncProgressTag, previousHash ?? "null", newHash ?? "null");
             
             // Only push if hash actually changed or if we have users waiting for data
             if (!string.Equals(previousHash, newHash, StringComparison.Ordinal) || _usersToPushDataTo.Count > 0)
             {
-                Logger.LogDebug("Character data hash changed from {oldHash} to {newHash}, pushing to users", 
-                    previousHash ?? "null", newHash ?? "null");
+                Logger.LogDebug("{tag} Data change detected: oldHash={oldHash} newHash={newHash} queuedUsers={count}",
+                    SyncProgressTag, previousHash ?? "null", newHash ?? "null", _usersToPushDataTo.Count);
                 PushToAllVisibleUsers(forced: true);
             }
             else
             {
-                Logger.LogDebug("Character data hash unchanged ({hash}), skipping push", newHash ?? "null");
+                Logger.LogDebug("{tag} Data unchanged: hash={hash} skip push", SyncProgressTag, newHash ?? "null");
             }
         });
 
@@ -106,6 +108,7 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
     {
         var currentHash = _lastCreatedData?.DataHash.Value;
         if (string.IsNullOrEmpty(currentHash)) return;
+        Logger.LogDebug("{tag} Push check: currentHash={hash} forced={forced}", SyncProgressTag, currentHash, forced);
         
         // Always validate the current hash for the current user to ensure it's stored in the database
         _ = Task.Run(async () => {
@@ -114,15 +117,15 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
                 if (!string.IsNullOrEmpty(currentUserUID)) {
                     var response = await _apiController.ValidateCharaDataHash(currentUserUID, currentHash).ConfigureAwait(false);
                     if (response != null) {
-                        Logger.LogDebug("Validated current user hash: {hash}, IsValid: {isValid}, CurrentHash: {currentHash}", 
-                            currentHash, response.IsValid, response.CurrentHash);
+                        Logger.LogDebug("{tag} Hash validate self: hash={hash} isValid={isValid} currentHash={currentHash}", 
+                            SyncProgressTag, currentHash, response.IsValid, response.CurrentHash);
                     } else {
-                        Logger.LogWarning("Hash validation returned null response for user {userUID} and hash {hash}", 
-                            currentUserUID, currentHash);
+                        Logger.LogWarning("{tag} Hash validate self: null response user={userUID} hash={hash}", 
+                            SyncProgressTag, currentUserUID, currentHash);
                     }
                 }
             } catch (Exception ex) {
-                Logger.LogError(ex, "Failed to validate current user hash for {hash}", currentHash);
+                Logger.LogError(ex, "{tag} Hash validate self failed: hash={hash}", SyncProgressTag, currentHash);
             }
         });
         
@@ -133,24 +136,24 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
             if (forced || lastHash == null || !string.Equals(lastHash, currentHash, StringComparison.Ordinal))
             {
                 _usersToPushDataTo.Add(user);
-                Logger.LogTrace("Adding user {user} to push queue - LastHash: {lastHash}, CurrentHash: {currentHash}, Forced: {forced}", 
-                    user.AliasOrUID, lastHash ?? "NONE", currentHash, forced);
+                Logger.LogDebug("{tag} Push queue add: user={user} lastHash={lastHash} currentHash={currentHash} forced={forced}", 
+                    SyncProgressTag, user.AliasOrUID, lastHash ?? "NONE", currentHash, forced);
             }
             else
             {
-                Logger.LogTrace("Skipping user {user} - already has hash {hash}", user.AliasOrUID, currentHash);
+                Logger.LogDebug("{tag} Push skip: user={user} already has hash={hash}", SyncProgressTag, user.AliasOrUID, currentHash);
             }
         }
 
         if (_usersToPushDataTo.Count > 0)
         {
-            Logger.LogDebug("Pushing data {hash} for {count} visible players (out of {total} total)", 
-                currentHash, _usersToPushDataTo.Count, _pairManager.GetVisibleUsers().Count);
+            Logger.LogDebug("{tag} Push start: hash={hash} count={count} totalVisible={total}", 
+                SyncProgressTag, currentHash, _usersToPushDataTo.Count, _pairManager.GetVisibleUsers().Count);
             PushCharacterData(forced);
         }
         else
         {
-            Logger.LogTrace("No users need data push - all have current hash {hash}", currentHash);
+            Logger.LogDebug("{tag} Push skip: no users need data hash={hash}", SyncProgressTag, currentHash);
         }
     }
 
@@ -164,16 +167,16 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
         _previouslyVisiblePlayers.AddRange(allVisibleUsers);
         if (newVisibleUsers.Count == 0) return;
 
-        Logger.LogDebug("New users entered view: {users}. Scheduling delayed data push check.",
-            string.Join(", ", newVisibleUsers.Select(k => k.AliasOrUID)));
+        Logger.LogDebug("{tag} New users visible: users={users} scheduling delayed push",
+            SyncProgressTag, string.Join(", ", newVisibleUsers.Select(k => k.AliasOrUID)));
         
         // Add new users to delayed push queue to give them time to stabilize connection
         var currentTime = DateTime.UtcNow;
         foreach (var user in newVisibleUsers)
         {
             _delayedPushUsers[user] = currentTime;
-            Logger.LogDebug("Added user {user} to delayed push queue - will push in {seconds} seconds", 
-                user.AliasOrUID, DELAYED_PUSH_SECONDS);
+            Logger.LogDebug("{tag} Delayed push queued: user={user} delaySeconds={seconds}", 
+                SyncProgressTag, user.AliasOrUID, DELAYED_PUSH_SECONDS);
         }
     }
 
@@ -188,14 +191,15 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
             if (_fileUploadTask == null || (_fileUploadTask?.IsCompleted ?? false) || forced)
             {
                 _uploadingCharacterData = _lastCreatedData.DeepClone();
-                Logger.LogDebug("Starting UploadTask for {hash}, Reason: TaskIsNull: {task}, TaskIsCompleted: {taskCpl}, Forced: {frc}",
-                    _lastCreatedData.DataHash, _fileUploadTask == null, _fileUploadTask?.IsCompleted ?? false, forced);
+                Logger.LogDebug("{tag} Upload start: hash={hash} taskNull={task} taskCompleted={taskCpl} forced={frc}",
+                    SyncProgressTag, _lastCreatedData.DataHash, _fileUploadTask == null, _fileUploadTask?.IsCompleted ?? false, forced);
                 _fileUploadTask = _fileTransferManager.UploadFiles(_uploadingCharacterData, [.. _usersToPushDataTo]);
             }
 
             if (_fileUploadTask != null)
             {
                 var dataToSend = await _fileUploadTask.ConfigureAwait(false);
+                Logger.LogDebug("{tag} Upload complete: hash={hash} users={users}", SyncProgressTag, dataToSend.DataHash.Value, string.Join(", ", _usersToPushDataTo.Select(u => u.AliasOrUID)));
                 await _pushDataSemaphore.WaitAsync(_runtimeCts.Token).ConfigureAwait(false);
                 try
                 {
@@ -214,12 +218,12 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
                                 var validationResponse = await _apiController.ValidateCharaDataHash(user.UID, lastSentHash).ConfigureAwait(false);
                                 if (validationResponse != null && validationResponse.IsValid && string.Equals(lastSentHash, currentHash, StringComparison.Ordinal))
                                 {
-                                    Logger.LogTrace("Hash still valid for user {user}, skipping push", user.AliasOrUID);
+                                    Logger.LogDebug("{tag} Hash still valid: user={user} hash={hash} skip push", SyncProgressTag, user.AliasOrUID, lastSentHash);
                                     continue;
                                 }
                             }
                             catch (Exception ex) {
-                                Logger.LogWarning(ex, "Hash validation failed for user {user}, proceeding with push", user.AliasOrUID);
+                                Logger.LogWarning(ex, "{tag} Hash validation failed: user={user} proceeding with push", SyncProgressTag, user.AliasOrUID);
                             }
                         }
                         
@@ -228,13 +232,19 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
                     
                     if (usersNeedingData.Count == 0)
                     {
-                        Logger.LogDebug("No users need data push after hash validation");
+                        Logger.LogDebug("{tag} Push skip: no users need data after validation", SyncProgressTag);
                         _usersToPushDataTo.Clear();
                         return;
                     }
                     
                     // Create hash key for acknowledgment tracking
                     var hashKey = dataToSend.DataHash.Value;
+
+                    // Revoke AckYou for all users before pushing new data
+                    // This ensures partners see a yellow eye indicating that the sender has changed state
+                    Logger.LogDebug("{tag} Ack reset before push: hash={hash}", SyncProgressTag, hashKey);
+                    _ = _apiController.UserUpdateAckYou(false);
+
                     _pairManager.SetPendingAcknowledgmentForSender([.. usersNeedingData], hashKey);
                     _sessionAcknowledgmentManager.SetPendingAcknowledgmentForHashVersion([.. usersNeedingData], hashKey);
                     
@@ -242,11 +252,12 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
                     foreach (var user in usersNeedingData)
                     {
                         _lastSentHashPerUser[user] = currentHash;
-                        Logger.LogTrace("Updated hash tracking for user {user}: {hash}", user.AliasOrUID, currentHash);
+                        Logger.LogDebug("{tag} Hash tracking update: user={user} hash={hash}", SyncProgressTag, user.AliasOrUID, currentHash);
                     }
                     
-                    Logger.LogDebug("Pushing {data} to {users} with hash key {hashKey}", dataToSend.DataHash, string.Join(", ", usersNeedingData.Select(k => k.AliasOrUID)), hashKey);
+                    Logger.LogDebug("{tag} Push send: hash={hash} ackKey={hashKey} users={users}", SyncProgressTag, dataToSend.DataHash, hashKey, string.Join(", ", usersNeedingData.Select(k => k.AliasOrUID)));
                     await _apiController.PushCharacterData(dataToSend, [.. usersNeedingData], hashKey).ConfigureAwait(false);
+                    Logger.LogDebug("{tag} Push complete: hash={hash} users={users}", SyncProgressTag, dataToSend.DataHash, string.Join(", ", usersNeedingData.Select(k => k.AliasOrUID)));
                     _usersToPushDataTo.Clear();
                 }
                 finally
@@ -279,7 +290,7 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
             {
                 usersToProcess.Add(user);
                 _delayedPushUsers.Remove(user);
-                Logger.LogDebug("Delay period expired for user {user} - adding to push queue", user.AliasOrUID);
+                Logger.LogDebug("{tag} Delayed push expired: user={user}", SyncProgressTag, user.AliasOrUID);
             }
         }
         
@@ -291,22 +302,22 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
                 _usersToPushDataTo.Add(user);
                 // Schedule character reload after acknowledgment is sent
                 _delayedReloadUsers[user] = DateTime.UtcNow;
-                Logger.LogDebug("Scheduled character reload for user {user} in {seconds} seconds", 
-                    user.AliasOrUID, CHARACTER_RELOAD_DELAY_SECONDS);
+                Logger.LogDebug("{tag} Reload scheduled: user={user} delaySeconds={seconds}", 
+                    SyncProgressTag, user.AliasOrUID, CHARACTER_RELOAD_DELAY_SECONDS);
             }
             
             // Only push if we have data to push
             if (_lastCreatedData != null)
             {
-                Logger.LogDebug("Pushing character data {hash} to {count} delayed users: {users}",
-                    _lastCreatedData.DataHash?.Value ?? "null", usersToProcess.Count,
+                Logger.LogDebug("{tag} Delayed push: hash={hash} count={count} users={users}",
+                    SyncProgressTag, _lastCreatedData.DataHash?.Value ?? "null", usersToProcess.Count,
                     string.Join(", ", usersToProcess.Select(u => u.AliasOrUID)));
                 PushCharacterData();
             }
             else
             {
-                Logger.LogDebug("No character data available yet for delayed users: {users}",
-                    string.Join(", ", usersToProcess.Select(u => u.AliasOrUID)));
+                Logger.LogDebug("{tag} Delayed push skipped: no data users={users}",
+                    SyncProgressTag, string.Join(", ", usersToProcess.Select(u => u.AliasOrUID)));
             }
         }
     }
@@ -330,15 +341,15 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
             {
                 usersToReload.Add(user);
                 _delayedReloadUsers.Remove(user);
-                Logger.LogDebug("Character reload delay expired for user {user} - triggering reload", user.AliasOrUID);
+                Logger.LogDebug("{tag} Reload delay expired: user={user}", SyncProgressTag, user.AliasOrUID);
             }
         }
         
         // Trigger character reload for users
         if (usersToReload.Count > 0)
         {
-            Logger.LogDebug("Triggering character reload for {count} users: {users}",
-                usersToReload.Count, string.Join(", ", usersToReload.Select(u => u.AliasOrUID)));
+            Logger.LogDebug("{tag} Reload trigger: count={count} users={users}",
+                SyncProgressTag, usersToReload.Count, string.Join(", ", usersToReload.Select(u => u.AliasOrUID)));
             
             // Trigger character data recreation by creating a temporary handler and sending CreateCacheForObjectMessage
             try
@@ -346,10 +357,11 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
                 var tempHandler = await _gameObjectHandlerFactory.Create(ObjectKind.Player, () => _dalamudUtil.GetPlayerPtr(), isWatched: false).ConfigureAwait(false);
                 Mediator.Publish(new CreateCacheForObjectMessage(tempHandler));
                 tempHandler.Dispose();
+                Logger.LogDebug("{tag} Reload trigger complete", SyncProgressTag);
             }
             catch (Exception ex)
             {
-                Logger.LogError(ex, "Failed to trigger character reload");
+                Logger.LogError(ex, "{tag} Reload trigger failed", SyncProgressTag);
             }
         }
     }

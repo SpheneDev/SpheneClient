@@ -77,6 +77,7 @@ public class CompactUi : WindowMediatorSubscriberBase
  // One-time check to correct persisted width below minimum
  private bool _widthCorrectionChecked = false;
     private const string TestServerDisclaimerPopupName = "Test Server Disclaimer";
+    private const string ControlPanelTitle = "Sphene Control Panel";
     private bool _showTestServerDisclaimerPopup;
     private DateTime _testServerDisclaimerOpenedAt = DateTime.MinValue;
     
@@ -698,7 +699,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         }
         
         // Apply any pending window resize before the window is drawn
-        UiSharedService.ApplyPendingWindowResize(GetControlPanelTitle());
+        UiSharedService.ApplyPendingWindowResize(ControlPanelTitle);
         base.PreDraw();
     }
 
@@ -963,129 +964,38 @@ public class CompactUi : WindowMediatorSubscriberBase
         }
         
         // Main content area
-        // Network Identity Section
-        ImGui.Spacing();
-        SpheneCustomTheme.DrawStyledText("Regulator ID", SpheneCustomTheme.CurrentTheme.CompactHeaderText);
-        ImGui.Separator();
-        DrawUIDContent();
-        
+        // Network Identity & Status Section
         ImGui.Spacing();
         
-        
-        // Calculate connection status text and button positions at the end of the line
-        var connectionStatus = _apiController.ServerState == ServerState.Connected ? "Connected" : "Disconnected";
-        var statusTextSize = ImGui.CalcTextSize(connectionStatus);
-        var availableWidth = ImGui.GetContentRegionAvail().X;
-        var disconnectSize = _uiSharedService.GetIconButtonSize(FontAwesomeIcon.Unlink);
-        var connectSize = _uiSharedService.GetIconButtonSize(FontAwesomeIcon.Link);
-        var reconnectSize = _uiSharedService.GetIconButtonSize(FontAwesomeIcon.Redo);
-#if IS_TEST_BUILD
-        var testServerSize = _uiSharedService.GetIconButtonSize(FontAwesomeIcon.Bug);
-#endif
-        
-        // Calculate positions from right to left: status indicator + text, disconnect button, reconnect button
-        var statusIndicatorWidth = 25.0f; // Approximate width for status indicator
-        var connectOrDisconnectSize = _apiController.IsConnected ? disconnectSize : connectSize;
-#if IS_TEST_BUILD
-        var rightButtonsTotalWidth = connectOrDisconnectSize.X + testServerSize.X + reconnectSize.X + (ImGui.GetStyle().ItemSpacing.X * 2);
-        var totalRightContentWidth = statusTextSize.X + statusIndicatorWidth + connectOrDisconnectSize.X + testServerSize.X + reconnectSize.X + (ImGui.GetStyle().ItemSpacing.X * 3);
-#else
-        var rightButtonsTotalWidth = connectOrDisconnectSize.X + reconnectSize.X + (ImGui.GetStyle().ItemSpacing.X * 0.5f);
-        var totalRightContentWidth = statusTextSize.X + statusIndicatorWidth + connectOrDisconnectSize.X + reconnectSize.X + (ImGui.GetStyle().ItemSpacing.X * 2);
-#endif
-        
-        ImGui.AlignTextToFramePadding();
-        SpheneCustomTheme.DrawStyledText("Character Status", SpheneCustomTheme.CurrentTheme.CompactHeaderText);
-        
-        // Position disconnect button first (second from right) - move closer to right edge
-        ImGui.SameLine(availableWidth - rightButtonsTotalWidth);
-        
-        if (_apiController.IsConnected)
-        {
-            if (_uiSharedService.IconButton(FontAwesomeIcon.Unlink, null, null, null, null, ButtonStyleKeys.Compact_Disconnect) && _serverManager.CurrentServer != null)
-            {
-                _serverManager.CurrentServer.FullPause = true;
-                _serverManager.Save();
-                _ = _apiController.CreateConnectionsAsync();
-            }
-            UiSharedService.AttachToolTip("Disconnect from Server");
-        }
-        else
-        {
-            if (_uiSharedService.IconButton(FontAwesomeIcon.Link, null, null, null, null, ButtonStyleKeys.Compact_Connect) && _serverManager.CurrentServer != null)
-            {
-                _serverManager.CurrentServer.FullPause = false;
-                _serverManager.Save();
-                _ = _apiController.CreateConnectionsAsync();
-            }
-            UiSharedService.AttachToolTip("Connect to Server");
-        }
-        
-        // Position reconnect button (rightmost) - use SameLine() for natural spacing
-#if IS_TEST_BUILD
-        ImGui.SameLine();
-        DrawTestServerToggleButton();
-#endif
+        var style = ImGui.GetStyle();
+        DrawHeaderCard(style);
 
-        ImGui.SameLine();
-        
-        var reconnectCurrentTime = DateTime.UtcNow;
-        var reconnectTimeSinceLastClick = reconnectCurrentTime - _lastReconnectButtonClick;
-        var isReconnectButtonDisabled = reconnectTimeSinceLastClick.TotalSeconds < 5.0;
-        
-        using (ImRaii.Disabled(isReconnectButtonDisabled))
+        // 4. Error Text (if any) - Displayed below the header block
+        if (_apiController.ServerState != ServerState.Connected)
         {
-            if (_uiSharedService.IconButton(FontAwesomeIcon.Redo, null, null, null, null, ButtonStyleKeys.Compact_Reconnect))
-            {
-                _lastReconnectButtonClick = reconnectCurrentTime;
-                _ = Task.Run(() => _apiController.CreateConnectionsAsync());
-            }
+             ImGui.Spacing();
+             UiSharedService.ColorTextWrapped(GetServerError(), GetServerStatusColor());
         }
-        
-        var reconnectTooltipText = "Reconnect to the Sphene Network";
-        if (isReconnectButtonDisabled)
-        {
-            var reconnectRemainingSeconds = Math.Ceiling(5.0 - reconnectTimeSinceLastClick.TotalSeconds);
-            reconnectTooltipText += $"\nCooldown: {reconnectRemainingSeconds} seconds remaining";
-        }
-        UiSharedService.AttachToolTip(reconnectTooltipText);
-        
-        // Position connection status indicator and text (third from right)
-        ImGui.SameLine(availableWidth - totalRightContentWidth);
-        UiSharedService.DrawThemedStatusIndicator(connectionStatus, _apiController.ServerState == ServerState.Connected);
-        
-        
-        ImGui.Separator();
-        DrawServerStatusContent();
-        
-    
-        ImGui.Spacing();
+
         
         if (_apiController.ServerState is ServerState.Connected)
-        {
-            ImGui.Spacing();
-
-            
-            // Navigation Section
-            SpheneCustomTheme.DrawStyledText("Navigation", SpheneCustomTheme.CurrentTheme.CompactHeaderText);
-            ImGui.Separator();
-            _tabMenu.Draw(GetPendingModSharingCount());
-
-            ImGui.Spacing();
-
+        {            
+            // Navigation / Buttons
+            _tabMenu.Draw(GetPendingModSharingCount(), false);
             
             // Connected Pairs Section
             var onlineCount = _pairManager.DirectPairs.Count(p => p.IsOnline);
             var totalCount = _pairManager.DirectPairs.Count;
-            var onlineText = $"({onlineCount} / {totalCount}) online";
-            var onlineTextSize = ImGui.CalcTextSize(onlineText);
+            var onlineText = $"Connected Pairs ({onlineCount} / {totalCount}) online";
             
-            SpheneCustomTheme.DrawStyledText("Connected Pairs", SpheneCustomTheme.CurrentTheme.CompactHeaderText);
-            ImGui.SameLine(ImGui.GetContentRegionAvail().X - onlineTextSize.X);
-            SpheneCustomTheme.DrawStyledText(onlineText, SpheneCustomTheme.CurrentTheme.CompactConnectedText);
-            ImGui.Separator();
+            // Center the text
+            var textSize = ImGui.CalcTextSize(onlineText);
+            var availableWidthPairs = ImGui.GetContentRegionAvail().X;
+            var startX = (availableWidthPairs - textSize.X) / 2;
+            if (startX < 0) startX = 0;
             
-            
+            ImGui.SetCursorPosX(startX);
+            SpheneCustomTheme.DrawStyledText(onlineText, SpheneCustomTheme.CurrentTheme.CompactHeaderText);
             
             using (ImRaii.PushId("pairlist")) DrawPairs();
             
@@ -1099,7 +1009,6 @@ public class CompactUi : WindowMediatorSubscriberBase
         // Draw update notification at bottom if available or forced by theme
         if (Sphene.UI.Theme.SpheneCustomTheme.CurrentTheme.ForceShowUpdateHint || _updateBannerInfo?.IsUpdateAvailable == true)
         {
-            ImGui.Separator();
             using (ImRaii.PushId("update-hint-footer"))
             {
                 var startY = ImGui.GetCursorPosY();
@@ -1236,26 +1145,12 @@ public class CompactUi : WindowMediatorSubscriberBase
     }
     
 
-    private void DrawServerStatusContent()
-    {
-        // Create a more intuitive layout with grouped functionality
-        ImGui.AlignTextToFramePadding();
-        
-        DrawModeControls();
-        
-        // Right side: Texture Management
-        DrawTextureManagement();
-        
-        if (_apiController.ServerState == ServerState.Connected)
-        {
-            // reserved for future server status details
-        }
-    }
+
 
     private void DrawModeControls()
     {
         ImGui.BeginGroup();
-        ImGui.Text("Mode:");
+        ImGui.TextColored(SpheneCustomTheme.CurrentTheme.TextSecondary, "Mode:");
         ImGui.SameLine();
         var currentTime = DateTime.UtcNow;
         var timeSinceLastClick = currentTime - _lastIncognitoButtonClick;
@@ -1329,21 +1224,37 @@ public class CompactUi : WindowMediatorSubscriberBase
 
     private void DrawTextureManagement()
     {
-        var availableWidth = ImGui.GetContentRegionAvail().X;
+        var headerPaddingRight = 12.0f;
+        var extraLeftShift = 18.0f;
+        var targetRightEdge = ImGui.GetWindowContentRegionMax().X - headerPaddingRight - extraLeftShift;
+
         var conversionButtonSize = _uiSharedService.GetIconButtonSize(FontAwesomeIcon.ArrowsToEye);
         var buttonWidth = conversionButtonSize.X;
         var spacing = ImGui.GetStyle().ItemSpacing.X;
-        var textureLabelWidth = ImGui.CalcTextSize("Textures:").X;
+        var textureLabelWidth = ImGui.CalcTextSize("VRAM:").X;
         var textureSizeBytes = GetCurrentTextureSize();
         var textureSizeMB = textureSizeBytes / (1024.0 * 1024.0);
         var textureIndicatorText = $"{textureSizeMB:F0}MB";
-        var iconWidth = 16f;
+        
+        // Measure the icon width accurately based on the current indicator
+        var (_, _, icon) = GetBc7ConversionIndicator();
+        // If spinner is active, it uses LineHeight. If icon, measure it.
+        var iconWidth = _automaticModeEnabled && _shrinkuConversionService.IsConverting
+            ? ImGui.GetTextLineHeight()
+            : UiBuilder.IconFont.GetCharAdvance((ushort)icon); 
+            
         var textWidth = ImGui.CalcTextSize(textureIndicatorText).X;
-        var textureIndicatorWidth = iconWidth + textWidth + 2f;
+        var textureIndicatorWidth = iconWidth + textWidth + 2f; // +2f for the SameLine(0, 2)
         var totalRightContentWidth = textureLabelWidth + buttonWidth + textureIndicatorWidth + (spacing * 2);
-        ImGui.SameLine(availableWidth - totalRightContentWidth);
+        
+        var startX = targetRightEdge - totalRightContentWidth;
+        
+        // Ensure we don't overlap with left content
+        if (startX < ImGui.GetCursorPosX()) startX = ImGui.GetCursorPosX() + spacing;
+        
+        ImGui.SameLine(startX);
         ImGui.BeginGroup();
-        ImGui.Text("Textures:");
+        ImGui.TextColored(SpheneCustomTheme.CurrentTheme.TextSecondary, "VRAM:");
         ImGui.SameLine();
         using (ImRaii.Disabled(_shrinkuConversionService.IsConverting))
         {
@@ -1363,9 +1274,13 @@ public class CompactUi : WindowMediatorSubscriberBase
     private void DrawTransfers()
     {
         var currentUploads = _fileTransferManager.CurrentUploads
-            .Where(u => !_fileTransferManager.IsPenumbraModUpload(u.Hash))
+            .Where(u => u != null && !string.IsNullOrWhiteSpace(u.Hash) && !_fileTransferManager.IsPenumbraModUpload(u.Hash))
             .ToList();
-        var currentDownloads = _currentDownloads.SelectMany(d => d.Value.Values).ToList();
+        var currentDownloads = _currentDownloads.Values
+            .Where(d => d != null)
+            .SelectMany(d => d.Values)
+            .Where(v => v != null)
+            .ToList();
         
         // Only show upload progress if there are active uploads
         if (currentUploads.Any())
@@ -1433,19 +1348,35 @@ public class CompactUi : WindowMediatorSubscriberBase
     {
         var uidText = GetUidText();
         
-        using (_uiSharedService.UidFont.Push())
+        var fontHandle = _uiSharedService.UidFont;
+        if (fontHandle.Available)
         {
-            ImGui.SetWindowFontScale(SpheneCustomTheme.CurrentTheme.CompactUidFontScale);
-            var uidTextSize = ImGui.CalcTextSize(uidText);
-            ImGui.SetCursorPosX((ImGui.GetWindowContentRegionMax().X - ImGui.GetWindowContentRegionMin().X) / 2 - (uidTextSize.X / 2));
+            using (fontHandle.Push())
+            {
+                ImGui.SetWindowFontScale(SpheneCustomTheme.CurrentTheme.CompactUidFontScale);
+                DrawUidTextInternal(uidText);
+                ImGui.SetWindowFontScale(1.0f);
+            }
+        }
+        else
+        {
+            // Per user request: Do not show pixelated fallback.
+            // Wait until the high-quality font is fully loaded.
+            // The parent container already reserves the correct height, so no layout jump will occur.
+            // We just show a subtle loading indicator or nothing.
             
-            // Use CompactUidColor for connected state, server status colors for other states
-            var uidColor = _apiController.ServerState == ServerState.Connected 
-                ? SpheneCustomTheme.CurrentTheme.CompactUidColor 
-                : GetServerStatusColor();
+            // Center the loading indicator vertically/horizontally in the reserved space
+            var avail = ImGui.GetContentRegionAvail();
+            var text = "...";
+            var textSize = ImGui.CalcTextSize(text);
             
-            ImGui.TextColored(uidColor, uidText);
-            ImGui.SetWindowFontScale(1.0f);
+            ImGui.SetCursorPosX((avail.X - textSize.X) * 0.5f);
+            ImGui.SetCursorPosY((avail.Y - textSize.Y) * 0.5f);
+            
+            using (ImRaii.PushColor(ImGuiCol.Text, SpheneCustomTheme.CurrentTheme.TextSecondary))
+            {
+                ImGui.Text(text);
+            }
         }
 
         if (_apiController.ServerState is ServerState.Connected)
@@ -1456,10 +1387,120 @@ public class CompactUi : WindowMediatorSubscriberBase
             }
             UiSharedService.AttachToolTip("Click to copy");
         }
-        else
+    }
+
+    private void DrawHeaderCard(ImGuiStylePtr style)
+    {
+        // 0. Pre-Flight Check: Fonts
+        // The user explicitly requested that the window should NOT be drawn/calculated
+        // until the font is fully loaded, to ensure correct sizing and no jumping.
+        if (!_uiSharedService.UidFont.Available)
         {
-            UiSharedService.ColorTextWrapped(GetServerError(), GetServerStatusColor());
+            // Draw a placeholder with the approximate height to prevent total collapse,
+            // but do not attempt to layout the content.
+            var approxHeight = ImGui.GetFrameHeight() * 2.0f;
+            ImGui.Dummy(new Vector2(ImGui.GetContentRegionAvail().X, approxHeight));
+            
+            // Center a loading text
+            var loadingText = "Loading Resources...";
+            var textSize = ImGui.CalcTextSize(loadingText);
+            var centerPos = ImGui.GetItemRectMin() + (ImGui.GetItemRectSize() - textSize) * 0.5f;
+            
+            ImGui.GetWindowDrawList().AddText(centerPos, ImGui.GetColorU32(ImGuiCol.TextDisabled), loadingText);
+            return;
         }
+
+        // 1. Calculate Sizes First to determine layout
+        
+        // --- UID Content Calculation ---
+        var availableWidth = ImGui.GetContentRegionAvail().X;
+        var childPadding = 20.0f; // 10 left + 10 right
+        var contentWidth = availableWidth - childPadding;
+        
+        // Calculate exact UID width using the now GUARANTEED available font
+        var uidText = GetUidText();
+        using (_uiSharedService.UidFont.Push())
+        {
+            var targetScale = SpheneCustomTheme.CurrentTheme.CompactUidFontScale;
+            ImGui.SetWindowFontScale(targetScale);
+            _ = ImGui.CalcTextSize(uidText);
+            ImGui.SetWindowFontScale(1.0f);
+        }
+
+        // Auto-Height Layout using Groups and Channels
+        // This ensures the card height perfectly matches the content
+        var drawList = ImGui.GetWindowDrawList();
+        var startPos = ImGui.GetCursorPos();
+        var padding = new Vector2(10, 10);
+        
+        drawList.ChannelsSplit(2);
+        drawList.ChannelsSetCurrent(1); // Draw content on top
+
+        // Apply padding offset
+        ImGui.SetCursorPos(startPos + padding);
+        
+        ImGui.BeginGroup();
+        
+        // Ensure the group spans the full width (minus padding)
+        // We use a dummy to force the width, but we MUST reset the cursor so content draws ON TOP of it (layout-wise)
+        var groupStartPos = ImGui.GetCursorPos();
+        ImGui.Dummy(new Vector2(contentWidth, 0)); 
+        ImGui.SetCursorPos(groupStartPos);
+
+        // 1. UID (Left)
+        ImGui.AlignTextToFramePadding();
+        DrawUIDContent();
+
+
+        // --- Row 2 (or 3): Separator & Mode/Textures ---
+        
+        // Draw a nice soft separator
+        var lineStart = ImGui.GetCursorScreenPos();
+        var lineEnd = lineStart + new Vector2(contentWidth, 0); // Use calculated contentWidth
+        ImGui.GetWindowDrawList().AddLine(lineStart, lineEnd, ImGui.GetColorU32(ImGuiCol.Separator));
+        
+        ImGui.Dummy(new Vector2(0, 5));
+
+        // Mode Controls (Left)
+        DrawModeControls();
+        
+        // Texture Management (Right)
+        DrawTextureManagement();
+
+        ImGui.EndGroup();
+        
+        // Determine bounds of the content
+        var groupMin = ImGui.GetItemRectMin();
+        var groupMax = ImGui.GetItemRectMax();
+        
+        // Draw Background
+        drawList.ChannelsSetCurrent(0); // Draw background behind
+        
+        // Expand background to include padding
+        // We strictly use availableWidth for the width to ensure it doesn't expand if content overflows
+        // This fixes the issue where the card becomes wider than the header if the UID text is too long
+        
+        var bgMin = groupMin - padding;
+        // Force the width to match the calculated available width exactly
+        var bgMax = new Vector2(bgMin.X + availableWidth, groupMax.Y + padding.Y);
+        
+        drawList.AddRectFilled(bgMin, bgMax, ImGui.GetColorU32(SpheneCustomTheme.Colors.HeaderBg), 10.0f);
+        
+        drawList.ChannelsMerge();
+        
+        // Advance cursor past the card
+        // We need to set the cursor to the bottom of the card (bgMax.Y) plus spacing
+        ImGui.SetCursorPosY(startPos.Y + (bgMax.Y - bgMin.Y) + style.ItemSpacing.Y);
+    }
+    
+    private void DrawUidTextInternal(string uidText)
+    {
+        // Use CompactUidColor for connected state, server status colors for other states
+        var uidColor = _apiController.ServerState == ServerState.Connected 
+            ? SpheneCustomTheme.CurrentTheme.CompactUidColor 
+            : GetServerStatusColor();
+        
+        ImGui.TextColored(uidColor, uidText);
     }
 
     private IEnumerable<IDrawFolder> GetDrawFolders()
@@ -1618,17 +1659,6 @@ public class CompactUi : WindowMediatorSubscriberBase
             ImmutablePairList(allPairs.Where(u => u.Key.IsOneSidedPair))));
 
         return drawFolders;
-    }
-
-    private static string GetControlPanelTitle()
-    {
-        var ver = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
-        if (ver is not null)
-        {
-            var revision = ver.Revision < 0 ? 0 : ver.Revision;
-            return $"Sphene Control Panel {ver.Major}.{ver.Minor}.{ver.Build}.{revision}";
-        }
-        return "Sphene Control Panel";
     }
 
     private void RefreshDrawFolders()
@@ -1989,7 +2019,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                 using (SpheneCustomTheme.ApplyTooltipTheme())
                 {
                     ImGui.BeginTooltip();
-                    ImGui.TextColored(SpheneCustomTheme.Colors.SpheneGold, "Texture Size");
+                    ImGui.TextColored(SpheneCustomTheme.Colors.SpheneGold, "Used VRAM Size");
                     ImGui.Separator();
                     ImGui.Text($"Current: {textureSizeMB:F0} MB");
                     ImGui.Spacing();
@@ -3664,10 +3694,13 @@ public class CompactUi : WindowMediatorSubscriberBase
         var contentY = contentStart.Y + (headerHeight - textHeight) / 2.0f;
         ImGui.SetCursorScreenPos(new Vector2(contentStart.X + headerPadding.X, contentY));
         
+        // --- Status Indicator (Left) ---
+        var connectionStatus = string.Empty; 
+        UiSharedService.DrawThemedStatusIndicator(connectionStatus, _apiController.ServerState == ServerState.Connected);
+        ImGui.SameLine();
+
         // Window title - vertically centered
-        SpheneCustomTheme.DrawStyledText(GetControlPanelTitle(), SpheneCustomTheme.CurrentTheme.CompactPanelTitleText);
-        
-        
+        SpheneCustomTheme.DrawStyledText(ControlPanelTitle, SpheneCustomTheme.CurrentTheme.CompactPanelTitleText);
         
         // Header buttons on the same line, positioned from the right with padding
         var buttonSpacing = 8.0f; // Reduced spacing between buttons (was 16.0f)
@@ -3677,33 +3710,15 @@ public class CompactUi : WindowMediatorSubscriberBase
         // Calculate button Y position to center them vertically in the header
         var buttonY = contentStart.Y + (headerHeight - buttonHeight) / 2.0f;
         
-        // Position close button first (rightmost)
-        var closeButtonX = ImGui.GetContentRegionAvail().X - buttonWidth - headerPadding.X;
+        // Order from right to left: Close -> Settings -> Reconnect -> TestServer -> Connect/Disconnect
         
-        // Position settings button with reduced spacing from close button
-        var settingsButtonX = closeButtonX - buttonWidth - buttonSpacing;
+        var rightEdge = ImGui.GetContentRegionAvail().X - headerPadding.X;
         
-        // Position settings button centered vertically in header
-        ImGui.SetCursorScreenPos(new Vector2(contentStart.X + settingsButtonX, buttonY));
+        // Helper to place button
+        float currentX = rightEdge - buttonWidth;
         
-        if (_uiSharedService.IconButton(FontAwesomeIcon.Cog, null, null, null, null, ButtonStyleKeys.Compact_Settings))
-        {
-            Mediator.Publish(new UiToggleMessage(typeof(SettingsUi)));
-        }
-        if (ImGui.IsItemHovered())
-        {
-            using (SpheneCustomTheme.ApplyTooltipTheme())
-            {
-                ImGui.BeginTooltip();
-                ImGui.Text("Open Network Configuration");
-                ImGui.EndTooltip();
-            }
-        }
-        
-        
-        // Position close button centered vertically in header
-        ImGui.SetCursorScreenPos(new Vector2(contentStart.X + closeButtonX, buttonY));
-        
+        // 1. Close Button
+        ImGui.SetCursorScreenPos(new Vector2(contentStart.X + currentX, buttonY));
         if (_uiSharedService.IconButton(FontAwesomeIcon.Times, null, null, null, null, ButtonStyleKeys.Compact_Close))
         {
             _logger.LogDebug("Close button clicked, closing CompactUI");
@@ -3719,6 +3734,75 @@ public class CompactUi : WindowMediatorSubscriberBase
             }
         }
         
+        currentX -= (buttonWidth + buttonSpacing);
+        
+        // 2. Settings Button
+        ImGui.SetCursorScreenPos(new Vector2(contentStart.X + currentX, buttonY));
+        if (_uiSharedService.IconButton(FontAwesomeIcon.Cog, null, null, null, null, ButtonStyleKeys.Compact_Settings))
+        {
+            Mediator.Publish(new UiToggleMessage(typeof(SettingsUi)));
+        }
+        if (ImGui.IsItemHovered())
+        {
+            using (SpheneCustomTheme.ApplyTooltipTheme())
+            {
+                ImGui.BeginTooltip();
+                ImGui.Text("Open Network Configuration");
+                ImGui.EndTooltip();
+            }
+        }
+        
+        currentX -= (buttonWidth + buttonSpacing);
+        
+        // 3. Reconnect Button
+        var reconnectCurrentTime = DateTime.UtcNow;
+        var reconnectTimeSinceLastClick = reconnectCurrentTime - _lastReconnectButtonClick;
+        var isReconnectButtonDisabled = reconnectTimeSinceLastClick.TotalSeconds < 5.0;
+
+        ImGui.SetCursorScreenPos(new Vector2(contentStart.X + currentX, buttonY));
+        using (ImRaii.Disabled(isReconnectButtonDisabled))
+        {
+            if (_uiSharedService.IconButton(FontAwesomeIcon.Redo, null, null, null, null, ButtonStyleKeys.Compact_Reconnect))
+            {
+                _lastReconnectButtonClick = reconnectCurrentTime;
+                _ = Task.Run(() => _apiController.CreateConnectionsAsync());
+            }
+        }
+        UiSharedService.AttachToolTip(isReconnectButtonDisabled 
+            ? $"Reconnect Cooldown: {Math.Ceiling(5.0 - reconnectTimeSinceLastClick.TotalSeconds)}s" 
+            : "Reconnect to the Sphene Network");
+            
+        currentX -= (buttonWidth + buttonSpacing);
+        
+#if IS_TEST_BUILD
+        // 4. Test Server Button
+        ImGui.SetCursorScreenPos(new Vector2(contentStart.X + currentX, buttonY));
+        DrawTestServerToggleButton();
+        currentX -= (buttonWidth + buttonSpacing);
+#endif
+
+        // 5. Connect/Disconnect Button
+        ImGui.SetCursorScreenPos(new Vector2(contentStart.X + currentX, buttonY));
+        if (_apiController.IsConnected)
+        {
+            if (_uiSharedService.IconButton(FontAwesomeIcon.Unlink, null, null, null, null, ButtonStyleKeys.Compact_Disconnect) && _serverManager.CurrentServer != null)
+            {
+                _serverManager.CurrentServer.FullPause = true;
+                _serverManager.Save();
+                _ = _apiController.CreateConnectionsAsync();
+            }
+            UiSharedService.AttachToolTip("Disconnect from Server");
+        }
+        else
+        {
+            if (_uiSharedService.IconButton(FontAwesomeIcon.Link, null, null, null, null, ButtonStyleKeys.Compact_Connect) && _serverManager.CurrentServer != null)
+            {
+                _serverManager.CurrentServer.FullPause = false;
+                _serverManager.Save();
+                _ = _apiController.CreateConnectionsAsync();
+            }
+            UiSharedService.AttachToolTip("Connect to Server");
+        }
         
         // Move cursor to end of header area
         ImGui.SetCursorScreenPos(new Vector2(contentStart.X, headerEnd.Y));

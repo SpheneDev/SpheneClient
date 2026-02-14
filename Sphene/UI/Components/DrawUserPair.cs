@@ -56,8 +56,8 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
     private static readonly System.Threading.Lock _globalAckYouLock = new();
     
     
-    // Cache acknowledgment status - updated only via events
     private bool _cachedHasPendingAck = false;
+    private DateTime _lastAckStatusPoll = DateTime.MinValue;
     private readonly List<FileTransferNotificationDto> _pendingModNotifications = new();
     public DrawUserPair(string id, Pair entry, List<GroupFullInfoDto> syncedGroups,
         GroupFullInfoDto? currentGroup,
@@ -249,6 +249,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
 
     public void DrawPairedClient()
     {
+        RefreshAckStatusIfDue();
         using var id = ImRaii.PushId(GetType() + _id);
         var color = ImRaii.PushColor(ImGuiCol.ChildBg, ImGui.GetColorU32(ImGuiCol.FrameBgHovered), _wasHovered);
         var baseFolderWidth = UiSharedService.GetBaseFolderWidth() + 9.0f;
@@ -510,6 +511,8 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         ImGui.AlignTextToFramePadding();
 
         var isVisibleForIcon = _pair.IsMutuallyVisible || (_uiSharedService.IsInGpose && _pair.WasMutuallyVisibleInGpose);
+        var partnerAckYou = _pair.UserPair.OtherPermissions.IsAckYou();
+        var suppressAckUi = _pair.IsInDuty;
 
         if (_pair.IsPaused)
         {
@@ -535,13 +538,19 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
                 ImGui.SameLine();
             }
             
-            var partnerAckYou = _pair.UserPair.OtherPermissions.IsAckYou();
-            var iconColor = partnerAckYou ? ImGuiColors.ParsedGreen : ImGuiColors.DalamudYellow;
+            var iconColor = suppressAckUi ? ImGuiColors.ParsedGreen : (partnerAckYou ? ImGuiColors.ParsedGreen : ImGuiColors.DalamudYellow);
             var icon = (_uiSharedService.IsInGpose || _pair.IsInGpose) ? FontAwesomeIcon.Camera : FontAwesomeIcon.Eye;
             _uiSharedService.IconText(icon, iconColor);
             
-            var ackStatus = partnerAckYou ? "acknowledges your data" : "does not acknowledge your data";
-            userPairText = _pair.UserData.AliasOrUID + " is visible: " + _pair.PlayerName + Environment.NewLine + "This user " + ackStatus + Environment.NewLine + "Click to target this player";
+            if (suppressAckUi)
+            {
+                userPairText = _pair.UserData.AliasOrUID + " is visible: " + _pair.PlayerName + Environment.NewLine + "Click to target this player";
+            }
+            else
+            {
+                var ackStatus = partnerAckYou ? "acknowledges your data" : "does not acknowledge your data";
+                userPairText = _pair.UserData.AliasOrUID + " is visible: " + _pair.PlayerName + Environment.NewLine + "This user " + ackStatus + Environment.NewLine + "Click to target this player";
+            }
             
             HandleReloadTimer(partnerAckYou);
             
@@ -566,14 +575,14 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
             }
         }
 
-        if (_pair.IsOnline && _pair.IsMutuallyVisible)
+        if (_pair.IsOnline && _pair.IsMutuallyVisible && !suppressAckUi)
         {
             ImGui.SameLine();
             if (_pair.HasPendingAcknowledgment)
             {
                 using var _ = ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.DalamudYellow);
                 _uiSharedService.IconText(FontAwesomeIcon.Clock);
-                UiSharedService.AttachToolTip("Waiting for acknowledgment from this user...");
+                UiSharedService.AttachToolTip("Processing character data...");
             }
             else if (_pair.LastAcknowledgmentSuccess.HasValue)
             {
@@ -624,7 +633,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         }
 
         // Add synchronization status information - only show for visible pairs
-        if (_pair.IsOnline && _pair.IsVisible)
+        if (_pair.IsOnline && _pair.IsVisible && !suppressAckUi)
         {
             // Show sync status for any pending acknowledgment (including build start)
             if (GetCachedHasPendingAcknowledgment())
@@ -643,7 +652,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
 
         if (_pair.IsInDuty)
         {
-            userPairText += UiSharedService.TooltipSeparator + "Info: In duty, acknowledgments can be delayed or fail during combat.";
+            userPairText += UiSharedService.TooltipSeparator + "Info: In duty, acknowledgment display is hidden.";
         }
 
         if (_syncedGroups.Any())
@@ -1022,15 +1031,24 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
     
     private bool GetCachedHasPendingAcknowledgment()
     {
-        // Return cached value without initializing from PairManager to avoid frequent calls
-        // Cache is updated only through event handlers
         return _cachedHasPendingAck;
+    }
+
+    private void RefreshAckStatusIfDue()
+    {
+        var now = DateTime.UtcNow;
+        if (now - _lastAckStatusPoll < TimeSpan.FromMilliseconds(500))
+        {
+            return;
+        }
+
+        _lastAckStatusPoll = now;
+        _cachedHasPendingAck = _pairManager.HasPendingAcknowledgmentForUser(_pair.UserData);
     }
 
     public void RefreshIcon()
     {
-        // Force refresh of cached icon data without recreating the entire DrawUserPair instance
-        // This method is called when only icons need to be updated
-        // The actual icon rendering will pick up the latest data on next draw
+        _cachedHasPendingAck = _pairManager.HasPendingAcknowledgmentForUser(_pair.UserData);
+        _lastAckStatusPoll = DateTime.UtcNow;
     }
 }

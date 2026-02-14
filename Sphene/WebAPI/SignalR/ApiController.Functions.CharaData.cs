@@ -40,6 +40,27 @@ public partial class ApiController
         }
     }
 
+    public async Task BypassEmoteUpdate(BypassEmoteUpdateDto updateDto)
+    {
+        if (!IsConnected) return;
+        if (_spheneHub == null || _spheneHub.State != HubConnectionState.Connected)
+        {
+            Logger.LogDebug("Skipping bypass emote update for {id} because hub is not connected (State: {State})",
+                updateDto.Id, _spheneHub?.State.ToString() ?? "null");
+            return;
+        }
+
+        try
+        {
+            Logger.LogDebug("Updating bypass emote data for {id}", updateDto.Id);
+            await _spheneHub!.InvokeAsync(nameof(BypassEmoteUpdate), updateDto).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to update bypass emote data for {id}", updateDto.Id);
+        }
+    }
+
     public async Task<bool> CharaDataDelete(string id)
     {
         if (!IsConnected) return false;

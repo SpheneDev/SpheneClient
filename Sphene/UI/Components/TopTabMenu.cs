@@ -73,12 +73,12 @@ public class TopTabMenu
             _selectedTab = value;
         }
     }
-    public void Draw()
+    public void Draw(bool drawSeparator = true)
     {
-        Draw(0);
+        Draw(0, drawSeparator);
     }
 
-    public void Draw(int pendingModSharingCount)
+    public void Draw(int pendingModSharingCount, bool drawSeparator = true)
     {
         var availableWidth = ImGui.GetWindowContentRegionMax().X - ImGui.GetWindowContentRegionMin().X;
         var spacing = ImGui.GetStyle().ItemSpacing;
@@ -113,7 +113,6 @@ public class TopTabMenu
         ImGui.NewLine();
         btncolor.Dispose();
 
-        ImGuiHelpers.ScaledDummy(spacing);
 
         if (TabSelection == SelectedTab.Individual)
         {
@@ -135,7 +134,7 @@ public class TopTabMenu
         }
 
         if (TabSelection != SelectedTab.None) ImGuiHelpers.ScaledDummy(3f);
-        ImGui.Separator();
+        if (drawSeparator) ImGui.Separator();
     }
 
     private void DrawTabButton(FontAwesomeIcon icon, SelectedTab tab, string styleKey, Vector2 buttonSize, Vector2 spacing, uint underlineColor, ImDrawListPtr drawList)

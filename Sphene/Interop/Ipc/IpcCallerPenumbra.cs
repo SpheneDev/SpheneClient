@@ -347,7 +347,11 @@ public sealed class IpcCallerPenumbra : DisposableMediatorSubscriberBase, IIpcCa
 
     private void ResourceLoaded(IntPtr ptr, string arg1, string arg2)
     {
-        if (ptr != IntPtr.Zero && string.Compare(arg1, arg2, ignoreCase: true, System.Globalization.CultureInfo.InvariantCulture) != 0)
+        if (ptr == IntPtr.Zero) return;
+
+        // Always publish SCD files to allow minion sound overrides to hook in even if currently unmodded (Default collection)
+        if (arg1.EndsWith(".scd", StringComparison.OrdinalIgnoreCase)
+            || string.Compare(arg1, arg2, ignoreCase: true, System.Globalization.CultureInfo.InvariantCulture) != 0)
         {
             _spheneMediator.Publish(new PenumbraResourceLoadMessage(ptr, arg1, arg2));
         }

@@ -13,6 +13,7 @@ using Sphene.API.Data;
 using Sphene.WebAPI;
 using Sphene.WebAPI.SignalR.Utils;
 using System.Numerics;
+using System.Text.Json;
 
 namespace Sphene.UI.Panels;
 
@@ -33,6 +34,9 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
     private bool _showAcknowledgments = true;
     private bool _showCircuitBreaker = true;
     private bool _showConnections = true;
+    private string? _selectedCharacterDebugUid;
+    private string? _selectedCharacterStatsUid;
+    private readonly Dictionary<string, CharacterStatsSnapshot> _characterStats = new(StringComparer.Ordinal);
     
     public StatusDebugUi(ILogger<StatusDebugUi> logger, SpheneMediator mediator,
         UiSharedService uiSharedService, PairManager pairManager, ApiController apiController,
@@ -174,6 +178,22 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             if (logTab)
             {
                 DrawCommunicationLog();
+            }
+        }
+
+        using (var characterLogTab = ImRaii.TabItem("Character Debug Logs"))
+        {
+            if (characterLogTab)
+            {
+                DrawCharacterDebugLogs();
+            }
+        }
+
+        using (var characterStatsTab = ImRaii.TabItem("Character Statistics"))
+        {
+            if (characterStatsTab)
+            {
+                DrawCharacterStatistics();
             }
         }
         
@@ -539,6 +559,403 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             _circuitBreaker.Reset();
             LogCommunication("[DEBUG] Circuit breaker manually reset");
         }
+    }
+
+    private void DrawCharacterDebugLogs()
+    {
+        ImGui.Text("Character Debug Logs");
+
+        var pairs = _pairManager.DirectPairs.ToList();
+        if (pairs.Count == 0)
+        {
+            ImGui.Text("No paired users");
+            return;
+        }
+
+        if (string.IsNullOrEmpty(_selectedCharacterDebugUid) || pairs.All(p => !string.Equals(p.UserData.UID, _selectedCharacterDebugUid, StringComparison.Ordinal)))
+        {
+            _selectedCharacterDebugUid = pairs[0].UserData.UID;
+        }
+
+        if (ImGui.BeginTable("CharacterDebugLogTable", 4, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable))
+        {
+            ImGui.TableSetupColumn("User", ImGuiTableColumnFlags.WidthFixed, 180);
+            ImGui.TableSetupColumn("UID", ImGuiTableColumnFlags.WidthFixed, 180);
+            ImGui.TableSetupColumn("Visibility", ImGuiTableColumnFlags.WidthFixed, 120);
+            ImGui.TableSetupColumn("Actions", ImGuiTableColumnFlags.WidthStretch);
+            ImGui.TableHeadersRow();
+
+            foreach (var pair in pairs)
+            {
+                var uid = pair.UserData.UID;
+                ImGui.TableNextRow();
+                ImGui.TableSetColumnIndex(0);
+                ImGui.Text(pair.UserData.AliasOrUID);
+
+                ImGui.TableSetColumnIndex(1);
+                ImGui.Text(uid);
+
+                ImGui.TableSetColumnIndex(2);
+                var visibilityText = pair.IsVisible ? "Visible" : "Hidden";
+                var visibilityColor = pair.IsVisible ? ImGuiColors.HealerGreen : ImGuiColors.DalamudRed;
+                UiSharedService.ColorText(visibilityText, visibilityColor);
+
+                ImGui.TableSetColumnIndex(3);
+                var isSelected = string.Equals(uid, _selectedCharacterDebugUid, StringComparison.Ordinal);
+                var selectText = isSelected ? "Selected" : "Select";
+                if (ImGui.Button($"{selectText}##select_{uid}"))
+                {
+                    _selectedCharacterDebugUid = uid;
+                }
+
+                ImGui.SameLine();
+                if (ImGui.Button($"Copy##copy_{uid}"))
+                {
+                    ImGui.SetClipboardText(GetApplyDebugText(pair));
+                }
+
+                ImGui.SameLine();
+                if (ImGui.Button($"Clear##clear_{uid}"))
+                {
+                    pair.ClearApplyDebug();
+                }
+            }
+
+            ImGui.EndTable();
+        }
+
+        ImGui.Separator();
+
+        Pair? selectedPair = null;
+        foreach (var pair in pairs)
+        {
+            if (string.Equals(pair.UserData.UID, _selectedCharacterDebugUid, StringComparison.Ordinal))
+            {
+                selectedPair = pair;
+                break;
+            }
+        }
+
+        if (selectedPair == null)
+        {
+            ImGui.Text("No character selected");
+            return;
+        }
+
+        ImGui.Text($"Selected: {selectedPair.UserData.AliasOrUID} ({selectedPair.UserData.UID})");
+
+        var logText = GetApplyDebugText(selectedPair);
+        var availableSize = ImGui.GetContentRegionAvail();
+        using var child = ImRaii.Child("CharacterDebugLogContent", availableSize, true);
+        if (child)
+        {
+            ImGui.TextUnformatted(logText);
+        }
+    }
+
+    private static string GetApplyDebugText(Pair pair)
+    {
+        var lines = pair.GetApplyDebugLines();
+        if (lines.Length == 0)
+        {
+            return "No debug logs for this character.";
+        }
+
+        return string.Join('\n', lines);
+    }
+
+    private void DrawCharacterStatistics()
+    {
+        ImGui.Text("Character Statistics");
+
+        var pairs = _pairManager.DirectPairs.ToList();
+        if (pairs.Count == 0)
+        {
+            ImGui.Text("No paired users");
+            return;
+        }
+
+        if (string.IsNullOrEmpty(_selectedCharacterStatsUid) || pairs.All(p => !string.Equals(p.UserData.UID, _selectedCharacterStatsUid, StringComparison.Ordinal)))
+        {
+            _selectedCharacterStatsUid = pairs[0].UserData.UID;
+        }
+
+        if (ImGui.BeginTable("CharacterStatsTable", 6, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable))
+        {
+            ImGui.TableSetupColumn("User", ImGuiTableColumnFlags.WidthFixed, 180);
+            ImGui.TableSetupColumn("Current Hash", ImGuiTableColumnFlags.WidthFixed, 140);
+            ImGui.TableSetupColumn("Last Hash", ImGuiTableColumnFlags.WidthFixed, 140);
+            ImGui.TableSetupColumn("Last Change", ImGuiTableColumnFlags.WidthFixed, 140);
+            ImGui.TableSetupColumn("Last Action", ImGuiTableColumnFlags.WidthStretch);
+            ImGui.TableSetupColumn("Select", ImGuiTableColumnFlags.WidthFixed, 80);
+            ImGui.TableHeadersRow();
+
+            foreach (var pair in pairs)
+            {
+                var snapshot = GetCharacterStatsSnapshot(pair);
+
+                ImGui.TableNextRow();
+                ImGui.TableSetColumnIndex(0);
+                ImGui.Text(pair.UserData.AliasOrUID);
+
+                ImGui.TableSetColumnIndex(1);
+                ImGui.Text(snapshot.Current.DataHash);
+
+                ImGui.TableSetColumnIndex(2);
+                ImGui.Text(snapshot.Previous?.DataHash ?? "-");
+
+                ImGui.TableSetColumnIndex(3);
+                ImGui.Text(snapshot.Previous?.SnapshotTime.ToLocalTime().ToString("HH:mm:ss") ?? "-");
+
+                ImGui.TableSetColumnIndex(4);
+                ImGui.Text(snapshot.Current.LastAction);
+
+                ImGui.TableSetColumnIndex(5);
+                var uid = pair.UserData.UID;
+                var isSelected = string.Equals(uid, _selectedCharacterStatsUid, StringComparison.Ordinal);
+                var selectText = isSelected ? "Selected" : "Select";
+                if (ImGui.Button($"{selectText}##stats_select_{uid}"))
+                {
+                    _selectedCharacterStatsUid = uid;
+                }
+            }
+
+            ImGui.EndTable();
+        }
+
+        ImGui.Separator();
+
+        Pair? selectedPair = null;
+        foreach (var pair in pairs)
+        {
+            if (string.Equals(pair.UserData.UID, _selectedCharacterStatsUid, StringComparison.Ordinal))
+            {
+                selectedPair = pair;
+                break;
+            }
+        }
+
+        if (selectedPair == null)
+        {
+            ImGui.Text("No character selected");
+            return;
+        }
+
+        var selectedSnapshot = GetCharacterStatsSnapshot(selectedPair);
+        ImGui.Text($"Selected: {selectedPair.UserData.AliasOrUID} ({selectedPair.UserData.UID})");
+
+        if (ImGui.BeginTable("CharacterStatsDetailTable", 3, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
+        {
+            ImGui.TableSetupColumn("Metric", ImGuiTableColumnFlags.WidthFixed, 200);
+            ImGui.TableSetupColumn("Current", ImGuiTableColumnFlags.WidthFixed, 240);
+            ImGui.TableSetupColumn("Last", ImGuiTableColumnFlags.WidthFixed, 240);
+            ImGui.TableHeadersRow();
+
+            DrawStatsRow("Data Hash", selectedSnapshot.Current.DataHash, selectedSnapshot.Previous?.DataHash);
+            DrawStatsRow("Applied Bytes", selectedSnapshot.Current.AppliedBytes.ToString(), selectedSnapshot.Previous?.AppliedBytes.ToString());
+            DrawStatsRow("Applied Triangles", selectedSnapshot.Current.AppliedTris.ToString(), selectedSnapshot.Previous?.AppliedTris.ToString());
+            DrawStatsRow("Applied VRAM Bytes", selectedSnapshot.Current.AppliedVramBytes.ToString(), selectedSnapshot.Previous?.AppliedVramBytes.ToString());
+            DrawStatsRow("Visible", selectedSnapshot.Current.IsVisible ? "Yes" : "No", selectedSnapshot.Previous != null ? (selectedSnapshot.Previous.IsVisible ? "Yes" : "No") : null);
+            DrawStatsRow("Mutually Visible", selectedSnapshot.Current.IsMutuallyVisible ? "Yes" : "No", selectedSnapshot.Previous != null ? (selectedSnapshot.Previous.IsMutuallyVisible ? "Yes" : "No") : null);
+            DrawStatsRow("Paused", selectedSnapshot.Current.IsPaused ? "Yes" : "No", selectedSnapshot.Previous != null ? (selectedSnapshot.Previous.IsPaused ? "Yes" : "No") : null);
+            DrawStatsRow("Last Ack Success", FormatNullableBool(selectedSnapshot.Current.LastAckSuccess), FormatNullableBool(selectedSnapshot.Previous?.LastAckSuccess));
+            DrawStatsRow("Last Ack Time", FormatNullableTime(selectedSnapshot.Current.LastAckTime), FormatNullableTime(selectedSnapshot.Previous?.LastAckTime));
+            DrawStatsRow("Last Ack Id", selectedSnapshot.Current.LastAckId ?? "-", selectedSnapshot.Previous?.LastAckId);
+            DrawStatsRow("Retry Count", selectedSnapshot.Current.ApplyRetryCount.ToString(), selectedSnapshot.Previous?.ApplyRetryCount.ToString());
+            DrawStatsRow("Snapshot Time", selectedSnapshot.Current.SnapshotTime.ToLocalTime().ToString("HH:mm:ss"), selectedSnapshot.Previous?.SnapshotTime.ToLocalTime().ToString("HH:mm:ss"));
+
+            ImGui.EndTable();
+        }
+
+        ImGui.Separator();
+        ImGui.Text("Received Created Character Data");
+
+        foreach (var pair in pairs)
+        {
+            var uid = pair.UserData.UID;
+            var label = $"{pair.UserData.AliasOrUID} ({uid})##received_character_data_{uid}";
+            if (ImGui.TreeNode(label))
+            {
+                var receivedData = pair.LastReceivedCharacterData;
+                var receivedDataJson = receivedData != null
+                    ? JsonSerializer.Serialize(receivedData, new JsonSerializerOptions() { WriteIndented = true })
+                    : "No received character data.";
+                var lastReceivedHash = pair.LastReceivedCharacterDataHash ?? "-";
+                var previousReceivedHash = pair.PreviousReceivedCharacterDataHash ?? "-";
+                var lastReceivedTime = pair.LastReceivedCharacterDataTime?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "-";
+                var lastChangeTime = pair.LastReceivedCharacterDataChangeTime?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "-";
+
+                ImGui.TextUnformatted($"Last Received Hash: {lastReceivedHash}");
+                ImGui.TextUnformatted($"Previous Received Hash: {previousReceivedHash}");
+                ImGui.TextUnformatted($"Last Received Time: {lastReceivedTime}");
+                ImGui.TextUnformatted($"Last Change Time: {lastChangeTime}");
+                ImGui.Separator();
+
+                if (ImGui.Button($"Copy##received_character_data_copy_{uid}"))
+                {
+                    if (receivedData != null)
+                    {
+                        ImGui.SetClipboardText(receivedDataJson);
+                    }
+                    else
+                    {
+                        ImGui.SetClipboardText("ERROR: No received character data, cannot copy.");
+                    }
+                }
+
+                foreach (var line in receivedDataJson.Split('\n'))
+                {
+                    ImGui.TextUnformatted(line);
+                }
+
+                ImGui.TreePop();
+            }
+        }
+    }
+
+    private static void DrawStatsRow(string metric, string current, string? last)
+    {
+        ImGui.TableNextRow();
+        ImGui.TableSetColumnIndex(0);
+        ImGui.Text(metric);
+        ImGui.TableSetColumnIndex(1);
+        ImGui.Text(current);
+        ImGui.TableSetColumnIndex(2);
+        ImGui.Text(last ?? "-");
+    }
+
+    private static string FormatNullableBool(bool? value)
+    {
+        if (!value.HasValue)
+        {
+            return "-";
+        }
+
+        return value.Value ? "Yes" : "No";
+    }
+
+    private static string FormatNullableTime(DateTimeOffset? value)
+    {
+        return value.HasValue ? value.Value.ToLocalTime().ToString("HH:mm:ss") : "-";
+    }
+
+    private CharacterStatsSnapshot GetCharacterStatsSnapshot(Pair pair)
+    {
+        var uid = pair.UserData.UID;
+        if (!_characterStats.TryGetValue(uid, out var snapshot))
+        {
+            var initial = BuildCharacterStats(pair);
+            snapshot = new CharacterStatsSnapshot(initial);
+            _characterStats[uid] = snapshot;
+            return snapshot;
+        }
+
+        var updated = BuildCharacterStats(pair);
+        if (HasStatsChanged(snapshot.Current, updated))
+        {
+            snapshot.Previous = snapshot.Current;
+            snapshot.Current = updated;
+        }
+        else
+        {
+            snapshot.Current = updated;
+        }
+
+        return snapshot;
+    }
+
+    private static bool HasStatsChanged(CharacterStats current, CharacterStats updated)
+    {
+        return !string.Equals(current.DataHash, updated.DataHash, StringComparison.Ordinal)
+               || current.AppliedBytes != updated.AppliedBytes
+               || current.AppliedTris != updated.AppliedTris
+               || current.AppliedVramBytes != updated.AppliedVramBytes
+               || current.IsVisible != updated.IsVisible
+               || current.IsMutuallyVisible != updated.IsMutuallyVisible
+               || current.IsPaused != updated.IsPaused
+               || current.ApplyRetryCount != updated.ApplyRetryCount
+               || current.LastAckSuccess != updated.LastAckSuccess
+               || !string.Equals(current.LastAckId, updated.LastAckId, StringComparison.Ordinal)
+               || current.LastAckTime != updated.LastAckTime;
+    }
+
+    private static CharacterStats BuildCharacterStats(Pair pair)
+    {
+        var dataHash = pair.GetCurrentDataHash();
+        var lastAction = GetLastApplyDebugLine(pair);
+
+        return new CharacterStats(
+            dataHash: string.IsNullOrEmpty(dataHash) ? "-" : dataHash,
+            appliedBytes: pair.LastAppliedDataBytes,
+            appliedTris: pair.LastAppliedDataTris,
+            appliedVramBytes: pair.LastAppliedApproximateVRAMBytes,
+            isVisible: pair.IsVisible,
+            isMutuallyVisible: pair.IsMutuallyVisible,
+            isPaused: pair.IsPaused,
+            lastAckSuccess: pair.LastAcknowledgmentSuccess,
+            lastAckTime: pair.LastAcknowledgmentTime,
+            lastAckId: pair.LastAcknowledgmentId,
+            applyRetryCount: pair.ApplyRetryCount,
+            snapshotTime: DateTimeOffset.Now,
+            lastAction: string.IsNullOrEmpty(lastAction) ? "-" : lastAction);
+    }
+
+    private static string? GetLastApplyDebugLine(Pair pair)
+    {
+        var lines = pair.GetApplyDebugLines();
+        if (lines.Length == 0)
+        {
+            return null;
+        }
+
+        return lines[^1];
+    }
+
+    private sealed class CharacterStatsSnapshot
+    {
+        public CharacterStatsSnapshot(CharacterStats current)
+        {
+            Current = current;
+        }
+
+        public CharacterStats Current { get; set; }
+        public CharacterStats? Previous { get; set; }
+    }
+
+    private sealed class CharacterStats
+    {
+        public CharacterStats(string dataHash, long appliedBytes, long appliedTris, long appliedVramBytes, bool isVisible,
+            bool isMutuallyVisible, bool isPaused, bool? lastAckSuccess, DateTimeOffset? lastAckTime, string? lastAckId,
+            int applyRetryCount, DateTimeOffset snapshotTime, string lastAction)
+        {
+            DataHash = dataHash;
+            AppliedBytes = appliedBytes;
+            AppliedTris = appliedTris;
+            AppliedVramBytes = appliedVramBytes;
+            IsVisible = isVisible;
+            IsMutuallyVisible = isMutuallyVisible;
+            IsPaused = isPaused;
+            LastAckSuccess = lastAckSuccess;
+            LastAckTime = lastAckTime;
+            LastAckId = lastAckId;
+            ApplyRetryCount = applyRetryCount;
+            SnapshotTime = snapshotTime;
+            LastAction = lastAction;
+        }
+
+        public string DataHash { get; }
+        public long AppliedBytes { get; }
+        public long AppliedTris { get; }
+        public long AppliedVramBytes { get; }
+        public bool IsVisible { get; }
+        public bool IsMutuallyVisible { get; }
+        public bool IsPaused { get; }
+        public bool? LastAckSuccess { get; }
+        public DateTimeOffset? LastAckTime { get; }
+        public string? LastAckId { get; }
+        public int ApplyRetryCount { get; }
+        public DateTimeOffset SnapshotTime { get; }
+        public string LastAction { get; }
     }
     
     private bool _showLogPopup = false;

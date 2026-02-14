@@ -248,6 +248,13 @@ public class SpheneIcon : WindowMediatorSubscriberBase
                 compatiblePlugins.Add(new PluginInfo("Brio", "Brio"));
             }
         }
+
+        var bypassEmotePlugin = _pluginInterface.InstalledPlugins
+            .FirstOrDefault(p => string.Equals(p.InternalName, "BypassEmote", StringComparison.OrdinalIgnoreCase));
+        if (bypassEmotePlugin != null)
+        {
+            compatiblePlugins.Add(new PluginInfo("BypassEmote", "BypassEmote"));
+        }
         
         return compatiblePlugins;
     }
@@ -262,6 +269,7 @@ public class SpheneIcon : WindowMediatorSubscriberBase
                 "customizeplus" => "/customize",
                 "simpleheels" => "/heels",
                 "livepose" => "/heels livepose",
+                "bypassemote" => "/be",
                 _ => $"/{internalName.ToLower()}"
             };
             

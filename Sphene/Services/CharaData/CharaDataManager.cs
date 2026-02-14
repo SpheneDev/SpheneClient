@@ -148,6 +148,45 @@ public sealed partial class CharaDataManager : DisposableMediatorSubscriberBase
                 }
             });
         });
+
+        spheneMediator.Subscribe<BypassEmoteUpdateMessage>(this, (msg) => _ = UpdateBypassEmote(msg.BypassEmoteData, msg.DataHash));
+    }
+
+    private async Task UpdateBypassEmote(string data, string? dataHash = null)
+    {
+        Logger.LogDebug("UpdateBypassEmote called. Hash: {Hash}, DataLen: {Len}, OwnDataCount: {Count}", dataHash ?? "null", data.Length, _ownCharaData.Count);
+
+        if (!_apiController.IsConnected) return;
+
+        string? targetId = null;
+
+        // If we have a valid hash from the message (Fast Path), use it.
+        // This allows updating even if _ownCharaData is empty (e.g. startup scenario where CacheCreationService knows the hash but we haven't processed the full data yet).
+        if (!string.IsNullOrEmpty(dataHash))
+        {
+            targetId = dataHash;
+        }
+        else
+        {
+            // Fallback to finding the most recent owned CharaData
+            var latestData = _ownCharaData.Values.OrderByDescending(d => d.UpdatedDate).FirstOrDefault();
+            if (latestData != null)
+            {
+                targetId = latestData.Id;
+            }
+        }
+
+        if (string.IsNullOrEmpty(targetId))
+        {
+            Logger.LogDebug("Skipping BypassEmote update - no target ID found (Hash: {Hash}, OwnDataCount: {Count})", dataHash ?? "null", _ownCharaData.Count);
+            return;
+        }
+
+        Logger.LogDebug("Sending BypassEmote update to API for {Id}. Data Length: {Len}", targetId, data.Length);
+
+        var visibleUsers = _pairManager.GetVisibleUsers();
+        var dto = new BypassEmoteUpdateDto(targetId, data, visibleUsers);
+        await _apiController.BypassEmoteUpdate(dto).ConfigureAwait(false);
     }
 
     public Task? AttachingPoseTask { get; private set; }
@@ -236,6 +275,7 @@ public sealed partial class CharaDataManager : DisposableMediatorSubscriberBase
             HonorificData = dataDto.HonorificData,
             MoodlesData = dataDto.MoodlesData,
             PetNamesData = dataDto.PetNamesData,
+            BypassEmoteData = dataDto.BypassEmoteData,
             UpdatedDate = dataDto.UpdatedDate
         };
 
@@ -563,7 +603,7 @@ public sealed partial class CharaDataManager : DisposableMediatorSubscriberBase
                     extractedFiles, charaFile.CharaFileData.ManipulationData, charaFile.CharaFileData.GlamourerData,
                     charaFile.CharaFileData.CustomizePlusData, charaFile.CharaFileData.HeelsData, 
                     charaFile.CharaFileData.HonorificData, charaFile.CharaFileData.MoodlesData, 
-                    charaFile.CharaFileData.PetNamesData, CancellationToken.None).ConfigureAwait(false);
+                    charaFile.CharaFileData.PetNamesData, charaFile.CharaFileData.BypassEmoteData, CancellationToken.None).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -770,6 +810,7 @@ public sealed partial class CharaDataManager : DisposableMediatorSubscriberBase
             HonorificData = dataDto.HonorificData,
             MoodlesData = dataDto.MoodlesData,
             PetNamesData = dataDto.PetNamesData,
+            BypassEmoteData = dataDto.BypassEmoteData,
             UpdatedDate = dataDto.UpdatedDate
         };
 
@@ -894,7 +935,7 @@ public sealed partial class CharaDataManager : DisposableMediatorSubscriberBase
 
     private async Task ApplyDataAsync(Guid applicationId, GameObjectHandler tempHandler, bool isSelf, bool autoRevert,
         CharaDataMetaInfoExtendedDto metaInfo, Dictionary<string, string> modPaths, string? manipData, string? glamourerData, string? customizeData, 
-        string? heelsData, string? honorificData, string? moodlesData, string? petNamesData, CancellationToken token)
+        string? heelsData, string? honorificData, string? moodlesData, string? petNamesData, string? bypassEmoteData, CancellationToken token)
     {
         Guid? cPlusId = null;
         Guid penumbraCollection;
@@ -965,6 +1006,14 @@ public sealed partial class CharaDataManager : DisposableMediatorSubscriberBase
                 await _ipcManager.PetNames.SetPlayerData(tempHandler.Address, petNamesData).ConfigureAwait(false);
             }
 
+            DataApplicationProgress = "Applying BypassEmote data";
+            Logger.LogTrace("[{appId}] Applying BypassEmote data", applicationId);
+            if (!string.IsNullOrEmpty(bypassEmoteData))
+            {
+                var cleanData = bypassEmoteData.Split('|')[0];
+                await _ipcManager.BypassEmote.SetStateForCharacterAsync(tempHandler.Address, cleanData).ConfigureAwait(false);
+            }
+
             if (autoRevert)
             {
                 Logger.LogTrace("[{appId}] Starting wait for auto revert", applicationId);
@@ -1026,6 +1075,42 @@ public sealed partial class CharaDataManager : DisposableMediatorSubscriberBase
         }
 
         Logger.LogDebug("Pushing update dto to server: {data}", baseUpdateDto);
+
+        if (baseUpdateDto.BypassEmoteData != null)
+        {
+            await _apiController.BypassEmoteUpdate(new BypassEmoteUpdateDto(baseUpdateDto.Id, baseUpdateDto.BypassEmoteData)).ConfigureAwait(false);
+
+            bool otherChanges = baseUpdateDto.Description != null
+               || baseUpdateDto.ExpiryDate != null
+               || baseUpdateDto.AccessType != null
+               || baseUpdateDto.ShareType != null
+               || baseUpdateDto.AllowedUsers != null
+               || baseUpdateDto.AllowedGroups != null
+               || baseUpdateDto.GlamourerData != null
+               || baseUpdateDto.FileSwaps != null
+               || baseUpdateDto.FileGamePaths != null
+               || baseUpdateDto.CustomizeData != null
+               || baseUpdateDto.ManipulationData != null
+               || baseUpdateDto.HeelsData != null
+               || baseUpdateDto.HonorificData != null
+               || baseUpdateDto.MoodlesData != null
+               || baseUpdateDto.PetNamesData != null
+               || baseUpdateDto.Poses != null;
+
+            if (!otherChanges)
+            {
+                if (_ownCharaData.TryGetValue(baseUpdateDto.Id, out var currentExtended))
+                {
+                    var newDto = currentExtended with
+                    {
+                        BypassEmoteData = baseUpdateDto.BypassEmoteData,
+                        UpdatedDate = DateTime.UtcNow
+                    };
+                    await AddOrUpdateDto(newDto).ConfigureAwait(false);
+                }
+                return;
+            }
+        }
 
         var res = await _apiController.CharaDataUpdate(baseUpdateDto).ConfigureAwait(false);
         await AddOrUpdateDto(res).ConfigureAwait(false);
@@ -1188,7 +1273,7 @@ public sealed partial class CharaDataManager : DisposableMediatorSubscriberBase
         var extendedMetaInfo = await CacheData(metaInfo).ConfigureAwait(false);
 
         await ApplyDataAsync(applicationId, tempHandler, isSelf, autoRevert, extendedMetaInfo, modPaths, charaDataDownloadDto.ManipulationData, charaDataDownloadDto.GlamourerData,
-            charaDataDownloadDto.CustomizeData, charaDataDownloadDto.HeelsData, charaDataDownloadDto.HonorificData, charaDataDownloadDto.MoodlesData, charaDataDownloadDto.PetNamesData, token).ConfigureAwait(false);
+            charaDataDownloadDto.CustomizeData, charaDataDownloadDto.HeelsData, charaDataDownloadDto.HonorificData, charaDataDownloadDto.MoodlesData, charaDataDownloadDto.PetNamesData, charaDataDownloadDto.BypassEmoteData, token).ConfigureAwait(false);
     }
 
     public async Task<(string Result, bool Success)> UploadFiles(List<GamePathEntry> missingFileList, Func<Task>? postUpload = null)

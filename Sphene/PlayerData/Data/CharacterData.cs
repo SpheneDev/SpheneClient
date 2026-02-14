@@ -14,6 +14,7 @@ public class CharacterData
     public string ManipulationString { get; set; } = string.Empty;
     public string MoodlesData { get; set; } = string.Empty;
     public string PetNamesData { get; set; } = string.Empty;
+    public string BypassEmoteData { get; set; } = string.Empty;
 
     public void SetFragment(ObjectKind kind, CharacterDataFragment? fragment)
     {
@@ -25,6 +26,7 @@ public class CharacterData
             ManipulationString = playerFragment?.ManipulationString ?? string.Empty;
             MoodlesData = playerFragment?.MoodlesData ?? string.Empty;
             PetNamesData = playerFragment?.PetNamesData ?? string.Empty;
+            BypassEmoteData = playerFragment?.BypassEmoteData ?? string.Empty;
         }
 
         if (fragment is null)
@@ -70,7 +72,8 @@ public class CharacterData
             CustomizePlusData = CustomizePlusScale.ToDictionary(d => d.Key, d => d.Value),
             HonorificData = HonorificData,
             MoodlesData = MoodlesData,
-            PetNamesData = PetNamesData
+            PetNamesData = PetNamesData,
+            BypassEmoteData = BypassEmoteData
         };
     }
 }
