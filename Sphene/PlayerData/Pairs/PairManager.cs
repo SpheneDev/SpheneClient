@@ -276,10 +276,16 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         _acknowledgmentTimeoutManager.CancelTimeout(acknowledgmentDto.DataHash);
         _acknowledgmentTimeoutManager.CancelInvalidHashTimeout(acknowledgmentDto.User.UID);
 
-        // Update the pair status and grant AckYou (True) to this specific user
-        // This ensures the partner sees a green eye indicating we acknowledge their sync
         if (_allClientPairs.TryGetValue(acknowledgmentDto.User, out var pair))
         {
+            var otherPermissions = pair.UserPair.OtherPermissions;
+            var newAckYouStatus = acknowledgmentDto.Success;
+            if (otherPermissions.IsAckYou() != newAckYouStatus)
+            {
+                otherPermissions.SetAckYou(newAckYouStatus);
+                pair.UserPair.OtherPermissions = otherPermissions;
+            }
+
             _ = pair.UpdateAcknowledgmentStatus(acknowledgmentDto.DataHash, acknowledgmentDto.Success, new DateTimeOffset(acknowledgmentDto.AcknowledgedAt, TimeSpan.Zero));
         }
 

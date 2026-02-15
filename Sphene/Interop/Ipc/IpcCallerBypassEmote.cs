@@ -10,6 +10,7 @@ public sealed class IpcCallerBypassEmote : IIpcCaller
 {
     private const int RequiredApiMajorVersion = 3;
     private const int RequiredApiMinorVersion = 0;
+    private static readonly TimeSpan ImmediateDuplicateSuppressWindow = TimeSpan.FromMilliseconds(800);
 
     private readonly ILogger<IpcCallerBypassEmote> _logger;
     private readonly DalamudUtilService _dalamudUtil;
@@ -21,8 +22,11 @@ public sealed class IpcCallerBypassEmote : IIpcCaller
     private readonly ICallGateSubscriber<nint, string, object> _setStateForCharacter;
     private readonly ICallGateSubscriber<nint, object> _clearStateForCharacter;
     private readonly ICallGateSubscriber<string, object> _onStateChange;
+    private readonly ICallGateSubscriber<string, object> _onStateChangeImmediate;
     private readonly ICallGateSubscriber<object> _onReady;
     private readonly ICallGateSubscriber<object> _onDispose;
+    private string _lastImmediateData = string.Empty;
+    private DateTime _lastImmediateTime = DateTime.MinValue;
 
     public IpcCallerBypassEmote(ILogger<IpcCallerBypassEmote> logger, IDalamudPluginInterface pi, DalamudUtilService dalamudUtil,
         SpheneMediator mediator)
@@ -37,10 +41,12 @@ public sealed class IpcCallerBypassEmote : IIpcCaller
         _setStateForCharacter = pi.GetIpcSubscriber<nint, string, object>("BypassEmote.SetStateForCharacter");
         _clearStateForCharacter = pi.GetIpcSubscriber<nint, object>("BypassEmote.ClearStateForCharacter");
         _onStateChange = pi.GetIpcSubscriber<string, object>("BypassEmote.OnStateChange");
+        _onStateChangeImmediate = pi.GetIpcSubscriber<string, object>("BypassEmote.OnStateChangeImmediate");
         _onReady = pi.GetIpcSubscriber<object>("BypassEmote.OnReady");
         _onDispose = pi.GetIpcSubscriber<object>("BypassEmote.OnDispose");
 
         _onStateChange.Subscribe(OnStateChange);
+        _onStateChangeImmediate.Subscribe(OnStateChangeImmediate);
         _onReady.Subscribe(OnReady);
         _onDispose.Subscribe(OnDispose);
 
@@ -104,6 +110,24 @@ public sealed class IpcCallerBypassEmote : IIpcCaller
 
     private void OnStateChange(string data)
     {
+        if (string.Equals(data, _lastImmediateData, StringComparison.Ordinal)
+            && DateTime.UtcNow - _lastImmediateTime <= ImmediateDuplicateSuppressWindow)
+        {
+            return;
+        }
+
+        PublishState(data);
+    }
+
+    private void OnStateChangeImmediate(string data)
+    {
+        _lastImmediateData = data;
+        _lastImmediateTime = DateTime.UtcNow;
+        PublishState(data);
+    }
+
+    private void PublishState(string data)
+    {
         _mediator.Publish(new BypassEmoteMessage($"{data}|{DateTime.UtcNow.Ticks}"));
     }
 
@@ -123,12 +147,13 @@ public sealed class IpcCallerBypassEmote : IIpcCaller
     {
         var playerAddress = await _dalamudUtil.GetPlayerPointerAsync().ConfigureAwait(false);
         var state = await GetStateForCharacterAsync(playerAddress).ConfigureAwait(false);
-        _mediator.Publish(new BypassEmoteMessage($"{state}|{DateTime.UtcNow.Ticks}"));
+        PublishState(state);
     }
 
     public void Dispose()
     {
         _onStateChange.Unsubscribe(OnStateChange);
+        _onStateChangeImmediate.Unsubscribe(OnStateChangeImmediate);
         _onReady.Unsubscribe(OnReady);
         _onDispose.Unsubscribe(OnDispose);
     }
