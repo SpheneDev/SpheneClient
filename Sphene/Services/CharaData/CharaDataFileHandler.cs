@@ -90,24 +90,6 @@ public sealed class CharaDataFileHandler : IDisposable
         PlayerData.Data.CharacterData newCdata = new();
         var fragment = await _playerDataFactory.BuildCharacterData(tempHandler, CancellationToken.None).ConfigureAwait(false);
         newCdata.SetFragment(ObjectKind.Player, fragment);
-        if (newCdata.FileReplacements.TryGetValue(ObjectKind.Player, out var playerData) && playerData != null)
-        {
-            foreach (var data in playerData.Select(g => g.GamePaths))
-            {
-                data.RemoveWhere(g => g.EndsWith(".pap", StringComparison.OrdinalIgnoreCase)
-                    || g.EndsWith(".tmb", StringComparison.OrdinalIgnoreCase)
-                    || g.EndsWith(".scd", StringComparison.OrdinalIgnoreCase)
-                    || (g.EndsWith(".avfx", StringComparison.OrdinalIgnoreCase)
-                        && !g.Contains("/weapon/", StringComparison.OrdinalIgnoreCase)
-                        && !g.Contains("/equipment/", StringComparison.OrdinalIgnoreCase))
-                    || (g.EndsWith(".atex", StringComparison.OrdinalIgnoreCase)
-                        && !g.Contains("/weapon/", StringComparison.OrdinalIgnoreCase)
-                        && !g.Contains("/equipment/", StringComparison.OrdinalIgnoreCase)));
-            }
-
-            playerData.RemoveWhere(g => g.GamePaths.Count == 0);
-        }
-
         return newCdata.ToAPI();
     }
 

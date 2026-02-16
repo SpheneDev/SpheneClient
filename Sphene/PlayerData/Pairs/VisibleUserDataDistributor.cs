@@ -21,6 +21,7 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
     private readonly SessionAcknowledgmentManager _sessionAcknowledgmentManager;
     private CharacterData? _lastCreatedData;
     private CharacterData? _uploadingCharacterData = null;
+    private CharacterData? _pendingBackgroundUploadData = null;
     private readonly List<UserData> _previouslyVisiblePlayers = [];
     private Task<CharacterData>? _fileUploadTask = null;
     private readonly HashSet<UserData> _usersToPushDataTo = [];
@@ -68,6 +69,7 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
             
             _lastCreatedData = msg.CharacterData;
             Logger.LogDebug("{tag} Data created: previousHash={oldHash} newHash={newHash}", SyncProgressTag, previousHash ?? "null", newHash ?? "null");
+            EnsureServerHasFilesForCurrentData();
             
             // Only push if hash actually changed or if we have users waiting for data
             if (!string.Equals(previousHash, newHash, StringComparison.Ordinal) || _usersToPushDataTo.Count > 0)
@@ -82,7 +84,11 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
             }
         });
 
-        Mediator.Subscribe<ConnectedMessage>(this, (_) => PushToAllVisibleUsers());
+        Mediator.Subscribe<ConnectedMessage>(this, (_) =>
+        {
+            PushToAllVisibleUsers();
+            EnsureServerHasFilesForCurrentData();
+        });
         Mediator.Subscribe<DisconnectedMessage>(this, (_) => 
         {
             _previouslyVisiblePlayers.Clear();
@@ -102,6 +108,73 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
         }
 
         base.Dispose(disposing);
+    }
+
+    private void EnsureServerHasFilesForCurrentData()
+    {
+        if (_lastCreatedData == null)
+        {
+            return;
+        }
+
+        if (_pairManager.GetVisibleUsers().Count > 0)
+        {
+            return;
+        }
+
+        var dataToUpload = _pendingBackgroundUploadData ?? _lastCreatedData;
+        if (dataToUpload == null)
+        {
+            return;
+        }
+
+        dataToUpload = dataToUpload.DeepClone();
+        var hash = dataToUpload.DataHash?.Value ?? string.Empty;
+        if (string.IsNullOrEmpty(hash))
+        {
+            return;
+        }
+
+        if (!_fileTransferManager.IsInitialized)
+        {
+            _pendingBackgroundUploadData = dataToUpload;
+            Logger.LogDebug("{tag} Background upload deferred: hash={hash} file transfer not initialized", SyncProgressTag, hash);
+            return;
+        }
+
+        if (_fileUploadTask != null && !_fileUploadTask.IsCompleted)
+        {
+            var existingHash = _uploadingCharacterData?.DataHash?.Value ?? string.Empty;
+            if (string.Equals(existingHash, hash, StringComparison.Ordinal))
+            {
+                Logger.LogDebug("{tag} Background upload skip: hash={hash} already running", SyncProgressTag, hash);
+                return;
+            }
+
+            Logger.LogDebug("{tag} Background upload queued: hash={hash}", SyncProgressTag, hash);
+            _uploadingCharacterData = dataToUpload;
+            _fileUploadTask = _fileUploadTask.ContinueWith(_ => UploadFilesWithLogging(dataToUpload, []), TaskScheduler.Default).Unwrap();
+            _pendingBackgroundUploadData = null;
+            return;
+        }
+
+        _uploadingCharacterData = dataToUpload;
+        Logger.LogDebug("{tag} Background upload start: hash={hash}", SyncProgressTag, hash);
+        _fileUploadTask = UploadFilesWithLogging(dataToUpload, []);
+        _pendingBackgroundUploadData = null;
+    }
+
+    private async Task<CharacterData> UploadFilesWithLogging(CharacterData data, List<UserData> recipients)
+    {
+        try
+        {
+            return await _fileTransferManager.UploadFiles(data, recipients).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "{tag} Upload failed: hash={hash}", SyncProgressTag, data.DataHash?.Value ?? "null");
+            return data;
+        }
     }
 
     private void PushToAllVisibleUsers(bool forced = false)

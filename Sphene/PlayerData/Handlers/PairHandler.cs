@@ -544,6 +544,69 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         _applyPipelineTask = DownloadAndApplyCharacter(applicationBase, characterData.DeepClone(), charaDataToUpdate, forceApplyCustomization);
     }
 
+    private void PrefetchVisibleFileReplacements(CharacterData characterData)
+    {
+        if (_charaHandler == null || _charaHandler.Address == nint.Zero)
+        {
+            return;
+        }
+
+        if (_downloadCancellationTokenSource == null || _downloadCancellationTokenSource.IsCancellationRequested)
+        {
+            _downloadCancellationTokenSource = _downloadCancellationTokenSource?.CancelRecreate() ?? new CancellationTokenSource();
+        }
+
+        if (_pairDownloadTask != null && !_pairDownloadTask.IsCompleted)
+        {
+            Logger.LogDebug("{tag} Prefetch skipped: download in progress user={user}", SyncProgressTag, Pair.UserData.AliasOrUID);
+            return;
+        }
+
+        var snapshot = characterData.DeepClone();
+        var downloadToken = _downloadCancellationTokenSource.Token;
+        var applicationBase = Guid.NewGuid();
+        _pairDownloadTask = Task.Run(async () =>
+        {
+            try
+            {
+                var missingFiles = TryCalculateModdedDictionary(applicationBase, snapshot, out var moddedPaths, downloadToken);
+                Logger.LogDebug("{tag} Prefetch calculate: user={user} hash={hash} missingFiles={missing} paths={paths}",
+                    SyncProgressTag, Pair.UserData.AliasOrUID, snapshot.DataHash?.Value ?? "null", missingFiles.Count, moddedPaths.Count);
+
+                if (missingFiles.Count == 0)
+                {
+                    Logger.LogDebug("{tag} Prefetch skipped: user={user} hash={hash} missingFiles=0",
+                        SyncProgressTag, Pair.UserData.AliasOrUID, snapshot.DataHash?.Value ?? "null");
+                    return;
+                }
+
+                var toDownloadFiles = await _downloadManager.InitiateDownloadList(_charaHandler, missingFiles, downloadToken).ConfigureAwait(false);
+                Logger.LogDebug("{tag} Prefetch batch: user={user} hash={hash} missingFiles={count}",
+                    SyncProgressTag, Pair.UserData.AliasOrUID, snapshot.DataHash?.Value ?? "null", toDownloadFiles.Count);
+
+                if (!_playerPerformanceService.ComputeAndAutoPauseOnVRAMUsageThresholds(this, snapshot, toDownloadFiles))
+                {
+                    Logger.LogDebug("{tag} Prefetch paused: user={user} hash={hash} reason=performance",
+                        SyncProgressTag, Pair.UserData.AliasOrUID, snapshot.DataHash?.Value ?? "null");
+                    _downloadManager.ClearDownload();
+                    return;
+                }
+
+                await _downloadManager.DownloadFiles(_charaHandler, missingFiles, downloadToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                Logger.LogDebug("{tag} Prefetch cancelled: user={user} hash={hash}",
+                    SyncProgressTag, Pair.UserData.AliasOrUID, snapshot.DataHash?.Value ?? "null");
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "{tag} Prefetch failed: user={user} hash={hash}",
+                    SyncProgressTag, Pair.UserData.AliasOrUID, snapshot.DataHash?.Value ?? "null");
+            }
+        });
+    }
+
 
 
     public override string ToString()
@@ -1360,6 +1423,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                     IsVisible = true;
                     if (_cachedData != null)
                     {
+                        PrefetchVisibleFileReplacements(_cachedData);
                         var currentAddress = _charaHandler!.Address;
                         if (!string.IsNullOrEmpty(_cachedData.HonorificData))
                         {

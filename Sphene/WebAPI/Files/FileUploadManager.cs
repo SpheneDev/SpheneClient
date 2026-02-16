@@ -56,6 +56,7 @@ public sealed class FileUploadManager : DisposableMediatorSubscriberBase
 
     public List<FileTransfer> CurrentUploads { get; } = [];
     public bool IsUploading => CurrentUploads.Count > 0;
+    public bool IsInitialized => _orchestrator.IsInitialized;
 
     private const long MaxUploadSizeBytes = 1024L * 1024L * 1024L;
 
