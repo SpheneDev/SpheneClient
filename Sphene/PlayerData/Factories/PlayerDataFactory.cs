@@ -23,10 +23,12 @@ public class PlayerDataFactory
     private readonly XivDataAnalyzer _modelAnalyzer;
     private readonly SpheneMediator _spheneMediator;
     private readonly TransientResourceManager _transientResourceManager;
+    private readonly PenumbraModScanner _penumbraModScanner;
 
     public PlayerDataFactory(ILogger<PlayerDataFactory> logger, DalamudUtilService dalamudUtil, IpcManager ipcManager,
         TransientResourceManager transientResourceManager, FileCacheManager fileReplacementFactory,
-        PerformanceCollectorService performanceCollector, XivDataAnalyzer modelAnalyzer, SpheneMediator spheneMediator)
+        PerformanceCollectorService performanceCollector, XivDataAnalyzer modelAnalyzer, SpheneMediator spheneMediator,
+        PenumbraModScanner penumbraModScanner)
     {
         _logger = logger;
         _dalamudUtil = dalamudUtil;
@@ -36,6 +38,7 @@ public class PlayerDataFactory
         _performanceCollector = performanceCollector;
         _modelAnalyzer = modelAnalyzer;
         _spheneMediator = spheneMediator;
+        _penumbraModScanner = penumbraModScanner;
         _logger.LogTrace("Creating {this}", nameof(PlayerDataFactory));
     }
 
@@ -144,6 +147,59 @@ public class PlayerDataFactory
         fragment.FileReplacements.RemoveWhere(c => c.GamePaths.Any(g => !CacheMonitor.AllowedFileExtensions.Any(e => g.EndsWith(e, StringComparison.OrdinalIgnoreCase))));
 
         ct.ThrowIfCancellationRequested();
+
+        // Populate ModName and OptionName from PenumbraModScanner
+        try
+        {
+            var modLookup = await _penumbraModScanner.GetModFileLookupAsync(ct).ConfigureAwait(false);
+            _logger.LogDebug("[FileReplacementNew] PenumbraModScanner returned {count} entries", modLookup.Count);
+
+            if (modLookup.Count > 0 && _logger.IsEnabled(LogLevel.Trace))
+            {
+                 var sampleKeys = string.Join(", ", modLookup.Keys.Take(5));
+                 _logger.LogTrace("[FileReplacementNew] Sample keys in lookup: {keys}", sampleKeys);
+            }
+
+            var activeModNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var replacement in fragment.FileReplacements)
+            {
+                // Try exact match first (case-insensitive due to dictionary)
+                if (modLookup.TryGetValue(replacement.ResolvedPath, out var modInfo))
+                {
+                    replacement.ModName = modInfo.ModName;
+                    replacement.OptionName = modInfo.OptionName;
+                    activeModNames.Add(modInfo.ModName);
+                    _logger.LogTrace("[FileReplacementNew] Found match for {path}: Mod={mod}, Option={opt}", replacement.ResolvedPath, modInfo.ModName, modInfo.OptionName);
+                }
+                else
+                {
+                    // Try normalizing separators
+                    var normalizedPath = Path.GetFullPath(replacement.ResolvedPath);
+                    if (modLookup.TryGetValue(normalizedPath, out modInfo))
+                    {
+                        replacement.ModName = modInfo.ModName;
+                        replacement.OptionName = modInfo.OptionName;
+                        activeModNames.Add(modInfo.ModName);
+                         _logger.LogTrace("[FileReplacementNew] Found match for normalized {path}: Mod={mod}, Option={opt}", normalizedPath, modInfo.ModName, modInfo.OptionName);
+                    }
+                    else
+                    {
+                        // Always log failures for debugging
+                         _logger.LogDebug("[FileReplacementNew] Failed to find mod info for path: '{path}' (Normalized: '{norm}')", replacement.ResolvedPath, normalizedPath);
+                    }
+                }
+            }
+
+            if (objectKind == ObjectKind.Player)
+            {
+                _penumbraModScanner.SetActivePlayerMods(activeModNames);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[FileReplacementNew] Failed to populate mod details");
+        }
 
         _logger.LogDebug("== Static Replacements ==");
         foreach (var replacement in fragment.FileReplacements.Where(i => i.HasFileReplacement).OrderBy(i => i.GamePaths.First(), StringComparer.OrdinalIgnoreCase))
@@ -351,7 +407,7 @@ public class PlayerDataFactory
         var forwardPaths = forwardResolve.ToArray();
         var reversePaths = reverseResolve.ToArray();
         Dictionary<string, List<string>> resolvedPaths = new(StringComparer.Ordinal);
-        var (forward, reverse) = await _ipcManager.Penumbra.ResolvePathsAsync(forwardPaths, reversePaths).ConfigureAwait(false);
+        var (forward, reverse) = await _ipcManager.Penumbra.ResolvePlayerPathsAsync(forwardPaths, reversePaths).ConfigureAwait(false);
         for (int i = 0; i < forwardPaths.Length; i++)
         {
             var filePath = forward[i].ToLowerInvariant();

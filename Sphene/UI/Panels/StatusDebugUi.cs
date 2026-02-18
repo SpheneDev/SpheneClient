@@ -23,6 +23,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
     
     private readonly PairManager _pairManager;
     private readonly ApiController _apiController;
+    private readonly PenumbraModScanner _penumbraScanner;
     private readonly ConnectionHealthMonitor _healthMonitor;
     private readonly CircuitBreakerService _circuitBreaker;
     private readonly EnhancedAcknowledgmentManager? _acknowledgmentManager;
@@ -37,9 +38,12 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
     private string? _selectedCharacterDebugUid;
     private string? _selectedCharacterStatsUid;
     private readonly Dictionary<string, CharacterStatsSnapshot> _characterStats = new(StringComparer.Ordinal);
+    private string _penumbraSearch = string.Empty;
+    private bool _showOnlyEnabledMods = true;
     
     public StatusDebugUi(ILogger<StatusDebugUi> logger, SpheneMediator mediator,
         UiSharedService uiSharedService, PairManager pairManager, ApiController apiController,
+        PenumbraModScanner penumbraScanner,
         ConnectionHealthMonitor healthMonitor, CircuitBreakerService circuitBreaker,
         PerformanceCollectorService performanceCollectorService,
         EnhancedAcknowledgmentManager? acknowledgmentManager = null,
@@ -49,6 +53,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         _logger = logger;
         _pairManager = pairManager;
         _apiController = apiController;
+        _penumbraScanner = penumbraScanner;
         _healthMonitor = healthMonitor;
         _circuitBreaker = circuitBreaker;
         _acknowledgmentManager = acknowledgmentManager;
@@ -194,6 +199,14 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             if (characterStatsTab)
             {
                 DrawCharacterStatistics();
+            }
+        }
+
+        using (var penumbraDebugTab = ImRaii.TabItem("Penumbra Debug"))
+        {
+            if (penumbraDebugTab)
+            {
+                DrawPenumbraDebug();
             }
         }
         
@@ -662,6 +675,130 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         }
 
         return string.Join('\n', lines);
+    }
+
+    private void DrawPenumbraDebug()
+    {
+        ImGui.Text("Penumbra Mod Scan Debug");
+        ImGui.Separator();
+
+        if (ImGui.Button("Force Rescan"))
+        {
+            _penumbraScanner.MarkDirty();
+        }
+        ImGui.SameLine();
+        ImGui.TextColored(ImGuiColors.DalamudGrey, "Note: Scanning happens automatically when needed.");
+
+        ImGui.InputText("Search Mods", ref _penumbraSearch, 100);
+        ImGui.SameLine();
+        ImGui.Checkbox("Show Only Enabled", ref _showOnlyEnabledMods);
+        
+        var debugInfo = _penumbraScanner.LastScanDebugInfo;
+        
+        if (debugInfo.Count == 0)
+        {
+            ImGui.TextColored(ImGuiColors.DalamudYellow, "No scan data available yet. Please trigger a character update or wait.");
+            return;
+        }
+
+        var filtered = debugInfo.Where(x => 
+            (string.IsNullOrEmpty(_penumbraSearch) || 
+            x.DirectoryName.Contains(_penumbraSearch, StringComparison.OrdinalIgnoreCase) ||
+            x.Status.Contains(_penumbraSearch, StringComparison.OrdinalIgnoreCase) ||
+            x.ModName.Contains(_penumbraSearch, StringComparison.OrdinalIgnoreCase)) &&
+            (!_showOnlyEnabledMods || x.IsEnabled || x.IsTemporary)
+        ).ToList();
+
+        ImGui.Text($"Total Mods Scanned: {debugInfo.Count} | Filtered: {filtered.Count}");
+
+        using var table = ImRaii.Table("PenumbraDebugTable", 10, ImGuiTableFlags.RowBg | ImGuiTableFlags.Borders | ImGuiTableFlags.Resizable | ImGuiTableFlags.ScrollY);
+        if (!table) return;
+
+        ImGui.TableSetupColumn("Directory Name", ImGuiTableColumnFlags.WidthStretch);
+        ImGui.TableSetupColumn("Mod Name", ImGuiTableColumnFlags.WidthStretch);
+        ImGui.TableSetupColumn("Status", ImGuiTableColumnFlags.WidthFixed, 150);
+        ImGui.TableSetupColumn("Flags", ImGuiTableColumnFlags.WidthFixed, 100);
+        ImGui.TableSetupColumn("Priority", ImGuiTableColumnFlags.WidthFixed, 60);
+        ImGui.TableSetupColumn("Active / Total Files", ImGuiTableColumnFlags.WidthFixed, 120);
+        ImGui.TableSetupColumn("Enabled", ImGuiTableColumnFlags.WidthFixed, 60);
+        ImGui.TableSetupColumn("Inherited", ImGuiTableColumnFlags.WidthFixed, 60);
+        ImGui.TableSetupColumn("Temporary", ImGuiTableColumnFlags.WidthFixed, 60);
+        ImGui.TableSetupColumn("Options", ImGuiTableColumnFlags.WidthFixed, 200);
+        ImGui.TableHeadersRow();
+
+        foreach (var mod in filtered)
+        {
+            ImGui.TableNextRow();
+            
+            // Highlight row if mod is actively used by the player
+            if (_penumbraScanner.IsModActiveForPlayer(mod.ModName))
+            {
+                ImGui.TableSetBgColor(ImGuiTableBgTarget.RowBg0, ImGui.GetColorU32(new Vector4(0.1f, 0.4f, 0.1f, 0.3f)));
+            }
+
+            ImGui.TableNextColumn();
+            ImGui.TextUnformatted(mod.DirectoryName);
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip($"Path: {mod.Path}");
+
+            ImGui.TableNextColumn();
+            var nameMatch = string.Equals(mod.DirectoryName, mod.ModName, StringComparison.OrdinalIgnoreCase);
+            if (!nameMatch)
+            {
+                ImGui.TextColored(ImGuiColors.DalamudYellow, mod.ModName);
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip("Mismatch between Directory Name and Mod Name (from meta.json)");
+            }
+            else
+            {
+                ImGui.TextUnformatted(mod.ModName);
+            }
+
+            ImGui.TableNextColumn();
+            var color = string.Equals(mod.Status, "OK", StringComparison.Ordinal) ? ImGuiColors.HealerGreen : ImGuiColors.DalamudRed;
+            if (mod.Status.StartsWith("No Files", StringComparison.Ordinal)) color = ImGuiColors.DalamudOrange;
+            ImGui.TextColored(color, mod.Status);
+
+            ImGui.TableNextColumn();
+            if (mod.HasCharacterLegacyShpk)
+            {
+                ImGui.TextColored(ImGuiColors.DalamudRed, "⚠ Legacy SHPK");
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip("This mod contains or replaces 'characterlegacy.shpk', which may cause issues.");
+            }
+
+            ImGui.TableNextColumn();
+            ImGui.TextUnformatted(mod.Priority.ToString());
+
+            ImGui.TableNextColumn();
+            ImGui.TextUnformatted($"{mod.ActiveFilesCount} / {mod.TotalFilesCount}");
+
+            ImGui.TableNextColumn();
+            ImGui.TextUnformatted(mod.IsEnabled ? "Yes" : "No");
+
+            ImGui.TableNextColumn();
+            ImGui.TextUnformatted(mod.IsInherited ? "Yes" : "No");
+
+            ImGui.TableNextColumn();
+            ImGui.TextUnformatted(mod.IsTemporary ? "Yes" : "No");
+
+            ImGui.TableNextColumn();
+            if (mod.ActiveOptions.Count > 0)
+            {
+                if (ImGui.TreeNode($"Options ({mod.ActiveOptions.Count})###{mod.DirectoryName}"))
+                {
+                    foreach (var opt in mod.ActiveOptions)
+                    {
+                        ImGui.TextUnformatted(opt);
+                    }
+                    ImGui.TreePop();
+                }
+            }
+            else
+            {
+                ImGui.TextDisabled("None");
+            }
+        }
     }
 
     private void DrawCharacterStatistics()
@@ -1154,6 +1291,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         LogCommunication($"Acknowledgment batch completed - Batch ID: {message.BatchId}, Users: {userNames}", "ACK");
     }
     
+
     private void OnNotification(NotificationMessage message)
     {
         var typeStr = message.Type.ToString().ToUpper();

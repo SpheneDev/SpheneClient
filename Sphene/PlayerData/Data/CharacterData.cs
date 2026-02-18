@@ -47,13 +47,15 @@ public class CharacterData
     {
         Dictionary<ObjectKind, List<FileReplacementData>> fileReplacements =
             FileReplacements.ToDictionary(k => k.Key, k => k.Value.Where(f => f.HasFileReplacement && !f.IsFileSwap)
-            .GroupBy(f => f.Hash, StringComparer.OrdinalIgnoreCase)
+            .GroupBy(f => (f.Hash, f.ModName, f.OptionName))
             .Select(g =>
         {
             return new FileReplacementData()
             {
                 GamePaths = g.SelectMany(f => f.GamePaths).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
-                Hash = g.First().Hash,
+                Hash = g.Key.Hash,
+                ModName = g.Key.ModName,
+                OptionName = g.Key.OptionName
             };
         }).ToList());
 

@@ -332,12 +332,12 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                     _ = Task.Run(async () =>
                     {
                         var paths = selectedList.ToArray();
-                        var resolved = await _ipcManager.Penumbra.ResolvePathsAsync(paths, []).ConfigureAwait(false);
+                        var (forward, _) = await _ipcManager.Penumbra.ResolvePlayerPathsAsync(paths, []).ConfigureAwait(false);
                         _filePathResolve.Clear();
 
-                        for (int i = 0; i < resolved.forward.Length; i++)
+                        for (int i = 0; i < forward.Length; i++)
                         {
-                            _filePathResolve[paths[i]] = resolved.forward[i];
+                            _filePathResolve[paths[i]] = forward[i];
                         }
                     });
                 }

@@ -1,4 +1,5 @@
 using Dalamud.Plugin;
+using Dalamud.Plugin.Ipc;
 using Sphene.SpheneConfiguration.Models;
 using Sphene.PlayerData.Handlers;
 using Sphene.Services;
@@ -39,6 +40,9 @@ public sealed class IpcCallerPenumbra : DisposableMediatorSubscriberBase, IIpcCa
     private readonly EventSubscriber _penumbraInit;
     private readonly EventSubscriber<ModSettingChange, Guid, string, bool> _penumbraModSettingChanged;
     private readonly EventSubscriber<nint, int> _penumbraObjectIsRedrawn;
+    private readonly EventSubscriber<string> _penumbraModAdded;
+    private readonly EventSubscriber<string> _penumbraModDeleted;
+    private readonly EventSubscriber<string, string> _penumbraModMoved;
 
     private readonly AddTemporaryMod _penumbraAddTemporaryMod;
     private readonly AssignTemporaryCollection _penumbraAssignTemporaryCollection;
@@ -52,6 +56,11 @@ public sealed class IpcCallerPenumbra : DisposableMediatorSubscriberBase, IIpcCa
     private readonly GetModDirectory _penumbraResolveModDir;
     private readonly ResolvePlayerPathsAsync _penumbraResolvePaths;
     private readonly GetGameObjectResourcePaths _penumbraResourcePaths;
+    private readonly ICallGateSubscriber<ApiCollectionType, (Guid, string)?> _penumbraGetCollection;
+    private readonly ICallGateSubscriber<Guid, bool, bool, int, (PenumbraApiEc, Dictionary<string, (bool, int, Dictionary<string, List<string>>, bool, bool)>?)> _penumbraGetAllModSettings;
+    private readonly ICallGateSubscriber<Dictionary<string, string>> _penumbraGetModList;
+    private readonly ICallGateSubscriber<string, string, (PenumbraApiEc, string, bool, bool)> _penumbraGetModPath;
+    private readonly ICallGateSubscriber<int, (bool, bool, (Guid, string))> _penumbraGetCollectionForObject;
 
     public IpcCallerPenumbra(ILogger<IpcCallerPenumbra> logger, IDalamudPluginInterface pi, DalamudUtilService dalamudUtil,
         SpheneMediator spheneMediator, RedrawManager redrawManager) : base(logger, spheneMediator)
@@ -73,13 +82,41 @@ public sealed class IpcCallerPenumbra : DisposableMediatorSubscriberBase, IIpcCa
         _penumbraAssignTemporaryCollection = new AssignTemporaryCollection(pi);
         _penumbraResolvePaths = new ResolvePlayerPathsAsync(pi);
         _penumbraEnabled = new GetEnabledState(pi);
-        _penumbraModSettingChanged = ModSettingChanged.Subscriber(pi, (change, arg1, arg, b) =>
+        _penumbraModSettingChanged = ModSettingChanged.Subscriber(pi, (change, collection, mod, inherited) =>
         {
-            if (change == ModSettingChange.EnableState)
+            // Trigger rescan for any setting change that affects active mods
+            // We include almost all changes: EnableState, Priority, Setting, TemporaryMod, etc.
+            // Even Edited might change file paths (e.g. meta changes).
+            if (change != ModSettingChange.Edited)
+            {
+                logger.LogDebug("Penumbra setting changed: {Type} (Collection: {Collection}, Mod: {Mod}) -> Triggering Rescan", change, collection, mod);
                 _spheneMediator.Publish(new PenumbraModSettingChangedMessage());
+            }
+        });
+        _penumbraModAdded = ModAdded.Subscriber(pi, s => 
+        {
+            logger.LogDebug("Penumbra mod added: {Mod} -> Triggering Rescan", s);
+            _spheneMediator.Publish(new PenumbraModSettingChangedMessage());
+        });
+        _penumbraModDeleted = ModDeleted.Subscriber(pi, s => 
+        {
+            logger.LogDebug("Penumbra mod deleted: {Mod} -> Triggering Rescan", s);
+            _spheneMediator.Publish(new PenumbraModSettingChangedMessage());
+        });
+        _penumbraModMoved = ModMoved.Subscriber(pi, (s1, s2) => 
+        {
+            logger.LogDebug("Penumbra mod moved: {Old} -> {New} -> Triggering Rescan", s1, s2);
+            _spheneMediator.Publish(new PenumbraModSettingChangedMessage());
         });
         _penumbraConvertTextureFile = new ConvertTextureFile(pi);
         _penumbraResourcePaths = new GetGameObjectResourcePaths(pi);
+        
+        // Initialize new IPC subscribers
+        _penumbraGetCollection = _pi.GetIpcSubscriber<ApiCollectionType, (Guid, string)?>("Penumbra.GetCollection");
+        _penumbraGetAllModSettings = _pi.GetIpcSubscriber<Guid, bool, bool, int, (PenumbraApiEc, Dictionary<string, (bool, int, Dictionary<string, List<string>>, bool, bool)>?)>("Penumbra.GetAllModSettings");
+        _penumbraGetModList = _pi.GetIpcSubscriber<Dictionary<string, string>>("Penumbra.GetModList");
+        _penumbraGetModPath = _pi.GetIpcSubscriber<string, string, (PenumbraApiEc, string, bool, bool)>("Penumbra.GetModPath.V5");
+        _penumbraGetCollectionForObject = _pi.GetIpcSubscriber<int, (bool, bool, (Guid, string))>("Penumbra.GetCollectionForObject.V5");
 
         _penumbraGameObjectResourcePathResolved = GameObjectResourcePathResolved.Subscriber(pi, ResourceLoaded);
 
@@ -88,11 +125,14 @@ public sealed class IpcCallerPenumbra : DisposableMediatorSubscriberBase, IIpcCa
 
         Mediator.Subscribe<PenumbraRedrawCharacterMessage>(this, (msg) =>
         {
-            _penumbraRedraw.Invoke(msg.Character.ObjectIndex, RedrawType.AfterGPose);
+            if (msg.Character.ObjectIndex < 0) return;
+            _penumbraRedraw.Invoke(msg.Character.ObjectIndex, RedrawType.Redraw);
         });
 
         Mediator.Subscribe<DalamudLoginMessage>(this, (msg) => _shownPenumbraUnavailable = false);
     }
+
+
 
     public bool APIAvailable { get; private set; } = false;
 
@@ -155,7 +195,26 @@ public sealed class IpcCallerPenumbra : DisposableMediatorSubscriberBase, IIpcCa
         _penumbraDispose.Dispose();
         _penumbraInit.Dispose();
         _penumbraObjectIsRedrawn.Dispose();
+        _penumbraModAdded.Dispose();
+        _penumbraModDeleted.Dispose();
+        _penumbraModMoved.Dispose();
     }
+
+    public Dictionary<string, string> GetModList()
+    {
+        if (!APIAvailable) return [];
+        try
+        {
+            return _penumbraGetModList.InvokeFunc();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to get mod list from Penumbra");
+            return [];
+        }
+    }
+
+
 
     public async Task AssignTemporaryCollectionAsync(ILogger logger, Guid collName, int idx)
     {
@@ -293,9 +352,80 @@ public sealed class IpcCallerPenumbra : DisposableMediatorSubscriberBase, IIpcCa
         }).ConfigureAwait(false);
     }
 
-    public async Task<(string[] forward, string[][] reverse)> ResolvePathsAsync(string[] forward, string[] reverse)
+    public async Task<(string[], string[][])> ResolvePlayerPathsAsync(string[] forward, string[] reverse)
     {
+        if (!APIAvailable) return ([], []);
         return await _penumbraResolvePaths.Invoke(forward, reverse).ConfigureAwait(false);
+    }
+
+    public (Guid, string)? GetCollection(ApiCollectionType type)
+    {
+        if (!APIAvailable) return null;
+        try
+        {
+            return _penumbraGetCollection.InvokeFunc(type);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to get collection for type {Type}", type);
+            return null;
+        }
+    }
+
+    public Dictionary<string, (bool Enabled, int Priority, Dictionary<string, List<string>> Settings, bool Inherited, bool Temporary)>? GetAllModSettings(Guid collectionId)
+    {
+        if (!APIAvailable) return null;
+        try
+        {
+            // We want inherited settings to get the full effective configuration
+            // And we want temporary settings (e.g. from Glamourer)
+            var result = _penumbraGetAllModSettings.InvokeFunc(collectionId, false, false, 0);
+            if (result.Item1 != PenumbraApiEc.Success)
+            {
+                Logger.LogWarning("GetAllModSettings failed: {Error}", result.Item1);
+                return null;
+            }
+            return result.Item2;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to get all mod settings for collection {CollectionId}", collectionId);
+            return null;
+        }
+    }
+
+    public string? GetModPath(string modDirectory, string modName)
+    {
+        if (!APIAvailable) return null;
+        try
+        {
+            var result = _penumbraGetModPath.InvokeFunc(modDirectory, modName);
+            if (result.Item1 != PenumbraApiEc.Success)
+            {
+                if (Logger.IsEnabled(LogLevel.Trace)) Logger.LogTrace("[FileReplacementNew] GetModPath failed for {dir}/{name}: {code}", modDirectory, modName, result.Item1);
+                return null;
+            }
+            return result.Item2;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogTrace(ex, "[FileReplacementNew] Error getting mod path for {ModDirectory} {ModName}", modDirectory, modName);
+            return null;
+        }
+    }
+
+    public (bool ObjectValid, bool IndividualSet, (Guid Id, string Name) EffectiveCollection) GetCollectionForObject(int objectIndex)
+    {
+        if (!APIAvailable) return (false, false, (Guid.Empty, string.Empty));
+        try
+        {
+            return _penumbraGetCollectionForObject.InvokeFunc(objectIndex);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to get collection for object {ObjectIndex}", objectIndex);
+            return (false, false, (Guid.Empty, string.Empty));
+        }
     }
 
     public Task RedrawPlayerAsync(int delayMs = 600)

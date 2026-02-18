@@ -19,6 +19,8 @@ public partial class FileReplacement
     public string Hash { get; set; } = string.Empty;
     public bool IsFileSwap => !IsLocalPath(ResolvedPath) && GamePaths.All(p => !IsLocalPath(p));
     public string ResolvedPath { get; init; }
+    public string? ModName { get; set; }
+    public string? OptionName { get; set; }
 
     public FileReplacementData ToFileReplacementDto()
     {
@@ -27,12 +29,14 @@ public partial class FileReplacement
             GamePaths = [.. GamePaths],
             Hash = Hash,
             FileSwapPath = IsFileSwap ? ResolvedPath : string.Empty,
+            ModName = ModName,
+            OptionName = OptionName,
         };
     }
 
     public override string ToString()
     {
-        return $"HasReplacement:{HasFileReplacement},IsFileSwap:{IsFileSwap} - {string.Join(",", GamePaths)} => {ResolvedPath}";
+        return $"HasReplacement:{HasFileReplacement},IsFileSwap:{IsFileSwap} - {string.Join(",", GamePaths)} => {ResolvedPath} ({ModName ?? "Unknown"} - {OptionName ?? "Default"})";
     }
 
     private static bool IsLocalPath(string? path)

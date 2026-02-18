@@ -302,6 +302,7 @@ public sealed class Plugin : IDalamudPlugin
                 s.GetRequiredService<IpcCallerCustomize>(), s.GetRequiredService<IpcCallerHeels>(), s.GetRequiredService<IpcCallerHonorific>(),
                 s.GetRequiredService<IpcCallerMoodles>(), s.GetRequiredService<IpcCallerPetNames>(), s.GetRequiredService<IpcCallerBypassEmote>(),
                 s.GetRequiredService<IpcCallerBrio>()));
+            collection.AddSingleton<PenumbraModScanner>();
             collection.AddSingleton((s) => new MessageService(s.GetRequiredService<ILogger<MessageService>>(), notificationManager, s.GetRequiredService<SpheneConfigService>(), s.GetRequiredService<SpheneMediator>()));
             collection.AddSingleton((s) => new AcknowledgmentBatchingService(
                 s.GetRequiredService<ILogger<AcknowledgmentBatchingService>>(),
