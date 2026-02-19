@@ -30,6 +30,7 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
     );
 
     private Dictionary<string, (string ModName, string OptionName, int Priority)> _lookupCache = new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, (string ResolvedPath, string ModName, string OptionName, int Priority)> _gamePathLookupCache = new(StringComparer.OrdinalIgnoreCase);
     private bool _cacheDirty = true;
     private readonly SemaphoreSlim _lock = new(1, 1);
     
@@ -42,14 +43,62 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
         : base(logger, mediator)
     {
         _ipcManager = ipcManager;
-        Mediator.Subscribe<PenumbraModSettingChangedMessage>(this, _ => _cacheDirty = true);
-        Mediator.Subscribe<PenumbraInitializedMessage>(this, _ => _cacheDirty = true);
+        Mediator.Subscribe<PenumbraModSettingChangedMessage>(this, _ => TriggerScan());
+        Mediator.Subscribe<PenumbraInitializedMessage>(this, _ => TriggerScan());
     }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _scanCts?.Cancel();
+            _scanCts?.Dispose();
+        }
+        base.Dispose(disposing);
+    }
+
+    private CancellationTokenSource? _scanCts;
+
+    private void TriggerScan()
+    {
+        _cacheDirty = true;
+        
+        _scanCts?.Cancel();
+        _scanCts = new CancellationTokenSource();
+        var token = _scanCts.Token;
+
+        // Debounce scan to avoid spamming
+        _ = Task.Run(async () => 
+        {
+            try 
+            {
+                await Task.Delay(500, token).ConfigureAwait(false);
+                if (token.IsCancellationRequested) return;
+
+                await GetModFileLookupAsync(CancellationToken.None).ConfigureAwait(false);
+                
+                if (!token.IsCancellationRequested)
+                {
+                    Logger.LogDebug("Penumbra mod scan finished, publishing completion message.");
+                    Mediator.Publish(new PenumbraModScanFinishedMessage());
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // Debounced
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Failed to scan mods after change");
+            }
+        }, token);
+    }
+
 
     public void MarkDirty()
     {
-        _cacheDirty = true;
-        Logger.LogDebug("Penumbra mod cache marked as dirty by user request.");
+        Logger.LogDebug("Penumbra mod cache marked as dirty by user request -> Triggering Rescan.");
+        TriggerScan();
     }
 
     public void SetActivePlayerMods(IEnumerable<string> modNames)
@@ -64,6 +113,12 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
     public bool IsModActiveForPlayer(string modName)
     {
         return _activePlayerMods.ContainsKey(modName);
+    }
+
+    public async Task<List<(string GamePath, string ResolvedPath, string ModName, string OptionName, int Priority)>> GetEnabledModReplacementsAsync(CancellationToken ct)
+    {
+        await GetModFileLookupAsync(ct).ConfigureAwait(false);
+        return _gamePathLookupCache.Select(kvp => (kvp.Key, kvp.Value.ResolvedPath, kvp.Value.ModName, kvp.Value.OptionName, kvp.Value.Priority)).ToList();
     }
 
     public async Task<Dictionary<string, (string ModName, string OptionName, int Priority)>> GetModFileLookupAsync(CancellationToken ct)
@@ -209,7 +264,7 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
                  Logger.LogDebug("[FileReplacementNew] Penumbra Base Mod Directory: {Path}", baseModDir);
             }
 
-            var bag = new ConcurrentBag<(string Path, string ModName, string OptionName, int Priority)>();
+            var bag = new ConcurrentBag<(string GamePath, string Path, string ModName, string OptionName, int Priority)>();
             var debugBag = new ConcurrentBag<ModDebugInfo>();
 
             // Add missing mods to debug info
@@ -463,6 +518,21 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
                     StringComparer.OrdinalIgnoreCase
                 );
 
+            _gamePathLookupCache = bag
+                .GroupBy(x => x.GamePath, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(
+                    g => g.Key,
+                    g => 
+                    {
+                        // Similar logic: Highest priority wins
+                        var best = g.OrderByDescending(x => x.Priority)
+                                    .ThenBy(x => x.ModName, StringComparer.OrdinalIgnoreCase)
+                                    .First();
+                        return (best.Path, best.ModName, best.OptionName, best.Priority);
+                    },
+                    StringComparer.OrdinalIgnoreCase
+                );
+
             _cacheDirty = false;
             return _lookupCache;
         }
@@ -477,11 +547,14 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
         }
     }
 
-    private async Task<(int AddedCount, int TotalCount, string ResolvedModName, bool HasCharacterLegacyShpk)> ProcessModFiles(string modPath, Dictionary<string, List<string>> settings, int priority, ConcurrentBag<(string Path, string ModName, string OptionName, int Priority)> bag, string resolvedModName, bool isDebugTarget, CancellationToken ct)
+    private async Task<(int AddedCount, int TotalCount, string ResolvedModName, bool HasCharacterLegacyShpk)> ProcessModFiles(string modPath, Dictionary<string, List<string>> settings, int priority, ConcurrentBag<(string GamePath, string Path, string ModName, string OptionName, int Priority)> bag, string resolvedModName, bool isDebugTarget, CancellationToken ct)
     {
         int addedCount = 0;
         int totalCount = 0;
         bool hasCharacterLegacyShpk = false;
+        bool containsUi = false;
+        var localBag = new List<(string GamePath, string Path, string ModName, string OptionName, int Priority)>();
+
         // Create case-insensitive settings lookup
         var settingsCaseInsensitive = new Dictionary<string, List<string>>(settings, StringComparer.OrdinalIgnoreCase);
 
@@ -540,10 +613,16 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
                         hasCharacterLegacyShpk = true;
 
                     totalCount += defaultMod.Files.Count;
-                    foreach (var file in defaultMod.Files.Values)
+                    foreach (var kvp in defaultMod.Files)
                     {
-                        var localPath = Path.GetFullPath(Path.Combine(modPath, file));
-                        bag.Add((localPath, modName, "Default", priority));
+                        var gamePath = kvp.Key;
+                        if (gamePath.StartsWith("ui/", StringComparison.OrdinalIgnoreCase) || gamePath.StartsWith("common/font", StringComparison.OrdinalIgnoreCase))
+                        {
+                            containsUi = true;
+                        }
+
+                        var localPath = Path.GetFullPath(Path.Combine(modPath, kvp.Value));
+                        localBag.Add((gamePath, localPath, modName, "Default", priority));
                         addedCount++;
                         if (Logger.IsEnabled(LogLevel.Trace)) Logger.LogTrace("[FileReplacementNew] Added default file: {path} -> {mod}", localPath, modName);
                     }
@@ -555,13 +634,19 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
                          hasCharacterLegacyShpk = true;
 
                     totalCount += defaultMod.FileSwaps.Count;
-                    foreach (var swap in defaultMod.FileSwaps.Values)
+                    foreach (var kvp in defaultMod.FileSwaps)
                     {
-                        var localPath = Path.GetFullPath(Path.Combine(modPath, swap));
+                        var gamePath = kvp.Key;
+                        if (gamePath.StartsWith("ui/", StringComparison.OrdinalIgnoreCase) || gamePath.StartsWith("common/font", StringComparison.OrdinalIgnoreCase))
+                        {
+                            containsUi = true;
+                        }
+
+                        var localPath = Path.GetFullPath(Path.Combine(modPath, kvp.Value));
                         // Only add if it's a local file
                         if (File.Exists(localPath))
                         {
-                            bag.Add((localPath, modName, "Default", priority));
+                            localBag.Add((gamePath, localPath, modName, "Default", priority));
                             addedCount++;
                             if (Logger.IsEnabled(LogLevel.Trace)) Logger.LogTrace("[FileReplacementNew] Added default swap: {path} -> {mod}", localPath, modName);
                         }
@@ -655,10 +740,16 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
 
                                     if (container.Files != null)
                                     {
-                                        foreach (var file in container.Files.Values)
+                                        foreach (var kvp in container.Files)
                                         {
-                                            var localPath = Path.GetFullPath(Path.Combine(modPath, file));
-                                            bag.Add((localPath, modName, combinedOptionName, priority));
+                                            var gamePath = kvp.Key;
+                                            if (gamePath.StartsWith("ui/", StringComparison.OrdinalIgnoreCase) || gamePath.StartsWith("common/font", StringComparison.OrdinalIgnoreCase))
+                                            {
+                                                containsUi = true;
+                                            }
+
+                                            var localPath = Path.GetFullPath(Path.Combine(modPath, kvp.Value));
+                                            localBag.Add((gamePath, localPath, modName, combinedOptionName, priority));
                                             addedCount++;
                                             if (Logger.IsEnabled(LogLevel.Trace) || isDebugTarget) Logger.LogTrace("[FileReplacementNew] Added combining group file: {path} -> {mod} ({opt})", localPath, modName, combinedOptionName);
                                         }
@@ -666,12 +757,18 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
 
                                     if (container.FileSwaps != null)
                                     {
-                                        foreach (var swap in container.FileSwaps.Values)
+                                        foreach (var kvp in container.FileSwaps)
                                         {
-                                            var localPath = Path.GetFullPath(Path.Combine(modPath, swap));
+                                            var gamePath = kvp.Key;
+                                            if (gamePath.StartsWith("ui/", StringComparison.OrdinalIgnoreCase) || gamePath.StartsWith("common/font", StringComparison.OrdinalIgnoreCase))
+                                            {
+                                                containsUi = true;
+                                            }
+
+                                            var localPath = Path.GetFullPath(Path.Combine(modPath, kvp.Value));
                                             if (File.Exists(localPath))
                                             {
-                                                bag.Add((localPath, modName, combinedOptionName, priority));
+                                                localBag.Add((gamePath, localPath, modName, combinedOptionName, priority));
                                                 addedCount++;
                                                 if (Logger.IsEnabled(LogLevel.Trace) || isDebugTarget) Logger.LogTrace("[FileReplacementNew] Added combining group swap: {path} -> {mod} ({opt})", localPath, modName, combinedOptionName);
                                             }
@@ -714,10 +811,16 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
 
                                             if (container.Files != null)
                                             {
-                                                foreach (var file in container.Files.Values)
+                                                foreach (var kvp in container.Files)
                                                 {
-                                                    var localPath = Path.GetFullPath(Path.Combine(modPath, file));
-                                                    bag.Add((localPath, modName, combinedOptionName, priority));
+                                                    var gamePath = kvp.Key;
+                                                    if (gamePath.StartsWith("ui/", StringComparison.OrdinalIgnoreCase) || gamePath.StartsWith("common/font", StringComparison.OrdinalIgnoreCase))
+                                                    {
+                                                        containsUi = true;
+                                                    }
+
+                                                    var localPath = Path.GetFullPath(Path.Combine(modPath, kvp.Value));
+                                                    localBag.Add((gamePath, localPath, modName, combinedOptionName, priority));
                                                     addedCount++;
                                                     if (Logger.IsEnabled(LogLevel.Trace) || isDebugTarget) Logger.LogTrace("[FileReplacementNew] Added complex group file: {path} -> {mod} ({opt})", localPath, modName, combinedOptionName);
                                                 }
@@ -725,12 +828,18 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
 
                                             if (container.FileSwaps != null)
                                             {
-                                                foreach (var swap in container.FileSwaps.Values)
+                                                foreach (var kvp in container.FileSwaps)
                                                 {
-                                                    var localPath = Path.GetFullPath(Path.Combine(modPath, swap));
+                                                    var gamePath = kvp.Key;
+                                                    if (gamePath.StartsWith("ui/", StringComparison.OrdinalIgnoreCase) || gamePath.StartsWith("common/font", StringComparison.OrdinalIgnoreCase))
+                                                    {
+                                                        containsUi = true;
+                                                    }
+
+                                                    var localPath = Path.GetFullPath(Path.Combine(modPath, kvp.Value));
                                                     if (File.Exists(localPath))
                                                     {
-                                                        bag.Add((localPath, modName, combinedOptionName, priority));
+                                                        localBag.Add((gamePath, localPath, modName, combinedOptionName, priority));
                                                         addedCount++;
                                                         if (Logger.IsEnabled(LogLevel.Trace) || isDebugTarget) Logger.LogTrace("[FileReplacementNew] Added complex group swap: {path} -> {mod} ({opt})", localPath, modName, combinedOptionName);
                                                     }
@@ -753,10 +862,16 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
                                             
                                             if (option.Files != null)
                                             {
-                                                foreach (var file in option.Files.Values)
+                                                foreach (var kvp in option.Files)
                                                 {
-                                                    var localPath = Path.GetFullPath(Path.Combine(modPath, file));
-                                                    bag.Add((localPath, modName, $"{group.Name}: {option.Name}", priority));
+                                                    var gamePath = kvp.Key;
+                                                    if (gamePath.StartsWith("ui/", StringComparison.OrdinalIgnoreCase) || gamePath.StartsWith("common/font", StringComparison.OrdinalIgnoreCase))
+                                                    {
+                                                        containsUi = true;
+                                                    }
+
+                                                    var localPath = Path.GetFullPath(Path.Combine(modPath, kvp.Value));
+                                                    localBag.Add((gamePath, localPath, modName, $"{group.Name}: {option.Name}", priority));
                                                     addedCount++;
                                                     if (Logger.IsEnabled(LogLevel.Trace) || isDebugTarget) Logger.LogTrace("[FileReplacementNew] Added group option file: {path} -> {mod} ({opt})", localPath, modName, $"{group.Name}: {option.Name}");
                                                 }
@@ -764,12 +879,18 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
 
                                             if (option.FileSwaps != null)
                                             {
-                                                foreach (var swap in option.FileSwaps.Values)
+                                                foreach (var kvp in option.FileSwaps)
                                                 {
-                                                    var localPath = Path.GetFullPath(Path.Combine(modPath, swap));
+                                                    var gamePath = kvp.Key;
+                                                    if (gamePath.StartsWith("ui/", StringComparison.OrdinalIgnoreCase) || gamePath.StartsWith("common/font", StringComparison.OrdinalIgnoreCase))
+                                                    {
+                                                        containsUi = true;
+                                                    }
+
+                                                    var localPath = Path.GetFullPath(Path.Combine(modPath, kvp.Value));
                                                     if (File.Exists(localPath))
                                                     {
-                                                        bag.Add((localPath, modName, $"{group.Name}: {option.Name}", priority));
+                                                        localBag.Add((gamePath, localPath, modName, $"{group.Name}: {option.Name}", priority));
                                                         addedCount++;
                                                         if (Logger.IsEnabled(LogLevel.Trace) || isDebugTarget) Logger.LogTrace("[FileReplacementNew] Added group swap: {path} -> {mod} ({opt})", localPath, modName, $"{group.Name}: {option.Name}");
                                                     }
@@ -807,6 +928,18 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
         catch (Exception ex)
         {
              Logger.LogWarning(ex, "Failed to scan group files for {Path}", modPath);
+        }
+
+        if (!containsUi)
+        {
+            foreach (var item in localBag)
+            {
+                bag.Add(item);
+            }
+        }
+        else
+        {
+            if (isDebugTarget || Logger.IsEnabled(LogLevel.Debug)) Logger.LogDebug("[FileReplacementNew] Skipping UI/Icon mod: {Mod}", modName);
         }
 
         return (addedCount, totalCount, modName, hasCharacterLegacyShpk);

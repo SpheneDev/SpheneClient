@@ -135,7 +135,8 @@ public sealed class CharacterAnalyzer : MediatorSubscriberBase, IDisposable
                         fileCacheEntries.Select(c => c.ResolvedFilepath).Distinct(StringComparer.Ordinal).ToList(),
                         entry.Size > 0 ? entry.Size.Value : 0,
                         entry.CompressedSize > 0 ? entry.CompressedSize.Value : 0,
-                        tris);
+                        tris,
+                        fileEntry.IsActive);
                 }
             }
 
@@ -158,7 +159,7 @@ public sealed class CharacterAnalyzer : MediatorSubscriberBase, IDisposable
 
             foreach (var entry in kvp.Value.OrderBy(b => b.Value.GamePaths.OrderBy(p => p, StringComparer.Ordinal).First(), StringComparer.Ordinal))
             {
-                Logger.LogInformation("File {x}/{y}: {hash}", fileCounter++, totalFiles, entry.Key);
+                Logger.LogInformation("File {x}/{y}: {hash} (Active: {active})", fileCounter++, totalFiles, entry.Key, entry.Value.IsActive);
                 foreach (var path in entry.Value.GamePaths)
                 {
                     Logger.LogInformation("  Game Path: {path}", path);
@@ -193,7 +194,7 @@ public sealed class CharacterAnalyzer : MediatorSubscriberBase, IDisposable
         Logger.LogInformation("IMPORTANT NOTES:\n\r- For Sphene up- and downloads only the compressed size is relevant.\n\r- An unusually high total files count beyond 200 and up will also increase your download time to others significantly.");
     }
 
-    internal sealed record FileDataEntry(string Hash, string FileType, List<string> GamePaths, List<string> FilePaths, long OriginalSize, long CompressedSize, long Triangles)
+    internal sealed record FileDataEntry(string Hash, string FileType, List<string> GamePaths, List<string> FilePaths, long OriginalSize, long CompressedSize, long Triangles, bool IsActive)
     {
         public bool IsComputed => OriginalSize > 0 && CompressedSize > 0;
         public async Task ComputeSizes(FileCacheManager fileCacheManager, CancellationToken token)

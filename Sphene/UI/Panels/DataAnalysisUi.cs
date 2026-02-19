@@ -655,11 +655,13 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                 ImGui.TextUnformatted(UiSharedService.ByteToString(kvp.Value.Sum(c => c.Value.CompressedSize)));
                 ImGui.Separator();
 
-                var vramUsage = groupedfiles.SingleOrDefault(v => string.Equals(v.Key, "tex", StringComparison.Ordinal));
-                if (vramUsage != null)
+                var vramRelevantExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "tex" };
+                var vramFiles = kvp.Value.Values.Where(f => f.IsActive && vramRelevantExtensions.Contains(f.FileType)).ToList();
+                
+                if (vramFiles.Count > 0)
                 {
-                    var actualVramUsage = vramUsage.Sum(f => f.OriginalSize);
-                    ImGui.TextUnformatted($"{kvp.Key} VRAM usage:");
+                    var actualVramUsage = vramFiles.Sum(f => f.OriginalSize);
+                    ImGui.TextUnformatted($"{kvp.Key} VRAM usage (Active only):");
                     ImGui.SameLine();
                     ImGui.TextUnformatted(UiSharedService.ByteToString(actualVramUsage));
                     if (_playerPerformanceConfig.Current.WarnOnExceedingThresholds

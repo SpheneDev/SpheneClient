@@ -1968,7 +1968,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         {
             foreach (var fileEntry in objectKindData.Values)
             {
-                if (fileEntry.FileType.Equals("tex", StringComparison.OrdinalIgnoreCase))
+                if (fileEntry.FileType.Equals("tex", StringComparison.OrdinalIgnoreCase) && fileEntry.IsActive)
                 {
                     totalSize += fileEntry.OriginalSize;
                 }
@@ -2930,7 +2930,7 @@ public class CompactUi : WindowMediatorSubscriberBase
             foreach (var fileData in objectKindData.Values)
             {
                 totalFiles++;
-                if (fileData.FilePaths != null && fileData.FilePaths.Count > 0 && fileData.Format != null && !string.IsNullOrEmpty(fileData.Format.Value))
+                if (fileData.FilePaths != null && fileData.FilePaths.Count > 0 && fileData.Format != null && !string.IsNullOrEmpty(fileData.Format.Value) && fileData.IsActive)
                 {
                     textureFiles++;
                     textureData.Add((fileData.Format.Value, fileData.OriginalSize, fileData.FilePaths));

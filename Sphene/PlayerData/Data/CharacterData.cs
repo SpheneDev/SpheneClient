@@ -55,7 +55,8 @@ public class CharacterData
                 GamePaths = g.SelectMany(f => f.GamePaths).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
                 Hash = g.Key.Hash,
                 ModName = g.Key.ModName,
-                OptionName = g.Key.OptionName
+                OptionName = g.Key.OptionName,
+                IsActive = g.Any(f => f.IsActive)
             };
         }).ToList());
 

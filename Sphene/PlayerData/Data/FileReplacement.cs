@@ -21,6 +21,7 @@ public partial class FileReplacement
     public string ResolvedPath { get; init; }
     public string? ModName { get; set; }
     public string? OptionName { get; set; }
+    public bool IsActive { get; set; } = false;
 
     public FileReplacementData ToFileReplacementDto()
     {
@@ -31,6 +32,7 @@ public partial class FileReplacement
             FileSwapPath = IsFileSwap ? ResolvedPath : string.Empty,
             ModName = ModName,
             OptionName = OptionName,
+            IsActive = IsActive,
         };
     }
 

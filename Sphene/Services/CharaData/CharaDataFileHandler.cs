@@ -43,8 +43,15 @@ public sealed class CharaDataFileHandler : IDisposable
     {
         modPaths = [];
         missingFiles = [];
+        var visualExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".mdl", ".mtrl", ".tex", ".sklb", ".atex" };
         foreach (var file in charaDataDownloadDto.FileGamePaths)
         {
+            var ext = Path.GetExtension(file.GamePath);
+            if (!string.IsNullOrEmpty(ext) && visualExtensions.Contains(ext) && !file.IsActive)
+            {
+                continue;
+            }
+
             var localCacheFile = _fileCacheManager.GetFileCacheByHash(file.HashOrFileSwap);
             if (localCacheFile == null)
             {
@@ -228,8 +235,8 @@ public sealed class CharaDataFileHandler : IDisposable
             }
             else
             {
-                updateDto.FileGamePaths = [.. fileReplacements!.Where(u => string.IsNullOrEmpty(u.FileSwapPath)).SelectMany(u => u.GamePaths, (file, path) => new GamePathEntry(file.Hash, path) { ModName = file.ModName, OptionName = file.OptionName })];
-                updateDto.FileSwaps = [.. fileReplacements!.Where(u => !string.IsNullOrEmpty(u.FileSwapPath)).SelectMany(u => u.GamePaths, (file, path) => new GamePathEntry(file.FileSwapPath, path))];
+                updateDto.FileGamePaths = [.. fileReplacements!.Where(u => string.IsNullOrEmpty(u.FileSwapPath)).SelectMany(u => u.GamePaths, (file, path) => new GamePathEntry(file.Hash, path) { ModName = file.ModName, OptionName = file.OptionName, IsActive = file.IsActive })];
+                updateDto.FileSwaps = [.. fileReplacements!.Where(u => !string.IsNullOrEmpty(u.FileSwapPath)).SelectMany(u => u.GamePaths, (file, path) => new GamePathEntry(file.FileSwapPath, path) { ModName = file.ModName, OptionName = file.OptionName, IsActive = file.IsActive })];
             }
         }
     }

@@ -32,7 +32,7 @@ public sealed class TransientResourceManager : DisposableMediatorSubscriberBase
         _dalamudUtil = dalamudUtil;
 
         Mediator.Subscribe<PenumbraResourceLoadMessage>(this, Manager_PenumbraResourceLoadEvent);
-        Mediator.Subscribe<PenumbraModSettingChangedMessage>(this, (_) => Manager_PenumbraModSettingChanged());
+        Mediator.Subscribe<PenumbraModScanFinishedMessage>(this, (_) => Manager_PenumbraModScanFinished());
         Mediator.Subscribe<PriorityFrameworkUpdateMessage>(this, (_) => DalamudUtil_FrameworkUpdate());
         Mediator.Subscribe<GameObjectHandlerCreatedMessage>(this, (msg) =>
         {
@@ -280,11 +280,11 @@ public sealed class TransientResourceManager : DisposableMediatorSubscriberBase
         }
     }
 
-    private void Manager_PenumbraModSettingChanged()
+    private void Manager_PenumbraModScanFinished()
     {
         _ = Task.Run(() =>
         {
-            Logger.LogDebug("Penumbra Mod Settings changed, verifying SemiTransientResources");
+            Logger.LogDebug("Penumbra Mod Scan finished, verifying SemiTransientResources");
             foreach (var item in _playerRelatedPointers)
             {
                 Mediator.Publish(new TransientResourceChangedMessage(item.Address));

@@ -176,9 +176,9 @@ public sealed class CacheCreationService : DisposableMediatorSubscriberBase
             }
         });
 
-        Mediator.Subscribe<PenumbraModSettingChangedMessage>(this, (msg) =>
+        Mediator.Subscribe<PenumbraModScanFinishedMessage>(this, (msg) =>
         {
-            Logger.LogDebug("Received Penumbra Mod settings change, updating everything");
+            Logger.LogDebug("Received Penumbra Mod Scan Finished message, updating everything");
             AddCacheToCreate(ObjectKind.Player);
             AddCacheToCreate(ObjectKind.Pet);
             AddCacheToCreate(ObjectKind.MinionOrMount);

@@ -14,6 +14,7 @@ using Sphene.WebAPI;
 using Sphene.WebAPI.SignalR.Utils;
 using System.Numerics;
 using System.Text.Json;
+using Sphene.FileCache;
 
 namespace Sphene.UI.Panels;
 
@@ -28,6 +29,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
     private readonly CircuitBreakerService _circuitBreaker;
     private readonly EnhancedAcknowledgmentManager? _acknowledgmentManager;
     private readonly SessionAcknowledgmentManager? _sessionAcknowledgmentManager;
+    private readonly FileCacheManager _fileCacheManager;
     
     private string _communicationLog = "Communication Log:\n";
     private bool _autoScroll = true;
@@ -37,13 +39,14 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
     private bool _showConnections = true;
     private string? _selectedCharacterDebugUid;
     private string? _selectedCharacterStatsUid;
+    private string? _selectedPairCollectionUid;
     private readonly Dictionary<string, CharacterStatsSnapshot> _characterStats = new(StringComparer.Ordinal);
     private string _penumbraSearch = string.Empty;
     private bool _showOnlyEnabledMods = true;
     
     public StatusDebugUi(ILogger<StatusDebugUi> logger, SpheneMediator mediator,
         UiSharedService uiSharedService, PairManager pairManager, ApiController apiController,
-        PenumbraModScanner penumbraScanner,
+        PenumbraModScanner penumbraScanner, FileCacheManager fileCacheManager,
         ConnectionHealthMonitor healthMonitor, CircuitBreakerService circuitBreaker,
         PerformanceCollectorService performanceCollectorService,
         EnhancedAcknowledgmentManager? acknowledgmentManager = null,
@@ -54,6 +57,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         _pairManager = pairManager;
         _apiController = apiController;
         _penumbraScanner = penumbraScanner;
+        _fileCacheManager = fileCacheManager;
         _healthMonitor = healthMonitor;
         _circuitBreaker = circuitBreaker;
         _acknowledgmentManager = acknowledgmentManager;
@@ -207,6 +211,14 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             if (penumbraDebugTab)
             {
                 DrawPenumbraDebug();
+            }
+        }
+
+        using (var pairCollectionTab = ImRaii.TabItem("Pair Collections"))
+        {
+            if (pairCollectionTab)
+            {
+                DrawPairsCollection();
             }
         }
         
@@ -492,29 +504,169 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         ImGui.Text($"User ID: {_apiController.UID ?? "Not logged in"}");
     }
     
+    private void DrawPairsCollection()
+    {
+        var pairs = _pairManager.DirectPairs.Where(p => p.LastReceivedCharacterData != null).ToList();
+
+        if (pairs.Count == 0)
+        {
+            ImGui.Text("No pair data available.");
+            return;
+        }
+
+        ImGui.Columns(2, "PairsCollectionColumns", true);
+
+        // Left Column: List of Pairs
+        if (_selectedPairCollectionUid == null && pairs.Count > 0)
+        {
+            _selectedPairCollectionUid = pairs[0].UserData.UID;
+        }
+
+        ImGui.BeginChild("PairsList", new Vector2(0, 0), true);
+        foreach (var pair in pairs)
+        {
+            bool isSelected = string.Equals(_selectedPairCollectionUid, pair.UserData.UID, StringComparison.Ordinal);
+            if (ImGui.Selectable($"{pair.UserData.AliasOrUID}##{pair.UserData.UID}", isSelected))
+            {
+                _selectedPairCollectionUid = pair.UserData.UID;
+            }
+        }
+        ImGui.EndChild();
+
+        ImGui.NextColumn();
+
+        // Right Column: Collection Details
+        if (_selectedPairCollectionUid != null)
+        {
+            var selectedPair = pairs.FirstOrDefault(p => string.Equals(p.UserData.UID, _selectedPairCollectionUid, StringComparison.Ordinal));
+            if (selectedPair != null && selectedPair.LastReceivedCharacterData != null)
+            {
+                DrawPairCollectionDetails(selectedPair);
+            }
+        }
+
+        ImGui.Columns(1);
+    }
+
     private void DrawControlButtons()
     {
-        ImGui.Text("Debug Controls:");
-        
+        ImGui.Text("Control Buttons");
         if (ImGui.Button("Force Reconnect"))
         {
-            LogCommunication("[DEBUG] Force reconnect triggered");
-            // Trigger reconnection logic here if available
-        }
-        
-        ImGui.SameLine();
-        if (ImGui.Button("Refresh Pairs"))
-        {
-            LogCommunication("[DEBUG] Pair refresh triggered");
-            // Trigger pair refresh logic here if available
-        }
-        
-        ImGui.SameLine();
-        if (ImGui.Button("Clear Log"))
-        {
-            _communicationLog = "Communication Log:\n";
+            _ = _apiController.CreateConnectionsAsync();
         }
     }
+
+    private void DrawPairCollectionDetails(Pair pair)
+    {
+        var data = pair.LastReceivedCharacterData;
+        if (data == null) return;
+
+        ImGui.Text($"Collection for {pair.UserData.AliasOrUID}");
+        ImGui.Text($"Data Hash: {data.GetHashCode()}"); // Approximate hash or use actual if available
+
+        ImGui.Separator();
+
+        if (ImGui.BeginTable("CollectionTable", 5, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable | ImGuiTableFlags.Sortable))
+        {
+            ImGui.TableSetupColumn("Mod Name", ImGuiTableColumnFlags.WidthStretch);
+            ImGui.TableSetupColumn("Option", ImGuiTableColumnFlags.WidthStretch);
+            ImGui.TableSetupColumn("Files (Cached/Total)", ImGuiTableColumnFlags.WidthFixed, 150);
+            ImGui.TableSetupColumn("Size", ImGuiTableColumnFlags.WidthFixed, 80);
+            ImGui.TableSetupColumn("Status", ImGuiTableColumnFlags.WidthFixed, 100);
+            ImGui.TableHeadersRow();
+
+            // Flatten and Group
+            var allReplacements = data.FileReplacements.Values
+                .SelectMany(x => x)
+                .Where(x => !string.IsNullOrEmpty(x.Hash)) // Filter out empty hashes
+                .GroupBy(x => new { x.ModName, x.OptionName })
+                .OrderBy(g => g.Key.ModName, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(g => g.Key.OptionName, StringComparer.OrdinalIgnoreCase);
+
+            var localMods = _penumbraScanner.LastScanDebugInfo.Select(m => m.ModName).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var group in allReplacements)
+            {
+                var modName = string.IsNullOrEmpty(group.Key.ModName) ? "Unknown Mod" : group.Key.ModName;
+                var optionName = string.IsNullOrEmpty(group.Key.OptionName) ? "Default" : group.Key.OptionName;
+                
+                var distinctFiles = group.Select(f => f.Hash).Distinct(StringComparer.Ordinal).ToList();
+                var totalFiles = distinctFiles.Count;
+                var cachedFiles = 0;
+                long totalSize = 0;
+
+                foreach (var hash in distinctFiles)
+                {
+                    var cache = _fileCacheManager.GetFileCacheByHash(hash);
+                    if (cache != null)
+                    {
+                        var validation = _fileCacheManager.ValidateFileCacheEntity(cache);
+                        if (validation.State == FileState.Valid)
+                        {
+                            cachedFiles++;
+                            totalSize += cache.Size ?? 0;
+                        }
+                    }
+                }
+
+                // Check for legacy shpk
+                bool hasLegacyShpk = group.SelectMany(f => f.GamePaths).Any(p => p.EndsWith("characterlegacy.shpk", StringComparison.OrdinalIgnoreCase));
+
+                ImGui.TableNextRow();
+
+                // Mod Name
+                ImGui.TableSetColumnIndex(0);
+                if (localMods.Contains(modName))
+                {
+                    UiSharedService.ColorText(modName, ImGuiColors.HealerGreen);
+                    if (ImGui.IsItemHovered()) ImGui.SetTooltip("You also have this mod installed (Shared)");
+                }
+                else
+                {
+                    ImGui.Text(modName);
+                }
+
+                if (hasLegacyShpk)
+                {
+                    ImGui.SameLine();
+                    ImGui.TextColored(ImGuiColors.DalamudRed, "⚠");
+                    if (ImGui.IsItemHovered()) ImGui.SetTooltip("Contains characterlegacy.shpk");
+                }
+
+                // Option
+                ImGui.TableSetColumnIndex(1);
+                ImGui.Text(optionName);
+
+                // Files
+                ImGui.TableSetColumnIndex(2);
+                var fileColor = cachedFiles == totalFiles ? ImGuiColors.HealerGreen : (cachedFiles > 0 ? ImGuiColors.DalamudYellow : ImGuiColors.DalamudRed);
+                UiSharedService.ColorText($"{cachedFiles} / {totalFiles}", fileColor);
+
+                // Size
+                ImGui.TableSetColumnIndex(3);
+                ImGui.Text(UiSharedService.ByteToString(totalSize));
+
+                // Status
+                ImGui.TableSetColumnIndex(4);
+                if (cachedFiles == totalFiles)
+                {
+                    UiSharedService.ColorText("Ready", ImGuiColors.HealerGreen);
+                }
+                else if (cachedFiles > 0)
+                {
+                    UiSharedService.ColorText("Partial", ImGuiColors.DalamudYellow);
+                }
+                else
+                {
+                    UiSharedService.ColorText("Missing", ImGuiColors.DalamudRed);
+                }
+            }
+
+            ImGui.EndTable();
+        }
+    }
+
     
     private void DrawHealthMonitoringSection()
     {
@@ -711,10 +863,9 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
 
         ImGui.Text($"Total Mods Scanned: {debugInfo.Count} | Filtered: {filtered.Count}");
 
-        using var table = ImRaii.Table("PenumbraDebugTable", 10, ImGuiTableFlags.RowBg | ImGuiTableFlags.Borders | ImGuiTableFlags.Resizable | ImGuiTableFlags.ScrollY);
+        using var table = ImRaii.Table("PenumbraDebugTable", 9, ImGuiTableFlags.RowBg | ImGuiTableFlags.Borders | ImGuiTableFlags.Resizable | ImGuiTableFlags.ScrollY);
         if (!table) return;
 
-        ImGui.TableSetupColumn("Directory Name", ImGuiTableColumnFlags.WidthStretch);
         ImGui.TableSetupColumn("Mod Name", ImGuiTableColumnFlags.WidthStretch);
         ImGui.TableSetupColumn("Status", ImGuiTableColumnFlags.WidthFixed, 150);
         ImGui.TableSetupColumn("Flags", ImGuiTableColumnFlags.WidthFixed, 100);
@@ -737,21 +888,18 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             }
 
             ImGui.TableNextColumn();
-            ImGui.TextUnformatted(mod.DirectoryName);
-            if (ImGui.IsItemHovered())
-                ImGui.SetTooltip($"Path: {mod.Path}");
-
-            ImGui.TableNextColumn();
             var nameMatch = string.Equals(mod.DirectoryName, mod.ModName, StringComparison.OrdinalIgnoreCase);
             if (!nameMatch)
             {
                 ImGui.TextColored(ImGuiColors.DalamudYellow, mod.ModName);
                 if (ImGui.IsItemHovered())
-                    ImGui.SetTooltip("Mismatch between Directory Name and Mod Name (from meta.json)");
+                    ImGui.SetTooltip($"Directory: {mod.DirectoryName}\nPath: {mod.Path}\n\nMismatch between Directory Name and Mod Name (from meta.json)");
             }
             else
             {
                 ImGui.TextUnformatted(mod.ModName);
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip($"Directory: {mod.DirectoryName}\nPath: {mod.Path}");
             }
 
             ImGui.TableNextColumn();
