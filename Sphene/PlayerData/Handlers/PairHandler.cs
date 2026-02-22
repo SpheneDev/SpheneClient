@@ -7,6 +7,7 @@ using Sphene.Services;
 using Sphene.Services.Events;
 using Sphene.Services.Mediator;
 using Sphene.Services.ServerConfiguration;
+using Sphene.SpheneConfiguration;
 using Sphene.Utils;
 using Sphene.WebAPI.Files;
 using Microsoft.Extensions.Hosting;
@@ -32,6 +33,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
     private readonly IHostApplicationLifetime _lifetime;
     private readonly PlayerPerformanceService _playerPerformanceService;
     private readonly ServerConfigurationManager _serverConfigManager;
+    private readonly SpheneConfigService _spheneConfigService;
     private volatile bool _localVisibilityGateActive = false;
     private readonly PluginWarningNotificationService _pluginWarningNotificationManager;
     private CancellationTokenSource? _applicationCancellationTokenSource = new();
@@ -40,6 +42,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
     private Task? _applyPipelineTask;
     private CharacterData? _cachedData = null;
     private CharacterData? _lastKnownMinionData = null;
+    private readonly HashSet<string> _appliedTemporaryMods = [];
     private readonly ConcurrentDictionary<string, string> _lastKnownMinionFileOverrides = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, string> _lastKnownMinionScdOverrides = new(StringComparer.OrdinalIgnoreCase);
     private string? _lastKnownMinionOverrideHash;
@@ -68,7 +71,12 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
     private nint _lastBoundMinionAddress = nint.Zero;
     private nint _lastAppliedMinionAddress = nint.Zero;
     private bool _minionReapplyInProgress = false;
+    private bool _pendingCombatRedraw = false;
     private bool _initIdentMissingLogged = false;
+
+    private bool AllowCombatSync => _spheneConfigService.Current.AllowSyncInCombatWithoutRedraw;
+    private bool ShouldSuppressRedraw => _dalamudUtil.IsInCombatOrPerforming && AllowCombatSync;
+    private bool EnableSelectiveRedrawForTextures => _spheneConfigService.Current.EnableSelectiveRedrawForTextures;
     private bool _proximityReportedVisible = false;
     private DateTime _postZoneCheckUntil = DateTime.MinValue;
     private DateTime _postZoneLastCheck = DateTime.MinValue;
@@ -96,7 +104,8 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         FileCacheManager fileDbManager, SpheneMediator mediator,
         PlayerPerformanceService playerPerformanceService,
         ServerConfigurationManager serverConfigManager,
-        VisibilityGateService visibilityGateService) : base(logger, mediator)
+        VisibilityGateService visibilityGateService,
+        SpheneConfigService spheneConfigService) : base(logger, mediator)
     {
         Pair = pair;
         _gameObjectHandlerFactory = gameObjectHandlerFactory;
@@ -108,6 +117,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         _fileDbManager = fileDbManager;
         _playerPerformanceService = playerPerformanceService;
         _serverConfigManager = serverConfigManager;
+        _spheneConfigService = spheneConfigService;
         _localVisibilityGateActive = visibilityGateService.IsGateActive;
         // Initialize Penumbra collection asynchronously to avoid blocking constructor
         _ = Task.Run(async () => 
@@ -240,9 +250,19 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                     _dataReceivedInDowntime.CharacterData, _dataReceivedInDowntime.Forced);
                 _dataReceivedInDowntime = null;
             }
+            if (IsVisible && _pendingCombatRedraw && _cachedData != null)
+            {
+                _pendingCombatRedraw = false;
+                ApplyCharacterData(Guid.NewGuid(), _cachedData, forceApplyCustomization: true);
+            }
         });
         Mediator.Subscribe<CombatOrPerformanceStartMessage>(this, _ =>
         {
+            if (AllowCombatSync)
+            {
+                return;
+            }
+
             _downloadCancellationTokenSource = _downloadCancellationTokenSource?.CancelRecreate();
             if (_applyPipelineTask != null && !_applyPipelineTask.IsCompleted)
             {
@@ -422,7 +442,8 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
 
     public void ApplyCharacterData(Guid applicationBase, CharacterData characterData, bool forceApplyCustomization = false)
     {
-        if (_dalamudUtil.IsInCombatOrPerforming)
+        var suppressRedraw = ShouldSuppressRedraw;
+        if (_dalamudUtil.IsInCombatOrPerforming && !AllowCombatSync)
         {
             Mediator.Publish(new EventMessage(new Event(PlayerName, Pair.UserData, nameof(PairHandler), EventSeverity.Warning,
                 "Cannot apply character data: you are in combat or performing music, deferring application")));
@@ -541,7 +562,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
 
         Logger.LogDebug("[BASE-{appbase}] Downloading and applying character for {name}", applicationBase, this);
 
-        _applyPipelineTask = DownloadAndApplyCharacter(applicationBase, characterData.DeepClone(), charaDataToUpdate, forceApplyCustomization);
+        _applyPipelineTask = DownloadAndApplyCharacter(applicationBase, characterData.DeepClone(), charaDataToUpdate, forceApplyCustomization, suppressRedraw);
     }
 
     private void PrefetchVisibleFileReplacements(CharacterData characterData)
@@ -698,10 +719,11 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         }
     }
 
-    private async Task ApplyCustomizationDataAsync(Guid applicationId, KeyValuePair<ObjectKind, HashSet<PlayerChanges>> changes, CharacterData charaData, CancellationToken token)
+    private async Task ApplyCustomizationDataAsync(Guid applicationId, KeyValuePair<ObjectKind, HashSet<PlayerChanges>> changes, CharacterData charaData, bool suppressRedraw, CancellationToken token)
     {
         if (PlayerCharacter == nint.Zero) return;
         var ptr = PlayerCharacter;
+        var effectiveSuppressRedraw = suppressRedraw || ShouldSuppressRedraw;
 
         var handler = changes.Key switch
         {
@@ -813,6 +835,16 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                             && minionReplacements.Count > 0)
                         {
                             await EnsureMinionCollectionBindingsAsync(handler.Address).ConfigureAwait(false);
+                        }
+                        if (changes.Key == ObjectKind.Player && ShouldSkipRedrawForPlayer(charaData))
+                        {
+                            Logger.LogDebug("[{applicationId}] Skipping redraw for {handler} due to selective redraw setting", applicationId, handler);
+                            break;
+                        }
+                        if (effectiveSuppressRedraw)
+                        {
+                            _pendingCombatRedraw = true;
+                            break;
                         }
                         await _ipcManager.Penumbra.RedrawAsync(Logger, handler, applicationId, token).ConfigureAwait(false);
                         break;
@@ -935,13 +967,16 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             return;
         }
 
-        foreach (var entry in moddedPaths)
+        foreach (var mod in moddedPaths.Values)
         {
-            var normalizedGamePath = entry.Key.GamePath.Replace('\\', '/').ToLowerInvariant();
-            _lastKnownMinionFileOverrides[normalizedGamePath] = entry.Value;
-            if (normalizedGamePath.EndsWith(".scd", StringComparison.OrdinalIgnoreCase))
+            foreach (var entry in mod)
             {
-                _lastKnownMinionScdOverrides[normalizedGamePath] = entry.Value;
+                var normalizedGamePath = entry.Key.Replace('\\', '/').ToLowerInvariant();
+                _lastKnownMinionFileOverrides[normalizedGamePath] = entry.Value;
+                if (normalizedGamePath.EndsWith(".scd", StringComparison.OrdinalIgnoreCase))
+                {
+                    _lastKnownMinionScdOverrides[normalizedGamePath] = entry.Value;
+                }
             }
         }
 
@@ -996,7 +1031,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         return null;
     }
 
-    private Task DownloadAndApplyCharacter(Guid applicationBase, CharacterData charaData, Dictionary<ObjectKind, HashSet<PlayerChanges>> updatedData, bool forceApplyCustomization)
+    private Task DownloadAndApplyCharacter(Guid applicationBase, CharacterData charaData, Dictionary<ObjectKind, HashSet<PlayerChanges>> updatedData, bool forceApplyCustomization, bool suppressRedraw)
     {
         if (!updatedData.Any())
         {
@@ -1015,7 +1050,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             return Task.CompletedTask;
         }
 
-        if (_dalamudUtil.IsInCombatOrPerforming)
+        if (_dalamudUtil.IsInCombatOrPerforming && !AllowCombatSync)
         {
             Logger.LogDebug("{tag} Apply deferred: user={user} hash={hash} reason=combat",
                 SyncProgressTag, Pair.UserData.AliasOrUID, charaData.DataHash?.Value ?? "null");
@@ -1036,7 +1071,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         {
             try
             {
-                await DownloadAndApplyCharacterAsync(applicationBase, charaData, updatedData, updateModdedPaths, updateManip, forceApplyCustomization, downloadToken).ConfigureAwait(false);
+                await DownloadAndApplyCharacterAsync(applicationBase, charaData, updatedData, updateModdedPaths, updateManip, forceApplyCustomization, suppressRedraw, downloadToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -1068,11 +1103,11 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
     private Task? _pairDownloadTask;
 
     private async Task DownloadAndApplyCharacterAsync(Guid applicationBase, CharacterData charaData, Dictionary<ObjectKind, HashSet<PlayerChanges>> updatedData,
-        bool updateModdedPaths, bool updateManip, bool forceApplyCustomization, CancellationToken downloadToken)
+        bool updateModdedPaths, bool updateManip, bool forceApplyCustomization, bool suppressRedraw, CancellationToken downloadToken)
     {
         Logger.LogDebug("{tag} Apply pipeline enter: user={user} hash={hash} modFiles={modFiles} manip={manip}",
             SyncProgressTag, Pair.UserData.AliasOrUID, charaData.DataHash?.Value ?? "null", updateModdedPaths, updateManip);
-        Dictionary<(string GamePath, string? Hash), string> moddedPaths = [];
+        Dictionary<string, Dictionary<string, string>> moddedPaths = [];
 
         List<FileReplacementData> toDownloadReplacements = [];
         if (updateModdedPaths)
@@ -1196,20 +1231,23 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             {
                 _lastKnownMinionFileOverrides.Clear();
                 _lastKnownMinionScdOverrides.Clear();
-                foreach (var entry in moddedPaths)
+                foreach (var mod in moddedPaths.Values)
                 {
-                    var normalizedGamePath = entry.Key.GamePath.Replace('\\', '/').ToLowerInvariant();
-                    _lastKnownMinionFileOverrides[normalizedGamePath] = entry.Value;
-                    if (normalizedGamePath.EndsWith(".scd", StringComparison.OrdinalIgnoreCase))
+                    foreach (var entry in mod)
                     {
-                        _lastKnownMinionScdOverrides[normalizedGamePath] = entry.Value;
+                        var normalizedGamePath = entry.Key.Replace('\\', '/').ToLowerInvariant();
+                        _lastKnownMinionFileOverrides[normalizedGamePath] = entry.Value;
+                        if (normalizedGamePath.EndsWith(".scd", StringComparison.OrdinalIgnoreCase))
+                        {
+                            _lastKnownMinionScdOverrides[normalizedGamePath] = entry.Value;
+                        }
                     }
                 }
                 _lastKnownMinionOverrideHash = minionHash;
             }
         }
 
-        if (_dalamudUtil.IsInCombatOrPerforming)
+        if (_dalamudUtil.IsInCombatOrPerforming && !AllowCombatSync)
         {
             Logger.LogDebug("{tag} Apply deferred: user={user} hash={hash} reason=combat",
                 SyncProgressTag, Pair.UserData.AliasOrUID, charaData.DataHash?.Value ?? "null");
@@ -1231,16 +1269,17 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
 
         Logger.LogDebug("{tag} Apply start: user={user} hash={hash} applicationBase={appBase}",
             SyncProgressTag, Pair.UserData.AliasOrUID, charaData.DataHash?.Value ?? "null", applicationBase);
-        _applicationTask = ApplyCharacterDataAsync(applicationBase, charaData, updatedData, updateModdedPaths, updateManip, moddedPaths, token);
+        _applicationTask = ApplyCharacterDataAsync(applicationBase, charaData, updatedData, updateModdedPaths, updateManip, moddedPaths, suppressRedraw, token);
     }
 
     private async Task ApplyCharacterDataAsync(Guid applicationBase, CharacterData charaData, Dictionary<ObjectKind, HashSet<PlayerChanges>> updatedData, bool updateModdedPaths, bool updateManip,
-        Dictionary<(string GamePath, string? Hash), string> moddedPaths, CancellationToken token)
+        Dictionary<string, Dictionary<string, string>> moddedPaths, bool suppressRedraw, CancellationToken token)
     {
         try
         {
             _applicationId = Guid.NewGuid();
             Logger.LogDebug("[BASE-{applicationId}] Starting application task for {this}: {appId}", applicationBase, this, _applicationId);
+            var effectiveSuppressRedraw = suppressRedraw || ShouldSuppressRedraw;
 
             Logger.LogDebug("{tag} Apply wait draw start: appId={appId} handler={handler}", SyncProgressTag, _applicationId, _charaHandler?.Address ?? nint.Zero);
             await _dalamudUtil.WaitWhileCharacterIsDrawing(Logger, _charaHandler!, _applicationId, 30000, token).ConfigureAwait(false);
@@ -1254,14 +1293,26 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                 var objIndex = await _dalamudUtil.RunOnFrameworkThread(() => _charaHandler!.GetGameObject()!.ObjectIndex).ConfigureAwait(false);
                 await _ipcManager.Penumbra.AssignTemporaryCollectionAsync(Logger, _penumbraCollection, objIndex).ConfigureAwait(false);
 
-                await _ipcManager.Penumbra.SetTemporaryModsAsync(Logger, _applicationId, _penumbraCollection,
-                    moddedPaths.ToDictionary(k => k.Key.GamePath, k => k.Value, StringComparer.Ordinal)).ConfigureAwait(false);
-                LastAppliedDataBytes = -1;
-                foreach (var path in moddedPaths.Values.Distinct(StringComparer.OrdinalIgnoreCase).Select(v => new FileInfo(v)).Where(p => p.Exists))
+                var modsToRemove = _appliedTemporaryMods.ToList();
+                
+                await _ipcManager.Penumbra.SetTemporaryModsBatchAsync(Logger, _applicationId, _penumbraCollection,
+                    moddedPaths, modsToRemove).ConfigureAwait(false);
+                
+                _appliedTemporaryMods.Clear();
+                foreach(var modName in moddedPaths.Keys)
                 {
-                    if (LastAppliedDataBytes == -1) LastAppliedDataBytes = 0;
+                    _appliedTemporaryMods.Add(modName);
+                }
 
-                    LastAppliedDataBytes += path.Length;
+                LastAppliedDataBytes = -1;
+                foreach (var mod in moddedPaths.Values)
+                {
+                    foreach (var path in mod.Values.Distinct(StringComparer.OrdinalIgnoreCase).Select(v => new FileInfo(v)).Where(p => p.Exists))
+                    {
+                        if (LastAppliedDataBytes == -1) LastAppliedDataBytes = 0;
+
+                        LastAppliedDataBytes += path.Length;
+                    }
                 }
             }
 
@@ -1274,7 +1325,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
 
             foreach (var kind in updatedData)
             {
-                await ApplyCustomizationDataAsync(_applicationId, kind, charaData, token).ConfigureAwait(false);
+                await ApplyCustomizationDataAsync(_applicationId, kind, charaData, effectiveSuppressRedraw, token).ConfigureAwait(false);
                 token.ThrowIfCancellationRequested();
             }
 
@@ -1283,7 +1334,18 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                 && playerChanges.Contains(PlayerChanges.ModFiles)
                 && !playerChanges.Contains(PlayerChanges.ForcedRedraw))
             {
-                await _ipcManager.Penumbra.RedrawAsync(Logger, _charaHandler, _applicationId, token).ConfigureAwait(false);
+                if (effectiveSuppressRedraw)
+                {
+                    _pendingCombatRedraw = true;
+                }
+                else if (ShouldSkipRedrawForPlayer(charaData))
+                {
+                    Logger.LogDebug("[{applicationId}] Skipping redraw for {handler} due to selective redraw setting", _applicationId, _charaHandler);
+                }
+                else
+                {
+                    await _ipcManager.Penumbra.RedrawAsync(Logger, _charaHandler, _applicationId, token).ConfigureAwait(false);
+                }
             }
 
             if (_forceRedrawAfterCurrentApplication
@@ -1292,7 +1354,18 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                     || (!playerUpdates.Contains(PlayerChanges.ForcedRedraw) && !playerUpdates.Contains(PlayerChanges.ModFiles))))
             {
                 _forceRedrawAfterCurrentApplication = false;
-                await _ipcManager.Penumbra.RedrawAsync(Logger, _charaHandler, _applicationId, token).ConfigureAwait(false);
+                if (effectiveSuppressRedraw)
+                {
+                    _pendingCombatRedraw = true;
+                }
+                else if (ShouldSkipRedrawForPlayer(charaData))
+                {
+                    Logger.LogDebug("[{applicationId}] Skipping redraw for {handler} due to selective redraw setting", _applicationId, _charaHandler);
+                }
+                else
+                {
+                    await _ipcManager.Penumbra.RedrawAsync(Logger, _charaHandler, _applicationId, token).ConfigureAwait(false);
+                }
             }
             else
             {
@@ -1344,6 +1417,130 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             _inProgressRestHash = null;
             _inProgressDataHash = null;
         }
+    }
+
+    private bool ShouldSkipRedrawForPlayer(CharacterData charaData)
+    {
+        if (!EnableSelectiveRedrawForTextures)
+        {
+            return false;
+        }
+
+        if (_cachedData == null)
+        {
+            return false;
+        }
+
+        List<FileReplacementData>? oldReplacements = null;
+        List<FileReplacementData>? newReplacements = null;
+        if (!_cachedData.FileReplacements.TryGetValue(ObjectKind.Player, out oldReplacements))
+        {
+            oldReplacements = null;
+        }
+        if (!charaData.FileReplacements.TryGetValue(ObjectKind.Player, out newReplacements))
+        {
+            newReplacements = null;
+        }
+
+        if ((oldReplacements == null || oldReplacements.Count == 0) && (newReplacements == null || newReplacements.Count == 0))
+        {
+            return true;
+        }
+
+        var comparer = PlayerData.Data.FileReplacementDataComparer.Instance;
+        var oldSet = new HashSet<FileReplacementData>(comparer);
+        var newSet = new HashSet<FileReplacementData>(comparer);
+        if (oldReplacements != null)
+        {
+            foreach (var replacement in oldReplacements)
+            {
+                if (replacement != null)
+                {
+                    oldSet.Add(replacement);
+                }
+            }
+        }
+        if (newReplacements != null)
+        {
+            foreach (var replacement in newReplacements)
+            {
+                if (replacement != null)
+                {
+                    newSet.Add(replacement);
+                }
+            }
+        }
+
+        var changedGamePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var replacement in newSet)
+        {
+            if (!oldSet.Contains(replacement))
+            {
+                AddGamePaths(replacement, changedGamePaths);
+            }
+        }
+        foreach (var replacement in oldSet)
+        {
+            if (!newSet.Contains(replacement))
+            {
+                AddGamePaths(replacement, changedGamePaths);
+            }
+        }
+
+        if (changedGamePaths.Count == 0)
+        {
+            return true;
+        }
+
+        foreach (var path in changedGamePaths)
+        {
+            if (IsCriticalTexturePath(path))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static void AddGamePaths(FileReplacementData replacement, HashSet<string> output)
+    {
+        var gamePaths = replacement.GamePaths;
+        if (gamePaths == null || gamePaths.Length == 0)
+        {
+            return;
+        }
+
+        for (var i = 0; i < gamePaths.Length; i++)
+        {
+            output.Add(gamePaths[i]);
+        }
+    }
+
+    private static bool IsCriticalTexturePath(string gamePath)
+    {
+        if (string.IsNullOrEmpty(gamePath))
+        {
+            return false;
+        }
+
+        var normalized = gamePath.Replace('\\', '/');
+        if (!normalized.EndsWith(".tex", StringComparison.OrdinalIgnoreCase)
+            && !normalized.EndsWith(".atex", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (normalized.Contains("/face/", StringComparison.OrdinalIgnoreCase)
+            || normalized.Contains("/eye/", StringComparison.OrdinalIgnoreCase)
+            || normalized.Contains("/eyes/", StringComparison.OrdinalIgnoreCase)
+            || normalized.Contains("/skin/", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return normalized.Contains("/human/", StringComparison.OrdinalIgnoreCase)
+            && normalized.Contains("/body/", StringComparison.OrdinalIgnoreCase);
     }
 
     private void FrameworkUpdate()
@@ -1702,6 +1899,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                 await ApplyCustomizationDataAsync(Guid.NewGuid(),
                     new KeyValuePair<ObjectKind, HashSet<PlayerChanges>>(ObjectKind.MinionOrMount, localChanges),
                     minionData,
+                    ShouldSuppressRedraw,
                     CancellationToken.None).ConfigureAwait(false);
 
                 if (appliedFiles)
@@ -1745,10 +1943,13 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         }
 
         var tempMods = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var entry in moddedPaths)
+        foreach (var mod in moddedPaths.Values)
         {
-            var normalizedGamePath = entry.Key.GamePath.Replace('\\', '/').ToLowerInvariant();
-            tempMods[normalizedGamePath] = entry.Value;
+            foreach (var entry in mod)
+            {
+                var normalizedGamePath = entry.Key.Replace('\\', '/').ToLowerInvariant();
+                tempMods[normalizedGamePath] = entry.Value;
+            }
         }
         return await ApplyMinionTempModsAsync(minionAddress, tempMods, token).ConfigureAwait(false);
     }
@@ -1809,8 +2010,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
 
         var tempModsHash = ComputeTempModsHash(tempMods);
         if (minionAddress == _lastMinionTempModsAddress
-            && tempModsHash == _lastMinionTempModsHash
-            && DateTime.UtcNow - _lastMinionTempModsApplyAttempt < TimeSpan.FromMilliseconds(MinionTempModsCooldownMs))
+            && tempModsHash == _lastMinionTempModsHash)
         {
             return true;
         }
@@ -2157,12 +2357,12 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         }
     }
 
-    private List<FileReplacementData> TryCalculateModdedDictionary(Guid applicationBase, CharacterData charaData, out Dictionary<(string GamePath, string? Hash), string> moddedDictionary, CancellationToken token)
+    private List<FileReplacementData> TryCalculateModdedDictionary(Guid applicationBase, CharacterData charaData, out Dictionary<string, Dictionary<string, string>> moddedDictionary, CancellationToken token)
     {
         Stopwatch st = Stopwatch.StartNew();
         ConcurrentBag<FileReplacementData> missingFiles = [];
         moddedDictionary = [];
-        ConcurrentDictionary<(string GamePath, string? Hash), string> outputDict = new();
+        ConcurrentDictionary<(string ModName, string GamePath, string? Hash), string> outputDict = new();
         bool hasMigrationChanges = false;
         bool cancellationRequested = false;
 
@@ -2261,7 +2461,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                             {
                                 if (!string.IsNullOrEmpty(gamePath))
                                 {
-                                    outputDict[(gamePath, item.Hash)] = fileCache.ResolvedFilepath;
+                                    outputDict[(item.ModName ?? "Unknown", gamePath, item.Hash)] = fileCache.ResolvedFilepath;
                                 }
                             }
                         }
@@ -2300,7 +2500,12 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                 return [.. missingFiles];
             }
 
-            moddedDictionary = outputDict.ToDictionary(k => k.Key, k => k.Value);
+            moddedDictionary = outputDict
+                .GroupBy(k => k.Key.ModName, StringComparer.Ordinal)
+                .ToDictionary(
+                    g => g.Key,
+                    g => g.ToDictionary(k => k.Key.GamePath, k => k.Value, StringComparer.OrdinalIgnoreCase),
+                    StringComparer.Ordinal);
 
             // Process file swaps with additional validation
             var fileSwapItems = charaData.FileReplacements.SelectMany(k => k.Value.Where(v => !string.IsNullOrEmpty(v.FileSwapPath))).ToList();
@@ -2319,7 +2524,14 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                         if (!string.IsNullOrEmpty(gamePath))
                         {
                             Logger.LogTrace("[BASE-{appBase}] Adding file swap for {path}: {fileSwap}", applicationBase, gamePath, item.FileSwapPath);
-                            moddedDictionary[(gamePath, null)] = item.FileSwapPath;
+                            
+                            var modName = item.ModName ?? "Unknown";
+                            if (!moddedDictionary.TryGetValue(modName, out var modDict))
+                            {
+                                modDict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                                moddedDictionary[modName] = modDict;
+                            }
+                            modDict[gamePath] = item.FileSwapPath;
                         }
                     }
                 }

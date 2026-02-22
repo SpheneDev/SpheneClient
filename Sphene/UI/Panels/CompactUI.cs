@@ -2077,7 +2077,8 @@ public class CompactUi : WindowMediatorSubscriberBase
                 }
 
                 // If analysis is running or blocking, show busy indicator and avoid interactive content
-                if ((_popupAnalysisTask != null && !_popupAnalysisTask.IsCompleted) || _isPopupAnalysisBlocking)
+                // BUT: If active textures are already computed, allow access
+                if (((_popupAnalysisTask != null && !_popupAnalysisTask.IsCompleted) || _isPopupAnalysisBlocking) && !_characterAnalyzer.AreActiveTexturesComputed)
                 {
                     UiSharedService.ColorTextWrapped("Analyzing character data…", SpheneCustomTheme.Colors.Warning);
                     if (_characterAnalyzer.IsAnalysisRunning)
@@ -3205,6 +3206,13 @@ public class CompactUi : WindowMediatorSubscriberBase
             {
                 _logger.LogDebug("Popup analysis required: no analysis available");
                 return true;
+            }
+
+            // If active textures are computed, we consider the analysis sufficient for the popup
+            // This ensures the window opens immediately without waiting for full analysis
+            if (_characterAnalyzer.AreActiveTexturesComputed)
+            {
+                return false;
             }
 
             // Require compute if any entries are not computed

@@ -25,6 +25,7 @@ using Sphene.WebAPI.Files;
 using Sphene.WebAPI.Files.Models;
 using Sphene.WebAPI.SignalR.Utils;
 using Sphene.UI.Components;
+using Sphene.UI.Handlers;
 using Sphene.UI.Theme;
 using Microsoft.AspNetCore.Http.Connections;
 using Microsoft.Extensions.Logging;
@@ -83,6 +84,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
     private bool? _compactUiWasOpen = null;
     private int _pluginInstallInProgress = 0;
     private string? _installingPluginName;
+    private string _modSyncFilter = string.Empty;
+    private string? _selectedModSyncName = null;
     // New navigation state for redesigned Settings layout
     private enum SettingsPage
     {
@@ -101,6 +104,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
     private SettingsPage _activeSettingsPage = SettingsPage.Home;
     private bool _preferPanelThemeTab = false;
     private bool _preferButtonStylesTab = false;
+    private string _pairTagFilter = string.Empty;
+    private string _pairTagToAdd = string.Empty;
 
 
     public SettingsUi(ILogger<SettingsUi> logger,
@@ -387,6 +392,128 @@ public class SettingsUi : WindowMediatorSubscriberBase
             _configService.Save();
         }
         _uiShared.DrawHelpText("Attempts a single-shot transmission instead of streaming. Not usually required; enable only if you encounter transfer issues.");
+
+        ImGui.Separator();
+        _uiShared.BigText("Selective Mod Sync");
+        UiSharedService.TextWrapped("Assign pair tags to specific mods. Only pairs with at least one of the selected tags will receive that mod. Leave a mod without tags to send it to everyone.");
+        ImGuiHelpers.ScaledDummy(5);
+
+        var availableTags = _serverConfigurationManager.GetServerAvailablePairTags().OrderBy(t => t, StringComparer.OrdinalIgnoreCase).ToList();
+        var modNames = new List<string>();
+        if (LastCreatedCharacterData != null)
+        {
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var replacements in LastCreatedCharacterData.FileReplacements.Values)
+            {
+                foreach (var file in replacements)
+                {
+                    if (string.IsNullOrWhiteSpace(file.ModName))
+                    {
+                        continue;
+                    }
+
+                    if (seen.Add(file.ModName))
+                    {
+                        modNames.Add(file.ModName);
+                    }
+                }
+            }
+        }
+        modNames.Sort(StringComparer.OrdinalIgnoreCase);
+
+        ImGui.SetNextItemWidth(300 * ImGuiHelpers.GlobalScale);
+        ImGui.InputText("Mod Filter", ref _modSyncFilter, 64);
+        ImGuiHelpers.ScaledDummy(5);
+
+        if (_selectedModSyncName != null && !modNames.Contains(_selectedModSyncName, StringComparer.OrdinalIgnoreCase))
+        {
+            _selectedModSyncName = null;
+        }
+
+        var availableSize = ImGui.GetContentRegionAvail();
+        var listWidth = MathF.Max(280f * ImGuiHelpers.GlobalScale, availableSize.X * 0.45f);
+        using (ImRaii.Child("modSyncList", new Vector2(listWidth, 220 * ImGuiHelpers.GlobalScale), true))
+        {
+            if (modNames.Count == 0)
+            {
+                ImGui.TextUnformatted("No mods found in current character data.");
+            }
+            else
+            {
+                foreach (var mod in modNames)
+                {
+                    if (!string.IsNullOrWhiteSpace(_modSyncFilter)
+                        && mod.IndexOf(_modSyncFilter, StringComparison.OrdinalIgnoreCase) < 0)
+                    {
+                        continue;
+                    }
+
+                    var isSelected = string.Equals(_selectedModSyncName, mod, StringComparison.OrdinalIgnoreCase);
+                    if (ImGui.Selectable(mod, isSelected))
+                    {
+                        _selectedModSyncName = mod;
+                    }
+                }
+            }
+        }
+
+        ImGui.SameLine();
+        using (ImRaii.Child("modSyncTags", new Vector2(0, 220 * ImGuiHelpers.GlobalScale), true))
+        {
+            if (_selectedModSyncName == null)
+            {
+                ImGui.TextUnformatted("Select a mod to configure tag restrictions.");
+            }
+            else if (availableTags.Count == 0)
+            {
+                ImGui.TextUnformatted("No pair tags available. Create tags in People & Notes.");
+            }
+            else
+            {
+                ImGui.TextUnformatted(_selectedModSyncName);
+                ImGuiHelpers.ScaledDummy(3);
+
+                var modSyncTagsByModName = _configService.Current.ModSyncTagsByModName;
+                modSyncTagsByModName.TryGetValue(_selectedModSyncName, out var modTags);
+                modTags ??= new HashSet<string>(StringComparer.Ordinal);
+
+                foreach (var tag in availableTags)
+                {
+                    var hasTag = modTags.Contains(tag, StringComparer.Ordinal);
+                    if (ImGui.Checkbox(tag, ref hasTag))
+                    {
+                        if (hasTag)
+                        {
+                            modTags.Add(tag);
+                        }
+                        else
+                        {
+                            modTags.Remove(tag);
+                        }
+
+                        if (modTags.Count == 0)
+                        {
+                            modSyncTagsByModName.Remove(_selectedModSyncName);
+                        }
+                        else
+                        {
+                            modSyncTagsByModName[_selectedModSyncName] = modTags;
+                        }
+
+                        _configService.Save();
+                        Mediator.Publish(new ModSyncTagsChangedMessage());
+                    }
+                }
+
+                ImGuiHelpers.ScaledDummy(6);
+                if (ImGui.Button("Allow all pairs for this mod"))
+                {
+                    modSyncTagsByModName.Remove(_selectedModSyncName);
+                    _configService.Save();
+                    Mediator.Publish(new ModSyncTagsChangedMessage());
+                }
+            }
+        }
 
         ImGui.Separator();
         _uiShared.BigText("Transfer Monitor");
@@ -2483,6 +2610,69 @@ public class SettingsUi : WindowMediatorSubscriberBase
             currentProfile.AutoPopulateEmptyNotesFromCharaName = autoPopulateNotes;
             _configService.Save();
         }
+
+        ImGui.Separator();
+        _uiShared.BigText("Pair Tags");
+        ImGui.TextUnformatted("Create tags used for mod-specific sync and user grouping.");
+
+        var tags = _serverConfigurationManager.GetServerAvailablePairTags()
+            .OrderBy(t => t, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var trimmedTagToAdd = _pairTagToAdd.Trim();
+        var tagAlreadyExists = tags.Any(t => string.Equals(t, trimmedTagToAdd, StringComparison.OrdinalIgnoreCase));
+        var addDisabled = string.IsNullOrWhiteSpace(trimmedTagToAdd) || IsReservedTagName(trimmedTagToAdd) || tagAlreadyExists;
+
+        ImGui.InputTextWithHint("##pairTagNew", "New tag", ref _pairTagToAdd, 40);
+        ImGui.SameLine();
+        using (ImRaii.Disabled(addDisabled))
+        {
+            if (_uiShared.IconTextButton(FontAwesomeIcon.Plus, "Add Tag"))
+            {
+                _serverConfigurationManager.AddTag(trimmedTagToAdd);
+                _pairTagToAdd = string.Empty;
+            }
+        }
+
+        ImGui.InputTextWithHint("##pairTagFilter", "Filter tags", ref _pairTagFilter, 40);
+        var filteredTags = string.IsNullOrWhiteSpace(_pairTagFilter)
+            ? tags
+            : tags.Where(t => t.Contains(_pairTagFilter, StringComparison.OrdinalIgnoreCase)).ToList();
+        using (var child = ImRaii.Child("pairTagList", new Vector2(0, 140 * ImGuiHelpers.GlobalScale), true))
+        {
+            if (child)
+            {
+                if (filteredTags.Count == 0)
+                {
+                    ImGui.TextUnformatted("No pair tags.");
+                }
+                else
+                {
+                    foreach (var tag in filteredTags)
+                    {
+                        using (ImRaii.PushId($"pairTag-{tag}"))
+                        {
+                            ImGui.TextUnformatted(tag);
+                            ImGui.SameLine();
+                            using (ImRaii.Disabled(IsReservedTagName(tag)))
+                            {
+                                if (_uiShared.IconTextButton(FontAwesomeIcon.Trash, "Delete Tag") && UiSharedService.CtrlPressed())
+                                {
+                                    _serverConfigurationManager.RemoveTag(tag);
+                                }
+                            }
+                            UiSharedService.AttachToolTip("Hold CTRL to delete this tag.");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private static bool IsReservedTagName(string tag)
+    {
+        return tag is TagHandler.CustomAllTag or TagHandler.CustomOfflineTag or TagHandler.CustomOfflineSyncshellTag
+            or TagHandler.CustomOnlineTag or TagHandler.CustomPausedTag or TagHandler.CustomUnpairedTag
+            or TagHandler.CustomVisibleTag;
     }
 
     private void DrawGeneralUiDisplaySettings()
@@ -2844,6 +3034,44 @@ public class SettingsUi : WindowMediatorSubscriberBase
             _configService.Save();
         }
         _uiShared.DrawHelpText("How long to wait for acknowledgment responses before timing out.");
+        
+        ImGui.Spacing();
+        ImGui.Separator();
+        
+        // Legacy Client Compatibility
+        _uiShared.BigText("Legacy Client Compatibility");
+        
+        var stripModInfo = _configService.Current.StripModInfoFromCharacterData;
+        if (ImGui.Checkbox("Strip modinfo and IsActive flags from character data", ref stripModInfo))
+        {
+            _configService.Current.StripModInfoFromCharacterData = stripModInfo;
+            _configService.Save();
+        }
+        _uiShared.DrawHelpText("Enable this option to send character data without modinfo and IsActive flags for compatibility with older clients. Only active if explicitly enabled.");
+        
+        var anonymizeModNames = _configService.Current.AnonymizeModNamesInCharacterData;
+        if (ImGui.Checkbox("Anonymize mod names in character data", ref anonymizeModNames))
+        {
+            _configService.Current.AnonymizeModNamesInCharacterData = anonymizeModNames;
+            _configService.Save();
+        }
+        _uiShared.DrawHelpText("Replaces mod and option names with anonymized numbers before sending character data.");
+
+        var allowSyncInCombat = _configService.Current.AllowSyncInCombatWithoutRedraw;
+        if (ImGui.Checkbox("Allow sync during combat (skip redraw)", ref allowSyncInCombat))
+        {
+            _configService.Current.AllowSyncInCombatWithoutRedraw = allowSyncInCombat;
+            _configService.Save();
+        }
+        _uiShared.DrawHelpText("Applies incoming sync updates during combat without triggering redraws. This avoids temporary invisibility but delays visual updates until combat ends.");
+
+        var enableSelectiveRedraw = _configService.Current.EnableSelectiveRedrawForTextures;
+        if (ImGui.Checkbox("Skip redraw for equipment-only mod changes (experimental)", ref enableSelectiveRedraw))
+        {
+            _configService.Current.EnableSelectiveRedrawForTextures = enableSelectiveRedraw;
+            _configService.Save();
+        }
+        _uiShared.DrawHelpText("When enabled, redraws only occur for eye, hair, skin, or face texture changes. Disabling restores default redraw behavior.");
         
         ImGui.Spacing();
         ImGui.Separator();

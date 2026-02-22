@@ -559,10 +559,10 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
             UiSharedService.TextWrapped("This tab shows you all files and their sizes that are currently in use through your character and associated entities in Sphene");
         });
 
-        if (_cachedAnalysis!.Count == 0) return;
+        if (_cachedAnalysis == null) return;
 
         bool isAnalyzing = _characterAnalyzer.IsAnalysisRunning;
-        if (isAnalyzing)
+        if (isAnalyzing && !_characterAnalyzer.AreActiveTexturesComputed)
         {
             UiSharedService.ColorTextWrapped($"Analyzing {_characterAnalyzer.CurrentFile}/{_characterAnalyzer.TotalFiles}",
                 ImGuiColors.DalamudYellow);
@@ -573,7 +573,18 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
         }
         else
         {
-            if (_cachedAnalysis!.Any(c => c.Value.Any(f => !f.Value.IsComputed)))
+            if (isAnalyzing)
+            {
+                UiSharedService.ColorTextWrapped($"Analyzing remaining files: {_characterAnalyzer.CurrentFile}/{_characterAnalyzer.TotalFiles}",
+                    ImGuiColors.DalamudYellow);
+                if (_uiSharedService.IconTextButton(FontAwesomeIcon.StopCircle, "Cancel analysis"))
+                {
+                    _characterAnalyzer.CancelAnalyze();
+                }
+                ImGui.Separator();
+            }
+
+            if (!isAnalyzing && _cachedAnalysis!.Any(c => c.Value.Any(f => !f.Value.IsComputed)))
             {
                 UiSharedService.ColorTextWrapped("Some entries in the analysis have file size not determined yet, press the button below to analyze your current data",
                     ImGuiColors.DalamudYellow);

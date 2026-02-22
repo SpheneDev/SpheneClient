@@ -10,6 +10,8 @@ using Microsoft.Extensions.Logging;
 using System.Globalization;
 using System.Numerics;
 using System.Text.Json.Nodes;
+using Sphene.SpheneConfiguration;
+using Sphene.Utils;
 
 namespace Sphene.Services.CharaData;
 
@@ -21,6 +23,7 @@ public class CharaDataGposeTogetherManager : DisposableMediatorSubscriberBase
     private readonly CharaDataFileHandler _charaDataFileHandler;
     private readonly CharaDataManager _charaDataManager;
     private readonly DalamudUtilService _dalamudUtil;
+    private readonly SpheneConfigService _spheneConfigService;
     private readonly Dictionary<string, GposeLobbyUserData> _usersInLobby = [];
     private readonly VfxSpawnManager _vfxSpawnManager;
     private (CharacterData ApiData, CharaDataDownloadDto Dto)? _lastCreatedCharaData;
@@ -30,7 +33,7 @@ public class CharaDataGposeTogetherManager : DisposableMediatorSubscriberBase
 
     public CharaDataGposeTogetherManager(ILogger<CharaDataGposeTogetherManager> logger, SpheneMediator mediator,
             ApiController apiController, IpcCallerBrio brio, DalamudUtilService dalamudUtil, VfxSpawnManager vfxSpawnManager,
-        CharaDataFileHandler charaDataFileHandler, CharaDataManager charaDataManager) : base(logger, mediator)
+        CharaDataFileHandler charaDataFileHandler, CharaDataManager charaDataManager, SpheneConfigService spheneConfigService) : base(logger, mediator)
     {
         Mediator.Subscribe<GposeLobbyUserJoin>(this, (msg) =>
         {
@@ -90,6 +93,7 @@ public class CharaDataGposeTogetherManager : DisposableMediatorSubscriberBase
         _vfxSpawnManager = vfxSpawnManager;
         _charaDataFileHandler = charaDataFileHandler;
         _charaDataManager = charaDataManager;
+        _spheneConfigService = spheneConfigService;
     }
 
     public string? CurrentGPoseLobbyId { get; private set; }
@@ -106,27 +110,28 @@ public class CharaDataGposeTogetherManager : DisposableMediatorSubscriberBase
     {
         var playerData = await _charaDataFileHandler.CreatePlayerData().ConfigureAwait(false);
         if (playerData == null) return;
-        if (!string.Equals(playerData.DataHash.Value, _lastCreatedCharaData?.ApiData.DataHash.Value, StringComparison.Ordinal))
+        var outgoingData = playerData.CreateOutboundCopy(_spheneConfigService.Current.StripModInfoFromCharacterData);
+        if (!string.Equals(outgoingData.DataHash.Value, _lastCreatedCharaData?.ApiData.DataHash.Value, StringComparison.Ordinal))
         {
-            List<GamePathEntry> filegamePaths = [.. playerData.FileReplacements[API.Data.Enum.ObjectKind.Player]
+            List<GamePathEntry> filegamePaths = [.. outgoingData.FileReplacements[API.Data.Enum.ObjectKind.Player]
             .Where(u => string.IsNullOrEmpty(u.FileSwapPath)).SelectMany(u => u.GamePaths, (file, path) => new GamePathEntry(file.Hash, path) { ModName = file.ModName, OptionName = file.OptionName, IsActive = file.IsActive })];
-            List<GamePathEntry> fileSwapPaths = [.. playerData.FileReplacements[API.Data.Enum.ObjectKind.Player]
+            List<GamePathEntry> fileSwapPaths = [.. outgoingData.FileReplacements[API.Data.Enum.ObjectKind.Player]
             .Where(u => !string.IsNullOrEmpty(u.FileSwapPath)).SelectMany(u => u.GamePaths, (file, path) => new GamePathEntry(file.FileSwapPath, path) { ModName = file.ModName, OptionName = file.OptionName, IsActive = file.IsActive })];
-            await _charaDataManager.UploadFiles([.. playerData.FileReplacements[API.Data.Enum.ObjectKind.Player]
+            await _charaDataManager.UploadFiles([.. outgoingData.FileReplacements[API.Data.Enum.ObjectKind.Player]
             .Where(u => string.IsNullOrEmpty(u.FileSwapPath)).SelectMany(u => u.GamePaths, (file, path) => new GamePathEntry(file.Hash, path) { ModName = file.ModName, OptionName = file.OptionName, IsActive = file.IsActive })])
                 .ConfigureAwait(false);
 
             CharaDataDownloadDto charaDataDownloadDto = new($"GPOSELOBBY:{CurrentGPoseLobbyId}", new(_apiController.UID))
             {
                 UpdatedDate = DateTime.UtcNow,
-                ManipulationData = playerData.ManipulationData,
-                CustomizeData = playerData.CustomizePlusData[API.Data.Enum.ObjectKind.Player],
+                ManipulationData = outgoingData.ManipulationData,
+                CustomizeData = outgoingData.CustomizePlusData[API.Data.Enum.ObjectKind.Player],
                 FileGamePaths = filegamePaths,
                 FileSwaps = fileSwapPaths,
-                GlamourerData = playerData.GlamourerData[API.Data.Enum.ObjectKind.Player],
+                GlamourerData = outgoingData.GlamourerData[API.Data.Enum.ObjectKind.Player],
             };
 
-            _lastCreatedCharaData = (playerData, charaDataDownloadDto);
+            _lastCreatedCharaData = (outgoingData, charaDataDownloadDto);
         }
 
         ForceResendOwnData();

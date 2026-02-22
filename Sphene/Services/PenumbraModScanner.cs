@@ -31,6 +31,7 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
 
     private Dictionary<string, (string ModName, string OptionName, int Priority)> _lookupCache = new(StringComparer.OrdinalIgnoreCase);
     private Dictionary<string, (string ResolvedPath, string ModName, string OptionName, int Priority)> _gamePathLookupCache = new(StringComparer.OrdinalIgnoreCase);
+    private List<(string GamePath, string ResolvedPath, string ModName, string OptionName, int Priority)> _allEnabledModsCache = [];
     private bool _cacheDirty = true;
     private readonly SemaphoreSlim _lock = new(1, 1);
     
@@ -119,6 +120,12 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
     {
         await GetModFileLookupAsync(ct).ConfigureAwait(false);
         return _gamePathLookupCache.Select(kvp => (kvp.Key, kvp.Value.ResolvedPath, kvp.Value.ModName, kvp.Value.OptionName, kvp.Value.Priority)).ToList();
+    }
+
+    public async Task<List<(string GamePath, string ResolvedPath, string ModName, string OptionName, int Priority)>> GetAllEnabledModReplacementsAsync(CancellationToken ct)
+    {
+        await GetModFileLookupAsync(ct).ConfigureAwait(false);
+        return _allEnabledModsCache.ToList();
     }
 
     public async Task<Dictionary<string, (string ModName, string OptionName, int Priority)>> GetModFileLookupAsync(CancellationToken ct)
@@ -533,6 +540,8 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
                     StringComparer.OrdinalIgnoreCase
                 );
 
+            _allEnabledModsCache = bag.OrderBy(x => x.ModName, StringComparer.OrdinalIgnoreCase).ThenBy(x => x.Priority).ToList();
+
             _cacheDirty = false;
             return _lookupCache;
         }
@@ -545,6 +554,19 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
         {
             _lock.Release();
         }
+    }
+
+    public async Task<Dictionary<string, (string ResolvedPath, string ModName, string OptionName, int Priority)>> GetGamePathLookupAsync(CancellationToken ct)
+    {
+        if (!_cacheDirty && _gamePathLookupCache.Count > 0)
+        {
+            return new Dictionary<string, (string ResolvedPath, string ModName, string OptionName, int Priority)>(_gamePathLookupCache, StringComparer.OrdinalIgnoreCase);
+        }
+
+        // Trigger build by calling GetModFileLookupAsync (it builds both)
+        await GetModFileLookupAsync(ct).ConfigureAwait(false);
+
+        return new Dictionary<string, (string ResolvedPath, string ModName, string OptionName, int Priority)>(_gamePathLookupCache, StringComparer.OrdinalIgnoreCase);
     }
 
     private async Task<(int AddedCount, int TotalCount, string ResolvedModName, bool HasCharacterLegacyShpk)> ProcessModFiles(string modPath, Dictionary<string, List<string>> settings, int priority, ConcurrentBag<(string GamePath, string Path, string ModName, string OptionName, int Priority)> bag, string resolvedModName, bool isDebugTarget, CancellationToken ct)

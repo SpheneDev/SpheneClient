@@ -308,6 +308,7 @@ public class ServerConfigurationManager
 
         _serverTagConfig.Save();
         _spheneMediator.Publish(new StructuralRefreshUiMessage());
+        _spheneMediator.Publish(new ModSyncTagsChangedMessage());
     }
 
     internal bool ContainsOpenPairTag(string tag)
@@ -412,6 +413,7 @@ public class ServerConfigurationManager
         }
         _serverTagConfig.Save();
         _spheneMediator.Publish(new StructuralRefreshUiMessage());
+        _spheneMediator.Publish(new ModSyncTagsChangedMessage());
     }
 
     internal void RemoveTagForUid(string uid, string tagName, bool save = true)
@@ -424,6 +426,7 @@ public class ServerConfigurationManager
             {
                 _serverTagConfig.Save();
                 _spheneMediator.Publish(new StructuralRefreshUiMessage());
+                _spheneMediator.Publish(new ModSyncTagsChangedMessage());
             }
         }
     }

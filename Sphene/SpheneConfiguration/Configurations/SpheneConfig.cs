@@ -98,6 +98,11 @@ public class SpheneConfig : ISpheneConfiguration
     public bool ShowAcknowledgmentPopups { get; set; } = false;
     public bool ShowWaitingForAcknowledgmentPopups { get; set; } = false;
     public bool EnableAcknowledgmentBatching { get; set; } = true;
+    public bool StripModInfoFromCharacterData { get; set; } = false;
+    public bool AnonymizeModNamesInCharacterData { get; set; } = true;
+    public Dictionary<string, HashSet<string>> ModSyncTagsByModName { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public bool AllowSyncInCombatWithoutRedraw { get; set; } = false;
+    public bool EnableSelectiveRedrawForTextures { get; set; } = true;
     public bool EnableAcknowledgmentAutoRetry { get; set; } = true;
 
     public int AcknowledgmentTimeoutSeconds { get; set; } = 30;

@@ -16,7 +16,7 @@ namespace Sphene.PlayerData.Factories;
 
 public class PlayerDataFactory
 {
-    private static readonly Regex _gamePathRegex = new(@"^[a-zA-Z0-9/._-]+$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex _gamePathRegex = new(@"^[a-zA-Z0-9/._-]+$", RegexOptions.Compiled | RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100));
 
     private readonly DalamudUtilService _dalamudUtil;
     private readonly FileCacheManager _fileCacheManager;
@@ -155,7 +155,7 @@ public class PlayerDataFactory
             try
             {
                 var modLookup = await _penumbraModScanner.GetModFileLookupAsync(ct).ConfigureAwait(false);
-                var enabledReplacements = await _penumbraModScanner.GetEnabledModReplacementsAsync(ct).ConfigureAwait(false);
+                var enabledReplacements = await _penumbraModScanner.GetAllEnabledModReplacementsAsync(ct).ConfigureAwait(false);
                 
                 _logger.LogDebug("[FileReplacementNew] PenumbraModScanner returned {count} entries", modLookup.Count);
 
@@ -200,77 +200,147 @@ public class PlayerDataFactory
                 // Add all enabled but not active mods
                 if (enabledReplacements.Count > 0)
                 {
-                    // Group enabled replacements by ResolvedPath (physical file)
-                    var replacementsByResolvedPath = enabledReplacements
-                        .GroupBy(r => r.ResolvedPath, StringComparer.OrdinalIgnoreCase)
-                        .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
+                    // Create a set of all currently active GamePaths to avoid conflicts
+                    // This ensures we don't add an inactive file for a GamePath that is already covered by an active mod
+                    var activeGamePaths = fragment.FileReplacements
+                        .SelectMany(f => f.GamePaths)
+                        .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+                    // Group enabled replacements by ModName to handle strict priority
+                    var replacementsByMod = enabledReplacements
+                        .GroupBy(r => r.ModName, StringComparer.OrdinalIgnoreCase)
+                        .Select(g => new
+                        {
+                            ModName = g.Key,
+                            Entries = g.ToList(),
+                            MaxPriority = g.Max(e => e.Priority)
+                        })
+                        .OrderByDescending(x => x.MaxPriority)
+                        .ToList();
 
                     // Index existing replacements for fast lookup
                     var existingReplacements = fragment.FileReplacements
                         .ToDictionary(r => r.ResolvedPath, StringComparer.OrdinalIgnoreCase);
 
                     int addedCount = 0;
-                    foreach (var kvp in replacementsByResolvedPath)
+                    foreach (var modGroup in replacementsByMod)
                     {
-                        var resolvedPath = kvp.Key;
-                        var entries = kvp.Value;
-                        var gamePaths = entries.Select(e => e.GamePath).Where(p => _gamePathRegex.IsMatch(p)).ToArray();
-
-                        if (gamePaths.Length == 0) continue;
-
-                        // Skip if UI/Icon related (double check, though scanner should have filtered)
-                        if (gamePaths.Any(p => p.StartsWith("ui/", StringComparison.OrdinalIgnoreCase) || p.StartsWith("common/font", StringComparison.OrdinalIgnoreCase)))
-                        {
-                            continue;
-                        }
+                        var modName = modGroup.ModName;
+                        var isAlreadyActive = activeModNames.Contains(modName);
                         
-                        // Check if file extension is allowed
-                        if (!gamePaths.Any(p => CacheMonitor.AllowedFileExtensions.Any(e => p.EndsWith(e, StringComparison.OrdinalIgnoreCase))))
+                        var modEntries = modGroup.Entries;
+                        
+                        // Collect all GamePaths this mod attempts to provide
+                        var allModGamePaths = modEntries
+                            .Select(e => e.GamePath)
+                            .Where(p => _gamePathRegex.IsMatch(p))
+                            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+                        if (allModGamePaths.Count == 0) continue;
+
+                        // STRICT PRIORITY CHECK:
+                        // If ANY GamePath from this mod is already claimed by a higher priority (or active) mod,
+                        // we discard the ENTIRE mod. This prevents partial application of mods (e.g. mixed emotes).
+                        // EXCEPTION: If the mod is ALREADY active (partially resolved), we allow adding its remaining files.
+                        if (!isAlreadyActive)
+                        {
+                             bool hasConflict = allModGamePaths.Any(p => activeGamePaths.Contains(p.Replace('\\', '/')));
+                             if (hasConflict)
+                             {
+                                 _logger.LogTrace("[FileReplacementNew] Mod {mod} skipped due to strict priority conflict", modName);
+                                 continue;
+                             }
+                        }
+
+                        // If no conflict (or is active), we check if the mod contains any "Important" files
+                        // We also consider any mod containing Minion/Monster/Companion paths as important
+                        // This ensures we can correctly identify Minion mods even if their models are not currently loaded (inactive)
+                        bool isImportant = allModGamePaths.Any(p =>
+                                p.EndsWith(".scd", StringComparison.OrdinalIgnoreCase) ||
+                                p.EndsWith(".avfx", StringComparison.OrdinalIgnoreCase) ||
+                                p.EndsWith(".pap", StringComparison.OrdinalIgnoreCase) ||
+                                p.EndsWith(".tmb", StringComparison.OrdinalIgnoreCase) ||
+                                p.EndsWith(".atex", StringComparison.OrdinalIgnoreCase) ||
+                                p.StartsWith("chara/monster/", StringComparison.OrdinalIgnoreCase) ||
+                                p.StartsWith("chara/companion/", StringComparison.OrdinalIgnoreCase) ||
+                                p.StartsWith("chara/demihuman/", StringComparison.OrdinalIgnoreCase));
+
+                        if (!isImportant)
                         {
                             continue;
                         }
 
-                        // Add all contributing mods to active list
-                        foreach(var entry in entries)
-                        {
-                            activeModNames.Add(entry.ModName);
-                        }
+                        // The mod is valid, has no conflicts, and is important. Add its files.
+                        
+                        // We need to group entries by ResolvedPath to create FileReplacements
+                        var entriesByFile = modEntries
+                            .GroupBy(e => e.ResolvedPath, StringComparer.OrdinalIgnoreCase);
 
-                        // Pick best mod info for the file replacement record (highest priority wins)
-                        var bestEntry = entries.OrderByDescending(e => e.Priority).ThenBy(e => e.ModName, StringComparer.OrdinalIgnoreCase).First();
-                        var modName = bestEntry.ModName;
-                        var optionName = bestEntry.OptionName;
+                        foreach (var fileGroup in entriesByFile)
+                        {
+                            var resolvedPath = fileGroup.Key;
+                            var fileGamePaths = fileGroup.Select(e => e.GamePath).Where(p => _gamePathRegex.IsMatch(p)).ToArray();
 
-                        if (existingReplacements.TryGetValue(resolvedPath, out var existing))
-                        {
-                            // Merge GamePaths if needed
-                            foreach (var gp in gamePaths)
+                            if (fileGamePaths.Length == 0) continue;
+
+                            // Skip UI/Icon related
+                            if (fileGamePaths.Any(p => p.StartsWith("ui/", StringComparison.OrdinalIgnoreCase) || p.StartsWith("common/font", StringComparison.OrdinalIgnoreCase)))
                             {
-                                existing.GamePaths.Add(gp.Replace('\\', '/').ToLowerInvariant());
+                                continue;
                             }
-                            
-                            // Ensure ModName is set if it was missing
-                            if (string.IsNullOrEmpty(existing.ModName) && !string.IsNullOrEmpty(modName))
+
+                            // Check extension allowed (redundant if we trust scanner/importance check, but safe)
+                            if (!fileGamePaths.Any(p => CacheMonitor.AllowedFileExtensions.Any(e => p.EndsWith(e, StringComparison.OrdinalIgnoreCase))))
                             {
-                                existing.ModName = modName;
-                                existing.OptionName = optionName;
+                                continue;
                             }
-                        }
-                        else
-                        {
-                            // Add new replacement
-                            var newReplacement = new FileReplacement(gamePaths, resolvedPath)
+
+                            // Get OptionName (just take first, or join them?)
+                            // Usually a FileReplacement represents one file. If multiple options point to same file, we can just pick one option name or join them.
+                            // Current FileReplacement structure has single OptionName.
+                            // We can use the one from the highest priority entry for this file.
+                            var bestEntry = fileGroup.OrderByDescending(e => e.Priority).First();
+                            var optionName = bestEntry.OptionName;
+
+                            if (existingReplacements.TryGetValue(resolvedPath, out var existing))
                             {
-                                ModName = modName,
-                                OptionName = optionName
-                            };
-                            
-                            fragment.FileReplacements.Add(newReplacement);
-                            existingReplacements[resolvedPath] = newReplacement; // Update local index
-                            addedCount++;
+                                // This should ideally not happen if we checked activeModNames, but just in case
+                                foreach (var gp in fileGamePaths)
+                                {
+                                    var normalizedGp = gp.Replace('\\', '/').ToLowerInvariant();
+                                    if (existing.GamePaths.Add(normalizedGp))
+                                    {
+                                        activeGamePaths.Add(normalizedGp);
+                                    }
+                                }
+                            }
+                            else
+                            {
+                                var uniqueGamePaths = fileGamePaths
+                                    .Where(p => !activeGamePaths.Contains(p.Replace('\\', '/')))
+                                    .ToArray();
+
+                                if (uniqueGamePaths.Length == 0) continue;
+
+                                var newReplacement = new FileReplacement(uniqueGamePaths, resolvedPath)
+                                {
+                                    ModName = modName,
+                                    OptionName = optionName,
+                                    IsActive = false
+                                };
+
+                                fragment.FileReplacements.Add(newReplacement);
+                                existingReplacements[resolvedPath] = newReplacement;
+                                addedCount++;
+
+                                foreach (var gp in uniqueGamePaths)
+                                {
+                                    activeGamePaths.Add(gp.Replace('\\', '/').ToLowerInvariant());
+                                }
+                            }
                         }
                     }
-                    _logger.LogDebug("[FileReplacementNew] Added {count} enabled-but-not-active mod files to character data", addedCount);
+                    _logger.LogDebug("[FileReplacementNew] Added {count} enabled-but-not-active mod files to character data (Strict Priority)", addedCount);
                 }
 
                 if (objectKind == ObjectKind.Player)

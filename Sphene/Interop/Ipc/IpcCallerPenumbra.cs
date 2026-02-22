@@ -465,6 +465,41 @@ public sealed class IpcCallerPenumbra : DisposableMediatorSubscriberBase, IIpcCa
         }).ConfigureAwait(false);
     }
 
+    public async Task SetTemporaryModsBatchAsync(ILogger logger, Guid applicationId, Guid collId, Dictionary<string, Dictionary<string, string>> modsByModName, IEnumerable<string> modsToRemove)
+    {
+        if (!APIAvailable) return;
+
+        await _dalamudUtil.RunOnFrameworkThread(() =>
+        {
+            // Remove old mods
+            foreach (var modName in modsToRemove)
+            {
+                 var retRemove = _penumbraRemoveTemporaryMod.Invoke(modName, collId, 0);
+                 logger.LogTrace("[{applicationId}] Removing temp mod {modName} for {collId}, Success: {ret}", applicationId, modName, collId, retRemove);
+            }
+
+            // Remove legacy "SpheneChara_Files" just in case
+            _penumbraRemoveTemporaryMod.Invoke("SpheneChara_Files", collId, 0);
+
+            // Add new mods
+            foreach (var kvp in modsByModName)
+            {
+                var modName = kvp.Key;
+                var modPaths = kvp.Value;
+                
+                if (modPaths.Count == 0) continue;
+
+                foreach (var mod in modPaths)
+                {
+                    logger.LogTrace("[{applicationId}] [{modName}] Change: {from} => {to}", applicationId, modName, mod.Key, mod.Value);
+                }
+
+                var retAdd = _penumbraAddTemporaryMod.Invoke(modName, collId, modPaths, string.Empty, 0);
+                logger.LogTrace("[{applicationId}] Setting temp mod {modName} for {collId}, Success: {ret}", applicationId, modName, collId, retAdd);
+            }
+        }).ConfigureAwait(false);
+    }
+
     private void RedrawEvent(IntPtr objectAddress, int objectTableIndex)
     {
         var wasRequested = _redrawManager.TryConsumeRequestedRedraw(objectAddress);

@@ -11,6 +11,7 @@ using Sphene.Services.CharaData.Models;
 using Sphene.Utils;
 using Sphene.WebAPI.Files;
 using Microsoft.Extensions.Logging;
+using Sphene.SpheneConfiguration;
 
 namespace Sphene.Services;
 
@@ -24,10 +25,11 @@ public sealed class CharaDataFileHandler : IDisposable
     private readonly ILogger<CharaDataFileHandler> _logger;
     private readonly SpheneCharaFileDataFactory _spheneCharaFileDataFactory;
     private readonly PlayerDataFactory _playerDataFactory;
+    private readonly SpheneConfigService _spheneConfigService;
     private int _globalFileCounter = 0;
 
     public CharaDataFileHandler(ILogger<CharaDataFileHandler> logger, FileDownloadManagerFactory fileDownloadManagerFactory, FileUploadManager fileUploadManager, FileCacheManager fileCacheManager,
-            DalamudUtilService dalamudUtilService, GameObjectHandlerFactory gameObjectHandlerFactory, PlayerDataFactory playerDataFactory)
+            DalamudUtilService dalamudUtilService, GameObjectHandlerFactory gameObjectHandlerFactory, PlayerDataFactory playerDataFactory, SpheneConfigService spheneConfigService)
     {
         _fileDownloadManager = fileDownloadManagerFactory.Create();
         _logger = logger;
@@ -36,6 +38,7 @@ public sealed class CharaDataFileHandler : IDisposable
         _dalamudUtilService = dalamudUtilService;
         _gameObjectHandlerFactory = gameObjectHandlerFactory;
         _playerDataFactory = playerDataFactory;
+        _spheneConfigService = spheneConfigService;
         _spheneCharaFileDataFactory = new(fileCacheManager);
     }
 
@@ -47,7 +50,8 @@ public sealed class CharaDataFileHandler : IDisposable
         foreach (var file in charaDataDownloadDto.FileGamePaths)
         {
             var ext = Path.GetExtension(file.GamePath);
-            if (!string.IsNullOrEmpty(ext) && visualExtensions.Contains(ext) && !file.IsActive)
+            // If ModName is empty, we assume it's a stripped data and should be applied regardless of IsActive flag (which defaults to false)
+            if (!string.IsNullOrEmpty(ext) && visualExtensions.Contains(ext) && !file.IsActive && !string.IsNullOrEmpty(file.ModName))
             {
                 continue;
             }
@@ -97,7 +101,7 @@ public sealed class CharaDataFileHandler : IDisposable
         PlayerData.Data.CharacterData newCdata = new();
         var fragment = await _playerDataFactory.BuildCharacterData(tempHandler, CancellationToken.None).ConfigureAwait(false);
         newCdata.SetFragment(ObjectKind.Player, fragment);
-        return newCdata.ToAPI();
+        return newCdata.ToAPI(false, _spheneConfigService.Current.AnonymizeModNamesInCharacterData);
     }
 
     public void Dispose()
@@ -212,22 +216,23 @@ public sealed class CharaDataFileHandler : IDisposable
 
         if (data != null)
         {
-            var hasGlamourerData = data.GlamourerData.TryGetValue(ObjectKind.Player, out var playerDataString);
+            var outgoingData = data.CreateOutboundCopy(_spheneConfigService.Current.StripModInfoFromCharacterData);
+            var hasGlamourerData = outgoingData.GlamourerData.TryGetValue(ObjectKind.Player, out var playerDataString);
             if (!hasGlamourerData) updateDto.GlamourerData = null;
             else updateDto.GlamourerData = playerDataString;
 
-            var hasCustomizeData = data.CustomizePlusData.TryGetValue(ObjectKind.Player, out var customizeDataString);
+            var hasCustomizeData = outgoingData.CustomizePlusData.TryGetValue(ObjectKind.Player, out var customizeDataString);
             if (!hasCustomizeData) updateDto.CustomizeData = null;
             else updateDto.CustomizeData = customizeDataString;
 
-            updateDto.ManipulationData = data.ManipulationData;
-            updateDto.HeelsData = data.HeelsData;
-            updateDto.HonorificData = data.HonorificData;
-            updateDto.MoodlesData = data.MoodlesData;
-            updateDto.PetNamesData = data.PetNamesData;
-            updateDto.BypassEmoteData = data.BypassEmoteData;
+            updateDto.ManipulationData = outgoingData.ManipulationData;
+            updateDto.HeelsData = outgoingData.HeelsData;
+            updateDto.HonorificData = outgoingData.HonorificData;
+            updateDto.MoodlesData = outgoingData.MoodlesData;
+            updateDto.PetNamesData = outgoingData.PetNamesData;
+            updateDto.BypassEmoteData = outgoingData.BypassEmoteData;
 
-            var hasFiles = data.FileReplacements.TryGetValue(ObjectKind.Player, out var fileReplacements);
+            var hasFiles = outgoingData.FileReplacements.TryGetValue(ObjectKind.Player, out var fileReplacements);
             if (!hasFiles)
             {
                 updateDto.FileGamePaths = [];

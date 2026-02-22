@@ -4,7 +4,9 @@ using Sphene.PlayerData.Factories;
 using Sphene.PlayerData.Handlers;
 using Sphene.Services;
 using Sphene.Services.Mediator;
+using Sphene.SpheneConfiguration;
 using Microsoft.Extensions.Logging;
+using Sphene.Utils;
 
 namespace Sphene.PlayerData.Services;
 
@@ -14,6 +16,7 @@ public sealed class CacheCreationService : DisposableMediatorSubscriberBase
     private readonly System.Threading.Lock _playerDataLock = new();
     private readonly HashSet<ObjectKind> _cachesToCreate = [];
     private readonly PlayerDataFactory _characterDataFactory;
+    private readonly SpheneConfigService _spheneConfigService;
     private readonly HashSet<ObjectKind> _currentlyCreating = [];
     private readonly HashSet<ObjectKind> _debouncedObjectCache = [];
     private readonly CharacterData _playerData = new();
@@ -26,9 +29,10 @@ public sealed class CacheCreationService : DisposableMediatorSubscriberBase
     private string? _lastDataHash = null;
 
     public CacheCreationService(ILogger<CacheCreationService> logger, SpheneMediator mediator, GameObjectHandlerFactory gameObjectHandlerFactory,
-        PlayerDataFactory characterDataFactory, DalamudUtilService dalamudUtil) : base(logger, mediator)
+        PlayerDataFactory characterDataFactory, DalamudUtilService dalamudUtil, SpheneConfigService spheneConfigService) : base(logger, mediator)
     {
         _characterDataFactory = characterDataFactory;
+        _spheneConfigService = spheneConfigService;
 
         Mediator.Subscribe<ZoneSwitchStartMessage>(this, (msg) => _isZoning = true);
         Mediator.Subscribe<ZoneSwitchEndMessage>(this, (msg) =>
@@ -155,14 +159,15 @@ public sealed class CacheCreationService : DisposableMediatorSubscriberBase
                     Logger.LogDebug("Received BypassEmote change, fast-tracking update. Old Hash: {Hash}", _lastDataHash ?? "null");
                     _playerData.BypassEmoteData = msg.BypassEmoteData;
 
-                    var newData = _playerData.ToAPI();
+                    var newData = _playerData.ToAPI(false, _spheneConfigService.Current.AnonymizeModNamesInCharacterData);
                     var newHash = newData.DataHash?.Value;
+                    var outgoingHash = newData.CreateOutboundCopy(_spheneConfigService.Current.StripModInfoFromCharacterData).DataHash?.Value;
 
                     // Fast path: Publish immediately using the NEW hash.
                     // The receiver (CharaDataManager) needs a valid hash to send to the server.
                     // Even if the server doesn't have this hash yet (Slow Path hasn't arrived),
                     // the server can still forward the message to recipients.
-                    Mediator.Publish(new BypassEmoteUpdateMessage(msg.BypassEmoteData, newHash ?? string.Empty));
+                    Mediator.Publish(new BypassEmoteUpdateMessage(msg.BypassEmoteData, outgoingHash ?? string.Empty));
                     
                     if (!string.Equals(newHash, _lastDataHash, StringComparison.Ordinal))
                     {
@@ -277,7 +282,7 @@ public sealed class CacheCreationService : DisposableMediatorSubscriberBase
                     }
 
                     // Check if data actually changed before publishing
-                    var newData = _playerData.ToAPI();
+                    var newData = _playerData.ToAPI(false, _spheneConfigService.Current.AnonymizeModNamesInCharacterData);
                     var newHash = newData.DataHash?.Value;
                     
                     if (!string.Equals(newHash, _lastDataHash, StringComparison.Ordinal))

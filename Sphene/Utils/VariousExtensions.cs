@@ -225,6 +225,81 @@ public static class VariousExtensions
         return JsonSerializer.Deserialize<T>(JsonSerializer.Serialize(obj))!;
     }
 
+    public static CharacterData CreateOutboundCopy(this CharacterData data, bool stripModInfo, Dictionary<string, HashSet<string>>? modSyncTagsByModName = null, IReadOnlyCollection<string>? recipientTags = null)
+    {
+        var clone = data.DeepClone();
+        if (modSyncTagsByModName != null && modSyncTagsByModName.Count > 0)
+        {
+            clone.FilterModsByTags(modSyncTagsByModName, recipientTags);
+        }
+        if (stripModInfo)
+        {
+            clone.StripModInfo();
+        }
+
+        return clone;
+    }
+
+    public static void FilterModsByTags(this CharacterData data, Dictionary<string, HashSet<string>> modSyncTagsByModName, IReadOnlyCollection<string>? recipientTags)
+    {
+        if (modSyncTagsByModName.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var replacements in data.FileReplacements.Values)
+        {
+            replacements.RemoveAll(file =>
+            {
+                if (string.IsNullOrWhiteSpace(file.ModName))
+                {
+                    return false;
+                }
+
+                if (!modSyncTagsByModName.TryGetValue(file.ModName, out var allowedTags))
+                {
+                    return false;
+                }
+
+                if (allowedTags == null || allowedTags.Count == 0)
+                {
+                    return true;
+                }
+
+                if (recipientTags == null || recipientTags.Count == 0)
+                {
+                    return true;
+                }
+
+                foreach (var tag in allowedTags)
+                {
+                    foreach (var recipientTag in recipientTags)
+                    {
+                        if (string.Equals(tag, recipientTag, StringComparison.Ordinal))
+                        {
+                            return false;
+                        }
+                    }
+                }
+
+                return true;
+            });
+        }
+    }
+
+    public static void StripModInfo(this CharacterData data)
+    {
+        foreach (var replacements in data.FileReplacements.Values)
+        {
+            foreach (var file in replacements)
+            {
+                file.ModName = null;
+                file.OptionName = null;
+                file.IsActive = false;
+            }
+        }
+    }
+
     public static unsafe int? ObjectTableIndex(this IGameObject? gameObject)
     {
         if (gameObject == null || gameObject.Address == IntPtr.Zero)

@@ -3,10 +3,12 @@ using Sphene.API.Data.Enum;
 using Sphene.PlayerData.Factories;
 using Sphene.Services;
 using Sphene.Services.Mediator;
+using Sphene.Services.ServerConfiguration;
 using Sphene.Utils;
 using Sphene.WebAPI;
 using Sphene.WebAPI.Files;
 using Microsoft.Extensions.Logging;
+using Sphene.SpheneConfiguration;
 
 namespace Sphene.PlayerData.Pairs;
 
@@ -18,7 +20,9 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
     private readonly FileUploadManager _fileTransferManager;
     private readonly GameObjectHandlerFactory _gameObjectHandlerFactory;
     private readonly PairManager _pairManager;
+    private readonly ServerConfigurationManager _serverConfigurationManager;
     private readonly SessionAcknowledgmentManager _sessionAcknowledgmentManager;
+    private readonly SpheneConfigService _spheneConfigService;
     private CharacterData? _lastCreatedData;
     private CharacterData? _uploadingCharacterData = null;
     private CharacterData? _pendingBackgroundUploadData = null;
@@ -41,9 +45,10 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
     private const int CHARACTER_RELOAD_DELAY_SECONDS = 3;
 
 
-    public VisibleUserDataDistributor(ILogger<VisibleUserDataDistributor> logger, ApiController apiController, DalamudUtilService dalamudUtil,
-        PairManager pairManager, SpheneMediator mediator, FileUploadManager fileTransferManager, SessionAcknowledgmentManager sessionAcknowledgmentManager,
-        GameObjectHandlerFactory gameObjectHandlerFactory) : base(logger, mediator)
+    public VisibleUserDataDistributor(ILogger<VisibleUserDataDistributor> logger, SpheneMediator mediator, ApiController apiController,
+        PairManager pairManager, FileUploadManager fileTransferManager, SessionAcknowledgmentManager sessionAcknowledgmentManager,
+        GameObjectHandlerFactory gameObjectHandlerFactory, SpheneConfigService spheneConfigService,
+        ServerConfigurationManager serverConfigurationManager, DalamudUtilService dalamudUtil) : base(logger, mediator)
     {
         _apiController = apiController;
         _dalamudUtil = dalamudUtil;
@@ -51,6 +56,9 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
         _fileTransferManager = fileTransferManager;
         _sessionAcknowledgmentManager = sessionAcknowledgmentManager;
         _gameObjectHandlerFactory = gameObjectHandlerFactory;
+        _spheneConfigService = spheneConfigService;
+        
+        _serverConfigurationManager = serverConfigurationManager;
         
 
         
@@ -62,10 +70,11 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
         _characterReloadTimer = new Timer(ProcessDelayedReloads, null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
         
         Mediator.Subscribe<DelayedFrameworkUpdateMessage>(this, (_) => FrameworkOnUpdate());
+        Mediator.Subscribe<ModSyncTagsChangedMessage>(this, (_) => PushToAllVisibleUsers(forced: true));
         Mediator.Subscribe<CharacterDataCreatedMessage>(this, (msg) =>
         {
-            var previousHash = _lastCreatedData?.DataHash?.Value;
-            var newHash = msg.CharacterData.DataHash?.Value;
+            var previousHash = _lastCreatedData == null ? null : _lastCreatedData.CreateOutboundCopy(_spheneConfigService.Current.StripModInfoFromCharacterData).DataHash?.Value;
+            var newHash = msg.CharacterData.CreateOutboundCopy(_spheneConfigService.Current.StripModInfoFromCharacterData).DataHash?.Value;
             
             _lastCreatedData = msg.CharacterData;
             Logger.LogDebug("{tag} Data created: previousHash={oldHash} newHash={newHash}", SyncProgressTag, previousHash ?? "null", newHash ?? "null");
@@ -128,7 +137,7 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
             return;
         }
 
-        dataToUpload = dataToUpload.DeepClone();
+        dataToUpload = dataToUpload.CreateOutboundCopy(false);
         var hash = dataToUpload.DataHash?.Value ?? string.Empty;
         if (string.IsNullOrEmpty(hash))
         {
@@ -179,7 +188,8 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
 
     private void PushToAllVisibleUsers(bool forced = false)
     {
-        var currentHash = _lastCreatedData?.DataHash.Value;
+        if (_lastCreatedData == null) return;
+        var currentHash = _lastCreatedData.CreateOutboundCopy(_spheneConfigService.Current.StripModInfoFromCharacterData).DataHash.Value;
         if (string.IsNullOrEmpty(currentHash)) return;
         Logger.LogDebug("{tag} Push check: currentHash={hash} forced={forced}", SyncProgressTag, currentHash, forced);
         
@@ -259,13 +269,16 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
 
         _ = Task.Run(async () =>
         {
-            forced |= _uploadingCharacterData?.DataHash != _lastCreatedData.DataHash;
+            var modSyncTagsByModName = _spheneConfigService.Current.ModSyncTagsByModName;
+            var stripModInfo = _spheneConfigService.Current.StripModInfoFromCharacterData;
+            var outgoingData = _lastCreatedData.CreateOutboundCopy(false);
+            forced |= _uploadingCharacterData?.DataHash != outgoingData.DataHash;
 
             if (_fileUploadTask == null || (_fileUploadTask?.IsCompleted ?? false) || forced)
             {
-                _uploadingCharacterData = _lastCreatedData.DeepClone();
+                _uploadingCharacterData = outgoingData;
                 Logger.LogDebug("{tag} Upload start: hash={hash} taskNull={task} taskCompleted={taskCpl} forced={frc}",
-                    SyncProgressTag, _lastCreatedData.DataHash, _fileUploadTask == null, _fileUploadTask?.IsCompleted ?? false, forced);
+                    SyncProgressTag, outgoingData.DataHash, _fileUploadTask == null, _fileUploadTask?.IsCompleted ?? false, forced);
                 _fileUploadTask = _fileTransferManager.UploadFiles(_uploadingCharacterData, [.. _usersToPushDataTo]);
             }
 
@@ -277,60 +290,83 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
                 try
                 {
                     if (_usersToPushDataTo.Count == 0) return;
-                    
-                    // Validate hashes before pushing to avoid unnecessary data transfers
-                    var usersNeedingData = new List<UserData>();
-                    var currentHash = dataToSend.DataHash.Value;
-                    
-                    foreach (var user in _usersToPushDataTo.ToList())
+                    var usersToProcess = _usersToPushDataTo.ToList();
+                    var tagMapping = _serverConfigurationManager.GetUidServerPairedUserTags();
+                    CharacterData? sharedData = null;
+                    if (modSyncTagsByModName.Count == 0)
                     {
-                        if (_lastSentHashPerUser.TryGetValue(user, out var lastSentHash) && !forced)
+                        sharedData = stripModInfo ? dataToSend.CreateOutboundCopy(true) : dataToSend;
+                    }
+
+                    var groupedUsers = new Dictionary<string, (CharacterData Data, List<UserData> Users)>(StringComparer.Ordinal);
+                    foreach (var user in usersToProcess)
+                    {
+                        CharacterData dataForUser;
+                        if (modSyncTagsByModName.Count == 0)
                         {
-                            // Validate if the hash is still valid on the client side
-                            try {
+                            dataForUser = sharedData!;
+                        }
+                        else
+                        {
+                            tagMapping.TryGetValue(user.UID, out var recipientTags);
+                            dataForUser = dataToSend.CreateOutboundCopy(stripModInfo, modSyncTagsByModName, recipientTags);
+                        }
+
+                        var currentHash = dataForUser.DataHash.Value;
+                        if (_lastSentHashPerUser.TryGetValue(user, out var lastSentHash) && !forced
+                            && string.Equals(lastSentHash, currentHash, StringComparison.Ordinal))
+                        {
+                            try
+                            {
                                 var validationResponse = await _apiController.ValidateCharaDataHash(user.UID, lastSentHash).ConfigureAwait(false);
-                                if (validationResponse != null && validationResponse.IsValid && string.Equals(lastSentHash, currentHash, StringComparison.Ordinal))
+                                if (validationResponse != null && validationResponse.IsValid)
                                 {
                                     Logger.LogDebug("{tag} Hash still valid: user={user} hash={hash} skip push", SyncProgressTag, user.AliasOrUID, lastSentHash);
                                     continue;
                                 }
                             }
-                            catch (Exception ex) {
+                            catch (Exception ex)
+                            {
                                 Logger.LogWarning(ex, "{tag} Hash validation failed: user={user} proceeding with push", SyncProgressTag, user.AliasOrUID);
                             }
                         }
-                        
-                        usersNeedingData.Add(user);
+
+                        if (!groupedUsers.TryGetValue(currentHash, out var group))
+                        {
+                            group = (dataForUser, []);
+                        }
+
+                        group.Users.Add(user);
+                        groupedUsers[currentHash] = group;
                     }
-                    
-                    if (usersNeedingData.Count == 0)
+
+                    if (groupedUsers.Count == 0)
                     {
                         Logger.LogDebug("{tag} Push skip: no users need data after validation", SyncProgressTag);
                         _usersToPushDataTo.Clear();
                         return;
                     }
-                    
-                    // Create hash key for acknowledgment tracking
-                    var hashKey = dataToSend.DataHash.Value;
 
-                    // Revoke AckYou for all users before pushing new data
-                    // This ensures partners see a yellow eye indicating that the sender has changed state
-                    Logger.LogDebug("{tag} Ack reset before push: hash={hash}", SyncProgressTag, hashKey);
+                    Logger.LogDebug("{tag} Ack reset before push", SyncProgressTag);
                     _ = _apiController.UserUpdateAckYou(false);
 
-                    _pairManager.SetPendingAcknowledgmentForSender([.. usersNeedingData], hashKey);
-                    _sessionAcknowledgmentManager.SetPendingAcknowledgmentForHashVersion([.. usersNeedingData], hashKey);
-                    
-                    // Track the hash sent to each user
-                    foreach (var user in usersNeedingData)
+                    foreach (var group in groupedUsers.Values)
                     {
-                        _lastSentHashPerUser[user] = currentHash;
-                        Logger.LogDebug("{tag} Hash tracking update: user={user} hash={hash}", SyncProgressTag, user.AliasOrUID, currentHash);
+                        var hashKey = group.Data.DataHash.Value;
+                        _pairManager.SetPendingAcknowledgmentForSender([.. group.Users], hashKey);
+                        _sessionAcknowledgmentManager.SetPendingAcknowledgmentForHashVersion([.. group.Users], hashKey);
+
+                        foreach (var user in group.Users)
+                        {
+                            _lastSentHashPerUser[user] = hashKey;
+                            Logger.LogDebug("{tag} Hash tracking update: user={user} hash={hash}", SyncProgressTag, user.AliasOrUID, hashKey);
+                        }
+
+                        Logger.LogDebug("{tag} Push send: hash={hash} users={users}", SyncProgressTag, hashKey, string.Join(", ", group.Users.Select(k => k.AliasOrUID)));
+                        await _apiController.PushCharacterData(group.Data, [.. group.Users], hashKey).ConfigureAwait(false);
+                        Logger.LogDebug("{tag} Push complete: hash={hash} users={users}", SyncProgressTag, hashKey, string.Join(", ", group.Users.Select(k => k.AliasOrUID)));
                     }
-                    
-                    Logger.LogDebug("{tag} Push send: hash={hash} ackKey={hashKey} users={users}", SyncProgressTag, dataToSend.DataHash, hashKey, string.Join(", ", usersNeedingData.Select(k => k.AliasOrUID)));
-                    await _apiController.PushCharacterData(dataToSend, [.. usersNeedingData], hashKey).ConfigureAwait(false);
-                    Logger.LogDebug("{tag} Push complete: hash={hash} users={users}", SyncProgressTag, dataToSend.DataHash, string.Join(", ", usersNeedingData.Select(k => k.AliasOrUID)));
+
                     _usersToPushDataTo.Clear();
                 }
                 finally

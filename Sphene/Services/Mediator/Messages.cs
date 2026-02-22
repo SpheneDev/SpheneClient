@@ -63,6 +63,7 @@ public record NotificationMessage
 public record CreateCacheForObjectMessage(GameObjectHandler ObjectToCreateFor) : SameThreadMessage;
 public record ClearCacheForObjectMessage(GameObjectHandler ObjectToCreateFor) : SameThreadMessage;
 public record CharacterDataCreatedMessage(CharacterData CharacterData) : SameThreadMessage;
+public record ModSyncTagsChangedMessage : SameThreadMessage;
 public record CharacterDataBuildStartedMessage : MessageBase;
 public record CharacterDataApplicationCompletedMessage(string PlayerName, string UserUID, Guid ApplicationId, bool Success, string? DataHash) : MessageBase;
 public record CharacterDataAnalyzedMessage : MessageBase;

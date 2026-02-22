@@ -69,6 +69,21 @@ public class RedrawManager : IDisposable
         }
     }
 
+    public async Task RedrawMinionOrMountAsync()
+    {
+        var minionPtr = await _dalamudUtil.GetMinionOrMountAsync().ConfigureAwait(false);
+        if (minionPtr == IntPtr.Zero) return;
+
+        await _dalamudUtil.RunOnFrameworkThread(() =>
+        {
+            var obj = _dalamudUtil.CreateGameObject(minionPtr);
+            if (obj is ICharacter character)
+            {
+                _spheneMediator.Publish(new PenumbraRedrawCharacterMessage(character));
+            }
+        }).ConfigureAwait(false);
+    }
+
     private async Task WaitForRequestedRedrawEventAsync(RedrawRequestState requestState, CancellationToken token)
     {
         if (Volatile.Read(ref requestState.PendingRequest) == 0)
