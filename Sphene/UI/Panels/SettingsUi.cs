@@ -5,6 +5,7 @@ using Dalamud.Interface.Utility;
 using Dalamud.Interface.Utility.Raii;
 using Dalamud.Utility;
 using Sphene.API.Data;
+using Sphene.API.Data.Enum;
 using Sphene.API.Dto.Files;
 using Sphene.API.Data.Comparer;
 using Sphene.API.Routes;
@@ -13,6 +14,7 @@ using Sphene.Interop.Ipc;
 using Sphene.SpheneConfiguration;
 using Sphene.SpheneConfiguration.Models;
 using Sphene.PlayerData.Handlers;
+using Sphene.PlayerData.Factories;
 using Sphene.PlayerData.Pairs;
 using Sphene.Services;
 using Sphene.Services.Mediator;
@@ -63,11 +65,15 @@ public class SettingsUi : WindowMediatorSubscriberBase
     private readonly UiSharedService _uiShared;
     private readonly ShrinkUHostService _shrinkUHostService;
     private readonly ChangelogService _changelogService;
+    private readonly GameObjectHandlerFactory _gameObjectHandlerFactory;
     private readonly string _shrinkUVersion;
     private readonly IProgress<(int, int, FileCacheEntity)> _validationProgress;
     private (int, int, FileCacheEntity) _currentProgress;
     private const string SeaOfStarsRepoUrl = "https://raw.githubusercontent.com/Ottermandias/SeaOfStars/refs/heads/main/repo.json";
     private const string SeaOfStarsRepoName = "SeaOfStars Repo";
+    private const string TestServerName = "Sphene Test Server";
+    private const string DebugServerName = "Sphene Debug Server";
+    private const string TestServerIdentifier = "test.sphene.online";
     private bool _deleteAccountPopupModalShown = false;
     private bool _deleteFilesPopupModalShown = false;
     private string _lastTab = string.Empty;
@@ -92,6 +98,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         Home,
         Connectivity,
         PeopleNotes,
+        SyncTags,
         Display,
         Theme,
         Alerts,
@@ -121,7 +128,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         IpcManager ipcManager, CacheMonitor cacheMonitor,
         ShrinkUHostService shrinkUHostService,
         DalamudUtilService dalamudUtilService, HttpClient httpClient,
-        ChangelogService changelogService) : base(logger, mediator, "Network Configuration", performanceCollector)
+        ChangelogService changelogService, GameObjectHandlerFactory gameObjectHandlerFactory) : base(logger, mediator, "Network Configuration", performanceCollector)
     {
         _configService = configService;
         _pairManager = pairManager;
@@ -140,6 +147,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         _uiShared = uiShared;
         _shrinkUHostService = shrinkUHostService;
         _changelogService = changelogService;
+        _gameObjectHandlerFactory = gameObjectHandlerFactory;
         _shrinkUVersion = GetShrinkUAssemblyVersion();
         AllowClickthrough = false;
         AllowPinning = false;
@@ -392,128 +400,6 @@ public class SettingsUi : WindowMediatorSubscriberBase
             _configService.Save();
         }
         _uiShared.DrawHelpText("Attempts a single-shot transmission instead of streaming. Not usually required; enable only if you encounter transfer issues.");
-
-        ImGui.Separator();
-        _uiShared.BigText("Selective Mod Sync");
-        UiSharedService.TextWrapped("Assign pair tags to specific mods. Only pairs with at least one of the selected tags will receive that mod. Leave a mod without tags to send it to everyone.");
-        ImGuiHelpers.ScaledDummy(5);
-
-        var availableTags = _serverConfigurationManager.GetServerAvailablePairTags().OrderBy(t => t, StringComparer.OrdinalIgnoreCase).ToList();
-        var modNames = new List<string>();
-        if (LastCreatedCharacterData != null)
-        {
-            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var replacements in LastCreatedCharacterData.FileReplacements.Values)
-            {
-                foreach (var file in replacements)
-                {
-                    if (string.IsNullOrWhiteSpace(file.ModName))
-                    {
-                        continue;
-                    }
-
-                    if (seen.Add(file.ModName))
-                    {
-                        modNames.Add(file.ModName);
-                    }
-                }
-            }
-        }
-        modNames.Sort(StringComparer.OrdinalIgnoreCase);
-
-        ImGui.SetNextItemWidth(300 * ImGuiHelpers.GlobalScale);
-        ImGui.InputText("Mod Filter", ref _modSyncFilter, 64);
-        ImGuiHelpers.ScaledDummy(5);
-
-        if (_selectedModSyncName != null && !modNames.Contains(_selectedModSyncName, StringComparer.OrdinalIgnoreCase))
-        {
-            _selectedModSyncName = null;
-        }
-
-        var availableSize = ImGui.GetContentRegionAvail();
-        var listWidth = MathF.Max(280f * ImGuiHelpers.GlobalScale, availableSize.X * 0.45f);
-        using (ImRaii.Child("modSyncList", new Vector2(listWidth, 220 * ImGuiHelpers.GlobalScale), true))
-        {
-            if (modNames.Count == 0)
-            {
-                ImGui.TextUnformatted("No mods found in current character data.");
-            }
-            else
-            {
-                foreach (var mod in modNames)
-                {
-                    if (!string.IsNullOrWhiteSpace(_modSyncFilter)
-                        && mod.IndexOf(_modSyncFilter, StringComparison.OrdinalIgnoreCase) < 0)
-                    {
-                        continue;
-                    }
-
-                    var isSelected = string.Equals(_selectedModSyncName, mod, StringComparison.OrdinalIgnoreCase);
-                    if (ImGui.Selectable(mod, isSelected))
-                    {
-                        _selectedModSyncName = mod;
-                    }
-                }
-            }
-        }
-
-        ImGui.SameLine();
-        using (ImRaii.Child("modSyncTags", new Vector2(0, 220 * ImGuiHelpers.GlobalScale), true))
-        {
-            if (_selectedModSyncName == null)
-            {
-                ImGui.TextUnformatted("Select a mod to configure tag restrictions.");
-            }
-            else if (availableTags.Count == 0)
-            {
-                ImGui.TextUnformatted("No pair tags available. Create tags in People & Notes.");
-            }
-            else
-            {
-                ImGui.TextUnformatted(_selectedModSyncName);
-                ImGuiHelpers.ScaledDummy(3);
-
-                var modSyncTagsByModName = _configService.Current.ModSyncTagsByModName;
-                modSyncTagsByModName.TryGetValue(_selectedModSyncName, out var modTags);
-                modTags ??= new HashSet<string>(StringComparer.Ordinal);
-
-                foreach (var tag in availableTags)
-                {
-                    var hasTag = modTags.Contains(tag, StringComparer.Ordinal);
-                    if (ImGui.Checkbox(tag, ref hasTag))
-                    {
-                        if (hasTag)
-                        {
-                            modTags.Add(tag);
-                        }
-                        else
-                        {
-                            modTags.Remove(tag);
-                        }
-
-                        if (modTags.Count == 0)
-                        {
-                            modSyncTagsByModName.Remove(_selectedModSyncName);
-                        }
-                        else
-                        {
-                            modSyncTagsByModName[_selectedModSyncName] = modTags;
-                        }
-
-                        _configService.Save();
-                        Mediator.Publish(new ModSyncTagsChangedMessage());
-                    }
-                }
-
-                ImGuiHelpers.ScaledDummy(6);
-                if (ImGui.Button("Allow all pairs for this mod"))
-                {
-                    modSyncTagsByModName.Remove(_selectedModSyncName);
-                    _configService.Save();
-                    Mediator.Publish(new ModSyncTagsChangedMessage());
-                }
-            }
-        }
 
         ImGui.Separator();
         _uiShared.BigText("Transfer Monitor");
@@ -1993,7 +1879,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
 #endif
         
         // Calculate optimal sidebar width based on longest button text + reduced padding
-        var buttonLabels = new[] { "Home", "Connectivity", "People & Notes", "Appearance", "Theme", "Notifications", "Performance", "Transfers", "Storage", "Acknowledgment", diagnosticsPageLabel };
+        var buttonLabels = new[] { "Home", "Connectivity", "People & Notes", "Sync & Tags", "Appearance", "Theme", "Notifications", "Performance", "Transfers", "Storage", "Acknowledgment", diagnosticsPageLabel };
         var maxTextWidth = 0f;
         foreach (var label in buttonLabels)
         {
@@ -2021,6 +1907,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         SidebarButton("Home", SettingsPage.Home);
         SidebarButton("Connectivity", SettingsPage.Connectivity);
         SidebarButton("People & Notes", SettingsPage.PeopleNotes);
+        SidebarButton("Sync & Tags", SettingsPage.SyncTags);
         SidebarButton("Appearance", SettingsPage.Display);
         SidebarButton("Theme", SettingsPage.Theme);
         SidebarButton("Notifications", SettingsPage.Alerts);
@@ -2047,6 +1934,9 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 break;
             case SettingsPage.PeopleNotes:
                 DrawGeneralUserManagement();
+                break;
+            case SettingsPage.SyncTags:
+                DrawSyncTagsSettings();
                 break;
             case SettingsPage.Display:
                 DrawGeneralUiDisplaySettings();
@@ -2611,9 +2501,18 @@ public class SettingsUi : WindowMediatorSubscriberBase
             _configService.Save();
         }
 
+    }
+
+    private void DrawSyncTagsSettings()
+    {
+        _lastTab = "Sync Options";
+        _uiShared.BigText("Sync Options");
+        ImGui.TextColored(ImGuiColors.DalamudYellow, "Still under construction :D");
+        ImGui.TextColored(ImGuiColors.DalamudYellow, "Will be refactored after successful implementation and testing of mod sync.");
+        ImGui.Spacing();
+
         ImGui.Separator();
-        _uiShared.BigText("Pair Tags");
-        ImGui.TextUnformatted("Create tags used for mod-specific sync and user grouping.");
+        _uiShared.BigText("Pair Tags/Group");
 
         var tags = _serverConfigurationManager.GetServerAvailablePairTags()
             .OrderBy(t => t, StringComparer.OrdinalIgnoreCase)
@@ -2666,6 +2565,173 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 }
             }
         }
+
+        ImGui.Separator();
+        _uiShared.BigText("Selective Mod Sync");
+        UiSharedService.TextWrapped("Assign pair tags to specific mods. Only pairs with at least one of the selected tags will receive that mod. Leave a mod without tags to send it to everyone.");
+        ImGuiHelpers.ScaledDummy(5);
+
+        var availableTags = tags;
+        var modNames = new List<string>();
+        if (LastCreatedCharacterData != null)
+        {
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var replacements in LastCreatedCharacterData.FileReplacements.Values)
+            {
+                foreach (var file in replacements)
+                {
+                    if (string.IsNullOrWhiteSpace(file.ModName))
+                    {
+                        continue;
+                    }
+
+                    if (seen.Add(file.ModName))
+                    {
+                        modNames.Add(file.ModName);
+                    }
+                }
+            }
+        }
+        modNames.Sort(StringComparer.OrdinalIgnoreCase);
+
+        ImGui.SetNextItemWidth(300 * ImGuiHelpers.GlobalScale);
+        ImGui.InputText("Mod Filter", ref _modSyncFilter, 64);
+        ImGuiHelpers.ScaledDummy(5);
+
+        if (_selectedModSyncName != null && !modNames.Contains(_selectedModSyncName, StringComparer.OrdinalIgnoreCase))
+        {
+            _selectedModSyncName = null;
+        }
+
+        var availableSize = ImGui.GetContentRegionAvail();
+        var listWidth = MathF.Max(280f * ImGuiHelpers.GlobalScale, availableSize.X * 0.45f);
+        using (ImRaii.Child("modSyncList", new Vector2(listWidth, 220 * ImGuiHelpers.GlobalScale), true))
+        {
+            if (modNames.Count == 0)
+            {
+                ImGui.TextUnformatted("No mods found in current character data.");
+            }
+            else
+            {
+                foreach (var mod in modNames)
+                {
+                    if (!string.IsNullOrWhiteSpace(_modSyncFilter)
+                        && mod.IndexOf(_modSyncFilter, StringComparison.OrdinalIgnoreCase) < 0)
+                    {
+                        continue;
+                    }
+
+                    var isSelected = string.Equals(_selectedModSyncName, mod, StringComparison.OrdinalIgnoreCase);
+                    if (ImGui.Selectable(mod, isSelected))
+                    {
+                        _selectedModSyncName = mod;
+                    }
+                }
+            }
+        }
+
+        ImGui.SameLine();
+        using (ImRaii.Child("modSyncTags", new Vector2(0, 220 * ImGuiHelpers.GlobalScale), true))
+        {
+            if (_selectedModSyncName == null)
+            {
+                ImGui.TextUnformatted("Select a mod to configure tag restrictions.");
+            }
+            else if (availableTags.Count == 0)
+            {
+                ImGui.TextUnformatted("No pair tags available. Create tags in Sync & Tags.");
+            }
+            else
+            {
+                ImGui.TextUnformatted(_selectedModSyncName);
+                ImGuiHelpers.ScaledDummy(3);
+
+                var modSyncTagsByModName = _configService.Current.ModSyncTagsByModName;
+                modSyncTagsByModName.TryGetValue(_selectedModSyncName, out var modTags);
+                modTags ??= new HashSet<string>(StringComparer.Ordinal);
+
+                foreach (var tag in availableTags)
+                {
+                    var hasTag = modTags.Contains(tag, StringComparer.Ordinal);
+                    if (ImGui.Checkbox(tag, ref hasTag))
+                    {
+                        if (hasTag)
+                        {
+                            modTags.Add(tag);
+                        }
+                        else
+                        {
+                            modTags.Remove(tag);
+                        }
+
+                        if (modTags.Count == 0)
+                        {
+                            modSyncTagsByModName.Remove(_selectedModSyncName);
+                        }
+                        else
+                        {
+                            modSyncTagsByModName[_selectedModSyncName] = modTags;
+                        }
+
+                        _configService.Save();
+                        Mediator.Publish(new ModSyncTagsChangedMessage());
+                    }
+                }
+
+                ImGuiHelpers.ScaledDummy(6);
+                if (ImGui.Button("Allow all pairs for this mod"))
+                {
+                    modSyncTagsByModName.Remove(_selectedModSyncName);
+                    _configService.Save();
+                    Mediator.Publish(new ModSyncTagsChangedMessage());
+                }
+            }
+        }
+
+        ImGui.Separator();
+        _uiShared.BigText("Mod Sync Options");
+
+        var anonymizeModNames = _configService.Current.AnonymizeModNamesInCharacterData;
+        if (ImGui.Checkbox("Anonymize mod names in character data", ref anonymizeModNames))
+        {
+            _configService.Current.AnonymizeModNamesInCharacterData = anonymizeModNames;
+            _configService.Save();
+            _ = TriggerCharacterDataRebuildAsync();
+        }
+        _uiShared.DrawHelpText("Replaces mod and option names with anonymized numbers before sending character data.");
+
+        var allowSyncInCombat = _configService.Current.AllowSyncInCombatWithoutRedraw;
+        if (ImGui.Checkbox("Allow sync during combat (skip redraw)", ref allowSyncInCombat))
+        {
+            _configService.Current.AllowSyncInCombatWithoutRedraw = allowSyncInCombat;
+            _configService.Save();
+        }
+        _uiShared.DrawHelpText("Applies incoming sync updates during combat without triggering redraws. This avoids temporary invisibility but delays visual updates until combat ends.");
+
+        var enableSelectiveRedraw = _configService.Current.EnableSelectiveRedrawForTextures;
+        if (ImGui.Checkbox("Skip redraw for equipment-only mod changes (experimental)", ref enableSelectiveRedraw))
+        {
+            _configService.Current.EnableSelectiveRedrawForTextures = enableSelectiveRedraw;
+            _configService.Save();
+        }
+        _uiShared.DrawHelpText("When enabled, redraws only occur for eye, hair, skin, or face texture changes. Disabling restores default redraw behavior.");
+
+        ImGui.Separator();
+        _uiShared.BigText("Legacy Client/Server Compatibility");
+
+        var shouldStripModInfo = ShouldStripModInfoForCurrentServer();
+        if (_configService.Current.StripModInfoFromCharacterData != shouldStripModInfo)
+        {
+            _configService.Current.StripModInfoFromCharacterData = shouldStripModInfo;
+            _configService.Save();
+            _ = TriggerCharacterDataRebuildAsync();
+        }
+        var stripModInfo = _configService.Current.StripModInfoFromCharacterData;
+        using (ImRaii.Disabled(true))
+        {
+            ImGui.Checkbox("Strip modinfo and IsActive flags from character data", ref stripModInfo);
+        }
+        _uiShared.DrawHelpText("This option is controlled by the active server. Main server enables it, test server disables it.");
     }
 
     private static bool IsReservedTagName(string tag)
@@ -2673,6 +2739,61 @@ public class SettingsUi : WindowMediatorSubscriberBase
         return tag is TagHandler.CustomAllTag or TagHandler.CustomOfflineTag or TagHandler.CustomOfflineSyncshellTag
             or TagHandler.CustomOnlineTag or TagHandler.CustomPausedTag or TagHandler.CustomUnpairedTag
             or TagHandler.CustomVisibleTag;
+    }
+
+    private bool ShouldStripModInfoForCurrentServer()
+    {
+        return !IsTestServerActive();
+    }
+
+    private bool IsTestServerActive()
+    {
+        if (_configService.Current.UseTestServerOverride)
+        {
+            return true;
+        }
+
+        var currentServer = _serverConfigurationManager.CurrentServer;
+        if (currentServer == null)
+        {
+            return false;
+        }
+
+        var serverName = currentServer.ServerName ?? string.Empty;
+        var serverUri = currentServer.ServerUri ?? string.Empty;
+
+        if (serverUri.Contains(TestServerIdentifier, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (string.Equals(serverName, TestServerName, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(serverName, DebugServerName, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (serverName.Contains("Test", StringComparison.OrdinalIgnoreCase)
+            || serverName.Contains("Debug", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return serverUri.Contains("test", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task TriggerCharacterDataRebuildAsync()
+    {
+        try
+        {
+            var tempHandler = await _gameObjectHandlerFactory.Create(ObjectKind.Player, () => _dalamudUtilService.GetPlayerPtr(), isWatched: false).ConfigureAwait(false);
+            Mediator.Publish(new CreateCacheForObjectMessage(tempHandler));
+            tempHandler.Dispose();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to trigger character data rebuild");
+        }
     }
 
     private void DrawGeneralUiDisplaySettings()
@@ -3034,44 +3155,6 @@ public class SettingsUi : WindowMediatorSubscriberBase
             _configService.Save();
         }
         _uiShared.DrawHelpText("How long to wait for acknowledgment responses before timing out.");
-        
-        ImGui.Spacing();
-        ImGui.Separator();
-        
-        // Legacy Client Compatibility
-        _uiShared.BigText("Legacy Client Compatibility");
-        
-        var stripModInfo = _configService.Current.StripModInfoFromCharacterData;
-        if (ImGui.Checkbox("Strip modinfo and IsActive flags from character data", ref stripModInfo))
-        {
-            _configService.Current.StripModInfoFromCharacterData = stripModInfo;
-            _configService.Save();
-        }
-        _uiShared.DrawHelpText("Enable this option to send character data without modinfo and IsActive flags for compatibility with older clients. Only active if explicitly enabled.");
-        
-        var anonymizeModNames = _configService.Current.AnonymizeModNamesInCharacterData;
-        if (ImGui.Checkbox("Anonymize mod names in character data", ref anonymizeModNames))
-        {
-            _configService.Current.AnonymizeModNamesInCharacterData = anonymizeModNames;
-            _configService.Save();
-        }
-        _uiShared.DrawHelpText("Replaces mod and option names with anonymized numbers before sending character data.");
-
-        var allowSyncInCombat = _configService.Current.AllowSyncInCombatWithoutRedraw;
-        if (ImGui.Checkbox("Allow sync during combat (skip redraw)", ref allowSyncInCombat))
-        {
-            _configService.Current.AllowSyncInCombatWithoutRedraw = allowSyncInCombat;
-            _configService.Save();
-        }
-        _uiShared.DrawHelpText("Applies incoming sync updates during combat without triggering redraws. This avoids temporary invisibility but delays visual updates until combat ends.");
-
-        var enableSelectiveRedraw = _configService.Current.EnableSelectiveRedrawForTextures;
-        if (ImGui.Checkbox("Skip redraw for equipment-only mod changes (experimental)", ref enableSelectiveRedraw))
-        {
-            _configService.Current.EnableSelectiveRedrawForTextures = enableSelectiveRedraw;
-            _configService.Save();
-        }
-        _uiShared.DrawHelpText("When enabled, redraws only occur for eye, hair, skin, or face texture changes. Disabling restores default redraw behavior.");
         
         ImGui.Spacing();
         ImGui.Separator();
