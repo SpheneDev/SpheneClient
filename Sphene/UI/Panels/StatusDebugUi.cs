@@ -43,6 +43,11 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
     private readonly Dictionary<string, CharacterStatsSnapshot> _characterStats = new(StringComparer.Ordinal);
     private string _penumbraSearch = string.Empty;
     private bool _showOnlyEnabledMods = true;
+    private string? _pairCollectionCacheUid;
+    private string? _pairCollectionCacheDataHash;
+    private int _pairCollectionLocalModsCount;
+    private readonly List<PairCollectionRow> _pairCollectionRows = [];
+    private readonly HashSet<string> _pairCollectionLocalMods = new(StringComparer.OrdinalIgnoreCase);
     
     public StatusDebugUi(ILogger<StatusDebugUi> logger, SpheneMediator mediator,
         UiSharedService uiSharedService, PairManager pairManager, ApiController apiController,
@@ -562,6 +567,8 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         var data = pair.LastReceivedCharacterData;
         if (data == null) return;
 
+        EnsurePairCollectionCache(pair, data);
+
         ImGui.Text($"Collection for {pair.UserData.AliasOrUID}");
         ImGui.Text($"Data Hash: {data.GetHashCode()}"); // Approximate hash or use actual if available
 
@@ -576,58 +583,23 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             ImGui.TableSetupColumn("Status", ImGuiTableColumnFlags.WidthFixed, 100);
             ImGui.TableHeadersRow();
 
-            // Flatten and Group
-            var allReplacements = data.FileReplacements.Values
-                .SelectMany(x => x)
-                .Where(x => !string.IsNullOrEmpty(x.Hash)) // Filter out empty hashes
-                .GroupBy(x => new { x.ModName, x.OptionName })
-                .OrderBy(g => g.Key.ModName, StringComparer.OrdinalIgnoreCase)
-                .ThenBy(g => g.Key.OptionName, StringComparer.OrdinalIgnoreCase);
-
-            var localMods = _penumbraScanner.LastScanDebugInfo.Select(m => m.ModName).ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-            foreach (var group in allReplacements)
+            foreach (var row in _pairCollectionRows)
             {
-                var modName = string.IsNullOrEmpty(group.Key.ModName) ? "Unknown Mod" : group.Key.ModName;
-                var optionName = string.IsNullOrEmpty(group.Key.OptionName) ? "Default" : group.Key.OptionName;
-                
-                var distinctFiles = group.Select(f => f.Hash).Distinct(StringComparer.Ordinal).ToList();
-                var totalFiles = distinctFiles.Count;
-                var cachedFiles = 0;
-                long totalSize = 0;
-
-                foreach (var hash in distinctFiles)
-                {
-                    var cache = _fileCacheManager.GetFileCacheByHash(hash);
-                    if (cache != null)
-                    {
-                        var validation = _fileCacheManager.ValidateFileCacheEntity(cache);
-                        if (validation.State == FileState.Valid)
-                        {
-                            cachedFiles++;
-                            totalSize += cache.Size ?? 0;
-                        }
-                    }
-                }
-
-                // Check for legacy shpk
-                bool hasLegacyShpk = group.SelectMany(f => f.GamePaths).Any(p => p.EndsWith("characterlegacy.shpk", StringComparison.OrdinalIgnoreCase));
-
                 ImGui.TableNextRow();
 
                 // Mod Name
                 ImGui.TableSetColumnIndex(0);
-                if (localMods.Contains(modName))
+                if (row.IsShared)
                 {
-                    UiSharedService.ColorText(modName, ImGuiColors.HealerGreen);
+                    UiSharedService.ColorText(row.ModName, ImGuiColors.HealerGreen);
                     if (ImGui.IsItemHovered()) ImGui.SetTooltip("You also have this mod installed (Shared)");
                 }
                 else
                 {
-                    ImGui.Text(modName);
+                    ImGui.Text(row.ModName);
                 }
 
-                if (hasLegacyShpk)
+                if (row.HasLegacyShpk)
                 {
                     ImGui.SameLine();
                     ImGui.TextColored(ImGuiColors.DalamudRed, "⚠");
@@ -636,24 +608,24 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
 
                 // Option
                 ImGui.TableSetColumnIndex(1);
-                ImGui.Text(optionName);
+                ImGui.Text(row.OptionName);
 
                 // Files
                 ImGui.TableSetColumnIndex(2);
-                var fileColor = cachedFiles == totalFiles ? ImGuiColors.HealerGreen : (cachedFiles > 0 ? ImGuiColors.DalamudYellow : ImGuiColors.DalamudRed);
-                UiSharedService.ColorText($"{cachedFiles} / {totalFiles}", fileColor);
+                var fileColor = row.CachedFiles == row.TotalFiles ? ImGuiColors.HealerGreen : (row.CachedFiles > 0 ? ImGuiColors.DalamudYellow : ImGuiColors.DalamudRed);
+                UiSharedService.ColorText($"{row.CachedFiles} / {row.TotalFiles}", fileColor);
 
                 // Size
                 ImGui.TableSetColumnIndex(3);
-                ImGui.Text(UiSharedService.ByteToString(totalSize));
+                ImGui.Text(UiSharedService.ByteToString(row.TotalSize));
 
                 // Status
                 ImGui.TableSetColumnIndex(4);
-                if (cachedFiles == totalFiles)
+                if (row.CachedFiles == row.TotalFiles)
                 {
                     UiSharedService.ColorText("Ready", ImGuiColors.HealerGreen);
                 }
-                else if (cachedFiles > 0)
+                else if (row.CachedFiles > 0)
                 {
                     UiSharedService.ColorText("Partial", ImGuiColors.DalamudYellow);
                 }
@@ -665,6 +637,131 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
 
             ImGui.EndTable();
         }
+    }
+
+    private void EnsurePairCollectionCache(Pair pair, CharacterData data)
+    {
+        var localModsCount = _penumbraScanner.LastScanDebugInfo.Count;
+        var dataHash = data.DataHash.Value;
+        if (!string.Equals(_pairCollectionCacheUid, pair.UserData.UID, StringComparison.Ordinal)
+            || !string.Equals(_pairCollectionCacheDataHash, dataHash, StringComparison.Ordinal)
+            || _pairCollectionLocalModsCount != localModsCount)
+        {
+            RebuildPairCollectionCache(pair, data, localModsCount, dataHash);
+        }
+    }
+
+    private void RebuildPairCollectionCache(Pair pair, CharacterData data, int localModsCount, string dataHash)
+    {
+        _pairCollectionCacheUid = pair.UserData.UID;
+        _pairCollectionCacheDataHash = dataHash;
+        _pairCollectionLocalModsCount = localModsCount;
+        _pairCollectionRows.Clear();
+        _pairCollectionLocalMods.Clear();
+
+        foreach (var modInfo in _penumbraScanner.LastScanDebugInfo)
+        {
+            if (!string.IsNullOrEmpty(modInfo.ModName))
+            {
+                _pairCollectionLocalMods.Add(modInfo.ModName);
+            }
+        }
+
+        var builders = new Dictionary<string, PairCollectionRowBuilder>(StringComparer.OrdinalIgnoreCase);
+        foreach (var replacements in data.FileReplacements.Values)
+        {
+            if (replacements == null) continue;
+            foreach (var replacement in replacements)
+            {
+                if (string.IsNullOrEmpty(replacement.Hash)) continue;
+
+                var modName = string.IsNullOrEmpty(replacement.ModName) ? "Unknown Mod" : replacement.ModName;
+                var optionName = string.IsNullOrEmpty(replacement.OptionName) ? "Default" : replacement.OptionName;
+                var key = modName + "\u001F" + optionName;
+
+                if (!builders.TryGetValue(key, out var builder))
+                {
+                    builder = new PairCollectionRowBuilder(modName, optionName);
+                    builders.Add(key, builder);
+                }
+
+                builder.Hashes.Add(replacement.Hash);
+                var gamePaths = replacement.GamePaths;
+                for (var i = 0; i < gamePaths.Length; i++)
+                {
+                    if (gamePaths[i].EndsWith("characterlegacy.shpk", StringComparison.OrdinalIgnoreCase))
+                    {
+                        builder.Row.HasLegacyShpk = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        foreach (var builder in builders.Values)
+        {
+            var totalFiles = 0;
+            var cachedFiles = 0;
+            long totalSize = 0;
+
+            foreach (var hash in builder.Hashes)
+            {
+                totalFiles++;
+                var cache = _fileCacheManager.GetFileCacheByHash(hash);
+                if (cache != null)
+                {
+                    var validation = _fileCacheManager.ValidateFileCacheEntity(cache);
+                    if (validation.State == FileState.Valid)
+                    {
+                        cachedFiles++;
+                        totalSize += cache.Size ?? 0;
+                    }
+                }
+            }
+
+            var row = builder.Row;
+            row.TotalFiles = totalFiles;
+            row.CachedFiles = cachedFiles;
+            row.TotalSize = totalSize;
+            row.IsShared = _pairCollectionLocalMods.Contains(row.ModName);
+            _pairCollectionRows.Add(row);
+        }
+
+        _pairCollectionRows.Sort((left, right) =>
+        {
+            var modCompare = StringComparer.OrdinalIgnoreCase.Compare(left.ModName, right.ModName);
+            if (modCompare != 0) return modCompare;
+            return StringComparer.OrdinalIgnoreCase.Compare(left.OptionName, right.OptionName);
+        });
+    }
+
+    private sealed class PairCollectionRow
+    {
+        public PairCollectionRow(string modName, string optionName)
+        {
+            ModName = modName;
+            OptionName = optionName;
+        }
+
+        public string ModName { get; }
+        public string OptionName { get; }
+        public int CachedFiles { get; set; }
+        public int TotalFiles { get; set; }
+        public long TotalSize { get; set; }
+        public bool HasLegacyShpk { get; set; }
+        public bool IsShared { get; set; }
+    }
+
+    private sealed class PairCollectionRowBuilder
+    {
+        public PairCollectionRowBuilder(string modName, string optionName)
+        {
+            Row = new PairCollectionRow(modName, optionName);
+            Hashes = new HashSet<string>(StringComparer.Ordinal);
+        }
+
+        public PairCollectionRow Row { get; }
+        public HashSet<string> Hashes { get; }
     }
 
     

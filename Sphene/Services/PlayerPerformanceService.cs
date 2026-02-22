@@ -113,7 +113,7 @@ public class PlayerPerformanceService
             return true;
         }
 
-        var moddedModelHashes = playerReplacements.Where(p => string.IsNullOrEmpty(p.FileSwapPath) && p.GamePaths.Any(g => g.EndsWith("mdl", StringComparison.OrdinalIgnoreCase)))
+        var moddedModelHashes = playerReplacements.Where(p => p.IsActive && string.IsNullOrEmpty(p.FileSwapPath) && p.GamePaths.Any(g => g.EndsWith("mdl", StringComparison.OrdinalIgnoreCase)))
             .Select(p => p.Hash)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -168,7 +168,7 @@ public class PlayerPerformanceService
             return true;
         }
 
-        var moddedTextureHashes = playerReplacements.Where(p => string.IsNullOrEmpty(p.FileSwapPath) && p.GamePaths.Any(g => g.EndsWith(".tex", StringComparison.OrdinalIgnoreCase)))
+        var moddedTextureHashes = playerReplacements.Where(p => p.IsActive && string.IsNullOrEmpty(p.FileSwapPath) && p.GamePaths.Any(g => g.EndsWith(".tex", StringComparison.OrdinalIgnoreCase)))
             .Select(p => p.Hash)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();

@@ -183,11 +183,11 @@ public sealed class CacheCreationService : DisposableMediatorSubscriberBase
 
         Mediator.Subscribe<PenumbraModScanFinishedMessage>(this, (msg) =>
         {
-            Logger.LogDebug("Received Penumbra Mod Scan Finished message, updating everything");
+            Logger.LogDebug("Received Penumbra Mod Scan Finished message, updating active objects");
             AddCacheToCreate(ObjectKind.Player);
-            AddCacheToCreate(ObjectKind.Pet);
-            AddCacheToCreate(ObjectKind.MinionOrMount);
-            AddCacheToCreate(ObjectKind.Companion);
+            if (ShouldCreateForModScan(ObjectKind.Pet)) AddCacheToCreate(ObjectKind.Pet);
+            if (ShouldCreateForModScan(ObjectKind.MinionOrMount)) AddCacheToCreate(ObjectKind.MinionOrMount);
+            if (ShouldCreateForModScan(ObjectKind.Companion)) AddCacheToCreate(ObjectKind.Companion);
         });
 
         Mediator.Subscribe<FrameworkUpdateMessage>(this, (msg) => ProcessCacheCreation());
@@ -226,6 +226,21 @@ public sealed class CacheCreationService : DisposableMediatorSubscriberBase
             _debouncedObjectCache.Clear();
             _cacheCreateLock.Release();
         });
+    }
+
+    private bool ShouldCreateForModScan(ObjectKind objectKind)
+    {
+        if (objectKind == ObjectKind.Player)
+        {
+            return true;
+        }
+
+        if (!_playerRelatedObjects.TryGetValue(objectKind, out var handler))
+        {
+            return false;
+        }
+
+        return handler.Address != IntPtr.Zero;
     }
 
     private void ProcessCacheCreation()
