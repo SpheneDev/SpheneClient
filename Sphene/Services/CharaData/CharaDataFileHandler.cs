@@ -216,7 +216,7 @@ public sealed class CharaDataFileHandler : IDisposable
 
         if (data != null)
         {
-            var outgoingData = data.CreateOutboundCopy(_spheneConfigService.Current.StripModInfoFromCharacterData);
+            var outgoingData = data.CreateOutboundCopy(_spheneConfigService.Current.StripModInfoFromCharacterData, anonymizeModNames: _spheneConfigService.Current.AnonymizeModNamesInCharacterData);
             var hasGlamourerData = outgoingData.GlamourerData.TryGetValue(ObjectKind.Player, out var playerDataString);
             if (!hasGlamourerData) updateDto.GlamourerData = null;
             else updateDto.GlamourerData = playerDataString;

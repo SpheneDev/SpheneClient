@@ -92,6 +92,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
     private string? _installingPluginName;
     private string _modSyncFilter = string.Empty;
     private string? _selectedModSyncName = null;
+    private List<string> _modSyncAvailableModNames = [];
     // New navigation state for redesigned Settings layout
     private enum SettingsPage
     {
@@ -164,6 +165,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         Mediator.Subscribe<CutsceneStartMessage>(this, (_) => UiSharedService_GposeStart());
         Mediator.Subscribe<CutsceneEndMessage>(this, (_) => UiSharedService_GposeEnd());
         Mediator.Subscribe<CharacterDataCreatedMessage>(this, (msg) => LastCreatedCharacterData = msg.CharacterData);
+        Mediator.Subscribe<ModSyncModNameListMessage>(this, (msg) => _modSyncAvailableModNames = msg.ModNames.ToList());
         Mediator.Subscribe<DownloadStartedMessage>(this, (msg) => _currentDownloads[msg.DownloadId] = msg.DownloadStatus);
         Mediator.Subscribe<DownloadFinishedMessage>(this, (msg) => _currentDownloads.TryRemove(msg.DownloadId, out _));
         Mediator.Subscribe<CompactUiChange>(this, (msg) => { _currentCompactUiSize = msg.Size; _compactUiHasLayoutInfo = true; });
@@ -2573,7 +2575,11 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
         var availableTags = tags;
         var modNames = new List<string>();
-        if (LastCreatedCharacterData != null)
+        if (_modSyncAvailableModNames.Count > 0)
+        {
+            modNames.AddRange(_modSyncAvailableModNames);
+        }
+        else if (LastCreatedCharacterData != null)
         {
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var replacements in LastCreatedCharacterData.FileReplacements.Values)

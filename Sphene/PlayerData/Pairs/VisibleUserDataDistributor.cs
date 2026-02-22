@@ -73,8 +73,10 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
         Mediator.Subscribe<ModSyncTagsChangedMessage>(this, (_) => PushToAllVisibleUsers(forced: true));
         Mediator.Subscribe<CharacterDataCreatedMessage>(this, (msg) =>
         {
-            var previousHash = _lastCreatedData == null ? null : _lastCreatedData.CreateOutboundCopy(_spheneConfigService.Current.StripModInfoFromCharacterData).DataHash?.Value;
-            var newHash = msg.CharacterData.CreateOutboundCopy(_spheneConfigService.Current.StripModInfoFromCharacterData).DataHash?.Value;
+            var stripModInfo = _spheneConfigService.Current.StripModInfoFromCharacterData;
+            var anonymizeModNames = _spheneConfigService.Current.AnonymizeModNamesInCharacterData;
+            var previousHash = _lastCreatedData == null ? null : _lastCreatedData.CreateOutboundCopy(stripModInfo, anonymizeModNames: anonymizeModNames).DataHash?.Value;
+            var newHash = msg.CharacterData.CreateOutboundCopy(stripModInfo, anonymizeModNames: anonymizeModNames).DataHash?.Value;
             
             _lastCreatedData = msg.CharacterData;
             Logger.LogDebug("{tag} Data created: previousHash={oldHash} newHash={newHash}", SyncProgressTag, previousHash ?? "null", newHash ?? "null");
@@ -137,7 +139,8 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
             return;
         }
 
-        dataToUpload = dataToUpload.CreateOutboundCopy(false);
+        var anonymizeModNames = _spheneConfigService.Current.AnonymizeModNamesInCharacterData;
+        dataToUpload = dataToUpload.CreateOutboundCopy(false, anonymizeModNames: anonymizeModNames);
         var hash = dataToUpload.DataHash?.Value ?? string.Empty;
         if (string.IsNullOrEmpty(hash))
         {
@@ -189,7 +192,9 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
     private void PushToAllVisibleUsers(bool forced = false)
     {
         if (_lastCreatedData == null) return;
-        var currentHash = _lastCreatedData.CreateOutboundCopy(_spheneConfigService.Current.StripModInfoFromCharacterData).DataHash.Value;
+        var stripModInfo = _spheneConfigService.Current.StripModInfoFromCharacterData;
+        var anonymizeModNames = _spheneConfigService.Current.AnonymizeModNamesInCharacterData;
+        var currentHash = _lastCreatedData.CreateOutboundCopy(stripModInfo, anonymizeModNames: anonymizeModNames).DataHash.Value;
         if (string.IsNullOrEmpty(currentHash)) return;
         Logger.LogDebug("{tag} Push check: currentHash={hash} forced={forced}", SyncProgressTag, currentHash, forced);
         
@@ -271,7 +276,8 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
         {
             var modSyncTagsByModName = _spheneConfigService.Current.ModSyncTagsByModName;
             var stripModInfo = _spheneConfigService.Current.StripModInfoFromCharacterData;
-            var outgoingData = _lastCreatedData.CreateOutboundCopy(false);
+            var anonymizeModNames = _spheneConfigService.Current.AnonymizeModNamesInCharacterData;
+            var outgoingData = _lastCreatedData.CreateOutboundCopy(false, anonymizeModNames: anonymizeModNames);
             forced |= _uploadingCharacterData?.DataHash != outgoingData.DataHash;
 
             if (_fileUploadTask == null || (_fileUploadTask?.IsCompleted ?? false) || forced)
@@ -295,7 +301,7 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
                     CharacterData? sharedData = null;
                     if (modSyncTagsByModName.Count == 0)
                     {
-                        sharedData = stripModInfo ? dataToSend.CreateOutboundCopy(true) : dataToSend;
+                        sharedData = stripModInfo ? dataToSend.CreateOutboundCopy(true, anonymizeModNames: anonymizeModNames) : dataToSend;
                     }
 
                     var groupedUsers = new Dictionary<string, (CharacterData Data, List<UserData> Users)>(StringComparer.Ordinal);
@@ -309,7 +315,7 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
                         else
                         {
                             tagMapping.TryGetValue(user.UID, out var recipientTags);
-                            dataForUser = dataToSend.CreateOutboundCopy(stripModInfo, modSyncTagsByModName, recipientTags);
+                            dataForUser = dataToSend.CreateOutboundCopy(stripModInfo, modSyncTagsByModName, recipientTags, anonymizeModNames: anonymizeModNames);
                         }
 
                         var currentHash = dataForUser.DataHash.Value;

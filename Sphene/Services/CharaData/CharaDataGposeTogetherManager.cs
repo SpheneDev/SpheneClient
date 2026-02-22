@@ -110,7 +110,7 @@ public class CharaDataGposeTogetherManager : DisposableMediatorSubscriberBase
     {
         var playerData = await _charaDataFileHandler.CreatePlayerData().ConfigureAwait(false);
         if (playerData == null) return;
-        var outgoingData = playerData.CreateOutboundCopy(_spheneConfigService.Current.StripModInfoFromCharacterData);
+        var outgoingData = playerData.CreateOutboundCopy(_spheneConfigService.Current.StripModInfoFromCharacterData, anonymizeModNames: _spheneConfigService.Current.AnonymizeModNamesInCharacterData);
         if (!string.Equals(outgoingData.DataHash.Value, _lastCreatedCharaData?.ApiData.DataHash.Value, StringComparison.Ordinal))
         {
             List<GamePathEntry> filegamePaths = [.. outgoingData.FileReplacements[API.Data.Enum.ObjectKind.Player]

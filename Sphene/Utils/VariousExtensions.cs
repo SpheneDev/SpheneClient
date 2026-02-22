@@ -4,6 +4,7 @@ using Sphene.API.Data.Enum;
 using Sphene.PlayerData.Handlers;
 using Sphene.PlayerData.Pairs;
 using Microsoft.Extensions.Logging;
+using System.Globalization;
 using System.Text.Json;
 
 namespace Sphene.Utils;
@@ -225,7 +226,7 @@ public static class VariousExtensions
         return JsonSerializer.Deserialize<T>(JsonSerializer.Serialize(obj))!;
     }
 
-    public static CharacterData CreateOutboundCopy(this CharacterData data, bool stripModInfo, Dictionary<string, HashSet<string>>? modSyncTagsByModName = null, IReadOnlyCollection<string>? recipientTags = null)
+    public static CharacterData CreateOutboundCopy(this CharacterData data, bool stripModInfo, Dictionary<string, HashSet<string>>? modSyncTagsByModName = null, IReadOnlyCollection<string>? recipientTags = null, bool anonymizeModNames = false)
     {
         var clone = data.DeepClone();
         if (modSyncTagsByModName != null && modSyncTagsByModName.Count > 0)
@@ -235,6 +236,10 @@ public static class VariousExtensions
         if (stripModInfo)
         {
             clone.StripModInfo();
+        }
+        else if (anonymizeModNames)
+        {
+            clone.AnonymizeModNames();
         }
 
         return clone;
@@ -298,6 +303,39 @@ public static class VariousExtensions
                 file.IsActive = false;
             }
         }
+    }
+
+    public static void AnonymizeModNames(this CharacterData data)
+    {
+        foreach (var replacements in data.FileReplacements.Values)
+        {
+            foreach (var file in replacements)
+            {
+                var originalModName = file.ModName;
+                if (!string.IsNullOrWhiteSpace(originalModName))
+                {
+                    file.ModName = "M" + GetAnonymizedNumber(originalModName);
+                }
+
+                if (!string.IsNullOrWhiteSpace(file.OptionName))
+                {
+                    var source = string.IsNullOrWhiteSpace(originalModName) ? file.OptionName : $"{originalModName}|{file.OptionName}";
+                    file.OptionName = "O" + GetAnonymizedNumber(source);
+                }
+            }
+        }
+    }
+
+    private static string GetAnonymizedNumber(string value)
+    {
+        var hash = value.GetHash256();
+        var shortHex = hash.Length >= 8 ? hash[..8] : hash;
+        if (!uint.TryParse(shortHex, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var number))
+        {
+            return "0";
+        }
+
+        return number.ToString(CultureInfo.InvariantCulture);
     }
 
     public static unsafe int? ObjectTableIndex(this IGameObject? gameObject)

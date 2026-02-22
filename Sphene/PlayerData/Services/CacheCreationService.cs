@@ -161,7 +161,7 @@ public sealed class CacheCreationService : DisposableMediatorSubscriberBase
 
                     var newData = _playerData.ToAPI(false, _spheneConfigService.Current.AnonymizeModNamesInCharacterData);
                     var newHash = newData.DataHash?.Value;
-                    var outgoingHash = newData.CreateOutboundCopy(_spheneConfigService.Current.StripModInfoFromCharacterData).DataHash?.Value;
+                    var outgoingHash = newData.CreateOutboundCopy(_spheneConfigService.Current.StripModInfoFromCharacterData, anonymizeModNames: _spheneConfigService.Current.AnonymizeModNamesInCharacterData).DataHash?.Value;
 
                     // Fast path: Publish immediately using the NEW hash.
                     // The receiver (CharaDataManager) needs a valid hash to send to the server.
@@ -285,6 +285,24 @@ public sealed class CacheCreationService : DisposableMediatorSubscriberBase
                     var newData = _playerData.ToAPI(false, _spheneConfigService.Current.AnonymizeModNamesInCharacterData);
                     var newHash = newData.DataHash?.Value;
                     
+                    var modNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var replacements in _playerData.FileReplacements.Values)
+                    {
+                        foreach (var file in replacements)
+                        {
+                            if (string.IsNullOrWhiteSpace(file.ModName))
+                            {
+                                continue;
+                            }
+
+                            modNames.Add(file.ModName);
+                        }
+                    }
+
+                    var modNameList = modNames.ToList();
+                    modNameList.Sort(StringComparer.OrdinalIgnoreCase);
+                    Mediator.Publish(new ModSyncModNameListMessage(modNameList));
+
                     if (!string.Equals(newHash, _lastDataHash, StringComparison.Ordinal))
                     {
                         Logger.LogDebug("Character data changed, publishing update. Old hash: {oldHash}, New hash: {newHash}", _lastDataHash ?? "null", newHash ?? "null");
