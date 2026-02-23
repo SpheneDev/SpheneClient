@@ -14,6 +14,7 @@ public sealed class CharacterAnalyzer : MediatorSubscriberBase, IDisposable
     private readonly FileCacheManager _fileCacheManager;
     private readonly XivDataAnalyzer _xivDataAnalyzer;
     private readonly PenumbraModScanner _penumbraModScanner;
+    private readonly System.Threading.Lock _analysisLock = new();
     private CancellationTokenSource? _analysisCts;
     private CancellationTokenSource _baseAnalysisCts = new();
     private string _lastDataHash = string.Empty;
@@ -37,12 +38,44 @@ public sealed class CharacterAnalyzer : MediatorSubscriberBase, IDisposable
     public int CurrentFile { get; internal set; }
     public bool IsAnalysisRunning => _analysisCts != null;
     public int TotalFiles { get; internal set; }
-    public bool AreActiveTexturesComputed => LastAnalysis.Values
-        .SelectMany(v => v.Values)
-        .Where(f => f.IsActive && string.Equals(f.FileType, "tex", StringComparison.OrdinalIgnoreCase))
-        .All(f => f.IsComputed);
+    public bool AreActiveTexturesComputed
+    {
+        get
+        {
+            lock (_analysisLock)
+            {
+                return LastAnalysis.Values
+                    .SelectMany(v => v.Values)
+                    .Where(f => f.IsActive && string.Equals(f.FileType, "tex", StringComparison.OrdinalIgnoreCase))
+                    .All(f => f.IsComputed);
+            }
+        }
+    }
 
     internal Dictionary<ObjectKind, Dictionary<string, FileDataEntry>> LastAnalysis { get; } = [];
+
+    /// <summary>
+    /// Gets the total size of active texture files in the latest analysis.
+    /// </summary>
+    public long GetActiveTextureSizeBytes()
+    {
+        lock (_analysisLock)
+        {
+            long totalSize = 0;
+            foreach (var objectKindData in LastAnalysis.Values)
+            {
+                foreach (var fileEntry in objectKindData.Values)
+                {
+                    if (fileEntry.IsActive && string.Equals(fileEntry.FileType, "tex", StringComparison.OrdinalIgnoreCase))
+                    {
+                        totalSize += fileEntry.OriginalSize;
+                    }
+                }
+            }
+
+            return totalSize;
+        }
+    }
 
     public void CancelAnalyze()
     {
@@ -58,7 +91,11 @@ public sealed class CharacterAnalyzer : MediatorSubscriberBase, IDisposable
 
         var cancelToken = _analysisCts.Token;
 
-        var allFiles = LastAnalysis.SelectMany(v => v.Value.Select(d => d.Value)).ToList();
+        List<FileDataEntry> allFiles;
+        lock (_analysisLock)
+        {
+            allFiles = LastAnalysis.SelectMany(v => v.Value.Select(d => d.Value)).ToList();
+        }
         if (allFiles.Exists(c => !c.IsComputed || recalculate))
         {
             var remaining = allFiles.Where(c => !c.IsComputed || recalculate).ToList();
@@ -124,7 +161,10 @@ public sealed class CharacterAnalyzer : MediatorSubscriberBase, IDisposable
     {
         if (string.Equals(charaData.DataHash.Value, _lastDataHash, StringComparison.Ordinal)) return;
 
-        LastAnalysis.Clear();
+        lock (_analysisLock)
+        {
+            LastAnalysis.Clear();
+        }
 
         // Pre-calculate relevant mods for MinionOrMount GLOBALLY
         HashSet<string> relevantMinionMods = new(StringComparer.OrdinalIgnoreCase);
@@ -378,7 +418,10 @@ public sealed class CharacterAnalyzer : MediatorSubscriberBase, IDisposable
                 }
             }
 
-            LastAnalysis[kind] = data;
+            lock (_analysisLock)
+            {
+                LastAnalysis[kind] = data;
+            }
         }
 
         Mediator.Publish(new CharacterDataAnalyzedMessage());
@@ -388,8 +431,14 @@ public sealed class CharacterAnalyzer : MediatorSubscriberBase, IDisposable
 
     private void PrintAnalysis()
     {
-        if (LastAnalysis.Count == 0) return;
-        foreach (var kvp in LastAnalysis)
+        Dictionary<ObjectKind, Dictionary<string, FileDataEntry>> snapshot;
+        lock (_analysisLock)
+        {
+            if (LastAnalysis.Count == 0) return;
+            snapshot = LastAnalysis.ToDictionary(k => k.Key, v => v.Value);
+        }
+
+        foreach (var kvp in snapshot)
         {
             int fileCounter = 1;
             int totalFiles = kvp.Value.Count;
@@ -411,7 +460,7 @@ public sealed class CharacterAnalyzer : MediatorSubscriberBase, IDisposable
                     UiSharedService.ByteToString(entry.Value.CompressedSize));
             }
         }
-        foreach (var kvp in LastAnalysis)
+        foreach (var kvp in snapshot)
         {
             Logger.LogInformation("=== Detailed summary by file type for {obj} ===", kvp.Key);
             foreach (var entry in kvp.Value.Select(v => v.Value).GroupBy(v => v.FileType, StringComparer.Ordinal))
@@ -426,9 +475,9 @@ public sealed class CharacterAnalyzer : MediatorSubscriberBase, IDisposable
 
         Logger.LogInformation("=== Total summary for all currently present objects ===");
         Logger.LogInformation("Total files: {count}, size extracted: {size}, size compressed: {sizeComp}",
-            LastAnalysis.Values.Sum(v => v.Values.Count),
-            UiSharedService.ByteToString(LastAnalysis.Values.Sum(c => c.Values.Sum(v => v.OriginalSize))),
-            UiSharedService.ByteToString(LastAnalysis.Values.Sum(c => c.Values.Sum(v => v.CompressedSize))));
+            snapshot.Values.Sum(v => v.Values.Count),
+            UiSharedService.ByteToString(snapshot.Values.Sum(c => c.Values.Sum(v => v.OriginalSize))),
+            UiSharedService.ByteToString(snapshot.Values.Sum(c => c.Values.Sum(v => v.CompressedSize))));
         Logger.LogInformation("IMPORTANT NOTES:\n\r- For Sphene up- and downloads only the compressed size is relevant.\n\r- An unusually high total files count beyond 200 and up will also increase your download time to others significantly.");
     }
 

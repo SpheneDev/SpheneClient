@@ -1960,21 +1960,7 @@ public class CompactUi : WindowMediatorSubscriberBase
 
     private long GetCurrentTextureSize()
     {
-        if (_characterAnalyzer.LastAnalysis == null || _characterAnalyzer.LastAnalysis.Count == 0)
-            return 0;
-
-        long totalSize = 0;
-        foreach (var objectKindData in _characterAnalyzer.LastAnalysis.Values)
-        {
-            foreach (var fileEntry in objectKindData.Values)
-            {
-                if (fileEntry.FileType.Equals("tex", StringComparison.OrdinalIgnoreCase) && fileEntry.IsActive)
-                {
-                    totalSize += fileEntry.OriginalSize;
-                }
-            }
-        }
-        return totalSize;
+        return _characterAnalyzer.GetActiveTextureSizeBytes();
     }
 
     private (Vector4 color, string text, FontAwesomeIcon icon) GetBc7ConversionIndicator()

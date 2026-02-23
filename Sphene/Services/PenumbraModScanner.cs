@@ -3,7 +3,11 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Linq;
 using System.IO;
+using System.Reflection;
 using Sphene.Interop.Ipc;
+using Dalamud.Plugin.Services;
+using Lumina.Excel;
+using Lumina.Excel.Sheets;
 using Microsoft.Extensions.Logging;
 using Penumbra.Api.Enums;
 using Sphene.Services.Mediator;
@@ -23,6 +27,7 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
         bool IsTemporary,
         int Priority,
         List<string> ActiveOptions,
+        List<string> ChangedItems,
         int ActiveFilesCount,
         int TotalFilesCount,
         string Status,
@@ -34,16 +39,24 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
     private List<(string GamePath, string ResolvedPath, string ModName, string OptionName, int Priority)> _allEnabledModsCache = [];
     private bool _cacheDirty = true;
     private readonly SemaphoreSlim _lock = new(1, 1);
+    private readonly IDataManager _gameData;
+    private readonly Dictionary<uint, string> _actionTimelineCache = new();
+    private readonly Lock _emoteCacheLock = new();
+    private readonly Dictionary<string, List<string>> _emoteFileNameCache = new(StringComparer.OrdinalIgnoreCase);
+    private bool _emoteLookupBuilt;
+    private static readonly PropertyInfo? ActionTimelineNameProperty = typeof(ActionTimeline).GetProperty("Name");
+    private static readonly PropertyInfo? ActionTimelineKeyProperty = typeof(ActionTimeline).GetProperty("Key");
     
     // Tracks mods that are currently "in use" by the local player (i.e., at least one file from them is resolved).
     private readonly ConcurrentDictionary<string, byte> _activePlayerMods = new(StringComparer.OrdinalIgnoreCase);
 
     public List<ModDebugInfo> LastScanDebugInfo { get; private set; } = [];
 
-    public PenumbraModScanner(ILogger<PenumbraModScanner> logger, IpcManager ipcManager, SpheneMediator mediator)
+    public PenumbraModScanner(ILogger<PenumbraModScanner> logger, IpcManager ipcManager, SpheneMediator mediator, IDataManager gameData)
         : base(logger, mediator)
     {
         _ipcManager = ipcManager;
+        _gameData = gameData;
         Mediator.Subscribe<PenumbraModSettingChangedMessage>(this, _ => TriggerScan());
         Mediator.Subscribe<PenumbraInitializedMessage>(this, _ => TriggerScan());
     }
@@ -309,6 +322,7 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
                         false,
                         0,
                         [],
+                       [],
                         0,
                         0,
                         "Missing from Collection Settings",
@@ -350,6 +364,7 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
                             isTemporary,
                             modPriority,
                             modSettings.SelectMany(x => x.Value.Select(v => $"{x.Key}: {v}")).ToList(),
+                            [],
                             0,
                             0,
                             "Path Resolution Failed",
@@ -446,6 +461,7 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
                         isTemporary,
                         modPriority,
                         modSettings.SelectMany(x => x.Value.Select(v => $"{x.Key}: {v}")).ToList(),
+                        [],
                         0,
                         0,
                         "Directory Not Found",
@@ -457,13 +473,15 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
                 int added = 0;
                 int total = 0;
                 bool hasCharacterLegacyShpk = false;
+                var changedItems = new List<string>();
 
                 try
                 {
-                    var result = await ProcessModFiles(fullModPath, modSettings, modPriority, bag, resolvedModName, isDebugTarget, token).ConfigureAwait(false);
+                    var result = await ProcessModFiles(modDirectoryName, fullModPath, modSettings, modPriority, bag, resolvedModName, isDebugTarget, token).ConfigureAwait(false);
                     added = result.AddedCount;
                     total = result.TotalCount;
                     hasCharacterLegacyShpk = result.HasCharacterLegacyShpk;
+                    changedItems = result.ChangedItems;
                     
                     // resolvedModName = result.ResolvedModName; // Don't overwrite if we already have it from list, but ProcessModFiles might update it from meta.json if list was empty?
                     if (string.IsNullOrEmpty(resolvedModName) || string.Equals(resolvedModName, modDirectoryName, StringComparison.Ordinal))
@@ -491,11 +509,13 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
                     isTemporary,
                     modPriority,
                     modSettings.SelectMany(x => x.Value.Select(v => $"{x.Key}: {v}")).ToList(),
+                    changedItems,
                     added,
                     total,
                     status,
                     hasCharacterLegacyShpk
                 ));
+
             }).ConfigureAwait(false);
 
             LastScanDebugInfo = debugBag.OrderBy(x => x.DirectoryName, StringComparer.OrdinalIgnoreCase).ToList();
@@ -569,13 +589,23 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
         return new Dictionary<string, (string ResolvedPath, string ModName, string OptionName, int Priority)>(_gamePathLookupCache, StringComparer.OrdinalIgnoreCase);
     }
 
-    private async Task<(int AddedCount, int TotalCount, string ResolvedModName, bool HasCharacterLegacyShpk)> ProcessModFiles(string modPath, Dictionary<string, List<string>> settings, int priority, ConcurrentBag<(string GamePath, string Path, string ModName, string OptionName, int Priority)> bag, string resolvedModName, bool isDebugTarget, CancellationToken ct)
+    public bool TryGetCachedGamePathEntry(string gamePath, out (string ResolvedPath, string ModName, string OptionName, int Priority) entry)
+    {
+        entry = default;
+        if (string.IsNullOrWhiteSpace(gamePath)) return false;
+        if (_cacheDirty || _gamePathLookupCache.Count == 0) return false;
+        return _gamePathLookupCache.TryGetValue(gamePath, out entry);
+    }
+
+    private async Task<(int AddedCount, int TotalCount, string ResolvedModName, bool HasCharacterLegacyShpk, List<string> ChangedItems)> ProcessModFiles(string modDirectoryName, string modPath, Dictionary<string, List<string>> settings, int priority, ConcurrentBag<(string GamePath, string Path, string ModName, string OptionName, int Priority)> bag, string resolvedModName, bool isDebugTarget, CancellationToken ct)
     {
         int addedCount = 0;
         int totalCount = 0;
         bool hasCharacterLegacyShpk = false;
         bool containsUi = false;
         var localBag = new List<(string GamePath, string Path, string ModName, string OptionName, int Priority)>();
+        var changedItems = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var usePenumbraChangedItems = false;
 
         // Create case-insensitive settings lookup
         var settingsCaseInsensitive = new Dictionary<string, List<string>>(settings, StringComparer.OrdinalIgnoreCase);
@@ -620,6 +650,16 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
              if (Logger.IsEnabled(LogLevel.Trace)) Logger.LogTrace("[FileReplacementNew] meta.json not found for {path}", modPath);
         }
 
+        var penumbraChangedItems = _ipcManager.Penumbra.GetChangedItems(modDirectoryName, modName);
+        if (penumbraChangedItems.Count > 0)
+        {
+            foreach (var item in penumbraChangedItems.Keys.OrderBy(x => x, StringComparer.OrdinalIgnoreCase))
+            {
+                changedItems.Add(item);
+            }
+            usePenumbraChangedItems = true;
+        }
+
         // 1. Process Default Files
         var defaultModPath = Path.Combine(modPath, "default_mod.json");
         if (File.Exists(defaultModPath))
@@ -638,6 +678,10 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
                     foreach (var kvp in defaultMod.Files)
                     {
                         var gamePath = kvp.Key;
+                        if (!usePenumbraChangedItems)
+                        {
+                            AddChangedItemsFromGamePath(gamePath, changedItems);
+                        }
                         if (gamePath.StartsWith("ui/", StringComparison.OrdinalIgnoreCase) || gamePath.StartsWith("common/font", StringComparison.OrdinalIgnoreCase))
                         {
                             containsUi = true;
@@ -659,6 +703,10 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
                     foreach (var kvp in defaultMod.FileSwaps)
                     {
                         var gamePath = kvp.Key;
+                        if (!usePenumbraChangedItems)
+                        {
+                            AddChangedItemsFromGamePath(gamePath, changedItems);
+                        }
                         if (gamePath.StartsWith("ui/", StringComparison.OrdinalIgnoreCase) || gamePath.StartsWith("common/font", StringComparison.OrdinalIgnoreCase))
                         {
                             containsUi = true;
@@ -765,6 +813,10 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
                                         foreach (var kvp in container.Files)
                                         {
                                             var gamePath = kvp.Key;
+                                            if (!usePenumbraChangedItems)
+                                            {
+                                                AddChangedItemsFromGamePath(gamePath, changedItems);
+                                            }
                                             if (gamePath.StartsWith("ui/", StringComparison.OrdinalIgnoreCase) || gamePath.StartsWith("common/font", StringComparison.OrdinalIgnoreCase))
                                             {
                                                 containsUi = true;
@@ -782,6 +834,10 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
                                         foreach (var kvp in container.FileSwaps)
                                         {
                                             var gamePath = kvp.Key;
+                                            if (!usePenumbraChangedItems)
+                                            {
+                                                AddChangedItemsFromGamePath(gamePath, changedItems);
+                                            }
                                             if (gamePath.StartsWith("ui/", StringComparison.OrdinalIgnoreCase) || gamePath.StartsWith("common/font", StringComparison.OrdinalIgnoreCase))
                                             {
                                                 containsUi = true;
@@ -836,6 +892,10 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
                                                 foreach (var kvp in container.Files)
                                                 {
                                                     var gamePath = kvp.Key;
+                                                    if (!usePenumbraChangedItems)
+                                                    {
+                                                        AddChangedItemsFromGamePath(gamePath, changedItems);
+                                                    }
                                                     if (gamePath.StartsWith("ui/", StringComparison.OrdinalIgnoreCase) || gamePath.StartsWith("common/font", StringComparison.OrdinalIgnoreCase))
                                                     {
                                                         containsUi = true;
@@ -853,6 +913,10 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
                                                 foreach (var kvp in container.FileSwaps)
                                                 {
                                                     var gamePath = kvp.Key;
+                                                    if (!usePenumbraChangedItems)
+                                                    {
+                                                        AddChangedItemsFromGamePath(gamePath, changedItems);
+                                                    }
                                                     if (gamePath.StartsWith("ui/", StringComparison.OrdinalIgnoreCase) || gamePath.StartsWith("common/font", StringComparison.OrdinalIgnoreCase))
                                                     {
                                                         containsUi = true;
@@ -887,6 +951,10 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
                                                 foreach (var kvp in option.Files)
                                                 {
                                                     var gamePath = kvp.Key;
+                                                    if (!usePenumbraChangedItems)
+                                                    {
+                                                        AddChangedItemsFromGamePath(gamePath, changedItems);
+                                                    }
                                                     if (gamePath.StartsWith("ui/", StringComparison.OrdinalIgnoreCase) || gamePath.StartsWith("common/font", StringComparison.OrdinalIgnoreCase))
                                                     {
                                                         containsUi = true;
@@ -904,6 +972,10 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
                                                 foreach (var kvp in option.FileSwaps)
                                                 {
                                                     var gamePath = kvp.Key;
+                                                    if (!usePenumbraChangedItems)
+                                                    {
+                                                        AddChangedItemsFromGamePath(gamePath, changedItems);
+                                                    }
                                                     if (gamePath.StartsWith("ui/", StringComparison.OrdinalIgnoreCase) || gamePath.StartsWith("common/font", StringComparison.OrdinalIgnoreCase))
                                                     {
                                                         containsUi = true;
@@ -964,7 +1036,231 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
             if (isDebugTarget || Logger.IsEnabled(LogLevel.Debug)) Logger.LogDebug("[FileReplacementNew] Skipping UI/Icon mod: {Mod}", modName);
         }
 
-        return (addedCount, totalCount, modName, hasCharacterLegacyShpk);
+        var items = changedItems.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList();
+        return (addedCount, totalCount, modName, hasCharacterLegacyShpk, items);
+    }
+
+    internal bool TryGetChangedItemsFromGamePath(string gamePath, out IReadOnlyList<string> changedItems)
+    {
+        changedItems = Array.Empty<string>();
+        if (string.IsNullOrEmpty(gamePath)) return false;
+
+        var items = new List<string>();
+        if (TryGetEmoteNamesFromGamePath(gamePath, out var emoteNames) && emoteNames.Count > 0)
+        {
+            for (int i = 0; i < emoteNames.Count; i++)
+            {
+                items.Add($"Emote: {emoteNames[i]}");
+            }
+        }
+        else
+        {
+            items.Add(gamePath.Replace('\\', '/'));
+        }
+
+        if (items.Count == 0) return false;
+        changedItems = items;
+        return true;
+    }
+
+    private void AddChangedItemsFromGamePath(string gamePath, HashSet<string> changedItems)
+    {
+        if (!TryGetChangedItemsFromGamePath(gamePath, out var items)) return;
+        for (int i = 0; i < items.Count; i++)
+        {
+            changedItems.Add(items[i]);
+        }
+    }
+
+    internal bool TryGetEmoteNameFromGamePath(string gamePath, out string emoteName)
+    {
+        emoteName = string.Empty;
+        if (!TryGetEmoteNamesFromGamePath(gamePath, out var emoteNames) || emoteNames.Count == 0)
+        {
+            return false;
+        }
+        emoteName = emoteNames[0];
+        return true;
+    }
+
+    private bool TryGetEmoteNamesFromGamePath(string gamePath, out IReadOnlyList<string> emoteNames)
+    {
+        emoteNames = Array.Empty<string>();
+        if (string.IsNullOrEmpty(gamePath)) return false;
+        if (!IsEmotePath(gamePath)) return false;
+        var fileName = Path.GetFileName(gamePath);
+        if (string.IsNullOrWhiteSpace(fileName)) return false;
+
+        EnsureEmoteLookup();
+        if (_emoteFileNameCache.TryGetValue(fileName, out var mappedNames) && mappedNames.Count > 0)
+        {
+            emoteNames = mappedNames;
+            return true;
+        }
+
+        if (!TryExtractTimelineId(gamePath, out var timelineId)) return false;
+        if (TryGetActionTimelineName(timelineId, out var name))
+        {
+            emoteNames = new[] { name };
+            return true;
+        }
+        emoteNames = new[] { $"Unknown ({timelineId})" };
+        return true;
+    }
+
+    private void EnsureEmoteLookup()
+    {
+        if (_emoteLookupBuilt) return;
+        lock (_emoteCacheLock)
+        {
+            if (_emoteLookupBuilt) return;
+            _emoteFileNameCache.Clear();
+            var sheet = _gameData.GetExcelSheet<Emote>();
+            if (sheet != null)
+            {
+                foreach (var emote in sheet)
+                {
+                    var emoteName = emote.Name.ToString();
+                    if (string.IsNullOrWhiteSpace(emoteName)) continue;
+                    foreach (var timeline in emote.ActionTimeline)
+                    {
+                        if (timeline.RowId == 0 || !timeline.ValueNullable.HasValue) continue;
+                        var timelineKey = ExtractTimelineKey(timeline.Value);
+                        if (string.IsNullOrWhiteSpace(timelineKey)) continue;
+                        var baseName = Path.GetFileName(timelineKey);
+                        if (string.IsNullOrWhiteSpace(baseName)) continue;
+                        AddEmoteMapping($"{baseName}.pap", emoteName);
+                        AddEmoteMapping($"{baseName}.tmb", emoteName);
+                    }
+                }
+
+                AddSpecialEmoteMapping(sheet, AddEmoteMapping);
+            }
+            _emoteLookupBuilt = true;
+        }
+    }
+
+    private static void AddSpecialEmoteMapping(ExcelSheet<Emote> sheet, Action<string, string> addEmoteMapping)
+    {
+        var sit = sheet.GetRow(50);
+        if (sit.RowId != 0)
+        {
+            var name = sit.Name.ToString();
+            if (!string.IsNullOrWhiteSpace(name)) addEmoteMapping("s_pose01_loop.pap", name);
+        }
+        var sitOnGround = sheet.GetRow(52);
+        if (sitOnGround.RowId != 0)
+        {
+            var name = sitOnGround.Name.ToString();
+            if (!string.IsNullOrWhiteSpace(name)) addEmoteMapping("j_pose01_loop.pap", name);
+        }
+        var doze = sheet.GetRow(13);
+        if (doze.RowId != 0)
+        {
+            var name = doze.Name.ToString();
+            if (!string.IsNullOrWhiteSpace(name)) addEmoteMapping("l_pose01_loop.pap", name);
+        }
+    }
+
+    private void AddEmoteMapping(string fileName, string emoteName)
+    {
+        if (string.IsNullOrWhiteSpace(fileName) || string.IsNullOrWhiteSpace(emoteName)) return;
+        if (!_emoteFileNameCache.TryGetValue(fileName, out var list))
+        {
+            list = new List<string>();
+            _emoteFileNameCache[fileName] = list;
+        }
+        for (int i = 0; i < list.Count; i++)
+        {
+            if (string.Equals(list[i], emoteName, StringComparison.OrdinalIgnoreCase)) return;
+        }
+        list.Add(emoteName);
+        list.Sort(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private bool TryGetActionTimelineName(uint timelineId, out string name)
+    {
+        name = string.Empty;
+        lock (_emoteCacheLock)
+        {
+            if (_actionTimelineCache.TryGetValue(timelineId, out var cachedName) && !string.IsNullOrWhiteSpace(cachedName))
+            {
+                name = cachedName;
+                return true;
+            }
+        }
+
+        var sheet = _gameData.GetExcelSheet<ActionTimeline>();
+        var row = sheet?.GetRow(timelineId);
+        if (row == null)
+        {
+            name = string.Empty;
+            return false;
+        }
+        var rowName = ExtractTimelineName(row.Value);
+        if (string.IsNullOrWhiteSpace(rowName))
+        {
+            name = string.Empty;
+            return false;
+        }
+
+        lock (_emoteCacheLock)
+        {
+            _actionTimelineCache[timelineId] = rowName;
+        }
+
+        name = rowName;
+        return true;
+    }
+
+    private static string? ExtractTimelineName(ActionTimeline row)
+    {
+        var value = ActionTimelineNameProperty?.GetValue(row) ?? ActionTimelineKeyProperty?.GetValue(row);
+        return value?.ToString();
+    }
+
+    private static string? ExtractTimelineKey(ActionTimeline row)
+    {
+        var value = ActionTimelineKeyProperty?.GetValue(row);
+        return value?.ToString();
+    }
+
+    private static bool IsEmotePath(string gamePath)
+    {
+        if (!gamePath.EndsWith(".pap", StringComparison.OrdinalIgnoreCase)
+            && !gamePath.EndsWith(".tmb", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var normalized = gamePath.Replace('\\', '/').ToLowerInvariant();
+        return normalized.Contains("/emt/")
+            || normalized.Contains("/emote/")
+            || normalized.Contains("emote_");
+    }
+
+    private static bool TryExtractTimelineId(string gamePath, out uint timelineId)
+    {
+        timelineId = 0;
+        var fileName = Path.GetFileNameWithoutExtension(gamePath);
+        if (string.IsNullOrEmpty(fileName)) return false;
+
+        int end = fileName.Length - 1;
+        while (end >= 0 && !char.IsDigit(fileName[end]))
+        {
+            end--;
+        }
+        if (end < 0) return false;
+
+        int start = end;
+        while (start >= 0 && char.IsDigit(fileName[start]))
+        {
+            start--;
+        }
+        start++;
+
+        var span = fileName.AsSpan(start, end - start + 1);
+        return uint.TryParse(span, out timelineId);
     }
 
     private sealed class PenumbraModDefault

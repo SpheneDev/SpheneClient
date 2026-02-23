@@ -61,6 +61,7 @@ public sealed class IpcCallerPenumbra : DisposableMediatorSubscriberBase, IIpcCa
     private readonly ICallGateSubscriber<Dictionary<string, string>> _penumbraGetModList;
     private readonly ICallGateSubscriber<string, string, (PenumbraApiEc, string, bool, bool)> _penumbraGetModPath;
     private readonly ICallGateSubscriber<int, (bool, bool, (Guid, string))> _penumbraGetCollectionForObject;
+    private readonly ICallGateSubscriber<string, string, Dictionary<string, object?>> _penumbraGetChangedItems;
 
     public IpcCallerPenumbra(ILogger<IpcCallerPenumbra> logger, IDalamudPluginInterface pi, DalamudUtilService dalamudUtil,
         SpheneMediator spheneMediator, RedrawManager redrawManager) : base(logger, spheneMediator)
@@ -117,6 +118,7 @@ public sealed class IpcCallerPenumbra : DisposableMediatorSubscriberBase, IIpcCa
         _penumbraGetModList = _pi.GetIpcSubscriber<Dictionary<string, string>>("Penumbra.GetModList");
         _penumbraGetModPath = _pi.GetIpcSubscriber<string, string, (PenumbraApiEc, string, bool, bool)>("Penumbra.GetModPath.V5");
         _penumbraGetCollectionForObject = _pi.GetIpcSubscriber<int, (bool, bool, (Guid, string))>("Penumbra.GetCollectionForObject.V5");
+        _penumbraGetChangedItems = _pi.GetIpcSubscriber<string, string, Dictionary<string, object?>>("Penumbra.GetChangedItems.V5");
 
         _penumbraGameObjectResourcePathResolved = GameObjectResourcePathResolved.Subscriber(pi, ResourceLoaded);
 
@@ -210,6 +212,20 @@ public sealed class IpcCallerPenumbra : DisposableMediatorSubscriberBase, IIpcCa
         catch (Exception ex)
         {
             Logger.LogWarning(ex, "Failed to get mod list from Penumbra");
+            return [];
+        }
+    }
+
+    public Dictionary<string, object?> GetChangedItems(string modDirectory, string modName)
+    {
+        if (!APIAvailable) return [];
+        try
+        {
+            return _penumbraGetChangedItems.InvokeFunc(modDirectory, modName);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to get changed items from Penumbra for {ModDirectory}", modDirectory);
             return [];
         }
     }

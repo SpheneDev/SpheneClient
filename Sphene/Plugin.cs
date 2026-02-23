@@ -45,6 +45,8 @@ namespace Sphene;
 public sealed class Plugin : IDalamudPlugin
 {
     private readonly IHost _host;
+    private readonly IPluginLog _pluginLog;
+    private bool _hostStarted;
 
     public Plugin(IDalamudPluginInterface pluginInterface, ICommandManager commandManager, IDataManager gameData,
         IFramework framework, IObjectTable objectTable, IClientState clientState, ICondition condition, IChatGui chatGui,
@@ -52,6 +54,7 @@ public sealed class Plugin : IDalamudPlugin
         ITextureProvider textureProvider, IContextMenu contextMenu, IGameInteropProvider gameInteropProvider, IGameConfig gameConfig,
         ISigScanner sigScanner, IPartyList partyList)
     {
+        _pluginLog = pluginLog;
         if (!Directory.Exists(pluginInterface.ConfigDirectory.FullName))
             Directory.CreateDirectory(pluginInterface.ConfigDirectory.FullName);
         var traceDir = Path.Join(pluginInterface.ConfigDirectory.FullName, "tracelog");
@@ -101,6 +104,7 @@ public sealed class Plugin : IDalamudPlugin
             collection.AddSingleton(new Dalamud.Localization("Sphene.Localization.", "", useEmbedded: true));
             collection.AddSingleton(commandManager);
             collection.AddSingleton(framework);
+            collection.AddSingleton(gameData);
             collection.AddSingleton(pluginInterface);
 
             // ShrinkU integration services and windows
@@ -477,14 +481,48 @@ public sealed class Plugin : IDalamudPlugin
         var startTask = _host.StartAsync();
         _ = startTask.ContinueWith(t =>
         {
+            _hostStarted = t.IsCompletedSuccessfully;
+        }, TaskContinuationOptions.OnlyOnRanToCompletion);
+        _ = startTask.ContinueWith(t =>
+        {
             var logger = _host.Services.GetService<ILogger<Plugin>>();
             logger?.LogCritical(t.Exception, "Host StartAsync failed");
+            LogHostStartFailure(t.Exception);
         }, TaskContinuationOptions.OnlyOnFaulted);
     }
 
     public void Dispose()
     {
-        _host.StopAsync().GetAwaiter().GetResult();
+        if (_hostStarted)
+        {
+            try
+            {
+                _host.StopAsync().GetAwaiter().GetResult();
+            }
+            catch (Exception ex)
+            {
+                var logger = _host.Services.GetService<ILogger<Plugin>>();
+                logger?.LogWarning(ex, "Host StopAsync failed");
+            }
+        }
         _host.Dispose();
+    }
+
+    private void LogHostStartFailure(AggregateException? exception)
+    {
+        if (exception == null)
+        {
+            _pluginLog.Error("Host StartAsync failed without exception details.");
+            return;
+        }
+
+        var flattened = exception.Flatten();
+        _pluginLog.Error(flattened, "Host StartAsync failed with {count} exception(s).", flattened.InnerExceptions.Count);
+
+        for (var i = 0; i < flattened.InnerExceptions.Count; i++)
+        {
+            var inner = flattened.InnerExceptions[i];
+            _pluginLog.Error(inner, "Host StartAsync inner[{index}]: {message}", i, inner.Message);
+        }
     }
 }

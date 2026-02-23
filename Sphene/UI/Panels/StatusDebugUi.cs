@@ -12,6 +12,7 @@ using Sphene.PlayerData.Pairs;
 using Sphene.API.Data;
 using Sphene.WebAPI;
 using Sphene.WebAPI.SignalR.Utils;
+using System.IO;
 using System.Numerics;
 using System.Text.Json;
 using Sphene.FileCache;
@@ -46,8 +47,11 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
     private string? _pairCollectionCacheUid;
     private string? _pairCollectionCacheDataHash;
     private int _pairCollectionLocalModsCount;
-    private readonly List<PairCollectionRow> _pairCollectionRows = [];
+    private readonly List<PairCollectionModGroup> _pairCollectionModGroups = [];
     private readonly HashSet<string> _pairCollectionLocalMods = new(StringComparer.OrdinalIgnoreCase);
+    private CharacterData? _lastCreatedCharacterData;
+    private CharacterData? _winningItemsCacheData;
+    private readonly Dictionary<string, WinningModData> _winningItemsByMod = new(StringComparer.OrdinalIgnoreCase);
     
     public StatusDebugUi(ILogger<StatusDebugUi> logger, SpheneMediator mediator,
         UiSharedService uiSharedService, PairManager pairManager, ApiController apiController,
@@ -89,6 +93,11 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         
         // Subscribe to notification events
         Mediator.Subscribe<NotificationMessage>(this, OnNotification);
+        Mediator.Subscribe<CharacterDataCreatedMessage>(this, (msg) =>
+        {
+            _lastCreatedCharacterData = msg.CharacterData;
+            _winningItemsCacheData = null;
+        });
         
         // Subscribe to health monitor events by monitoring the health status changes
         // We'll use a timer to periodically check and log health status changes
@@ -574,32 +583,35 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
 
         ImGui.Separator();
 
-        if (ImGui.BeginTable("CollectionTable", 5, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable | ImGuiTableFlags.Sortable))
+        if (ImGui.BeginTable("CollectionTable", 4, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable | ImGuiTableFlags.Sortable))
         {
             ImGui.TableSetupColumn("Mod Name", ImGuiTableColumnFlags.WidthStretch);
             ImGui.TableSetupColumn("Option", ImGuiTableColumnFlags.WidthStretch);
-            ImGui.TableSetupColumn("Files (Cached/Total)", ImGuiTableColumnFlags.WidthFixed, 150);
-            ImGui.TableSetupColumn("Size", ImGuiTableColumnFlags.WidthFixed, 80);
-            ImGui.TableSetupColumn("Status", ImGuiTableColumnFlags.WidthFixed, 100);
+            ImGui.TableSetupColumn("Changed", ImGuiTableColumnFlags.WidthFixed, 150);
+            ImGui.TableSetupColumn("Files (Cached/Total)", ImGuiTableColumnFlags.WidthFixed, 120);
             ImGui.TableHeadersRow();
 
-            foreach (var row in _pairCollectionRows)
+            foreach (var modGroup in _pairCollectionModGroups)
             {
                 ImGui.TableNextRow();
 
                 // Mod Name
                 ImGui.TableSetColumnIndex(0);
-                if (row.IsShared)
+                var modLabel = $"##{modGroup.ModName}";
+                var treeFlags = ImGuiTreeNodeFlags.SpanFullWidth;
+                bool isOpen = ImGui.TreeNodeEx(modLabel, treeFlags);
+                ImGui.SameLine();
+                if (modGroup.IsShared)
                 {
-                    UiSharedService.ColorText(row.ModName, ImGuiColors.HealerGreen);
+                    UiSharedService.ColorText(modGroup.ModName, ImGuiColors.HealerGreen);
                     if (ImGui.IsItemHovered()) ImGui.SetTooltip("You also have this mod installed (Shared)");
                 }
                 else
                 {
-                    ImGui.Text(row.ModName);
+                    ImGui.Text(modGroup.ModName);
                 }
 
-                if (row.HasLegacyShpk)
+                if (modGroup.HasLegacyShpk)
                 {
                     ImGui.SameLine();
                     ImGui.TextColored(ImGuiColors.DalamudRed, "⚠");
@@ -608,30 +620,54 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
 
                 // Option
                 ImGui.TableSetColumnIndex(1);
-                ImGui.Text(row.OptionName);
+                ImGui.Text("All Options");
+
+                // Changed
+                ImGui.TableSetColumnIndex(2);
+                DrawChangedItems(modGroup.ChangedItems);
 
                 // Files
-                ImGui.TableSetColumnIndex(2);
-                var fileColor = row.CachedFiles == row.TotalFiles ? ImGuiColors.HealerGreen : (row.CachedFiles > 0 ? ImGuiColors.DalamudYellow : ImGuiColors.DalamudRed);
-                UiSharedService.ColorText($"{row.CachedFiles} / {row.TotalFiles}", fileColor);
-
-                // Size
                 ImGui.TableSetColumnIndex(3);
-                ImGui.Text(UiSharedService.ByteToString(row.TotalSize));
+                var fileColor = modGroup.CachedFiles == modGroup.TotalFiles ? ImGuiColors.HealerGreen : (modGroup.CachedFiles > 0 ? ImGuiColors.DalamudYellow : ImGuiColors.DalamudRed);
+                UiSharedService.ColorText($"{modGroup.CachedFiles} / {modGroup.TotalFiles}", fileColor);
+                if (ImGui.IsItemHovered())
+                {
+                    var status = modGroup.CachedFiles == modGroup.TotalFiles ? "Ready" : (modGroup.CachedFiles > 0 ? "Partial" : "Missing");
+                    ImGui.SetTooltip($"Size: {UiSharedService.ByteToString(modGroup.TotalSize)}\nStatus: {status}");
+                }
 
-                // Status
-                ImGui.TableSetColumnIndex(4);
-                if (row.CachedFiles == row.TotalFiles)
+                if (isOpen)
                 {
-                    UiSharedService.ColorText("Ready", ImGuiColors.HealerGreen);
-                }
-                else if (row.CachedFiles > 0)
-                {
-                    UiSharedService.ColorText("Partial", ImGuiColors.DalamudYellow);
-                }
-                else
-                {
-                    UiSharedService.ColorText("Missing", ImGuiColors.DalamudRed);
+                    foreach (var optionRow in modGroup.Options)
+                    {
+                        ImGui.TableNextRow();
+                        ImGui.TableSetColumnIndex(0);
+                        var optionLabel = $"##{modGroup.ModName}-{optionRow.OptionName}";
+                        ImGui.TreeNodeEx(optionLabel, ImGuiTreeNodeFlags.Leaf | ImGuiTreeNodeFlags.NoTreePushOnOpen | ImGuiTreeNodeFlags.SpanFullWidth);
+
+                        if (optionRow.HasLegacyShpk)
+                        {
+                            ImGui.SameLine();
+                            ImGui.TextColored(ImGuiColors.DalamudRed, "⚠");
+                            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Contains characterlegacy.shpk");
+                        }
+
+                        ImGui.TableSetColumnIndex(1);
+                        ImGui.Text(optionRow.OptionName);
+
+                        ImGui.TableSetColumnIndex(2);
+                        DrawChangedItems(optionRow.ChangedItems);
+
+                        ImGui.TableSetColumnIndex(3);
+                        var optionFileColor = optionRow.CachedFiles == optionRow.TotalFiles ? ImGuiColors.HealerGreen : (optionRow.CachedFiles > 0 ? ImGuiColors.DalamudYellow : ImGuiColors.DalamudRed);
+                        UiSharedService.ColorText($"{optionRow.CachedFiles} / {optionRow.TotalFiles}", optionFileColor);
+                        if (ImGui.IsItemHovered())
+                        {
+                            var status = optionRow.CachedFiles == optionRow.TotalFiles ? "Ready" : (optionRow.CachedFiles > 0 ? "Partial" : "Missing");
+                            ImGui.SetTooltip($"Size: {UiSharedService.ByteToString(optionRow.TotalSize)}\nStatus: {status}");
+                        }
+                    }
+                    ImGui.TreePop();
                 }
             }
 
@@ -656,7 +692,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         _pairCollectionCacheUid = pair.UserData.UID;
         _pairCollectionCacheDataHash = dataHash;
         _pairCollectionLocalModsCount = localModsCount;
-        _pairCollectionRows.Clear();
+        _pairCollectionModGroups.Clear();
         _pairCollectionLocalMods.Clear();
 
         foreach (var modInfo in _penumbraScanner.LastScanDebugInfo)
@@ -667,7 +703,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             }
         }
 
-        var builders = new Dictionary<string, PairCollectionRowBuilder>(StringComparer.OrdinalIgnoreCase);
+        var builders = new Dictionary<string, PairCollectionModGroupBuilder>(StringComparer.OrdinalIgnoreCase);
         foreach (var replacements in data.FileReplacements.Values)
         {
             if (replacements == null) continue;
@@ -677,22 +713,32 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
 
                 var modName = string.IsNullOrEmpty(replacement.ModName) ? "Unknown Mod" : replacement.ModName;
                 var optionName = string.IsNullOrEmpty(replacement.OptionName) ? "Default" : replacement.OptionName;
-                var key = modName + "\u001F" + optionName;
 
-                if (!builders.TryGetValue(key, out var builder))
+                if (!builders.TryGetValue(modName, out var builder))
                 {
-                    builder = new PairCollectionRowBuilder(modName, optionName);
-                    builders.Add(key, builder);
+                    builder = new PairCollectionModGroupBuilder(modName);
+                    builders.Add(modName, builder);
                 }
 
-                builder.Hashes.Add(replacement.Hash);
+                var optionBuilder = builder.GetOrCreateOption(optionName);
+                optionBuilder.Hashes.Add(replacement.Hash);
                 var gamePaths = replacement.GamePaths;
                 for (var i = 0; i < gamePaths.Length; i++)
                 {
                     if (gamePaths[i].EndsWith("characterlegacy.shpk", StringComparison.OrdinalIgnoreCase))
                     {
+                        optionBuilder.Row.HasLegacyShpk = true;
                         builder.Row.HasLegacyShpk = true;
                         break;
+                    }
+
+                    if (_penumbraScanner.TryGetChangedItemsFromGamePath(gamePaths[i], out var changedItems))
+                    {
+                        for (int j = 0; j < changedItems.Count; j++)
+                        {
+                            optionBuilder.ChangedItems.Add(changedItems[j]);
+                            builder.ChangedItems.Add(changedItems[j]);
+                        }
                     }
                 }
             }
@@ -700,17 +746,98 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
 
         foreach (var builder in builders.Values)
         {
-            var totalFiles = 0;
-            var cachedFiles = 0;
+            builder.FinalizeRows(_fileCacheManager);
+            var row = builder.Row;
+            row.IsShared = _pairCollectionLocalMods.Contains(row.ModName);
+            _pairCollectionModGroups.Add(row);
+        }
+
+        _pairCollectionModGroups.Sort((left, right) =>
+        {
+            var modCompare = StringComparer.OrdinalIgnoreCase.Compare(left.ModName, right.ModName);
+            return modCompare;
+        });
+    }
+
+    private sealed class PairCollectionModGroup
+    {
+        public PairCollectionModGroup(string modName)
+        {
+            ModName = modName;
+        }
+
+        public string ModName { get; }
+        public int CachedFiles { get; set; }
+        public int TotalFiles { get; set; }
+        public long TotalSize { get; set; }
+        public bool HasLegacyShpk { get; set; }
+        public bool IsShared { get; set; }
+        public List<string> ChangedItems { get; } = [];
+        public List<PairCollectionOptionRow> Options { get; } = [];
+    }
+
+    private sealed class PairCollectionOptionRow
+    {
+        public PairCollectionOptionRow(string optionName)
+        {
+            OptionName = optionName;
+        }
+
+        public string OptionName { get; }
+        public int CachedFiles { get; set; }
+        public int TotalFiles { get; set; }
+        public long TotalSize { get; set; }
+        public bool HasLegacyShpk { get; set; }
+        public List<string> ChangedItems { get; } = [];
+    }
+
+    private sealed class PairCollectionModGroupBuilder
+    {
+        private readonly Dictionary<string, PairCollectionOptionRowBuilder> _options = new(StringComparer.OrdinalIgnoreCase);
+        private readonly HashSet<string> _allHashes = new(StringComparer.Ordinal);
+        public HashSet<string> ChangedItems { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        public PairCollectionModGroupBuilder(string modName)
+        {
+            Row = new PairCollectionModGroup(modName);
+        }
+
+        public PairCollectionModGroup Row { get; }
+
+        public PairCollectionOptionRowBuilder GetOrCreateOption(string optionName)
+        {
+            if (!_options.TryGetValue(optionName, out var option))
+            {
+                option = new PairCollectionOptionRowBuilder(optionName);
+                _options.Add(optionName, option);
+                Row.Options.Add(option.Row);
+            }
+
+            return option;
+        }
+
+        public void FinalizeRows(FileCacheManager fileCacheManager)
+        {
+            foreach (var option in _options.Values)
+            {
+                option.FinalizeRow(fileCacheManager);
+                foreach (var hash in option.Hashes)
+                {
+                    _allHashes.Add(hash);
+                }
+            }
+
+            int totalFiles = 0;
+            int cachedFiles = 0;
             long totalSize = 0;
 
-            foreach (var hash in builder.Hashes)
+            foreach (var hash in _allHashes)
             {
                 totalFiles++;
-                var cache = _fileCacheManager.GetFileCacheByHash(hash);
+                var cache = fileCacheManager.GetFileCacheByHash(hash);
                 if (cache != null)
                 {
-                    var validation = _fileCacheManager.ValidateFileCacheEntity(cache);
+                    var validation = fileCacheManager.ValidateFileCacheEntity(cache);
                     if (validation.State == FileState.Valid)
                     {
                         cachedFiles++;
@@ -719,49 +846,62 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                 }
             }
 
-            var row = builder.Row;
-            row.TotalFiles = totalFiles;
-            row.CachedFiles = cachedFiles;
-            row.TotalSize = totalSize;
-            row.IsShared = _pairCollectionLocalMods.Contains(row.ModName);
-            _pairCollectionRows.Add(row);
-        }
+            Row.TotalFiles = totalFiles;
+            Row.CachedFiles = cachedFiles;
+            Row.TotalSize = totalSize;
+            Row.ChangedItems.Clear();
+            foreach (var item in ChangedItems.OrderBy(x => x, StringComparer.OrdinalIgnoreCase))
+            {
+                Row.ChangedItems.Add(item);
+            }
 
-        _pairCollectionRows.Sort((left, right) =>
-        {
-            var modCompare = StringComparer.OrdinalIgnoreCase.Compare(left.ModName, right.ModName);
-            if (modCompare != 0) return modCompare;
-            return StringComparer.OrdinalIgnoreCase.Compare(left.OptionName, right.OptionName);
-        });
+            Row.Options.Sort((left, right) => StringComparer.OrdinalIgnoreCase.Compare(left.OptionName, right.OptionName));
+        }
     }
 
-    private sealed class PairCollectionRow
+    private sealed class PairCollectionOptionRowBuilder
     {
-        public PairCollectionRow(string modName, string optionName)
+        public PairCollectionOptionRowBuilder(string optionName)
         {
-            ModName = modName;
-            OptionName = optionName;
-        }
-
-        public string ModName { get; }
-        public string OptionName { get; }
-        public int CachedFiles { get; set; }
-        public int TotalFiles { get; set; }
-        public long TotalSize { get; set; }
-        public bool HasLegacyShpk { get; set; }
-        public bool IsShared { get; set; }
-    }
-
-    private sealed class PairCollectionRowBuilder
-    {
-        public PairCollectionRowBuilder(string modName, string optionName)
-        {
-            Row = new PairCollectionRow(modName, optionName);
+            Row = new PairCollectionOptionRow(optionName);
             Hashes = new HashSet<string>(StringComparer.Ordinal);
+            ChangedItems = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         }
 
-        public PairCollectionRow Row { get; }
+        public PairCollectionOptionRow Row { get; }
         public HashSet<string> Hashes { get; }
+        public HashSet<string> ChangedItems { get; }
+
+        public void FinalizeRow(FileCacheManager fileCacheManager)
+        {
+            int totalFiles = 0;
+            int cachedFiles = 0;
+            long totalSize = 0;
+
+            foreach (var hash in Hashes)
+            {
+                totalFiles++;
+                var cache = fileCacheManager.GetFileCacheByHash(hash);
+                if (cache != null)
+                {
+                    var validation = fileCacheManager.ValidateFileCacheEntity(cache);
+                    if (validation.State == FileState.Valid)
+                    {
+                        cachedFiles++;
+                        totalSize += cache.Size ?? 0;
+                    }
+                }
+            }
+
+            Row.TotalFiles = totalFiles;
+            Row.CachedFiles = cachedFiles;
+            Row.TotalSize = totalSize;
+            Row.ChangedItems.Clear();
+            foreach (var item in ChangedItems.OrderBy(x => x, StringComparer.OrdinalIgnoreCase))
+            {
+                Row.ChangedItems.Add(item);
+            }
+        }
     }
 
     
@@ -960,23 +1100,26 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
 
         ImGui.Text($"Total Mods Scanned: {debugInfo.Count} | Filtered: {filtered.Count}");
 
-        using var table = ImRaii.Table("PenumbraDebugTable", 9, ImGuiTableFlags.RowBg | ImGuiTableFlags.Borders | ImGuiTableFlags.Resizable | ImGuiTableFlags.ScrollY);
+        EnsureWinningItemsCache();
+        bool hasWinningData = _winningItemsCacheData != null;
+
+        using var table = ImRaii.Table("PenumbraDebugTable", 7, ImGuiTableFlags.RowBg | ImGuiTableFlags.Borders | ImGuiTableFlags.Resizable | ImGuiTableFlags.ScrollY);
         if (!table) return;
 
         ImGui.TableSetupColumn("Mod Name", ImGuiTableColumnFlags.WidthStretch);
-        ImGui.TableSetupColumn("Status", ImGuiTableColumnFlags.WidthFixed, 150);
-        ImGui.TableSetupColumn("Flags", ImGuiTableColumnFlags.WidthFixed, 100);
-        ImGui.TableSetupColumn("Priority", ImGuiTableColumnFlags.WidthFixed, 60);
-        ImGui.TableSetupColumn("Active / Total Files", ImGuiTableColumnFlags.WidthFixed, 120);
-        ImGui.TableSetupColumn("Enabled", ImGuiTableColumnFlags.WidthFixed, 60);
-        ImGui.TableSetupColumn("Inherited", ImGuiTableColumnFlags.WidthFixed, 60);
-        ImGui.TableSetupColumn("Temporary", ImGuiTableColumnFlags.WidthFixed, 60);
-        ImGui.TableSetupColumn("Options", ImGuiTableColumnFlags.WidthFixed, 200);
+        ImGui.TableSetupColumn("Status", ImGuiTableColumnFlags.WidthFixed, 110);
+        ImGui.TableSetupColumn("Flags", ImGuiTableColumnFlags.WidthFixed, 80);
+        ImGui.TableSetupColumn("Priority", ImGuiTableColumnFlags.WidthFixed, 50);
+        ImGui.TableSetupColumn("Active / Total Files", ImGuiTableColumnFlags.WidthFixed, 100);
+        ImGui.TableSetupColumn("Changed", ImGuiTableColumnFlags.WidthFixed, 160);
+        ImGui.TableSetupColumn("Options", ImGuiTableColumnFlags.WidthFixed, 160);
         ImGui.TableHeadersRow();
 
         foreach (var mod in filtered)
         {
             ImGui.TableNextRow();
+            _winningItemsByMod.TryGetValue(mod.ModName, out var winningData);
+            bool hasWinningItems = winningData != null && winningData.Items.Count > 0;
             
             // Highlight row if mod is actively used by the player
             if (_penumbraScanner.IsModActiveForPlayer(mod.ModName))
@@ -990,13 +1133,13 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             {
                 ImGui.TextColored(ImGuiColors.DalamudYellow, mod.ModName);
                 if (ImGui.IsItemHovered())
-                    ImGui.SetTooltip($"Directory: {mod.DirectoryName}\nPath: {mod.Path}\n\nMismatch between Directory Name and Mod Name (from meta.json)");
+                    ImGui.SetTooltip($"Directory: {mod.DirectoryName}\nPath: {mod.Path}\nEnabled: {(mod.IsEnabled ? "Yes" : "No")}\nInherited: {(mod.IsInherited ? "Yes" : "No")}\nTemporary: {(mod.IsTemporary ? "Yes" : "No")}\n\nMismatch between Directory Name and Mod Name (from meta.json)");
             }
             else
             {
                 ImGui.TextUnformatted(mod.ModName);
                 if (ImGui.IsItemHovered())
-                    ImGui.SetTooltip($"Directory: {mod.DirectoryName}\nPath: {mod.Path}");
+                    ImGui.SetTooltip($"Directory: {mod.DirectoryName}\nPath: {mod.Path}\nEnabled: {(mod.IsEnabled ? "Yes" : "No")}\nInherited: {(mod.IsInherited ? "Yes" : "No")}\nTemporary: {(mod.IsTemporary ? "Yes" : "No")}");
             }
 
             ImGui.TableNextColumn();
@@ -1011,6 +1154,10 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                 if (ImGui.IsItemHovered())
                     ImGui.SetTooltip("This mod contains or replaces 'characterlegacy.shpk', which may cause issues.");
             }
+            if (hasWinningItems)
+            {
+                ImGui.TextColored(ImGuiColors.HealerGreen, "★ Winning");
+            }
 
             ImGui.TableNextColumn();
             ImGui.TextUnformatted(mod.Priority.ToString());
@@ -1019,13 +1166,21 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             ImGui.TextUnformatted($"{mod.ActiveFilesCount} / {mod.TotalFilesCount}");
 
             ImGui.TableNextColumn();
-            ImGui.TextUnformatted(mod.IsEnabled ? "Yes" : "No");
-
-            ImGui.TableNextColumn();
-            ImGui.TextUnformatted(mod.IsInherited ? "Yes" : "No");
-
-            ImGui.TableNextColumn();
-            ImGui.TextUnformatted(mod.IsTemporary ? "Yes" : "No");
+            if (hasWinningItems)
+            {
+                if (ImGui.TreeNode($"Winning Items ({winningData!.Items.Count})###{mod.DirectoryName}"))
+                {
+                    foreach (var item in winningData.Items)
+                    {
+                        DrawChangedItem(item);
+                    }
+                    ImGui.TreePop();
+                }
+            }
+            else
+            {
+                ImGui.TextDisabled(hasWinningData ? "None" : "No character data");
+            }
 
             ImGui.TableNextColumn();
             if (mod.ActiveOptions.Count > 0)
@@ -1034,7 +1189,14 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                 {
                     foreach (var opt in mod.ActiveOptions)
                     {
-                        ImGui.TextUnformatted(opt);
+                        if (winningData != null && winningData.Options.Contains(opt))
+                        {
+                            ImGui.TextColored(ImGuiColors.HealerGreen, $"★ {opt}");
+                        }
+                        else
+                        {
+                            ImGui.TextUnformatted(opt);
+                        }
                     }
                     ImGui.TreePop();
                 }
@@ -1044,6 +1206,157 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                 ImGui.TextDisabled("None");
             }
         }
+    }
+
+    private void EnsureWinningItemsCache()
+    {
+        if (_lastCreatedCharacterData == null)
+        {
+            _winningItemsByMod.Clear();
+            _winningItemsCacheData = null;
+            return;
+        }
+
+        if (ReferenceEquals(_winningItemsCacheData, _lastCreatedCharacterData))
+        {
+            return;
+        }
+
+        _winningItemsByMod.Clear();
+        foreach (var replacements in _lastCreatedCharacterData.FileReplacements.Values)
+        {
+            foreach (var replacement in replacements)
+            {
+                var gamePaths = replacement.GamePaths;
+                if (gamePaths == null || gamePaths.Length == 0)
+                {
+                    continue;
+                }
+
+                for (int i = 0; i < gamePaths.Length; i++)
+                {
+                    var gamePath = gamePaths[i];
+                    if (!TryResolveWinningModEntry(gamePath, replacement.ModName, replacement.OptionName, out var modName, out var optionName))
+                    {
+                        continue;
+                    }
+
+                    if (!_winningItemsByMod.TryGetValue(modName, out var modData))
+                    {
+                        modData = new WinningModData();
+                        _winningItemsByMod.Add(modName, modData);
+                    }
+
+                    modData.Options.Add(optionName);
+
+                    if (!_penumbraScanner.TryGetChangedItemsFromGamePath(gamePath, out var changedItems))
+                    {
+                        continue;
+                    }
+
+                    for (int j = 0; j < changedItems.Count; j++)
+                    {
+                        modData.Items.Add(changedItems[j]);
+                    }
+                }
+            }
+        }
+
+        _winningItemsCacheData = _lastCreatedCharacterData;
+    }
+
+    private bool TryResolveWinningModEntry(string gamePath, string? fallbackModName, string? fallbackOptionName, out string modName, out string optionName)
+    {
+        modName = string.IsNullOrWhiteSpace(fallbackModName) ? "Unknown Mod" : fallbackModName;
+        optionName = string.IsNullOrWhiteSpace(fallbackOptionName) ? "Default" : fallbackOptionName;
+
+        if (_penumbraScanner.TryGetCachedGamePathEntry(gamePath, out var entry))
+        {
+            if (!string.IsNullOrWhiteSpace(entry.ModName))
+            {
+                modName = entry.ModName;
+            }
+
+            if (!string.IsNullOrWhiteSpace(entry.OptionName))
+            {
+                optionName = entry.OptionName;
+            }
+        }
+
+        return true;
+    }
+
+    private static void DrawChangedItems(IReadOnlyCollection<string> items)
+    {
+        if (items.Count == 0)
+        {
+            ImGui.TextDisabled("None");
+            return;
+        }
+
+        int index = 0;
+        foreach (var item in items)
+        {
+            if (index > 0)
+            {
+                ImGui.SameLine();
+                ImGui.TextUnformatted(",");
+                ImGui.SameLine();
+            }
+
+            DrawChangedItem(item);
+            index++;
+        }
+    }
+
+    private static void DrawChangedItem(string item)
+    {
+        if (!TryGetItemDisplay(item, out var display, out var tooltip))
+        {
+            ImGui.TextDisabled("-");
+            return;
+        }
+
+        ImGui.TextUnformatted(display);
+        if (!string.IsNullOrWhiteSpace(tooltip) && ImGui.IsItemHovered())
+        {
+            ImGui.SetTooltip(tooltip);
+        }
+    }
+
+    private static bool TryGetItemDisplay(string item, out string display, out string? tooltip)
+    {
+        display = string.Empty;
+        tooltip = null;
+
+        if (string.IsNullOrWhiteSpace(item))
+        {
+            return false;
+        }
+
+        if (item.StartsWith("Emote:", StringComparison.OrdinalIgnoreCase))
+        {
+            display = item;
+            return true;
+        }
+
+        var normalized = item.Replace('\\', '/');
+        if (!normalized.Contains('/'))
+        {
+            display = item;
+            return true;
+        }
+
+        var fileName = Path.GetFileNameWithoutExtension(normalized);
+        display = string.IsNullOrWhiteSpace(fileName) ? normalized : fileName;
+        tooltip = normalized;
+        return true;
+    }
+
+    private sealed class WinningModData
+    {
+        public HashSet<string> Items { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public HashSet<string> Options { get; } = new(StringComparer.OrdinalIgnoreCase);
     }
 
     private void DrawCharacterStatistics()

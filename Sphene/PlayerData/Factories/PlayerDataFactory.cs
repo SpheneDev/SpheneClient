@@ -151,11 +151,15 @@ public class PlayerDataFactory
 
         ct.ThrowIfCancellationRequested();
 
+        Dictionary<string, (string ModName, string OptionName, int Priority)> modLookup = new(StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, (string ResolvedPath, string ModName, string OptionName, int Priority)> gamePathLookup = new(StringComparer.OrdinalIgnoreCase);
+
         // Populate ModName and OptionName from PenumbraModScanner
             try
             {
-                var modLookup = await _penumbraModScanner.GetModFileLookupAsync(ct).ConfigureAwait(false);
+                modLookup = await _penumbraModScanner.GetModFileLookupAsync(ct).ConfigureAwait(false);
                 var enabledReplacements = await _penumbraModScanner.GetAllEnabledModReplacementsAsync(ct).ConfigureAwait(false);
+                gamePathLookup = await _penumbraModScanner.GetGamePathLookupAsync(ct).ConfigureAwait(false);
                 
                 _logger.LogDebug("[FileReplacementNew] PenumbraModScanner returned {count} entries", modLookup.Count);
 
@@ -191,8 +195,24 @@ public class PlayerDataFactory
                         }
                         else
                         {
-                            // Always log failures for debugging
-                             _logger.LogDebug("[FileReplacementNew] Failed to find mod info for path: '{path}' (Normalized: '{norm}')", replacement.ResolvedPath, normalizedPath);
+                            bool foundByGamePath = false;
+                            foreach (var gamePath in replacement.GamePaths)
+                            {
+                                if (gamePathLookup.TryGetValue(gamePath, out var gamePathInfo))
+                                {
+                                    replacement.ModName = gamePathInfo.ModName;
+                                    replacement.OptionName = gamePathInfo.OptionName;
+                                    activeModNames.Add(gamePathInfo.ModName);
+                                    _logger.LogTrace("[FileReplacementNew] Found match for game path {path}: Mod={mod}, Option={opt}", gamePath, gamePathInfo.ModName, gamePathInfo.OptionName);
+                                    foundByGamePath = true;
+                                    break;
+                                }
+                            }
+
+                            if (!foundByGamePath)
+                            {
+                                _logger.LogDebug("[FileReplacementNew] Failed to find mod info for path: '{path}' (Normalized: '{norm}')", replacement.ResolvedPath, normalizedPath);
+                            }
                         }
                     }
                 }
@@ -229,9 +249,20 @@ public class PlayerDataFactory
                         var isAlreadyActive = activeModNames.Contains(modName);
                         
                         var modEntries = modGroup.Entries;
+
+                        var filteredModEntries = modEntries
+                            .Where(e => gamePathLookup.TryGetValue(e.GamePath, out var best) &&
+                                string.Equals(best.ModName, modName, StringComparison.OrdinalIgnoreCase) &&
+                                string.Equals(best.ResolvedPath, e.ResolvedPath, StringComparison.OrdinalIgnoreCase))
+                            .ToList();
+
+                        if (filteredModEntries.Count == 0)
+                        {
+                            continue;
+                        }
                         
                         // Collect all GamePaths this mod attempts to provide
-                        var allModGamePaths = modEntries
+                        var allModGamePaths = filteredModEntries
                             .Select(e => e.GamePath)
                             .Where(p => _gamePathRegex.IsMatch(p))
                             .ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -273,7 +304,7 @@ public class PlayerDataFactory
                         // The mod is valid, has no conflicts, and is important. Add its files.
                         
                         // We need to group entries by ResolvedPath to create FileReplacements
-                        var entriesByFile = modEntries
+                        var entriesByFile = filteredModEntries
                             .GroupBy(e => e.ResolvedPath, StringComparer.OrdinalIgnoreCase);
 
                         foreach (var fileGroup in entriesByFile)
@@ -347,6 +378,8 @@ public class PlayerDataFactory
                 {
                     _penumbraModScanner.SetActivePlayerMods(activeModNames);
                 }
+
+                RemoveLowerPriorityOptionConflicts(fragment.FileReplacements, gamePathLookup);
             }
             catch (Exception ex)
             {
@@ -392,9 +425,40 @@ public class PlayerDataFactory
         _logger.LogDebug("== Transient Replacements ==");
         foreach (var replacement in resolvedTransientPaths.Select(c => new FileReplacement([.. c.Value], c.Key)).OrderBy(f => f.ResolvedPath, StringComparer.Ordinal))
         {
+            if (string.IsNullOrEmpty(replacement.ModName))
+            {
+                if (modLookup.TryGetValue(replacement.ResolvedPath, out var modInfo))
+                {
+                    replacement.ModName = modInfo.ModName;
+                    replacement.OptionName = modInfo.OptionName;
+                }
+                else
+                {
+                    var normalizedPath = Path.GetFullPath(replacement.ResolvedPath);
+                    if (modLookup.TryGetValue(normalizedPath, out modInfo))
+                    {
+                        replacement.ModName = modInfo.ModName;
+                        replacement.OptionName = modInfo.OptionName;
+                    }
+                    else
+                    {
+                        foreach (var gamePath in replacement.GamePaths)
+                        {
+                            if (gamePathLookup.TryGetValue(gamePath, out var gamePathInfo))
+                            {
+                                replacement.ModName = gamePathInfo.ModName;
+                                replacement.OptionName = gamePathInfo.OptionName;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
             _logger.LogDebug("=> {repl}", replacement);
             fragment.FileReplacements.Add(replacement);
         }
+
+        NormalizeModOptions(fragment.FileReplacements, gamePathLookup);
 
         // clean up all semi transient resources that don't have any file replacement (aka null resolve)
         _transientResourceManager.CleanUpSemiTransientResources(objectKind, [.. fragment.FileReplacements]);
@@ -474,6 +538,221 @@ public class PlayerDataFactory
         _logger.LogDebug("Building character data for {obj} took {time}ms", objectKind, TimeSpan.FromTicks(DateTime.UtcNow.Ticks - start.Ticks).TotalMilliseconds);
 
         return fragment;
+    }
+
+    private void RemoveLowerPriorityOptionConflicts(HashSet<FileReplacement> replacements,
+        Dictionary<string, (string ResolvedPath, string ModName, string OptionName, int Priority)> gamePathLookup)
+    {
+        var options = new Dictionary<string, OptionEntry>(StringComparer.OrdinalIgnoreCase);
+        foreach (var replacement in replacements)
+        {
+            if (!replacement.HasFileReplacement)
+            {
+                continue;
+            }
+
+            var modName = string.IsNullOrWhiteSpace(replacement.ModName) ? "Unknown Mod" : replacement.ModName;
+            var optionName = string.IsNullOrWhiteSpace(replacement.OptionName) ? "Default" : replacement.OptionName;
+            var optionKey = $"{modName}||{optionName}";
+
+            if (!options.TryGetValue(optionKey, out var option))
+            {
+                option = new OptionEntry(modName, optionName);
+                options.Add(optionKey, option);
+            }
+
+            var gamePaths = replacement.GamePaths;
+            foreach (var gamePath in gamePaths)
+            {
+                if (gamePathLookup.TryGetValue(gamePath, out var entry) && entry.Priority > option.Priority)
+                {
+                    option.Priority = entry.Priority;
+                }
+
+                if (_penumbraModScanner.TryGetChangedItemsFromGamePath(gamePath, out var changedItems))
+                {
+                    for (int j = 0; j < changedItems.Count; j++)
+                    {
+                        option.Items.Add(changedItems[j]);
+                    }
+                }
+            }
+        }
+
+        var itemWinners = new Dictionary<string, ItemWinner>(StringComparer.OrdinalIgnoreCase);
+        foreach (var option in options.Values)
+        {
+            foreach (var item in option.Items)
+            {
+                if (!itemWinners.TryGetValue(item, out var winner))
+                {
+                    winner = new ItemWinner(option.Priority, option.Key);
+                    itemWinners.Add(item, winner);
+                    continue;
+                }
+
+                if (option.Priority > winner.Priority)
+                {
+                    winner.Priority = option.Priority;
+                    winner.Options.Clear();
+                    winner.Options.Add(option.Key);
+                }
+                else if (option.Priority == winner.Priority)
+                {
+                    winner.Options.Add(option.Key);
+                }
+            }
+        }
+
+        var losers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var option in options.Values)
+        {
+            foreach (var item in option.Items)
+            {
+                if (!itemWinners.TryGetValue(item, out var winner))
+                {
+                    continue;
+                }
+
+                if (winner.Priority > option.Priority)
+                {
+                    losers.Add(option.Key);
+                    break;
+                }
+            }
+        }
+
+        if (losers.Count == 0)
+        {
+            return;
+        }
+
+        replacements.RemoveWhere(r =>
+        {
+            if (!r.HasFileReplacement)
+            {
+                return false;
+            }
+
+            var modName = string.IsNullOrWhiteSpace(r.ModName) ? "Unknown Mod" : r.ModName;
+            var optionName = string.IsNullOrWhiteSpace(r.OptionName) ? "Default" : r.OptionName;
+            var optionKey = $"{modName}||{optionName}";
+            return losers.Contains(optionKey);
+        });
+    }
+
+    private sealed class OptionEntry
+    {
+        public OptionEntry(string modName, string optionName)
+        {
+            Key = $"{modName}||{optionName}";
+        }
+
+        public string Key { get; }
+        public int Priority { get; set; } = int.MinValue;
+        public HashSet<string> Items { get; } = new(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private sealed class ItemWinner
+    {
+        public ItemWinner(int priority, string key)
+        {
+            Priority = priority;
+            Options.Add(key);
+        }
+
+        public int Priority { get; set; }
+        public HashSet<string> Options { get; } = new(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static void NormalizeModOptions(HashSet<FileReplacement> replacements, Dictionary<string, (string ResolvedPath, string ModName, string OptionName, int Priority)> gamePathLookup)
+    {
+        if (replacements.Count == 0 || gamePathLookup.Count == 0)
+        {
+            return;
+        }
+
+        var modBestOption = new Dictionary<string, (string OptionName, int Priority)>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var replacement in replacements)
+        {
+            var modName = replacement.ModName;
+            if (string.IsNullOrWhiteSpace(modName))
+            {
+                continue;
+            }
+
+            string? bestOptionName = null;
+            int bestPriority = int.MinValue;
+
+            foreach (var gamePath in replacement.GamePaths)
+            {
+                if (!gamePathLookup.TryGetValue(gamePath, out var info))
+                {
+                    continue;
+                }
+
+                if (!string.Equals(info.ModName, modName, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (string.IsNullOrWhiteSpace(info.OptionName))
+                {
+                    continue;
+                }
+
+                if (info.Priority > bestPriority)
+                {
+                    bestPriority = info.Priority;
+                    bestOptionName = info.OptionName;
+                }
+                else if (info.Priority == bestPriority && bestOptionName != null && string.Compare(info.OptionName, bestOptionName, StringComparison.OrdinalIgnoreCase) < 0)
+                {
+                    bestOptionName = info.OptionName;
+                }
+            }
+
+            if (bestOptionName == null)
+            {
+                continue;
+            }
+
+            if (modBestOption.TryGetValue(modName, out var existing))
+            {
+                if (bestPriority > existing.Priority)
+                {
+                    modBestOption[modName] = (bestOptionName, bestPriority);
+                }
+                else if (bestPriority == existing.Priority && string.Compare(bestOptionName, existing.OptionName, StringComparison.OrdinalIgnoreCase) < 0)
+                {
+                    modBestOption[modName] = (bestOptionName, existing.Priority);
+                }
+            }
+            else
+            {
+                modBestOption[modName] = (bestOptionName, bestPriority);
+            }
+        }
+
+        if (modBestOption.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var replacement in replacements)
+        {
+            var modName = replacement.ModName;
+            if (string.IsNullOrWhiteSpace(modName))
+            {
+                continue;
+            }
+
+            if (modBestOption.TryGetValue(modName, out var best))
+            {
+                replacement.OptionName = best.OptionName;
+            }
+        }
     }
 
     private async Task VerifyPlayerAnimationBones(Dictionary<string, List<ushort>>? boneIndices, CharacterDataFragmentPlayer fragment, CancellationToken ct)
