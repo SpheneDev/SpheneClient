@@ -474,6 +474,7 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
                 int total = 0;
                 bool hasCharacterLegacyShpk = false;
                 var changedItems = new List<string>();
+                var activeOptions = new List<string>();
 
                 try
                 {
@@ -482,6 +483,7 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
                     total = result.TotalCount;
                     hasCharacterLegacyShpk = result.HasCharacterLegacyShpk;
                     changedItems = result.ChangedItems;
+                    activeOptions = result.ActiveOptions;
                     
                     // resolvedModName = result.ResolvedModName; // Don't overwrite if we already have it from list, but ProcessModFiles might update it from meta.json if list was empty?
                     if (string.IsNullOrEmpty(resolvedModName) || string.Equals(resolvedModName, modDirectoryName, StringComparison.Ordinal))
@@ -508,7 +510,7 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
                     modEntry.Value.Inherited,
                     isTemporary,
                     modPriority,
-                    modSettings.SelectMany(x => x.Value.Select(v => $"{x.Key}: {v}")).ToList(),
+                    activeOptions,
                     changedItems,
                     added,
                     total,
@@ -597,7 +599,7 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
         return _gamePathLookupCache.TryGetValue(gamePath, out entry);
     }
 
-    private async Task<(int AddedCount, int TotalCount, string ResolvedModName, bool HasCharacterLegacyShpk, List<string> ChangedItems)> ProcessModFiles(string modDirectoryName, string modPath, Dictionary<string, List<string>> settings, int priority, ConcurrentBag<(string GamePath, string Path, string ModName, string OptionName, int Priority)> bag, string resolvedModName, bool isDebugTarget, CancellationToken ct)
+    private async Task<(int AddedCount, int TotalCount, string ResolvedModName, bool HasCharacterLegacyShpk, List<string> ChangedItems, List<string> ActiveOptions)> ProcessModFiles(string modDirectoryName, string modPath, Dictionary<string, List<string>> settings, int priority, ConcurrentBag<(string GamePath, string Path, string ModName, string OptionName, int Priority)> bag, string resolvedModName, bool isDebugTarget, CancellationToken ct)
     {
         int addedCount = 0;
         int totalCount = 0;
@@ -605,6 +607,7 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
         bool containsUi = false;
         var localBag = new List<(string GamePath, string Path, string ModName, string OptionName, int Priority)>();
         var changedItems = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var activeOptions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var usePenumbraChangedItems = false;
 
         // Create case-insensitive settings lookup
@@ -678,6 +681,10 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
                     foreach (var kvp in defaultMod.Files)
                     {
                         var gamePath = kvp.Key;
+                        if (!hasCharacterLegacyShpk && gamePath.EndsWith("characterlegacy.shpk", StringComparison.OrdinalIgnoreCase))
+                        {
+                            hasCharacterLegacyShpk = true;
+                        }
                         if (!usePenumbraChangedItems)
                         {
                             AddChangedItemsFromGamePath(gamePath, changedItems);
@@ -690,6 +697,7 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
                         var localPath = Path.GetFullPath(Path.Combine(modPath, kvp.Value));
                         localBag.Add((gamePath, localPath, modName, "Default", priority));
                         addedCount++;
+                        activeOptions.Add("Default");
                         if (Logger.IsEnabled(LogLevel.Trace)) Logger.LogTrace("[FileReplacementNew] Added default file: {path} -> {mod}", localPath, modName);
                     }
                 }
@@ -703,6 +711,10 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
                     foreach (var kvp in defaultMod.FileSwaps)
                     {
                         var gamePath = kvp.Key;
+                        if (!hasCharacterLegacyShpk && gamePath.EndsWith("characterlegacy.shpk", StringComparison.OrdinalIgnoreCase))
+                        {
+                            hasCharacterLegacyShpk = true;
+                        }
                         if (!usePenumbraChangedItems)
                         {
                             AddChangedItemsFromGamePath(gamePath, changedItems);
@@ -718,6 +730,7 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
                         {
                             localBag.Add((gamePath, localPath, modName, "Default", priority));
                             addedCount++;
+                            activeOptions.Add("Default");
                             if (Logger.IsEnabled(LogLevel.Trace)) Logger.LogTrace("[FileReplacementNew] Added default swap: {path} -> {mod}", localPath, modName);
                         }
                     }
@@ -749,34 +762,6 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
                     if (group != null)
                     {
                         if (isDebugTarget) Logger.LogDebug("[FileReplacementNew] {Mod}: Found group {Group}, Type: {Type}", modName, group.Name, group.Type);
-
-                        // Calculate total files in group
-                        if (group.Options != null)
-                        {
-                            foreach (var opt in group.Options)
-                            {
-                                if (!hasCharacterLegacyShpk && opt.Files != null && opt.Files.Keys.Any(k => k.EndsWith("characterlegacy.shpk", StringComparison.OrdinalIgnoreCase)))
-                                     hasCharacterLegacyShpk = true;
-                                if (!hasCharacterLegacyShpk && opt.FileSwaps != null && opt.FileSwaps.Keys.Any(k => k.EndsWith("characterlegacy.shpk", StringComparison.OrdinalIgnoreCase)))
-                                     hasCharacterLegacyShpk = true;
-
-                                if (opt.Files != null) totalCount += opt.Files.Count;
-                                if (opt.FileSwaps != null) totalCount += opt.FileSwaps.Count;
-                            }
-                        }
-                        if (group.Containers != null)
-                        {
-                             foreach (var cont in group.Containers)
-                             {
-                                 if (!hasCharacterLegacyShpk && cont.Files != null && cont.Files.Keys.Any(k => k.EndsWith("characterlegacy.shpk", StringComparison.OrdinalIgnoreCase)))
-                                     hasCharacterLegacyShpk = true;
-                                 if (!hasCharacterLegacyShpk && cont.FileSwaps != null && cont.FileSwaps.Keys.Any(k => k.EndsWith("characterlegacy.shpk", StringComparison.OrdinalIgnoreCase)))
-                                     hasCharacterLegacyShpk = true;
-
-                                 if (cont.Files != null) totalCount += cont.Files.Count;
-                                 if (cont.FileSwaps != null) totalCount += cont.FileSwaps.Count;
-                             }
-                        }
 
                         if (settingsCaseInsensitive.TryGetValue(group.Name, out var enabledOptions))
                         {
@@ -813,6 +798,11 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
                                         foreach (var kvp in container.Files)
                                         {
                                             var gamePath = kvp.Key;
+                                            totalCount++;
+                                            if (!hasCharacterLegacyShpk && gamePath.EndsWith("characterlegacy.shpk", StringComparison.OrdinalIgnoreCase))
+                                            {
+                                                hasCharacterLegacyShpk = true;
+                                            }
                                             if (!usePenumbraChangedItems)
                                             {
                                                 AddChangedItemsFromGamePath(gamePath, changedItems);
@@ -825,6 +815,7 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
                                             var localPath = Path.GetFullPath(Path.Combine(modPath, kvp.Value));
                                             localBag.Add((gamePath, localPath, modName, combinedOptionName, priority));
                                             addedCount++;
+                                            activeOptions.Add(combinedOptionName);
                                             if (Logger.IsEnabled(LogLevel.Trace) || isDebugTarget) Logger.LogTrace("[FileReplacementNew] Added combining group file: {path} -> {mod} ({opt})", localPath, modName, combinedOptionName);
                                         }
                                     }
@@ -834,6 +825,11 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
                                         foreach (var kvp in container.FileSwaps)
                                         {
                                             var gamePath = kvp.Key;
+                                            totalCount++;
+                                            if (!hasCharacterLegacyShpk && gamePath.EndsWith("characterlegacy.shpk", StringComparison.OrdinalIgnoreCase))
+                                            {
+                                                hasCharacterLegacyShpk = true;
+                                            }
                                             if (!usePenumbraChangedItems)
                                             {
                                                 AddChangedItemsFromGamePath(gamePath, changedItems);
@@ -848,6 +844,7 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
                                             {
                                                 localBag.Add((gamePath, localPath, modName, combinedOptionName, priority));
                                                 addedCount++;
+                                                activeOptions.Add(combinedOptionName);
                                                 if (Logger.IsEnabled(LogLevel.Trace) || isDebugTarget) Logger.LogTrace("[FileReplacementNew] Added combining group swap: {path} -> {mod} ({opt})", localPath, modName, combinedOptionName);
                                             }
                                         }
@@ -892,6 +889,11 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
                                                 foreach (var kvp in container.Files)
                                                 {
                                                     var gamePath = kvp.Key;
+                                                    totalCount++;
+                                                    if (!hasCharacterLegacyShpk && gamePath.EndsWith("characterlegacy.shpk", StringComparison.OrdinalIgnoreCase))
+                                                    {
+                                                        hasCharacterLegacyShpk = true;
+                                                    }
                                                     if (!usePenumbraChangedItems)
                                                     {
                                                         AddChangedItemsFromGamePath(gamePath, changedItems);
@@ -904,6 +906,7 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
                                                     var localPath = Path.GetFullPath(Path.Combine(modPath, kvp.Value));
                                                     localBag.Add((gamePath, localPath, modName, combinedOptionName, priority));
                                                     addedCount++;
+                                                    activeOptions.Add(combinedOptionName);
                                                     if (Logger.IsEnabled(LogLevel.Trace) || isDebugTarget) Logger.LogTrace("[FileReplacementNew] Added complex group file: {path} -> {mod} ({opt})", localPath, modName, combinedOptionName);
                                                 }
                                             }
@@ -913,6 +916,11 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
                                                 foreach (var kvp in container.FileSwaps)
                                                 {
                                                     var gamePath = kvp.Key;
+                                                    totalCount++;
+                                                    if (!hasCharacterLegacyShpk && gamePath.EndsWith("characterlegacy.shpk", StringComparison.OrdinalIgnoreCase))
+                                                    {
+                                                        hasCharacterLegacyShpk = true;
+                                                    }
                                                     if (!usePenumbraChangedItems)
                                                     {
                                                         AddChangedItemsFromGamePath(gamePath, changedItems);
@@ -927,6 +935,7 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
                                                     {
                                                         localBag.Add((gamePath, localPath, modName, combinedOptionName, priority));
                                                         addedCount++;
+                                                        activeOptions.Add(combinedOptionName);
                                                         if (Logger.IsEnabled(LogLevel.Trace) || isDebugTarget) Logger.LogTrace("[FileReplacementNew] Added complex group swap: {path} -> {mod} ({opt})", localPath, modName, combinedOptionName);
                                                     }
                                                 }
@@ -951,6 +960,11 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
                                                 foreach (var kvp in option.Files)
                                                 {
                                                     var gamePath = kvp.Key;
+                                                    totalCount++;
+                                                    if (!hasCharacterLegacyShpk && gamePath.EndsWith("characterlegacy.shpk", StringComparison.OrdinalIgnoreCase))
+                                                    {
+                                                        hasCharacterLegacyShpk = true;
+                                                    }
                                                     if (!usePenumbraChangedItems)
                                                     {
                                                         AddChangedItemsFromGamePath(gamePath, changedItems);
@@ -963,6 +977,7 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
                                                     var localPath = Path.GetFullPath(Path.Combine(modPath, kvp.Value));
                                                     localBag.Add((gamePath, localPath, modName, $"{group.Name}: {option.Name}", priority));
                                                     addedCount++;
+                                                    activeOptions.Add($"{group.Name}: {option.Name}");
                                                     if (Logger.IsEnabled(LogLevel.Trace) || isDebugTarget) Logger.LogTrace("[FileReplacementNew] Added group option file: {path} -> {mod} ({opt})", localPath, modName, $"{group.Name}: {option.Name}");
                                                 }
                                             }
@@ -972,6 +987,11 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
                                                 foreach (var kvp in option.FileSwaps)
                                                 {
                                                     var gamePath = kvp.Key;
+                                                    totalCount++;
+                                                    if (!hasCharacterLegacyShpk && gamePath.EndsWith("characterlegacy.shpk", StringComparison.OrdinalIgnoreCase))
+                                                    {
+                                                        hasCharacterLegacyShpk = true;
+                                                    }
                                                     if (!usePenumbraChangedItems)
                                                     {
                                                         AddChangedItemsFromGamePath(gamePath, changedItems);
@@ -986,6 +1006,7 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
                                                     {
                                                         localBag.Add((gamePath, localPath, modName, $"{group.Name}: {option.Name}", priority));
                                                         addedCount++;
+                                                        activeOptions.Add($"{group.Name}: {option.Name}");
                                                         if (Logger.IsEnabled(LogLevel.Trace) || isDebugTarget) Logger.LogTrace("[FileReplacementNew] Added group swap: {path} -> {mod} ({opt})", localPath, modName, $"{group.Name}: {option.Name}");
                                                     }
                                                 }
@@ -1037,7 +1058,8 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
         }
 
         var items = changedItems.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList();
-        return (addedCount, totalCount, modName, hasCharacterLegacyShpk, items);
+        var optionList = activeOptions.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList();
+        return (addedCount, totalCount, modName, hasCharacterLegacyShpk, items, optionList);
     }
 
     internal bool TryGetChangedItemsFromGamePath(string gamePath, out IReadOnlyList<string> changedItems)

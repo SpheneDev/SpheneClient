@@ -13,13 +13,12 @@ public sealed class CharacterAnalyzer : MediatorSubscriberBase, IDisposable
 {
     private readonly FileCacheManager _fileCacheManager;
     private readonly XivDataAnalyzer _xivDataAnalyzer;
-    private readonly PenumbraModScanner _penumbraModScanner;
     private readonly System.Threading.Lock _analysisLock = new();
     private CancellationTokenSource? _analysisCts;
     private CancellationTokenSource _baseAnalysisCts = new();
     private string _lastDataHash = string.Empty;
 
-    public CharacterAnalyzer(ILogger<CharacterAnalyzer> logger, SpheneMediator mediator, FileCacheManager fileCacheManager, XivDataAnalyzer modelAnalyzer, PenumbraModScanner penumbraModScanner)
+    public CharacterAnalyzer(ILogger<CharacterAnalyzer> logger, SpheneMediator mediator, FileCacheManager fileCacheManager, XivDataAnalyzer modelAnalyzer)
         : base(logger, mediator)
     {
         Mediator.Subscribe<CharacterDataCreatedMessage>(this, (msg) =>
@@ -32,7 +31,6 @@ public sealed class CharacterAnalyzer : MediatorSubscriberBase, IDisposable
         });
         _fileCacheManager = fileCacheManager;
         _xivDataAnalyzer = modelAnalyzer;
-        _penumbraModScanner = penumbraModScanner;
     }
 
     public int CurrentFile { get; internal set; }
@@ -166,52 +164,21 @@ public sealed class CharacterAnalyzer : MediatorSubscriberBase, IDisposable
             LastAnalysis.Clear();
         }
 
-        // Pre-calculate relevant mods for MinionOrMount GLOBALLY
         HashSet<string> relevantMinionMods = new(StringComparer.OrdinalIgnoreCase);
         HashSet<string> relevantMinionOptions = new(StringComparer.OrdinalIgnoreCase);
         Dictionary<string, string> gamePathToModName = new(StringComparer.OrdinalIgnoreCase);
 
-        // Get all enabled mod files from Penumbra directly
-        // This ensures we find Minion mods even if the minion itself is not currently summoned
-        try 
-        {
-            var allEnabledFiles = await _penumbraModScanner.GetAllEnabledModReplacementsAsync(token).ConfigureAwait(false);
-            foreach (var f in allEnabledFiles)
-            {
-                if (string.IsNullOrEmpty(f.ModName)) continue;
-
-                // Build lookup for GamePath -> ModName to fix missing ModNames later
-                gamePathToModName[f.GamePath] = f.ModName;
-
-                bool isMinionPath = 
-                    f.GamePath.StartsWith("chara/companion/", StringComparison.OrdinalIgnoreCase) ||
-                    f.GamePath.StartsWith("chara/monster/", StringComparison.OrdinalIgnoreCase) ||
-                    f.GamePath.StartsWith("chara/demihuman/", StringComparison.OrdinalIgnoreCase) ||
-                    f.GamePath.StartsWith("sound/voice/mon_", StringComparison.OrdinalIgnoreCase) ||
-                    f.GamePath.StartsWith("vfx/monster/", StringComparison.OrdinalIgnoreCase) ||
-                    f.GamePath.StartsWith("vfx/demihuman/", StringComparison.OrdinalIgnoreCase);
-
-                if (isMinionPath)
-                {
-                    relevantMinionMods.Add(f.ModName);
-                    if (!string.IsNullOrEmpty(f.OptionName))
-                    {
-                        relevantMinionOptions.Add($"{f.ModName}|{f.OptionName}");
-                    }
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            Logger.LogWarning(ex, "Failed to fetch all enabled mod replacements from PenumbraModScanner.");
-        }
-
-        // Also scan current character data as fallback
         foreach (var list in charaData.FileReplacements.Values)
         {
             foreach (var f in list)
             {
                 if (string.IsNullOrEmpty(f.ModName)) continue;
+
+                foreach (var gamePath in f.GamePaths)
+                {
+                    if (string.IsNullOrWhiteSpace(gamePath)) continue;
+                    gamePathToModName[gamePath] = f.ModName;
+                }
 
                 bool isMinionPath = f.GamePaths.Any(p =>
                     p.StartsWith("chara/companion/", StringComparison.OrdinalIgnoreCase) ||
