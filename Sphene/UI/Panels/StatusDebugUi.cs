@@ -44,6 +44,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
     private readonly Dictionary<string, CharacterStatsSnapshot> _characterStats = new(StringComparer.Ordinal);
     private string _penumbraSearch = string.Empty;
     private bool _showOnlyEnabledMods = true;
+    private bool _showOnlyWinningMods = true;
     private string? _pairCollectionCacheUid;
     private string? _pairCollectionCacheDataHash;
     private int _pairCollectionLocalModsCount;
@@ -580,6 +581,15 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
 
         ImGui.Text($"Collection for {pair.UserData.AliasOrUID}");
         ImGui.Text($"Data Hash: {data.GetHashCode()}"); // Approximate hash or use actual if available
+        int totalCachedFiles = 0;
+        int totalFiles = 0;
+        for (int i = 0; i < _pairCollectionModGroups.Count; i++)
+        {
+            totalCachedFiles += _pairCollectionModGroups[i].CachedFiles;
+            totalFiles += _pairCollectionModGroups[i].TotalFiles;
+        }
+        ImGui.Text($"Loaded Mods: {_pairCollectionLocalMods.Count}");
+        ImGui.Text($"Cached Files: {totalCachedFiles} / {totalFiles}");
 
         ImGui.Separator();
 
@@ -590,6 +600,18 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             ImGui.TableSetupColumn("Changed", ImGuiTableColumnFlags.WidthFixed, 150);
             ImGui.TableSetupColumn("Files (Cached/Total)", ImGuiTableColumnFlags.WidthFixed, 120);
             ImGui.TableHeadersRow();
+
+            var pairCollectionSortSpecs = ImGui.TableGetSortSpecs();
+            if (pairCollectionSortSpecs.SpecsDirty && pairCollectionSortSpecs.SpecsCount > 0)
+            {
+                var spec = pairCollectionSortSpecs.Specs;
+                if (spec.ColumnIndex == 0)
+                {
+                    int direction = spec.SortDirection == ImGuiSortDirection.Ascending ? 1 : -1;
+                    _pairCollectionModGroups.Sort((left, right) => direction * StringComparer.OrdinalIgnoreCase.Compare(left.ModName, right.ModName));
+                }
+                pairCollectionSortSpecs.SpecsDirty = false;
+            }
 
             foreach (var modGroup in _pairCollectionModGroups)
             {
@@ -1081,6 +1103,8 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         ImGui.InputText("Search Mods", ref _penumbraSearch, 100);
         ImGui.SameLine();
         ImGui.Checkbox("Show Only Enabled", ref _showOnlyEnabledMods);
+        ImGui.SameLine();
+        ImGui.Checkbox("Show Only Winning", ref _showOnlyWinningMods);
         
         var debugInfo = _penumbraScanner.LastScanDebugInfo;
         
@@ -1090,20 +1114,31 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             return;
         }
 
+        EnsureWinningItemsCache();
+        bool hasWinningData = _winningItemsCacheData != null;
+
         var filtered = debugInfo.Where(x => 
             (string.IsNullOrEmpty(_penumbraSearch) || 
             x.DirectoryName.Contains(_penumbraSearch, StringComparison.OrdinalIgnoreCase) ||
             x.Status.Contains(_penumbraSearch, StringComparison.OrdinalIgnoreCase) ||
             x.ModName.Contains(_penumbraSearch, StringComparison.OrdinalIgnoreCase)) &&
-            (!_showOnlyEnabledMods || x.IsEnabled || x.IsTemporary)
+            (!_showOnlyEnabledMods || x.IsEnabled || x.IsTemporary) &&
+            (!_showOnlyWinningMods || (_winningItemsByMod.TryGetValue(x.ModName, out var win) && win.Items.Count > 0))
         ).ToList();
 
-        ImGui.Text($"Total Mods Scanned: {debugInfo.Count} | Filtered: {filtered.Count}");
+        int totalActiveFiles = 0;
+        int totalFiles = 0;
+        foreach (var mod in filtered)
+        {
+            totalFiles += mod.TotalFilesCount;
+            if (_winningItemsByMod.TryGetValue(mod.ModName, out var win))
+            {
+                totalActiveFiles += win.Items.Count;
+            }
+        }
+        ImGui.Text($"Total Mods Scanned: {debugInfo.Count} | Filtered: {filtered.Count} | Active / Total Files: {totalActiveFiles} / {totalFiles}");
 
-        EnsureWinningItemsCache();
-        bool hasWinningData = _winningItemsCacheData != null;
-
-        using var table = ImRaii.Table("PenumbraDebugTable", 7, ImGuiTableFlags.RowBg | ImGuiTableFlags.Borders | ImGuiTableFlags.Resizable | ImGuiTableFlags.ScrollY);
+        using var table = ImRaii.Table("PenumbraDebugTable", 7, ImGuiTableFlags.RowBg | ImGuiTableFlags.Borders | ImGuiTableFlags.Resizable | ImGuiTableFlags.ScrollY | ImGuiTableFlags.Sortable);
         if (!table) return;
 
         ImGui.TableSetupColumn("Mod Name", ImGuiTableColumnFlags.WidthStretch);
@@ -1114,6 +1149,21 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         ImGui.TableSetupColumn("Changed", ImGuiTableColumnFlags.WidthFixed, 160);
         ImGui.TableSetupColumn("Options", ImGuiTableColumnFlags.WidthFixed, 160);
         ImGui.TableHeadersRow();
+
+        var penumbraSortSpecs = ImGui.TableGetSortSpecs();
+        if (penumbraSortSpecs.SpecsCount > 0)
+        {
+            var spec = penumbraSortSpecs.Specs;
+            if (spec.ColumnIndex == 0)
+            {
+                int direction = spec.SortDirection == ImGuiSortDirection.Ascending ? 1 : -1;
+                filtered.Sort((left, right) => direction * StringComparer.OrdinalIgnoreCase.Compare(left.ModName, right.ModName));
+            }
+            if (penumbraSortSpecs.SpecsDirty)
+            {
+                penumbraSortSpecs.SpecsDirty = false;
+            }
+        }
 
         foreach (var mod in filtered)
         {
@@ -1163,7 +1213,8 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             ImGui.TextUnformatted(mod.Priority.ToString());
 
             ImGui.TableNextColumn();
-            ImGui.TextUnformatted($"{mod.ActiveFilesCount} / {mod.TotalFilesCount}");
+            int winningFilesCount = hasWinningItems ? winningData!.Items.Count : 0;
+            ImGui.TextUnformatted($"{winningFilesCount} / {mod.TotalFilesCount}");
 
             ImGui.TableNextColumn();
             if (hasWinningItems)
