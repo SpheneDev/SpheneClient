@@ -623,6 +623,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                 pairCollectionSortSpecs.SpecsDirty = false;
             }
 
+            int changedItemsId = 0;
             foreach (var modGroup in _pairCollectionModGroups)
             {
                 ImGui.TableNextRow();
@@ -648,7 +649,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
 
                 // Changed
                 ImGui.TableSetColumnIndex(2);
-                DrawChangedItems(modGroup.ChangedItems);
+                DrawChangedItems(modGroup.ChangedItems, changedItemsId++);
 
                 // Files
                 ImGui.TableSetColumnIndex(3);
@@ -680,7 +681,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                         ImGui.Text(optionRow.OptionName);
 
                         ImGui.TableSetColumnIndex(2);
-                        DrawChangedItems(optionRow.ChangedItems);
+                        DrawChangedItems(optionRow.ChangedItems, changedItemsId++);
 
                         ImGui.TableSetColumnIndex(3);
                         var optionFileColor = optionRow.CachedFiles == optionRow.TotalFiles ? ImGuiColors.HealerGreen : (optionRow.CachedFiles > 0 ? ImGuiColors.DalamudYellow : ImGuiColors.DalamudRed);
@@ -1528,7 +1529,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         }
     }
 
-    private void DrawChangedItems(IReadOnlyCollection<string> items)
+    private void DrawChangedItems(IReadOnlyCollection<string> items, int popupId)
     {
         if (items.Count == 0)
         {
@@ -1536,9 +1537,15 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             return;
         }
 
+        const int maxInlineItems = 4;
         int index = 0;
         foreach (var item in items)
         {
+            if (index >= maxInlineItems)
+            {
+                break;
+            }
+
             if (index > 0)
             {
                 ImGui.SameLine();
@@ -1548,6 +1555,32 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
 
             DrawChangedItem(item);
             index++;
+        }
+
+        if (items.Count > maxInlineItems)
+        {
+            ImGui.SameLine();
+            ImGui.TextUnformatted($"…(+{items.Count - maxInlineItems})");
+            ImGui.SameLine();
+            if (ImGui.SmallButton($"View##{popupId}"))
+            {
+                ImGui.OpenPopup($"ChangedItemsPopup##{popupId}");
+            }
+
+            if (ImGui.BeginPopup($"ChangedItemsPopup##{popupId}"))
+            {
+                ImGui.TextUnformatted($"Changed Items ({items.Count})");
+                ImGui.Separator();
+                ImGui.BeginChild($"ChangedItemsScroll##{popupId}", new Vector2(0, 200), true);
+                foreach (var item in items)
+                {
+                    ImGui.Bullet();
+                    ImGui.SameLine();
+                    DrawChangedItem(item);
+                }
+                ImGui.EndChild();
+                ImGui.EndPopup();
+            }
         }
     }
 

@@ -56,7 +56,6 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
         "ui/",
         "common/",
         "vfx/",
-        "bgcommon/",
         "bg/",
         "bgex/",
         "bgparts/",
@@ -64,6 +63,10 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
         "event/",
         "field/",
         "shader/"
+    ];
+    private static readonly string[] ExcludedGamePathPrefixes =
+    [
+        "bgcommon/"
     ];
     private string? _playerRaceCode;
     
@@ -1482,6 +1485,10 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
         }
 
         var normalized = gamePath.Replace('\\', '/').Trim();
+        if (IsExcludedGamePath(normalized))
+        {
+            return string.Empty;
+        }
         int bestIndex = -1;
         for (int i = 0; i < GamePathRoots.Length; i++)
         {
@@ -1502,7 +1509,30 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
             normalized = normalized.Substring(bestIndex);
         }
 
+        if (IsExcludedGamePath(normalized))
+        {
+            return string.Empty;
+        }
+
         return normalized;
+    }
+
+    private static bool IsExcludedGamePath(string gamePath)
+    {
+        if (string.IsNullOrWhiteSpace(gamePath))
+        {
+            return false;
+        }
+
+        for (int i = 0; i < ExcludedGamePathPrefixes.Length; i++)
+        {
+            if (gamePath.StartsWith(ExcludedGamePathPrefixes[i], StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static bool TryGetRaceCodeMatchState(string path, string playerRaceCode, out bool containsAny, out bool containsPlayer)

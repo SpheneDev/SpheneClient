@@ -20,6 +20,8 @@ public sealed class IpcCallerPenumbra : DisposableMediatorSubscriberBase, IIpcCa
     private readonly RedrawManager _redrawManager;
     private bool _shownPenumbraUnavailable = false;
     private string? _penumbraModDirectory;
+    private readonly ConcurrentDictionary<string, DateTime> _lastTempCollectionAssignLogByKey = new(StringComparer.Ordinal);
+    private const int TempCollectionAssignLogCooldownMs = 10000;
     public string? ModDirectory
     {
         get => _penumbraModDirectory;
@@ -239,9 +241,26 @@ public sealed class IpcCallerPenumbra : DisposableMediatorSubscriberBase, IIpcCa
         await _dalamudUtil.RunOnFrameworkThread(() =>
         {
             var retAssign = _penumbraAssignTemporaryCollection.Invoke(collName, idx, forceAssignment: true);
-            logger.LogTrace("Assigning Temp Collection {collName} to index {idx}, Success: {ret}", collName, idx, retAssign);
+            if (ShouldLogTempCollectionAssign(collName, idx))
+            {
+                logger.LogTrace("Assigning Temp Collection {collName} to index {idx}, Success: {ret}", collName, idx, retAssign);
+            }
             return collName;
         }).ConfigureAwait(false);
+    }
+
+    private bool ShouldLogTempCollectionAssign(Guid collectionId, int index)
+    {
+        var key = $"{collectionId:N}:{index}";
+        var now = DateTime.UtcNow;
+        if (_lastTempCollectionAssignLogByKey.TryGetValue(key, out var last)
+            && now - last < TimeSpan.FromMilliseconds(TempCollectionAssignLogCooldownMs))
+        {
+            return false;
+        }
+
+        _lastTempCollectionAssignLogByKey[key] = now;
+        return true;
     }
 
     public async Task ConvertTextureFiles(ILogger logger, Dictionary<string, string[]> textures, IProgress<(string, int)> progress, CancellationToken token)

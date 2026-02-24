@@ -150,7 +150,12 @@ public class PlayerDataFactory
                     foreach (var gamePath in set)
                     {
                         if (string.IsNullOrWhiteSpace(gamePath)) continue;
-                        activeGamePaths.Add(gamePath.Replace('\\', '/').ToLowerInvariant());
+                        var normalizedGamePath = gamePath.Replace('\\', '/');
+                        if (IsExcludedGamePath(normalizedGamePath))
+                        {
+                            continue;
+                        }
+                        activeGamePaths.Add(normalizedGamePath.ToLowerInvariant());
                     }
                 }
             }
@@ -213,6 +218,10 @@ public class PlayerDataFactory
                 }
 
                 var normalizedGamePath = gamePath.Replace('\\', '/');
+                if (IsExcludedGamePath(normalizedGamePath))
+                {
+                    continue;
+                }
                 if (activeGamePaths != null)
                 {
                     var decision = _penumbraModScanner.IsEquipmentGamePath(normalizedGamePath);
@@ -320,9 +329,29 @@ public class PlayerDataFactory
 
             ct.ThrowIfCancellationRequested();
 
-            fragment.FileReplacements =
-                    new HashSet<FileReplacement>(resolvedPaths.Select(c => new FileReplacement([.. c.Value], c.Key) { IsActive = true }), FileReplacementComparer.Instance)
-                    .Where(p => p.HasFileReplacement).ToHashSet();
+            var replacements = new HashSet<FileReplacement>(FileReplacementComparer.Instance);
+            foreach (var entry in resolvedPaths)
+            {
+                var gamePaths = entry.Value;
+                if (gamePaths == null || gamePaths.Count == 0)
+                {
+                    continue;
+                }
+
+                var filtered = gamePaths
+                    .Select(p => p.Replace('\\', '/'))
+                    .Where(p => !IsExcludedGamePath(p))
+                    .ToArray();
+
+                if (filtered.Length == 0)
+                {
+                    continue;
+                }
+
+                replacements.Add(new FileReplacement(filtered, entry.Key) { IsActive = true });
+            }
+
+            fragment.FileReplacements = replacements.Where(p => p.HasFileReplacement).ToHashSet();
             fragment.FileReplacements.RemoveWhere(c => c.GamePaths.Any(g => !CacheMonitor.AllowedFileExtensions.Any(e => g.EndsWith(e, StringComparison.OrdinalIgnoreCase))));
 
             modLookup = await _penumbraModScanner.GetModFileLookupAsync(ct).ConfigureAwait(false);
@@ -567,6 +596,16 @@ public class PlayerDataFactory
         if (!string.IsNullOrWhiteSpace(gamePath) && gamePath.EndsWith(".pap", StringComparison.OrdinalIgnoreCase)) return true;
         if (!string.IsNullOrWhiteSpace(resolvedPath) && resolvedPath.EndsWith(".pap", StringComparison.OrdinalIgnoreCase)) return true;
         return false;
+    }
+
+    private static bool IsExcludedGamePath(string gamePath)
+    {
+        if (string.IsNullOrWhiteSpace(gamePath))
+        {
+            return false;
+        }
+
+        return gamePath.StartsWith("bgcommon/", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string BuildPapRaceGroupKey(string path)
