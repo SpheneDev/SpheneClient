@@ -14,6 +14,7 @@ using Sphene.WebAPI;
 using Sphene.WebAPI.SignalR.Utils;
 using System.Numerics;
 using System.Text.Json;
+using Sphene.PlayerData.Data;
 
 namespace Sphene.UI.Panels;
 
@@ -194,6 +195,14 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             if (characterStatsTab)
             {
                 DrawCharacterStatistics();
+            }
+        }
+
+        using (var legacyCheckTab = ImRaii.TabItem("Legacy Check"))
+        {
+            if (legacyCheckTab)
+            {
+                DrawLegacyCheck();
             }
         }
         
@@ -1158,5 +1167,84 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
     {
         var typeStr = message.Type.ToString().ToUpper();
         LogCommunication($"Notification [{typeStr}]: {message.Title} - {message.Message}", "INFO");
+    }
+
+    private void DrawLegacyCheck()
+    {
+        if (ImGui.BeginTable("LegacyCheckTable", 3, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.ScrollY))
+        {
+            ImGui.TableSetupColumn("User", ImGuiTableColumnFlags.WidthFixed, 200);
+            ImGui.TableSetupColumn("Status", ImGuiTableColumnFlags.WidthFixed, 100);
+            ImGui.TableSetupColumn("Details", ImGuiTableColumnFlags.WidthStretch);
+            ImGui.TableHeadersRow();
+
+            var pairsToCheck = new HashSet<Pair>(_pairManager.DirectPairs);
+            foreach (var groupPairs in _pairManager.GroupPairs.Values)
+            {
+                foreach (var pair in groupPairs)
+                {
+                    pairsToCheck.Add(pair);
+                }
+            }
+
+            foreach (var pair in pairsToCheck)
+            {
+                ImGui.TableNextRow();
+                ImGui.TableNextColumn();
+                ImGui.TextUnformatted(pair.UserData.AliasOrUID);
+
+                ImGui.TableNextColumn();
+                var data = pair.LastReceivedCharacterData;
+                if (data == null)
+                {
+                    ImGui.TextColored(ImGuiColors.DalamudGrey, "No Data");
+                    ImGui.TableNextColumn();
+                    ImGui.TextUnformatted("-");
+                }
+                else
+                {
+                    var found = false;
+                    var details = new List<string>();
+
+                    if (data.FileReplacements != null)
+                    {
+                        foreach (var kvp in data.FileReplacements)
+                        {
+                            foreach (var replacement in kvp.Value)
+                            {
+                                if (!string.IsNullOrEmpty(replacement.FileSwapPath) && replacement.FileSwapPath.EndsWith("characterlegacy.shpk", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    found = true;
+                                    details.Add($"Swap: {replacement.FileSwapPath}");
+                                }
+                                foreach (var gamePath in replacement.GamePaths)
+                                {
+                                    if (gamePath.EndsWith("characterlegacy.shpk", StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        found = true;
+                                        details.Add($"GamePath: {gamePath}");
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if (found)
+                    {
+                        ImGui.TextColored(ImGuiColors.DalamudRed, "FOUND");
+                        ImGui.TableNextColumn();
+                        ImGui.TextWrapped(string.Join("\n", details));
+                    }
+                    else
+                    {
+                        ImGui.TextColored(ImGuiColors.HealerGreen, "Clean");
+                        ImGui.TableNextColumn();
+                        ImGui.TextUnformatted("-");
+                    }
+                }
+            }
+
+            ImGui.EndTable();
+        }
     }
 }
