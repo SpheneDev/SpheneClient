@@ -24,6 +24,7 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
     private readonly IpcManager _ipcManager;
     private readonly UiSharedService _uiSharedService;
     private readonly PlayerPerformanceConfigService _playerPerformanceConfig;
+    private readonly PenumbraModScanner _penumbraModScanner;
     private readonly TransientResourceManager _transientResourceManager;
     private readonly TransientConfigService _transientConfigService;
     private readonly TextureBackupService _textureBackupService;
@@ -63,7 +64,7 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
     public DataAnalysisUi(ILogger<DataAnalysisUi> logger, SpheneMediator mediator,
         CharacterAnalyzer characterAnalyzer, IpcManager ipcManager,
         PerformanceCollectorService performanceCollectorService, UiSharedService uiSharedService,
-        PlayerPerformanceConfigService playerPerformanceConfig, TransientResourceManager transientResourceManager,
+        PlayerPerformanceConfigService playerPerformanceConfig, PenumbraModScanner penumbraModScanner, TransientResourceManager transientResourceManager,
         TransientConfigService transientConfigService, TextureBackupService textureBackupService,
         ShrinkU.Services.TextureBackupService shrinkuBackupService,
         ShrinkU.Services.TextureConversionService shrinkuConversionService)
@@ -73,6 +74,7 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
         _ipcManager = ipcManager;
         _uiSharedService = uiSharedService;
         _playerPerformanceConfig = playerPerformanceConfig;
+        _penumbraModScanner = penumbraModScanner;
         _transientResourceManager = transientResourceManager;
         _transientConfigService = transientConfigService;
         _textureBackupService = textureBackupService;
@@ -508,14 +510,16 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
 
         ImGuiHelpers.ScaledDummy(5);
         var width = ImGui.GetContentRegionAvail();
-        using var table = ImRaii.Table("Recorded Transients", 4, ImGuiTableFlags.ScrollY | ImGuiTableFlags.SizingFixedFit | ImGuiTableFlags.RowBg);
+        using var table = ImRaii.Table("Recorded Transients", 5, ImGuiTableFlags.ScrollY | ImGuiTableFlags.SizingFixedFit | ImGuiTableFlags.RowBg);
         if (table)
         {
             int id = 0;
             ImGui.TableSetupColumn("", ImGuiTableColumnFlags.WidthFixed, 30);
             ImGui.TableSetupColumn("Owner", ImGuiTableColumnFlags.WidthFixed, 100);
-            ImGui.TableSetupColumn("Game Path", ImGuiTableColumnFlags.WidthFixed, (width.X - 30 - 100) / 2f);
-            ImGui.TableSetupColumn("File Path", ImGuiTableColumnFlags.WidthFixed, (width.X - 30 - 100) / 2f);
+            var remainingWidth = Math.Max(200f, width.X - 30 - 100);
+            ImGui.TableSetupColumn("Game Path", ImGuiTableColumnFlags.WidthFixed, remainingWidth * 0.4f);
+            ImGui.TableSetupColumn("File Path", ImGuiTableColumnFlags.WidthFixed, remainingWidth * 0.4f);
+            ImGui.TableSetupColumn("Emote", ImGuiTableColumnFlags.WidthFixed, remainingWidth * 0.2f);
             ImGui.TableSetupScrollFreeze(0, 1);
             ImGui.TableHeadersRow();
             var transients = _transientResourceManager.RecordedTransients.ToList();
@@ -544,6 +548,12 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                 ImGui.TableNextColumn();
                 ImGui.TextUnformatted(value.FilePath);
                 UiSharedService.AttachToolTip(value.FilePath);
+                ImGui.TableNextColumn();
+                if (_penumbraModScanner.TryGetEmoteNameFromGamePath(value.GamePath, out var emoteName))
+                {
+                    ImGui.TextUnformatted(emoteName);
+                    UiSharedService.AttachToolTip(emoteName);
+                }
                 if (value.AlreadyTransient)
                 {
                     ImGui.PopStyleColor();

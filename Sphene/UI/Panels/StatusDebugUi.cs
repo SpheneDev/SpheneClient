@@ -4,6 +4,8 @@ using Dalamud.Interface.Colors;
 using Sphene.API.Data.Extensions;
 using Dalamud.Interface.Utility;
 using Dalamud.Interface.Utility.Raii;
+using Dalamud.Plugin.Services;
+using Lumina.Excel.Sheets;
 using Microsoft.Extensions.Logging;
 using Sphene.Services;
 using Sphene.Services.Mediator;
@@ -28,9 +30,11 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
     private readonly PenumbraModScanner _penumbraScanner;
     private readonly ConnectionHealthMonitor _healthMonitor;
     private readonly CircuitBreakerService _circuitBreaker;
+    private readonly IDataManager _dataManager;
     private readonly EnhancedAcknowledgmentManager? _acknowledgmentManager;
     private readonly SessionAcknowledgmentManager? _sessionAcknowledgmentManager;
     private readonly FileCacheManager _fileCacheManager;
+    private CensusUpdateMessage? _lastCensus;
     
     private string _communicationLog = "Communication Log:\n";
     private bool _autoScroll = true;
@@ -47,17 +51,17 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
     private bool _showOnlyWinningMods = true;
     private string? _pairCollectionCacheUid;
     private string? _pairCollectionCacheDataHash;
-    private int _pairCollectionLocalModsCount;
     private readonly List<PairCollectionModGroup> _pairCollectionModGroups = [];
-    private readonly HashSet<string> _pairCollectionLocalMods = new(StringComparer.OrdinalIgnoreCase);
     private CharacterData? _lastCreatedCharacterData;
     private CharacterData? _winningItemsCacheData;
     private readonly Dictionary<string, WinningModData> _winningItemsByMod = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _activeModsInCharacterData = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, EmoteTooltipData> _emoteItemTooltips = new(StringComparer.OrdinalIgnoreCase);
     
     public StatusDebugUi(ILogger<StatusDebugUi> logger, SpheneMediator mediator,
         UiSharedService uiSharedService, PairManager pairManager, ApiController apiController,
         PenumbraModScanner penumbraScanner, FileCacheManager fileCacheManager,
-        ConnectionHealthMonitor healthMonitor, CircuitBreakerService circuitBreaker,
+        ConnectionHealthMonitor healthMonitor, CircuitBreakerService circuitBreaker, IDataManager dataManager,
         PerformanceCollectorService performanceCollectorService,
         EnhancedAcknowledgmentManager? acknowledgmentManager = null,
         SessionAcknowledgmentManager? sessionAcknowledgmentManager = null)
@@ -70,6 +74,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         _fileCacheManager = fileCacheManager;
         _healthMonitor = healthMonitor;
         _circuitBreaker = circuitBreaker;
+        _dataManager = dataManager;
         _acknowledgmentManager = acknowledgmentManager;
         _sessionAcknowledgmentManager = sessionAcknowledgmentManager;
         
@@ -99,6 +104,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             _lastCreatedCharacterData = msg.CharacterData;
             _winningItemsCacheData = null;
         });
+        Mediator.Subscribe<CensusUpdateMessage>(this, (msg) => _lastCensus = msg);
         
         // Subscribe to health monitor events by monitoring the health status changes
         // We'll use a timer to periodically check and log health status changes
@@ -588,7 +594,11 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             totalCachedFiles += _pairCollectionModGroups[i].CachedFiles;
             totalFiles += _pairCollectionModGroups[i].TotalFiles;
         }
-        ImGui.Text($"Loaded Mods: {_pairCollectionLocalMods.Count}");
+        ImGui.Text($"Loaded Mods: {_pairCollectionModGroups.Count}");
+        if (ImGui.IsItemHovered())
+        {
+            ImGui.SetTooltip("Loaded Mods are based on the received Sphene cache for this pair.");
+        }
         ImGui.Text($"Cached Files: {totalCachedFiles} / {totalFiles}");
 
         ImGui.Separator();
@@ -623,15 +633,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                 var treeFlags = ImGuiTreeNodeFlags.SpanFullWidth;
                 bool isOpen = ImGui.TreeNodeEx(modLabel, treeFlags);
                 ImGui.SameLine();
-                if (modGroup.IsShared)
-                {
-                    UiSharedService.ColorText(modGroup.ModName, ImGuiColors.HealerGreen);
-                    if (ImGui.IsItemHovered()) ImGui.SetTooltip("You also have this mod installed (Shared)");
-                }
-                else
-                {
-                    ImGui.Text(modGroup.ModName);
-                }
+                ImGui.Text(modGroup.ModName);
 
                 if (modGroup.HasLegacyShpk)
                 {
@@ -699,31 +701,19 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
 
     private void EnsurePairCollectionCache(Pair pair, CharacterData data)
     {
-        var localModsCount = _penumbraScanner.LastScanDebugInfo.Count;
         var dataHash = data.DataHash.Value;
         if (!string.Equals(_pairCollectionCacheUid, pair.UserData.UID, StringComparison.Ordinal)
-            || !string.Equals(_pairCollectionCacheDataHash, dataHash, StringComparison.Ordinal)
-            || _pairCollectionLocalModsCount != localModsCount)
+            || !string.Equals(_pairCollectionCacheDataHash, dataHash, StringComparison.Ordinal))
         {
-            RebuildPairCollectionCache(pair, data, localModsCount, dataHash);
+            RebuildPairCollectionCache(pair, data, dataHash);
         }
     }
 
-    private void RebuildPairCollectionCache(Pair pair, CharacterData data, int localModsCount, string dataHash)
+    private void RebuildPairCollectionCache(Pair pair, CharacterData data, string dataHash)
     {
         _pairCollectionCacheUid = pair.UserData.UID;
         _pairCollectionCacheDataHash = dataHash;
-        _pairCollectionLocalModsCount = localModsCount;
         _pairCollectionModGroups.Clear();
-        _pairCollectionLocalMods.Clear();
-
-        foreach (var modInfo in _penumbraScanner.LastScanDebugInfo)
-        {
-            if (!string.IsNullOrEmpty(modInfo.ModName))
-            {
-                _pairCollectionLocalMods.Add(modInfo.ModName);
-            }
-        }
 
         var builders = new Dictionary<string, PairCollectionModGroupBuilder>(StringComparer.OrdinalIgnoreCase);
         foreach (var replacements in data.FileReplacements.Values)
@@ -734,6 +724,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                 if (string.IsNullOrEmpty(replacement.Hash)) continue;
 
                 var modName = string.IsNullOrEmpty(replacement.ModName) ? "Unknown Mod" : replacement.ModName;
+                modName = $"Remote: {modName}";
                 var optionName = string.IsNullOrEmpty(replacement.OptionName) ? "Default" : replacement.OptionName;
 
                 if (!builders.TryGetValue(modName, out var builder))
@@ -770,7 +761,6 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         {
             builder.FinalizeRows(_fileCacheManager);
             var row = builder.Row;
-            row.IsShared = _pairCollectionLocalMods.Contains(row.ModName);
             _pairCollectionModGroups.Add(row);
         }
 
@@ -793,7 +783,6 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         public int TotalFiles { get; set; }
         public long TotalSize { get; set; }
         public bool HasLegacyShpk { get; set; }
-        public bool IsShared { get; set; }
         public List<string> ChangedItems { get; } = [];
         public List<PairCollectionOptionRow> Options { get; } = [];
     }
@@ -1100,6 +1089,8 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         ImGui.SameLine();
         ImGui.TextColored(ImGuiColors.DalamudGrey, "Note: Scanning happens automatically when needed.");
 
+        DrawCharacterCustomization();
+
         ImGui.InputText("Search Mods", ref _penumbraSearch, 100);
         ImGui.SameLine();
         ImGui.Checkbox("Show Only Enabled", ref _showOnlyEnabledMods);
@@ -1172,7 +1163,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             bool hasWinningItems = winningData != null && winningData.Items.Count > 0;
             
             // Highlight row if mod is actively used by the player
-            if (_penumbraScanner.IsModActiveForPlayer(mod.ModName))
+            if (_activeModsInCharacterData.Contains(mod.ModName))
             {
                 ImGui.TableSetBgColor(ImGuiTableBgTarget.RowBg0, ImGui.GetColorU32(new Vector4(0.1f, 0.4f, 0.1f, 0.3f)));
             }
@@ -1264,6 +1255,8 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         if (_lastCreatedCharacterData == null)
         {
             _winningItemsByMod.Clear();
+            _activeModsInCharacterData.Clear();
+            _emoteItemTooltips.Clear();
             _winningItemsCacheData = null;
             return;
         }
@@ -1274,10 +1267,31 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         }
 
         _winningItemsByMod.Clear();
+        _activeModsInCharacterData.Clear();
+        _emoteItemTooltips.Clear();
         foreach (var replacements in _lastCreatedCharacterData.FileReplacements.Values)
         {
             foreach (var replacement in replacements)
             {
+                if (replacement.IsActive)
+                {
+                    bool added = false;
+                    foreach (var gamePath in replacement.GamePaths)
+                    {
+                        if (_penumbraScanner.TryGetCachedGamePathEntry(gamePath, out var entry)
+                            && !string.IsNullOrWhiteSpace(entry.ModName))
+                        {
+                            _activeModsInCharacterData.Add(entry.ModName);
+                            added = true;
+                        }
+                    }
+
+                    if (!added && !string.IsNullOrWhiteSpace(replacement.ModName))
+                    {
+                        _activeModsInCharacterData.Add(replacement.ModName);
+                    }
+                }
+
                 var gamePaths = replacement.GamePaths;
                 if (gamePaths == null || gamePaths.Length == 0)
                 {
@@ -1287,6 +1301,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                 for (int i = 0; i < gamePaths.Length; i++)
                 {
                     var gamePath = gamePaths[i];
+                    var normalizedGamePath = gamePath.Replace('\\', '/');
                     if (!TryResolveWinningModEntry(gamePath, replacement.ModName, replacement.OptionName, out var modName, out var optionName))
                     {
                         continue;
@@ -1307,7 +1322,18 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
 
                     for (int j = 0; j < changedItems.Count; j++)
                     {
-                        modData.Items.Add(changedItems[j]);
+                        var changedItem = changedItems[j];
+                        modData.Items.Add(changedItem);
+                        if (changedItem.StartsWith("Emote:", StringComparison.OrdinalIgnoreCase))
+                        {
+                            if (!_emoteItemTooltips.TryGetValue(changedItem, out var emoteData))
+                            {
+                                emoteData = new EmoteTooltipData();
+                                _emoteItemTooltips.Add(changedItem, emoteData);
+                            }
+                            emoteData.InCharacterData = true;
+                            emoteData.GamePaths.Add(normalizedGamePath);
+                        }
                     }
                 }
             }
@@ -1337,7 +1363,172 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         return true;
     }
 
-    private static void DrawChangedItems(IReadOnlyCollection<string> items)
+    private void DrawCharacterCustomization()
+    {
+        ImGui.Spacing();
+        ImGui.Text("Character Customization");
+        ImGui.Separator();
+
+        if (_lastCensus == null)
+        {
+            ImGui.TextColored(ImGuiColors.DalamudYellow, "No census data available yet.");
+            return;
+        }
+
+        var genderName = GetGenderName(_lastCensus.Gender);
+        var raceName = GetRaceName(_lastCensus.RaceId);
+        var tribeName = GetTribeName(_lastCensus.TribeId);
+        var raceCode = GetRaceCode(_lastCensus.Gender, _lastCensus.TribeId);
+
+        DrawLabelValue("Gender", genderName, $"GenderId: {_lastCensus.Gender}");
+        DrawLabelValue("Race", raceName, $"RaceId: {_lastCensus.RaceId}");
+        DrawLabelValue("Tribe", tribeName, $"TribeId: {_lastCensus.TribeId}");
+        DrawLabelValue("Race Code", raceCode, $"Path prefix: chara/human/{raceCode}/...");
+        ImGui.Spacing();
+    }
+
+    private static string GetRaceCode(byte gender, byte tribeId)
+    {
+        var modelRace = GetModelRaceFromTribe(tribeId);
+        return modelRace switch
+        {
+            ModelRaceCode.Midlander => GetGenderedRaceCode(gender, "0101", "0201", "0104", "0204"),
+            ModelRaceCode.Highlander => GetGenderedRaceCode(gender, "0301", "0401", "0304", "0404"),
+            ModelRaceCode.Elezen => GetGenderedRaceCode(gender, "0501", "0601", "0504", "0604"),
+            ModelRaceCode.Lalafell => GetGenderedRaceCode(gender, "1101", "1201", "1104", "1204"),
+            ModelRaceCode.Miqote => GetGenderedRaceCode(gender, "0701", "0801", "0704", "0804"),
+            ModelRaceCode.Roegadyn => GetGenderedRaceCode(gender, "0901", "1001", "0904", "1004"),
+            ModelRaceCode.AuRa => GetGenderedRaceCode(gender, "1301", "1401", "1304", "1404"),
+            ModelRaceCode.Hrothgar => GetGenderedRaceCode(gender, "1501", "1601", "1504", "1604"),
+            ModelRaceCode.Viera => GetGenderedRaceCode(gender, "1701", "1801", "1704", "1804"),
+            _ => "Unknown",
+        };
+    }
+
+    private static string GetGenderedRaceCode(byte gender, string male, string female, string maleNpc, string femaleNpc)
+    {
+        return gender switch
+        {
+            0 => $"c{male}",
+            1 => $"c{female}",
+            2 => $"c{maleNpc}",
+            3 => $"c{femaleNpc}",
+            _ => "Unknown",
+        };
+    }
+
+    private static ModelRaceCode GetModelRaceFromTribe(byte tribeId)
+    {
+        return tribeId switch
+        {
+            1 => ModelRaceCode.Midlander,
+            2 => ModelRaceCode.Highlander,
+            3 or 4 => ModelRaceCode.Elezen,
+            5 or 6 => ModelRaceCode.Lalafell,
+            7 or 8 => ModelRaceCode.Miqote,
+            9 or 10 => ModelRaceCode.Roegadyn,
+            11 or 12 => ModelRaceCode.AuRa,
+            13 or 14 => ModelRaceCode.Hrothgar,
+            15 or 16 => ModelRaceCode.Viera,
+            _ => ModelRaceCode.Unknown,
+        };
+    }
+
+    private string GetRaceName(byte raceId)
+    {
+        var sheet = _dataManager.GetExcelSheet<Race>();
+        if (sheet == null || !sheet.TryGetRow(raceId, out var row))
+        {
+            return $"Unknown ({raceId})";
+        }
+
+        var name = GetRowName(row, "Name", "Masculine", "Feminine", "Singular", "Plural");
+        return string.IsNullOrWhiteSpace(name) ? $"Unknown ({raceId})" : name;
+    }
+
+    private string GetTribeName(byte tribeId)
+    {
+        var sheet = _dataManager.GetExcelSheet<Tribe>();
+        if (sheet == null || !sheet.TryGetRow(tribeId, out var row))
+        {
+            return $"Unknown ({tribeId})";
+        }
+
+        var name = GetRowName(row, "Name", "Masculine", "Feminine", "Singular", "Plural");
+        return string.IsNullOrWhiteSpace(name) ? $"Unknown ({tribeId})" : name;
+    }
+
+    private static string GetGenderName(byte gender)
+    {
+        return gender switch
+        {
+            0 => "Male",
+            1 => "Female",
+            2 => "Male (Child)",
+            3 => "Female (Child)",
+            _ => $"Unknown ({gender})"
+        };
+    }
+
+    private enum ModelRaceCode
+    {
+        Unknown = 0,
+        Midlander = 1,
+        Highlander = 2,
+        Elezen = 3,
+        Lalafell = 4,
+        Miqote = 5,
+        Roegadyn = 6,
+        AuRa = 7,
+        Hrothgar = 8,
+        Viera = 9,
+    }
+
+    private static string? GetRowName<T>(T row, params string[] propertyNames)
+    {
+        var type = row!.GetType();
+        for (int i = 0; i < propertyNames.Length; i++)
+        {
+            var property = type.GetProperty(propertyNames[i], System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
+            if (property == null)
+            {
+                continue;
+            }
+
+            var value = property.GetValue(row);
+            if (value == null)
+            {
+                continue;
+            }
+
+            var text = value.ToString();
+            if (!string.IsNullOrWhiteSpace(text))
+            {
+                return text;
+            }
+        }
+
+        return null;
+    }
+
+    private static void DrawLabelValue(string label, string value, string? tooltip = null)
+    {
+        var displayValue = value;
+        string? tooltipText = tooltip;
+        if (value.Length > 32)
+        {
+            displayValue = value[..29] + "...";
+            tooltipText = string.IsNullOrWhiteSpace(tooltipText) ? value : $"{value}\n{tooltipText}";
+        }
+
+        ImGui.TextUnformatted($"{label}: {displayValue}");
+        if (!string.IsNullOrWhiteSpace(tooltipText) && ImGui.IsItemHovered())
+        {
+            ImGui.SetTooltip(tooltipText);
+        }
+    }
+
+    private void DrawChangedItems(IReadOnlyCollection<string> items)
     {
         if (items.Count == 0)
         {
@@ -1360,18 +1551,35 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         }
     }
 
-    private static void DrawChangedItem(string item)
+    private void DrawChangedItem(string item)
     {
-        if (!TryGetItemDisplay(item, out var display, out var tooltip))
+        if (string.IsNullOrWhiteSpace(item))
+        {
+            ImGui.TextDisabled("-");
+            return;
+        }
+
+        if (item.StartsWith("Emote:", StringComparison.OrdinalIgnoreCase))
+        {
+            var tooltip = BuildEmoteTooltip(item);
+            ImGui.TextUnformatted(item);
+            if (!string.IsNullOrWhiteSpace(tooltip) && ImGui.IsItemHovered())
+            {
+                ImGui.SetTooltip(tooltip);
+            }
+            return;
+        }
+
+        if (!TryGetItemDisplay(item, out var display, out var itemTooltip))
         {
             ImGui.TextDisabled("-");
             return;
         }
 
         ImGui.TextUnformatted(display);
-        if (!string.IsNullOrWhiteSpace(tooltip) && ImGui.IsItemHovered())
+        if (!string.IsNullOrWhiteSpace(itemTooltip) && ImGui.IsItemHovered())
         {
-            ImGui.SetTooltip(tooltip);
+            ImGui.SetTooltip(itemTooltip);
         }
     }
 
@@ -1385,12 +1593,6 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             return false;
         }
 
-        if (item.StartsWith("Emote:", StringComparison.OrdinalIgnoreCase))
-        {
-            display = item;
-            return true;
-        }
-
         var normalized = item.Replace('\\', '/');
         if (!normalized.Contains('/'))
         {
@@ -1402,6 +1604,23 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         display = string.IsNullOrWhiteSpace(fileName) ? normalized : fileName;
         tooltip = normalized;
         return true;
+    }
+
+    private string BuildEmoteTooltip(string emoteItem)
+    {
+        if (_emoteItemTooltips.TryGetValue(emoteItem, out var data) && data.GamePaths.Count > 0)
+        {
+            var paths = data.GamePaths.OrderBy(p => p, StringComparer.OrdinalIgnoreCase).ToArray();
+            return $"Paths:\n{string.Join("\n", paths)}\nCharacter data: {(data.InCharacterData ? "Yes" : "No")}";
+        }
+
+        return "Paths: not available\nCharacter data: No";
+    }
+
+    private sealed class EmoteTooltipData
+    {
+        internal HashSet<string> GamePaths { get; } = new(StringComparer.OrdinalIgnoreCase);
+        internal bool InCharacterData { get; set; }
     }
 
     private sealed class WinningModData

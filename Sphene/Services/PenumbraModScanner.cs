@@ -38,6 +38,7 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
     private Dictionary<string, (string ResolvedPath, string ModName, string OptionName, int Priority)> _gamePathLookupCache = new(StringComparer.OrdinalIgnoreCase);
     private List<(string GamePath, string ResolvedPath, string ModName, string OptionName, int Priority)> _allEnabledModsCache = [];
     private bool _cacheDirty = true;
+    private readonly bool _autoFullScanEnabled = false;
     private readonly SemaphoreSlim _lock = new(1, 1);
     private readonly IDataManager _gameData;
     private readonly Dictionary<uint, string> _actionTimelineCache = new();
@@ -46,19 +47,23 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
     private bool _emoteLookupBuilt;
     private static readonly PropertyInfo? ActionTimelineNameProperty = typeof(ActionTimeline).GetProperty("Name");
     private static readonly PropertyInfo? ActionTimelineKeyProperty = typeof(ActionTimeline).GetProperty("Key");
+    private string? _playerRaceCode;
     
     // Tracks mods that are currently "in use" by the local player (i.e., at least one file from them is resolved).
     private readonly ConcurrentDictionary<string, byte> _activePlayerMods = new(StringComparer.OrdinalIgnoreCase);
 
     public List<ModDebugInfo> LastScanDebugInfo { get; private set; } = [];
 
+    internal string? PlayerRaceCode => _playerRaceCode;
+
     public PenumbraModScanner(ILogger<PenumbraModScanner> logger, IpcManager ipcManager, SpheneMediator mediator, IDataManager gameData)
         : base(logger, mediator)
     {
         _ipcManager = ipcManager;
         _gameData = gameData;
-        Mediator.Subscribe<PenumbraModSettingChangedMessage>(this, _ => TriggerScan());
-        Mediator.Subscribe<PenumbraInitializedMessage>(this, _ => TriggerScan());
+        Mediator.Subscribe<PenumbraModSettingChangedMessage>(this, _ => TriggerAutoScan());
+        Mediator.Subscribe<PenumbraInitializedMessage>(this, _ => TriggerAutoScan());
+        Mediator.Subscribe<CensusUpdateMessage>(this, msg => UpdatePlayerRaceCode(msg.Gender, msg.TribeId));
     }
 
     protected override void Dispose(bool disposing)
@@ -73,6 +78,15 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
 
     private CancellationTokenSource? _scanCts;
 
+    private void TriggerAutoScan()
+    {
+        _cacheDirty = true;
+        if (_autoFullScanEnabled)
+        {
+            TriggerScan();
+        }
+    }
+
     private void TriggerScan()
     {
         _cacheDirty = true;
@@ -81,7 +95,6 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
         _scanCts = new CancellationTokenSource();
         var token = _scanCts.Token;
 
-        // Debounce scan to avoid spamming
         _ = Task.Run(async () => 
         {
             try 
@@ -99,7 +112,7 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
             }
             catch (OperationCanceledException)
             {
-                // Debounced
+                Logger.LogTrace("Penumbra mod scan was cancelled.");
             }
             catch (Exception ex)
             {
@@ -139,6 +152,265 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
     {
         await GetModFileLookupAsync(ct).ConfigureAwait(false);
         return _allEnabledModsCache.ToList();
+    }
+
+    public async Task<Dictionary<string, (string ModName, string OptionName, int Priority)>> ForceFullScanAsync(CancellationToken ct)
+    {
+        await _lock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            _cacheDirty = true;
+            _lookupCache.Clear();
+            _gamePathLookupCache.Clear();
+            _allEnabledModsCache.Clear();
+        }
+        finally
+        {
+            _lock.Release();
+        }
+
+        return await GetModFileLookupAsync(ct).ConfigureAwait(false);
+    }
+
+    public async Task<Dictionary<string, (string ModName, string OptionName, int Priority)>> GetActiveModLookupForResolvedPathsAsync(Dictionary<string, HashSet<string>> resolvedPaths, CancellationToken ct)
+    {
+        var result = new Dictionary<string, (string ModName, string OptionName, int Priority)>(StringComparer.OrdinalIgnoreCase);
+        if (!_ipcManager.Penumbra.APIAvailable || resolvedPaths == null)
+        {
+            return result;
+        }
+
+        var pathList = new List<string>();
+        foreach (var path in resolvedPaths.Keys)
+        {
+            if (!string.IsNullOrWhiteSpace(path))
+            {
+                pathList.Add(path);
+            }
+        }
+
+        if (pathList.Count == 0)
+        {
+            return result;
+        }
+
+        await _lock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            if (!_ipcManager.Penumbra.APIAvailable)
+            {
+                return result;
+            }
+
+            (Guid Id, string Name) collectionInfo;
+            var playerCollection = _ipcManager.Penumbra.GetCollectionForObject(0);
+            if (playerCollection.ObjectValid)
+            {
+                collectionInfo = playerCollection.EffectiveCollection;
+            }
+            else
+            {
+                var currentCollection = _ipcManager.Penumbra.GetCollection(ApiCollectionType.Current);
+                if (currentCollection == null)
+                {
+                    return result;
+                }
+                collectionInfo = currentCollection.Value;
+            }
+
+            var allSettings = _ipcManager.Penumbra.GetAllModSettings(collectionInfo.Id);
+            if (allSettings == null || allSettings.Count == 0)
+            {
+                return result;
+            }
+
+            var enabledSettings = new List<KeyValuePair<string, (bool Enabled, int Priority, Dictionary<string, List<string>> Settings, bool Inherited, bool Temporary)>>();
+            foreach (var setting in allSettings)
+            {
+                if (setting.Value.Enabled || setting.Value.Temporary)
+                {
+                    enabledSettings.Add(setting);
+                }
+            }
+
+            if (enabledSettings.Count == 0)
+            {
+                return result;
+            }
+
+            var modList = _ipcManager.Penumbra.GetModList();
+            var dirToName = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            if (modList.Count > 0 && allSettings.Count > 0)
+            {
+                int keyMatches = 0;
+                int valueMatches = 0;
+                foreach (var item in modList.Take(50))
+                {
+                    if (allSettings.ContainsKey(item.Key)) keyMatches++;
+                    if (allSettings.ContainsKey(item.Value)) valueMatches++;
+                }
+
+                if (valueMatches > keyMatches)
+                {
+                    foreach (var kvp in modList)
+                    {
+                        if (!dirToName.ContainsKey(kvp.Value))
+                        {
+                            dirToName[kvp.Value] = kvp.Key;
+                        }
+                    }
+                }
+                else
+                {
+                    dirToName = new Dictionary<string, string>(modList, StringComparer.OrdinalIgnoreCase);
+                }
+            }
+            else
+            {
+                dirToName = new Dictionary<string, string>(modList, StringComparer.OrdinalIgnoreCase);
+            }
+
+            var baseModDirectory = _ipcManager.Penumbra.ModDirectory;
+            var modOptionsByName = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var debugList = new List<ModDebugInfo>(enabledSettings.Count);
+            foreach (var setting in enabledSettings)
+            {
+                var directoryName = setting.Key;
+                var modName = dirToName.TryGetValue(directoryName, out var name) ? name : directoryName;
+                var modPath = _ipcManager.Penumbra.GetModPath(directoryName, string.Empty);
+                if (string.IsNullOrWhiteSpace(modPath))
+                {
+                    modPath = _ipcManager.Penumbra.GetModPath(string.Empty, directoryName);
+                }
+                if (!string.IsNullOrWhiteSpace(modPath) && !Path.IsPathRooted(modPath) && !string.IsNullOrWhiteSpace(baseModDirectory))
+                {
+                    modPath = Path.Combine(baseModDirectory, modPath);
+                }
+
+                var activeOptions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                if (setting.Value.Settings != null && setting.Value.Settings.Count > 0)
+                {
+                    foreach (var group in setting.Value.Settings)
+                    {
+                        var options = group.Value;
+                        if (options == null || options.Count == 0)
+                        {
+                            activeOptions.Add("Default");
+                            continue;
+                        }
+
+                        for (int i = 0; i < options.Count; i++)
+                        {
+                            activeOptions.Add($"{group.Key}: {options[i]}");
+                        }
+                    }
+                }
+                if (activeOptions.Count == 0)
+                {
+                    activeOptions.Add("Default");
+                }
+                var optionName = string.Join(", ", activeOptions.OrderBy(x => x, StringComparer.OrdinalIgnoreCase));
+                modOptionsByName[modName] = optionName;
+
+                var status = setting.Value.Enabled ? "Active (Fast Mode)" : "Inactive (Fast Mode)";
+                debugList.Add(new ModDebugInfo(
+                    directoryName,
+                    modName,
+                    modPath ?? string.Empty,
+                    setting.Value.Enabled,
+                    setting.Value.Inherited,
+                    setting.Value.Temporary,
+                    setting.Value.Priority,
+                    activeOptions.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList(),
+                    [],
+                    0,
+                    0,
+                    status,
+                    false));
+            }
+            LastScanDebugInfo = debugList.OrderBy(x => x.DirectoryName, StringComparer.OrdinalIgnoreCase).ToList();
+            var modRoots = new List<(string RootPath, string ModName, string OptionName, int Priority)>();
+            foreach (var mod in enabledSettings)
+            {
+                var modName = dirToName.TryGetValue(mod.Key, out var name) ? name : mod.Key;
+                var modPath = _ipcManager.Penumbra.GetModPath(mod.Key, string.Empty);
+                if (string.IsNullOrWhiteSpace(modPath))
+                {
+                    modPath = _ipcManager.Penumbra.GetModPath(string.Empty, mod.Key);
+                }
+                if (string.IsNullOrWhiteSpace(modPath))
+                {
+                    continue;
+                }
+                if (!Path.IsPathRooted(modPath) && !string.IsNullOrWhiteSpace(baseModDirectory))
+                {
+                    modPath = Path.Combine(baseModDirectory, modPath);
+                }
+                modPath = modPath.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar);
+                if (!modPath.EndsWith(Path.DirectorySeparatorChar))
+                {
+                    modPath += Path.DirectorySeparatorChar;
+                }
+                var optionName = modOptionsByName.TryGetValue(modName, out var options) ? options : "Default";
+                modRoots.Add((modPath, modName, optionName, mod.Value.Priority));
+            }
+
+            if (modRoots.Count == 0)
+            {
+                return result;
+            }
+
+            modRoots.Sort((a, b) => b.RootPath.Length.CompareTo(a.RootPath.Length));
+
+            var activeModNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var gamePathCache = new Dictionary<string, (string ResolvedPath, string ModName, string OptionName, int Priority)>(StringComparer.OrdinalIgnoreCase);
+            foreach (var path in pathList)
+            {
+                ct.ThrowIfCancellationRequested();
+                string normalizedPath;
+                try
+                {
+                    normalizedPath = Path.GetFullPath(path).Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar);
+                }
+                catch
+                {
+                    continue;
+                }
+
+                for (int i = 0; i < modRoots.Count; i++)
+                {
+                    var root = modRoots[i];
+                    if (normalizedPath.StartsWith(root.RootPath, StringComparison.OrdinalIgnoreCase))
+                    {
+                        result[normalizedPath] = (root.ModName, root.OptionName, root.Priority);
+                        activeModNames.Add(root.ModName);
+                        if (resolvedPaths.TryGetValue(path, out var gamePaths) && gamePaths != null)
+                        {
+                            foreach (var gamePath in gamePaths)
+                            {
+                                if (string.IsNullOrWhiteSpace(gamePath))
+                                {
+                                    continue;
+                                }
+                                var normalizedGamePath = gamePath.Replace('\\', '/');
+                                gamePathCache[normalizedGamePath] = (normalizedPath, root.ModName, root.OptionName, root.Priority);
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+
+            SetActivePlayerMods(activeModNames);
+            _lookupCache = new Dictionary<string, (string ModName, string OptionName, int Priority)>(result, StringComparer.OrdinalIgnoreCase);
+            _gamePathLookupCache = gamePathCache;
+            _cacheDirty = false;
+            return result;
+        }
+        finally
+        {
+            _lock.Release();
+        }
     }
 
     public async Task<Dictionary<string, (string ModName, string OptionName, int Priority)>> GetModFileLookupAsync(CancellationToken ct)
@@ -530,19 +802,11 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
                     g => g.Key,
                     g =>
                     {
-                        // Group by ModName to handle multiple options from same mod
-                        var modGroups = g.GroupBy(x => x.ModName, StringComparer.Ordinal);
-                        
-                        // Pick the mod with highest priority, tie-break alphabetically
-                        var bestModGroup = modGroups.OrderByDescending(mg => mg.Max(x => x.Priority))
-                                                    .ThenBy(mg => mg.Key, StringComparer.OrdinalIgnoreCase)
-                                                    .First();
-                        
-                        var modName = bestModGroup.Key;
-                        var priority = bestModGroup.First().Priority;
-                        var options = string.Join(", ", bestModGroup.Select(x => x.OptionName).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x, StringComparer.OrdinalIgnoreCase));
-                        
-                        return (modName, options, priority);
+                        var best = g.OrderByDescending(x => x.Priority)
+                                    .ThenBy(x => x.ModName, StringComparer.OrdinalIgnoreCase)
+                                    .ThenBy(x => x.OptionName, StringComparer.OrdinalIgnoreCase)
+                                    .First();
+                        return (best.ModName, best.OptionName, best.Priority);
                     },
                     StringComparer.OrdinalIgnoreCase
                 );
@@ -954,7 +1218,8 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
                                         if (enabledOptions.Any(o => string.Equals(o, option.Name, StringComparison.OrdinalIgnoreCase)))
                                         {
                                             if (Logger.IsEnabled(LogLevel.Trace) || isDebugTarget) Logger.LogTrace("[FileReplacementNew] Mod {mod}: Processing group {group}, option {option}", modName, group.Name, option.Name);
-                                            
+
+                                            var optionName = $"{group.Name}: {option.Name}";
                                             if (option.Files != null)
                                             {
                                                 foreach (var kvp in option.Files)
@@ -975,10 +1240,10 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
                                                     }
 
                                                     var localPath = Path.GetFullPath(Path.Combine(modPath, kvp.Value));
-                                                    localBag.Add((gamePath, localPath, modName, $"{group.Name}: {option.Name}", priority));
+                                                    localBag.Add((gamePath, localPath, modName, optionName, priority));
                                                     addedCount++;
-                                                    activeOptions.Add($"{group.Name}: {option.Name}");
-                                                    if (Logger.IsEnabled(LogLevel.Trace) || isDebugTarget) Logger.LogTrace("[FileReplacementNew] Added group option file: {path} -> {mod} ({opt})", localPath, modName, $"{group.Name}: {option.Name}");
+                                                    activeOptions.Add(optionName);
+                                                    if (Logger.IsEnabled(LogLevel.Trace) || isDebugTarget) Logger.LogTrace("[FileReplacementNew] Added group option file: {path} -> {mod} ({opt})", localPath, modName, optionName);
                                                 }
                                             }
 
@@ -1004,10 +1269,10 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
                                                     var localPath = Path.GetFullPath(Path.Combine(modPath, kvp.Value));
                                                     if (File.Exists(localPath))
                                                     {
-                                                        localBag.Add((gamePath, localPath, modName, $"{group.Name}: {option.Name}", priority));
+                                                    localBag.Add((gamePath, localPath, modName, optionName, priority));
                                                         addedCount++;
-                                                        activeOptions.Add($"{group.Name}: {option.Name}");
-                                                        if (Logger.IsEnabled(LogLevel.Trace) || isDebugTarget) Logger.LogTrace("[FileReplacementNew] Added group swap: {path} -> {mod} ({opt})", localPath, modName, $"{group.Name}: {option.Name}");
+                                                    activeOptions.Add(optionName);
+                                                    if (Logger.IsEnabled(LogLevel.Trace) || isDebugTarget) Logger.LogTrace("[FileReplacementNew] Added group swap: {path} -> {mod} ({opt})", localPath, modName, optionName);
                                                     }
                                                 }
                                             }
@@ -1083,6 +1348,225 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
         if (items.Count == 0) return false;
         changedItems = items;
         return true;
+    }
+
+    internal EquipmentPathDecision IsEquipmentGamePath(string gamePath, IReadOnlyDictionary<string, int>? raceCodeCounts = null)
+    {
+        if (string.IsNullOrWhiteSpace(gamePath)) return EquipmentPathDecision.NonEquipment;
+        if (!gamePath.Contains("chara/", StringComparison.OrdinalIgnoreCase)) return EquipmentPathDecision.NonEquipment;
+        if (gamePath.Contains("chara/demihuman/", StringComparison.OrdinalIgnoreCase)) return EquipmentPathDecision.NonEquipment;
+        if (gamePath.Contains("chara/monster/", StringComparison.OrdinalIgnoreCase)) return EquipmentPathDecision.NonEquipment;
+        if (gamePath.Contains("chara/companion/", StringComparison.OrdinalIgnoreCase)) return EquipmentPathDecision.NonEquipment;
+        if (gamePath.Contains("emote/", StringComparison.OrdinalIgnoreCase)) return EquipmentPathDecision.NonEquipment;
+        if (gamePath.Contains("animation/", StringComparison.OrdinalIgnoreCase)) return EquipmentPathDecision.NonEquipment;
+        if (gamePath.Contains(".avfx", StringComparison.OrdinalIgnoreCase)) return EquipmentPathDecision.NonEquipment;
+
+        if (string.IsNullOrWhiteSpace(_playerRaceCode)) return EquipmentPathDecision.Include;
+        if (!TryGetRaceCodeMatchState(gamePath, _playerRaceCode, out var containsAny, out var containsPlayer)) return EquipmentPathDecision.Include;
+        if (!containsAny) return EquipmentPathDecision.Include;
+        if (containsPlayer) return EquipmentPathDecision.Include;
+
+        if (raceCodeCounts != null)
+        {
+            if (raceCodeCounts.ContainsKey(_playerRaceCode)) return EquipmentPathDecision.Exclude;
+            if (raceCodeCounts.Count == 1) return EquipmentPathDecision.Include;
+            return EquipmentPathDecision.Exclude;
+        }
+
+        return EquipmentPathDecision.Include;
+    }
+
+    private void UpdatePlayerRaceCode(byte gender, byte tribeId)
+    {
+        _playerRaceCode = GetRaceCodeFromGenderAndTribe(gender, tribeId);
+    }
+
+    internal static IReadOnlyDictionary<string, int> BuildRaceCodeCounts(IEnumerable<string> gamePaths)
+    {
+        var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var codes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var gamePath in gamePaths)
+        {
+            AddRaceCodesFromPath(gamePath, codes);
+        }
+
+        foreach (var code in codes)
+        {
+            counts[code] = 1;
+        }
+
+        return counts;
+    }
+
+    internal static bool PathContainsRaceCode(string path, string raceCode)
+    {
+        return TryGetRaceCodeMatchState(path, raceCode, out _, out var containsRaceCode) && containsRaceCode;
+    }
+
+    internal static bool PathContainsAnyRaceCode(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return false;
+        var normalized = path.Replace('\\', '/');
+        int index = 0;
+        while (index <= normalized.Length - 5)
+        {
+            var current = normalized[index];
+            if (current != 'c' && current != 'C')
+            {
+                index++;
+                continue;
+            }
+
+            if (!char.IsDigit(normalized[index + 1])
+                || !char.IsDigit(normalized[index + 2])
+                || !char.IsDigit(normalized[index + 3])
+                || !char.IsDigit(normalized[index + 4]))
+            {
+                index++;
+                continue;
+            }
+
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryGetRaceCodeMatchState(string path, string playerRaceCode, out bool containsAny, out bool containsPlayer)
+    {
+        containsAny = false;
+        containsPlayer = false;
+        if (string.IsNullOrWhiteSpace(path)) return false;
+
+        var normalized = path.Replace('\\', '/');
+        int index = 0;
+        while (index <= normalized.Length - 5)
+        {
+            var current = normalized[index];
+            if (current != 'c' && current != 'C')
+            {
+                index++;
+                continue;
+            }
+
+            if (!char.IsDigit(normalized[index + 1])
+                || !char.IsDigit(normalized[index + 2])
+                || !char.IsDigit(normalized[index + 3])
+                || !char.IsDigit(normalized[index + 4]))
+            {
+                index++;
+                continue;
+            }
+
+            containsAny = true;
+            if (!containsPlayer)
+            {
+                var code = $"c{normalized.Substring(index + 1, 4)}";
+                containsPlayer = string.Equals(code, playerRaceCode, StringComparison.OrdinalIgnoreCase);
+            }
+            index += 5;
+        }
+
+        return true;
+    }
+
+    internal static void AddRaceCodesFromPath(string path, HashSet<string> codes)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return;
+
+        var normalized = path.Replace('\\', '/');
+        int index = 0;
+        while (index <= normalized.Length - 5)
+        {
+            var current = normalized[index];
+            if (current != 'c' && current != 'C')
+            {
+                index++;
+                continue;
+            }
+
+            if (!char.IsDigit(normalized[index + 1])
+                || !char.IsDigit(normalized[index + 2])
+                || !char.IsDigit(normalized[index + 3])
+                || !char.IsDigit(normalized[index + 4]))
+            {
+                index++;
+                continue;
+            }
+
+            codes.Add($"c{normalized.Substring(index + 1, 4)}");
+            index += 5;
+        }
+    }
+
+    private static string? GetRaceCodeFromGenderAndTribe(byte gender, byte tribeId)
+    {
+        var modelRace = GetModelRaceFromTribe(tribeId);
+        if (modelRace == ModelRaceCode.Unknown) return null;
+
+        return modelRace switch
+        {
+            ModelRaceCode.Midlander => GetGenderedRaceCode(gender, "0101", "0201", "0104", "0204"),
+            ModelRaceCode.Highlander => GetGenderedRaceCode(gender, "0301", "0401", "0304", "0404"),
+            ModelRaceCode.Elezen => GetGenderedRaceCode(gender, "0501", "0601", "0504", "0604"),
+            ModelRaceCode.Lalafell => GetGenderedRaceCode(gender, "1101", "1201", "1104", "1204"),
+            ModelRaceCode.Miqote => GetGenderedRaceCode(gender, "0701", "0801", "0704", "0804"),
+            ModelRaceCode.Roegadyn => GetGenderedRaceCode(gender, "0901", "1001", "0904", "1004"),
+            ModelRaceCode.AuRa => GetGenderedRaceCode(gender, "1301", "1401", "1304", "1404"),
+            ModelRaceCode.Hrothgar => GetGenderedRaceCode(gender, "1501", "1601", "1504", "1604"),
+            ModelRaceCode.Viera => GetGenderedRaceCode(gender, "1701", "1801", "1704", "1804"),
+            _ => null,
+        };
+    }
+
+    private static string? GetGenderedRaceCode(byte gender, string male, string female, string maleNpc, string femaleNpc)
+    {
+        return gender switch
+        {
+            0 => $"c{male}",
+            1 => $"c{female}",
+            2 => $"c{maleNpc}",
+            3 => $"c{femaleNpc}",
+            _ => null,
+        };
+    }
+
+    private static ModelRaceCode GetModelRaceFromTribe(byte tribeId)
+    {
+        return tribeId switch
+        {
+            1 => ModelRaceCode.Midlander,
+            2 => ModelRaceCode.Highlander,
+            3 or 4 => ModelRaceCode.Elezen,
+            5 or 6 => ModelRaceCode.Lalafell,
+            7 or 8 => ModelRaceCode.Miqote,
+            9 or 10 => ModelRaceCode.Roegadyn,
+            11 or 12 => ModelRaceCode.AuRa,
+            13 or 14 => ModelRaceCode.Hrothgar,
+            15 or 16 => ModelRaceCode.Viera,
+            _ => ModelRaceCode.Unknown,
+        };
+    }
+
+    private enum ModelRaceCode
+    {
+        Unknown = 0,
+        Midlander = 1,
+        Highlander = 2,
+        Elezen = 3,
+        Lalafell = 4,
+        Miqote = 5,
+        Roegadyn = 6,
+        AuRa = 7,
+        Hrothgar = 8,
+        Viera = 9,
+    }
+
+    internal enum EquipmentPathDecision
+    {
+        NonEquipment = 0,
+        Include = 1,
+        Exclude = 2,
     }
 
     private void AddChangedItemsFromGamePath(string gamePath, HashSet<string> changedItems)

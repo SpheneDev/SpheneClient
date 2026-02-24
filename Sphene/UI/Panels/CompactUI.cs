@@ -154,6 +154,9 @@ public class CompactUi : WindowMediatorSubscriberBase
     private Task<Dictionary<string, List<string>>>? _textureDetectionTask;
     private DateTime _lastTextureDetectionUpdate = DateTime.MinValue;
     private DateTime _backupScanTriggeredAt = DateTime.MinValue;
+    private DateTime _lastBackupScanRequestAt = DateTime.MinValue;
+    private bool _pendingBackupScan;
+    private const int BackupScanCooldownMs = 3000;
 
     // Stable UI text caching to avoid flicker in backup sections
     private string _allBackupsKey = string.Empty;
@@ -431,21 +434,25 @@ public class CompactUi : WindowMediatorSubscriberBase
             _popupAnalysisTask = null;
             _isPopupAnalysisBlocking = false;
 
-            // Prewarm backup detection caches for faster popup responsiveness
+            if (!IsOpen)
+            {
+                _pendingBackupScan = true;
+                return;
+            }
             try
             {
                 _isTextureBackupScanInProgress = true;
-            _textureDetectionTask = Task.Run(() => GetBackupsForCurrentAnalysis());
-            _ = _textureDetectionTask.ContinueWith(t =>
-            {
-                try { _cachedTextureBackupsFiltered = t.Status == TaskStatus.RanToCompletion ? t.Result : new Dictionary<string, List<string>>(StringComparer.Ordinal); }
-                catch (Exception ex) { _cachedTextureBackupsFiltered = new Dictionary<string, List<string>>(StringComparer.Ordinal); _logger.LogDebug(ex, "Texture backup detection task failed"); }
-                finally { _lastTextureDetectionUpdate = DateTime.UtcNow; _isTextureBackupScanInProgress = false; }
-            }, TaskScheduler.Default);
+                _textureDetectionTask = Task.Run(() => GetBackupsForCurrentAnalysis());
+                _ = _textureDetectionTask.ContinueWith(t =>
+                {
+                    try { _cachedTextureBackupsFiltered = t.Status == TaskStatus.RanToCompletion ? t.Result : new Dictionary<string, List<string>>(StringComparer.Ordinal); }
+                    catch (Exception ex) { _cachedTextureBackupsFiltered = new Dictionary<string, List<string>>(StringComparer.Ordinal); _logger.LogDebug(ex, "Texture backup detection task failed"); }
+                    finally { _lastTextureDetectionUpdate = DateTime.UtcNow; _isTextureBackupScanInProgress = false; }
+                }, TaskScheduler.Default);
             }
             catch (Exception ex) { _isTextureBackupScanInProgress = false; _logger.LogDebug(ex, "Failed to prewarm backup detection caches"); }
-        try { _shrinkUDetectionTask = DetectShrinkUModBackupsAsync(); }
-        catch (Exception ex) { _logger.LogDebug(ex, "Failed to start ShrinkU detection task"); }
+            try { _shrinkUDetectionTask = DetectShrinkUModBackupsAsync(); }
+            catch (Exception ex) { _logger.LogDebug(ex, "Failed to start ShrinkU detection task"); }
         });
         // React immediately to Penumbra state changes to refresh backup detection
         Mediator.Subscribe<PenumbraInitializedMessage>(this, (_) =>
@@ -507,6 +514,21 @@ public class CompactUi : WindowMediatorSubscriberBase
 
     private void TriggerImmediateBackupScan(string reason)
     {
+        if (!IsOpen)
+        {
+            _pendingBackupScan = true;
+            return;
+        }
+        if (_isTextureBackupScanInProgress || (_shrinkUDetectionTask != null && !_shrinkUDetectionTask.IsCompleted))
+        {
+            return;
+        }
+        var now = DateTime.UtcNow;
+        if (now - _lastBackupScanRequestAt < TimeSpan.FromMilliseconds(BackupScanCooldownMs))
+        {
+            return;
+        }
+        _lastBackupScanRequestAt = now;
         _logger.LogDebug("Triggering immediate backup scan: {reason}", reason);
         _backupScanTriggeredAt = DateTime.UtcNow;
         // Invalidate caches so UI shows scanning state immediately
@@ -657,6 +679,11 @@ public class CompactUi : WindowMediatorSubscriberBase
         if (_stickEnabled && !IsOpen)
         {
             IsOpen = true;
+        }
+        if (IsOpen && _pendingBackupScan)
+        {
+            _pendingBackupScan = false;
+            TriggerImmediateBackupScan("pending-open");
         }
         var settingsOpen = false;
         Mediator.Publish(new QueryWindowOpenStateMessage(typeof(SettingsUi), state => settingsOpen = state));
@@ -3085,10 +3112,9 @@ public class CompactUi : WindowMediatorSubscriberBase
                 foreach (var filePath in texture.FilePaths)
                 {
                     var fileName = Path.GetFileName(filePath);
-                    if (!string.IsNullOrEmpty(fileName))
+                    if (!string.IsNullOrEmpty(fileName) && currentTextureNames.Add(fileName) && _logger.IsEnabled(LogLevel.Trace))
                     {
-                        currentTextureNames.Add(fileName);
-                        _logger.LogDebug("Added texture filename to filter: {fileName}", fileName);
+                        _logger.LogTrace("Added texture filename to filter: {fileName}", fileName);
                     }
                 }
             }

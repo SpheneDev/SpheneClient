@@ -92,6 +92,8 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
     private nint _lastMinionTempModsAddress = nint.Zero;
     private int _lastMinionTempModsHash;
     private int _minionTempModsApplyInProgress;
+    private readonly Dictionary<string, DateTime> _lastScdLogByPath = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Lock _scdLogLock = new();
     private const int MinionReapplyRetryDelayMs = 500;
     private const int MinionCollectionBindRetryDelayMs = 1500;
     private const int MinionTempModsCooldownMs = 2000;
@@ -2095,11 +2097,18 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                 return;
             }
 
-            Logger.LogDebug("Detected Minion SCD load: {path} for GameObject {ptr:X}", gamePath, msg.GameObject);
+            bool shouldLog = ShouldLogScd(gamePath);
+            if (shouldLog)
+            {
+                Logger.LogTrace("Detected Minion SCD load: {path} for GameObject {ptr:X}", gamePath, msg.GameObject);
+            }
 
             if (DateTime.UtcNow - _lastMinionScdOverrideAttempt < TimeSpan.FromMilliseconds(MinionCollectionBindRetryDelayMs))
             {
-                Logger.LogDebug("Skipping SCD override due to cooldown");
+                if (shouldLog)
+                {
+                    Logger.LogTrace("Skipping SCD override due to cooldown");
+                }
                 return;
             }
 
@@ -2112,7 +2121,10 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             var playerAddress = _charaHandler?.Address ?? nint.Zero;
             var minionAddress = await _dalamudUtil.RunOnFrameworkThread(() => _dalamudUtil.GetMinionOrMountPtr(PlayerCharacter)).ConfigureAwait(false);
 
-            Logger.LogDebug("SCD Load Addresses - Resource: {res:X}, Player: {plr:X}, Minion: {min:X}", resourceAddress, playerAddress, minionAddress);
+            if (shouldLog)
+            {
+                Logger.LogTrace("SCD Load Addresses - Resource: {res:X}, Player: {plr:X}, Minion: {min:X}", resourceAddress, playerAddress, minionAddress);
+            }
 
             if (resourceAddress == playerAddress)
             {
@@ -2135,7 +2147,10 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
 
             if (DateTime.UtcNow - _lastMinionTempModsApplyAttempt < TimeSpan.FromMilliseconds(MinionTempModsCooldownMs))
             {
-                Logger.LogDebug("Skipping TempMods apply due to cooldown");
+                if (shouldLog)
+                {
+                    Logger.LogTrace("Skipping TempMods apply due to cooldown");
+                }
                 return;
             }
 
@@ -2145,7 +2160,10 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             {
                 try
                 {
-                    Logger.LogDebug("Attempting to bind collection to {addr:X} and apply temp mods", resourceAddress);
+                    if (shouldLog)
+                    {
+                        Logger.LogTrace("Attempting to bind collection to {addr:X} and apply temp mods", resourceAddress);
+                    }
                     await TryBindCollectionToGameObjectAsync(resourceAddress).ConfigureAwait(false);
                     await ApplyMinionTempModsAsync(minionAddress, tempMods, CancellationToken.None).ConfigureAwait(false);
                 }
@@ -2202,6 +2220,22 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         Logger.LogDebug("Binding collection {coll} to object index {idx} (Address: {addr:X})", _penumbraCollection, objectIndex.Value, address);
         await _ipcManager.Penumbra.AssignTemporaryCollectionAsync(Logger, _penumbraCollection, objectIndex.Value).ConfigureAwait(false);
         return true;
+    }
+
+    private bool ShouldLogScd(string gamePath)
+    {
+        var now = DateTime.UtcNow;
+        lock (_scdLogLock)
+        {
+            if (_lastScdLogByPath.TryGetValue(gamePath, out var lastLog)
+                && now - lastLog < TimeSpan.FromMilliseconds(MinionCollectionBindRetryDelayMs))
+            {
+                return false;
+            }
+
+            _lastScdLogByPath[gamePath] = now;
+            return true;
+        }
     }
 
     private async Task<bool> EnsureMinionCollectionBindingsAsync(nint minionAddress)
