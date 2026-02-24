@@ -47,6 +47,24 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
     private bool _emoteLookupBuilt;
     private static readonly PropertyInfo? ActionTimelineNameProperty = typeof(ActionTimeline).GetProperty("Name");
     private static readonly PropertyInfo? ActionTimelineKeyProperty = typeof(ActionTimeline).GetProperty("Key");
+    private static readonly string[] GamePathRoots =
+    [
+        "chara/",
+        "sound/",
+        "music/",
+        "se/",
+        "ui/",
+        "common/",
+        "vfx/",
+        "bgcommon/",
+        "bg/",
+        "bgex/",
+        "bgparts/",
+        "cut/",
+        "event/",
+        "field/",
+        "shader/"
+    ];
     private string? _playerRaceCode;
     
     // Tracks mods that are currently "in use" by the local player (i.e., at least one file from them is resolved).
@@ -944,7 +962,11 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
                     totalCount += defaultMod.Files.Count;
                     foreach (var kvp in defaultMod.Files)
                     {
-                        var gamePath = kvp.Key;
+                        var gamePath = NormalizeGamePath(kvp.Key);
+                        if (string.IsNullOrEmpty(gamePath))
+                        {
+                            continue;
+                        }
                         if (!hasCharacterLegacyShpk && gamePath.EndsWith("characterlegacy.shpk", StringComparison.OrdinalIgnoreCase))
                         {
                             hasCharacterLegacyShpk = true;
@@ -974,7 +996,11 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
                     totalCount += defaultMod.FileSwaps.Count;
                     foreach (var kvp in defaultMod.FileSwaps)
                     {
-                        var gamePath = kvp.Key;
+                        var gamePath = NormalizeGamePath(kvp.Key);
+                        if (string.IsNullOrEmpty(gamePath))
+                        {
+                            continue;
+                        }
                         if (!hasCharacterLegacyShpk && gamePath.EndsWith("characterlegacy.shpk", StringComparison.OrdinalIgnoreCase))
                         {
                             hasCharacterLegacyShpk = true;
@@ -1061,7 +1087,11 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
                                     {
                                         foreach (var kvp in container.Files)
                                         {
-                                            var gamePath = kvp.Key;
+                                            var gamePath = NormalizeGamePath(kvp.Key);
+                                            if (string.IsNullOrEmpty(gamePath))
+                                            {
+                                                continue;
+                                            }
                                             totalCount++;
                                             if (!hasCharacterLegacyShpk && gamePath.EndsWith("characterlegacy.shpk", StringComparison.OrdinalIgnoreCase))
                                             {
@@ -1088,7 +1118,11 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
                                     {
                                         foreach (var kvp in container.FileSwaps)
                                         {
-                                            var gamePath = kvp.Key;
+                                            var gamePath = NormalizeGamePath(kvp.Key);
+                                            if (string.IsNullOrEmpty(gamePath))
+                                            {
+                                                continue;
+                                            }
                                             totalCount++;
                                             if (!hasCharacterLegacyShpk && gamePath.EndsWith("characterlegacy.shpk", StringComparison.OrdinalIgnoreCase))
                                             {
@@ -1224,7 +1258,11 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
                                             {
                                                 foreach (var kvp in option.Files)
                                                 {
-                                                    var gamePath = kvp.Key;
+                                                    var gamePath = NormalizeGamePath(kvp.Key);
+                                                    if (string.IsNullOrEmpty(gamePath))
+                                                    {
+                                                        continue;
+                                                    }
                                                     totalCount++;
                                                     if (!hasCharacterLegacyShpk && gamePath.EndsWith("characterlegacy.shpk", StringComparison.OrdinalIgnoreCase))
                                                     {
@@ -1251,7 +1289,11 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
                                             {
                                                 foreach (var kvp in option.FileSwaps)
                                                 {
-                                                    var gamePath = kvp.Key;
+                                                    var gamePath = NormalizeGamePath(kvp.Key);
+                                                    if (string.IsNullOrEmpty(gamePath))
+                                                    {
+                                                        continue;
+                                                    }
                                                     totalCount++;
                                                     if (!hasCharacterLegacyShpk && gamePath.EndsWith("characterlegacy.shpk", StringComparison.OrdinalIgnoreCase))
                                                     {
@@ -1430,6 +1472,37 @@ public class PenumbraModScanner : DisposableMediatorSubscriberBase
         }
 
         return false;
+    }
+
+    private static string NormalizeGamePath(string gamePath)
+    {
+        if (string.IsNullOrWhiteSpace(gamePath))
+        {
+            return string.Empty;
+        }
+
+        var normalized = gamePath.Replace('\\', '/').Trim();
+        int bestIndex = -1;
+        for (int i = 0; i < GamePathRoots.Length; i++)
+        {
+            var index = normalized.IndexOf(GamePathRoots[i], StringComparison.OrdinalIgnoreCase);
+            if (index < 0)
+            {
+                continue;
+            }
+
+            if (bestIndex < 0 || index < bestIndex)
+            {
+                bestIndex = index;
+            }
+        }
+
+        if (bestIndex > 0)
+        {
+            normalized = normalized.Substring(bestIndex);
+        }
+
+        return normalized;
     }
 
     private static bool TryGetRaceCodeMatchState(string path, string playerRaceCode, out bool containsAny, out bool containsPlayer)
