@@ -17,6 +17,7 @@ using Sphene.PlayerData.Pairs;
 using Sphene.Services;
 using Sphene.Services.Mediator;
 using Sphene.Services.ServerConfiguration;
+using Sphene.Services.CharaData;
 using Sphene.UI.Styling;
 using Sphene.Configuration;
 using Sphene.Utils;
@@ -60,6 +61,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
     private readonly PlayerPerformanceConfigService _playerPerformanceConfigService;
     private readonly ServerConfigurationManager _serverConfigurationManager;
     private readonly UiSharedService _uiShared;
+    private readonly CharacterDataSqliteStore _characterDataSqliteStore;
     private readonly ShrinkUHostService _shrinkUHostService;
     private readonly ChangelogService _changelogService;
     private readonly string _shrinkUVersion;
@@ -69,6 +71,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
     private const string SeaOfStarsRepoName = "SeaOfStars Repo";
     private bool _deleteAccountPopupModalShown = false;
     private bool _deleteFilesPopupModalShown = false;
+    private bool _resetCharacterDataPopupModalShown = false;
     private string _lastTab = string.Empty;
     private bool? _notesSuccessfullyApplied = null;
     private bool _overwriteExistingLabels = false;
@@ -95,7 +98,9 @@ public class SettingsUi : WindowMediatorSubscriberBase
         Performance,
         Transfers,
         Storage,
+        CharacterData,
         Acknowledgment,
+        Sync,
         Debug
     }
     private SettingsPage _activeSettingsPage = SettingsPage.Home;
@@ -116,6 +121,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         IpcManager ipcManager, CacheMonitor cacheMonitor,
         ShrinkUHostService shrinkUHostService,
         DalamudUtilService dalamudUtilService, HttpClient httpClient,
+        CharacterDataSqliteStore characterDataSqliteStore,
         ChangelogService changelogService) : base(logger, mediator, "Network Configuration", performanceCollector)
     {
         _configService = configService;
@@ -135,6 +141,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         _uiShared = uiShared;
         _shrinkUHostService = shrinkUHostService;
         _changelogService = changelogService;
+        _characterDataSqliteStore = characterDataSqliteStore;
         _shrinkUVersion = GetShrinkUAssemblyVersion();
         AllowClickthrough = false;
         AllowPinning = false;
@@ -723,6 +730,13 @@ public class SettingsUi : WindowMediatorSubscriberBase
             {
                 ImGui.SetClipboardText("ERROR: No created character data, cannot copy.");
             }
+        }
+        if (LastCreatedCharacterData != null)
+        {
+            var count = LastCreatedCharacterData.FileReplacements?.Sum(x => x.Value.Count) ?? 0;
+            ImGui.SameLine();
+            ImGui.AlignTextToFramePadding();
+            ImGui.TextUnformatted($"({count} file replacements)");
         }
         UiSharedService.AttachToolTip("Use this when reporting modifications being rejected from the Network.");
 
@@ -1866,7 +1880,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
 #endif
         
         // Calculate optimal sidebar width based on longest button text + reduced padding
-        var buttonLabels = new[] { "Home", "Connectivity", "People & Notes", "Appearance", "Theme", "Notifications", "Performance", "Transfers", "Storage", "Acknowledgment", diagnosticsPageLabel };
+        var buttonLabels = new[] { "Home", "Connectivity", "People & Notes", "Appearance", "Theme", "Notifications", "Performance", "Transfers", "Storage", "Character Data", "Acknowledgment", "Sync Settings", diagnosticsPageLabel };
         var maxTextWidth = 0f;
         foreach (var label in buttonLabels)
         {
@@ -1900,7 +1914,9 @@ public class SettingsUi : WindowMediatorSubscriberBase
         SidebarButton("Performance", SettingsPage.Performance);
         SidebarButton("Transfers", SettingsPage.Transfers);
         SidebarButton("Storage", SettingsPage.Storage);
+        SidebarButton("Character Data", SettingsPage.CharacterData);
         SidebarButton("Acknowledgment", SettingsPage.Acknowledgment);
+        SidebarButton("Sync Settings", SettingsPage.Sync);
         SidebarButton(diagnosticsPageLabel, SettingsPage.Debug);
 
         ImGui.EndChild();
@@ -1939,8 +1955,14 @@ public class SettingsUi : WindowMediatorSubscriberBase
             case SettingsPage.Storage:
                 DrawFileStorageSettings();
                 break;
+            case SettingsPage.CharacterData:
+                DrawCharacterDataSettings();
+                break;
             case SettingsPage.Acknowledgment:
                 DrawAcknowledgmentSettings();
+                break;
+            case SettingsPage.Sync:
+                DrawSyncSettings();
                 break;
             case SettingsPage.Debug:
                 DrawDebug();
@@ -2868,6 +2890,215 @@ public class SettingsUi : WindowMediatorSubscriberBase
             _configService.Save();
         }
         _uiShared.DrawHelpText("Reset all acknowledgment settings to their default values.");
+    }
+
+    private void DrawSyncSettings()
+    {
+        _lastTab = "SyncSettings";
+        _uiShared.BigText("Sync Settings");
+        ImGui.Separator();
+
+        UiSharedService.TextWrapped("Configure how Sphene handles character data synchronization during various game states.");
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+
+        // Sync During Duty/Combat Section
+        _uiShared.BigText("Duty & Combat Behavior");
+
+        var disableSyncPause = _configService.Current.DisableSyncPauseDuringDutyOrCombat;
+        if (ImGui.Checkbox("Do not pause sync during duties/combat", ref disableSyncPause))
+        {
+            _configService.Current.DisableSyncPauseDuringDutyOrCombat = disableSyncPause;
+            _configService.Save();
+        }
+        _uiShared.DrawHelpText(
+            "When enabled, the sync process will continue even during active duties or combat situations. " +
+            "By default, Sphene pauses synchronization during duties and combat to minimize performance impact. " +
+            "Enable this option if you want to ensure continuous synchronization regardless of game state. " +
+            "Note: This may cause slight performance impacts during intense gameplay scenarios.");
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+
+        // File Filtering Section
+        _uiShared.BigText("File Filtering");
+
+        var filterCharacterLegacy = _configService.Current.FilterCharacterLegacyShpk;
+        if (ImGui.Checkbox("Filter characterlegacy.shpk on receive", ref filterCharacterLegacy))
+        {
+            _configService.Current.FilterCharacterLegacyShpk = filterCharacterLegacy;
+            _configService.Save();
+        }
+        _uiShared.DrawHelpText(
+            "When enabled, the characterlegacy.shpk file will be filtered out when receiving data from pairs. " +
+            "This can help prevent potential crashes and shadow-related bugs caused by this specific file. " +
+            "Enable this option if you experience stability issues related to character legacy data.");
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+
+        _uiShared.BigText("Redraw Behavior");
+        var disableEquipmentWeaponRedraw = _configService.Current.DisableAutomaticRedrawOnEquipmentOrWeaponChanges;
+        if (ImGui.Checkbox("Disable automatic refresh after equipment or weapon changes", ref disableEquipmentWeaponRedraw))
+        {
+            _configService.Current.DisableAutomaticRedrawOnEquipmentOrWeaponChanges = disableEquipmentWeaponRedraw;
+            _configService.Save();
+        }
+        _uiShared.DrawHelpText(
+            "Disables automatic refresh after equipment changes. Prevents reloading the display when only equipment or a weapon changed. " +
+            "When enabled, manual refreshes may be required to see all updates.");
+
+        var redrawOnlySpecialEmotesFirst = _configService.Current.RedrawPairsOnlyForSpecialEmotesFirstApply;
+        if (ImGui.Checkbox("Redraw pairs only for sit/ground sit/doze on first apply", ref redrawOnlySpecialEmotesFirst))
+        {
+            _configService.Current.RedrawPairsOnlyForSpecialEmotesFirstApply = redrawOnlySpecialEmotesFirst;
+            _configService.Save();
+        }
+        _uiShared.DrawHelpText(
+            "When enabled, pair redraws are suppressed unless the first received data includes sit, ground sit, or doze animations.");
+
+        var skipPostZoneUnchanged = _configService.Current.SkipPostZoneReapplyWhenUnchanged;
+        if (ImGui.Checkbox("Skip post-zone reapply when data is unchanged", ref skipPostZoneUnchanged))
+        {
+            _configService.Current.SkipPostZoneReapplyWhenUnchanged = skipPostZoneUnchanged;
+            _configService.Save();
+        }
+        _uiShared.DrawHelpText(
+            "When enabled, Sphene will keep the existing temporary collection and skip the reapply step after zoning if character data has not changed.");
+
+        var skipPostZoneEquipmentOnly = _configService.Current.SkipPostZoneReapplyForEquipmentOrWeaponOnlyChanges;
+        using (ImRaii.Disabled(!skipPostZoneUnchanged))
+        {
+            if (ImGui.Checkbox("Skip post-zone reapply for equipment or weapon-only changes", ref skipPostZoneEquipmentOnly))
+            {
+                _configService.Current.SkipPostZoneReapplyForEquipmentOrWeaponOnlyChanges = skipPostZoneEquipmentOnly;
+                _configService.Save();
+            }
+        }
+        _uiShared.DrawHelpText(
+            "Requires 'Skip post-zone reapply when data is unchanged'. " +
+            "When enabled, Sphene will skip reapplying after zoning if the only changes are equipment or weapon-related file replacements. " +
+            "You may need manual refreshes to see all updates.");
+
+        var disableTemporaryCollectionsAfterInactivity = _configService.Current.DisableTemporaryCollectionsAfterInactivity;
+        if (ImGui.Checkbox("Disable temporary collections after inactivity", ref disableTemporaryCollectionsAfterInactivity))
+        {
+            _configService.Current.DisableTemporaryCollectionsAfterInactivity = disableTemporaryCollectionsAfterInactivity;
+            _configService.Save();
+        }
+        _uiShared.DrawHelpText(
+            "When enabled, Sphene removes the temporary Penumbra collection for a pair after it has been inactive for the configured duration. " +
+            "This reduces overhead for pairs that are not currently visible. The collection is recreated automatically when needed.");
+
+        var preloadPairCollection = _configService.Current.PreloadPairCollectionFromLastReceivedData;
+        if (ImGui.Checkbox("Preload pair collection from last received data", ref preloadPairCollection))
+        {
+            _configService.Current.PreloadPairCollectionFromLastReceivedData = preloadPairCollection;
+            _configService.Save();
+        }
+        _uiShared.DrawHelpText(
+            "When enabled, Sphene prepares a pair's temporary collection using the last received character data even if the pair is not visible. " +
+            "This can reduce visual deformation when you first see the pair, but may increase background work.");
+
+        var temporaryCollectionTimeoutMinutes = Math.Max(1, _configService.Current.TemporaryCollectionInactivityTimeoutMinutes);
+        using (ImRaii.Disabled(!disableTemporaryCollectionsAfterInactivity))
+        {
+            if (ImGui.SliderInt("Temporary collection inactivity timeout (minutes)", ref temporaryCollectionTimeoutMinutes, 1, 60))
+            {
+                _configService.Current.TemporaryCollectionInactivityTimeoutMinutes = Math.Max(1, temporaryCollectionTimeoutMinutes);
+                _configService.Save();
+            }
+        }
+        _uiShared.DrawHelpText("Defines how long a pair can stay inactive before its temporary collection is removed.");
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+
+        // Information Section
+        _uiShared.BigText("How Sync Works");
+        UiSharedService.TextWrapped(
+            "Sphene continuously synchronizes character data between paired users to ensure everyone sees the latest appearance. " +
+            "During certain game activities like duties, trials, or combat, the sync process can be paused to prioritize game performance. " +
+            "The setting above allows you to control this behavior based on your preferences.");
+
+        ImGui.Spacing();
+
+        UiSharedService.TextWrapped(
+            "Sync may be paused during:");
+        ImGui.Indent();
+        ImGui.BulletText("Duty instances (trials, dungeons, raids)");
+        ImGui.BulletText("Combat situations");
+        ImGui.BulletText("Cutscenes and GPose");
+        ImGui.Unindent();
+
+        ImGui.Spacing();
+        UiSharedService.ColorTextWrapped(
+            "Tip: If you notice sync issues during duties or combat, try enabling the option above. " +
+            "However, if you experience performance issues, consider keeping it disabled.",
+            ImGuiColors.HealerGreen);
+    }
+
+    private void DrawCharacterDataSettings()
+    {
+        _lastTab = "CharacterData";
+        _uiShared.BigText("Character Data");
+        ImGui.Separator();
+
+        var persistCharacterData = _configService.Current.PersistReceivedCharacterData;
+        if (ImGui.Checkbox("Persist received character data", ref persistCharacterData))
+        {
+            _configService.Current.PersistReceivedCharacterData = persistCharacterData;
+            _configService.Save();
+        }
+        _uiShared.DrawHelpText("Stores received character data locally so it can be compared after restarting the client.");
+
+        ImGui.Spacing();
+        if (ImGui.Button("Reset character data database"))
+        {
+            _resetCharacterDataPopupModalShown = true;
+            ImGui.OpenPopup("Reset character data database?");
+        }
+        _uiShared.DrawHelpText("Deletes all locally stored character data and learned mods. Use if the database becomes corrupted.");
+
+        if (ImGui.BeginPopupModal("Reset character data database?", ref _resetCharacterDataPopupModalShown, UiSharedService.PopupWindowFlags))
+        {
+            using (SpheneCustomTheme.ApplyContextMenuTheme())
+            {
+                UiSharedService.TextWrapped("All locally stored character data and learned mod states will be removed.");
+                UiSharedService.TextWrapped("This cannot be undone.");
+                ImGui.TextUnformatted("Are you sure you want to continue?");
+                ImGui.Separator();
+                ImGui.Spacing();
+
+                var buttonSize = (ImGui.GetWindowContentRegionMax().X - ImGui.GetWindowContentRegionMin().X -
+                                 ImGui.GetStyle().ItemSpacing.X) / 2;
+
+                if (ImGui.Button("Reset database", new Vector2(buttonSize, 0)))
+                {
+                    _ = Task.Run(async () =>
+                    {
+                        await _characterDataSqliteStore.ResetDatabaseAsync().ConfigureAwait(false);
+                        Mediator.Publish(new ResetCharacterDataDatabaseMessage());
+                    });
+                    _resetCharacterDataPopupModalShown = false;
+                }
+
+                ImGui.SameLine();
+
+                if (ImGui.Button("Cancel##cancelResetCharacterData", new Vector2(buttonSize, 0)))
+                {
+                    _resetCharacterDataPopupModalShown = false;
+                }
+
+                UiSharedService.SetScaledWindowSize(325);
+            }
+            ImGui.EndPopup();
+        }
     }
 
     private void UiSharedService_GposeEnd()

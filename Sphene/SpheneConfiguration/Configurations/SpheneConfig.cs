@@ -126,4 +126,16 @@ public class SpheneConfig : ISpheneConfiguration
     public string TestServerApiUrl { get; set; } = string.Empty;
     public bool HasAcceptedTestServerDisclaimer { get; set; } = false;
 
+    // Sync Settings
+    public bool DisableSyncPauseDuringDutyOrCombat { get; set; } = false;
+    public bool FilterCharacterLegacyShpk { get; set; } = false;
+    public bool DisableAutomaticRedrawOnEquipmentOrWeaponChanges { get; set; } = false;
+    public bool RedrawPairsOnlyForSpecialEmotesFirstApply { get; set; } = false;
+    public bool PreloadPairCollectionFromLastReceivedData { get; set; } = false;
+    public bool SkipPostZoneReapplyWhenUnchanged { get; set; } = false;
+    public bool SkipPostZoneReapplyForEquipmentOrWeaponOnlyChanges { get; set; } = false;
+    public bool DisableTemporaryCollectionsAfterInactivity { get; set; } = false;
+    public int TemporaryCollectionInactivityTimeoutMinutes { get; set; } = 5;
+    public bool PersistReceivedCharacterData { get; set; } = false;
+
 }

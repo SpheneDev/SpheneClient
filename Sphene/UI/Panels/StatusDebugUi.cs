@@ -28,7 +28,6 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
     private readonly CircuitBreakerService _circuitBreaker;
     private readonly EnhancedAcknowledgmentManager? _acknowledgmentManager;
     private readonly SessionAcknowledgmentManager? _sessionAcknowledgmentManager;
-    
     private string _communicationLog = "Communication Log:\n";
     private bool _autoScroll = true;
     private bool _showHealthChecks = true;
@@ -37,7 +36,13 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
     private bool _showConnections = true;
     private string? _selectedCharacterDebugUid;
     private string? _selectedCharacterStatsUid;
+    private string? _selectedTempCollectionUid;
     private readonly Dictionary<string, CharacterStatsSnapshot> _characterStats = new(StringComparer.Ordinal);
+    private string? _tempCollectionSnapshot;
+    private string? _tempCollectionSnapshotError;
+    private DateTimeOffset? _tempCollectionSnapshotTime;
+    private Guid _tempCollectionSnapshotCollectionId = Guid.Empty;
+    private string? _tempCollectionSnapshotPair;
     
     public StatusDebugUi(ILogger<StatusDebugUi> logger, SpheneMediator mediator,
         UiSharedService uiSharedService, PairManager pairManager, ApiController apiController,
@@ -195,6 +200,14 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             if (characterStatsTab)
             {
                 DrawCharacterStatistics();
+            }
+        }
+
+        using (var tempCollectionsTab = ImRaii.TabItem("Temporary Collections"))
+        {
+            if (tempCollectionsTab)
+            {
+                DrawTemporaryCollections();
             }
         }
 
@@ -660,6 +673,160 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         {
             ImGui.TextUnformatted(logText);
         }
+    }
+
+    private void DrawTemporaryCollections()
+    {
+        ImGui.Text("Temporary Collections");
+
+        var pairs = _pairManager.DirectPairs.ToList();
+        if (pairs.Count == 0)
+        {
+            ImGui.Text("No paired users");
+            return;
+        }
+
+        if (string.IsNullOrEmpty(_selectedTempCollectionUid) || pairs.All(p => !string.Equals(p.UserData.UID, _selectedTempCollectionUid, StringComparison.Ordinal)))
+        {
+            _selectedTempCollectionUid = pairs[0].UserData.UID;
+        }
+
+        if (ImGui.BeginTable("TempCollectionTable", 5, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable))
+        {
+            ImGui.TableSetupColumn("User", ImGuiTableColumnFlags.WidthFixed, 180);
+            ImGui.TableSetupColumn("UID", ImGuiTableColumnFlags.WidthFixed, 180);
+            ImGui.TableSetupColumn("Visibility", ImGuiTableColumnFlags.WidthFixed, 120);
+            ImGui.TableSetupColumn("Collection", ImGuiTableColumnFlags.WidthFixed, 220);
+            ImGui.TableSetupColumn("Actions", ImGuiTableColumnFlags.WidthStretch);
+            ImGui.TableHeadersRow();
+
+            foreach (var pair in pairs)
+            {
+                var uid = pair.UserData.UID;
+                ImGui.TableNextRow();
+                ImGui.TableSetColumnIndex(0);
+                ImGui.Text(pair.UserData.AliasOrUID);
+
+                ImGui.TableSetColumnIndex(1);
+                ImGui.Text(uid);
+
+                ImGui.TableSetColumnIndex(2);
+                var visibilityText = pair.IsVisible ? "Visible" : "Hidden";
+                var visibilityColor = pair.IsVisible ? ImGuiColors.HealerGreen : ImGuiColors.DalamudRed;
+                UiSharedService.ColorText(visibilityText, visibilityColor);
+
+                ImGui.TableSetColumnIndex(3);
+                if (pair.TryGetPenumbraCollectionId(out var collectionId))
+                {
+                    ImGui.Text(collectionId == Guid.Empty ? "-" : collectionId.ToString());
+                }
+                else
+                {
+                    ImGui.Text("-");
+                }
+
+                ImGui.TableSetColumnIndex(4);
+                var isSelected = string.Equals(uid, _selectedTempCollectionUid, StringComparison.Ordinal);
+                var selectText = isSelected ? "Selected" : "Select";
+                if (ImGui.Button($"{selectText}##temp_select_{uid}"))
+                {
+                    _selectedTempCollectionUid = uid;
+                }
+            }
+
+            ImGui.EndTable();
+        }
+
+        ImGui.Separator();
+
+        Pair? selectedPair = null;
+        foreach (var pair in pairs)
+        {
+            if (string.Equals(pair.UserData.UID, _selectedTempCollectionUid, StringComparison.Ordinal))
+            {
+                selectedPair = pair;
+                break;
+            }
+        }
+
+        if (selectedPair == null)
+        {
+            ImGui.Text("No character selected");
+            return;
+        }
+
+        ImGui.Text($"Selected: {selectedPair.UserData.AliasOrUID} ({selectedPair.UserData.UID})");
+        if (!string.IsNullOrEmpty(selectedPair.LastReceivedCharacterDataHash))
+        {
+            ImGui.Text($"Last Data Hash: {selectedPair.LastReceivedCharacterDataHash}");
+        }
+        if (selectedPair.LastReceivedCharacterDataTime.HasValue)
+        {
+            ImGui.Text($"Last Data Time: {selectedPair.LastReceivedCharacterDataTime:yyyy-MM-dd HH:mm:ss}");
+        }
+
+        if (ImGui.Button("Load Character Data Snapshot"))
+        {
+            LoadTempCollectionSnapshot(selectedPair);
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("Clear Snapshot"))
+        {
+            _tempCollectionSnapshot = null;
+            _tempCollectionSnapshotError = null;
+            _tempCollectionSnapshotTime = null;
+            _tempCollectionSnapshotCollectionId = Guid.Empty;
+            _tempCollectionSnapshotPair = null;
+        }
+
+        if (!string.IsNullOrEmpty(_tempCollectionSnapshotError))
+        {
+            UiSharedService.ColorText(_tempCollectionSnapshotError, ImGuiColors.DalamudRed);
+            return;
+        }
+
+        if (string.IsNullOrEmpty(_tempCollectionSnapshot))
+        {
+            ImGui.Text("No snapshot loaded");
+            return;
+        }
+
+        ImGui.Text($"Snapshot Pair: {_tempCollectionSnapshotPair}");
+        ImGui.Text($"Collection Id: {_tempCollectionSnapshotCollectionId}");
+        if (_tempCollectionSnapshotTime.HasValue)
+        {
+            ImGui.Text($"Snapshot Time (UTC): {_tempCollectionSnapshotTime:yyyy-MM-dd HH:mm:ss}");
+        }
+
+        ImGui.Separator();
+        ImGui.Text("Character Data JSON");
+        var availableSize = ImGui.GetContentRegionAvail();
+        using (var child = ImRaii.Child("TempCollectionCharacterDataJson", availableSize, true))
+        {
+            if (child)
+            {
+                ImGui.TextUnformatted(_tempCollectionSnapshot ?? "Character data not available");
+            }
+        }
+    }
+
+    private void LoadTempCollectionSnapshot(Pair pair)
+    {
+        _tempCollectionSnapshotError = null;
+
+        if (pair.LastReceivedCharacterData == null)
+        {
+            _tempCollectionSnapshotError = "No character data available for this pair";
+            return;
+        }
+
+        var characterDataJson = JsonSerializer.Serialize(pair.LastReceivedCharacterData, new JsonSerializerOptions { WriteIndented = true });
+
+        _tempCollectionSnapshot = characterDataJson;
+        _tempCollectionSnapshotTime = DateTimeOffset.UtcNow;
+        _tempCollectionSnapshotCollectionId = pair.TryGetPenumbraCollectionId(out var collectionId) ? collectionId : Guid.Empty;
+        _tempCollectionSnapshotPair = pair.UserData.AliasOrUID;
     }
 
     private static string GetApplyDebugText(Pair pair)

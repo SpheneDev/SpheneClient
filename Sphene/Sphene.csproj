@@ -3,9 +3,9 @@
   <PropertyGroup>
     <Authors></Authors>
     <Company></Company>
-    <Version>1.1.11.302</Version>
-    <AssemblyVersion>1.1.11.302</AssemblyVersion>
-    <FileVersion>1.1.11.302</FileVersion>
+    <Version>1.1.11.473</Version>
+    <AssemblyVersion>1.1.11.473</AssemblyVersion>
+    <FileVersion>1.1.11.473</FileVersion>
     <Description>Through the power of Living Memory, this plugin harmonizes your Penumbra modifications and Glamourer configurations across all connected souls, ensuring endless synchronization in your shared digital realm.</Description>
     <Copyright></Copyright>
     <PackageProjectUrl>https://github.com/SpheneDev/client</PackageProjectUrl>
@@ -88,6 +88,7 @@
     </PackageReference>
     <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.1" />
     <PackageReference Include="Microsoft.AspNetCore.SignalR.Protocols.MessagePack" Version="10.0.1" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.2" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.1" />
     <PackageReference Include="Glamourer.Api" Version="2.8.0" />
     <PackageReference Include="NReco.Logging.File" Version="1.2.2" />

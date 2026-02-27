@@ -4,7 +4,9 @@ using Sphene.API.Data.Enum;
 using Sphene.PlayerData.Handlers;
 using Sphene.PlayerData.Pairs;
 using Microsoft.Extensions.Logging;
+using System.Linq;
 using System.Text.Json;
+using System.IO;
 
 namespace Sphene.Utils;
 
@@ -56,10 +58,11 @@ public static class VariousExtensions
     }
 
     public static Dictionary<ObjectKind, HashSet<PlayerChanges>> CheckUpdatedData(this CharacterData newData, Guid applicationBase,
-        CharacterData? oldData, ILogger logger, PairHandler cachedPlayer, bool forceApplyCustomization, bool forceApplyMods)
+        CharacterData? oldData, ILogger logger, PairHandler cachedPlayer, bool forceApplyCustomization, bool forceApplyMods, bool suppressRedrawOnEquipmentOrWeaponChanges)
     {
         oldData ??= new();
         var charaDataToUpdate = new Dictionary<ObjectKind, HashSet<PlayerChanges>>();
+        var shouldForcePlayerRedraw = newData.RequiresEyeOrEmoteRedraw(oldData);
         foreach (ObjectKind objectKind in Enum.GetValues<ObjectKind>())
         {
             charaDataToUpdate[objectKind] = [];
@@ -67,6 +70,9 @@ public static class VariousExtensions
             newData.FileReplacements.TryGetValue(objectKind, out var newFileReplacements);
             oldData.GlamourerData.TryGetValue(objectKind, out var existingGlamourerData);
             newData.GlamourerData.TryGetValue(objectKind, out var newGlamourerData);
+            var suppressEquipmentRedraw = suppressRedrawOnEquipmentOrWeaponChanges
+                && objectKind == ObjectKind.Player
+                && IsEquipmentOrWeaponOnlyChange(existingFileReplacements, newFileReplacements);
 
             bool hasNewButNotOldFileReplacements = newFileReplacements != null && existingFileReplacements == null;
             bool hasOldButNotNewFileReplacements = existingFileReplacements != null && newFileReplacements == null;
@@ -86,7 +92,10 @@ public static class VariousExtensions
                 if (hasNewButNotOldFileReplacements || hasOldButNotNewFileReplacements)
                 {
                     charaDataToUpdate[objectKind].Add(PlayerChanges.ModFiles);
-                    charaDataToUpdate[objectKind].Add(PlayerChanges.ForcedRedraw);
+                    if (objectKind != ObjectKind.Player || shouldForcePlayerRedraw)
+                    {
+                        charaDataToUpdate[objectKind].Add(PlayerChanges.ForcedRedraw);
+                    }
                 }
                 if (hasNewButNotOldGlamourerData || hasOldButNotNewGlamourerData)
                 {
@@ -104,38 +113,16 @@ public static class VariousExtensions
                         charaDataToUpdate[objectKind].Add(PlayerChanges.ModFiles);
                         if (forceApplyMods || objectKind != ObjectKind.Player)
                         {
-                            charaDataToUpdate[objectKind].Add(PlayerChanges.ForcedRedraw);
+                            if (objectKind != ObjectKind.Player || !suppressEquipmentRedraw)
+                            {
+                                charaDataToUpdate[objectKind].Add(PlayerChanges.ForcedRedraw);
+                            }
                         }
                         else
                         {
-                            var existingFace = (existingFileReplacements ?? Enumerable.Empty<FileReplacementData>()).Where(g => g.GamePaths.Any(p => p.Contains("/face/", StringComparison.OrdinalIgnoreCase)))
-                                .OrderBy(g => string.IsNullOrEmpty(g.Hash) ? g.FileSwapPath : g.Hash, StringComparer.OrdinalIgnoreCase).ToList();
-                            var existingHair = (existingFileReplacements ?? Enumerable.Empty<FileReplacementData>()).Where(g => g.GamePaths.Any(p => p.Contains("/hair/", StringComparison.OrdinalIgnoreCase)))
-                                .OrderBy(g => string.IsNullOrEmpty(g.Hash) ? g.FileSwapPath : g.Hash, StringComparer.OrdinalIgnoreCase).ToList();
-                            var existingTail = (existingFileReplacements ?? Enumerable.Empty<FileReplacementData>()).Where(g => g.GamePaths.Any(p => p.Contains("/tail/", StringComparison.OrdinalIgnoreCase)))
-                                .OrderBy(g => string.IsNullOrEmpty(g.Hash) ? g.FileSwapPath : g.Hash, StringComparer.OrdinalIgnoreCase).ToList();
-                            var newFace = (newFileReplacements ?? Enumerable.Empty<FileReplacementData>()).Where(g => g.GamePaths.Any(p => p.Contains("/face/", StringComparison.OrdinalIgnoreCase)))
-                                .OrderBy(g => string.IsNullOrEmpty(g.Hash) ? g.FileSwapPath : g.Hash, StringComparer.OrdinalIgnoreCase).ToList();
-                            var newHair = (newFileReplacements ?? Enumerable.Empty<FileReplacementData>()).Where(g => g.GamePaths.Any(p => p.Contains("/hair/", StringComparison.OrdinalIgnoreCase)))
-                                .OrderBy(g => string.IsNullOrEmpty(g.Hash) ? g.FileSwapPath : g.Hash, StringComparer.OrdinalIgnoreCase).ToList();
-                            var newTail = (newFileReplacements ?? Enumerable.Empty<FileReplacementData>()).Where(g => g.GamePaths.Any(p => p.Contains("/tail/", StringComparison.OrdinalIgnoreCase)))
-                                .OrderBy(g => string.IsNullOrEmpty(g.Hash) ? g.FileSwapPath : g.Hash, StringComparer.OrdinalIgnoreCase).ToList();
-                            var existingTransients = (existingFileReplacements ?? Enumerable.Empty<FileReplacementData>()).Where(g => g.GamePaths.Any(g => !g.EndsWith("mdl", StringComparison.OrdinalIgnoreCase) && !g.EndsWith("tex", StringComparison.OrdinalIgnoreCase) && !g.EndsWith("mtrl", StringComparison.OrdinalIgnoreCase)))
-                                .OrderBy(g => string.IsNullOrEmpty(g.Hash) ? g.FileSwapPath : g.Hash, StringComparer.OrdinalIgnoreCase).ToList();
-                            var newTransients = (newFileReplacements ?? Enumerable.Empty<FileReplacementData>()).Where(g => g.GamePaths.Any(g => !g.EndsWith("mdl", StringComparison.OrdinalIgnoreCase) && !g.EndsWith("tex", StringComparison.OrdinalIgnoreCase) && !g.EndsWith("mtrl", StringComparison.OrdinalIgnoreCase)))
-                                .OrderBy(g => string.IsNullOrEmpty(g.Hash) ? g.FileSwapPath : g.Hash, StringComparer.OrdinalIgnoreCase).ToList();
-
-                            logger.LogTrace("[BASE-{appbase}] ExistingFace: {of}, NewFace: {fc}; ExistingHair: {eh}, NewHair: {nh}; ExistingTail: {et}, NewTail: {nt}; ExistingTransient: {etr}, NewTransient: {ntr}", applicationBase,
-                                existingFace.Count, newFace.Count, existingHair.Count, newHair.Count, existingTail.Count, newTail.Count, existingTransients.Count, newTransients.Count);
-
-                            var differentFace = !existingFace.SequenceEqual(newFace, PlayerData.Data.FileReplacementDataComparer.Instance);
-                            var differentHair = !existingHair.SequenceEqual(newHair, PlayerData.Data.FileReplacementDataComparer.Instance);
-                            var differentTail = !existingTail.SequenceEqual(newTail, PlayerData.Data.FileReplacementDataComparer.Instance);
-                            var differenTransients = !existingTransients.SequenceEqual(newTransients, PlayerData.Data.FileReplacementDataComparer.Instance);
-                            if (differentFace || differentHair || differentTail || differenTransients)
+                            if (shouldForcePlayerRedraw)
                             {
-                                logger.LogDebug("[BASE-{appbase}] Different Subparts: Face: {face}, Hair: {hair}, Tail: {tail}, Transients: {transients} => {change}", applicationBase,
-                                    differentFace, differentHair, differentTail, differenTransients, PlayerChanges.ForcedRedraw);
+                                logger.LogDebug("[BASE-{appbase}] Redraw needed for eye textures or new emote data => {change}", applicationBase, PlayerChanges.ForcedRedraw);
                                 charaDataToUpdate[objectKind].Add(PlayerChanges.ForcedRedraw);
                             }
                         }
@@ -218,6 +205,127 @@ public static class VariousExtensions
         }
 
         return charaDataToUpdate;
+    }
+
+    public static bool RequiresEyeOrEmoteRedraw(this CharacterData newData, CharacterData? oldData)
+    {
+        oldData ??= new CharacterData();
+        oldData.FileReplacements.TryGetValue(ObjectKind.Player, out var existingFileReplacements);
+        newData.FileReplacements.TryGetValue(ObjectKind.Player, out var newFileReplacements);
+        var eyesChanged = HasEyeTextureChanges(existingFileReplacements, newFileReplacements);
+        var hasNewTransient = HasNewTransientEmote(existingFileReplacements, newFileReplacements);
+        return eyesChanged || hasNewTransient;
+    }
+
+    public static bool HasSpecialEmotePap(this CharacterData data)
+    {
+        if (!data.FileReplacements.TryGetValue(ObjectKind.Player, out var list) || list.Count == 0) return false;
+        foreach (var entry in list)
+        {
+            foreach (var path in entry.GamePaths)
+            {
+                var file = Path.GetFileName(path);
+                if (_specialEmotePaps.Contains(file)) return true;
+            }
+        }
+        return false;
+    }
+
+    public static bool IsEquipmentOrWeaponOnlyChange(this CharacterData newData, CharacterData? oldData)
+    {
+        oldData ??= new CharacterData();
+        oldData.FileReplacements.TryGetValue(ObjectKind.Player, out var existingFileReplacements);
+        newData.FileReplacements.TryGetValue(ObjectKind.Player, out var newFileReplacements);
+        return IsEquipmentOrWeaponOnlyChange(existingFileReplacements, newFileReplacements);
+    }
+
+    private static bool HasEyeTextureChanges(IEnumerable<FileReplacementData>? existingFileReplacements, IEnumerable<FileReplacementData>? newFileReplacements)
+    {
+        var existingEyes = FilterEyeReplacements(existingFileReplacements);
+        var newEyes = FilterEyeReplacements(newFileReplacements);
+        return !existingEyes.SequenceEqual(newEyes, PlayerData.Data.FileReplacementDataComparer.Instance);
+    }
+
+    private static bool HasNewTransientEmote(IEnumerable<FileReplacementData>? existingFileReplacements, IEnumerable<FileReplacementData>? newFileReplacements)
+    {
+        var existingTransients = FilterTransientReplacements(existingFileReplacements);
+        var newTransients = FilterTransientReplacements(newFileReplacements);
+        if (newTransients.Count == 0) return false;
+        return newTransients.Any(n => !existingTransients.Contains(n, PlayerData.Data.FileReplacementDataComparer.Instance));
+    }
+
+    private static List<FileReplacementData> FilterEyeReplacements(IEnumerable<FileReplacementData>? fileReplacements)
+    {
+        if (fileReplacements == null) return [];
+        return fileReplacements
+            .Where(g => g.GamePaths.Any(IsEyePath))
+            .OrderBy(g => string.IsNullOrEmpty(g.Hash) ? g.FileSwapPath : g.Hash, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static List<FileReplacementData> FilterTransientReplacements(IEnumerable<FileReplacementData>? fileReplacements)
+    {
+        if (fileReplacements == null) return [];
+        return fileReplacements
+            .Where(g => g.GamePaths.Any(IsTransientPath))
+            .OrderBy(g => string.IsNullOrEmpty(g.Hash) ? g.FileSwapPath : g.Hash, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static bool IsEyePath(string path)
+    {
+        return path.Contains("/eye/", StringComparison.OrdinalIgnoreCase)
+            || path.Contains("/face/", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsTransientPath(string path)
+    {
+        return !path.EndsWith("mdl", StringComparison.OrdinalIgnoreCase)
+            && !path.EndsWith("tex", StringComparison.OrdinalIgnoreCase)
+            && !path.EndsWith("mtrl", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static readonly HashSet<string> _specialEmotePaps = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "s_pose01_loop.pap",
+        "s_pose02_loop.pap",
+        "s_pose03_loop.pap",
+        "s_pose04_loop.pap",
+        "s_pose05_loop.pap",
+        "j_pose01_loop.pap",
+        "j_pose02_loop.pap",
+        "j_pose03_loop.pap",
+        "j_pose04_loop.pap",
+        "l_pose01_loop.pap",
+        "l_pose02_loop.pap",
+        "l_pose03_loop.pap"
+    };
+
+    private static bool IsEquipmentOrWeaponOnlyChange(IEnumerable<FileReplacementData>? existingFileReplacements, IEnumerable<FileReplacementData>? newFileReplacements)
+    {
+        var existingList = existingFileReplacements?.ToList() ?? [];
+        var newList = newFileReplacements?.ToList() ?? [];
+        if (existingList.Count == 0 && newList.Count == 0) return false;
+
+        var comparer = PlayerData.Data.FileReplacementDataComparer.Instance;
+        var removed = existingList.Where(item => !newList.Contains(item, comparer)).ToList();
+        var added = newList.Where(item => !existingList.Contains(item, comparer)).ToList();
+        if (removed.Count == 0 && added.Count == 0) return false;
+
+        return removed.All(IsEquipmentOrWeaponReplacement) && added.All(IsEquipmentOrWeaponReplacement);
+    }
+
+    private static bool IsEquipmentOrWeaponReplacement(FileReplacementData data)
+    {
+        if (data.GamePaths == null || data.GamePaths.Length == 0) return false;
+        return data.GamePaths.All(IsEquipmentOrWeaponPath);
+    }
+
+    private static bool IsEquipmentOrWeaponPath(string path)
+    {
+        return path.Contains("/equipment/", StringComparison.OrdinalIgnoreCase)
+            || path.Contains("/weapon/", StringComparison.OrdinalIgnoreCase)
+            || path.Contains("/accessory/", StringComparison.OrdinalIgnoreCase);
     }
 
     public static T DeepClone<T>(this T obj)

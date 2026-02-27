@@ -39,6 +39,7 @@ using ShrinkU.Interop;
 using ShrinkU.UI;
 using System;
 using System.IO;
+using Sphene.Services.ModLearning;
 
 namespace Sphene;
 
@@ -239,6 +240,7 @@ public sealed class Plugin : IDalamudPlugin
             collection.AddSingleton<CharaDataCharacterHandler>();
             collection.AddSingleton<CharaDataNearbyManager>();
             collection.AddSingleton<CharaDataGposeTogetherManager>();
+            collection.AddSingleton<CharacterDataSqliteStore>();
             collection.AddSingleton<TextureBackupService>();
             collection.AddSingleton(s => new HousingOwnershipService(
                 s.GetRequiredService<ILogger<HousingOwnershipService>>(),
@@ -281,6 +283,17 @@ public sealed class Plugin : IDalamudPlugin
             collection.AddSingleton<RedrawManager>();
             collection.AddSingleton((s) => new IpcCallerPenumbra(s.GetRequiredService<ILogger<IpcCallerPenumbra>>(), pluginInterface,
                 s.GetRequiredService<DalamudUtilService>(), s.GetRequiredService<SpheneMediator>(), s.GetRequiredService<RedrawManager>()));
+            collection.AddSingleton<ModLearningService>(s => new ModLearningService(
+                s.GetRequiredService<ILogger<ModLearningService>>(),
+                s.GetRequiredService<IpcCallerPenumbra>(),
+                s.GetRequiredService<SpheneMediator>(),
+                clientState,
+                gameData,
+                s.GetRequiredService<CharacterDataSqliteStore>(),
+                s.GetRequiredService<DalamudUtilService>(),
+                s.GetRequiredService<FileCacheManager>()
+            ));
+            collection.AddHostedService(s => s.GetRequiredService<ModLearningService>());
             collection.AddSingleton((s) => new IpcCallerGlamourer(s.GetRequiredService<ILogger<IpcCallerGlamourer>>(), pluginInterface,
                 s.GetRequiredService<DalamudUtilService>(), s.GetRequiredService<SpheneMediator>(), s.GetRequiredService<RedrawManager>()));
             collection.AddSingleton((s) => new IpcCallerCustomize(s.GetRequiredService<ILogger<IpcCallerCustomize>>(), pluginInterface,
@@ -454,6 +467,7 @@ public sealed class Plugin : IDalamudPlugin
             collection.AddHostedService(p => p.GetRequiredService<DtrEntry>());
             collection.AddHostedService(p => p.GetRequiredService<EventAggregator>());
             collection.AddHostedService(p => p.GetRequiredService<IpcProvider>());
+            collection.AddHostedService(p => p.GetRequiredService<CharacterDataSqliteStore>());
             collection.AddHostedService(p => p.GetRequiredService<LoginHandler>());
             collection.AddHostedService(p => p.GetRequiredService<UpdateCheckService>());
             collection.AddSingleton<ChangelogService>();

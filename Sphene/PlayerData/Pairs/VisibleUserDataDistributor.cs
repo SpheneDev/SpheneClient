@@ -29,6 +29,8 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
     
     // Hash-based acknowledgment tracking
     private readonly Dictionary<UserData, string> _lastSentHashPerUser = new();
+    private string? _lastUploadedHashToServer;
+    private Task? _serverUploadTask;
     
     // Delayed push tracking for newly connected users
     private readonly Dictionary<UserData, DateTime> _delayedPushUsers = new();
@@ -61,7 +63,7 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
         _characterReloadTimer = new Timer(ProcessDelayedReloads, null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
         
         Mediator.Subscribe<DelayedFrameworkUpdateMessage>(this, (_) => FrameworkOnUpdate());
-        Mediator.Subscribe<CharacterDataCreatedMessage>(this, (msg) =>
+        Mediator.Subscribe<CharacterDataReadyForPushMessage>(this, (msg) =>
         {
             var previousHash = _lastCreatedData?.DataHash?.Value;
             var newHash = msg.CharacterData.DataHash?.Value;
@@ -87,6 +89,7 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
         {
             _previouslyVisiblePlayers.Clear();
             _lastSentHashPerUser.Clear();
+            _lastUploadedHashToServer = null;
         });
     }
 
@@ -129,7 +132,8 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
             }
         });
         
-        foreach (var user in _pairManager.GetVisibleUsers())
+        var visibleUsers = _pairManager.GetVisibleUsers();
+        foreach (var user in visibleUsers)
         {
             // Only add users who haven't received this hash yet or if forced
             _lastSentHashPerUser.TryGetValue(user, out var lastHash);
@@ -145,6 +149,11 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
             }
         }
 
+        if (visibleUsers.Count == 0)
+        {
+            EnsureServerUploadForCurrentData(currentHash, forced);
+        }
+
         if (_usersToPushDataTo.Count > 0)
         {
             Logger.LogDebug("{tag} Push start: hash={hash} count={count} totalVisible={total}", 
@@ -155,6 +164,31 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
         {
             Logger.LogDebug("{tag} Push skip: no users need data hash={hash}", SyncProgressTag, currentHash);
         }
+    }
+
+    private void EnsureServerUploadForCurrentData(string currentHash, bool forced)
+    {
+        if (!_apiController.IsConnected) return;
+        if (!forced && string.Equals(_lastUploadedHashToServer, currentHash, StringComparison.Ordinal)) return;
+        if (_lastCreatedData == null) return;
+        if (_serverUploadTask != null && !_serverUploadTask.IsCompleted && !forced) return;
+
+        var dataToUpload = _lastCreatedData.DeepClone();
+        _serverUploadTask = Task.Run(async () =>
+        {
+            try
+            {
+                Logger.LogDebug("{tag} Server-only upload start: hash={hash}", SyncProgressTag, currentHash);
+                var uploaded = await _fileTransferManager.UploadFiles(dataToUpload, []).ConfigureAwait(false);
+                await _apiController.PushCharacterData(uploaded, []).ConfigureAwait(false);
+                _lastUploadedHashToServer = currentHash;
+                Logger.LogDebug("{tag} Server-only upload complete: hash={hash}", SyncProgressTag, currentHash);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "{tag} Server-only upload failed: hash={hash}", SyncProgressTag, currentHash);
+            }
+        });
     }
 
     private void FrameworkOnUpdate()

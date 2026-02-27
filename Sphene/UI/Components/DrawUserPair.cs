@@ -512,6 +512,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
 
         var isVisibleForIcon = _pair.IsMutuallyVisible || (_uiSharedService.IsInGpose && _pair.WasMutuallyVisibleInGpose);
         var partnerAckYou = _pair.UserPair.OtherPermissions.IsAckYou();
+        var ownAckYou = _pair.UserPair.OwnPermissions.IsAckYou();
         var suppressAckUi = _pair.IsInDuty;
 
         if (_pair.IsPaused)
@@ -538,7 +539,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
                 ImGui.SameLine();
             }
             
-            var iconColor = suppressAckUi ? ImGuiColors.ParsedGreen : (partnerAckYou ? ImGuiColors.ParsedGreen : ImGuiColors.DalamudYellow);
+            var iconColor = suppressAckUi ? ImGuiColors.ParsedGreen : (ownAckYou ? ImGuiColors.ParsedGreen : ImGuiColors.DalamudYellow);
             var icon = (_uiSharedService.IsInGpose || _pair.IsInGpose) ? FontAwesomeIcon.Camera : FontAwesomeIcon.Eye;
             _uiSharedService.IconText(icon, iconColor);
             
@@ -548,11 +549,16 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
             }
             else
             {
-                var ackStatus = partnerAckYou ? "acknowledges your data" : "does not acknowledge your data";
-                userPairText = _pair.UserData.AliasOrUID + " is visible: " + _pair.PlayerName + Environment.NewLine + "This user " + ackStatus + Environment.NewLine + "Click to target this player";
+                var ackStatus = ownAckYou ? "You acknowledge this user's data" : "You do not acknowledge this user's data";
+                if (partnerAckYou != ownAckYou)
+                {
+                    var partnerStatus = partnerAckYou ? "This user acknowledges your data" : "This user does not acknowledge your data";
+                    ackStatus += Environment.NewLine + partnerStatus;
+                }
+                userPairText = _pair.UserData.AliasOrUID + " is visible: " + _pair.PlayerName + Environment.NewLine + ackStatus + Environment.NewLine + "Click to target this player";
             }
             
-            HandleReloadTimer(partnerAckYou);
+            HandleReloadTimer(ownAckYou);
             
             if (ImGui.IsItemClicked())
             {

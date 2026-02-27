@@ -61,7 +61,8 @@ public record NotificationMessage
     (string Title, string Message, NotificationType Type, TimeSpan? TimeShownOnScreen = null) : MessageBase;
 public record CreateCacheForObjectMessage(GameObjectHandler ObjectToCreateFor) : SameThreadMessage;
 public record ClearCacheForObjectMessage(GameObjectHandler ObjectToCreateFor) : SameThreadMessage;
-public record CharacterDataCreatedMessage(CharacterData CharacterData) : SameThreadMessage;
+public record CharacterDataCreatedMessage(CharacterData CharacterData, Sphene.PlayerData.Data.CharacterData? RawData = null) : SameThreadMessage;
+public record CharacterDataReadyForPushMessage(CharacterData CharacterData) : MessageBase;
 public record CharacterDataBuildStartedMessage : MessageBase;
 public record CharacterDataApplicationCompletedMessage(string PlayerName, string UserUID, Guid ApplicationId, bool Success, string? DataHash) : MessageBase;
 public record CharacterDataAnalyzedMessage : MessageBase;
@@ -118,6 +119,7 @@ public record PenumbraRedrawCharacterMessage(ICharacter Character) : SameThreadM
 public record GameObjectHandlerCreatedMessage(GameObjectHandler GameObjectHandler, bool OwnedObject) : SameThreadMessage;
 public record GameObjectHandlerDestroyedMessage(GameObjectHandler GameObjectHandler, bool OwnedObject) : SameThreadMessage;
 public record HaltCharaDataCreation(bool Resume = false) : SameThreadMessage;
+public record ResetCharacterDataDatabaseMessage : MessageBase;
 public record GposeLobbyUserJoin(UserData UserData) : MessageBase;
 public record GPoseLobbyUserLeave(UserData UserData) : MessageBase;
 public record GPoseLobbyReceiveCharaData(CharaDataDownloadDto CharaDataDownloadDto) : MessageBase;

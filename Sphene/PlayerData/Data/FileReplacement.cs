@@ -6,19 +6,26 @@ namespace Sphene.PlayerData.Data;
 
 public partial class FileReplacement
 {
+    public FileReplacement()
+    {
+        GamePaths = [];
+        ResolvedPath = string.Empty;
+    }
+
     public FileReplacement(string[] gamePaths, string filePath)
     {
         GamePaths = gamePaths.Select(g => g.Replace('\\', '/').ToLowerInvariant()).ToHashSet(StringComparer.Ordinal);
-        ResolvedPath = filePath.Replace('\\', '/');
+        var resolved = filePath.Replace('\\', '/');
+        ResolvedPath = IsLocalPath(resolved) ? resolved : resolved.ToLowerInvariant();
     }
 
-    public HashSet<string> GamePaths { get; init; }
+    public HashSet<string> GamePaths { get; set; }
 
     public bool HasFileReplacement => GamePaths.Count >= 1 && GamePaths.Any(p => !string.Equals(p, ResolvedPath, StringComparison.Ordinal));
 
     public string Hash { get; set; } = string.Empty;
     public bool IsFileSwap => !IsLocalPath(ResolvedPath) && GamePaths.All(p => !IsLocalPath(p));
-    public string ResolvedPath { get; init; }
+    public string ResolvedPath { get; set; }
 
     public FileReplacementData ToFileReplacementDto()
     {
@@ -33,6 +40,22 @@ public partial class FileReplacement
     public override string ToString()
     {
         return $"HasReplacement:{HasFileReplacement},IsFileSwap:{IsFileSwap} - {string.Join(",", GamePaths)} => {ResolvedPath}";
+    }
+
+    public override bool Equals(object? obj)
+    {
+        if (obj is not FileReplacement other) return false;
+        return string.Equals(ResolvedPath, other.ResolvedPath, StringComparison.Ordinal) &&
+               string.Equals(Hash, other.Hash, StringComparison.Ordinal) &&
+               GamePaths.SetEquals(other.GamePaths);
+    }
+
+    public override int GetHashCode()
+    {
+        var hash = new HashCode();
+        hash.Add(ResolvedPath, StringComparer.Ordinal);
+        hash.Add(Hash, StringComparer.Ordinal);
+        return hash.ToHashCode();
     }
 
     private static bool IsLocalPath(string? path)

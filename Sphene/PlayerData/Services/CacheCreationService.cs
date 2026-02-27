@@ -24,6 +24,7 @@ public sealed class CacheCreationService : DisposableMediatorSubscriberBase
     private bool _haltCharaDataCreation;
     private bool _isZoning = false;
     private string? _lastDataHash = null;
+    private bool _forcePublishNext = false;
 
     public CacheCreationService(ILogger<CacheCreationService> logger, SpheneMediator mediator, GameObjectHandlerFactory gameObjectHandlerFactory,
         PlayerDataFactory characterDataFactory, DalamudUtilService dalamudUtil) : base(logger, mediator)
@@ -179,6 +180,7 @@ public sealed class CacheCreationService : DisposableMediatorSubscriberBase
         Mediator.Subscribe<PenumbraModSettingChangedMessage>(this, (msg) =>
         {
             Logger.LogDebug("Received Penumbra Mod settings change, updating everything");
+            _forcePublishNext = true;
             AddCacheToCreate(ObjectKind.Player);
             AddCacheToCreate(ObjectKind.Pet);
             AddCacheToCreate(ObjectKind.MinionOrMount);
@@ -280,11 +282,19 @@ public sealed class CacheCreationService : DisposableMediatorSubscriberBase
                     var newData = _playerData.ToAPI();
                     var newHash = newData.DataHash?.Value;
                     
+                    var forcePublish = _forcePublishNext;
+                    _forcePublishNext = false;
+
                     if (!string.Equals(newHash, _lastDataHash, StringComparison.Ordinal))
                     {
                         Logger.LogDebug("Character data changed, publishing update. Old hash: {oldHash}, New hash: {newHash}", _lastDataHash ?? "null", newHash ?? "null");
                         _lastDataHash = newHash;
-                        Mediator.Publish(new CharacterDataCreatedMessage(newData));
+                        Mediator.Publish(new CharacterDataCreatedMessage(newData, _playerData));
+                    }
+                    else if (forcePublish)
+                    {
+                        Logger.LogDebug("Character data unchanged but forced publish after mod settings change. Hash: {hash}", newHash ?? "null");
+                        Mediator.Publish(new CharacterDataCreatedMessage(newData, _playerData));
                     }
                     else
                     {

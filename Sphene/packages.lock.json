@@ -64,6 +64,17 @@
           "Microsoft.AspNetCore.SignalR.Common": "10.0.1"
         }
       },
+      "Microsoft.Data.Sqlite": {
+        "type": "Direct",
+        "requested": "[9.0.2, )",
+        "resolved": "9.0.2",
+        "contentHash": "61su148W1dVLxlTnDAQb870RhYrzHJ1OE4ggtOpM/V+xRlzWL9nbJ9Gj6lROhpZnYxoVXXBxOm9rnk12mn2vtA==",
+        "dependencies": {
+          "Microsoft.Data.Sqlite.Core": "9.0.2",
+          "SQLitePCLRaw.bundle_e_sqlite3": "2.1.10",
+          "SQLitePCLRaw.core": "2.1.10"
+        }
+      },
       "Microsoft.Extensions.Hosting": {
         "type": "Direct",
         "requested": "[10.0.1, )",
@@ -210,6 +221,14 @@
         "contentHash": "mv5FggqTA1uIOhgrp+ZixYICplvCMNvpDBvV5DfT9nLJ9luteaskbqsNoaPRLZi23ZKpg20Y9ZLhxkk2C91gMA==",
         "dependencies": {
           "Microsoft.AspNetCore.SignalR.Common": "10.0.1"
+        }
+      },
+      "Microsoft.Data.Sqlite.Core": {
+        "type": "Transitive",
+        "resolved": "9.0.2",
+        "contentHash": "lJbaLhjWnnPfLhZrQXPri5F0pmlJXg68yCSf5aRM3qFF8WD7dT1jnQUuBd3YvT5s1VDOH9t/6filPcTIOwZR7Q==",
+        "dependencies": {
+          "SQLitePCLRaw.core": "2.1.10"
         }
       },
       "Microsoft.Extensions.Configuration": {
@@ -500,6 +519,33 @@
         "type": "Transitive",
         "resolved": "17.6.3",
         "contentHash": "N0ZIanl1QCgvUumEL1laasU0a7sOE5ZwLZVTn0pAePnfhq8P7SvTjF8Axq+CnavuQkmdQpGNXQ1efZtu5kDFbA=="
+      },
+      "SQLitePCLRaw.bundle_e_sqlite3": {
+        "type": "Transitive",
+        "resolved": "2.1.10",
+        "contentHash": "UxWuisvZ3uVcVOLJQv7urM/JiQH+v3TmaJc1BLKl5Dxfm/nTzTUrqswCqg/INiYLi61AXnHo1M1JPmPqqLnAdg==",
+        "dependencies": {
+          "SQLitePCLRaw.lib.e_sqlite3": "2.1.10",
+          "SQLitePCLRaw.provider.e_sqlite3": "2.1.10"
+        }
+      },
+      "SQLitePCLRaw.core": {
+        "type": "Transitive",
+        "resolved": "2.1.10",
+        "contentHash": "Ii8JCbC7oiVclaE/mbDEK000EFIJ+ShRPwAvvV89GOZhQ+ZLtlnSWl6ksCNMKu/VGXA4Nfi2B7LhN/QFN9oBcw=="
+      },
+      "SQLitePCLRaw.lib.e_sqlite3": {
+        "type": "Transitive",
+        "resolved": "2.1.10",
+        "contentHash": "mAr69tDbnf3QJpRy2nJz8Qdpebdil00fvycyByR58Cn9eARvR+UiG2Vzsp+4q1tV3ikwiYIjlXCQFc12GfebbA=="
+      },
+      "SQLitePCLRaw.provider.e_sqlite3": {
+        "type": "Transitive",
+        "resolved": "2.1.10",
+        "contentHash": "uZVTi02C1SxqzgT0HqTWatIbWGb40iIkfc3FpFCpE/r7g6K0PqzDUeefL6P6HPhDtc6BacN3yQysfzP7ks+wSQ==",
+        "dependencies": {
+          "SQLitePCLRaw.core": "2.1.10"
+        }
       },
       "shrinku": {
         "type": "Project",
