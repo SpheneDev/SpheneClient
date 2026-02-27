@@ -80,6 +80,14 @@ public class SettingsUi : WindowMediatorSubscriberBase
     private string _uidToAddForIgnore = string.Empty;
     private int _selectedTempCollectionEntry = -1;
     private string _uidToAddForTempCollection = string.Empty;
+    private Task<CharacterDataSqliteStore.CharacterDataDatabaseStats>? _characterDataStatsTask;
+    private CharacterDataSqliteStore.CharacterDataDatabaseStats? _characterDataStats;
+    private DateTimeOffset? _characterDataStatsUpdated;
+    private string? _characterDataStatsError;
+    private Task<(bool IsOk, string Message)>? _characterDataHealthTask;
+    private (bool IsOk, string Message)? _characterDataHealth;
+    private DateTimeOffset? _characterDataHealthUpdated;
+    private string? _characterDataHealthError;
     private CancellationTokenSource? _validationCts;
     private Task<List<FileCacheEntity>>? _validationTask;
     private bool _wasOpen = false;
@@ -1950,7 +1958,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
 #endif
         
         // Calculate optimal sidebar width based on longest button text + reduced padding
-        var buttonLabels = new[] { "Home", "Connectivity", "People & Notes", "Appearance", "Theme", "Notifications", "Performance", "Transfers", "Storage", "Character Data", "Acknowledgment", "Sync Settings", diagnosticsPageLabel };
+        var buttonLabels = new[] { "General", "Appearance", "Sync & Network", "Data & Storage", "Diagnostics", "Home", "Connectivity", "People & Notes", "Theme", "Notifications", "Performance", "Transfers", "Storage", "Character Data", "Acknowledgment", "Sync Settings", diagnosticsPageLabel };
         var maxTextWidth = 0f;
         foreach (var label in buttonLabels)
         {
@@ -1975,18 +1983,40 @@ public class SettingsUi : WindowMediatorSubscriberBase
             if (isActive) ImGui.PopStyleColor();
         }
 
+        ImGui.TextDisabled("General");
+        ImGui.Separator();
         SidebarButton("Home", SettingsPage.Home);
-        SidebarButton("Connectivity", SettingsPage.Connectivity);
         SidebarButton("People & Notes", SettingsPage.PeopleNotes);
+
+        ImGui.Dummy(new Vector2(0, 6f * ImGuiHelpers.GlobalScale));
+        ImGui.TextDisabled("Appearance");
+        ImGui.Separator();
         SidebarButton("Appearance", SettingsPage.Display);
         SidebarButton("Theme", SettingsPage.Theme);
         SidebarButton("Notifications", SettingsPage.Alerts);
+
+        ImGui.Dummy(new Vector2(0, 6f * ImGuiHelpers.GlobalScale));
+        ImGui.TextDisabled("Sync & Network");
+        ImGui.Separator();
+        SidebarButton("Connectivity", SettingsPage.Connectivity);
+        SidebarButton("Sync Settings", SettingsPage.Sync);
+        SidebarButton("Acknowledgment", SettingsPage.Acknowledgment);
+
+        ImGui.Dummy(new Vector2(0, 6f * ImGuiHelpers.GlobalScale));
+        ImGui.TextDisabled("Performance");
+        ImGui.Separator();
         SidebarButton("Performance", SettingsPage.Performance);
+
+        ImGui.Dummy(new Vector2(0, 6f * ImGuiHelpers.GlobalScale));
+        ImGui.TextDisabled("Data & Storage");
+        ImGui.Separator();
         SidebarButton("Transfers", SettingsPage.Transfers);
         SidebarButton("Storage", SettingsPage.Storage);
         SidebarButton("Character Data", SettingsPage.CharacterData);
-        SidebarButton("Acknowledgment", SettingsPage.Acknowledgment);
-        SidebarButton("Sync Settings", SettingsPage.Sync);
+
+        ImGui.Dummy(new Vector2(0, 6f * ImGuiHelpers.GlobalScale));
+        ImGui.TextDisabled("Diagnostics");
+        ImGui.Separator();
         SidebarButton(diagnosticsPageLabel, SettingsPage.Debug);
 
         ImGui.EndChild();
@@ -2530,16 +2560,23 @@ public class SettingsUi : WindowMediatorSubscriberBase
         _uiShared.BigText("People & Notes");
         ImGui.Spacing();
 
+        UiSharedService.TextWrapped(
+            "Manage personal notes, labels, and group visibility for your paired users. " +
+            "Notes and groups are stored locally and help you organize people across sessions.");
+
         var currentProfile = _configService.Current;
         var overwriteExistingLabels = _overwriteExistingLabels;
         if (ImGui.Button("Export Notes"))
         {
-            ImGui.SetClipboardText(UiSharedService.GetNotes(
+            var notes = UiSharedService.GetNotes(
                 _pairManager.DirectPairs.UnionBy(
                     _pairManager.GroupPairs.SelectMany(p => p.Value),
                     p => p.UserData,
-                    UserDataComparer.Instance).ToList()));
+                    UserDataComparer.Instance).ToList());
+            ImGui.SetClipboardText(notes);
+            Mediator.Publish(new NotificationMessage("Notes Exported", "Notes copied to clipboard.", NotificationType.Success));
         }
+        _uiShared.DrawHelpText("Exports all notes to your clipboard.");
         ImGui.SameLine();
         if (ImGui.Button("Import Notes"))
         {
@@ -2558,6 +2595,48 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 ImGui.TextColored(ImGuiColors.ParsedGreen, "Notes successfully applied.");
             else
                 ImGui.TextColored(ImGuiColors.DalamudRed, "Failed to apply notes.");
+        }
+
+        ImGui.Separator();
+        _uiShared.BigText("Pair Groups");
+        UiSharedService.TextWrapped(
+            "Shows your locally managed pair groups created via the Pair Groups menu.");
+
+        var groupTags = _serverConfigurationManager.GetServerAvailablePairTags()
+            .Where(tag => !tag.StartsWith("Sphene_", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(tag => tag, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (groupTags.Count == 0)
+        {
+            ImGui.TextUnformatted("No pair groups available.");
+        }
+        else if (ImGui.BeginTable("PairGroupsTable", 3, ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerV))
+        {
+            ImGui.TableSetupColumn("Group", ImGuiTableColumnFlags.WidthStretch);
+            ImGui.TableSetupColumn("Members", ImGuiTableColumnFlags.WidthFixed, 90);
+            ImGui.TableSetupColumn("Online", ImGuiTableColumnFlags.WidthFixed, 80);
+            ImGui.TableHeadersRow();
+
+            foreach (var tag in groupTags)
+            {
+                var groupName = tag;
+                var uids = _serverConfigurationManager.GetUidsForTag(tag);
+                var memberCount = uids.Count;
+                var onlineCount = uids.Count(uid => _pairManager.GetPairByUID(uid)?.IsOnline == true);
+
+                ImGui.TableNextRow();
+                ImGui.TableSetColumnIndex(0);
+                ImGui.TextUnformatted(groupName);
+
+                ImGui.TableSetColumnIndex(1);
+                ImGui.TextUnformatted(memberCount.ToString("N0"));
+
+                ImGui.TableSetColumnIndex(2);
+                ImGui.TextUnformatted(onlineCount.ToString("N0"));
+            }
+
+            ImGui.EndTable();
         }
 
         ImGui.Separator();
@@ -2970,6 +3049,22 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
         UiSharedService.TextWrapped("Configure how Sphene handles character data synchronization during various game states.");
 
+        UiSharedService.TextWrapped(
+            "Sphene continuously synchronizes character data between paired users to ensure everyone sees the latest appearance. " +
+            "During certain game activities like duties, trials, or combat, the sync process can be paused to prioritize game performance. " +
+            "The setting above allows you to control this behavior based on your preferences.");
+
+        ImGui.Spacing();
+
+        UiSharedService.TextWrapped(
+            "Sync may be paused during:");
+        ImGui.Indent();
+        ImGui.BulletText("Duty instances (trials, dungeons, raids)");
+        ImGui.BulletText("Combat situations");
+        ImGui.BulletText("Cutscenes and GPose");
+        ImGui.Unindent();
+
+
         ImGui.Spacing();
         ImGui.Separator();
         ImGui.Spacing();
@@ -2988,7 +3083,11 @@ public class SettingsUi : WindowMediatorSubscriberBase
             "By default, Sphene pauses synchronization during duties and combat to minimize performance impact. " +
             "Enable this option if you want to ensure continuous synchronization regardless of game state. " +
             "Note: This may cause slight performance impacts during intense gameplay scenarios.");
-
+        ImGui.Spacing();
+        UiSharedService.ColorTextWrapped(
+            "Tip: If you notice sync issues during duties or combat, try enabling the option above. " +
+            "However, if you experience performance issues, consider keeping it disabled.",
+            ImGuiColors.HealerGreen);
         ImGui.Spacing();
         ImGui.Separator();
         ImGui.Spacing();
@@ -3054,6 +3153,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
             "When enabled, Sphene will skip reapplying after zoning if the only changes are equipment or weapon-related file replacements. " +
             "You may need manual refreshes to see all updates.");
 
+        _uiShared.BigText("Pair Temporary Collection Behavior");
+
         var disableTemporaryCollectionsAfterInactivity = _configService.Current.DisableTemporaryCollectionsAfterInactivity;
         if (ImGui.Checkbox("Disable temporary collections after inactivity", ref disableTemporaryCollectionsAfterInactivity))
         {
@@ -3077,7 +3178,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         var temporaryCollectionTimeoutMinutes = Math.Max(1, _configService.Current.TemporaryCollectionInactivityTimeoutMinutes);
         using (ImRaii.Disabled(!disableTemporaryCollectionsAfterInactivity))
         {
-            if (ImGui.SliderInt("Temporary collection inactivity timeout (minutes)", ref temporaryCollectionTimeoutMinutes, 1, 60))
+            if (ImGui.SliderInt("Temporary collection inactivity timeout (minutes)", ref temporaryCollectionTimeoutMinutes, 1, 40))
             {
                 _configService.Current.TemporaryCollectionInactivityTimeoutMinutes = Math.Max(1, temporaryCollectionTimeoutMinutes);
                 _configService.Save();
@@ -3089,28 +3190,6 @@ public class SettingsUi : WindowMediatorSubscriberBase
         ImGui.Separator();
         ImGui.Spacing();
 
-        // Information Section
-        _uiShared.BigText("How Sync Works");
-        UiSharedService.TextWrapped(
-            "Sphene continuously synchronizes character data between paired users to ensure everyone sees the latest appearance. " +
-            "During certain game activities like duties, trials, or combat, the sync process can be paused to prioritize game performance. " +
-            "The setting above allows you to control this behavior based on your preferences.");
-
-        ImGui.Spacing();
-
-        UiSharedService.TextWrapped(
-            "Sync may be paused during:");
-        ImGui.Indent();
-        ImGui.BulletText("Duty instances (trials, dungeons, raids)");
-        ImGui.BulletText("Combat situations");
-        ImGui.BulletText("Cutscenes and GPose");
-        ImGui.Unindent();
-
-        ImGui.Spacing();
-        UiSharedService.ColorTextWrapped(
-            "Tip: If you notice sync issues during duties or combat, try enabling the option above. " +
-            "However, if you experience performance issues, consider keeping it disabled.",
-            ImGuiColors.HealerGreen);
     }
 
     private void DrawCharacterDataSettings()
@@ -3119,21 +3198,174 @@ public class SettingsUi : WindowMediatorSubscriberBase
         _uiShared.BigText("Character Data");
         ImGui.Separator();
 
+        UiSharedService.TextWrapped(
+            "Character data is stored locally to accelerate pairing, compare updates across sessions, and keep track of learned mod states. " +
+            "These settings control what is stored and provide visibility into the database size and contents.");
+
+        ImGui.Spacing();
+        _uiShared.BigText("Storage Behavior");
         var persistCharacterData = _configService.Current.PersistReceivedCharacterData;
         if (ImGui.Checkbox("Persist received character data", ref persistCharacterData))
         {
             _configService.Current.PersistReceivedCharacterData = persistCharacterData;
             _configService.Save();
         }
-        _uiShared.DrawHelpText("Stores received character data locally so it can be compared after restarting the client.");
+        _uiShared.DrawHelpText(
+            "Stores received character data locally so it can be compared after restarting the client. " +
+            "Disabling this reduces disk usage but can increase sync work after restarts.");
 
         ImGui.Spacing();
+        _uiShared.BigText("Database Statistics");
+        UpdateCharacterDataStatsIfReady();
+        if (_characterDataStatsTask == null && _characterDataStats == null)
+        {
+            RequestCharacterDataStatsRefresh();
+        }
+
+        if (ImGui.Button("Refresh statistics"))
+        {
+            RequestCharacterDataStatsRefresh();
+        }
+
+        ImGui.SameLine();
+        if (_characterDataStatsTask != null && !_characterDataStatsTask.IsCompleted)
+        {
+            ImGui.TextUnformatted("Loading...");
+        }
+        else if (_characterDataStatsUpdated.HasValue)
+        {
+            ImGui.TextUnformatted($"Updated: {_characterDataStatsUpdated:yyyy-MM-dd HH:mm:ss} UTC");
+        }
+
+        if (!string.IsNullOrEmpty(_characterDataStatsError))
+        {
+            UiSharedService.ColorTextWrapped(_characterDataStatsError, ImGuiColors.DalamudRed);
+        }
+        else if (_characterDataStats != null && ImGui.BeginTable("CharacterDataStatsTable", 2, ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerV))
+        {
+            ImGui.TableSetupColumn("Metric", ImGuiTableColumnFlags.WidthFixed, 220);
+            ImGui.TableSetupColumn("Value", ImGuiTableColumnFlags.WidthStretch);
+            ImGui.TableNextRow();
+            ImGui.TableSetColumnIndex(0);
+            ImGui.TextUnformatted("Database Path");
+            ImGui.TableSetColumnIndex(1);
+            ImGui.TextUnformatted(_characterDataStats.DatabasePath);
+
+            ImGui.TableNextRow();
+            ImGui.TableSetColumnIndex(0);
+            ImGui.TextUnformatted("Database Size");
+            ImGui.TableSetColumnIndex(1);
+            ImGui.TextUnformatted(FormatBytes(_characterDataStats.DatabaseSizeBytes));
+
+            ImGui.TableNextRow();
+            ImGui.TableSetColumnIndex(0);
+            ImGui.TextUnformatted("Local Character Entries");
+            ImGui.TableSetColumnIndex(1);
+            ImGui.TextUnformatted(_characterDataStats.LocalCharacterCount.ToString("N0"));
+
+            ImGui.TableNextRow();
+            ImGui.TableSetColumnIndex(0);
+            ImGui.TextUnformatted("Pair Character Entries");
+            ImGui.TableSetColumnIndex(1);
+            ImGui.TextUnformatted(_characterDataStats.PairCharacterCount.ToString("N0"));
+
+            ImGui.TableNextRow();
+            ImGui.TableSetColumnIndex(0);
+            ImGui.TextUnformatted("Learned Mod Entries");
+            ImGui.TableSetColumnIndex(1);
+            ImGui.TextUnformatted(_characterDataStats.LearnedModsCount.ToString("N0"));
+
+            ImGui.TableNextRow();
+            ImGui.TableSetColumnIndex(0);
+            ImGui.TextUnformatted("Resource Links");
+            ImGui.TableSetColumnIndex(1);
+            ImGui.TextUnformatted(_characterDataStats.ResourceLinksCount.ToString("N0"));
+
+            ImGui.TableNextRow();
+            ImGui.TableSetColumnIndex(0);
+            ImGui.TextUnformatted("Cache Entries");
+            ImGui.TableSetColumnIndex(1);
+            ImGui.TextUnformatted(_characterDataStats.CacheEntryCount.ToString("N0"));
+
+            ImGui.TableNextRow();
+            ImGui.TableSetColumnIndex(0);
+            ImGui.TextUnformatted("Local Data Size");
+            ImGui.TableSetColumnIndex(1);
+            ImGui.TextUnformatted(FormatBytes(_characterDataStats.LocalDataBytes));
+
+            ImGui.TableNextRow();
+            ImGui.TableSetColumnIndex(0);
+            ImGui.TextUnformatted("Pair Data Size");
+            ImGui.TableSetColumnIndex(1);
+            ImGui.TextUnformatted(FormatBytes(_characterDataStats.PairDataBytes));
+
+            ImGui.TableNextRow();
+            ImGui.TableSetColumnIndex(0);
+            ImGui.TextUnformatted("Last Pair Update");
+            ImGui.TableSetColumnIndex(1);
+            ImGui.TextUnformatted(_characterDataStats.LastPairReceivedUtc?.ToString("yyyy-MM-dd HH:mm:ss") ?? "-");
+
+            ImGui.EndTable();
+        }
+
+        ImGui.Spacing();
+        _uiShared.BigText("Database Health");
+        UpdateCharacterDataHealthIfReady();
+        if (_characterDataHealthTask == null && _characterDataHealth == null)
+        {
+            RequestCharacterDataHealthCheck();
+        }
+
+        if (ImGui.Button("Run health check"))
+        {
+            RequestCharacterDataHealthCheck();
+        }
+
+        ImGui.SameLine();
+        if (_characterDataHealthTask != null && !_characterDataHealthTask.IsCompleted)
+        {
+            ImGui.TextUnformatted("Checking...");
+        }
+        else if (_characterDataHealthUpdated.HasValue)
+        {
+            ImGui.TextUnformatted($"Updated: {_characterDataHealthUpdated:yyyy-MM-dd HH:mm:ss} UTC");
+        }
+
+        if (!string.IsNullOrEmpty(_characterDataHealthError))
+        {
+            UiSharedService.ColorTextWrapped(_characterDataHealthError, ImGuiColors.DalamudRed);
+        }
+        else if (_characterDataHealth.HasValue)
+        {
+            var (isOk, message) = _characterDataHealth.Value;
+            UiSharedService.ColorTextWrapped(
+                isOk ? $"Health: OK ({message})" : $"Health: {message}",
+                isOk ? ImGuiColors.HealerGreen : ImGuiColors.DalamudRed);
+        }
+
+        ImGui.Spacing();
+        _uiShared.BigText("Maintenance");
+        using (ImRaii.Disabled(_characterDataHealthTask != null && !_characterDataHealthTask.IsCompleted))
+        {
+            if (ImGui.Button("Vacuum database"))
+            {
+                _characterDataHealthError = null;
+                _characterDataHealthTask = Task.Run(async () =>
+                {
+                    await _characterDataSqliteStore.VacuumDatabaseAsync().ConfigureAwait(false);
+                    return (true, "VACUUM completed");
+                });
+            }
+        }
+        _uiShared.DrawHelpText("Reclaims unused space and can improve database performance. This may take a moment.");
+
         if (ImGui.Button("Reset character data database"))
         {
             _resetCharacterDataPopupModalShown = true;
             ImGui.OpenPopup("Reset character data database?");
         }
-        _uiShared.DrawHelpText("Deletes all locally stored character data and learned mods. Use if the database becomes corrupted.");
+        _uiShared.DrawHelpText(
+            "Deletes all locally stored character data and learned mods. Use this if the database becomes corrupted or you want a clean slate.");
 
         if (ImGui.BeginPopupModal("Reset character data database?", ref _resetCharacterDataPopupModalShown, UiSharedService.PopupWindowFlags))
         {
@@ -3169,6 +3401,59 @@ public class SettingsUi : WindowMediatorSubscriberBase
             }
             ImGui.EndPopup();
         }
+    }
+
+    private void RequestCharacterDataStatsRefresh()
+    {
+        _characterDataStatsError = null;
+        _characterDataStatsTask = Task.Run(() => _characterDataSqliteStore.GetDatabaseStatsAsync());
+    }
+
+    private void RequestCharacterDataHealthCheck()
+    {
+        _characterDataHealthError = null;
+        _characterDataHealthTask = Task.Run(() => _characterDataSqliteStore.CheckDatabaseHealthAsync());
+    }
+
+    private void UpdateCharacterDataStatsIfReady()
+    {
+        if (_characterDataStatsTask == null || !_characterDataStatsTask.IsCompleted) return;
+        if (_characterDataStatsTask.IsFaulted)
+        {
+            _characterDataStatsError = _characterDataStatsTask.Exception?.GetBaseException().Message;
+            _characterDataStatsTask = null;
+            return;
+        }
+
+        _characterDataStats = _characterDataStatsTask.Result;
+        _characterDataStatsError = _characterDataStats.Error;
+        _characterDataStatsUpdated = DateTimeOffset.UtcNow;
+        _characterDataStatsTask = null;
+    }
+
+    private void UpdateCharacterDataHealthIfReady()
+    {
+        if (_characterDataHealthTask == null || !_characterDataHealthTask.IsCompleted) return;
+        if (_characterDataHealthTask.IsFaulted)
+        {
+            _characterDataHealthError = _characterDataHealthTask.Exception?.GetBaseException().Message;
+            _characterDataHealthTask = null;
+            return;
+        }
+
+        _characterDataHealth = _characterDataHealthTask.Result;
+        _characterDataHealthError = _characterDataHealth.Value.IsOk ? null : _characterDataHealth.Value.Message;
+        _characterDataHealthUpdated = DateTimeOffset.UtcNow;
+        _characterDataHealthTask = null;
+    }
+
+    private static string FormatBytes(long bytes)
+    {
+        if (bytes <= 0) return "0 B";
+        string[] suffixes = ["B", "KB", "MB", "GB", "TB"];
+        var order = Math.Min(suffixes.Length - 1, (int)Math.Floor(Math.Log(bytes, 1024)));
+        var value = bytes / Math.Pow(1024, order);
+        return $"{value:0.##} {suffixes[order]}";
     }
 
     private void UiSharedService_GposeEnd()

@@ -99,6 +99,119 @@ public sealed class CharacterDataSqliteStore : DisposableMediatorSubscriberBase,
         await InitializeDatabaseAsync(CancellationToken.None).ConfigureAwait(false);
     }
 
+    internal sealed record CharacterDataDatabaseStats(
+        string DatabasePath,
+        long DatabaseSizeBytes,
+        long LocalCharacterCount,
+        long PairCharacterCount,
+        long LearnedModsCount,
+        long ResourceLinksCount,
+        long CacheEntryCount,
+        long LocalDataBytes,
+        long PairDataBytes,
+        DateTimeOffset? LastPairReceivedUtc,
+        string? Error);
+
+    internal async Task<CharacterDataDatabaseStats> GetDatabaseStatsAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var fileSize = File.Exists(_databasePath) ? new FileInfo(_databasePath).Length : 0;
+            using var connection = new SqliteConnection(GetConnectionString());
+            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+            async Task<long> ScalarLongAsync(string sql)
+            {
+                using var command = connection.CreateCommand();
+                command.CommandText = sql;
+                var result = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+                if (result == null || result is DBNull) return 0;
+                return Convert.ToInt64(result);
+            }
+
+            var localCount = await ScalarLongAsync("SELECT COUNT(*) FROM local_character_data;").ConfigureAwait(false);
+            var pairCount = await ScalarLongAsync("SELECT COUNT(*) FROM pair_character_data;").ConfigureAwait(false);
+            var learnedModsCount = await ScalarLongAsync("SELECT COUNT(*) FROM learned_mods;").ConfigureAwait(false);
+            var resourceLinksCount = await ScalarLongAsync("SELECT COUNT(*) FROM resource_links;").ConfigureAwait(false);
+            var cacheEntryCount = await ScalarLongAsync("SELECT COUNT(*) FROM content_addressable_cache;").ConfigureAwait(false);
+            var localBytes = await ScalarLongAsync("SELECT COALESCE(SUM(LENGTH(data_blob)), 0) FROM local_character_data;").ConfigureAwait(false);
+            var pairBytes = await ScalarLongAsync("SELECT COALESCE(SUM(LENGTH(data_blob)), 0) FROM pair_character_data;").ConfigureAwait(false);
+            var lastPairReceived = await ScalarLongAsync("SELECT COALESCE(MAX(received_utc), 0) FROM pair_character_data;").ConfigureAwait(false);
+            DateTimeOffset? lastReceivedUtc = lastPairReceived > 0
+                ? DateTimeOffset.FromUnixTimeMilliseconds(lastPairReceived)
+                : null;
+
+            return new CharacterDataDatabaseStats(
+                _databasePath,
+                fileSize,
+                localCount,
+                pairCount,
+                learnedModsCount,
+                resourceLinksCount,
+                cacheEntryCount,
+                localBytes,
+                pairBytes,
+                lastReceivedUtc,
+                null);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to read character data database stats");
+            return new CharacterDataDatabaseStats(
+                _databasePath,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                null,
+                ex.Message);
+        }
+    }
+
+    internal async Task<(bool IsOk, string Message)> CheckDatabaseHealthAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            using var connection = new SqliteConnection(GetConnectionString());
+            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+            using var command = connection.CreateCommand();
+            command.CommandText = "PRAGMA quick_check(1);";
+            var result = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+            var message = Convert.ToString(result) ?? "unknown";
+            return (string.Equals(message, "ok", StringComparison.OrdinalIgnoreCase), message);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to run database health check");
+            return (false, ex.Message);
+        }
+    }
+
+    internal async Task VacuumDatabaseAsync(CancellationToken cancellationToken = default)
+    {
+        await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            using var connection = new SqliteConnection(GetConnectionString());
+            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+            using var command = connection.CreateCommand();
+            command.CommandText = "VACUUM;";
+            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException("Failed to vacuum character data database.", ex);
+        }
+        finally
+        {
+            _writeLock.Release();
+        }
+    }
+
     /// <summary>
     /// Stores received pair character data in SQLite.
     /// </summary>
