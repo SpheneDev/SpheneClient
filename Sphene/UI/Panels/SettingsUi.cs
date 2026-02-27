@@ -3178,6 +3178,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         var temporaryCollectionTimeoutMinutes = Math.Max(1, _configService.Current.TemporaryCollectionInactivityTimeoutMinutes);
         using (ImRaii.Disabled(!disableTemporaryCollectionsAfterInactivity))
         {
+            ImGui.SetNextItemWidth(220 * ImGuiHelpers.GlobalScale);
             if (ImGui.SliderInt("Temporary collection inactivity timeout (minutes)", ref temporaryCollectionTimeoutMinutes, 1, 40))
             {
                 _configService.Current.TemporaryCollectionInactivityTimeoutMinutes = Math.Max(1, temporaryCollectionTimeoutMinutes);
