@@ -1958,7 +1958,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
 #endif
         
         // Calculate optimal sidebar width based on longest button text + reduced padding
-        var buttonLabels = new[] { "General", "Appearance", "Sync & Network", "Data & Storage", "Diagnostics", "Home", "Connectivity", "People & Notes", "Theme", "Notifications", "Performance", "Transfers", "Storage", "Character Data", "Acknowledgment", "Sync Settings", diagnosticsPageLabel };
+        var buttonLabels = new[] { "General", "Appearance", "Sync & Network", "Data & Storage", "Diagnostics", "Home", "Connectivity", "People & Notes", "Theme", "Notifications", "Performance", "Transfers", "Storage", "Char & Mod Data", "Acknowledgment", "Sync Settings", diagnosticsPageLabel };
         var maxTextWidth = 0f;
         foreach (var label in buttonLabels)
         {
@@ -2012,7 +2012,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         ImGui.Separator();
         SidebarButton("Transfers", SettingsPage.Transfers);
         SidebarButton("Storage", SettingsPage.Storage);
-        SidebarButton("Character Data", SettingsPage.CharacterData);
+        SidebarButton("Char & Mod Data", SettingsPage.CharacterData);
 
         ImGui.Dummy(new Vector2(0, 6f * ImGuiHelpers.GlobalScale));
         ImGui.TextDisabled("Diagnostics");
@@ -3196,12 +3196,26 @@ public class SettingsUi : WindowMediatorSubscriberBase
     private void DrawCharacterDataSettings()
     {
         _lastTab = "CharacterData";
-        _uiShared.BigText("Character Data");
+        _uiShared.BigText("Char & Mod Data");
         ImGui.Separator();
 
         UiSharedService.TextWrapped(
-            "Character data is stored locally to accelerate pairing, compare updates across sessions, and keep track of learned mod states. " +
+            "Character and mod learning data is stored locally to accelerate pairing, compare updates across sessions, and restore learned mod states. " +
             "These settings control what is stored and provide visibility into the database size and contents.");
+
+        ImGui.Spacing();
+        _uiShared.BigText("Mod Learning");
+        UiSharedService.TextWrapped(
+            "Mod learning observes which emotes, VFX, and sounds are tied to each mod option so Sphene can include them in character data ahead of time. " +
+            "Over time it learns which data is needed per character and job, so required files are already present when an emote plays. " +
+            "This keeps transfers small while avoiding extra sends when new effects appear.");
+        var enableModLearning = _configService.Current.EnableModLearning;
+        if (ImGui.Checkbox("Enable mod learning", ref enableModLearning))
+        {
+            _configService.Current.EnableModLearning = enableModLearning;
+            _configService.Save();
+        }
+        _uiShared.DrawHelpText("Disable this to revert to the standard character data flow if you run into issues.");
 
         ImGui.Spacing();
         _uiShared.BigText("Storage Behavior");
@@ -3272,7 +3286,13 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
             ImGui.TableNextRow();
             ImGui.TableSetColumnIndex(0);
-            ImGui.TextUnformatted("Learned Mod Entries");
+            ImGui.TextUnformatted("Learned Mods");
+            ImGui.TableSetColumnIndex(1);
+            ImGui.TextUnformatted(_characterDataStats.LearnedModsDistinctCount.ToString("N0"));
+
+            ImGui.TableNextRow();
+            ImGui.TableSetColumnIndex(0);
+            ImGui.TextUnformatted("Learned Mod Options");
             ImGui.TableSetColumnIndex(1);
             ImGui.TextUnformatted(_characterDataStats.LearnedModsCount.ToString("N0"));
 

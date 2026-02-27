@@ -291,7 +291,8 @@ public sealed class Plugin : IDalamudPlugin
                 gameData,
                 s.GetRequiredService<CharacterDataSqliteStore>(),
                 s.GetRequiredService<DalamudUtilService>(),
-                s.GetRequiredService<FileCacheManager>()
+                s.GetRequiredService<FileCacheManager>(),
+                s.GetRequiredService<SpheneConfigService>()
             ));
             collection.AddHostedService(s => s.GetRequiredService<ModLearningService>());
             collection.AddSingleton((s) => new IpcCallerGlamourer(s.GetRequiredService<ILogger<IpcCallerGlamourer>>(), pluginInterface,

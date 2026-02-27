@@ -137,5 +137,6 @@ public class SpheneConfig : ISpheneConfiguration
     public bool DisableTemporaryCollectionsAfterInactivity { get; set; } = false;
     public int TemporaryCollectionInactivityTimeoutMinutes { get; set; } = 5;
     public bool PersistReceivedCharacterData { get; set; } = false;
+    public bool EnableModLearning { get; set; } = true;
 
 }

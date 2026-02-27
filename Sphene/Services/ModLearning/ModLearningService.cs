@@ -18,6 +18,7 @@ using System.Threading;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using Sphene.FileCache;
+using Sphene.SpheneConfiguration;
 
 namespace Sphene.Services.ModLearning;
 
@@ -30,6 +31,7 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
     private readonly IDataManager _gameData;
     private readonly DalamudUtilService _dalamudUtil;
     private readonly FileCacheManager _fileCacheManager;
+    private readonly SpheneConfigService _configService;
     private readonly Dictionary<string, Dictionary<string, Dictionary<string, HashSet<string>>>> _modOptionIndexCache = [];
     private readonly Dictionary<string, Dictionary<string, Dictionary<string, OptionFileEntry>>> _modOptionFileMapCache = [];
     private readonly Dictionary<string, string> _stateHashCache = new(StringComparer.Ordinal);
@@ -47,7 +49,7 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
 
     private readonly Lock _lock = new();
 
-    public ModLearningService(ILogger<ModLearningService> logger, IpcCallerPenumbra penumbra, SpheneMediator mediator, IClientState clientState, IDataManager gameData, CharacterDataSqliteStore sqliteStore, DalamudUtilService dalamudUtil, FileCacheManager fileCacheManager) 
+    public ModLearningService(ILogger<ModLearningService> logger, IpcCallerPenumbra penumbra, SpheneMediator mediator, IClientState clientState, IDataManager gameData, CharacterDataSqliteStore sqliteStore, DalamudUtilService dalamudUtil, FileCacheManager fileCacheManager, SpheneConfigService configService) 
         : base(logger, mediator)
     {
         _logger = logger;
@@ -57,6 +59,7 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
         _sqliteStore = sqliteStore;
         _dalamudUtil = dalamudUtil;
         _fileCacheManager = fileCacheManager;
+        _configService = configService;
         _papEmoteMap = new Lazy<Dictionary<string, List<string>>>(BuildPapEmoteMap);
 
         Mediator.Subscribe<CharacterDataCreatedMessage>(this, OnCharacterDataCreated);
@@ -83,6 +86,7 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
 
     private void OnPenumbraResourceLoad(PenumbraResourceLoadMessage msg)
     {
+        if (!_configService.Current.EnableModLearning) return;
         var gamePath = NormalizePathString(msg.GamePath);
         var filePath = NormalizeFilePath(msg.FilePath);
         if (string.IsNullOrWhiteSpace(gamePath) || string.IsNullOrWhiteSpace(filePath)) return;
@@ -138,6 +142,7 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
 
     private void OnPenumbraModSettingChanged(PenumbraModSettingChangedMessage msg)
     {
+        if (!_configService.Current.EnableModLearning) return;
         _penumbraSettingChangeCount++;
         _lastPenumbraSettingChangeAt = DateTime.UtcNow;
         _logger.LogDebug("[ModLearning] Penumbra settings changed. Count={count}", _penumbraSettingChangeCount);
@@ -154,6 +159,11 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
 
     private void OnCharacterDataCreated(CharacterDataCreatedMessage msg)
     {
+        if (!_configService.Current.EnableModLearning)
+        {
+            PublishReadyForPush(msg.CharacterData);
+            return;
+        }
         var rawData = msg.RawData;
         if (rawData == null)
         {
@@ -1331,6 +1341,15 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
             _logger.LogTrace("[ModLearning] ChangedItems count={count}", changedItems.Count);
             var knownMods = _penumbra.GetMods();
             _logger.LogTrace("[ModLearning] Known mods count={count}", knownMods.Count);
+            var changedMods = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var changedKey in changedItems.Keys)
+            {
+                if (knownMods.ContainsKey(changedKey))
+                {
+                    changedMods.Add(changedKey);
+                }
+            }
+            var hasChangedMods = changedMods.Count > 0;
 
             // Group replacements by Mod Directory Name
             var replacementsByMod = new Dictionary<string, List<FileReplacement>>(StringComparer.OrdinalIgnoreCase);
@@ -1414,6 +1433,10 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
 
                     if (modName != null)
                     {
+                        if (hasChangedMods && !changedMods.Contains(modName))
+                        {
+                            continue;
+                        }
                         if (!replacementsByMod.ContainsKey(modName))
                             replacementsByMod[modName] = [];
                         replacementsByMod[modName].Add(replacement);
@@ -1426,9 +1449,8 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
                 _logger.LogDebug("[ModLearning] No replacements found that match ModDirectory. totalReplacements={count}", data.Sum(k => k.Value.Count));
             }
 
-            foreach (var changedKey in changedItems.Keys)
+            foreach (var changedKey in changedMods)
             {
-                if (!knownMods.ContainsKey(changedKey)) continue;
                 if (!replacementsByMod.ContainsKey(changedKey))
                 {
                     replacementsByMod[changedKey] = [];
@@ -1474,6 +1496,16 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
                 if (enabled)
                 {
                     var settingsDict = settings.ToDictionary(k => k.Key, k => k.Value.ToList(), StringComparer.Ordinal);
+                    if (modReplacements.Count == 0)
+                    {
+                        var settingsHash = ComputeSettingsHash(settingsDict);
+                        var cacheKey = $"{key}|{modDirName}|{settingsHash}";
+                        if (_stateHashCache.ContainsKey(cacheKey))
+                        {
+                            _logger.LogTrace("[ModLearning] Skipping mod without replacements due to cached settings hash: {mod} settingsHash={settingsHash}", modDirName, settingsHash);
+                            continue;
+                        }
+                    }
                     _logger.LogTrace("[ModLearning] Mod settings: {mod} enabled={enabled} groups={groups}", modDirName, enabled, settingsDict.Count);
                     var optionStates = await BuildOptionStatesAsync(modDir, modDirName, modReplacements, data, settingsDict).ConfigureAwait(false);
                     _logger.LogDebug("[ModLearning] Option states built: {mod} count={count}", modDirName, optionStates.Count);

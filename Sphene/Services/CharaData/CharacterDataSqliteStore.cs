@@ -104,6 +104,7 @@ public sealed class CharacterDataSqliteStore : DisposableMediatorSubscriberBase,
         long DatabaseSizeBytes,
         long LocalCharacterCount,
         long PairCharacterCount,
+        long LearnedModsDistinctCount,
         long LearnedModsCount,
         long ResourceLinksCount,
         long CacheEntryCount,
@@ -132,6 +133,7 @@ public sealed class CharacterDataSqliteStore : DisposableMediatorSubscriberBase,
             var localCount = await ScalarLongAsync("SELECT COUNT(*) FROM local_character_data;").ConfigureAwait(false);
             var pairCount = await ScalarLongAsync("SELECT COUNT(*) FROM pair_character_data;").ConfigureAwait(false);
             var learnedModsCount = await ScalarLongAsync("SELECT COUNT(*) FROM learned_mods;").ConfigureAwait(false);
+            var learnedModsDistinct = await ScalarLongAsync("SELECT COUNT(DISTINCT mod_directory_name) FROM learned_mods;").ConfigureAwait(false);
             var resourceLinksCount = await ScalarLongAsync("SELECT COUNT(*) FROM resource_links;").ConfigureAwait(false);
             var cacheEntryCount = await ScalarLongAsync("SELECT COUNT(*) FROM content_addressable_cache;").ConfigureAwait(false);
             var localBytes = await ScalarLongAsync("SELECT COALESCE(SUM(LENGTH(data_blob)), 0) FROM local_character_data;").ConfigureAwait(false);
@@ -146,6 +148,7 @@ public sealed class CharacterDataSqliteStore : DisposableMediatorSubscriberBase,
                 fileSize,
                 localCount,
                 pairCount,
+                learnedModsDistinct,
                 learnedModsCount,
                 resourceLinksCount,
                 cacheEntryCount,
@@ -159,6 +162,7 @@ public sealed class CharacterDataSqliteStore : DisposableMediatorSubscriberBase,
             Logger.LogWarning(ex, "Failed to read character data database stats");
             return new CharacterDataDatabaseStats(
                 _databasePath,
+                0,
                 0,
                 0,
                 0,
