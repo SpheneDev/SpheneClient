@@ -541,6 +541,20 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         {
             playerChangesToAdjust.Remove(PlayerChanges.ForcedRedraw);
         }
+        var hasTemporaryCollection = _penumbraCollection != Guid.Empty;
+        var specialEmoteChanged = characterData.HasSpecialEmoteChanges(_cachedData);
+        var eyeTextureChanged = characterData.HasEyeTextureChanges(_cachedData);
+        if (hasTemporaryCollection && !forceRedraw && !specialEmoteChanged && !eyeTextureChanged
+            && charaDataToUpdate.TryGetValue(ObjectKind.Player, out var playerChangesWithoutRedraw))
+        {
+            playerChangesWithoutRedraw.Remove(PlayerChanges.ForcedRedraw);
+        }
+        else if (!hasTemporaryCollection
+            && charaDataToUpdate.TryGetValue(ObjectKind.Player, out var playerChangesWithRedraw)
+            && playerChangesWithRedraw.Contains(PlayerChanges.ModFiles))
+        {
+            playerChangesWithRedraw.Add(PlayerChanges.ForcedRedraw);
+        }
         if (forceRedraw)
         {
             if (charaDataToUpdate.TryGetValue(ObjectKind.Player, out var playerChangesToForce))

@@ -217,6 +217,14 @@ public static class VariousExtensions
         return eyesChanged || hasNewTransient;
     }
 
+    public static bool HasEyeTextureChanges(this CharacterData newData, CharacterData? oldData)
+    {
+        oldData ??= new CharacterData();
+        oldData.FileReplacements.TryGetValue(ObjectKind.Player, out var existingFileReplacements);
+        newData.FileReplacements.TryGetValue(ObjectKind.Player, out var newFileReplacements);
+        return HasEyeTextureChanges(existingFileReplacements, newFileReplacements);
+    }
+
     public static bool HasSpecialEmotePap(this CharacterData data)
     {
         if (!data.FileReplacements.TryGetValue(ObjectKind.Player, out var list) || list.Count == 0) return false;
@@ -229,6 +237,16 @@ public static class VariousExtensions
             }
         }
         return false;
+    }
+
+    public static bool HasSpecialEmoteChanges(this CharacterData newData, CharacterData? oldData)
+    {
+        oldData ??= new CharacterData();
+        oldData.FileReplacements.TryGetValue(ObjectKind.Player, out var existingFileReplacements);
+        newData.FileReplacements.TryGetValue(ObjectKind.Player, out var newFileReplacements);
+        var existingSpecial = FilterSpecialEmoteReplacements(existingFileReplacements);
+        var newSpecial = FilterSpecialEmoteReplacements(newFileReplacements);
+        return !existingSpecial.SequenceEqual(newSpecial, PlayerData.Data.FileReplacementDataComparer.Instance);
     }
 
     public static bool IsEquipmentOrWeaponOnlyChange(this CharacterData newData, CharacterData? oldData)
@@ -272,6 +290,15 @@ public static class VariousExtensions
             .ToList();
     }
 
+    private static List<FileReplacementData> FilterSpecialEmoteReplacements(IEnumerable<FileReplacementData>? fileReplacements)
+    {
+        if (fileReplacements == null) return [];
+        return fileReplacements
+            .Where(g => g.GamePaths.Any(IsSpecialEmotePath))
+            .OrderBy(g => string.IsNullOrEmpty(g.Hash) ? g.FileSwapPath : g.Hash, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
     private static bool IsEyePath(string path)
     {
         return path.Contains("/eye/", StringComparison.OrdinalIgnoreCase)
@@ -283,6 +310,12 @@ public static class VariousExtensions
         return !path.EndsWith("mdl", StringComparison.OrdinalIgnoreCase)
             && !path.EndsWith("tex", StringComparison.OrdinalIgnoreCase)
             && !path.EndsWith("mtrl", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsSpecialEmotePath(string path)
+    {
+        var file = Path.GetFileName(path);
+        return _specialEmotePaps.Contains(file);
     }
 
     private static readonly HashSet<string> _specialEmotePaps = new(StringComparer.OrdinalIgnoreCase)

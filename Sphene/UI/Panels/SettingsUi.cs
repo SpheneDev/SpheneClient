@@ -1247,7 +1247,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         }
         using (ImRaii.Disabled(_selectedTempCollectionEntry == -1))
         {
-            if (_uiShared.IconTextButton(FontAwesomeIcon.Trash, "Delete selected UID from temporary collection list"))
+            if (_uiShared.IconTextButton(FontAwesomeIcon.Trash, "Delete selected UID"))
             {
                 _playerPerformanceConfigService.Current.TemporaryCollectionWhitelist.RemoveAt(_selectedTempCollectionEntry);
                 _selectedTempCollectionEntry = -1;
