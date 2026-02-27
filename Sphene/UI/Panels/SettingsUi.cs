@@ -78,6 +78,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
     private bool _readClearCache = false;
     private int _selectedEntry = -1;
     private string _uidToAddForIgnore = string.Empty;
+    private int _selectedTempCollectionEntry = -1;
+    private string _uidToAddForTempCollection = string.Empty;
     private CancellationTokenSource? _validationCts;
     private Task<List<FileCacheEntity>>? _validationTask;
     private bool _wasOpen = false;
@@ -202,6 +204,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
         _uiShared.EditTrackerPosition = false;
         _uidToAddForIgnore = string.Empty;
+        _uidToAddForTempCollection = string.Empty;
         _secretKeysConversionCts = _secretKeysConversionCts.CancelRecreate();
         _downloadServersTask = null;
         _speedTestTask = null;
@@ -1173,6 +1176,73 @@ public class SettingsUi : WindowMediatorSubscriberBase
             {
                 _playerPerformanceConfigService.Current.UIDsToIgnore.RemoveAt(_selectedEntry);
                 _selectedEntry = -1;
+                _playerPerformanceConfigService.Save();
+            }
+        }
+        ImGui.Dummy(new Vector2(10));
+        _uiShared.BigText("Temporary Collection Whitelist");
+        UiSharedService.TextWrapped("Only users in this list will use preloaded temporary collections when the preload option is enabled.");
+        ImGui.Dummy(new Vector2(10));
+        ImGui.SetNextItemWidth(200 * ImGuiHelpers.GlobalScale);
+        ImGui.InputText("##tempcollectionuid", ref _uidToAddForTempCollection, 20);
+        ImGui.SameLine();
+        using (ImRaii.Disabled(string.IsNullOrEmpty(_uidToAddForTempCollection)))
+        {
+            if (_uiShared.IconTextButton(FontAwesomeIcon.Plus, "Add UID/Vanity ID to temporary collection list"))
+            {
+                if (!_playerPerformanceConfigService.Current.TemporaryCollectionWhitelist.Contains(_uidToAddForTempCollection, StringComparer.Ordinal))
+                {
+                    _playerPerformanceConfigService.Current.TemporaryCollectionWhitelist.Add(_uidToAddForTempCollection);
+                    _playerPerformanceConfigService.Save();
+                }
+                _uidToAddForTempCollection = string.Empty;
+            }
+        }
+        _uiShared.DrawHelpText("Hint: UIDs are case sensitive.");
+        var tempCollectionList = _playerPerformanceConfigService.Current.TemporaryCollectionWhitelist;
+        ImGui.SetNextItemWidth(400 * ImGuiHelpers.GlobalScale);
+        using (var lb = ImRaii.ListBox("Temporary collection whitelist"))
+        {
+            if (lb)
+            {
+                for (int i = 0; i < tempCollectionList.Count; i++)
+                {
+                    bool shouldBeSelected = _selectedTempCollectionEntry == i;
+                    var identifier = tempCollectionList[i];
+                    var pair = _pairManager.GetPairByUID(identifier);
+                    if (pair == null)
+                    {
+                        pair = _pairManager.DirectPairs.FirstOrDefault(p =>
+                            string.Equals(p.UserData.Alias, identifier, StringComparison.Ordinal));
+                    }
+
+                    var displayText = identifier;
+                    if (pair != null)
+                    {
+                        var note = pair.GetNote();
+                        if (!string.IsNullOrEmpty(note))
+                        {
+                            displayText = $"{identifier} ({note})";
+                        }
+                        else if (!string.IsNullOrEmpty(pair.UserData.Alias))
+                        {
+                            displayText = $"{identifier} ({pair.UserData.Alias})";
+                        }
+                    }
+
+                    if (ImGui.Selectable(displayText + "##tempcollection" + i, shouldBeSelected))
+                    {
+                        _selectedTempCollectionEntry = i;
+                    }
+                }
+            }
+        }
+        using (ImRaii.Disabled(_selectedTempCollectionEntry == -1))
+        {
+            if (_uiShared.IconTextButton(FontAwesomeIcon.Trash, "Delete selected UID from temporary collection list"))
+            {
+                _playerPerformanceConfigService.Current.TemporaryCollectionWhitelist.RemoveAt(_selectedTempCollectionEntry);
+                _selectedTempCollectionEntry = -1;
                 _playerPerformanceConfigService.Save();
             }
         }
@@ -3002,7 +3072,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         }
         _uiShared.DrawHelpText(
             "When enabled, Sphene prepares a pair's temporary collection using the last received character data even if the pair is not visible. " +
-            "This can reduce visual deformation when you first see the pair, but may increase background work.");
+            "Only users in the Temporary Collection Whitelist will be preloaded. This can reduce visual deformation when you first see the pair, but may increase background work.");
 
         var temporaryCollectionTimeoutMinutes = Math.Max(1, _configService.Current.TemporaryCollectionInactivityTimeoutMinutes);
         using (ImRaii.Disabled(!disableTemporaryCollectionsAfterInactivity))

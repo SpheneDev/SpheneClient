@@ -429,6 +429,41 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
             }
             UiSharedService.AttachToolTip("Removes this user from the performance whitelist.");
         }
+
+        ImGui.Separator();
+        ImGui.TextUnformatted("Temporary Collection Preload");
+
+        var tempWhitelist = _performanceConfigService.Current.TemporaryCollectionWhitelist;
+        bool isTempWhitelisted = tempWhitelist.Contains(userIdentifier, StringComparer.Ordinal) ||
+                                 tempWhitelist.Contains(_pair.UserData.UID, StringComparer.Ordinal);
+
+        if (!isTempWhitelisted)
+        {
+            if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.Shield, "Add to Temporary Collection Whitelist", _menuWidth, ButtonStyleKeys.ContextMenu_Item))
+            {
+                var identifierToAdd = !string.IsNullOrEmpty(_pair.UserData.Alias) ? _pair.UserData.Alias : _pair.UserData.UID;
+                if (!tempWhitelist.Contains(identifierToAdd, StringComparer.Ordinal))
+                {
+                    tempWhitelist.Add(identifierToAdd);
+                    _performanceConfigService.Save();
+                }
+                ImGui.CloseCurrentPopup();
+            }
+            UiSharedService.AttachToolTip("Adds this user to the temporary collection preload whitelist." + Environment.NewLine +
+                                          "Will use: " + (!string.IsNullOrEmpty(_pair.UserData.Alias) ? _pair.UserData.Alias : _pair.UserData.UID));
+        }
+        else
+        {
+            if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.ShieldAlt, "Remove from Temporary Collection Whitelist", _menuWidth, ButtonStyleKeys.ContextMenu_Item))
+            {
+                tempWhitelist.RemoveAll(uid =>
+                    string.Equals(uid, _pair.UserData.Alias, StringComparison.Ordinal) ||
+                    string.Equals(uid, _pair.UserData.UID, StringComparison.Ordinal));
+                _performanceConfigService.Save();
+                ImGui.CloseCurrentPopup();
+            }
+            UiSharedService.AttachToolTip("Removes this user from the temporary collection preload whitelist.");
+        }
     }
 
     private bool _disposed;

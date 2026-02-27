@@ -194,6 +194,7 @@ public class Pair : DisposableMediatorSubscriberBase
         SeStringBuilder seStringBuilder3 = new();
         SeStringBuilder seStringBuilder4 = new();
         SeStringBuilder seStringBuilder5 = new();
+        SeStringBuilder seStringBuilder6 = new();
         var openProfileSeString = seStringBuilder.AddText("Open Profile").Build();
         var reapplyDataSeString = seStringBuilder2.AddText("Reapply last data").Build();
         var cyclePauseState = seStringBuilder3.AddText("Cycle pause state").Build();
@@ -205,6 +206,11 @@ public class Pair : DisposableMediatorSubscriberBase
         var isWhitelisted = System.Linq.Enumerable.Contains(config.UIDsToIgnore, UserData.UID, StringComparer.Ordinal);
         var whitelistText = isWhitelisted ? "Remove from Performance Whitelist" : "Add to Performance Whitelist";
         var performanceWhitelistSeString = seStringBuilder5.AddText(whitelistText).Build();
+        var tempWhitelist = config.TemporaryCollectionWhitelist;
+        var isTempWhitelisted = System.Linq.Enumerable.Contains(tempWhitelist, userIdentifier, StringComparer.Ordinal) ||
+                                System.Linq.Enumerable.Contains(tempWhitelist, UserData.UID, StringComparer.Ordinal);
+        var tempWhitelistText = isTempWhitelisted ? "Remove from Temporary Collection Whitelist" : "Add to Temporary Collection Whitelist";
+        var tempWhitelistSeString = seStringBuilder6.AddText(tempWhitelistText).Build();
         
         args.AddMenuItem(new MenuItem()
         {
@@ -258,6 +264,31 @@ public class Pair : DisposableMediatorSubscriberBase
                     // Add to whitelist with identifier for reference
                     config.UIDsToIgnore.Add(UserData.UID);
                     Logger.LogInformation("Added {identifier} ({uid}) to performance whitelist", userIdentifier, UserData.UID);
+                }
+                _playerPerformanceConfigService.Save();
+            },
+            UseDefaultPrefix = false,
+            PrefixChar = 'S',
+            PrefixColor = 500
+        });
+
+        args.AddMenuItem(new MenuItem()
+        {
+            Name = tempWhitelistSeString,
+            OnClicked = (a) =>
+            {
+                if (isTempWhitelisted)
+                {
+                    tempWhitelist.RemoveAll(uid =>
+                        string.Equals(uid, UserPair.User.Alias, StringComparison.Ordinal) ||
+                        string.Equals(uid, UserData.UID, StringComparison.Ordinal));
+                    Logger.LogInformation("Removed {identifier} ({uid}) from temporary collection whitelist", userIdentifier, UserData.UID);
+                }
+                else
+                {
+                    var identifierToAdd = !string.IsNullOrEmpty(UserPair.User.Alias) ? UserPair.User.Alias : UserData.UID;
+                    tempWhitelist.Add(identifierToAdd);
+                    Logger.LogInformation("Added {identifier} ({uid}) to temporary collection whitelist", userIdentifier, UserData.UID);
                 }
                 _playerPerformanceConfigService.Save();
             },
@@ -466,7 +497,7 @@ public class Pair : DisposableMediatorSubscriberBase
 
             CachedPlayer?.Dispose();
             CachedPlayer = _cachedPlayerFactory.Create(this);
-            if (_configService.Current.PreloadPairCollectionFromLastReceivedData && LastReceivedCharacterData != null)
+            if (_configService.Current.PreloadPairCollectionFromLastReceivedData && LastReceivedCharacterData != null && IsTemporaryCollectionPreloadAllowed())
             {
                 _ = CachedPlayer.PreloadTemporaryCollectionFromLastReceivedDataAsync(LastReceivedCharacterData.DeepClone());
             }
@@ -480,6 +511,15 @@ public class Pair : DisposableMediatorSubscriberBase
     public string? GetNote()
     {
         return _serverConfigurationManager.GetNoteForUid(UserData.UID);
+    }
+
+    private bool IsTemporaryCollectionPreloadAllowed()
+    {
+        var whitelist = _playerPerformanceConfigService.Current.TemporaryCollectionWhitelist;
+        if (whitelist.Count == 0) return false;
+        var userIdentifier = !string.IsNullOrEmpty(UserData.Alias) ? UserData.Alias : UserData.UID;
+        return whitelist.Contains(userIdentifier, StringComparer.Ordinal) ||
+               whitelist.Contains(UserData.UID, StringComparer.Ordinal);
     }
 
     public string GetPlayerNameHash()
