@@ -321,6 +321,10 @@ public class CompactUi : WindowMediatorSubscriberBase
         {
             if (msg.UiType == GetType())
             {
+                if (!_dalamudUtilService.IsLoggedIn)
+                {
+                    return;
+                }
                 if (_stickEnabled)
                 {
                     return;
@@ -331,7 +335,7 @@ public class CompactUi : WindowMediatorSubscriberBase
 
         Mediator.Subscribe<FrameworkUpdateMessage>(this, (_) =>
         {
-            if (_stickEnabled && !IsOpen)
+            if (_stickEnabled && !IsOpen && _dalamudUtilService.IsLoggedIn)
                 IsOpen = true;
         });
 
@@ -389,7 +393,10 @@ public class CompactUi : WindowMediatorSubscriberBase
         var ver = Assembly.GetExecutingAssembly().GetName().Version!;
         var revision = ver.Revision < 0 ? 0 : ver.Revision;
         WindowName = $"Sphene {dev} ({ver.Major}.{ver.Minor}.{ver.Build}.{revision})###SpheneMainUI";
-        Toggle();
+        if (_dalamudUtilService.IsLoggedIn)
+        {
+            Toggle();
+        }
 #else
         var ver = Assembly.GetExecutingAssembly().GetName().Version;
         var major = ver?.Major ?? 0;
@@ -399,8 +406,15 @@ public class CompactUi : WindowMediatorSubscriberBase
         if (revision < 0) revision = 0;
         WindowName = "Sphene " + major + "." + minor + "." + build + "." + revision + "###SpheneMainUI";
 #endif
-        Mediator.Subscribe<SwitchToMainUiMessage>(this, (_) => IsOpen = true);
+        Mediator.Subscribe<SwitchToMainUiMessage>(this, (_) =>
+        {
+            if (_dalamudUtilService.IsLoggedIn)
+            {
+                IsOpen = true;
+            }
+        });
         Mediator.Subscribe<SwitchToIntroUiMessage>(this, (_) => { _logger.LogDebug("SwitchToIntroUiMessage received, closing CompactUI"); IsOpen = false; });
+        Mediator.Subscribe<DalamudLogoutMessage>(this, (_) => IsOpen = false);
         Mediator.Subscribe<CutsceneStartMessage>(this, (_) => UiSharedService_GposeStart());
         Mediator.Subscribe<CutsceneEndMessage>(this, (_) => UiSharedService_GposeEnd());
         Mediator.Subscribe<DownloadStartedMessage>(this, (msg) => _currentDownloads[msg.DownloadId] = msg.DownloadStatus);
