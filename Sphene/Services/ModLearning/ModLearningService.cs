@@ -174,12 +174,12 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
         _logger.LogDebug("[ModLearning] CharacterDataCreated: kinds={kinds} hash={hash}", rawData.FileReplacements.Count, msg.CharacterData.DataHash?.Value ?? "null");
         // Extract relevant data synchronously (safe because we are inside the lock of CacheCreationService)
         var extractedData = new Dictionary<ObjectKind, List<FileReplacement>>();
-        foreach (var kvp in rawData.FileReplacements)
+            foreach (var kvp in rawData.FileReplacements)
         {
             var list = new List<FileReplacement>();
             foreach (var r in kvp.Value)
             {
-                 if ((r.HasFileReplacement || r.IsFileSwap) && IsTrackedReplacement(r))
+                 if ((r.HasFileReplacement || r.IsFileSwap) && IsTrackedReplacement(r, kvp.Key))
                  {
                      list.Add(r);
                  }
@@ -1059,13 +1059,15 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
         var gamePathSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var state in states)
         {
-            foreach (var fragment in state.Fragments.Values)
+            foreach (var fragmentEntry in state.Fragments)
             {
+                var kind = fragmentEntry.Key;
+                var fragment = fragmentEntry.Value;
                 foreach (var replacement in GetAllReplacements(fragment))
                 {
                     foreach (var gp in replacement.GamePaths)
                     {
-                        if (!IsTrackedExt(Path.GetExtension(gp))) continue;
+                        if (!IsTrackedExtForKind(kind, Path.GetExtension(gp))) continue;
                         if (gamePathSet.Add(gp))
                         {
                             gamePathList.Add(gp);
@@ -1248,6 +1250,15 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
             || string.Equals(extension, ".tmb", StringComparison.OrdinalIgnoreCase);
     }
 
+    private static bool IsTrackedExtForKind(ObjectKind objectKind, string extension)
+    {
+        if (IsTrackedExt(extension)) return true;
+        return objectKind == ObjectKind.MinionOrMount &&
+               (string.Equals(extension, ".mdl", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(extension, ".mtrl", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(extension, ".tex", StringComparison.OrdinalIgnoreCase));
+    }
+
     private static bool IsTrackedParentExt(string extension)
     {
         return string.Equals(extension, ".pap", StringComparison.OrdinalIgnoreCase)
@@ -1261,21 +1272,21 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
             p.EndsWith(".avfx", StringComparison.OrdinalIgnoreCase));
     }
 
-    private static bool IsTrackedReplacement(FileReplacement replacement)
+    private static bool IsTrackedReplacement(FileReplacement replacement, ObjectKind objectKind)
     {
-        return replacement.GamePaths.Any(p => IsTrackedExt(Path.GetExtension(p)));
+        return replacement.GamePaths.Any(p => IsTrackedExtForKind(objectKind, Path.GetExtension(p)));
     }
 
-    private static void FilterUntrackedReplacements(ModFileFragment fragment)
+    private static void FilterUntrackedReplacements(ModFileFragment fragment, ObjectKind objectKind)
     {
         fragment.FileReplacements ??= [];
         fragment.JobFileReplacements ??= [];
-        fragment.FileReplacements = fragment.FileReplacements.Where(IsTrackedReplacement).ToHashSet();
+        fragment.FileReplacements = fragment.FileReplacements.Where(r => IsTrackedReplacement(r, objectKind)).ToHashSet();
         foreach (var jobId in fragment.JobFileReplacements.Keys.ToList())
         {
             var list = fragment.JobFileReplacements[jobId];
             if (list == null) continue;
-            fragment.JobFileReplacements[jobId] = list.Where(IsTrackedReplacement).ToHashSet();
+            fragment.JobFileReplacements[jobId] = list.Where(r => IsTrackedReplacement(r, objectKind)).ToHashSet();
         }
     }
 
@@ -1584,9 +1595,11 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
                                     AddOrElevateJobReplacement(existingFragment, jobIdForKind, replacement, promoteToGlobal);
                                 }
 
-                                FilterUntrackedReplacements(existingFragment);
+                                FilterUntrackedReplacements(existingFragment, kind);
                                 NormalizeJobReplacements(existingFragment);
                             }
+
+                            RemoveMinionOverridesFromPlayer(existingState);
 
                             var hadScdLinks = existingState.ScdLinks != null && existingState.ScdLinks.Count > 0;
                             existingState.ScdLinks = BuildScdLinksForState(modDirName, existingState, scdBuildSkipLogged);
@@ -2125,6 +2138,34 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
             RemoveConflictingReplacements(fragment, replacement);
             AddOrElevateJobReplacement(fragment, 0, replacement, true);
         }
+    }
+
+    private static void RemoveMinionOverridesFromPlayer(LearnedModState state)
+    {
+        if (!state.Fragments.TryGetValue(ObjectKind.MinionOrMount, out var minionFragment)) return;
+        if (!state.Fragments.TryGetValue(ObjectKind.Player, out var playerFragment)) return;
+
+        var minionPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var replacement in GetAllReplacements(minionFragment))
+        {
+            foreach (var gp in replacement.GamePaths)
+            {
+                minionPaths.Add(NormalizePathString(gp));
+            }
+        }
+
+        if (minionPaths.Count == 0) return;
+
+        playerFragment.FileReplacements.RemoveWhere(replacement =>
+            replacement.GamePaths.Any(p => minionPaths.Contains(NormalizePathString(p))));
+
+        foreach (var jobSet in playerFragment.JobFileReplacements.Values)
+        {
+            if (jobSet == null) continue;
+            jobSet.RemoveWhere(replacement =>
+                replacement.GamePaths.Any(p => minionPaths.Contains(NormalizePathString(p))));
+        }
+        CleanupEmptyJobSets(playerFragment);
     }
 
     private static bool AreSettingsEqual(Dictionary<string, List<string>> a, Dictionary<string, List<string>> b)
