@@ -1569,6 +1569,7 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
                             {
                                 var kind = fragmentKvp.Key;
                                 var newFragment = fragmentKvp.Value;
+                                var jobIdForKind = kind == ObjectKind.MinionOrMount ? 0u : jobId;
 
                                 if (!existingState.Fragments.TryGetValue(kind, out var existingFragment))
                                 {
@@ -1578,9 +1579,9 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
 
                                 foreach (var replacement in newFragment.FileReplacements)
                                 {
-                                    var promoteToGlobal = IsReplacementShared(existingFragment, jobId, replacement);
+                                    var promoteToGlobal = IsReplacementShared(existingFragment, jobIdForKind, replacement);
                                     RemoveConflictingReplacements(existingFragment, replacement);
-                                    AddOrElevateJobReplacement(existingFragment, jobId, replacement, promoteToGlobal);
+                                    AddOrElevateJobReplacement(existingFragment, jobIdForKind, replacement, promoteToGlobal);
                                 }
 
                                 FilterUntrackedReplacements(existingFragment);
