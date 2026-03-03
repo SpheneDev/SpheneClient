@@ -266,6 +266,8 @@ public sealed class CacheCreationService : DisposableMediatorSubscriberBase
                     createdData[objectKind] = await _characterDataFactory.BuildCharacterData(_playerRelatedObjects[objectKind], linkedCts.Token).ConfigureAwait(false);
                 }
 
+                RemovePlayerMinionOverlaps(createdData);
+
                 lock (_playerDataLock)
                 {
                     foreach (var kvp in createdData)
@@ -317,5 +319,31 @@ public sealed class CacheCreationService : DisposableMediatorSubscriberBase
                 Logger.LogDebug("Cache Creation complete");
             }
         });
+    }
+
+    private static void RemovePlayerMinionOverlaps(Dictionary<ObjectKind, CharacterDataFragment?> createdData)
+    {
+        if (!createdData.TryGetValue(ObjectKind.Player, out var playerFragment) || playerFragment == null) return;
+        if (!createdData.TryGetValue(ObjectKind.MinionOrMount, out var minionFragment) || minionFragment == null) return;
+        if (playerFragment.FileReplacements.Count == 0 || minionFragment.FileReplacements.Count == 0) return;
+
+        var minionPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var replacement in minionFragment.FileReplacements)
+        {
+            foreach (var path in replacement.GamePaths)
+            {
+                minionPaths.Add(NormalizePathString(path));
+            }
+        }
+
+        if (minionPaths.Count == 0) return;
+
+        playerFragment.FileReplacements.RemoveWhere(replacement =>
+            replacement.GamePaths.Any(p => minionPaths.Contains(NormalizePathString(p))));
+    }
+
+    private static string NormalizePathString(string path)
+    {
+        return path.Replace('\\', '/').ToLowerInvariant();
     }
 }
