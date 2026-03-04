@@ -90,6 +90,7 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
     private bool _modLearningTabActive = false;
     private bool _modLearningFirstTabVisitDone = false;
     private bool _modLearningRefreshRequested = false;
+    private bool _modLearningCollapseResetRequested = true;
     private static readonly JsonSerializerOptions ModLearningJsonOptions = new()
     {
         WriteIndented = true
@@ -307,6 +308,7 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
 
     private void DrawModLearning()
     {
+        var resetCollapse = _modLearningCollapseResetRequested;
         if (_modLearningRefreshRequested)
         {
             _modLearningRefreshRequested = false;
@@ -472,12 +474,13 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
         ImGuiHelpers.ScaledDummy(8);
         using (ImRaii.Child("##modlearning_content", new Vector2(0, 0), false, ImGuiWindowFlags.HorizontalScrollbar))
         {
-            DrawModLearningJsonBuild();
+            DrawModLearningJsonBuild(resetCollapse);
 
         var selectedState = GetSelectedState();
         if (selectedState == null)
         {
             ImGui.TextUnformatted("Select a character, mod and option to view entries.");
+            _modLearningCollapseResetRequested = false;
             return;
         }
 
@@ -559,7 +562,8 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
             var missingNotLoaded = missingEntries.Where(entry => !HasLocalEntriesForPaths(entry, currentEntries)).ToList();
             var missingLoaded = missingEntries.Where(entry => HasLocalEntriesForPaths(entry, currentEntries)).ToList();
             ImGuiHelpers.ScaledDummy(6);
-            if (ImGui.CollapsingHeader($"Missing expected entries (loaded): {missingLoaded.Count}", ImGuiTreeNodeFlags.DefaultOpen))
+            if (resetCollapse) ImGui.SetNextItemOpen(false, ImGuiCond.Always);
+            if (ImGui.CollapsingHeader($"Missing expected entries (loaded): {missingLoaded.Count}", ImGuiTreeNodeFlags.None))
             {
                 using (ImRaii.Child("##modlearning_missing_buttons", new Vector2(0, ImGui.GetFrameHeight()), false))
                 {
@@ -632,7 +636,8 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
             if (missingNotLoaded.Count > 0)
             {
                 ImGuiHelpers.ScaledDummy(6);
-                if (ImGui.CollapsingHeader($"Missing expected entries (not loaded): {missingNotLoaded.Count}", ImGuiTreeNodeFlags.DefaultOpen))
+                if (resetCollapse) ImGui.SetNextItemOpen(false, ImGuiCond.Always);
+                if (ImGui.CollapsingHeader($"Missing expected entries (not loaded): {missingNotLoaded.Count}", ImGuiTreeNodeFlags.None))
                 {
                     using (ImRaii.Child("##modlearning_missing_not_loaded_buttons", new Vector2(0, ImGui.GetFrameHeight()), false))
                     {
@@ -700,6 +705,7 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
         if (currentKeys.Count > 0 && presentEntries.Count > 0)
         {
             ImGuiHelpers.ScaledDummy(6);
+            if (resetCollapse) ImGui.SetNextItemOpen(false, ImGuiCond.Always);
             if (ImGui.CollapsingHeader($"Present entries: {presentEntries.Count}", ImGuiTreeNodeFlags.None))
             {
                 var presentHeight = 180f * ImGuiHelpers.GlobalScale;
@@ -730,7 +736,8 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                 .Where(e => IsCurrentEntryUnexpected(e, expectedKeys))
                 .ToList();
             ImGuiHelpers.ScaledDummy(6);
-            if (ImGui.CollapsingHeader($"Current-only entries (not expected): {extraEntries.Count}", ImGuiTreeNodeFlags.DefaultOpen))
+            if (resetCollapse) ImGui.SetNextItemOpen(false, ImGuiCond.Always);
+            if (ImGui.CollapsingHeader($"Current-only entries (not expected): {extraEntries.Count}", ImGuiTreeNodeFlags.None))
             {
                 var extraHeight = 180f * ImGuiHelpers.GlobalScale;
                 using var extraChild = ImRaii.Child("##modlearning_current_only", new Vector2(0, extraHeight), true, ImGuiWindowFlags.HorizontalScrollbar);
@@ -754,6 +761,7 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                 }
             }
         }
+        _modLearningCollapseResetRequested = false;
         }
     }
 
@@ -1536,9 +1544,10 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
         return new ApplyMissingResult(true, true, gamePaths.Length);
     }
 
-    private void DrawModLearningJsonBuild()
+    private void DrawModLearningJsonBuild(bool resetCollapse)
     {
-        if (!ImGui.CollapsingHeader("Mod Learning JSON Build", ImGuiTreeNodeFlags.DefaultOpen)) return;
+        if (resetCollapse) ImGui.SetNextItemOpen(false, ImGuiCond.Always);
+        if (!ImGui.CollapsingHeader("Mod Learning JSON Build", ImGuiTreeNodeFlags.None)) return;
 
         ImGui.Checkbox("Show JSON", ref _showModLearningJson);
         if (!_showModLearningJson) return;
@@ -2588,6 +2597,7 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
         _hasUpdate = true;
         _selectedHash = string.Empty;
         _texturesToConvert.Clear();
+        _modLearningCollapseResetRequested = true;
     }
 
     protected override void Dispose(bool disposing)
