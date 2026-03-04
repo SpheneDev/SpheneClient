@@ -424,6 +424,18 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
 
             var removedLinkedTotal = 0;
             HashSet<string>? scdToRemoveAll = null;
+            var scdToRemoveEmote = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (overriddenParents.Count > 0)
+            {
+                foreach (var parent in overriddenParents)
+                {
+                    if (!scdLinksMap.TryGetValue(parent, out var scds)) continue;
+                    foreach (var scd in scds)
+                    {
+                        scdToRemoveEmote.Add(scd);
+                    }
+                }
+            }
             if (effectiveParentPaths.Count == 0 && scdLinksMap.Count > 0)
             {
                 scdToRemoveAll = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -435,8 +447,20 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
                     }
                 }
             }
+            var blockedScdToRestore = new HashSet<string>(scdToRemove, StringComparer.OrdinalIgnoreCase);
+            if (scdToRemoveAll != null)
+            {
+                foreach (var scd in scdToRemoveAll)
+                {
+                    blockedScdToRestore.Add(NormalizePathString(scd));
+                }
+            }
+            foreach (var scd in scdToRemoveEmote)
+            {
+                blockedScdToRestore.Add(NormalizePathString(scd));
+            }
 
-            if (scdToRemove.Count > 0 || (scdToRemoveAll != null && scdToRemoveAll.Count > 0))
+            if (scdToRemove.Count > 0 || (scdToRemoveAll != null && scdToRemoveAll.Count > 0) || scdToRemoveEmote.Count > 0)
             {
                 if (modResourceLinksSnapshot.Count > 0)
                 {
@@ -472,23 +496,11 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
                     }
                 }
 
-                if (overriddenParents.Count > 0)
+                if (scdToRemoveEmote.Count > 0)
                 {
-                    var scdToRemoveEmote = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                    foreach (var parent in overriddenParents)
+                    foreach (var targetList in apiData.FileReplacements.Values)
                     {
-                        if (!scdLinksMap.TryGetValue(parent, out var scds)) continue;
-                        foreach (var scd in scds)
-                        {
-                            scdToRemoveEmote.Add(scd);
-                        }
-                    }
-                    if (scdToRemoveEmote.Count > 0)
-                    {
-                        foreach (var targetList in apiData.FileReplacements.Values)
-                        {
-                            removedLinkedTotal += RemoveLinkedScdByGamePathsIgnoreHash(targetList, scdToRemoveEmote);
-                        }
+                        removedLinkedTotal += RemoveLinkedScdByGamePathsIgnoreHash(targetList, scdToRemoveEmote);
                     }
                 }
 
@@ -506,13 +518,13 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
                     .Where(p => p.EndsWith(".scd", StringComparison.OrdinalIgnoreCase))
                     .Select(NormalizePathString)
                     .ToHashSet(StringComparer.OrdinalIgnoreCase);
-                var scdRemovalSet = scdToRemoveAll ?? scdToRemove;
+                var scdRemovalSet = blockedScdToRestore;
                 var missingScd = scdRemovalSet.Where(p => !targetScdPaths.Contains(p)).ToList();
                 _logger.LogTrace("[ModLearning] SCD remove check: mod={mod} scdToRemove={scdRemove} targetScd={targetScd} missingScd={missing} missingSample={sample}",
                     modDirName, scdRemovalSet.Count, targetScdPaths.Count, missingScd.Count, string.Join(", ", missingScd.Take(5)));
                 foreach (var targetList in apiData.FileReplacements.Values)
                 {
-                    removedLinkedTotal += RemoveLinkedScdByGamePaths(targetList, scdToRemove, modScdHashes);
+                    removedLinkedTotal += RemoveLinkedScdByGamePaths(targetList, blockedScdToRestore, modScdHashes);
                 }
                     if (removedLinkedTotal > 0)
                 {
@@ -537,6 +549,19 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
             var skippedExistingHash = 0;
             foreach (var matchingState in matchingStates)
             {
+                var overriddenEmotesForState = GetOverriddenEmotesForState(matchingState, modDirName, emoteOwners);
+                if (overriddenEmotesForState.Count > 0)
+                {
+                    var removedFromState = RemoveStateReplacementsFromCharacterData(apiData, matchingState, jobId);
+                    if (removedFromState > 0)
+                    {
+                        modified = true;
+                    }
+                    skippedEmoteOverride += Math.Max(1, removedFromState);
+                    _logger.LogTrace("[ModLearning] Skip state due to overridden emote: mod={mod} emotes={emotes} removed={removed}",
+                        modDirName, string.Join(", ", overriddenEmotesForState), removedFromState);
+                    continue;
+                }
                 foreach (var fragmentKvp in matchingState.Fragments)
                 {
                  var kind = fragmentKvp.Key;
@@ -610,8 +635,8 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
                         continue;
                     }
 
-                    if (IsScdReplacement(replacement) && scdToRemove.Count > 0 &&
-                        replacement.GamePaths.Any(p => scdToRemove.Contains(NormalizePathString(p))))
+                    if (IsScdReplacement(replacement) && blockedScdToRestore.Count > 0 &&
+                        replacement.GamePaths.Any(p => blockedScdToRestore.Contains(NormalizePathString(p))))
                     {
                         skippedScdParentOverride++;
                         _logger.LogTrace("[ModLearning] Skip re-add SCD due to parent override: mod={mod} paths={paths}",
@@ -677,6 +702,53 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
         }
         _logger.LogTrace("[ModLearning] Restore complete: modified={modified}", modified);
         return modified;
+    }
+
+    private static HashSet<string> GetOverriddenEmotesForState(
+        LearnedModState state,
+        string modDirName,
+        Dictionary<string, HashSet<string>> emoteOwners)
+    {
+        var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (state.PapEmotes == null || state.PapEmotes.Count == 0) return result;
+        foreach (var entry in state.PapEmotes)
+        {
+            var emoteNames = entry.Value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            foreach (var emoteName in emoteNames)
+            {
+                if (!emoteOwners.TryGetValue(emoteName, out var owners) || owners.Count == 0) continue;
+                if (owners.Any(owner => !string.Equals(owner, modDirName, StringComparison.OrdinalIgnoreCase)))
+                {
+                    result.Add(emoteName);
+                }
+            }
+        }
+        return result;
+    }
+
+    private static int RemoveStateReplacementsFromCharacterData(
+        Sphene.API.Data.CharacterData apiData,
+        LearnedModState state,
+        uint jobId)
+    {
+        var removed = 0;
+        foreach (var fragmentKvp in state.Fragments)
+        {
+            var kind = fragmentKvp.Key;
+            var fragment = fragmentKvp.Value;
+            if (!apiData.FileReplacements.TryGetValue(kind, out var targetList) || targetList == null || targetList.Count == 0)
+            {
+                continue;
+            }
+            foreach (var replacement in GetEffectiveReplacements(fragment, jobId))
+            {
+                if (RemoveFromTargetList(targetList, replacement))
+                {
+                    removed++;
+                }
+            }
+        }
+        return removed;
     }
 
     private static int RemoveLinkedScdReplacements(List<FileReplacementData> targetList, ModFileFragment fragment, uint jobId, HashSet<string> linkedScdGamePaths, HashSet<string> scdWithEffectiveParents, HashSet<string> modScdHashes)
@@ -1010,6 +1082,56 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
         }
 
         return result;
+    }
+
+    private bool IsEmoteParentReplacement(FileReplacement replacement)
+    {
+        var map = _papEmoteMap.Value;
+        if (map.Count == 0) return false;
+        foreach (var gp in replacement.GamePaths)
+        {
+            if (!gp.EndsWith(".pap", StringComparison.OrdinalIgnoreCase)) continue;
+            var key = Path.GetFileName(gp).ToLowerInvariant();
+            if (map.TryGetValue(key, out var names) && names.Count > 0)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static void PromoteEmoteLinkedReplacementsToGlobal(LearnedModState state)
+    {
+        if (state.PapEmotes == null || state.PapEmotes.Count == 0) return;
+        var emoteParents = state.PapEmotes.Keys
+            .Select(NormalizePathString)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (emoteParents.Count == 0) return;
+
+        var emoteScd = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var kvp in state.ScdLinks)
+        {
+            if (!emoteParents.Contains(NormalizePathString(kvp.Key))) continue;
+            foreach (var scd in kvp.Value)
+            {
+                emoteScd.Add(NormalizePathString(scd));
+            }
+        }
+
+        foreach (var fragment in state.Fragments.Values)
+        {
+            var toPromote = GetAllReplacements(fragment)
+                .Where(replacement =>
+                    replacement.GamePaths.Any(p => emoteParents.Contains(NormalizePathString(p))) ||
+                    replacement.GamePaths.Any(p => emoteScd.Contains(NormalizePathString(p))))
+                .Distinct()
+                .ToList();
+            foreach (var replacement in toPromote)
+            {
+                RemoveConflictingReplacements(fragment, replacement);
+                AddOrElevateJobReplacement(fragment, 0, replacement, true);
+            }
+        }
     }
 
     private Dictionary<string, List<string>> BuildPapEmoteMap()
@@ -1804,9 +1926,11 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
 
                                 foreach (var replacement in newFragment.FileReplacements)
                                 {
-                                    var promoteToGlobal = IsReplacementShared(existingFragment, jobIdForKind, replacement);
+                                    var emoteGlobal = IsEmoteParentReplacement(replacement);
+                                    var targetJobId = emoteGlobal ? 0u : jobIdForKind;
+                                    var promoteToGlobal = emoteGlobal || IsReplacementShared(existingFragment, targetJobId, replacement);
                                     RemoveConflictingReplacements(existingFragment, replacement);
-                                    AddOrElevateJobReplacement(existingFragment, jobIdForKind, replacement, promoteToGlobal);
+                                    AddOrElevateJobReplacement(existingFragment, targetJobId, replacement, promoteToGlobal);
                                 }
 
                                 FilterUntrackedReplacements(existingFragment, kind);
@@ -1819,6 +1943,7 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
                             existingState.ScdLinks = BuildScdLinksForState(modDirName, existingState, scdBuildSkipLogged);
                             var hasScdLinks = existingState.ScdLinks.Count > 0;
                             existingState.PapEmotes = BuildPapEmotesForState(existingState);
+                            PromoteEmoteLinkedReplacementsToGlobal(existingState);
                             existingState.LastUpdated = DateTime.UtcNow;
 
                             var stateHash = ComputeStateHash(existingState);

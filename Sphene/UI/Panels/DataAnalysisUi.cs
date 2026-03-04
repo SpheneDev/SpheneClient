@@ -349,6 +349,8 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
             _selectedModLearningOption = options.Keys.FirstOrDefault() ?? string.Empty;
         }
         var runtime = GetCurrentModRuntimeStatus(_selectedModLearningMod);
+        var currentKeysSnapshot = GetCurrentReplacementKeysSnapshot();
+        var emoteOverriddenMods = GetEmoteOverriddenModsForJob(sortedModsForJob, _selectedModLearningJobId, currentKeysSnapshot);
 
         ImGui.SetNextItemWidth(240f * ImGuiHelpers.GlobalScale);
         ImGui.InputTextWithHint("##modlearning_filter", "Filter mods", ref _modLearningFilter, 255);
@@ -428,8 +430,9 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                     var modRuntime = GetCurrentModRuntimeStatus(modName);
                     var comparison = usedByJob ? GetModComparison(modName, _selectedModLearningJobId, modRuntime) : null;
                     var labelColor = GetModListColor(usedByJob, modRuntime, comparison);
+                    var emoteIndicator = emoteOverriddenMods.Contains(modName) ? " • emote overridden" : string.Empty;
                     ImGui.PushStyleColor(ImGuiCol.Text, labelColor);
-                    if (ImGui.Selectable($"{modDisplayName}##{modName}", string.Equals(_selectedModLearningMod, modName, StringComparison.Ordinal)))
+                    if (ImGui.Selectable($"{modDisplayName}{emoteIndicator}##{modName}", string.Equals(_selectedModLearningMod, modName, StringComparison.Ordinal)))
                     {
                         _selectedModLearningMod = modName;
                         _selectedModLearningOption = string.Empty;
@@ -477,7 +480,7 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
         var selectedList = GetDisplayListForJob(selectedState, _selectedModLearningJobId);
         var selectedListWithKind = GetDisplayListForJobWithKind(selectedState, _selectedModLearningJobId);
         var expectedKeys = BuildExpectedReplacementKeySet(selectedList);
-        var currentKeys = GetCurrentReplacementKeysSnapshot();
+        var currentKeys = currentKeysSnapshot;
         var keySummary = GetKeyComparisonSummary(expectedKeys, currentKeys);
         var currentEntries = GetCurrentReplacementEntriesSnapshot();
         var optionStatus = GetSelectedModOptionStatus(selectedState);
@@ -1271,6 +1274,90 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
         var missing = learnedKeys.Count(key => !currentKeys.Contains(key));
         var color = missing > 0 ? SpheneCustomTheme.Colors.Warning : SpheneCustomTheme.Colors.Success;
         return (color, total, missing);
+    }
+
+    private HashSet<string> GetEmoteOverriddenModsForJob(IEnumerable<string> modsForJob, uint jobId, HashSet<string> currentKeys)
+    {
+        if (currentKeys.Count == 0) return [];
+        Dictionary<string, List<LearnedModState>> statesByMod;
+        lock (_modLearningLock)
+        {
+            statesByMod = _modLearningStatesByMod;
+        }
+
+        var emoteOwners = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+        var emoteMissingByMod = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var modName in modsForJob)
+        {
+            if (!statesByMod.TryGetValue(modName, out var states) || states.Count == 0) continue;
+            var runtime = GetCurrentModRuntimeStatus(modName);
+            if (!runtime.Enabled) continue;
+
+            var relevantStates = states;
+            if (runtime.Settings.Count > 0)
+            {
+                var matchingStates = states.Where(s => SettingsSubsetMatch(runtime.Settings, s.Settings)).ToList();
+                if (matchingStates.Count > 0)
+                {
+                    relevantStates = matchingStates;
+                }
+            }
+
+            foreach (var state in relevantStates)
+            {
+                if (state.PapEmotes == null || state.PapEmotes.Count == 0) continue;
+                var emoteReplacements = GetDisplayListForJob(state, jobId)
+                    .Where(replacement => replacement.GamePaths.Any(gp => state.PapEmotes.ContainsKey(NormalizePathString(gp))))
+                    .ToList();
+                foreach (var replacement in emoteReplacements)
+                {
+                    var present = IsReplacementFullyPresent(replacement, currentKeys);
+                    foreach (var gp in replacement.GamePaths)
+                    {
+                        var normalized = NormalizePathString(gp);
+                        if (!state.PapEmotes.TryGetValue(normalized, out var emoteNames) || string.IsNullOrWhiteSpace(emoteNames)) continue;
+                        var names = emoteNames.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                        foreach (var emoteName in names)
+                        {
+                            if (present)
+                            {
+                                if (!emoteOwners.TryGetValue(emoteName, out var owners))
+                                {
+                                    owners = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                                    emoteOwners[emoteName] = owners;
+                                }
+                                owners.Add(modName);
+                            }
+                            else
+                            {
+                                if (!emoteMissingByMod.TryGetValue(modName, out var missing))
+                                {
+                                    missing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                                    emoteMissingByMod[modName] = missing;
+                                }
+                                missing.Add(emoteName);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        var overridden = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var missingEntry in emoteMissingByMod)
+        {
+            foreach (var emoteName in missingEntry.Value)
+            {
+                if (!emoteOwners.TryGetValue(emoteName, out var owners)) continue;
+                if (owners.Any(owner => !string.Equals(owner, missingEntry.Key, StringComparison.OrdinalIgnoreCase)))
+                {
+                    overridden.Add(missingEntry.Key);
+                    break;
+                }
+            }
+        }
+        return overridden;
     }
 
     private bool ModUsedByJob(string modName, uint jobId)
