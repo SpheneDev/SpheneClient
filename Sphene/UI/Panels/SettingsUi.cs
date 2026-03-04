@@ -159,8 +159,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
         SizeConstraints = new WindowSizeConstraints()
         {
-            MinimumSize = new Vector2(800, 400),
-            MaximumSize = new Vector2(800, 2000),
+            MinimumSize = new Vector2(900, 500),
+            MaximumSize = new Vector2(2200, 2000),
         };
 
         Mediator.Subscribe<OpenSettingsUiMessage>(this, (_) => Toggle());
@@ -1966,7 +1966,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             if (textSize.X > maxTextWidth)
                 maxTextWidth = textSize.X;
         }
-        var sidebarWidth = (maxTextWidth + 16f) * ImGuiHelpers.GlobalScale; // Reduced padding from 32f to 16f
+        var sidebarWidth = Math.Clamp((maxTextWidth + 16f) * ImGuiHelpers.GlobalScale, 170f * ImGuiHelpers.GlobalScale, Math.Max(220f * ImGuiHelpers.GlobalScale, available.X * 0.32f));
 
         // Sidebar
         ImGui.BeginChild("settings-sidebar", new Vector2(sidebarWidth, available.Y), true);
@@ -2023,8 +2023,9 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
         ImGui.SameLine();
 
-        // Content pane without horizontal scrolling - content should fit within available width
-        ImGui.BeginChild("settings-content", new Vector2(available.X - sidebarWidth - ImGui.GetStyle().ItemSpacing.X, available.Y), false);
+        // Content pane without horizontal scrolling - fill remaining width
+        ImGui.BeginChild("settings-content", new Vector2(0, available.Y), false);
+        ImGui.PushStyleVar(ImGuiStyleVar.ItemSpacing, new Vector2(6f * ImGuiHelpers.GlobalScale, 4f * ImGuiHelpers.GlobalScale));
 
         switch (_activeSettingsPage)
         {
@@ -2069,6 +2070,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 break;
         }
 
+        ImGui.PopStyleVar();
         ImGui.EndChild();
     }
 
@@ -3047,17 +3049,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
         _uiShared.BigText("Sync Settings");
         ImGui.Separator();
 
-        UiSharedService.TextWrapped("Configure how Sphene handles character data synchronization during various game states.");
-
-        UiSharedService.TextWrapped(
-            "Sphene continuously synchronizes character data between paired users to ensure everyone sees the latest appearance. " +
-            "During certain game activities like duties, trials, or combat, the sync process can be paused to prioritize game performance. " +
-            "The setting above allows you to control this behavior based on your preferences.");
-
-        ImGui.Spacing();
-
-        UiSharedService.TextWrapped(
-            "Sync may be paused during:");
+        UiSharedService.TextWrapped("Control when Sphene applies data and which files are filtered on receive.");
+        UiSharedService.TextWrapped("Sync may pause to reduce load during:");
         ImGui.Indent();
         ImGui.BulletText("Duty instances (trials, dungeons, raids)");
         ImGui.BulletText("Combat situations");
@@ -3079,14 +3072,10 @@ public class SettingsUi : WindowMediatorSubscriberBase
             _configService.Save();
         }
         _uiShared.DrawHelpText(
-            "When enabled, the sync process will continue even during active duties or combat situations. " +
-            "By default, Sphene pauses synchronization during duties and combat to minimize performance impact. " +
-            "Enable this option if you want to ensure continuous synchronization regardless of game state. " +
-            "Note: This may cause slight performance impacts during intense gameplay scenarios.");
+            "Enabled: keep sync running in duty/combat. Disabled: better performance in heavy encounters.");
         ImGui.Spacing();
         UiSharedService.ColorTextWrapped(
-            "Tip: If you notice sync issues during duties or combat, try enabling the option above. " +
-            "However, if you experience performance issues, consider keeping it disabled.",
+            "Tip: enable if updates are missing in combat; disable if you notice FPS drops.",
             ImGuiColors.HealerGreen);
         ImGui.Spacing();
         ImGui.Separator();
@@ -3127,8 +3116,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             _configService.Save();
         }
         _uiShared.DrawHelpText(
-            "Disables automatic refresh after equipment changes. Prevents reloading the display when only equipment or a weapon changed. " +
-            "When enabled, manual refreshes may be required to see all updates.");
+            "Prevents auto-refresh on gear/weapon-only changes. Manual refresh may be required.");
 
         var redrawOnlySpecialEmotesFirst = _configService.Current.RedrawPairsOnlyForSpecialEmotesFirstApply;
         if (ImGui.Checkbox("Redraw pairs only for sit/ground sit/doze on first apply", ref redrawOnlySpecialEmotesFirst))
@@ -3146,7 +3134,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             _configService.Save();
         }
         _uiShared.DrawHelpText(
-            "When enabled, Sphene will keep the existing temporary collection and skip the reapply step after zoning if character data has not changed.");
+            "Skips post-zone reapply when character data is unchanged.");
 
         var skipPostZoneEquipmentOnly = _configService.Current.SkipPostZoneReapplyForEquipmentOrWeaponOnlyChanges;
         using (ImRaii.Disabled(!skipPostZoneUnchanged))
