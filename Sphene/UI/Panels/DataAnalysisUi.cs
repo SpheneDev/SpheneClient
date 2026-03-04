@@ -351,6 +351,8 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
         var runtime = GetCurrentModRuntimeStatus(_selectedModLearningMod);
         var currentKeysSnapshot = GetCurrentReplacementKeysSnapshot();
         var emoteOverriddenMods = GetEmoteOverriddenModsForJob(sortedModsForJob, _selectedModLearningJobId, currentKeysSnapshot);
+        var currentJobId = _dalamudUtilService.ClassJobId;
+        var currentJobLabel = _uiSharedService.JobData.TryGetValue((ushort)currentJobId, out var currentJobName) ? currentJobName : currentJobId.ToString();
 
         ImGui.SetNextItemWidth(240f * ImGuiHelpers.GlobalScale);
         ImGui.InputTextWithHint("##modlearning_filter", "Filter mods", ref _modLearningFilter, 255);
@@ -361,6 +363,8 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
         }
         ImGui.SameLine();
         ImGui.TextUnformatted($"Selected: {_selectedModLearningCharacter} / Job {_selectedModLearningJobId} / {GetModDisplayName(modDisplayNames, _selectedModLearningMod)}");
+        ImGui.SameLine();
+        ImGui.TextUnformatted($"Current Job: {currentJobLabel} ({currentJobId})");
 
         using (ImRaii.Child("##modlearning_selector", new Vector2(0, selectorHeight), true))
         using (var selectorTable = ImRaii.Table("##modlearning_selector_table", 4, ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.BordersInnerV))
@@ -1550,17 +1554,19 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
             ImGui.TextUnformatted("No mod learning data loaded.");
             return;
         }
+        var modDisplayNames = GetModDisplayNamesSnapshot();
 
         var height = 260f * ImGuiHelpers.GlobalScale;
         using var child = ImRaii.Child("##modlearning_json_build", new Vector2(0, height), true, ImGuiWindowFlags.HorizontalScrollbar);
         if (!child) return;
 
-        foreach (var entry in snapshot.OrderBy(k => k.Key, StringComparer.OrdinalIgnoreCase))
+        foreach (var entry in snapshot.OrderBy(k => GetModDisplayName(modDisplayNames, k.Key), StringComparer.OrdinalIgnoreCase))
         {
             var color = GetModColor(entry.Key);
             using var id = ImRaii.PushId(entry.Key);
             ImGui.PushStyleColor(ImGuiCol.Text, color);
-            var open = ImGui.TreeNodeEx(entry.Key, ImGuiTreeNodeFlags.Framed | ImGuiTreeNodeFlags.AllowItemOverlap);
+            var label = GetModDisplayName(modDisplayNames, entry.Key);
+            var open = ImGui.TreeNodeEx(label, ImGuiTreeNodeFlags.Framed | ImGuiTreeNodeFlags.AllowItemOverlap);
             ImGui.PopStyleColor();
             ImGui.SetItemAllowOverlap();
             ImGui.SameLine();
@@ -2639,6 +2645,7 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
 
     private void DrawTable(IGrouping<string, CharacterAnalyzer.FileDataEntry> fileGroup)
     {
+        var modDisplayNames = GetModDisplayNamesSnapshot();
         var tableColumns = string.Equals(fileGroup.Key, "tex", StringComparison.Ordinal)
             ? (_enableBc7ConversionMode ? 8 : 7)
             : (string.Equals(fileGroup.Key, "mdl", StringComparison.Ordinal) ? 7 : 6);
@@ -2689,9 +2696,9 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
             if (idx == 4 && sortSpecs.Specs.SortDirection == ImGuiSortDirection.Descending)
                 _cachedAnalysis![_selectedObjectTab] = _cachedAnalysis[_selectedObjectTab].OrderByDescending(k => k.Value.CompressedSize).ToDictionary(d => d.Key, d => d.Value, StringComparer.Ordinal);
             if (idx == 5 && sortSpecs.Specs.SortDirection == ImGuiSortDirection.Ascending)
-                _cachedAnalysis![_selectedObjectTab] = _cachedAnalysis[_selectedObjectTab].OrderBy(k => k.Value.ModName, StringComparer.Ordinal).ToDictionary(d => d.Key, d => d.Value, StringComparer.Ordinal);
+                _cachedAnalysis![_selectedObjectTab] = _cachedAnalysis[_selectedObjectTab].OrderBy(k => GetModDisplayName(modDisplayNames, k.Value.ModName), StringComparer.OrdinalIgnoreCase).ToDictionary(d => d.Key, d => d.Value, StringComparer.Ordinal);
             if (idx == 5 && sortSpecs.Specs.SortDirection == ImGuiSortDirection.Descending)
-                _cachedAnalysis![_selectedObjectTab] = _cachedAnalysis[_selectedObjectTab].OrderByDescending(k => k.Value.ModName, StringComparer.Ordinal).ToDictionary(d => d.Key, d => d.Value, StringComparer.Ordinal);
+                _cachedAnalysis![_selectedObjectTab] = _cachedAnalysis[_selectedObjectTab].OrderByDescending(k => GetModDisplayName(modDisplayNames, k.Value.ModName), StringComparer.OrdinalIgnoreCase).ToDictionary(d => d.Key, d => d.Value, StringComparer.Ordinal);
             if (string.Equals(fileGroup.Key, "mdl", StringComparison.Ordinal) && idx == 6 && sortSpecs.Specs.SortDirection == ImGuiSortDirection.Ascending)
                 _cachedAnalysis![_selectedObjectTab] = _cachedAnalysis[_selectedObjectTab].OrderBy(k => k.Value.Triangles).ToDictionary(d => d.Key, d => d.Value, StringComparer.Ordinal);
             if (string.Equals(fileGroup.Key, "mdl", StringComparison.Ordinal) && idx == 6 && sortSpecs.Specs.SortDirection == ImGuiSortDirection.Descending)
@@ -2734,7 +2741,7 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
             ImGui.TextUnformatted(UiSharedService.ByteToString(item.CompressedSize));
             if (ImGui.IsItemClicked()) _selectedHash = item.Hash;
             ImGui.TableNextColumn();
-            ImGui.TextUnformatted(item.ModName);
+            ImGui.TextUnformatted(GetModDisplayName(modDisplayNames, item.ModName));
             if (ImGui.IsItemClicked()) _selectedHash = item.Hash;
             if (string.Equals(fileGroup.Key, "tex", StringComparison.Ordinal))
             {
