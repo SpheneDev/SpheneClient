@@ -2,6 +2,7 @@ using Sphene.API.Data.Enum;
 using Sphene.PlayerData.Data;
 using Sphene.PlayerData.Factories;
 using Sphene.PlayerData.Handlers;
+using Sphene.Interop.Ipc;
 using Sphene.Services;
 using Sphene.Services.Mediator;
 using Microsoft.Extensions.Logging;
@@ -18,6 +19,7 @@ public sealed class CacheCreationService : DisposableMediatorSubscriberBase
     private readonly HashSet<ObjectKind> _debouncedObjectCache = [];
     private readonly CharacterData _playerData = new();
     private readonly Dictionary<ObjectKind, GameObjectHandler> _playerRelatedObjects = [];
+    private readonly IpcManager _ipcManager;
     private readonly Dictionary<ObjectKind, string> _forceRebuildTraceByKind = [];
     private readonly CancellationTokenSource _runtimeCts = new();
     private CancellationTokenSource _creationCts = new();
@@ -28,9 +30,10 @@ public sealed class CacheCreationService : DisposableMediatorSubscriberBase
     private bool _forcePublishNext = false;
 
     public CacheCreationService(ILogger<CacheCreationService> logger, SpheneMediator mediator, GameObjectHandlerFactory gameObjectHandlerFactory,
-        PlayerDataFactory characterDataFactory, DalamudUtilService dalamudUtil) : base(logger, mediator)
+        PlayerDataFactory characterDataFactory, DalamudUtilService dalamudUtil, IpcManager ipcManager) : base(logger, mediator)
     {
         _characterDataFactory = characterDataFactory;
+        _ipcManager = ipcManager;
 
         Mediator.Subscribe<ZoneSwitchStartMessage>(this, (msg) => _isZoning = true);
         Mediator.Subscribe<ZoneSwitchEndMessage>(this, (msg) =>
@@ -192,6 +195,11 @@ public sealed class CacheCreationService : DisposableMediatorSubscriberBase
 
         Mediator.Subscribe<PenumbraModSettingChangedMessage>(this, (msg) =>
         {
+            if (!ShouldRebuildForPenumbraChange(msg))
+            {
+                Logger.LogTrace("Ignoring Penumbra Mod settings change for non-local collection {collection}", msg.CollectionId);
+                return;
+            }
             Logger.LogDebug("Received Penumbra Mod settings change, updating everything");
             _forcePublishNext = true;
             AddCacheToCreate(ObjectKind.Player);
@@ -201,6 +209,15 @@ public sealed class CacheCreationService : DisposableMediatorSubscriberBase
         });
 
         Mediator.Subscribe<FrameworkUpdateMessage>(this, (msg) => ProcessCacheCreation());
+    }
+
+    private bool ShouldRebuildForPenumbraChange(PenumbraModSettingChangedMessage msg)
+    {
+        if (msg.CollectionId == Guid.Empty) return true;
+        if (!_ipcManager.Penumbra.APIAvailable) return true;
+        var (valid, _, collection) = _ipcManager.Penumbra.GetCollectionForObject(0);
+        if (!valid) return true;
+        return msg.CollectionId == collection.Id;
     }
 
     protected override void Dispose(bool disposing)

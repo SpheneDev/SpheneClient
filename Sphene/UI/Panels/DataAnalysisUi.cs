@@ -328,12 +328,16 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
 
         var listHeight = 150f * ImGuiHelpers.GlobalScale;
         var selectorHeight = 205f * ImGuiHelpers.GlobalScale;
+        var modDisplayNames = GetModDisplayNamesSnapshot();
         var jobKeys = GetJobsForSelectedCharacter();
         if (!jobKeys.Contains(_selectedModLearningJobId))
         {
             _selectedModLearningJobId = jobKeys[0];
         }
         var modsForJob = GetModsForSelectedJob();
+        var sortedModsForJob = modsForJob
+            .OrderBy(mod => GetModDisplayName(modDisplayNames, mod), StringComparer.OrdinalIgnoreCase)
+            .ToList();
         if (modsForJob.Count > 0 && !modsForJob.Contains(_selectedModLearningMod, StringComparer.Ordinal))
         {
             _selectedModLearningMod = modsForJob[0];
@@ -354,7 +358,7 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
             LoadModLearningStates(forceReload: true);
         }
         ImGui.SameLine();
-        ImGui.TextUnformatted($"Selected: {_selectedModLearningCharacter} / Job {_selectedModLearningJobId} / {_selectedModLearningMod}");
+        ImGui.TextUnformatted($"Selected: {_selectedModLearningCharacter} / Job {_selectedModLearningJobId} / {GetModDisplayName(modDisplayNames, _selectedModLearningMod)}");
 
         using (ImRaii.Child("##modlearning_selector", new Vector2(0, selectorHeight), true))
         using (var selectorTable = ImRaii.Table("##modlearning_selector_table", 4, ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.BordersInnerV))
@@ -411,9 +415,12 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
             ImGui.Separator();
             using (ImRaii.ListBox("##modlearning_mods", new Vector2(-1, listHeight)))
             {
-                foreach (var modName in modsForJob)
+                foreach (var modName in sortedModsForJob)
                 {
-                    if (!string.IsNullOrWhiteSpace(_modLearningFilter) && !modName.Contains(_modLearningFilter, StringComparison.OrdinalIgnoreCase))
+                    var modDisplayName = GetModDisplayName(modDisplayNames, modName);
+                    if (!string.IsNullOrWhiteSpace(_modLearningFilter)
+                        && !modDisplayName.Contains(_modLearningFilter, StringComparison.OrdinalIgnoreCase)
+                        && !modName.Contains(_modLearningFilter, StringComparison.OrdinalIgnoreCase))
                     {
                         continue;
                     }
@@ -422,7 +429,7 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                     var comparison = usedByJob ? GetModComparison(modName, _selectedModLearningJobId, modRuntime) : null;
                     var labelColor = GetModListColor(usedByJob, modRuntime, comparison);
                     ImGui.PushStyleColor(ImGuiCol.Text, labelColor);
-                    if (ImGui.Selectable(modName, string.Equals(_selectedModLearningMod, modName, StringComparison.Ordinal)))
+                    if (ImGui.Selectable($"{modDisplayName}##{modName}", string.Equals(_selectedModLearningMod, modName, StringComparison.Ordinal)))
                     {
                         _selectedModLearningMod = modName;
                         _selectedModLearningOption = string.Empty;
@@ -1601,6 +1608,29 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
         }
 
         return jobs.OrderBy(k => k == 0 ? uint.MinValue : k).ToList();
+    }
+
+    private Dictionary<string, string> GetModDisplayNamesSnapshot()
+    {
+        if (!_ipcManager.Penumbra.APIAvailable) return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            var mods = _ipcManager.Penumbra.GetMods();
+            return mods.ToDictionary(
+                k => k.Key,
+                v => string.IsNullOrWhiteSpace(v.Value) ? v.Key : v.Value,
+                StringComparer.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
+    private static string GetModDisplayName(IReadOnlyDictionary<string, string> displayNamesByFolder, string modFolder)
+    {
+        if (string.IsNullOrWhiteSpace(modFolder)) return string.Empty;
+        return displayNamesByFolder.TryGetValue(modFolder, out var displayName) ? displayName : modFolder;
     }
 
     private List<string> GetModsForSelectedJob()

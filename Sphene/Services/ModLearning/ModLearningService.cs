@@ -1925,6 +1925,7 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
         {
             var kind = kvp.Key;
             var replacements = kvp.Value;
+            var requireTransientObservation = kind == ObjectKind.Player;
             
             var relevant = replacements.Where(r => replacementSet.Contains(r)).ToHashSet();
             
@@ -1933,7 +1934,7 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
                 foreach (var replacement in relevant)
                 {
                     var optionMatches = GetOptionMatches(optionIndex, selectedOptions, replacement.GamePaths);
-                    var seenInTransient = replacement.GamePaths.Any(gp => observedTransientPaths.Contains(NormalizePathString(gp)));
+                    var seenInTransient = !requireTransientObservation || replacement.GamePaths.Any(gp => observedTransientPaths.Contains(NormalizePathString(gp)));
                     if (optionMatches.Count == 0)
                     {
                         AddReplacementToOptionState(states[baseKey], kind, replacement);
