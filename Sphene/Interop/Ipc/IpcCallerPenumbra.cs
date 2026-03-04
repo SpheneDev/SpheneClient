@@ -85,13 +85,13 @@ public sealed class IpcCallerPenumbra : DisposableMediatorSubscriberBase, IIpcCa
         _penumbraModSettingChanged = ModSettingChanged.Subscriber(pi, (change, arg1, arg, b) =>
         {
             Logger.LogTrace("ModSettingChanged: change={change} collection={collection} mod={mod} inherited={inherited}", change, arg1, arg, b);
-            _spheneMediator.Publish(new PenumbraModSettingChangedMessage());
+            _spheneMediator.Publish(new PenumbraModSettingChangedMessage(change, arg1, arg, b));
         });
         _penumbraModSettingChangedV6 = new EventSubscriber<ModSettingChange, Guid, string, bool>(pi, "Penumbra.ModSettingChanged.V6",
             (change, arg1, arg, b) =>
         {
-            Logger.LogTrace("ModSettingChanged: change={change} collection={collection} mod={mod} inherited={inherited}", change, arg1, arg, b);
-            _spheneMediator.Publish(new PenumbraModSettingChangedMessage());
+            Logger.LogTrace("ModSettingChangedV6: change={change} collection={collection} mod={mod} inherited={inherited}", change, arg1, arg, b);
+            _spheneMediator.Publish(new PenumbraModSettingChangedMessage(change, arg1, arg, b));
         });
         _penumbraConvertTextureFile = new ConvertTextureFile(pi);
         _penumbraResourcePaths = new GetGameObjectResourcePaths(pi);

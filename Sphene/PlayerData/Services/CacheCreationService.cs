@@ -18,6 +18,7 @@ public sealed class CacheCreationService : DisposableMediatorSubscriberBase
     private readonly HashSet<ObjectKind> _debouncedObjectCache = [];
     private readonly CharacterData _playerData = new();
     private readonly Dictionary<ObjectKind, GameObjectHandler> _playerRelatedObjects = [];
+    private readonly Dictionary<ObjectKind, string> _forceRebuildTraceByKind = [];
     private readonly CancellationTokenSource _runtimeCts = new();
     private CancellationTokenSource _creationCts = new();
     private CancellationTokenSource _debounceCts = new();
@@ -52,6 +53,18 @@ public sealed class CacheCreationService : DisposableMediatorSubscriberBase
         {
             Logger.LogDebug("Received CreateCacheForObject for {handler}, updating", msg.ObjectToCreateFor);
             AddCacheToCreate(msg.ObjectToCreateFor.ObjectKind);
+        });
+        Mediator.Subscribe<ForceLocalCharacterDataRebuildMessage>(this, (msg) =>
+        {
+            if (_isZoning)
+            {
+                Logger.LogDebug("[Trace:ForceRebuild:{trace}] SKIP zoning", msg.TraceId);
+                return;
+            }
+            Logger.LogDebug("[Trace:ForceRebuild:{trace}] REQUEST kind={kind}", msg.TraceId, msg.ObjectKind);
+            _forcePublishNext = true;
+            _forceRebuildTraceByKind[msg.ObjectKind] = msg.TraceId;
+            AddCacheToCreate(msg.ObjectKind);
         });
 
         _playerRelatedObjects[ObjectKind.Player] = gameObjectHandlerFactory.Create(ObjectKind.Player, dalamudUtil.GetPlayerPtr, isWatched: true)
@@ -257,6 +270,13 @@ public sealed class CacheCreationService : DisposableMediatorSubscriberBase
             await Task.Delay(TimeSpan.FromSeconds(1), linkedCts.Token).ConfigureAwait(false);
 
             Logger.LogDebug("Creating Caches for {objectKinds}", string.Join(", ", objectKindsToCreate));
+            foreach (var kind in objectKindsToCreate)
+            {
+                if (_forceRebuildTraceByKind.TryGetValue(kind, out var traceId))
+                {
+                    Logger.LogDebug("[Trace:ForceRebuild:{trace}] BUILD start kind={kind}", traceId, kind);
+                }
+            }
 
             try
             {
@@ -268,6 +288,8 @@ public sealed class CacheCreationService : DisposableMediatorSubscriberBase
 
                 RemovePlayerMinionOverlaps(createdData);
 
+                string? newHash = null;
+                var totalReplacements = 0;
                 lock (_playerDataLock)
                 {
                     foreach (var kvp in createdData)
@@ -282,11 +304,12 @@ public sealed class CacheCreationService : DisposableMediatorSubscriberBase
 
                     // Check if data actually changed before publishing
                     var newData = _playerData.ToAPI();
-                    var newHash = newData.DataHash?.Value;
+                    newHash = newData.DataHash?.Value;
                     
                     var forcePublish = _forcePublishNext;
                     _forcePublishNext = false;
 
+                    totalReplacements = newData.FileReplacements.Values.Sum(l => l.Count);
                     if (!string.Equals(newHash, _lastDataHash, StringComparison.Ordinal))
                     {
                         Logger.LogDebug("Character data changed, publishing update. Old hash: {oldHash}, New hash: {newHash}", _lastDataHash ?? "null", newHash ?? "null");
@@ -304,6 +327,15 @@ public sealed class CacheCreationService : DisposableMediatorSubscriberBase
                     }
                 }
                 
+                foreach (var kind in objectKindsToCreate)
+                {
+                    if (_forceRebuildTraceByKind.TryGetValue(kind, out var traceId))
+                    {
+                        Logger.LogDebug("[Trace:ForceRebuild:{trace}] BUILD done kind={kind} hash={hash} totalEntries={total}",
+                            traceId, kind, newHash ?? "null", totalReplacements);
+                        _forceRebuildTraceByKind.Remove(kind);
+                    }
+                }
                 _currentlyCreating.Clear();
             }
             catch (OperationCanceledException)

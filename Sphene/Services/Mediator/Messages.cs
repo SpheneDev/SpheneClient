@@ -1,6 +1,7 @@
 using Dalamud.Game.ClientState.Objects.Types;
 using Dalamud.Interface.Textures.TextureWraps;
 using Sphene.API.Data;
+using Sphene.API.Data.Enum;
 using Sphene.API.Dto;
 using Sphene.API.Dto.CharaData;
 using Sphene.API.Dto.Group;
@@ -12,6 +13,7 @@ using Sphene.Services.Events;
 using Sphene.Services;
 using Sphene.WebAPI.Files.Models;
 using Sphene.API.Dto.Files;
+using Penumbra.Api.Enums;
 using System.Numerics;
 
 namespace Sphene.Services.Mediator;
@@ -38,7 +40,7 @@ public record CutsceneEndMessage : MessageBase;
 public record CutsceneFrameworkUpdateMessage : SameThreadMessage;
 public record ConnectedMessage(ConnectionDto Connection) : MessageBase;
 public record DisconnectedMessage : SameThreadMessage;
-public record PenumbraModSettingChangedMessage : MessageBase;
+public record PenumbraModSettingChangedMessage(ModSettingChange ChangeType, Guid CollectionId, string ModDirectoryName, bool Inherited) : MessageBase;
 public record PenumbraInitializedMessage : MessageBase;
 public record PenumbraDisposedMessage : MessageBase;
 public record PenumbraRedrawMessage(IntPtr Address, int ObjTblIdx, bool WasRequested) : SameThreadMessage;
@@ -61,6 +63,7 @@ public record NotificationMessage
     (string Title, string Message, NotificationType Type, TimeSpan? TimeShownOnScreen = null) : MessageBase;
 public record CreateCacheForObjectMessage(GameObjectHandler ObjectToCreateFor) : SameThreadMessage;
 public record ClearCacheForObjectMessage(GameObjectHandler ObjectToCreateFor) : SameThreadMessage;
+public record ForceLocalCharacterDataRebuildMessage(ObjectKind ObjectKind, string TraceId) : SameThreadMessage;
 public record CharacterDataCreatedMessage(CharacterData CharacterData, Sphene.PlayerData.Data.CharacterData? RawData = null) : SameThreadMessage;
 public record CharacterDataReadyForPushMessage(CharacterData CharacterData) : MessageBase;
 public record CharacterDataBuildStartedMessage : MessageBase;

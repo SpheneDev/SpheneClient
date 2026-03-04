@@ -138,5 +138,7 @@ public class SpheneConfig : ISpheneConfiguration
     public int TemporaryCollectionInactivityTimeoutMinutes { get; set; } = 5;
     public bool PersistReceivedCharacterData { get; set; } = false;
     public bool EnableModLearning { get; set; } = true;
+    public bool ModLearningForceRestorePersistent { get; set; } = true;
+    public Dictionary<string, List<string>> ModLearningForceRestoreMods { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
 }

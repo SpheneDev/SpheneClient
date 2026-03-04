@@ -32,6 +32,7 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
     private readonly DalamudUtilService _dalamudUtil;
     private readonly FileCacheManager _fileCacheManager;
     private readonly SpheneConfigService _configService;
+    private readonly TransientConfigService _transientConfigService;
     private readonly Dictionary<string, Dictionary<string, Dictionary<string, HashSet<string>>>> _modOptionIndexCache = [];
     private readonly Dictionary<string, Dictionary<string, Dictionary<string, OptionFileEntry>>> _modOptionFileMapCache = [];
     private readonly Dictionary<string, string> _stateHashCache = new(StringComparer.Ordinal);
@@ -40,6 +41,8 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
     private readonly Dictionary<(IntPtr, string), List<ResourceLoadStamp>> _recentResourceLoads = [];
     private DateTime _lastPenumbraSettingChangeAt = DateTime.MinValue;
     private int _penumbraSettingChangeCount = 0;
+    private readonly HashSet<string> _pendingModSettingChanges = new(StringComparer.OrdinalIgnoreCase);
+    private bool _hasGlobalModSettingChange = false;
     private DateTime _lastRestoreAt = DateTime.MinValue;
     private string? _lastReadyPushHash = null;
     private readonly Lazy<Dictionary<string, List<string>>> _papEmoteMap;
@@ -49,7 +52,7 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
 
     private readonly Lock _lock = new();
 
-    public ModLearningService(ILogger<ModLearningService> logger, IpcCallerPenumbra penumbra, SpheneMediator mediator, IClientState clientState, IDataManager gameData, CharacterDataSqliteStore sqliteStore, DalamudUtilService dalamudUtil, FileCacheManager fileCacheManager, SpheneConfigService configService) 
+    public ModLearningService(ILogger<ModLearningService> logger, IpcCallerPenumbra penumbra, SpheneMediator mediator, IClientState clientState, IDataManager gameData, CharacterDataSqliteStore sqliteStore, DalamudUtilService dalamudUtil, FileCacheManager fileCacheManager, SpheneConfigService configService, TransientConfigService transientConfigService) 
         : base(logger, mediator)
     {
         _logger = logger;
@@ -60,6 +63,7 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
         _dalamudUtil = dalamudUtil;
         _fileCacheManager = fileCacheManager;
         _configService = configService;
+        _transientConfigService = transientConfigService;
         _papEmoteMap = new Lazy<Dictionary<string, List<string>>>(BuildPapEmoteMap);
 
         Mediator.Subscribe<CharacterDataCreatedMessage>(this, OnCharacterDataCreated);
@@ -79,6 +83,8 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
             _modResourceLinks.Clear();
             _modResourceLinksBySettings.Clear();
             _recentResourceLoads.Clear();
+            _pendingModSettingChanges.Clear();
+            _hasGlobalModSettingChange = false;
         }
         _lastRestoreAt = DateTime.MinValue;
         _lastReadyPushHash = null;
@@ -145,6 +151,36 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
         if (!_configService.Current.EnableModLearning) return;
         _penumbraSettingChangeCount++;
         _lastPenumbraSettingChangeAt = DateTime.UtcNow;
+        lock (_lock)
+        {
+            var hasModName = !string.IsNullOrWhiteSpace(msg.ModDirectoryName);
+            var isTargetedChange = msg.ChangeType is Penumbra.Api.Enums.ModSettingChange.Setting
+                or Penumbra.Api.Enums.ModSettingChange.EnableState
+                or Penumbra.Api.Enums.ModSettingChange.Priority
+                or Penumbra.Api.Enums.ModSettingChange.TemporaryMod
+                or Penumbra.Api.Enums.ModSettingChange.Edited
+                or Penumbra.Api.Enums.ModSettingChange.TemporarySetting;
+
+            if (isTargetedChange)
+            {
+                if (hasModName)
+                {
+                    _pendingModSettingChanges.Add(msg.ModDirectoryName);
+                }
+                else
+                {
+                    _hasGlobalModSettingChange = true;
+                }
+            }
+            else
+            {
+                _hasGlobalModSettingChange = true;
+                if (hasModName)
+                {
+                    _pendingModSettingChanges.Add(msg.ModDirectoryName);
+                }
+            }
+        }
         _logger.LogDebug("[ModLearning] Penumbra settings changed. Count={count}", _penumbraSettingChangeCount);
     }
 
@@ -159,19 +195,22 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
 
     private void OnCharacterDataCreated(CharacterDataCreatedMessage msg)
     {
+        var traceId = $"MLC-{DateTime.UtcNow:yyyyMMddHHmmssfff}";
+        _logger.LogDebug("[Trace:ModLearning:{trace}] START kinds={kinds} hash={hash}", traceId, msg.RawData?.FileReplacements.Count ?? 0, msg.CharacterData.DataHash?.Value ?? "null");
         if (!_configService.Current.EnableModLearning)
         {
+            _logger.LogDebug("[Trace:ModLearning:{trace}] SKIP disabled", traceId);
             PublishReadyForPush(msg.CharacterData);
             return;
         }
         var rawData = msg.RawData;
         if (rawData == null)
         {
-            _logger.LogDebug("[ModLearning] CharacterDataCreated without RawData. Skipping.");
+            _logger.LogDebug("[Trace:ModLearning:{trace}] SKIP no-rawdata", traceId);
             return;
         }
 
-        _logger.LogDebug("[ModLearning] CharacterDataCreated: kinds={kinds} hash={hash}", rawData.FileReplacements.Count, msg.CharacterData.DataHash?.Value ?? "null");
+        _logger.LogDebug("[Trace:ModLearning:{trace}] RAW kinds={kinds} hash={hash}", traceId, rawData.FileReplacements.Count, msg.CharacterData.DataHash?.Value ?? "null");
         // Extract relevant data synchronously (safe because we are inside the lock of CacheCreationService)
         var extractedData = new Dictionary<ObjectKind, List<FileReplacement>>();
             foreach (var kvp in rawData.FileReplacements)
@@ -187,7 +226,7 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
             if (list.Any())
                 extractedData[kvp.Key] = list;
         }
-        _logger.LogDebug("[ModLearning] Extracted replacements: kinds={kinds} totalEntries={count}", extractedData.Count, extractedData.Sum(k => k.Value.Count));
+        _logger.LogDebug("[Trace:ModLearning:{trace}] EXTRACT kinds={kinds} totalEntries={count}", traceId, extractedData.Count, extractedData.Sum(k => k.Value.Count));
 
         // Dispatch to Main Thread
         var runTask = _dalamudUtil.RunOnFrameworkThread(async () =>
@@ -196,7 +235,7 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
             {
                 if ((DateTime.UtcNow - _lastRestoreAt).TotalMilliseconds < 1500)
                 {
-                    _logger.LogTrace("[ModLearning] Restore skipped due to debounce.");
+                    _logger.LogDebug("[Trace:ModLearning:{trace}] RESTORE SKIP debounce", traceId);
                     return;
                 }
 
@@ -216,9 +255,11 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
 
                 var name = player.Name.ToString();
                 var homeWorld = player.HomeWorld.Value.Name.ToString();
+                var homeWorldId = player.HomeWorld.RowId;
                 var jobId = player.ClassJob.RowId;
                 var key = $"{name}@{homeWorld}";
 
+                _logger.LogDebug("[Trace:ModLearning:{trace}] RESTORE start key={key} job={job}", traceId, key, jobId);
                 var restored = await RestoreLearnedData(msg, key, name, homeWorld, jobId).ConfigureAwait(false);
                 var dataToPush = msg.CharacterData;
                 if (restored)
@@ -226,24 +267,25 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
                     _lastRestoreAt = DateTime.UtcNow;
                     var newData = CloneCharacterData(msg.CharacterData);
                     await _sqliteStore.UpsertLocalCharacterDataAsync(newData).ConfigureAwait(false);
-                    _logger.LogDebug("[ModLearning] Restored learned files and updated local character data. Republishing message.");
-                    _logger.LogTrace("[ModLearning] Republish CharacterDataCreatedMessage after restore");
+                    _logger.LogDebug("[Trace:ModLearning:{trace}] RESTORE updated local data", traceId);
                     Mediator.Publish(new CharacterDataCreatedMessage(newData, msg.RawData));
                     dataToPush = newData;
                 }
+                _logger.LogDebug("[Trace:ModLearning:{trace}] RESTORE done restored={restored}", traceId, restored);
 
                 if (!extractedData.Any())
                 {
-                    _logger.LogDebug("[ModLearning] No extracted replacements, skipping processing.");
+                    _logger.LogDebug("[Trace:ModLearning:{trace}] PROCESS SKIP no-extracted", traceId);
                     PublishReadyForPush(dataToPush);
                     return;
                 }
 
-                _logger.LogTrace("[ModLearning] Begin processing: key={key} jobId={jobId} extractedKinds={kinds}", key, jobId, extractedData.Count);
-                _logger.LogDebug("[ModLearning] Dispatching ProcessCharacterData for {key}. Replacements count: {count}", key, extractedData.Count);
+                _logger.LogDebug("[Trace:ModLearning:{trace}] PROCESS begin key={key} job={job} kinds={kinds}", traceId, key, jobId, extractedData.Count);
 
-                await Task.Run(() => ProcessCharacterData(key, name, homeWorld, jobId, extractedData)).ConfigureAwait(false);
+                await Task.Run(() => ProcessCharacterData(key, name, homeWorld, homeWorldId, jobId, extractedData)).ConfigureAwait(false);
+                _logger.LogDebug("[Trace:ModLearning:{trace}] PROCESS done", traceId);
                 PublishReadyForPush(dataToPush);
+                _logger.LogDebug("[Trace:ModLearning:{trace}] READY push", traceId);
             }
             catch (Exception ex)
             {
@@ -289,6 +331,15 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
 
         var enabledMods = new List<(string ModDirName, Dictionary<string, List<string>> Settings, List<LearnedModState> States)>();
         var allStates = new List<LearnedModState>();
+        HashSet<string> pendingModSettings = [];
+        lock (_lock)
+        {
+            if (_pendingModSettingChanges.Count > 0 &&
+                (DateTime.UtcNow - _lastPenumbraSettingChangeAt).TotalSeconds < 10)
+            {
+                pendingModSettings = new HashSet<string>(_pendingModSettingChanges, StringComparer.OrdinalIgnoreCase);
+            }
+        }
         foreach (var modDirName in modDirs)
         {
             var (ec, settingsTuple) = _penumbra.GetModSettings(collection.Id, modDirName);
@@ -322,11 +373,28 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
             var modDirName = modEntry.ModDirName;
             var settingsDict = modEntry.Settings;
             var matchingStates = modEntry.States;
+            var forceRestoreMod = pendingModSettings.Contains(modDirName)
+                || IsForceRestoreConfigured(key, modDirName)
+                || _configService.Current.ModLearningForceRestorePersistent;
+            var allowActiveDbBackfill = true;
             _logger.LogTrace("[ModLearning] Restore mod={mod} enabled={enabled} settingsKeys={settingsCount}", modDirName, true, settingsDict.Count);
             var modKey = modDirName.ToLowerInvariant();
 
             var scdLinksMap = GetScdLinksForStates(matchingStates);
             var modResourceLinksSnapshot = GetModResourceLinksSnapshot(modDirName);
+            var hasMinionState = matchingStates.Any(state =>
+                state.Fragments.TryGetValue(ObjectKind.MinionOrMount, out var minionFragment) &&
+                FragmentHasAnyReplacement(minionFragment));
+            if (hasMinionState && modResourceLinksSnapshot.Count > 0)
+            {
+                var removedPlayerScd = RemovePlayerScdLinkedToMinionMod(apiData, modResourceLinksSnapshot);
+                if (removedPlayerScd > 0)
+                {
+                    modified = true;
+                    _logger.LogDebug("[ModLearning] Removed player SCD entries linked to minion mod: mod={mod} removed={count}",
+                        modDirName, removedPlayerScd);
+                }
+            }
             var parentStatus = GetParentEffectiveness(matchingStates, resolvedMap);
             var overriddenParents = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             if (parentStatus.Count > 0)
@@ -345,7 +413,7 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
                 }
             }
 
-            var effectiveParentPaths = parentStatus.Where(p => p.Value && baselineParentPaths.Contains(p.Key))
+            var effectiveParentPaths = parentStatus.Where(p => p.Value && (forceRestoreMod || baselineParentPaths.Contains(p.Key)))
                 .Select(p => p.Key)
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
             var scdWithEffectiveParents = GetScdWithEffectiveParents(scdLinksMap, effectiveParentPaths);
@@ -460,6 +528,13 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
             }
 
             var modRestoredCount = 0;
+            var skippedNotEffective = 0;
+            var skippedEmoteOverride = 0;
+            var skippedScdParentOverride = 0;
+            var skippedParentBaseline = 0;
+            var skippedScdBaseline = 0;
+            var skippedMissingFile = 0;
+            var skippedExistingHash = 0;
             foreach (var matchingState in matchingStates)
             {
                 foreach (var fragmentKvp in matchingState.Fragments)
@@ -488,8 +563,11 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
                     foreach (var replacement in GetEffectiveReplacements(fragment, jobId))
                     {
                     var isEffective = IsReplacementEffective(replacement, resolvedMap);
-                    if (!isEffective)
+                    if (!isEffective && !forceRestoreMod && !allowActiveDbBackfill)
                     {
+                        skippedNotEffective++;
+                        _logger.LogTrace("[ModLearning] Skip non-effective replacement: mod={mod} kind={kind} hash={hash} paths={paths}",
+                            modDirName, kind, replacement.Hash, string.Join(", ", replacement.GamePaths));
                         var removed = RemoveFromTargetList(targetList, replacement);
                         if (removed)
                         {
@@ -521,6 +599,7 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
                         emoteOwners.TryGetValue(emoteName, out var emoteOwnerSet) && emoteOwnerSet.Count > 0 &&
                         !emoteOwnerSet.Contains(modDirName))
                     {
+                        skippedEmoteOverride++;
                         var removed = RemoveFromTargetList(targetList, replacement);
                         if (removed)
                         {
@@ -534,24 +613,31 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
                     if (IsScdReplacement(replacement) && scdToRemove.Count > 0 &&
                         replacement.GamePaths.Any(p => scdToRemove.Contains(NormalizePathString(p))))
                     {
+                        skippedScdParentOverride++;
                         _logger.LogTrace("[ModLearning] Skip re-add SCD due to parent override: mod={mod} paths={paths}",
                             modDirName, string.Join(", ", replacement.GamePaths));
                         continue;
                     }
 
-                    if (IsTrackedParentReplacement(replacement) &&
+                    if (!forceRestoreMod && !allowActiveDbBackfill && IsTrackedParentReplacement(replacement) &&
                         !replacement.GamePaths.Any(p => baselineParentPaths.Contains(NormalizePathString(p))))
                     {
+                        skippedParentBaseline++;
+                        _logger.LogTrace("[ModLearning] Skip parent not in baseline: mod={mod} kind={kind} hash={hash} paths={paths}",
+                            modDirName, kind, replacement.Hash, string.Join(", ", replacement.GamePaths));
                         continue;
                     }
 
-                    if (IsScdReplacement(replacement) && scdLinksMap.Count > 0)
+                    if (!forceRestoreMod && !allowActiveDbBackfill && IsScdReplacement(replacement) && scdLinksMap.Count > 0)
                     {
                         var linkedParents = scdLinksMap.Where(k => k.Value.Any(s => replacement.GamePaths.Any(p => string.Equals(NormalizePathString(p), NormalizePathString(s), StringComparison.OrdinalIgnoreCase))))
                             .Select(k => k.Key)
                             .ToList();
                         if (linkedParents.Count > 0 && !linkedParents.Any(p => baselineParentPaths.Contains(p)))
                         {
+                            skippedScdBaseline++;
+                            _logger.LogTrace("[ModLearning] Skip SCD linked parents not in baseline: mod={mod} hash={hash} paths={paths}",
+                                modDirName, replacement.Hash, string.Join(", ", replacement.GamePaths));
                             continue;
                         }
                     }
@@ -566,12 +652,27 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
                         _logger.LogTrace("[ModLearning] Restored missing file: {path} (Hash: {hash})", replacement.ResolvedPath, replacement.Hash);
                         _logger.LogTrace("[ModLearning] Restore add: mod={mod} kind={kind} hash={hash}", modDirName, kind, replacement.Hash);
                         }
+                    else
+                    {
+                        if (!canAdd)
+                        {
+                            skippedMissingFile++;
+                            _logger.LogTrace("[ModLearning] Skip missing file on disk: mod={mod} kind={kind} hash={hash} path={path}",
+                                modDirName, kind, replacement.Hash, replacement.ResolvedPath);
+                        }
+                        else if (existingHashes.Contains(replacement.Hash))
+                        {
+                            skippedExistingHash++;
+                            _logger.LogTrace("[ModLearning] Skip already present hash: mod={mod} kind={kind} hash={hash}", modDirName, kind, replacement.Hash);
+                        }
+                    }
                     }
                 }
             }
-            if (modRestoredCount > 0)
+            if (modRestoredCount > 0 || skippedNotEffective > 0 || skippedEmoteOverride > 0 || skippedScdParentOverride > 0 || skippedParentBaseline > 0 || skippedScdBaseline > 0 || skippedMissingFile > 0 || skippedExistingHash > 0)
             {
-                _logger.LogDebug("[ModLearning] Restored missing files: mod={mod} count={count}", modDirName, modRestoredCount);
+                _logger.LogDebug("[ModLearning] Restore summary: mod={mod} added={added} skipNotEffective={notEff} skipEmote={emote} skipScdOverride={scdOverride} skipParentBaseline={parentBase} skipScdBaseline={scdBase} skipMissingFile={missingFile} skipExistingHash={existingHash}",
+                    modDirName, modRestoredCount, skippedNotEffective, skippedEmoteOverride, skippedScdParentOverride, skippedParentBaseline, skippedScdBaseline, skippedMissingFile, skippedExistingHash);
             }
         }
         _logger.LogTrace("[ModLearning] Restore complete: modified={modified}", modified);
@@ -628,6 +729,39 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
         return removed;
     }
 
+    private static int RemovePlayerScdLinkedToMinionMod(Sphene.API.Data.CharacterData apiData, Dictionary<string, HashSet<string>> modResourceLinksSnapshot)
+    {
+        if (!apiData.FileReplacements.TryGetValue(ObjectKind.Player, out var playerList) || playerList == null || playerList.Count == 0)
+        {
+            return 0;
+        }
+
+        var linkedScd = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var scdSet in modResourceLinksSnapshot.Values)
+        {
+            foreach (var scd in scdSet)
+            {
+                if (scd.EndsWith(".scd", StringComparison.OrdinalIgnoreCase))
+                {
+                    linkedScd.Add(NormalizePathString(scd));
+                }
+            }
+        }
+        if (linkedScd.Count == 0) return 0;
+
+        var removed = 0;
+        for (var i = playerList.Count - 1; i >= 0; i--)
+        {
+            var entry = playerList[i];
+            if (entry.GamePaths.Any(p => linkedScd.Contains(NormalizePathString(p))))
+            {
+                playerList.RemoveAt(i);
+                removed++;
+            }
+        }
+        return removed;
+    }
+
     private static int AddLinkedScdReplacements(List<FileReplacementData> targetList, ModFileFragment fragment, HashSet<string> scdWithEffectiveParents, Dictionary<string, string> resolvedMap, HashSet<string> existingHashes)
     {
         if (scdWithEffectiveParents.Count == 0) return 0;
@@ -665,6 +799,14 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
             }
         }
         return results;
+    }
+
+    private static bool FragmentHasAnyReplacement(ModFileFragment? fragment)
+    {
+        if (fragment == null) return false;
+        if (fragment.FileReplacements != null && fragment.FileReplacements.Count > 0) return true;
+        if (fragment.JobFileReplacements == null || fragment.JobFileReplacements.Count == 0) return false;
+        return fragment.JobFileReplacements.Values.Any(set => set != null && set.Count > 0);
     }
 
     private static Dictionary<string, bool> GetParentEffectiveness(IEnumerable<LearnedModState> states, Dictionary<string, string> resolvedMap)
@@ -1246,6 +1388,7 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
         return string.Equals(extension, ".scd", StringComparison.OrdinalIgnoreCase)
             || string.Equals(extension, ".pap", StringComparison.OrdinalIgnoreCase)
             || string.Equals(extension, ".avfx", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(extension, ".sklb", StringComparison.OrdinalIgnoreCase)
             || string.Equals(extension, ".atex", StringComparison.OrdinalIgnoreCase)
             || string.Equals(extension, ".tmb", StringComparison.OrdinalIgnoreCase);
     }
@@ -1295,6 +1438,28 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
         return replacement.GamePaths.Any(p => p.EndsWith(".scd", StringComparison.OrdinalIgnoreCase));
     }
 
+    private bool HasDisabledModInSet(Guid collectionId, HashSet<string> modNames)
+    {
+        foreach (var modName in modNames)
+        {
+            var (ec, settingsTuple) = _penumbra.GetModSettings(collectionId, modName);
+            if (ec != Penumbra.Api.Enums.PenumbraApiEc.Success || settingsTuple == null) continue;
+            var (enabled, _, _, _) = settingsTuple.Value;
+            if (!enabled)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private bool IsForceRestoreConfigured(string characterKey, string modDirName)
+    {
+        var forced = _configService.Current.ModLearningForceRestoreMods;
+        if (!forced.TryGetValue(characterKey, out var mods)) return false;
+        return mods.Any(m => string.Equals(m, modDirName, StringComparison.OrdinalIgnoreCase));
+    }
+
     private static Sphene.API.Data.CharacterData CloneCharacterData(Sphene.API.Data.CharacterData source)
     {
         return new Sphene.API.Data.CharacterData
@@ -1311,7 +1476,7 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
         };
     }
 
-    private async Task ProcessCharacterData(string key, string name, string homeWorld, uint jobId, Dictionary<ObjectKind, List<FileReplacement>> data)
+    private async Task ProcessCharacterData(string key, string name, string homeWorld, uint homeWorldId, uint jobId, Dictionary<ObjectKind, List<FileReplacement>> data)
     {
         try
         {
@@ -1361,6 +1526,27 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
                 }
             }
             var hasChangedMods = changedMods.Count > 0;
+            HashSet<string> pendingModSettings = [];
+            bool restrictToPending = false;
+            bool restrictToChangedItems = false;
+            lock (_lock)
+            {
+                if (!_hasGlobalModSettingChange && _pendingModSettingChanges.Count > 0 &&
+                    (DateTime.UtcNow - _lastPenumbraSettingChangeAt).TotalSeconds < 10)
+                {
+                    pendingModSettings = new HashSet<string>(_pendingModSettingChanges, StringComparer.OrdinalIgnoreCase);
+                    restrictToPending = true;
+                }
+                else if (_hasGlobalModSettingChange && hasChangedMods)
+                {
+                    restrictToChangedItems = true;
+                }
+            }
+            if (restrictToPending && HasDisabledModInSet(collectionId, pendingModSettings))
+            {
+                restrictToPending = false;
+                _logger.LogDebug("[ModLearning] Pending set contains disabled mod; processing all observed replacements to capture ownership changes.");
+            }
 
             // Group replacements by Mod Directory Name
             var replacementsByMod = new Dictionary<string, List<FileReplacement>>(StringComparer.OrdinalIgnoreCase);
@@ -1468,6 +1654,33 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
                 }
             }
 
+            if (restrictToPending)
+            {
+                replacementsByMod = replacementsByMod
+                    .Where(kvp => pendingModSettings.Contains(kvp.Key))
+                    .ToDictionary(k => k.Key, v => v.Value, StringComparer.OrdinalIgnoreCase);
+                foreach (var pendingMod in pendingModSettings)
+                {
+                    if (!replacementsByMod.ContainsKey(pendingMod))
+                    {
+                        replacementsByMod[pendingMod] = [];
+                    }
+                }
+            }
+            else if (restrictToChangedItems)
+            {
+                replacementsByMod = replacementsByMod
+                    .Where(kvp => changedMods.Contains(kvp.Key))
+                    .ToDictionary(k => k.Key, v => v.Value, StringComparer.OrdinalIgnoreCase);
+                foreach (var changedMod in changedMods)
+                {
+                    if (!replacementsByMod.ContainsKey(changedMod))
+                    {
+                        replacementsByMod[changedMod] = [];
+                    }
+                }
+            }
+
             if (!replacementsByMod.Any())
             {
                 _logger.LogDebug("[ModLearning] No mods to process after ChangedItems merge. Skipping persist.");
@@ -1479,6 +1692,7 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
             int totalUpserts = 0;
             int totalSkipped = 0;
             int totalStates = 0;
+            var observedTransientPaths = GetObservedTransientGamePathsForCharacter(name, homeWorldId);
 
             // We do not lock the whole process, but we should be careful with the dictionary access.
             // Since this runs in a task, and OnCharacterDataCreated spawns tasks, we might have concurrency.
@@ -1518,7 +1732,7 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
                         }
                     }
                     _logger.LogTrace("[ModLearning] Mod settings: {mod} enabled={enabled} groups={groups}", modDirName, enabled, settingsDict.Count);
-                    var optionStates = await BuildOptionStatesAsync(modDir, modDirName, modReplacements, data, settingsDict).ConfigureAwait(false);
+                    var optionStates = await BuildOptionStatesAsync(modDir, modDirName, modReplacements, data, settingsDict, observedTransientPaths).ConfigureAwait(false);
                     _logger.LogDebug("[ModLearning] Option states built: {mod} count={count}", modDirName, optionStates.Count);
                     
                     lock (_lock)
@@ -1637,6 +1851,24 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
             }
 
             stopwatch.Stop();
+            if (restrictToPending)
+            {
+                lock (_lock)
+                {
+                    foreach (var mod in pendingModSettings)
+                    {
+                        _pendingModSettingChanges.Remove(mod);
+                    }
+                }
+            }
+            lock (_lock)
+            {
+                if (_hasGlobalModSettingChange)
+                {
+                    _pendingModSettingChanges.Clear();
+                    _hasGlobalModSettingChange = false;
+                }
+            }
             _logger.LogDebug("[ModLearning] Persist summary: Mods={mods}, States={states}, Upserts={upserts}, Skipped={skipped}, DurationMs={durationMs}.",
                 replacementsByMod.Count, totalStates, totalUpserts, totalSkipped, stopwatch.ElapsedMilliseconds);
             _logger.LogTrace("[ModLearning] Process complete: key={key} durationMs={durationMs}", key, stopwatch.ElapsedMilliseconds);
@@ -1647,10 +1879,39 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
         }
     }
 
+    private HashSet<string> GetObservedTransientGamePathsForCharacter(string characterName, uint homeWorldId)
+    {
+        var transientKey = $"{characterName}_{homeWorldId}";
+        if (!_transientConfigService.Current.TransientConfigs.TryGetValue(transientKey, out var playerConfig))
+        {
+            return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        var observed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var path in playerConfig.GlobalPersistentCache)
+        {
+            if (!string.IsNullOrWhiteSpace(path))
+            {
+                observed.Add(NormalizePathString(path));
+            }
+        }
+        foreach (var jobCache in playerConfig.JobSpecificCache.Values)
+        {
+            foreach (var path in jobCache)
+            {
+                if (!string.IsNullOrWhiteSpace(path))
+                {
+                    observed.Add(NormalizePathString(path));
+                }
+            }
+        }
+        return observed;
+    }
+
     private sealed record OptionState(Dictionary<string, List<string>> Settings, Dictionary<ObjectKind, ModFileFragment> Fragments);
     private readonly record struct ResourceLoadStamp(string GamePath, string Extension, long TimestampMs);
 
-    private async Task<List<OptionState>> BuildOptionStatesAsync(string modDirectoryPath, string modDirectoryName, List<FileReplacement> modReplacements, Dictionary<ObjectKind, List<FileReplacement>> fullData, Dictionary<string, List<string>> settingsDict)
+    private async Task<List<OptionState>> BuildOptionStatesAsync(string modDirectoryPath, string modDirectoryName, List<FileReplacement> modReplacements, Dictionary<ObjectKind, List<FileReplacement>> fullData, Dictionary<string, List<string>> settingsDict, HashSet<string> observedTransientPaths)
     {
         var replacementSet = modReplacements.ToHashSet();
         var optionIndex = GetOptionIndex(modDirectoryPath, modDirectoryName);
@@ -1672,6 +1933,7 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
                 foreach (var replacement in relevant)
                 {
                     var optionMatches = GetOptionMatches(optionIndex, selectedOptions, replacement.GamePaths);
+                    var seenInTransient = replacement.GamePaths.Any(gp => observedTransientPaths.Contains(NormalizePathString(gp)));
                     if (optionMatches.Count == 0)
                     {
                         AddReplacementToOptionState(states[baseKey], kind, replacement);
@@ -1688,6 +1950,10 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
                             };
                             state = new OptionState(settings, new Dictionary<ObjectKind, ModFileFragment>());
                             states[match.OptionKey] = state;
+                        }
+                        if (!seenInTransient)
+                        {
+                            continue;
                         }
                         AddReplacementToOptionState(state, kind, replacement);
                     }
@@ -1727,6 +1993,10 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
             }
             foreach (var replacement in optionEntry.Value)
             {
+                if (!replacement.GamePaths.Any(gp => observedTransientPaths.Contains(NormalizePathString(gp))))
+                {
+                    continue;
+                }
                 AddReplacementToOptionState(state, ObjectKind.Player, replacement);
             }
         }
