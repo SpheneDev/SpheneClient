@@ -129,6 +129,7 @@ public class SpheneConfig : ISpheneConfiguration
     // Sync Settings
     public bool DisableSyncPauseDuringDutyOrCombat { get; set; } = false;
     public bool FilterCharacterLegacyShpk { get; set; } = false;
+    public bool FilterCharacterShpk { get; set; } = false;
     public bool DisableAutomaticRedrawOnEquipmentOrWeaponChanges { get; set; } = false;
     public bool RedrawPairsOnlyForSpecialEmotesFirstApply { get; set; } = false;
     public bool PreloadPairCollectionFromLastReceivedData { get; set; } = false;

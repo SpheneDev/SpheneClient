@@ -90,6 +90,10 @@ public class Pair : DisposableMediatorSubscriberBase
     public string? PreviousReceivedCharacterDataHash { get; private set; }
     public DateTimeOffset? LastReceivedCharacterDataTime { get; private set; }
     public DateTimeOffset? LastReceivedCharacterDataChangeTime { get; private set; }
+    public bool LastReceivedContainsCharacterLegacyShpk { get; private set; } = false;
+    public bool LastReceivedContainsCharacterShpk { get; private set; } = false;
+    public bool LastReceivedCharacterLegacyShpkFiltered { get; private set; } = false;
+    public bool LastReceivedCharacterShpkFiltered { get; private set; } = false;
     public string? PlayerName => CachedPlayer?.PlayerName ?? string.Empty;
     public long LastAppliedDataBytes => CachedPlayer?.LastAppliedDataBytes ?? -1;
     public long LastAppliedDataTris { get; set; } = -1;
@@ -404,6 +408,10 @@ public class Pair : DisposableMediatorSubscriberBase
         LastReceivedCharacterData = data.CharaData;
         LastReceivedCharacterDataHash = newHash;
         LastReceivedCharacterDataTime = now;
+        LastReceivedContainsCharacterLegacyShpk = ContainsGamePath(LastReceivedCharacterData, "characterlegacy.shpk");
+        LastReceivedContainsCharacterShpk = ContainsGamePath(LastReceivedCharacterData, "character.shpk");
+        LastReceivedCharacterLegacyShpkFiltered = LastReceivedContainsCharacterLegacyShpk && _configService.Current.FilterCharacterLegacyShpk;
+        LastReceivedCharacterShpkFiltered = LastReceivedContainsCharacterShpk && _configService.Current.FilterCharacterShpk;
         Logger.LogDebug("{tag} Cache updated: user={user} newHash={newHash} previousHash={prevHash} changed={changed}",
             SyncProgressTag,
             data.User.AliasOrUID,
@@ -429,6 +437,10 @@ public class Pair : DisposableMediatorSubscriberBase
         LastReceivedCharacterDataHash = persisted.DataHash;
         LastReceivedCharacterDataTime = persisted.ReceivedAt;
         LastReceivedCharacterDataChangeTime = persisted.ReceivedAt;
+        LastReceivedContainsCharacterLegacyShpk = ContainsGamePath(LastReceivedCharacterData, "characterlegacy.shpk");
+        LastReceivedContainsCharacterShpk = ContainsGamePath(LastReceivedCharacterData, "character.shpk");
+        LastReceivedCharacterLegacyShpkFiltered = LastReceivedContainsCharacterLegacyShpk && _configService.Current.FilterCharacterLegacyShpk;
+        LastReceivedCharacterShpkFiltered = LastReceivedContainsCharacterShpk && _configService.Current.FilterCharacterShpk;
         Logger.LogDebug("{tag} Loaded persisted character data: user={user} hash={hash}", SyncProgressTag, UserData.AliasOrUID, persisted.DataHash[..Math.Min(8, persisted.DataHash.Length)]);
     }
 
@@ -545,6 +557,10 @@ public class Pair : DisposableMediatorSubscriberBase
             PreviousReceivedCharacterDataHash = null;
             LastReceivedCharacterDataTime = null;
             LastReceivedCharacterDataChangeTime = null;
+            LastReceivedContainsCharacterLegacyShpk = false;
+            LastReceivedContainsCharacterShpk = false;
+            LastReceivedCharacterLegacyShpkFiltered = false;
+            LastReceivedCharacterShpkFiltered = false;
             var player = CachedPlayer;
             CachedPlayer = null;
             player?.Dispose();
@@ -581,6 +597,7 @@ public class Pair : DisposableMediatorSubscriberBase
         bool disableIndividualVFX = (UserPair.OtherPermissions.IsDisableVFX() || UserPair.OwnPermissions.IsDisableVFX());
         bool disableIndividualSounds = (UserPair.OtherPermissions.IsDisableSounds() || UserPair.OwnPermissions.IsDisableSounds());
         bool filterCharacterLegacy = _configService.Current.FilterCharacterLegacyShpk;
+        bool filterCharacterShpk = _configService.Current.FilterCharacterShpk;
 
         if (_dalamudUtilService.IsInDuty
             && (UserPair.OtherPermissions.IsDisableVFXInDuty() || UserPair.OwnPermissions.IsDisableVFXInDuty()))
@@ -589,13 +606,13 @@ public class Pair : DisposableMediatorSubscriberBase
         }
 
         Logger.LogTrace("Disable: Sounds: {disableIndividualSounds}, Anims: {disableIndividualAnims}; " +
-            "VFX: {disableGroupSounds}, FilterLegacy: {filterCharacterLegacy}",
-            disableIndividualSounds, disableIndividualAnimations, disableIndividualVFX, filterCharacterLegacy);
+            "VFX: {disableGroupSounds}, FilterLegacy: {filterCharacterLegacy}, FilterCharacterShpk: {filterCharacterShpk}",
+            disableIndividualSounds, disableIndividualAnimations, disableIndividualVFX, filterCharacterLegacy, filterCharacterShpk);
 
-        if (disableIndividualAnimations || disableIndividualSounds || disableIndividualVFX || filterCharacterLegacy)
+        if (disableIndividualAnimations || disableIndividualSounds || disableIndividualVFX || filterCharacterLegacy || filterCharacterShpk)
         {
-            Logger.LogTrace("Data cleaned up: Animations disabled: {disableAnimations}, Sounds disabled: {disableSounds}, VFX disabled: {disableVFX}, Filter Legacy: {filterCharacterLegacy}",
-                disableIndividualAnimations, disableIndividualSounds, disableIndividualVFX, filterCharacterLegacy);
+            Logger.LogTrace("Data cleaned up: Animations disabled: {disableAnimations}, Sounds disabled: {disableSounds}, VFX disabled: {disableVFX}, Filter Legacy: {filterCharacterLegacy}, Filter Character Shpk: {filterCharacterShpk}",
+                disableIndividualAnimations, disableIndividualSounds, disableIndividualVFX, filterCharacterLegacy, filterCharacterShpk);
             foreach (var objectKind in data.FileReplacements.Select(k => k.Key))
             {
                 if (disableIndividualSounds)
@@ -614,10 +631,35 @@ public class Pair : DisposableMediatorSubscriberBase
                     data.FileReplacements[objectKind] = data.FileReplacements[objectKind]
                         .Where(f => !f.GamePaths.Any(p => p.EndsWith("characterlegacy.shpk", StringComparison.OrdinalIgnoreCase)))
                         .ToList();
+                if (filterCharacterShpk)
+                    data.FileReplacements[objectKind] = data.FileReplacements[objectKind]
+                        .Where(f => !f.GamePaths.Any(p => p.EndsWith("character.shpk", StringComparison.OrdinalIgnoreCase)))
+                        .ToList();
             }
         }
 
         return data;
+    }
+
+    private static bool ContainsGamePath(CharacterData? data, string fileName)
+    {
+        if (data?.FileReplacements == null) return false;
+        foreach (var objectKind in data.FileReplacements.Keys)
+        {
+            foreach (var replacement in data.FileReplacements[objectKind])
+            {
+                if (!string.IsNullOrEmpty(replacement.FileSwapPath) &&
+                    replacement.FileSwapPath.EndsWith(fileName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+                if (replacement.GamePaths.Any(p => p.EndsWith(fileName, StringComparison.OrdinalIgnoreCase)))
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     public async Task UpdateAcknowledgmentStatus(string? acknowledgmentId, bool success, DateTimeOffset timestamp)

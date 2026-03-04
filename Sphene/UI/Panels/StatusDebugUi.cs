@@ -1370,8 +1370,27 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                 }
                 else
                 {
-                    var found = false;
                     var details = new List<string>();
+                    if (pair.LastReceivedContainsCharacterLegacyShpk)
+                    {
+                        details.Add(pair.LastReceivedCharacterLegacyShpkFiltered
+                            ? "characterlegacy.shpk: SENT (filtered locally)"
+                            : "characterlegacy.shpk: SENT");
+                    }
+                    else
+                    {
+                        details.Add("characterlegacy.shpk: not present");
+                    }
+                    if (pair.LastReceivedContainsCharacterShpk)
+                    {
+                        details.Add(pair.LastReceivedCharacterShpkFiltered
+                            ? "character.shpk: SENT (filtered locally)"
+                            : "character.shpk: SENT");
+                    }
+                    else
+                    {
+                        details.Add("character.shpk: not present");
+                    }
 
                     if (data.FileReplacements != null)
                     {
@@ -1379,16 +1398,17 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                         {
                             foreach (var replacement in kvp.Value)
                             {
-                                if (!string.IsNullOrEmpty(replacement.FileSwapPath) && replacement.FileSwapPath.EndsWith("characterlegacy.shpk", StringComparison.OrdinalIgnoreCase))
+                                if (!string.IsNullOrEmpty(replacement.FileSwapPath) &&
+                                    (replacement.FileSwapPath.EndsWith("characterlegacy.shpk", StringComparison.OrdinalIgnoreCase)
+                                     || replacement.FileSwapPath.EndsWith("character.shpk", StringComparison.OrdinalIgnoreCase)))
                                 {
-                                    found = true;
                                     details.Add($"Swap: {replacement.FileSwapPath}");
                                 }
                                 foreach (var gamePath in replacement.GamePaths)
                                 {
-                                    if (gamePath.EndsWith("characterlegacy.shpk", StringComparison.OrdinalIgnoreCase))
+                                    if (gamePath.EndsWith("characterlegacy.shpk", StringComparison.OrdinalIgnoreCase)
+                                        || gamePath.EndsWith("character.shpk", StringComparison.OrdinalIgnoreCase))
                                     {
-                                        found = true;
                                         details.Add($"GamePath: {gamePath}");
                                     }
                                 }
@@ -1396,18 +1416,10 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                         }
                     }
 
-                    if (found)
-                    {
-                        ImGui.TextColored(ImGuiColors.DalamudRed, "FOUND");
-                        ImGui.TableNextColumn();
-                        ImGui.TextWrapped(string.Join("\n", details));
-                    }
-                    else
-                    {
-                        ImGui.TextColored(ImGuiColors.HealerGreen, "Clean");
-                        ImGui.TableNextColumn();
-                        ImGui.TextUnformatted("-");
-                    }
+                    var foundAny = pair.LastReceivedContainsCharacterLegacyShpk || pair.LastReceivedContainsCharacterShpk;
+                    ImGui.TextColored(foundAny ? ImGuiColors.DalamudRed : ImGuiColors.HealerGreen, foundAny ? "FOUND" : "Clean");
+                    ImGui.TableNextColumn();
+                    ImGui.TextWrapped(string.Join("\n", details));
                 }
             }
 

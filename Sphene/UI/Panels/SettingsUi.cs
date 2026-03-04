@@ -3105,6 +3105,15 @@ public class SettingsUi : WindowMediatorSubscriberBase
             "When enabled, the characterlegacy.shpk file will be filtered out when receiving data from pairs. " +
             "This can help prevent potential crashes and shadow-related bugs caused by this specific file. " +
             "Enable this option if you experience stability issues related to character legacy data.");
+        var filterCharacterShpk = _configService.Current.FilterCharacterShpk;
+        if (ImGui.Checkbox("Filter character.shpk on receive", ref filterCharacterShpk))
+        {
+            _configService.Current.FilterCharacterShpk = filterCharacterShpk;
+            _configService.Save();
+        }
+        _uiShared.DrawHelpText(
+            "When enabled, the character.shpk file will be filtered out when receiving data from pairs. " +
+            "Use this if character shader changes cause visual artifacts or instability.");
 
         ImGui.Spacing();
         ImGui.Separator();
