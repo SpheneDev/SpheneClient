@@ -395,7 +395,7 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
                         modDirName, removedPlayerScd);
                 }
             }
-            var parentStatus = GetParentEffectiveness(matchingStates, resolvedMap);
+            var parentStatus = GetParentEffectiveness(matchingStates, resolvedMap, jobId);
             var overriddenParents = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             if (parentStatus.Count > 0)
             {
@@ -928,14 +928,14 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
         return fragment.JobFileReplacements.Values.Any(set => set != null && set.Count > 0);
     }
 
-    private static Dictionary<string, bool> GetParentEffectiveness(IEnumerable<LearnedModState> states, Dictionary<string, string> resolvedMap)
+    private static Dictionary<string, bool> GetParentEffectiveness(IEnumerable<LearnedModState> states, Dictionary<string, string> resolvedMap, uint jobId)
     {
         var status = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
         foreach (var state in states)
         {
             foreach (var fragment in state.Fragments.Values)
             {
-                foreach (var replacement in GetAllReplacements(fragment))
+                foreach (var replacement in GetEffectiveReplacements(fragment, jobId))
                 {
                     if (!IsTrackedParentReplacement(replacement)) continue;
                     var isEffective = IsReplacementEffective(replacement, resolvedMap);
