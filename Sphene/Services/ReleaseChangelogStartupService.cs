@@ -52,7 +52,10 @@ public sealed class ReleaseChangelogStartupService : IHostedService, IMediatorSu
             var lastSeen = _configService.Current.LastSeenVersionChangelog ?? string.Empty;
             _logger.LogDebug("ReleaseChangelogStartupService: current={current}, lastSeen={last}", currentVersion, lastSeen);
 
-            if (ShouldShowChangelog(version, lastSeen))
+            var shouldShow = ShouldShowChangelog(version, lastSeen);
+            _mediator.Publish(new ReleaseChangelogStartupStateMessage(shouldShow));
+
+            if (shouldShow)
             {
                 _pendingVersionString = currentVersion;
                 _logger.LogDebug("Release changelog pending until UI is initialized. version={version}", currentVersion);

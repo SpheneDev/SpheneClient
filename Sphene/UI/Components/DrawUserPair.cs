@@ -432,6 +432,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
 
         ImGui.Separator();
         ImGui.TextUnformatted("Temporary Collection Preload");
+        UiSharedService.AttachToolTip("Manage per-user preload eligibility directly from this menu.");
 
         var tempWhitelist = _performanceConfigService.Current.TemporaryCollectionWhitelist;
         bool isTempWhitelisted = tempWhitelist.Contains(userIdentifier, StringComparer.Ordinal) ||
@@ -450,6 +451,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
                 ImGui.CloseCurrentPopup();
             }
             UiSharedService.AttachToolTip("Adds this user to the temporary collection preload whitelist." + Environment.NewLine +
+                                          "The preload setting must be enabled in Settings > Sync Settings." + Environment.NewLine +
                                           "Will use: " + (!string.IsNullOrEmpty(_pair.UserData.Alias) ? _pair.UserData.Alias : _pair.UserData.UID));
         }
         else

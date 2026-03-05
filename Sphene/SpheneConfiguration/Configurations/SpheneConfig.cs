@@ -141,5 +141,6 @@ public class SpheneConfig : ISpheneConfiguration
     public bool EnableModLearning { get; set; } = true;
     public bool ModLearningForceRestorePersistent { get; set; } = true;
     public Dictionary<string, List<string>> ModLearningForceRestoreMods { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public HashSet<string> SeenOneTimeOptionSummaryPrompts { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
 }

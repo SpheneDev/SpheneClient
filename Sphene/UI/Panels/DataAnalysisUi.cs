@@ -1956,6 +1956,15 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
         }
         ImGui.SameLine();
         bool selectedData = config.TryGetValue(_selectedStoredCharacter, out var transientStorage) && transientStorage != null;
+        if (!selectedData && !string.IsNullOrEmpty(_selectedStoredCharacter))
+        {
+            _selectedStoredCharacter = string.Empty;
+            _selectedJobEntry = string.Empty;
+            _storedPathsToRemove.Clear();
+            _filePathResolve.Clear();
+            _filterFilePath = string.Empty;
+            _filterGamePath = string.Empty;
+        }
         using (ImRaii.Group())
         {
             ImGui.TextUnformatted("Job");
@@ -1987,9 +1996,20 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
         ImGui.SameLine();
         using (ImRaii.Group())
         {
-            var selectedList = string.Equals(_selectedJobEntry, "alljobs", StringComparison.Ordinal)
-                ? config[_selectedStoredCharacter].GlobalPersistentCache
-                : (string.IsNullOrEmpty(_selectedJobEntry) ? [] : config[_selectedStoredCharacter].JobSpecificCache[uint.Parse(_selectedJobEntry)]);
+            List<string> selectedList = [];
+            if (selectedData)
+            {
+                if (string.Equals(_selectedJobEntry, "alljobs", StringComparison.Ordinal))
+                {
+                    selectedList = transientStorage!.GlobalPersistentCache;
+                }
+                else if (!string.IsNullOrEmpty(_selectedJobEntry)
+                    && uint.TryParse(_selectedJobEntry, out var selectedJobId)
+                    && transientStorage!.JobSpecificCache.TryGetValue(selectedJobId, out var selectedJobList))
+                {
+                    selectedList = selectedJobList;
+                }
+            }
             ImGui.TextUnformatted($"Attached Files (Total Files: {selectedList.Count})");
             ImGui.Separator();
             ImGuiHelpers.ScaledDummy(3);

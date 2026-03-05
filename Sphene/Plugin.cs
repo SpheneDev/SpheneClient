@@ -417,6 +417,14 @@ public sealed class Plugin : IDalamudPlugin
                 s.GetRequiredService<SpheneMediator>(),
                 s.GetRequiredService<PerformanceCollectorService>(),
                 s.GetRequiredService<ChangelogService>()));
+            collection.AddSingleton<WindowMediatorSubscriberBase, OneTimeUpdateOptionsSummaryUi>((s) => new OneTimeUpdateOptionsSummaryUi(
+                s.GetRequiredService<ILogger<OneTimeUpdateOptionsSummaryUi>>(),
+                s.GetRequiredService<SpheneMediator>(),
+                s.GetRequiredService<PerformanceCollectorService>(),
+                s.GetRequiredService<UiSharedService>(),
+                s.GetRequiredService<SpheneConfigService>(),
+                s.GetRequiredService<PlayerPerformanceConfigService>(),
+                s.GetRequiredService<TransientResourceManager>()));
 
             collection.AddScoped<WindowMediatorSubscriberBase, EditProfileUi>((s) => new EditProfileUi(s.GetRequiredService<ILogger<EditProfileUi>>(),
                 s.GetRequiredService<SpheneMediator>(), s.GetRequiredService<ApiController>(), s.GetRequiredService<UiSharedService>(), s.GetRequiredService<FileDialogManager>(),
@@ -474,7 +482,9 @@ public sealed class Plugin : IDalamudPlugin
             collection.AddHostedService(p => p.GetRequiredService<UpdateCheckService>());
             collection.AddSingleton<ChangelogService>();
             collection.AddSingleton<ReleaseChangelogStartupService>();
+            collection.AddSingleton<OneTimeUpdateOptionsSummaryStartupService>();
             collection.AddHostedService(p => p.GetRequiredService<ReleaseChangelogStartupService>());
+            collection.AddHostedService(p => p.GetRequiredService<OneTimeUpdateOptionsSummaryStartupService>());
             collection.AddHostedService(p => p.GetRequiredService<ShrinkUHostService>());
             // Initialize CitySyncshellExplanationUI early as hosted service to ensure it's created before CitySyncshellService
             collection.AddHostedService(p => 

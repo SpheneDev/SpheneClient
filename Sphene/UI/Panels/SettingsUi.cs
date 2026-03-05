@@ -62,6 +62,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
     private readonly ServerConfigurationManager _serverConfigurationManager;
     private readonly UiSharedService _uiShared;
     private readonly CharacterDataSqliteStore _characterDataSqliteStore;
+    private readonly TransientResourceManager _transientResourceManager;
     private readonly ShrinkUHostService _shrinkUHostService;
     private readonly ChangelogService _changelogService;
     private readonly string _shrinkUVersion;
@@ -132,6 +133,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         ShrinkUHostService shrinkUHostService,
         DalamudUtilService dalamudUtilService, HttpClient httpClient,
         CharacterDataSqliteStore characterDataSqliteStore,
+        TransientResourceManager transientResourceManager,
         ChangelogService changelogService) : base(logger, mediator, "Network Configuration", performanceCollector)
     {
         _configService = configService;
@@ -152,6 +154,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         _shrinkUHostService = shrinkUHostService;
         _changelogService = changelogService;
         _characterDataSqliteStore = characterDataSqliteStore;
+        _transientResourceManager = transientResourceManager;
         _shrinkUVersion = GetShrinkUAssemblyVersion();
         AllowClickthrough = false;
         AllowPinning = false;
@@ -1206,6 +1209,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 _uidToAddForTempCollection = string.Empty;
             }
         }
+        UiSharedService.AttachToolTip("Adds this UID/Vanity ID to preload whitelist. You can also add users from the pair context menu.");
         _uiShared.DrawHelpText("Hint: UIDs are case sensitive.");
         var tempCollectionList = _playerPerformanceConfigService.Current.TemporaryCollectionWhitelist;
         ImGui.SetNextItemWidth(400 * ImGuiHelpers.GlobalScale);
@@ -3071,6 +3075,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             _configService.Current.DisableSyncPauseDuringDutyOrCombat = disableSyncPause;
             _configService.Save();
         }
+        UiSharedService.AttachToolTip("Keep synchronization active in duties/combat. Useful for consistency, but may cost performance.");
         _uiShared.DrawHelpText(
             "Enabled: keep sync running in duty/combat. Disabled: better performance in heavy encounters.");
         ImGui.Spacing();
@@ -3090,6 +3095,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             _configService.Current.FilterCharacterLegacyShpk = filterCharacterLegacy;
             _configService.Save();
         }
+        UiSharedService.AttachToolTip("Filters incoming characterlegacy shader data before apply.");
         _uiShared.DrawHelpText(
             "When enabled, the characterlegacy.shpk file will be filtered out when receiving data from pairs. " +
             "This can help prevent potential crashes and shadow-related bugs caused by this specific file. " +
@@ -3100,6 +3106,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             _configService.Current.FilterCharacterShpk = filterCharacterShpk;
             _configService.Save();
         }
+        UiSharedService.AttachToolTip("Filters incoming character shader data before apply.");
         _uiShared.DrawHelpText(
             "When enabled, the character.shpk file will be filtered out when receiving data from pairs. " +
             "Use this if character shader changes cause visual artifacts or instability.");
@@ -3110,13 +3117,14 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
         _uiShared.BigText("Redraw Behavior");
         var disableEquipmentWeaponRedraw = _configService.Current.DisableAutomaticRedrawOnEquipmentOrWeaponChanges;
-        if (ImGui.Checkbox("Disable automatic refresh after equipment or weapon changes", ref disableEquipmentWeaponRedraw))
+        if (ImGui.Checkbox("Disable automatic redraw after equipment or weapon changes", ref disableEquipmentWeaponRedraw))
         {
             _configService.Current.DisableAutomaticRedrawOnEquipmentOrWeaponChanges = disableEquipmentWeaponRedraw;
             _configService.Save();
         }
+        UiSharedService.AttachToolTip("Suppresses redraw for gear/weapon-only updates.");
         _uiShared.DrawHelpText(
-            "Prevents auto-refresh on gear/weapon-only changes. Manual refresh may be required.");
+            "Prevents auto-redraw on gear/weapon-only changes. Manual redraw may be required.");
 
         var redrawOnlySpecialEmotesFirst = _configService.Current.RedrawPairsOnlyForSpecialEmotesFirstApply;
         if (ImGui.Checkbox("Redraw pairs only for sit/ground sit/doze on first apply", ref redrawOnlySpecialEmotesFirst))
@@ -3137,20 +3145,34 @@ public class SettingsUi : WindowMediatorSubscriberBase
             "Skips post-zone reapply when character data is unchanged.");
 
         var skipPostZoneEquipmentOnly = _configService.Current.SkipPostZoneReapplyForEquipmentOrWeaponOnlyChanges;
-        using (ImRaii.Disabled(!skipPostZoneUnchanged))
+        using (ImRaii.PushIndent(20f * ImGuiHelpers.GlobalScale))
         {
-            if (ImGui.Checkbox("Skip post-zone reapply for equipment or weapon-only changes", ref skipPostZoneEquipmentOnly))
+            using (ImRaii.Disabled(!skipPostZoneUnchanged))
             {
-                _configService.Current.SkipPostZoneReapplyForEquipmentOrWeaponOnlyChanges = skipPostZoneEquipmentOnly;
-                _configService.Save();
+                if (ImGui.Checkbox("Skip post-zone reapply for equipment or weapon-only changes", ref skipPostZoneEquipmentOnly))
+                {
+                    _configService.Current.SkipPostZoneReapplyForEquipmentOrWeaponOnlyChanges = skipPostZoneEquipmentOnly;
+                    _configService.Save();
+                }
             }
+            _uiShared.DrawHelpText(
+                "Requires 'Skip post-zone reapply when data is unchanged'. " +
+                "When enabled, Sphene will skip reapplying after zoning if the only changes are equipment or weapon-related file replacements. " +
+                "You may need manual refreshes to see all updates.");
         }
-        _uiShared.DrawHelpText(
-            "Requires 'Skip post-zone reapply when data is unchanged'. " +
-            "When enabled, Sphene will skip reapplying after zoning if the only changes are equipment or weapon-related file replacements. " +
-            "You may need manual refreshes to see all updates.");
 
         _uiShared.BigText("Pair Temporary Collection Behavior");
+
+        var preloadPairCollection = _configService.Current.PreloadPairCollectionFromLastReceivedData;
+        if (ImGui.Checkbox("Preload pair collection from last received data", ref preloadPairCollection))
+        {
+            _configService.Current.PreloadPairCollectionFromLastReceivedData = preloadPairCollection;
+            _configService.Save();
+        }
+        UiSharedService.AttachToolTip("Prepares temporary collections earlier to reduce visual pop-in when users appear.");
+        _uiShared.DrawHelpText(
+            "When enabled, Sphene prepares a pair's temporary collection using the last received character data even if the pair is not visible. " +
+            "Only users in the Temporary Collection Whitelist will be preloaded. This can reduce visual deformation when you first see the pair, but may increase background work.");
 
         var disableTemporaryCollectionsAfterInactivity = _configService.Current.DisableTemporaryCollectionsAfterInactivity;
         if (ImGui.Checkbox("Disable temporary collections after inactivity", ref disableTemporaryCollectionsAfterInactivity))
@@ -3162,27 +3184,20 @@ public class SettingsUi : WindowMediatorSubscriberBase
             "When enabled, Sphene removes the temporary Penumbra collection for a pair after it has been inactive for the configured duration. " +
             "This reduces overhead for pairs that are not currently visible. The collection is recreated automatically when needed.");
 
-        var preloadPairCollection = _configService.Current.PreloadPairCollectionFromLastReceivedData;
-        if (ImGui.Checkbox("Preload pair collection from last received data", ref preloadPairCollection))
-        {
-            _configService.Current.PreloadPairCollectionFromLastReceivedData = preloadPairCollection;
-            _configService.Save();
-        }
-        _uiShared.DrawHelpText(
-            "When enabled, Sphene prepares a pair's temporary collection using the last received character data even if the pair is not visible. " +
-            "Only users in the Temporary Collection Whitelist will be preloaded. This can reduce visual deformation when you first see the pair, but may increase background work.");
-
         var temporaryCollectionTimeoutMinutes = Math.Max(1, _configService.Current.TemporaryCollectionInactivityTimeoutMinutes);
-        using (ImRaii.Disabled(!disableTemporaryCollectionsAfterInactivity))
+        using (ImRaii.PushIndent(20f * ImGuiHelpers.GlobalScale))
         {
-            ImGui.SetNextItemWidth(220 * ImGuiHelpers.GlobalScale);
-            if (ImGui.SliderInt("Temporary collection inactivity timeout (minutes)", ref temporaryCollectionTimeoutMinutes, 1, 40))
+            using (ImRaii.Disabled(!disableTemporaryCollectionsAfterInactivity))
             {
-                _configService.Current.TemporaryCollectionInactivityTimeoutMinutes = Math.Max(1, temporaryCollectionTimeoutMinutes);
-                _configService.Save();
+                ImGui.SetNextItemWidth(260 * ImGuiHelpers.GlobalScale);
+                if (ImGui.SliderInt("Temporary collection inactivity timeout (minutes)", ref temporaryCollectionTimeoutMinutes, 1, 40))
+                {
+                    _configService.Current.TemporaryCollectionInactivityTimeoutMinutes = Math.Max(1, temporaryCollectionTimeoutMinutes);
+                    _configService.Save();
+                }
             }
+            _uiShared.DrawHelpText("Defines how long a pair can stay inactive before its temporary collection is removed.");
         }
-        _uiShared.DrawHelpText("Defines how long a pair can stay inactive before its temporary collection is removed.");
 
         ImGui.Spacing();
         ImGui.Separator();
@@ -3209,9 +3224,9 @@ public class SettingsUi : WindowMediatorSubscriberBase
         var enableModLearning = _configService.Current.EnableModLearning;
         if (ImGui.Checkbox("Enable mod learning", ref enableModLearning))
         {
-            _configService.Current.EnableModLearning = enableModLearning;
-            _configService.Save();
+            SetEnableModLearning(enableModLearning, clearTransientOnEnable: true);
         }
+        UiSharedService.AttachToolTip("Learns mod-specific resources and can restore them proactively.");
         _uiShared.DrawHelpText("Disable this to revert to the standard character data flow if you run into issues.");
 
         ImGui.Spacing();
@@ -3222,6 +3237,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             _configService.Current.PersistReceivedCharacterData = persistCharacterData;
             _configService.Save();
         }
+        UiSharedService.AttachToolTip("Stores received character data locally across restarts.");
         _uiShared.DrawHelpText(
             "Stores received character data locally so it can be compared after restarting the client. " +
             "Disabling this reduces disk usage but can increase sync work after restarts.");
@@ -3418,6 +3434,30 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 UiSharedService.SetScaledWindowSize(325);
             }
             ImGui.EndPopup();
+        }
+    }
+
+    private void SetEnableModLearning(bool enableModLearning, bool clearTransientOnEnable)
+    {
+        var wasEnabled = _configService.Current.EnableModLearning;
+        _configService.Current.EnableModLearning = enableModLearning;
+        _configService.Save();
+        if (!wasEnabled && enableModLearning && clearTransientOnEnable)
+        {
+            ClearTransientFilesAfterModLearningEnable();
+        }
+    }
+
+    private void ClearTransientFilesAfterModLearningEnable()
+    {
+        try
+        {
+            _transientResourceManager.ClearCurrentCharacterPersistentTransientData();
+            _logger.LogInformation("Cleared transient file settings for current character after enabling mod learning");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to clear transient file settings after enabling mod learning");
         }
     }
 
