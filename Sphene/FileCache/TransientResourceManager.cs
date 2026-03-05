@@ -297,6 +297,32 @@ public sealed class TransientResourceManager : DisposableMediatorSubscriberBase
         _semiTransientResources = null;
     }
 
+    public void ClearCurrentCharacterPersistentTransientData()
+    {
+        try
+        {
+            var key = PlayerPersistentDataKey;
+            var removed = _configurationService.Current.TransientConfigs.Remove(key);
+            if (removed)
+            {
+                Logger.LogInformation("Cleared transient persistent data for current character key={key}", key);
+                _configurationService.Save();
+            }
+            else
+            {
+                Logger.LogDebug("No transient persistent data found for current character key={key}", key);
+            }
+
+            _semiTransientResources = null;
+            TransientResources.TryRemove(ObjectKind.Player, out _);
+            TransientResources.TryRemove(ObjectKind.Pet, out _);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to clear transient persistent data for current character");
+        }
+    }
+
     private void Manager_PenumbraResourceLoadEvent(PenumbraResourceLoadMessage msg)
     {
         var gamePath = msg.GamePath.ToLowerInvariant();

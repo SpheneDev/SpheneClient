@@ -38,6 +38,7 @@ public sealed class IpcCallerPenumbra : DisposableMediatorSubscriberBase, IIpcCa
     private readonly EventSubscriber<nint, string, string> _penumbraGameObjectResourcePathResolved;
     private readonly EventSubscriber _penumbraInit;
     private readonly EventSubscriber<ModSettingChange, Guid, string, bool> _penumbraModSettingChanged;
+    private readonly EventSubscriber<ModSettingChange, Guid, string, bool> _penumbraModSettingChangedV6;
     private readonly EventSubscriber<nint, int> _penumbraObjectIsRedrawn;
 
     private readonly AddTemporaryMod _penumbraAddTemporaryMod;
@@ -46,6 +47,10 @@ public sealed class IpcCallerPenumbra : DisposableMediatorSubscriberBase, IIpcCa
     private readonly CreateTemporaryCollection _penumbraCreateNamedTemporaryCollection;
     private readonly GetEnabledState _penumbraEnabled;
     private readonly GetPlayerMetaManipulations _penumbraGetMetaManipulations;
+    private readonly GetModList _penumbraGetMods;
+    private readonly GetCurrentModSettings _penumbraGetModSettings;
+    private readonly GetCollectionForObject _penumbraGetCollectionForObject;
+    private readonly GetChangedItemsForCollection _penumbraGetChangedItemsForCollection;
     private readonly RedrawObject _penumbraRedraw;
     private readonly DeleteTemporaryCollection _penumbraRemoveTemporaryCollection;
     private readonly RemoveTemporaryMod _penumbraRemoveTemporaryMod;
@@ -63,6 +68,10 @@ public sealed class IpcCallerPenumbra : DisposableMediatorSubscriberBase, IIpcCa
         _penumbraInit = Initialized.Subscriber(pi, PenumbraInit);
         _penumbraDispose = Disposed.Subscriber(pi, PenumbraDispose);
         _penumbraResolveModDir = new GetModDirectory(pi);
+        _penumbraGetMods = new GetModList(pi);
+        _penumbraGetModSettings = new GetCurrentModSettings(pi);
+        _penumbraGetCollectionForObject = new GetCollectionForObject(pi);
+        _penumbraGetChangedItemsForCollection = new GetChangedItemsForCollection(pi);
         _penumbraRedraw = new RedrawObject(pi);
         _penumbraObjectIsRedrawn = GameObjectRedrawn.Subscriber(pi, RedrawEvent);
         _penumbraGetMetaManipulations = new GetPlayerMetaManipulations(pi);
@@ -75,8 +84,14 @@ public sealed class IpcCallerPenumbra : DisposableMediatorSubscriberBase, IIpcCa
         _penumbraEnabled = new GetEnabledState(pi);
         _penumbraModSettingChanged = ModSettingChanged.Subscriber(pi, (change, arg1, arg, b) =>
         {
-            if (change == ModSettingChange.EnableState)
-                _spheneMediator.Publish(new PenumbraModSettingChangedMessage());
+            Logger.LogTrace("ModSettingChanged: change={change} collection={collection} mod={mod} inherited={inherited}", change, arg1, arg, b);
+            _spheneMediator.Publish(new PenumbraModSettingChangedMessage(change, arg1, arg, b));
+        });
+        _penumbraModSettingChangedV6 = new EventSubscriber<ModSettingChange, Guid, string, bool>(pi, "Penumbra.ModSettingChanged.V6",
+            (change, arg1, arg, b) =>
+        {
+            Logger.LogTrace("ModSettingChangedV6: change={change} collection={collection} mod={mod} inherited={inherited}", change, arg1, arg, b);
+            _spheneMediator.Publish(new PenumbraModSettingChangedMessage(change, arg1, arg, b));
         });
         _penumbraConvertTextureFile = new ConvertTextureFile(pi);
         _penumbraResourcePaths = new GetGameObjectResourcePaths(pi);
@@ -144,6 +159,30 @@ public sealed class IpcCallerPenumbra : DisposableMediatorSubscriberBase, IIpcCa
         }
     }
 
+    public Dictionary<string, string> GetMods()
+    {
+        if (!APIAvailable) return [];
+        return _penumbraGetMods.Invoke();
+    }
+
+    public (bool ObjectValid, bool IndividualSet, (Guid Id, string Name) EffectiveCollection) GetCollectionForObject(int objectIndex)
+    {
+        if (!APIAvailable) return (false, false, (Guid.Empty, string.Empty));
+        return _penumbraGetCollectionForObject.Invoke(objectIndex);
+    }
+
+    public (PenumbraApiEc, (bool, int, IDictionary<string, List<string>>, bool)?) GetModSettings(Guid collectionId, string modDirectoryName, string modName = "", bool ignoreInheritance = false)
+    {
+         if (!APIAvailable) return (default, null);
+         return _penumbraGetModSettings.Invoke(collectionId, modDirectoryName, modName, ignoreInheritance);
+    }
+
+    public IReadOnlyDictionary<string, object?> GetChangedItemsForCollection(Guid collectionId)
+    {
+        if (!APIAvailable) return new Dictionary<string, object?>(StringComparer.Ordinal);
+        return _penumbraGetChangedItemsForCollection.Invoke(collectionId);
+    }
+
     protected override void Dispose(bool disposing)
     {
         base.Dispose(disposing);
@@ -151,6 +190,7 @@ public sealed class IpcCallerPenumbra : DisposableMediatorSubscriberBase, IIpcCa
         _redrawManager.Cancel();
 
         _penumbraModSettingChanged.Dispose();
+        _penumbraModSettingChangedV6.Dispose();
         _penumbraGameObjectResourcePathResolved.Dispose();
         _penumbraDispose.Dispose();
         _penumbraInit.Dispose();

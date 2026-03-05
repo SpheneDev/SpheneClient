@@ -957,13 +957,12 @@ public sealed partial class CharaDataManager : DisposableMediatorSubscriberBase
             await _ipcManager.Penumbra.SetTemporaryModsAsync(Logger, applicationId, penumbraCollection, modPaths).ConfigureAwait(false);
             await _ipcManager.Penumbra.SetManipulationDataAsync(Logger, applicationId, penumbraCollection, manipData ?? string.Empty).ConfigureAwait(false);
 
-            Logger.LogTrace("[{appId}] Applying Glamourer data and Redrawing", applicationId);
-            DataApplicationProgress = "Applying Glamourer and redrawing Character";
-            await _ipcManager.Glamourer.ApplyAllAsync(Logger, tempHandler, glamourerData, applicationId, token).ConfigureAwait(false);
-            await _ipcManager.Penumbra.RedrawAsync(Logger, tempHandler, applicationId, token).ConfigureAwait(false);
-            await _dalamudUtilService.WaitWhileCharacterIsDrawing(Logger, tempHandler, applicationId, ct: token).ConfigureAwait(false);
-            Logger.LogTrace("[{appId}] Removing collection", applicationId);
-            await _ipcManager.Penumbra.RemoveTemporaryCollectionAsync(Logger, applicationId, penumbraCollection).ConfigureAwait(false);
+            DataApplicationProgress = "Applying Honorific data";
+            Logger.LogTrace("[{appId}] Applying Honorific data", applicationId);
+            if (!string.IsNullOrEmpty(honorificData))
+            {
+                await _ipcManager.Honorific.SetTitleAsync(tempHandler.Address, honorificData).ConfigureAwait(false);
+            }
 
             DataApplicationProgress = "Applying Customize+ data";
             Logger.LogTrace("[{appId}] Appplying C+ data", applicationId);
@@ -977,7 +976,6 @@ public sealed partial class CharaDataManager : DisposableMediatorSubscriberBase
                 cPlusId = await _ipcManager.CustomizePlus.SetBodyScaleAsync(tempHandler.Address, Convert.ToBase64String(Encoding.UTF8.GetBytes("{}"))).ConfigureAwait(false);
             }
 
-            // Apply additional data types
             DataApplicationProgress = "Applying Heels data";
             Logger.LogTrace("[{appId}] Applying Heels data", applicationId);
             if (!string.IsNullOrEmpty(heelsData))
@@ -985,12 +983,13 @@ public sealed partial class CharaDataManager : DisposableMediatorSubscriberBase
                 await _ipcManager.Heels.SetOffsetForPlayerAsync(tempHandler.Address, heelsData).ConfigureAwait(false);
             }
 
-            DataApplicationProgress = "Applying Honorific data";
-            Logger.LogTrace("[{appId}] Applying Honorific data", applicationId);
-            if (!string.IsNullOrEmpty(honorificData))
-            {
-                await _ipcManager.Honorific.SetTitleAsync(tempHandler.Address, honorificData).ConfigureAwait(false);
-            }
+            Logger.LogTrace("[{appId}] Applying Glamourer data and Redrawing", applicationId);
+            DataApplicationProgress = "Applying Glamourer and redrawing Character";
+            await _ipcManager.Glamourer.ApplyAllAsync(Logger, tempHandler, glamourerData, applicationId, token).ConfigureAwait(false);
+            await _ipcManager.Penumbra.RedrawAsync(Logger, tempHandler, applicationId, token).ConfigureAwait(false);
+            await _dalamudUtilService.WaitWhileCharacterIsDrawing(Logger, tempHandler, applicationId, ct: token).ConfigureAwait(false);
+            Logger.LogTrace("[{appId}] Removing collection", applicationId);
+            await _ipcManager.Penumbra.RemoveTemporaryCollectionAsync(Logger, applicationId, penumbraCollection).ConfigureAwait(false);
 
             DataApplicationProgress = "Applying Moodles data";
             Logger.LogTrace("[{appId}] Applying Moodles data", applicationId);

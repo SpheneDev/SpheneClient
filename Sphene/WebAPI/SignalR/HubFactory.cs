@@ -105,6 +105,10 @@ public class HubFactory : MediatorSubscriberBase
                 options.AccessTokenProvider = () => _tokenProvider.GetOrUpdateToken(ct);
                 options.Transports = transportType;
                 options.Headers.Add("User-Agent", userAgent);
+                options.WebSocketConfiguration = socketOptions =>
+                {
+                    socketOptions.KeepAliveInterval = TimeSpan.FromSeconds(15);
+                };
             })
             .AddMessagePackProtocol(opt =>
             {
@@ -132,6 +136,9 @@ public class HubFactory : MediatorSubscriberBase
                 a.SetMinimumLevel(LogLevel.Information);
             })
             .Build();
+
+        _instance.ServerTimeout = TimeSpan.FromSeconds(90);
+        _instance.KeepAliveInterval = TimeSpan.FromSeconds(15);
 
         _instance.Closed += HubOnClosed;
         _instance.Reconnecting += HubOnReconnecting;

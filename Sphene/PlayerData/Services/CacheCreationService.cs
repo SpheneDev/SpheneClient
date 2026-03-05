@@ -2,6 +2,7 @@ using Sphene.API.Data.Enum;
 using Sphene.PlayerData.Data;
 using Sphene.PlayerData.Factories;
 using Sphene.PlayerData.Handlers;
+using Sphene.Interop.Ipc;
 using Sphene.Services;
 using Sphene.Services.Mediator;
 using Microsoft.Extensions.Logging;
@@ -18,17 +19,21 @@ public sealed class CacheCreationService : DisposableMediatorSubscriberBase
     private readonly HashSet<ObjectKind> _debouncedObjectCache = [];
     private readonly CharacterData _playerData = new();
     private readonly Dictionary<ObjectKind, GameObjectHandler> _playerRelatedObjects = [];
+    private readonly IpcManager _ipcManager;
+    private readonly Dictionary<ObjectKind, string> _forceRebuildTraceByKind = [];
     private readonly CancellationTokenSource _runtimeCts = new();
     private CancellationTokenSource _creationCts = new();
     private CancellationTokenSource _debounceCts = new();
     private bool _haltCharaDataCreation;
     private bool _isZoning = false;
     private string? _lastDataHash = null;
+    private bool _forcePublishNext = false;
 
     public CacheCreationService(ILogger<CacheCreationService> logger, SpheneMediator mediator, GameObjectHandlerFactory gameObjectHandlerFactory,
-        PlayerDataFactory characterDataFactory, DalamudUtilService dalamudUtil) : base(logger, mediator)
+        PlayerDataFactory characterDataFactory, DalamudUtilService dalamudUtil, IpcManager ipcManager) : base(logger, mediator)
     {
         _characterDataFactory = characterDataFactory;
+        _ipcManager = ipcManager;
 
         Mediator.Subscribe<ZoneSwitchStartMessage>(this, (msg) => _isZoning = true);
         Mediator.Subscribe<ZoneSwitchEndMessage>(this, (msg) =>
@@ -51,6 +56,18 @@ public sealed class CacheCreationService : DisposableMediatorSubscriberBase
         {
             Logger.LogDebug("Received CreateCacheForObject for {handler}, updating", msg.ObjectToCreateFor);
             AddCacheToCreate(msg.ObjectToCreateFor.ObjectKind);
+        });
+        Mediator.Subscribe<ForceLocalCharacterDataRebuildMessage>(this, (msg) =>
+        {
+            if (_isZoning)
+            {
+                Logger.LogDebug("[Trace:ForceRebuild:{trace}] SKIP zoning", msg.TraceId);
+                return;
+            }
+            Logger.LogDebug("[Trace:ForceRebuild:{trace}] REQUEST kind={kind}", msg.TraceId, msg.ObjectKind);
+            _forcePublishNext = true;
+            _forceRebuildTraceByKind[msg.ObjectKind] = msg.TraceId;
+            AddCacheToCreate(msg.ObjectKind);
         });
 
         _playerRelatedObjects[ObjectKind.Player] = gameObjectHandlerFactory.Create(ObjectKind.Player, dalamudUtil.GetPlayerPtr, isWatched: true)
@@ -178,7 +195,13 @@ public sealed class CacheCreationService : DisposableMediatorSubscriberBase
 
         Mediator.Subscribe<PenumbraModSettingChangedMessage>(this, (msg) =>
         {
+            if (!ShouldRebuildForPenumbraChange(msg))
+            {
+                Logger.LogTrace("Ignoring Penumbra Mod settings change for non-local collection {collection}", msg.CollectionId);
+                return;
+            }
             Logger.LogDebug("Received Penumbra Mod settings change, updating everything");
+            _forcePublishNext = true;
             AddCacheToCreate(ObjectKind.Player);
             AddCacheToCreate(ObjectKind.Pet);
             AddCacheToCreate(ObjectKind.MinionOrMount);
@@ -186,6 +209,15 @@ public sealed class CacheCreationService : DisposableMediatorSubscriberBase
         });
 
         Mediator.Subscribe<FrameworkUpdateMessage>(this, (msg) => ProcessCacheCreation());
+    }
+
+    private bool ShouldRebuildForPenumbraChange(PenumbraModSettingChangedMessage msg)
+    {
+        if (msg.CollectionId == Guid.Empty) return true;
+        if (!_ipcManager.Penumbra.APIAvailable) return true;
+        var (valid, _, collection) = _ipcManager.Penumbra.GetCollectionForObject(0);
+        if (!valid) return true;
+        return msg.CollectionId == collection.Id;
     }
 
     protected override void Dispose(bool disposing)
@@ -255,6 +287,13 @@ public sealed class CacheCreationService : DisposableMediatorSubscriberBase
             await Task.Delay(TimeSpan.FromSeconds(1), linkedCts.Token).ConfigureAwait(false);
 
             Logger.LogDebug("Creating Caches for {objectKinds}", string.Join(", ", objectKindsToCreate));
+            foreach (var kind in objectKindsToCreate)
+            {
+                if (_forceRebuildTraceByKind.TryGetValue(kind, out var traceId))
+                {
+                    Logger.LogDebug("[Trace:ForceRebuild:{trace}] BUILD start kind={kind}", traceId, kind);
+                }
+            }
 
             try
             {
@@ -264,6 +303,10 @@ public sealed class CacheCreationService : DisposableMediatorSubscriberBase
                     createdData[objectKind] = await _characterDataFactory.BuildCharacterData(_playerRelatedObjects[objectKind], linkedCts.Token).ConfigureAwait(false);
                 }
 
+                RemovePlayerMinionOverlaps(createdData);
+
+                string? newHash = null;
+                var totalReplacements = 0;
                 lock (_playerDataLock)
                 {
                     foreach (var kvp in createdData)
@@ -278,13 +321,22 @@ public sealed class CacheCreationService : DisposableMediatorSubscriberBase
 
                     // Check if data actually changed before publishing
                     var newData = _playerData.ToAPI();
-                    var newHash = newData.DataHash?.Value;
+                    newHash = newData.DataHash?.Value;
                     
+                    var forcePublish = _forcePublishNext;
+                    _forcePublishNext = false;
+
+                    totalReplacements = newData.FileReplacements.Values.Sum(l => l.Count);
                     if (!string.Equals(newHash, _lastDataHash, StringComparison.Ordinal))
                     {
                         Logger.LogDebug("Character data changed, publishing update. Old hash: {oldHash}, New hash: {newHash}", _lastDataHash ?? "null", newHash ?? "null");
                         _lastDataHash = newHash;
-                        Mediator.Publish(new CharacterDataCreatedMessage(newData));
+                        Mediator.Publish(new CharacterDataCreatedMessage(newData, _playerData));
+                    }
+                    else if (forcePublish)
+                    {
+                        Logger.LogDebug("Character data unchanged but forced publish after mod settings change. Hash: {hash}", newHash ?? "null");
+                        Mediator.Publish(new CharacterDataCreatedMessage(newData, _playerData));
                     }
                     else
                     {
@@ -292,6 +344,15 @@ public sealed class CacheCreationService : DisposableMediatorSubscriberBase
                     }
                 }
                 
+                foreach (var kind in objectKindsToCreate)
+                {
+                    if (_forceRebuildTraceByKind.TryGetValue(kind, out var traceId))
+                    {
+                        Logger.LogDebug("[Trace:ForceRebuild:{trace}] BUILD done kind={kind} hash={hash} totalEntries={total}",
+                            traceId, kind, newHash ?? "null", totalReplacements);
+                        _forceRebuildTraceByKind.Remove(kind);
+                    }
+                }
                 _currentlyCreating.Clear();
             }
             catch (OperationCanceledException)
@@ -307,5 +368,31 @@ public sealed class CacheCreationService : DisposableMediatorSubscriberBase
                 Logger.LogDebug("Cache Creation complete");
             }
         });
+    }
+
+    private static void RemovePlayerMinionOverlaps(Dictionary<ObjectKind, CharacterDataFragment?> createdData)
+    {
+        if (!createdData.TryGetValue(ObjectKind.Player, out var playerFragment) || playerFragment == null) return;
+        if (!createdData.TryGetValue(ObjectKind.MinionOrMount, out var minionFragment) || minionFragment == null) return;
+        if (playerFragment.FileReplacements.Count == 0 || minionFragment.FileReplacements.Count == 0) return;
+
+        var minionPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var replacement in minionFragment.FileReplacements)
+        {
+            foreach (var path in replacement.GamePaths)
+            {
+                minionPaths.Add(NormalizePathString(path));
+            }
+        }
+
+        if (minionPaths.Count == 0) return;
+
+        playerFragment.FileReplacements.RemoveWhere(replacement =>
+            replacement.GamePaths.Any(p => minionPaths.Contains(NormalizePathString(p))));
+    }
+
+    private static string NormalizePathString(string path)
+    {
+        return path.Replace('\\', '/').ToLowerInvariant();
     }
 }

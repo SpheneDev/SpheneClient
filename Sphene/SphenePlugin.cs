@@ -151,6 +151,7 @@ public class SphenePlugin : MediatorSubscriberBase, IHostedService
         Mediator.Subscribe<DalamudLogoutMessage>(this, (_) => DalamudUtilOnLogOut());
 
         Mediator.StartQueueProcessing();
+        if (_launchTask == null || _launchTask.IsCompleted) _launchTask = Task.Run(WaitForPlayerAndLaunchCharacterManager);
 
         return Task.CompletedTask;
     }

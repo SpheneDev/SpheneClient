@@ -7,6 +7,7 @@ using Sphene.Services;
 using Sphene.Services.Events;
 using Sphene.Services.Mediator;
 using Sphene.Services.ServerConfiguration;
+using Sphene.SpheneConfiguration;
 using Sphene.Utils;
 using Sphene.WebAPI.Files;
 using Microsoft.Extensions.Hosting;
@@ -21,7 +22,7 @@ namespace Sphene.PlayerData.Handlers;
 
 public sealed class PairHandler : DisposableMediatorSubscriberBase
 {
-    private sealed record CombatData(Guid ApplicationId, CharacterData CharacterData, bool Forced);
+    private sealed record CombatData(Guid ApplicationId, CharacterData CharacterData, bool Forced, bool ForceRedraw);
 
     private const string SyncProgressTag = "[SyncProgress]";
     private readonly DalamudUtilService _dalamudUtil;
@@ -32,6 +33,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
     private readonly IHostApplicationLifetime _lifetime;
     private readonly PlayerPerformanceService _playerPerformanceService;
     private readonly ServerConfigurationManager _serverConfigManager;
+    private readonly SpheneConfigService _configService;
     private volatile bool _localVisibilityGateActive = false;
     private readonly PluginWarningNotificationService _pluginWarningNotificationManager;
     private CancellationTokenSource? _applicationCancellationTokenSource = new();
@@ -39,6 +41,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
     private Task? _applicationTask;
     private Task? _applyPipelineTask;
     private CharacterData? _cachedData = null;
+    private CharacterData? _lastAppliedCharacterData = null;
     private CharacterData? _lastKnownMinionData = null;
     private readonly ConcurrentDictionary<string, string> _lastKnownMinionFileOverrides = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, string> _lastKnownMinionScdOverrides = new(StringComparer.OrdinalIgnoreCase);
@@ -50,7 +53,8 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
     private bool _forceApplyMods = false;
     private bool _isVisible;
     private Guid _penumbraCollection;
-    private bool _redrawOnNextApplication = false;
+    private DateTime _lastTemporaryCollectionUse = DateTime.UtcNow;
+    private DateTime _lastTemporaryCollectionDisableAttempt = DateTime.MinValue;
     private bool _forceRedrawAfterCurrentApplication = false;
     private string? _inProgressPenumbraHash;
     private string? _inProgressGlamourerHash;
@@ -60,6 +64,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
     private string? _lastAppliedBypassEmoteData;
     private nint _lastAppliedBypassEmoteAddress = nint.Zero;
     private DateTime _lastAppliedBypassEmoteTime = DateTime.MinValue;
+    private string? _lastAppliedHonorificData;
     private string? _lastSuccessfullyAppliedPenumbraHash;
     private string? _lastSuccessfullyAppliedGlamourerHash;
     private string? _lastSuccessfullyAppliedRestHash;
@@ -96,6 +101,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         FileCacheManager fileDbManager, SpheneMediator mediator,
         PlayerPerformanceService playerPerformanceService,
         ServerConfigurationManager serverConfigManager,
+        SpheneConfigService configService,
         VisibilityGateService visibilityGateService) : base(logger, mediator)
     {
         Pair = pair;
@@ -108,6 +114,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         _fileDbManager = fileDbManager;
         _playerPerformanceService = playerPerformanceService;
         _serverConfigManager = serverConfigManager;
+        _configService = configService;
         _localVisibilityGateActive = visibilityGateService.IsGateActive;
         // Initialize Penumbra collection asynchronously to avoid blocking constructor
         _ = Task.Run(async () => 
@@ -225,19 +232,12 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         {
             _pendingPenumbraReapply = true;
         });
-        Mediator.Subscribe<ClassJobChangedMessage>(this, (msg) =>
-        {
-            if (msg.GameObjectHandler == _charaHandler)
-            {
-                _redrawOnNextApplication = true;
-            }
-        });
         Mediator.Subscribe<CombatOrPerformanceEndMessage>(this, (msg) =>
         {
             if (IsVisible && _dataReceivedInDowntime != null)
             {
                 ApplyCharacterData(_dataReceivedInDowntime.ApplicationId,
-                    _dataReceivedInDowntime.CharacterData, _dataReceivedInDowntime.Forced);
+                    _dataReceivedInDowntime.CharacterData, _dataReceivedInDowntime.Forced, _dataReceivedInDowntime.ForceRedraw);
                 _dataReceivedInDowntime = null;
             }
         });
@@ -281,6 +281,11 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         : ((FFXIVClientStructs.FFXIV.Client.Game.Object.GameObject*)_charaHandler!.Address)->EntityId;
     public string? PlayerName { get; private set; }
     public string PlayerNameHash => Pair.Ident;
+    internal bool TryGetPenumbraCollectionId(out Guid collectionId)
+    {
+        collectionId = _penumbraCollection;
+        return collectionId != Guid.Empty;
+    }
 
     internal bool IsCharacterDataAppliedForCurrentCharacter(CharacterData data)
     {
@@ -420,14 +425,15 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         }
     }
 
-    public void ApplyCharacterData(Guid applicationBase, CharacterData characterData, bool forceApplyCustomization = false)
+    public void ApplyCharacterData(Guid applicationBase, CharacterData characterData, bool forceApplyCustomization = false, bool forceRedraw = false)
     {
+        MarkTemporaryCollectionUsed();
         if (_dalamudUtil.IsInCombatOrPerforming)
         {
             Mediator.Publish(new EventMessage(new Event(PlayerName, Pair.UserData, nameof(PairHandler), EventSeverity.Warning,
                 "Cannot apply character data: you are in combat or performing music, deferring application")));
             Logger.LogDebug("[BASE-{appBase}] Received data but player is in combat or performing", applicationBase);
-            _dataReceivedInDowntime = new(applicationBase, characterData, forceApplyCustomization);
+            _dataReceivedInDowntime = new(applicationBase, characterData, forceApplyCustomization, forceRedraw);
             SetUploading(isUploading: false);
             return;
         }
@@ -439,7 +445,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             Logger.LogDebug("[BASE-{appBase}] Received data but player was in invalid state, charaHandlerIsNull: {charaIsNull}, playerPointerIsNull: {ptrIsNull}",
                 applicationBase, _charaHandler == null, PlayerCharacter == IntPtr.Zero);
             var hasDiffMods = characterData.CheckUpdatedData(applicationBase, _cachedData, Logger,
-                this, forceApplyCustomization, forceApplyMods: false)
+                this, forceApplyCustomization, forceApplyMods: false, _configService.Current.DisableAutomaticRedrawOnEquipmentOrWeaponChanges)
                 .Any(p => p.Value.Contains(PlayerChanges.ModManip) || p.Value.Contains(PlayerChanges.ModFiles));
             _forceApplyMods = hasDiffMods || _forceApplyMods || (PlayerCharacter == IntPtr.Zero && _cachedData == null);
             _cachedData = characterData;
@@ -451,16 +457,25 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
 
         Logger.LogDebug("[BASE-{appbase}] Applying data for {player}, forceApplyCustomization: {forced}, forceApplyMods: {forceMods}", applicationBase, this, forceApplyCustomization, _forceApplyMods);
         Logger.LogDebug("[BASE-{appbase}] Hash for data is {newHash}, current cache hash is {oldHash}", applicationBase, characterData.DataHash.Value, _cachedData?.DataHash.Value ?? "NODATA");
+        var limitPairRedraws = _configService.Current.RedrawPairsOnlyForSpecialEmotesFirstApply;
+        var isFirstApply = _cachedData == null && _lastSuccessfullyAppliedDataHash == null;
+        var hasSpecialEmote = characterData.HasSpecialEmotePap();
+        var allowPairRedraw = forceRedraw || !limitPairRedraws || (isFirstApply && hasSpecialEmote);
+        var requiresRedraw = allowPairRedraw && (forceRedraw || characterData.RequiresEyeOrEmoteRedraw(_cachedData));
+        if (_charaHandler != null && _charaHandler.Address != nint.Zero && !string.Equals(characterData.HonorificData, _lastAppliedHonorificData, StringComparison.Ordinal))
+        {
+            _lastAppliedHonorificData = characterData.HonorificData;
+            _ = _ipcManager.Honorific.SetTitleAsync(_charaHandler.Address, characterData.HonorificData).ConfigureAwait(false);
+        }
 
         if (_applyPipelineTask != null
             && !_applyPipelineTask.IsCompleted
             && (AreComponentHashesEqual(characterData, _inProgressPenumbraHash, _inProgressGlamourerHash, _inProgressRestHash)
                 || AreDataHashesEqual(characterData, _inProgressPipelineDataHash)))
         {
-            if (forceApplyCustomization || _forceApplyMods || _redrawOnNextApplication)
+            if (requiresRedraw)
             {
                 _forceRedrawAfterCurrentApplication = true;
-                _redrawOnNextApplication = false;
             }
             Logger.LogDebug("{tag} Apply pipeline skipped: already in progress hash={hash}", SyncProgressTag,
                 characterData.DataHash?.Value ?? "null");
@@ -472,10 +487,9 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             && (AreComponentHashesEqual(characterData, _inProgressPenumbraHash, _inProgressGlamourerHash, _inProgressRestHash)
                 || AreDataHashesEqual(characterData, _inProgressDataHash)))
         {
-            if (forceApplyCustomization || _forceApplyMods || _redrawOnNextApplication)
+            if (requiresRedraw)
             {
                 _forceRedrawAfterCurrentApplication = true;
-                _redrawOnNextApplication = false;
             }
             Logger.LogDebug("[BASE-{appbase}] Skipping application - component hashes already in progress", applicationBase);
             return;
@@ -483,7 +497,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
 
         var hashesAreEqual = AreComponentHashesEqual(characterData, _cachedData) || AreDataHashesEqual(characterData, _cachedData);
         var hasNewCharacterAddress = _charaHandler != null && _charaHandler.Address != _lastSuccessfullyAppliedCharacterAddress;
-        if (hashesAreEqual && !forceApplyCustomization && !_forceApplyMods && !_redrawOnNextApplication && !hasNewCharacterAddress)
+        if (hashesAreEqual && !forceApplyCustomization && !_forceApplyMods && !requiresRedraw && !hasNewCharacterAddress)
         {
             Logger.LogTrace("[BASE-{appbase}] Skipping application - hash unchanged and no forced customization", applicationBase);
             return;
@@ -521,17 +535,41 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         _inProgressDataHash = characterData.DataHash?.Value;
         _inProgressPipelineDataHash = characterData.DataHash?.Value;
 
-        var charaDataToUpdate = characterData.CheckUpdatedData(applicationBase, _cachedData?.DeepClone() ?? new(), Logger, this, forceApplyCustomization, _forceApplyMods);
+        var charaDataToUpdate = characterData.CheckUpdatedData(applicationBase, _cachedData?.DeepClone() ?? new(), Logger, this, forceApplyCustomization, _forceApplyMods,
+            _configService.Current.DisableAutomaticRedrawOnEquipmentOrWeaponChanges);
+        if (limitPairRedraws && !allowPairRedraw && charaDataToUpdate.TryGetValue(ObjectKind.Player, out var playerChangesToAdjust))
+        {
+            playerChangesToAdjust.Remove(PlayerChanges.ForcedRedraw);
+        }
+        var hasTemporaryCollection = _penumbraCollection != Guid.Empty;
+        var specialEmoteChanged = characterData.HasSpecialEmoteChanges(_cachedData);
+        var eyeTextureChanged = characterData.HasEyeTextureChanges(_cachedData);
+        if (hasTemporaryCollection && !forceRedraw && !specialEmoteChanged && !eyeTextureChanged
+            && charaDataToUpdate.TryGetValue(ObjectKind.Player, out var playerChangesWithoutRedraw))
+        {
+            playerChangesWithoutRedraw.Remove(PlayerChanges.ForcedRedraw);
+        }
+        else if (!hasTemporaryCollection
+            && charaDataToUpdate.TryGetValue(ObjectKind.Player, out var playerChangesWithRedraw)
+            && playerChangesWithRedraw.Contains(PlayerChanges.ModFiles))
+        {
+            playerChangesWithRedraw.Add(PlayerChanges.ForcedRedraw);
+        }
+        if (forceRedraw)
+        {
+            if (charaDataToUpdate.TryGetValue(ObjectKind.Player, out var playerChangesToForce))
+            {
+                playerChangesToForce.Add(PlayerChanges.ForcedRedraw);
+            }
+            else
+            {
+                charaDataToUpdate[ObjectKind.Player] = [PlayerChanges.ForcedRedraw];
+            }
+        }
 
         if (_charaHandler != null && _forceApplyMods)
         {
             _forceApplyMods = false;
-        }
-
-        if (_redrawOnNextApplication && charaDataToUpdate.TryGetValue(ObjectKind.Player, out var player))
-        {
-            player.Add(PlayerChanges.ForcedRedraw);
-            _redrawOnNextApplication = false;
         }
 
         if (charaDataToUpdate.TryGetValue(ObjectKind.Player, out var playerChanges))
@@ -662,7 +700,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                 await _dalamudUtil.WaitWhileCharacterIsDrawing(Logger, handler, applicationId, 30000, token).ConfigureAwait(false);
             }
             token.ThrowIfCancellationRequested();
-            foreach (var change in changes.Value.OrderBy(p => (int)p))
+            foreach (var change in changes.Value.OrderBy(GetCustomizationApplyOrder))
             {
                 Logger.LogDebug("[{applicationId}] Processing {change} for {handler}", applicationId, change, handler);
                 switch (change)
@@ -765,6 +803,22 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         {
             if (handler != _charaHandler) handler.Dispose();
         }
+
+        static int GetCustomizationApplyOrder(PlayerChanges change)
+        {
+            return change switch
+            {
+                PlayerChanges.Honorific => -10,
+                PlayerChanges.Customize => -5,
+                PlayerChanges.Heels => -4,
+                PlayerChanges.Glamourer => -2,
+                PlayerChanges.Moodles => 0,
+                PlayerChanges.PetNames => 1,
+                PlayerChanges.BypassEmote => 2,
+                PlayerChanges.ForcedRedraw => 10,
+                _ => 5
+            };
+        }
     }
 
     private static bool AreComponentHashesEqual(CharacterData newData, CharacterData? cachedData)
@@ -814,6 +868,67 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         }
 
         return string.Equals(newHash, dataHash, StringComparison.Ordinal);
+    }
+
+    private void MarkTemporaryCollectionUsed()
+    {
+        _lastTemporaryCollectionUse = DateTime.UtcNow;
+    }
+
+    private void TryDisableTemporaryCollectionAfterInactivity()
+    {
+        var config = _configService.Current;
+        if (!config.DisableTemporaryCollectionsAfterInactivity)
+        {
+            return;
+        }
+
+        if (_penumbraCollection == Guid.Empty || IsVisible)
+        {
+            return;
+        }
+
+        var timeoutMinutes = config.TemporaryCollectionInactivityTimeoutMinutes;
+        if (timeoutMinutes <= 0)
+        {
+            return;
+        }
+
+        if (DateTime.UtcNow - _lastTemporaryCollectionUse < TimeSpan.FromMinutes(timeoutMinutes))
+        {
+            return;
+        }
+
+        if (DateTime.UtcNow - _lastTemporaryCollectionDisableAttempt < TimeSpan.FromSeconds(10))
+        {
+            return;
+        }
+
+        if (_dalamudUtil.IsZoning || _dalamudUtil.IsInCutscene || _dalamudUtil.IsInGpose)
+        {
+            return;
+        }
+
+        _lastTemporaryCollectionDisableAttempt = DateTime.UtcNow;
+        var collectionId = _penumbraCollection;
+        _penumbraCollection = Guid.Empty;
+        _lastSuccessfullyAppliedPenumbraHash = null;
+        _lastSuccessfullyAppliedGlamourerHash = null;
+        _lastSuccessfullyAppliedRestHash = null;
+        _lastSuccessfullyAppliedDataHash = null;
+        _lastSuccessfullyAppliedCharacterAddress = nint.Zero;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await _ipcManager.Penumbra.RemoveTemporaryCollectionAsync(Logger, Guid.NewGuid(), collectionId).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogDebug(ex, "Failed to remove temp collection for {this}", this);
+            }
+        });
     }
 
     private static bool HasMinionData(CharacterData data)
@@ -939,6 +1054,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         {
             Logger.LogDebug("[BASE-{appBase}] Nothing to update for {obj}", applicationBase, this);
             _cachedData = charaData;
+            _lastAppliedCharacterData = charaData.DeepClone();
             UpdateLastKnownMinionData(charaData);
             if (_charaHandler != null)
             {
@@ -956,7 +1072,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         {
             Logger.LogDebug("{tag} Apply deferred: user={user} hash={hash} reason=combat",
                 SyncProgressTag, Pair.UserData.AliasOrUID, charaData.DataHash?.Value ?? "null");
-            _dataReceivedInDowntime = new(applicationBase, charaData, forceApplyCustomization);
+            _dataReceivedInDowntime = new(applicationBase, charaData, forceApplyCustomization, false);
             return Task.CompletedTask;
         }
 
@@ -1150,7 +1266,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         {
             Logger.LogDebug("{tag} Apply deferred: user={user} hash={hash} reason=combat",
                 SyncProgressTag, Pair.UserData.AliasOrUID, charaData.DataHash?.Value ?? "null");
-            _dataReceivedInDowntime = new(applicationBase, charaData, forceApplyCustomization);
+            _dataReceivedInDowntime = new(applicationBase, charaData, forceApplyCustomization, false);
             return;
         }
 
@@ -1190,6 +1306,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                 // ensure collection is set
                 var objIndex = await _dalamudUtil.RunOnFrameworkThread(() => _charaHandler!.GetGameObject()!.ObjectIndex).ConfigureAwait(false);
                 await _ipcManager.Penumbra.AssignTemporaryCollectionAsync(Logger, _penumbraCollection, objIndex).ConfigureAwait(false);
+                MarkTemporaryCollectionUsed();
 
                 await _ipcManager.Penumbra.SetTemporaryModsAsync(Logger, _applicationId, _penumbraCollection,
                     moddedPaths.ToDictionary(k => k.Key.GamePath, k => k.Value, StringComparer.Ordinal)).ConfigureAwait(false);
@@ -1213,14 +1330,6 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             {
                 await ApplyCustomizationDataAsync(_applicationId, kind, charaData, token).ConfigureAwait(false);
                 token.ThrowIfCancellationRequested();
-            }
-
-            if (_charaHandler != null
-                && updatedData.TryGetValue(ObjectKind.Player, out var playerChanges)
-                && playerChanges.Contains(PlayerChanges.ModFiles)
-                && !playerChanges.Contains(PlayerChanges.ForcedRedraw))
-            {
-                await _ipcManager.Penumbra.RedrawAsync(Logger, _charaHandler, _applicationId, token).ConfigureAwait(false);
             }
 
             if (_forceRedrawAfterCurrentApplication
@@ -1372,6 +1481,27 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                             Logger.LogDebug("[BASE-{appBase}] {this} visibility changed (mutual), cached data exists", appData, this);
                             _ = Task.Run(() =>
                             {
+                                var isPostZone = DateTime.UtcNow < _postZoneCheckUntil;
+                                var hasLastAppliedSnapshot = _lastAppliedCharacterData != null;
+                                var skipPostZoneUnchanged = _configService.Current.SkipPostZoneReapplyWhenUnchanged;
+                                var skipPostZoneEquipmentOnly = _configService.Current.SkipPostZoneReapplyForEquipmentOrWeaponOnlyChanges;
+                                var dataMatchesLastApplied = skipPostZoneUnchanged
+                                    && hasLastAppliedSnapshot
+                                    && (AreComponentHashesEqual(_cachedData!, _lastAppliedCharacterData!)
+                                        || AreDataHashesEqual(_cachedData!, _lastAppliedCharacterData!));
+                                var equipmentOnlyDiff = skipPostZoneEquipmentOnly
+                                    && hasLastAppliedSnapshot
+                                    && _cachedData!.IsEquipmentOrWeaponOnlyChange(_lastAppliedCharacterData);
+
+                                if (isPostZone
+                                    && ((skipPostZoneUnchanged && dataMatchesLastApplied)
+                                        || (skipPostZoneEquipmentOnly && equipmentOnlyDiff)))
+                                {
+                                    _lastSuccessfullyAppliedCharacterAddress = _charaHandler!.Address;
+                                    Logger.LogDebug("[BASE-{appBase}] {this} post-zone apply skipped: data unchanged or equipment-only change", appData, this);
+                                    return;
+                                }
+
                                 ApplyCharacterData(appData, _cachedData!, forceApplyCustomization: false);
                             });
                         }
@@ -1427,6 +1557,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                                 if (playerIndex.HasValue)
                                 {
                                     await _ipcManager.Penumbra.AssignTemporaryCollectionAsync(Logger, _penumbraCollection, playerIndex.Value).ConfigureAwait(false);
+                                    MarkTemporaryCollectionUsed();
                                 }
                             }
                             catch (Exception ex)
@@ -1456,6 +1587,8 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                 _proximityReportedVisible = false;
                 Logger.LogTrace("{this} visibility changed, now: {visi}", this, IsVisible);
             }
+
+            TryDisableTemporaryCollectionAfterInactivity();
         }
         catch (Exception ex)
         {
@@ -1540,6 +1673,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         });
 
         _ipcManager.Penumbra.AssignTemporaryCollectionAsync(Logger, _penumbraCollection, _charaHandler.GetGameObject()!.ObjectIndex).GetAwaiter().GetResult();
+        MarkTemporaryCollectionUsed();
     }
 
     private void TryQueueMinionReapply()
@@ -1728,6 +1862,29 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         _lastMinionTempModsHash = tempModsHash;
 
         return true;
+    }
+
+    internal async Task PreloadTemporaryCollectionFromLastReceivedDataAsync(CharacterData charaData)
+    {
+        if (charaData == null || !_ipcManager.Penumbra.APIAvailable) return;
+        if (_dalamudUtil.IsInCutscene || _dalamudUtil.IsInGpose) return;
+        if (!charaData.FileReplacements.TryGetValue(ObjectKind.Player, out var replacements) || replacements.Count == 0) return;
+
+        var missingFiles = TryCalculateModdedDictionary(Guid.NewGuid(), charaData, out var moddedPaths, CancellationToken.None);
+        if (missingFiles.Count > 0 || moddedPaths.Count == 0) return;
+
+        await EnsurePenumbraCollectionAsync().ConfigureAwait(false);
+        if (_penumbraCollection == Guid.Empty) return;
+
+        var tempMods = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in moddedPaths)
+        {
+            var normalizedGamePath = entry.Key.GamePath.Replace('\\', '/').ToLowerInvariant();
+            tempMods[normalizedGamePath] = entry.Value;
+        }
+
+        await _ipcManager.Penumbra.SetTemporaryModsAsync(Logger, Guid.NewGuid(), _penumbraCollection, tempMods).ConfigureAwait(false);
+        MarkTemporaryCollectionUsed();
     }
 
     private async Task<bool> ApplyMinionTempModsAsync(nint minionAddress, Dictionary<string, string> tempMods, CancellationToken token)
@@ -1937,6 +2094,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
 
         Logger.LogDebug("Binding collection {coll} to object index {idx} (Address: {addr:X})", _penumbraCollection, objectIndex.Value, address);
         await _ipcManager.Penumbra.AssignTemporaryCollectionAsync(Logger, _penumbraCollection, objectIndex.Value).ConfigureAwait(false);
+        MarkTemporaryCollectionUsed();
         return true;
     }
 
@@ -1953,6 +2111,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         {
             playerIndex = await _dalamudUtil.RunOnFrameworkThread(() => _charaHandler.GetGameObject()!.ObjectIndex).ConfigureAwait(false);
             await _ipcManager.Penumbra.AssignTemporaryCollectionAsync(Logger, _penumbraCollection, playerIndex.Value).ConfigureAwait(false);
+            MarkTemporaryCollectionUsed();
         }
 
         int? minionIndex = null;
@@ -1972,6 +2131,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         }
 
         await _ipcManager.Penumbra.AssignTemporaryCollectionAsync(Logger, _penumbraCollection, minionIndex.Value).ConfigureAwait(false);
+        MarkTemporaryCollectionUsed();
         return true;
     }
 
@@ -1989,6 +2149,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             {
                 var idx = await _dalamudUtil.RunOnFrameworkThread(() => _charaHandler.GetGameObject()!.ObjectIndex).ConfigureAwait(false);
                 await _ipcManager.Penumbra.AssignTemporaryCollectionAsync(Logger, _penumbraCollection, idx).ConfigureAwait(false);
+                MarkTemporaryCollectionUsed();
             }
         }
         catch (Exception ex)

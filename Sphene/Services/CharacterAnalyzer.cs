@@ -13,11 +13,12 @@ public sealed class CharacterAnalyzer : MediatorSubscriberBase, IDisposable
 {
     private readonly FileCacheManager _fileCacheManager;
     private readonly XivDataAnalyzer _xivDataAnalyzer;
+    private readonly Sphene.Interop.Ipc.IpcCallerPenumbra _penumbra;
     private CancellationTokenSource? _analysisCts;
     private CancellationTokenSource _baseAnalysisCts = new();
     private string _lastDataHash = string.Empty;
 
-    public CharacterAnalyzer(ILogger<CharacterAnalyzer> logger, SpheneMediator mediator, FileCacheManager fileCacheManager, XivDataAnalyzer modelAnalyzer)
+    public CharacterAnalyzer(ILogger<CharacterAnalyzer> logger, SpheneMediator mediator, FileCacheManager fileCacheManager, XivDataAnalyzer modelAnalyzer, Sphene.Interop.Ipc.IpcCallerPenumbra penumbra)
         : base(logger, mediator)
     {
         Mediator.Subscribe<CharacterDataCreatedMessage>(this, (msg) =>
@@ -30,6 +31,7 @@ public sealed class CharacterAnalyzer : MediatorSubscriberBase, IDisposable
         });
         _fileCacheManager = fileCacheManager;
         _xivDataAnalyzer = modelAnalyzer;
+        _penumbra = penumbra;
     }
 
     public int CurrentFile { get; internal set; }
@@ -128,6 +130,29 @@ public sealed class CharacterAnalyzer : MediatorSubscriberBase, IDisposable
 
                 var tris = await _xivDataAnalyzer.GetTrianglesByHash(fileEntry.Hash).ConfigureAwait(false);
 
+                string modName = string.Empty;
+                var modDir = _penumbra.ModDirectory;
+                if (!string.IsNullOrEmpty(modDir))
+                {
+                    modDir = modDir.Replace('\\', '/');
+                    if (!modDir.EndsWith('/')) modDir += '/';
+
+                    foreach (var path in fileCacheEntries.Select(c => c.ResolvedFilepath))
+                    {
+                        var normalizedPath = path.Replace('\\', '/');
+                        if (normalizedPath.StartsWith(modDir, StringComparison.OrdinalIgnoreCase))
+                        {
+                            var relPath = normalizedPath.Substring(modDir.Length);
+                            var parts = relPath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+                            if (parts.Length > 0)
+                            {
+                                modName = parts[0];
+                                break;
+                            }
+                        }
+                    }
+                }
+
                 foreach (var entry in fileCacheEntries)
                 {
                     data[fileEntry.Hash] = new FileDataEntry(fileEntry.Hash, ext,
@@ -135,7 +160,8 @@ public sealed class CharacterAnalyzer : MediatorSubscriberBase, IDisposable
                         fileCacheEntries.Select(c => c.ResolvedFilepath).Distinct(StringComparer.Ordinal).ToList(),
                         entry.Size > 0 ? entry.Size.Value : 0,
                         entry.CompressedSize > 0 ? entry.CompressedSize.Value : 0,
-                        tris);
+                        tris,
+                        modName);
                 }
             }
 
@@ -193,7 +219,7 @@ public sealed class CharacterAnalyzer : MediatorSubscriberBase, IDisposable
         Logger.LogInformation("IMPORTANT NOTES:\n\r- For Sphene up- and downloads only the compressed size is relevant.\n\r- An unusually high total files count beyond 200 and up will also increase your download time to others significantly.");
     }
 
-    internal sealed record FileDataEntry(string Hash, string FileType, List<string> GamePaths, List<string> FilePaths, long OriginalSize, long CompressedSize, long Triangles)
+    internal sealed record FileDataEntry(string Hash, string FileType, List<string> GamePaths, List<string> FilePaths, long OriginalSize, long CompressedSize, long Triangles, string ModName)
     {
         public bool IsComputed => OriginalSize > 0 && CompressedSize > 0;
         public async Task ComputeSizes(FileCacheManager fileCacheManager, CancellationToken token)

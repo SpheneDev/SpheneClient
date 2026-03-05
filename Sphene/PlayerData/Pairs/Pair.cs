@@ -14,6 +14,7 @@ using Sphene.Utils;
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
 using Sphene.Services;
+using Sphene.Services.CharaData;
 using NotificationType = Sphene.SpheneConfiguration.Models.NotificationType;
 using Sphene.Services.Events;
 using Dalamud.Interface.ImGuiNotification;
@@ -30,6 +31,8 @@ public class Pair : DisposableMediatorSubscriberBase
     private readonly PlayerPerformanceConfigService _playerPerformanceConfigService;
     private readonly Lazy<ApiController> _apiController;
     private readonly DalamudUtilService _dalamudUtilService;
+    private readonly SpheneConfigService _configService;
+    private readonly CharacterDataSqliteStore _characterDataSqliteStore;
     private CancellationTokenSource _applicationCts = new();
     private OnlineUserIdentDto? _onlineUserIdentDto = null;
     private readonly VisibilityGateService _visibilityGateService;
@@ -48,7 +51,8 @@ public class Pair : DisposableMediatorSubscriberBase
     public Pair(ILogger<Pair> logger, UserFullPairDto userPair, PairHandlerFactory cachedPlayerFactory,
         SpheneMediator mediator, ServerConfigurationManager serverConfigurationManager,
         PlayerPerformanceConfigService playerPerformanceConfigService, Lazy<ApiController> apiController,
-        VisibilityGateService visibilityGateService, DalamudUtilService dalamudUtilService) : base(logger, mediator)
+        VisibilityGateService visibilityGateService, DalamudUtilService dalamudUtilService,
+        SpheneConfigService configService, CharacterDataSqliteStore characterDataSqliteStore) : base(logger, mediator)
     {
         UserPair = userPair;
         _cachedPlayerFactory = cachedPlayerFactory;
@@ -57,11 +61,14 @@ public class Pair : DisposableMediatorSubscriberBase
         _apiController = apiController;
         _visibilityGateService = visibilityGateService;
         _dalamudUtilService = dalamudUtilService;
-        
+        _configService = configService;
+        _characterDataSqliteStore = characterDataSqliteStore;
+
         // Subscribe to character data application completion messages
         Mediator.Subscribe<CharacterDataApplicationCompletedMessage>(this, message => { _ = OnCharacterDataApplicationCompleted(message); });
         Mediator.Subscribe<GposeStartMessage>(this, _ => { WasMutuallyVisibleInGpose = IsMutuallyVisible; });
         Mediator.Subscribe<GposeEndMessage>(this, _ => { WasMutuallyVisibleInGpose = false; });
+        _ = LoadPersistedLastReceivedDataAsync();
     }
 
     public bool HasCachedPlayer => CachedPlayer != null && !string.IsNullOrEmpty(CachedPlayer.PlayerName) && _onlineUserIdentDto != null;
@@ -83,12 +90,27 @@ public class Pair : DisposableMediatorSubscriberBase
     public string? PreviousReceivedCharacterDataHash { get; private set; }
     public DateTimeOffset? LastReceivedCharacterDataTime { get; private set; }
     public DateTimeOffset? LastReceivedCharacterDataChangeTime { get; private set; }
+    public bool LastReceivedContainsCharacterLegacyShpk { get; private set; } = false;
+    public bool LastReceivedContainsCharacterShpk { get; private set; } = false;
+    public bool LastReceivedCharacterLegacyShpkFiltered { get; private set; } = false;
+    public bool LastReceivedCharacterShpkFiltered { get; private set; } = false;
     public string? PlayerName => CachedPlayer?.PlayerName ?? string.Empty;
     public long LastAppliedDataBytes => CachedPlayer?.LastAppliedDataBytes ?? -1;
     public long LastAppliedDataTris { get; set; } = -1;
     public long LastAppliedApproximateVRAMBytes { get; set; } = -1;
     public string Ident => _onlineUserIdentDto?.Ident ?? string.Empty;
     internal int ApplyRetryCount => _applyRetryCount;
+
+    public bool TryGetPenumbraCollectionId(out Guid collectionId)
+    {
+        if (CachedPlayer == null)
+        {
+            collectionId = Guid.Empty;
+            return false;
+        }
+
+        return CachedPlayer.TryGetPenumbraCollectionId(out collectionId);
+    }
     
     // Data synchronization status properties
     public bool? LastAcknowledgmentSuccess { get; private set; } = null;
@@ -176,6 +198,7 @@ public class Pair : DisposableMediatorSubscriberBase
         SeStringBuilder seStringBuilder3 = new();
         SeStringBuilder seStringBuilder4 = new();
         SeStringBuilder seStringBuilder5 = new();
+        SeStringBuilder seStringBuilder6 = new();
         var openProfileSeString = seStringBuilder.AddText("Open Profile").Build();
         var reapplyDataSeString = seStringBuilder2.AddText("Reapply last data").Build();
         var cyclePauseState = seStringBuilder3.AddText("Cycle pause state").Build();
@@ -187,6 +210,11 @@ public class Pair : DisposableMediatorSubscriberBase
         var isWhitelisted = System.Linq.Enumerable.Contains(config.UIDsToIgnore, UserData.UID, StringComparer.Ordinal);
         var whitelistText = isWhitelisted ? "Remove from Performance Whitelist" : "Add to Performance Whitelist";
         var performanceWhitelistSeString = seStringBuilder5.AddText(whitelistText).Build();
+        var tempWhitelist = config.TemporaryCollectionWhitelist;
+        var isTempWhitelisted = System.Linq.Enumerable.Contains(tempWhitelist, userIdentifier, StringComparer.Ordinal) ||
+                                System.Linq.Enumerable.Contains(tempWhitelist, UserData.UID, StringComparer.Ordinal);
+        var tempWhitelistText = isTempWhitelisted ? "Remove from Temporary Collection Whitelist" : "Add to Temporary Collection Whitelist";
+        var tempWhitelistSeString = seStringBuilder6.AddText(tempWhitelistText).Build();
         
         args.AddMenuItem(new MenuItem()
         {
@@ -240,6 +268,31 @@ public class Pair : DisposableMediatorSubscriberBase
                     // Add to whitelist with identifier for reference
                     config.UIDsToIgnore.Add(UserData.UID);
                     Logger.LogInformation("Added {identifier} ({uid}) to performance whitelist", userIdentifier, UserData.UID);
+                }
+                _playerPerformanceConfigService.Save();
+            },
+            UseDefaultPrefix = false,
+            PrefixChar = 'S',
+            PrefixColor = 500
+        });
+
+        args.AddMenuItem(new MenuItem()
+        {
+            Name = tempWhitelistSeString,
+            OnClicked = (a) =>
+            {
+                if (isTempWhitelisted)
+                {
+                    tempWhitelist.RemoveAll(uid =>
+                        string.Equals(uid, UserPair.User.Alias, StringComparison.Ordinal) ||
+                        string.Equals(uid, UserData.UID, StringComparison.Ordinal));
+                    Logger.LogInformation("Removed {identifier} ({uid}) from temporary collection whitelist", userIdentifier, UserData.UID);
+                }
+                else
+                {
+                    var identifierToAdd = !string.IsNullOrEmpty(UserPair.User.Alias) ? UserPair.User.Alias : UserData.UID;
+                    tempWhitelist.Add(identifierToAdd);
+                    Logger.LogInformation("Added {identifier} ({uid}) to temporary collection whitelist", userIdentifier, UserData.UID);
                 }
                 _playerPerformanceConfigService.Save();
             },
@@ -355,12 +408,40 @@ public class Pair : DisposableMediatorSubscriberBase
         LastReceivedCharacterData = data.CharaData;
         LastReceivedCharacterDataHash = newHash;
         LastReceivedCharacterDataTime = now;
+        LastReceivedContainsCharacterLegacyShpk = ContainsGamePath(LastReceivedCharacterData, "characterlegacy.shpk");
+        LastReceivedContainsCharacterShpk = ContainsGamePath(LastReceivedCharacterData, "character.shpk");
+        LastReceivedCharacterLegacyShpkFiltered = LastReceivedContainsCharacterLegacyShpk && _configService.Current.FilterCharacterLegacyShpk;
+        LastReceivedCharacterShpkFiltered = LastReceivedContainsCharacterShpk && _configService.Current.FilterCharacterShpk;
         Logger.LogDebug("{tag} Cache updated: user={user} newHash={newHash} previousHash={prevHash} changed={changed}",
             SyncProgressTag,
             data.User.AliasOrUID,
             string.IsNullOrEmpty(newHash) ? "NONE" : newHash[..Math.Min(8, newHash.Length)],
             string.IsNullOrEmpty(previousHash) ? "NONE" : previousHash[..Math.Min(8, previousHash.Length)],
             !string.Equals(previousHash, newHash, StringComparison.Ordinal));
+
+        if (data.CharaData != null && !string.IsNullOrWhiteSpace(newHash))
+        {
+            var playerName = CachedPlayer?.PlayerName;
+            _ = _characterDataSqliteStore.StoreReceivedPairDataAsync(data.User.UID, data.CharaData, playerName, null, null, null, null, data.SessionId, data.SequenceNumber, now);
+        }
+    }
+
+    private async Task LoadPersistedLastReceivedDataAsync()
+    {
+        if (string.IsNullOrWhiteSpace(UserData.UID)) return;
+
+        var persisted = await _characterDataSqliteStore.GetLatestPairDataAsync(UserData.UID).ConfigureAwait(false);
+        if (persisted == null) return;
+
+        LastReceivedCharacterData = persisted.CharacterData;
+        LastReceivedCharacterDataHash = persisted.DataHash;
+        LastReceivedCharacterDataTime = persisted.ReceivedAt;
+        LastReceivedCharacterDataChangeTime = persisted.ReceivedAt;
+        LastReceivedContainsCharacterLegacyShpk = ContainsGamePath(LastReceivedCharacterData, "characterlegacy.shpk");
+        LastReceivedContainsCharacterShpk = ContainsGamePath(LastReceivedCharacterData, "character.shpk");
+        LastReceivedCharacterLegacyShpkFiltered = LastReceivedContainsCharacterLegacyShpk && _configService.Current.FilterCharacterLegacyShpk;
+        LastReceivedCharacterShpkFiltered = LastReceivedContainsCharacterShpk && _configService.Current.FilterCharacterShpk;
+        Logger.LogDebug("{tag} Loaded persisted character data: user={user} hash={hash}", SyncProgressTag, UserData.AliasOrUID, persisted.DataHash[..Math.Min(8, persisted.DataHash.Length)]);
     }
 
     public void ApplyLastReceivedData(bool forced = false)
@@ -404,7 +485,7 @@ public class Pair : DisposableMediatorSubscriberBase
         _lastApplyAttemptTime = DateTimeOffset.UtcNow;
         AddApplyDebug($"Apply start forced={forced} hash={applyShortHash}");
         Logger.LogDebug("{tag} Apply start: user={user} forced={forced} hash={hash}", SyncProgressTag, UserData.AliasOrUID, forced, applyShortHash);
-        CachedPlayer.ApplyCharacterData(Guid.NewGuid(), RemoveNotSyncedFiles(LastReceivedCharacterData.DeepClone())!, forced);
+        CachedPlayer.ApplyCharacterData(Guid.NewGuid(), RemoveNotSyncedFiles(LastReceivedCharacterData.DeepClone())!, forced, forceRedraw: forced);
     }
 
     public void CreateCachedPlayer(OnlineUserIdentDto? dto = null)
@@ -428,6 +509,10 @@ public class Pair : DisposableMediatorSubscriberBase
 
             CachedPlayer?.Dispose();
             CachedPlayer = _cachedPlayerFactory.Create(this);
+            if (_configService.Current.PreloadPairCollectionFromLastReceivedData && LastReceivedCharacterData != null && IsTemporaryCollectionPreloadAllowed())
+            {
+                _ = CachedPlayer.PreloadTemporaryCollectionFromLastReceivedDataAsync(LastReceivedCharacterData.DeepClone());
+            }
         }
         finally
         {
@@ -438,6 +523,15 @@ public class Pair : DisposableMediatorSubscriberBase
     public string? GetNote()
     {
         return _serverConfigurationManager.GetNoteForUid(UserData.UID);
+    }
+
+    private bool IsTemporaryCollectionPreloadAllowed()
+    {
+        var whitelist = _playerPerformanceConfigService.Current.TemporaryCollectionWhitelist;
+        if (whitelist.Count == 0) return false;
+        var userIdentifier = !string.IsNullOrEmpty(UserData.Alias) ? UserData.Alias : UserData.UID;
+        return whitelist.Contains(userIdentifier, StringComparer.Ordinal) ||
+               whitelist.Contains(UserData.UID, StringComparer.Ordinal);
     }
 
     public string GetPlayerNameHash()
@@ -463,6 +557,10 @@ public class Pair : DisposableMediatorSubscriberBase
             PreviousReceivedCharacterDataHash = null;
             LastReceivedCharacterDataTime = null;
             LastReceivedCharacterDataChangeTime = null;
+            LastReceivedContainsCharacterLegacyShpk = false;
+            LastReceivedContainsCharacterShpk = false;
+            LastReceivedCharacterLegacyShpkFiltered = false;
+            LastReceivedCharacterShpkFiltered = false;
             var player = CachedPlayer;
             CachedPlayer = null;
             player?.Dispose();
@@ -498,6 +596,8 @@ public class Pair : DisposableMediatorSubscriberBase
         bool disableIndividualAnimations = (UserPair.OtherPermissions.IsDisableAnimations() || UserPair.OwnPermissions.IsDisableAnimations());
         bool disableIndividualVFX = (UserPair.OtherPermissions.IsDisableVFX() || UserPair.OwnPermissions.IsDisableVFX());
         bool disableIndividualSounds = (UserPair.OtherPermissions.IsDisableSounds() || UserPair.OwnPermissions.IsDisableSounds());
+        bool filterCharacterLegacy = _configService.Current.FilterCharacterLegacyShpk;
+        bool filterCharacterShpk = _configService.Current.FilterCharacterShpk;
 
         if (_dalamudUtilService.IsInDuty
             && (UserPair.OtherPermissions.IsDisableVFXInDuty() || UserPair.OwnPermissions.IsDisableVFXInDuty()))
@@ -506,13 +606,13 @@ public class Pair : DisposableMediatorSubscriberBase
         }
 
         Logger.LogTrace("Disable: Sounds: {disableIndividualSounds}, Anims: {disableIndividualAnims}; " +
-            "VFX: {disableGroupSounds}",
-            disableIndividualSounds, disableIndividualAnimations, disableIndividualVFX);
+            "VFX: {disableGroupSounds}, FilterLegacy: {filterCharacterLegacy}, FilterCharacterShpk: {filterCharacterShpk}",
+            disableIndividualSounds, disableIndividualAnimations, disableIndividualVFX, filterCharacterLegacy, filterCharacterShpk);
 
-        if (disableIndividualAnimations || disableIndividualSounds || disableIndividualVFX)
+        if (disableIndividualAnimations || disableIndividualSounds || disableIndividualVFX || filterCharacterLegacy || filterCharacterShpk)
         {
-            Logger.LogTrace("Data cleaned up: Animations disabled: {disableAnimations}, Sounds disabled: {disableSounds}, VFX disabled: {disableVFX}",
-                disableIndividualAnimations, disableIndividualSounds, disableIndividualVFX);
+            Logger.LogTrace("Data cleaned up: Animations disabled: {disableAnimations}, Sounds disabled: {disableSounds}, VFX disabled: {disableVFX}, Filter Legacy: {filterCharacterLegacy}, Filter Character Shpk: {filterCharacterShpk}",
+                disableIndividualAnimations, disableIndividualSounds, disableIndividualVFX, filterCharacterLegacy, filterCharacterShpk);
             foreach (var objectKind in data.FileReplacements.Select(k => k.Key))
             {
                 if (disableIndividualSounds)
@@ -527,36 +627,78 @@ public class Pair : DisposableMediatorSubscriberBase
                     data.FileReplacements[objectKind] = data.FileReplacements[objectKind]
                         .Where(f => !f.GamePaths.Any(p => p.EndsWith("atex", StringComparison.OrdinalIgnoreCase) || p.EndsWith("avfx", StringComparison.OrdinalIgnoreCase)))
                         .ToList();
+                if (filterCharacterLegacy)
+                    data.FileReplacements[objectKind] = data.FileReplacements[objectKind]
+                        .Where(f => !f.GamePaths.Any(p => p.EndsWith("characterlegacy.shpk", StringComparison.OrdinalIgnoreCase)))
+                        .ToList();
+                if (filterCharacterShpk)
+                    data.FileReplacements[objectKind] = data.FileReplacements[objectKind]
+                        .Where(f => !f.GamePaths.Any(p => p.EndsWith("character.shpk", StringComparison.OrdinalIgnoreCase)))
+                        .ToList();
             }
         }
 
         return data;
     }
 
+    private static bool ContainsGamePath(CharacterData? data, string fileName)
+    {
+        if (data?.FileReplacements == null) return false;
+        foreach (var objectKind in data.FileReplacements.Keys)
+        {
+            foreach (var replacement in data.FileReplacements[objectKind])
+            {
+                if (!string.IsNullOrEmpty(replacement.FileSwapPath) &&
+                    replacement.FileSwapPath.EndsWith(fileName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+                if (replacement.GamePaths.Any(p => p.EndsWith(fileName, StringComparison.OrdinalIgnoreCase)))
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     public async Task UpdateAcknowledgmentStatus(string? acknowledgmentId, bool success, DateTimeOffset timestamp)
     {
-        Logger.LogDebug("Updating acknowledgment status: {acknowledgmentId} - Success: {success} for user {user}", acknowledgmentId ?? "null", success, UserData.AliasOrUID);
+        Logger.LogTrace("UpdateAcknowledgmentStatus called: {acknowledgmentId} - Success: {success} for user {user}",
+            acknowledgmentId ?? "null", success, UserData.AliasOrUID);
+        
+        var currentAckYouBefore = UserPair.OwnPermissions.IsAckYou();
+        Logger.LogTrace("UpdateAcknowledgmentStatus: AckYou BEFORE update: {ackYou} for user {user}",
+            currentAckYouBefore, UserData.AliasOrUID);
+        
+        Logger.LogDebug("Updating acknowledgment status: {acknowledgmentId} - Success: {success} for user {user}",
+            acknowledgmentId ?? "null", success, UserData.AliasOrUID);
         LastAcknowledgmentId = acknowledgmentId;
         LastAcknowledgmentSuccess = success;
         LastAcknowledgmentTime = timestamp;
         HasPendingAcknowledgment = false;
-        
+
         // Update AckYou status based on current icon state
         // Green checkmark (success) = true, no icon (cleared) = false
         bool newAckYouStatus = success;
-        
+
         var permissions = UserPair.OwnPermissions;
+        var oldAckYou = permissions.IsAckYou();
         permissions.SetAckYou(newAckYouStatus);
-        
+
+        Logger.LogTrace("UpdateAcknowledgmentStatus: Setting AckYou from {oldAckYou} to {newAckYou} for user {user}",
+            oldAckYou, newAckYouStatus, UserData.AliasOrUID);
+
         try
         {
             await _apiController.Value.UserSetPairPermissions(new(UserData, permissions)).ConfigureAwait(false);
+            Logger.LogTrace("UpdateAcknowledgmentStatus: API call succeeded for AckYou update user={user}", UserData.AliasOrUID);
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Failed to update AckYou status for user {user}", UserData.AliasOrUID);
         }
-        
+
         // Publish specific pair acknowledgment status change event
         Mediator.Publish(new PairAcknowledgmentStatusChangedMessage(
             UserData,
@@ -565,16 +707,20 @@ public class Pair : DisposableMediatorSubscriberBase
             LastAcknowledgmentSuccess,
             LastAcknowledgmentTime
         ));
-        
+
         // Publish optimized icon update for acknowledgment status
         var ackData = new AcknowledgmentStatusData(HasPendingAcknowledgment, LastAcknowledgmentSuccess, LastAcknowledgmentTime);
         Mediator.Publish(new UserPairIconUpdateMessage(UserData, IconUpdateType.AcknowledgmentStatus, ackData));
-        
+
         // Publish granular UI refresh for this specific acknowledgment
         Mediator.Publish(new AcknowledgmentUiRefreshMessage(
             AcknowledgmentId: acknowledgmentId,
             User: UserData
         ));
+        
+        var finalAckYou = UserPair.OwnPermissions.IsAckYou();
+        Logger.LogTrace("UpdateAcknowledgmentStatus: AckYou AFTER update: {finalAckYou} for user {user}",
+            finalAckYou, UserData.AliasOrUID);
     }
 
     public async Task SetPendingAcknowledgment(string acknowledgmentId)
@@ -819,12 +965,12 @@ public class Pair : DisposableMediatorSubscriberBase
 
     private async Task SendAcknowledgmentIfRequired(OnlineUserCharaDataDto data, bool success, bool hashVerificationPassed = true)
     {
-        Logger.LogDebug("SendAcknowledgmentIfRequired called - RequiresAcknowledgment: {requires}, Hash: {hash}, Success: {success}, HashVerification: {hashVerification}", 
+        Logger.LogTrace("SendAcknowledgmentIfRequired called - RequiresAcknowledgment: {requires}, Hash: {hash}, Success: {success}, HashVerification: {hashVerification}", 
             data.RequiresAcknowledgment, data.DataHash[..Math.Min(8, data.DataHash.Length)], success, hashVerificationPassed);
-        
+
         if (!data.RequiresAcknowledgment || string.IsNullOrEmpty(data.DataHash))
         {
-            Logger.LogDebug("Skipping acknowledgment - RequiresAcknowledgment: {requires}, DataHash null/empty: {empty}", 
+            Logger.LogTrace("Skipping acknowledgment - RequiresAcknowledgment: {requires}, DataHash null/empty: {empty}",
                 data.RequiresAcknowledgment, string.IsNullOrEmpty(data.DataHash));
             return;
         }
@@ -834,7 +980,7 @@ public class Pair : DisposableMediatorSubscriberBase
             var finalSuccess = success && hashVerificationPassed;
             var errorCode = Sphene.API.Dto.User.AcknowledgmentErrorCode.None;
             string? errorMessage = null;
-            
+
             if (!success)
             {
                 errorCode = Sphene.API.Dto.User.AcknowledgmentErrorCode.DataCorrupted;
@@ -845,7 +991,7 @@ public class Pair : DisposableMediatorSubscriberBase
                 errorCode = Sphene.API.Dto.User.AcknowledgmentErrorCode.HashVerificationFailed;
                 errorMessage = "Data hash verification failed - data integrity compromised";
             }
-            
+
             var acknowledgmentDto = new CharacterDataAcknowledgmentDto(UserData, data.DataHash)
             {
                 Success = finalSuccess,
@@ -855,33 +1001,43 @@ public class Pair : DisposableMediatorSubscriberBase
                 SessionId = data.SessionId // Include session ID for batch acknowledgment tracking
             };
 
-            Logger.LogDebug("Sending acknowledgment to server - Hash: {hash}, User: {user}, Success: {success}, ErrorCode: {errorCode}", 
+            Logger.LogTrace("Sending acknowledgment to server - Hash: {hash}, User: {user}, Success: {success}, ErrorCode: {errorCode}",
                 data.DataHash[..Math.Min(8, data.DataHash.Length)], UserData.AliasOrUID, finalSuccess, errorCode);
 
             // Send acknowledgment through the mediator
              Mediator.Publish(new SendCharacterDataAcknowledgmentMessage(acknowledgmentDto));
-            Logger.LogDebug("Successfully published SendCharacterDataAcknowledgmentMessage for Hash: {hash}", 
+            Logger.LogTrace("Successfully published SendCharacterDataAcknowledgmentMessage for Hash: {hash}",
                 data.DataHash[..Math.Min(8, data.DataHash.Length)]);
 
             var permissions = UserPair.OwnPermissions;
+            var currentAckYou = permissions.IsAckYou();
             var newAckYouStatus = finalSuccess;
-            if (permissions.IsAckYou() != newAckYouStatus)
+            
+            Logger.LogTrace("SendAcknowledgmentIfRequired: Current AckYou={current}, newAckYouStatus={newStatus} for user {user}",
+                currentAckYou, newAckYouStatus, UserData.AliasOrUID);
+            
+            if (currentAckYou != newAckYouStatus)
             {
-                Logger.LogDebug("SendAcknowledgmentIfRequired: Setting Own AckYou={status} for user {user}", newAckYouStatus, UserData.AliasOrUID);
+                Logger.LogTrace("SendAcknowledgmentIfRequired: Setting Own AckYou={status} for user {user}", newAckYouStatus, UserData.AliasOrUID);
                 permissions.SetAckYou(newAckYouStatus);
                 try
                 {
                     await _apiController.Value.UserSetPairPermissions(new(UserData, permissions)).ConfigureAwait(false);
+                    Logger.LogTrace("SendAcknowledgmentIfRequired: API call succeeded for AckYou update user={user}", UserData.AliasOrUID);
                 }
                 catch (Exception ex)
                 {
-                    Logger.LogDebug(ex, "SendAcknowledgmentIfRequired: Failed to send Own AckYou update for user {user}", UserData.AliasOrUID);
+                    Logger.LogError(ex, "SendAcknowledgmentIfRequired: Failed to send Own AckYou update for user {user}", UserData.AliasOrUID);
                 }
+            }
+            else
+            {
+                Logger.LogTrace("SendAcknowledgmentIfRequired: AckYou already matches desired status - no API call needed user={user}", UserData.AliasOrUID);
             }
         }
         catch (Exception ex)
         {
-            Logger.LogWarning(ex, "Failed to send character data acknowledgment for Hash: {hash}", 
+            Logger.LogWarning(ex, "Failed to send character data acknowledgment for Hash: {hash}",
                 data.DataHash[..Math.Min(8, data.DataHash.Length)]);
         }
     }
@@ -893,91 +1049,164 @@ public class Pair : DisposableMediatorSubscriberBase
         // Check if this message is for this pair
         if (string.Equals(message.UserUID, UserPair.User.UID, StringComparison.Ordinal))
         {
-            Logger.LogDebug("{tag} Apply completed: user={user} success={success} hash={hash} appId={appId}",
+            Logger.LogTrace("{tag} Apply completed: user={user} success={success} hash={hash} appId={appId}",
                 SyncProgressTag, UserData.AliasOrUID, message.Success,
                 string.IsNullOrEmpty(message.DataHash) ? "NONE" : message.DataHash[..Math.Min(8, message.DataHash.Length)],
                 message.ApplicationId);
+            
+            // Debug trace for AckYou status before processing
+            var currentAckYouStatus = UserPair.OwnPermissions.IsAckYou();
+            Logger.LogTrace("{tag} AckYou status BEFORE processing: {ackYou} for user={user}",
+                SyncProgressTag, currentAckYouStatus, UserData.AliasOrUID);
+            
             if (message.Success)
             {
                 ResetApplyRetry();
+                Logger.LogTrace("{tag} Apply retry reset after success for user={user}",
+                    SyncProgressTag, UserData.AliasOrUID);
             }
             else
             {
                 ScheduleApplyRetry(increment: true);
+                Logger.LogTrace("{tag} Apply retry scheduled after failure for user={user}",
+                    SyncProgressTag, UserData.AliasOrUID);
             }
-            
-            if (!_pendingAcknowledgmentQueue.IsEmpty)
+
+            // If data was successfully applied, set acknowledgment to true immediately
+            // This ensures the server knows we have applied the data
+            if (message.Success && !string.IsNullOrEmpty(message.DataHash))
             {
-                OnlineUserCharaDataDto? matchingAcknowledgment = null;
-                var processedCount = 0;
-                var remaining = new List<OnlineUserCharaDataDto>();
-                var appliedHash = message.DataHash;
-                
-                while (_pendingAcknowledgmentQueue.TryDequeue(out var acknowledgmentData))
+                try
                 {
-                    processedCount++;
-                    if (!string.IsNullOrEmpty(appliedHash)
-                        && string.Equals(acknowledgmentData.DataHash, appliedHash, StringComparison.Ordinal))
+                    // Check if we have a pending acknowledgment for this hash
+                    OnlineUserCharaDataDto? matchingAcknowledgment = null;
+                    var remaining = new List<OnlineUserCharaDataDto>();
+                    var queueCountBefore = _pendingAcknowledgmentQueue.Count;
+
+                    Logger.LogTrace("{tag} Processing acknowledgment queue: count={count} hash={hash}",
+                        SyncProgressTag, queueCountBefore, message.DataHash[..Math.Min(8, message.DataHash.Length)]);
+
+                    while (_pendingAcknowledgmentQueue.TryDequeue(out var acknowledgmentData))
                     {
-                        if (matchingAcknowledgment == null || acknowledgmentData.SequenceNumber > matchingAcknowledgment.SequenceNumber)
+                        if (string.Equals(acknowledgmentData.DataHash, message.DataHash, StringComparison.Ordinal))
                         {
-                            matchingAcknowledgment = acknowledgmentData;
+                            if (matchingAcknowledgment == null || acknowledgmentData.SequenceNumber > matchingAcknowledgment.SequenceNumber)
+                            {
+                                matchingAcknowledgment = acknowledgmentData;
+                                Logger.LogTrace("{tag} Found matching acknowledgment: seq={seq} hash={hash}",
+                                    SyncProgressTag, acknowledgmentData.SequenceNumber, message.DataHash[..Math.Min(8, message.DataHash.Length)]);
+                            }
+                            else
+                            {
+                                remaining.Add(acknowledgmentData);
+                                Logger.LogTrace("{tag} Duplicate acknowledgment (lower seq): seq={seq}",
+                                    SyncProgressTag, acknowledgmentData.SequenceNumber);
+                            }
                         }
+                        else
+                        {
+                            remaining.Add(acknowledgmentData);
+                            Logger.LogTrace("{tag} Non-matching acknowledgment: hash={otherHash}",
+                                SyncProgressTag, acknowledgmentData.DataHash[..Math.Min(8, acknowledgmentData.DataHash.Length)]);
+                        }
+                    }
+
+                    // Re-enqueue remaining acknowledgments
+                    foreach (var pending in remaining)
+                    {
+                        _pendingAcknowledgmentQueue.Enqueue(pending);
+                    }
+
+                    Logger.LogTrace("{tag} Acknowledgment queue after processing: remaining={count}",
+                        SyncProgressTag, _pendingAcknowledgmentQueue.Count);
+
+                    if (matchingAcknowledgment != null)
+                    {
+                        // Send acknowledgment to server for matching hash
+                        var verificationSuccess = true;
+                        var isInDutyOrCombat = _dalamudUtilService.IsInDuty || _dalamudUtilService.IsInCombatOrPerforming;
+                        var shouldSkipVerification = _configService.Current.DisableSyncPauseDuringDutyOrCombat && isInDutyOrCombat;
+
+                        Logger.LogTrace("{tag} Processing matching acknowledgment: isInDutyOrCombat={inDuty} skipVerification={skip}",
+                            SyncProgressTag, isInDutyOrCombat, shouldSkipVerification);
+
+                        if (!shouldSkipVerification)
+                        {
+                            verificationSuccess = VerifyDataHashIntegrity(matchingAcknowledgment, message.DataHash);
+                            Logger.LogTrace("{tag} Hash verification result: {verificationSuccess}",
+                                SyncProgressTag, verificationSuccess);
+                        }
+
+                        Logger.LogTrace("{tag} Ack sending: appSuccess={appSuccess} hashVerified={hashSuccess} hash={hash}",
+                            SyncProgressTag,
+                            message.Success, verificationSuccess, message.DataHash[..Math.Min(8, message.DataHash.Length)]);
+
+                        await SendAcknowledgmentIfRequired(matchingAcknowledgment, message.Success, verificationSuccess).ConfigureAwait(false);
+                        
+                        Logger.LogTrace("{tag} SendAcknowledgmentIfRequired completed for hash={hash}",
+                            SyncProgressTag, message.DataHash[..Math.Min(8, message.DataHash.Length)]);
                     }
                     else
                     {
-                        remaining.Add(acknowledgmentData);
-                    }
-                }
-
-                foreach (var pending in remaining)
-                {
-                    _pendingAcknowledgmentQueue.Enqueue(pending);
-                }
-
-                Logger.LogDebug("{tag} Ack queue processed: processed={processedCount} remaining={remainingCount} appliedHash={hash}",
-                    SyncProgressTag,
-                    processedCount, remaining.Count, string.IsNullOrEmpty(appliedHash) ? "NONE" : appliedHash[..Math.Min(8, appliedHash.Length)]);
-
-                if (matchingAcknowledgment != null)
-                {
-                    try
-                    {
-                        var verificationSuccess = true;
-                        if (!_dalamudUtilService.IsInDuty && !_dalamudUtilService.IsInCombatOrPerforming)
+                        // No matching acknowledgment in queue, but data was applied successfully
+                        // Update local acknowledgment status to indicate successful application
+                        Logger.LogTrace("{tag} No matching acknowledgment in queue - setting AckYou directly hash={hash}",
+                            SyncProgressTag, message.DataHash[..Math.Min(8, message.DataHash.Length)]);
+                        
+                        // Set AckYou permission to true to indicate successful application
+                        var permissions = UserPair.OwnPermissions;
+                        var wasAckYou = permissions.IsAckYou();
+                        Logger.LogTrace("{tag} Current AckYou status: {wasAckYou} - attempting to set to true",
+                            SyncProgressTag, wasAckYou);
+                        
+                        if (!wasAckYou)
                         {
-                            verificationSuccess = VerifyDataHashIntegrity(matchingAcknowledgment, appliedHash);
+                            Logger.LogTrace("{tag} Setting AckYou to true for user={user}",
+                                SyncProgressTag, UserData.AliasOrUID);
+                            permissions.SetAckYou(true);
+                            try
+                            {
+                                await _apiController.Value.UserSetPairPermissions(new(UserData, permissions)).ConfigureAwait(false);
+                                Logger.LogTrace("{tag} AckYou set to true after successful apply hash={hash} - API call succeeded",
+                                    SyncProgressTag, message.DataHash[..Math.Min(8, message.DataHash.Length)]);
+                            }
+                            catch (Exception ex)
+                            {
+                                Logger.LogError(ex, "{tag} Failed to set AckYou after successful apply hash={hash}",
+                                    SyncProgressTag, message.DataHash[..Math.Min(8, message.DataHash.Length)]);
+                            }
                         }
-                        
-                        Logger.LogDebug("{tag} Ack sending: appSuccess={appSuccess} hashVerified={hashSuccess} hash={hash}", 
-                            SyncProgressTag,
-                            message.Success, verificationSuccess, string.IsNullOrEmpty(appliedHash) ? "NONE" : appliedHash[..Math.Min(8, appliedHash.Length)]);
-                        
-                        await SendAcknowledgmentIfRequired(matchingAcknowledgment, message.Success, verificationSuccess).ConfigureAwait(false);
-                    }
-                    catch (Exception ex)
-                    {
-                        Logger.LogError(ex, "{tag} Ack send failed: user={userUid}", SyncProgressTag, message.UserUID);
+                        else
+                        {
+                            Logger.LogTrace("{tag} AckYou already true - no action needed hash={hash}",
+                                SyncProgressTag, message.DataHash[..Math.Min(8, message.DataHash.Length)]);
+                        }
                     }
                 }
-                else
+                catch (Exception ex)
                 {
-                    Logger.LogDebug("{tag} Ack missing: appliedHash={hash} remaining={count}",
-                        SyncProgressTag,
-                        string.IsNullOrEmpty(appliedHash) ? "NONE" : appliedHash[..Math.Min(8, appliedHash.Length)],
-                        remaining.Count);
+                    Logger.LogError(ex, "{tag} Failed to process acknowledgment after successful apply hash={hash}",
+                        SyncProgressTag, message.DataHash ?? "NONE");
                 }
             }
-            else
+            else if (!message.Success)
             {
-                Logger.LogDebug("{tag} Ack queue empty: playerName={playerName} success={success}", SyncProgressTag, message.PlayerName, message.Success);
+                // Data application failed, check if we need to update acknowledgment status
+                Logger.LogTrace("{tag} Data application failed - checking acknowledgment status success={success} hasPending={hasPending}",
+                    SyncProgressTag, message.Success, HasPendingAcknowledgment);
 
                 if (HasPendingAcknowledgment || (message.Success && !UserPair.OwnPermissions.IsAckYou()))
                 {
-                    Logger.LogDebug("{tag} Ack auto-complete: success={success} lastAckId={ackId}", SyncProgressTag, message.Success, LastAcknowledgmentId ?? "null");
+                    Logger.LogTrace("{tag} Updating acknowledgment status: lastAckId={ackId}",
+                        SyncProgressTag, LastAcknowledgmentId ?? "null");
                     await UpdateAcknowledgmentStatus(LastAcknowledgmentId, message.Success, DateTime.UtcNow).ConfigureAwait(false);
                 }
             }
+            
+            // Final debug trace for AckYou status after processing
+            var finalAckYouStatus = UserPair.OwnPermissions.IsAckYou();
+            Logger.LogTrace("{tag} AckYou status AFTER processing: {finalAckYou} for user={user}",
+                SyncProgressTag, finalAckYouStatus, UserData.AliasOrUID);
         }
     }
 
@@ -1018,7 +1247,10 @@ public class Pair : DisposableMediatorSubscriberBase
             if (LastReceivedCharacterData == null || CachedPlayer == null) return;
             if (!IsVisible || !IsMutuallyVisible) return;
 
-            if (_dalamudUtilService.IsInCombatOrPerforming || _dalamudUtilService.IsInGpose || _dalamudUtilService.IsInCutscene)
+            var isInCombatOrCutscene = _dalamudUtilService.IsInCombatOrPerforming || _dalamudUtilService.IsInGpose || _dalamudUtilService.IsInCutscene;
+            var shouldSkipPauseCheck = _configService.Current.DisableSyncPauseDuringDutyOrCombat;
+            
+            if (isInCombatOrCutscene && !shouldSkipPauseCheck)
             {
                 ScheduleApplyRetry(increment: false);
                 return;

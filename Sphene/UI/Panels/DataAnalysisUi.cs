@@ -3,6 +3,7 @@ using Dalamud.Interface;
 using Dalamud.Interface.Colors;
 using Dalamud.Interface.Utility;
 using Dalamud.Interface.Utility.Raii;
+using Sphene.API.Data;
 using Sphene.API.Data.Enum;
 using Sphene.FileCache;
 using Sphene.Interop.Ipc;
@@ -11,24 +12,35 @@ using Sphene.Services;
 using Sphene.Services.Mediator;
 using Sphene.Utils;
 using Microsoft.Extensions.Logging;
+using System;
 using System.Linq;
 using System.Numerics;
+using System.Text.Json;
+using System.Runtime.InteropServices;
 using Sphene.UI.Theme;
+using Sphene.Services.ModLearning.Models;
+using Sphene.Services.CharaData;
+using Sphene.PlayerData.Data;
 
 namespace Sphene.UI.Panels;
 
 public class DataAnalysisUi : WindowMediatorSubscriberBase
 {
+    private readonly record struct CurrentReplacement(string Hash, string FileSwapPath, string[] GamePaths);
+    private readonly record struct ExpectedReplacement(ObjectKind Kind, FileReplacement Replacement);
     private readonly CharacterAnalyzer _characterAnalyzer;
     private readonly Progress<(string, int)> _conversionProgress = new();
     private readonly IpcManager _ipcManager;
     private readonly UiSharedService _uiSharedService;
+    private readonly DalamudUtilService _dalamudUtilService;
     private readonly PlayerPerformanceConfigService _playerPerformanceConfig;
     private readonly TransientResourceManager _transientResourceManager;
     private readonly TransientConfigService _transientConfigService;
     private readonly TextureBackupService _textureBackupService;
     private readonly ShrinkU.Services.TextureBackupService _shrinkuBackupService;
     private readonly ShrinkU.Services.TextureConversionService _shrinkuConversionService;
+    private readonly CharacterDataSqliteStore _characterDataSqliteStore;
+    private readonly SpheneConfigService _spheneConfigService;
     private readonly Dictionary<string, string[]> _texturesToConvert = new(StringComparer.Ordinal);
     private Dictionary<ObjectKind, Dictionary<string, CharacterAnalyzer.FileDataEntry>>? _cachedAnalysis;
     private readonly CancellationTokenSource _conversionCancellationTokenSource = new();
@@ -59,28 +71,64 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
     private int _totalMods = 0;
     private int _currentModTotalFiles = 0;
     private DateTime _currentModStartedAt = DateTime.MinValue;
+    private readonly Lock _modLearningLock = new();
+    private List<string> _modLearningCharacters = [];
+    private Dictionary<string, List<LearnedModState>> _modLearningStatesByMod = new(StringComparer.Ordinal);
+    private string _selectedModLearningCharacter = string.Empty;
+    private string _selectedModLearningMod = string.Empty;
+    private string _selectedModLearningOption = string.Empty;
+    private uint _selectedModLearningJobId = 0;
+    private string _modLearningFilter = string.Empty;
+    private bool _showModLearningJson = true;
+    private Dictionary<string, string> _modLearningJsonByMod = new(StringComparer.Ordinal);
+    private HashSet<string> _modLearningCurrentReplacementKeys = new(StringComparer.OrdinalIgnoreCase);
+    private string _modLearningCurrentDataHash = string.Empty;
+    private List<CurrentReplacement> _modLearningCurrentReplacements = [];
+    private Task? _modLearningLoadTask;
+    private bool _modLearningLoading = false;
+    private bool _modLearningAutoSelected = false;
+    private bool _modLearningTabActive = false;
+    private bool _modLearningFirstTabVisitDone = false;
+    private bool _modLearningRefreshRequested = false;
+    private bool _modLearningCollapseResetRequested = true;
+    private static readonly JsonSerializerOptions ModLearningJsonOptions = new()
+    {
+        WriteIndented = true
+    };
 
     public DataAnalysisUi(ILogger<DataAnalysisUi> logger, SpheneMediator mediator,
         CharacterAnalyzer characterAnalyzer, IpcManager ipcManager,
         PerformanceCollectorService performanceCollectorService, UiSharedService uiSharedService,
-        PlayerPerformanceConfigService playerPerformanceConfig, TransientResourceManager transientResourceManager,
+        DalamudUtilService dalamudUtilService, PlayerPerformanceConfigService playerPerformanceConfig, TransientResourceManager transientResourceManager,
         TransientConfigService transientConfigService, TextureBackupService textureBackupService,
         ShrinkU.Services.TextureBackupService shrinkuBackupService,
-        ShrinkU.Services.TextureConversionService shrinkuConversionService)
+        ShrinkU.Services.TextureConversionService shrinkuConversionService,
+        CharacterDataSqliteStore characterDataSqliteStore,
+        SpheneConfigService spheneConfigService)
         : base(logger, mediator, "Sphene Character Data Analysis", performanceCollectorService)
     {
         _characterAnalyzer = characterAnalyzer;
         _ipcManager = ipcManager;
         _uiSharedService = uiSharedService;
+        _dalamudUtilService = dalamudUtilService;
         _playerPerformanceConfig = playerPerformanceConfig;
         _transientResourceManager = transientResourceManager;
         _transientConfigService = transientConfigService;
         _textureBackupService = textureBackupService;
         _shrinkuBackupService = shrinkuBackupService;
         _shrinkuConversionService = shrinkuConversionService;
+        _characterDataSqliteStore = characterDataSqliteStore;
+        _spheneConfigService = spheneConfigService;
         Mediator.Subscribe<CharacterDataAnalyzedMessage>(this, (_) =>
         {
             _hasUpdate = true;
+        });
+        Mediator.Subscribe<CharacterDataCreatedMessage>(this, (_) =>
+        {
+            if (_modLearningTabActive)
+            {
+                _modLearningRefreshRequested = true;
+            }
         });
         SizeConstraints = new()
         {
@@ -230,6 +278,23 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                 }
             }
         }
+        using (var tabItem = ImRaii.TabItem("Mod Learning"))
+        {
+            if (tabItem)
+            {
+                _modLearningTabActive = true;
+                if (!_modLearningFirstTabVisitDone)
+                {
+                    _modLearningFirstTabVisitDone = true;
+                    _modLearningRefreshRequested = true;
+                }
+                DrawModLearning();
+            }
+            else
+            {
+                _modLearningTabActive = false;
+            }
+        }
     }
 
     private bool _showAlreadyAddedTransients = false;
@@ -240,6 +305,1611 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
     private readonly Dictionary<string, string> _filePathResolve = [];
     private string _filterGamePath = string.Empty;
     private string _filterFilePath = string.Empty;
+
+    private void DrawModLearning()
+    {
+        var resetCollapse = _modLearningCollapseResetRequested;
+        if (_modLearningRefreshRequested)
+        {
+            _modLearningRefreshRequested = false;
+            LoadModLearningStates(forceReload: true);
+        }
+
+        EnsureModLearningLoaded();
+
+        if (_modLearningLoading)
+        {
+            ImGui.TextUnformatted("Loading...");
+            return;
+        }
+
+        EnsureModLearningCurrentCharacterSelected();
+
+        using var container = ImRaii.Child("##modlearning_container", new Vector2(0, 0), false, ImGuiWindowFlags.NoScrollbar);
+        if (!container) return;
+
+        var listHeight = 150f * ImGuiHelpers.GlobalScale;
+        var selectorHeight = 205f * ImGuiHelpers.GlobalScale;
+        var modDisplayNames = GetModDisplayNamesSnapshot();
+        var jobKeys = GetJobsForSelectedCharacter();
+        if (!jobKeys.Contains(_selectedModLearningJobId))
+        {
+            _selectedModLearningJobId = jobKeys[0];
+        }
+        var modsForJob = GetModsForSelectedJob();
+        var sortedModsForJob = modsForJob
+            .OrderBy(mod => GetModDisplayName(modDisplayNames, mod), StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (modsForJob.Count > 0 && !modsForJob.Contains(_selectedModLearningMod, StringComparer.Ordinal))
+        {
+            _selectedModLearningMod = modsForJob[0];
+            _selectedModLearningOption = string.Empty;
+        }
+        var options = GetOptionsForSelectedMod();
+        if (options.Count > 0 && !options.ContainsKey(_selectedModLearningOption))
+        {
+            _selectedModLearningOption = options.Keys.FirstOrDefault() ?? string.Empty;
+        }
+        var runtime = GetCurrentModRuntimeStatus(_selectedModLearningMod);
+        var currentKeysSnapshot = GetCurrentReplacementKeysSnapshot();
+        var emoteOverriddenMods = GetEmoteOverriddenModsForJob(sortedModsForJob, _selectedModLearningJobId, currentKeysSnapshot);
+        var currentJobId = _dalamudUtilService.ClassJobId;
+        var currentJobLabel = _uiSharedService.JobData.TryGetValue((ushort)currentJobId, out var currentJobName) ? currentJobName : currentJobId.ToString();
+
+        ImGui.SetNextItemWidth(240f * ImGuiHelpers.GlobalScale);
+        ImGui.InputTextWithHint("##modlearning_filter", "Filter mods", ref _modLearningFilter, 255);
+        ImGui.SameLine();
+        if (_uiSharedService.IconTextButton(FontAwesomeIcon.SyncAlt, "Refresh"))
+        {
+            LoadModLearningStates(forceReload: true);
+        }
+        ImGui.SameLine();
+        ImGui.TextUnformatted($"Selected: {_selectedModLearningCharacter} / Job {_selectedModLearningJobId} / {GetModDisplayName(modDisplayNames, _selectedModLearningMod)}");
+        ImGui.SameLine();
+        ImGui.TextUnformatted($"Current Job: {currentJobLabel} ({currentJobId})");
+
+        using (ImRaii.Child("##modlearning_selector", new Vector2(0, selectorHeight), true))
+        using (var selectorTable = ImRaii.Table("##modlearning_selector_table", 4, ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.BordersInnerV))
+        {
+            if (!selectorTable) return;
+            ImGui.TableSetupColumn("Character", ImGuiTableColumnFlags.WidthStretch, 0.9f);
+            ImGui.TableSetupColumn("Job", ImGuiTableColumnFlags.WidthStretch, 0.7f);
+            ImGui.TableSetupColumn("Mod", ImGuiTableColumnFlags.WidthStretch, 1.2f);
+            ImGui.TableSetupColumn("Option", ImGuiTableColumnFlags.WidthStretch, 1.2f);
+            ImGui.TableNextRow();
+
+            ImGui.TableNextColumn();
+            ImGui.TextUnformatted($"Character ({_modLearningCharacters.Count})");
+            ImGui.Separator();
+            using (ImRaii.ListBox("##modlearning_characters", new Vector2(-1, listHeight)))
+            {
+                lock (_modLearningLock)
+                {
+                    foreach (var entry in _modLearningCharacters)
+                    {
+                        if (ImGui.Selectable(entry, string.Equals(_selectedModLearningCharacter, entry, StringComparison.Ordinal)))
+                        {
+                            _selectedModLearningCharacter = entry;
+                            _selectedModLearningMod = string.Empty;
+                            _selectedModLearningOption = string.Empty;
+                            _selectedModLearningJobId = 0;
+                            LoadModLearningStates();
+                        }
+                    }
+                }
+            }
+
+            ImGui.TableNextColumn();
+            ImGui.TextUnformatted($"Job ({jobKeys.Count})");
+            ImGui.Separator();
+            using (ImRaii.ListBox("##modlearning_jobs", new Vector2(-1, listHeight)))
+            {
+                foreach (var jobId in jobKeys)
+                {
+                    var jobName = jobId == 0
+                        ? "All Jobs"
+                        : (_uiSharedService.JobData.TryGetValue((ushort)jobId, out var jobLabel) ? jobLabel : jobId.ToString());
+                    if (ImGui.Selectable(jobName, _selectedModLearningJobId == jobId))
+                    {
+                        _selectedModLearningJobId = jobId;
+                        _selectedModLearningMod = string.Empty;
+                        _selectedModLearningOption = string.Empty;
+                    }
+                }
+            }
+
+            ImGui.TableNextColumn();
+            ImGui.TextUnformatted($"Mod ({modsForJob.Count})");
+            ImGui.Separator();
+            using (ImRaii.ListBox("##modlearning_mods", new Vector2(-1, listHeight)))
+            {
+                foreach (var modName in sortedModsForJob)
+                {
+                    var modDisplayName = GetModDisplayName(modDisplayNames, modName);
+                    if (!string.IsNullOrWhiteSpace(_modLearningFilter)
+                        && !modDisplayName.Contains(_modLearningFilter, StringComparison.OrdinalIgnoreCase)
+                        && !modName.Contains(_modLearningFilter, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+                    var usedByJob = ModUsedByJob(modName, _selectedModLearningJobId);
+                    var modRuntime = GetCurrentModRuntimeStatus(modName);
+                    var comparison = usedByJob ? GetModComparison(modName, _selectedModLearningJobId, modRuntime) : null;
+                    var labelColor = GetModListColor(usedByJob, modRuntime, comparison);
+                    var emoteIndicator = emoteOverriddenMods.Contains(modName) ? " • emote overridden" : string.Empty;
+                    ImGui.PushStyleColor(ImGuiCol.Text, labelColor);
+                    if (ImGui.Selectable($"{modDisplayName}{emoteIndicator}##{modName}", string.Equals(_selectedModLearningMod, modName, StringComparison.Ordinal)))
+                    {
+                        _selectedModLearningMod = modName;
+                        _selectedModLearningOption = string.Empty;
+                    }
+                    ImGui.PopStyleColor();
+                }
+            }
+
+            ImGui.TableNextColumn();
+            ImGui.TextUnformatted($"Option ({options.Count})");
+            ImGui.Separator();
+            using (ImRaii.ListBox("##modlearning_options", new Vector2(-1, listHeight)))
+            {
+                foreach (var optionEntry in options)
+                {
+                    var optionLabel = optionEntry.Key;
+                    var state = optionEntry.Value;
+                    var isUsedByJob = OptionUsedByJob(state, _selectedModLearningJobId);
+                    var runtimeStatus = GetOptionRuntimeStatus(state, isUsedByJob, runtime);
+                    var optionColor = runtimeStatus.Color;
+                    ImGui.PushStyleColor(ImGuiCol.Text, optionColor);
+                    var displayLabel = $"{optionLabel} • {runtimeStatus.Tag}";
+                    var selected = string.Equals(_selectedModLearningOption, optionLabel, StringComparison.Ordinal);
+                    if (ImGui.Selectable(displayLabel, selected))
+                    {
+                        _selectedModLearningOption = optionLabel;
+                    }
+                    ImGui.PopStyleColor();
+                }
+            }
+        }
+
+        ImGuiHelpers.ScaledDummy(8);
+        using (ImRaii.Child("##modlearning_content", new Vector2(0, 0), false, ImGuiWindowFlags.HorizontalScrollbar))
+        {
+            DrawModLearningJsonBuild(resetCollapse);
+
+        var selectedState = GetSelectedState();
+        if (selectedState == null)
+        {
+            ImGui.TextUnformatted("Select a character, mod and option to view entries.");
+            _modLearningCollapseResetRequested = false;
+            return;
+        }
+
+        var selectedList = GetDisplayListForJob(selectedState, _selectedModLearningJobId);
+        var selectedListWithKind = GetDisplayListForJobWithKind(selectedState, _selectedModLearningJobId);
+        var expectedKeys = BuildExpectedReplacementKeySet(selectedList);
+        var currentKeys = currentKeysSnapshot;
+        var keySummary = GetKeyComparisonSummary(expectedKeys, currentKeys);
+        var currentEntries = GetCurrentReplacementEntriesSnapshot();
+        var optionStatus = GetSelectedModOptionStatus(selectedState);
+        var jobStatus = GetSelectedJobMismatchStatus();
+        if (currentKeys.Count == 0)
+        {
+            UiSharedService.ColorTextWrapped("No local character data loaded for comparison.", ImGuiColors.DalamudGrey);
+        }
+        else
+        {
+            var summaryColor = keySummary.MissingCount > 0 ? ImGuiColors.DalamudYellow : ImGuiColors.ParsedGreen;
+            UiSharedService.ColorTextWrapped($"Comparison: {keySummary.PresentCount}/{keySummary.ExpectedCount} present, {keySummary.MissingCount} missing, {keySummary.ExtraCount} extra",
+                summaryColor);
+            ImGui.TextUnformatted($"Expected (job) entries: {keySummary.ExpectedCount}");
+            ImGui.TextUnformatted($"Current total entries: {currentKeys.Count}");
+            if (!string.IsNullOrWhiteSpace(_modLearningCurrentDataHash))
+            {
+                ImGui.TextUnformatted($"Local Data Hash: {_modLearningCurrentDataHash}");
+            }
+        }
+
+        var missingEntries = currentKeys.Count > 0
+            ? selectedList.Where(replacement => !IsReplacementFullyPresent(replacement, currentKeys)).ToList()
+            : [];
+        var presentEntries = currentKeys.Count > 0
+            ? selectedList.Where(replacement => IsReplacementFullyPresent(replacement, currentKeys)).ToList()
+            : selectedList.ToList();
+        var missingEntriesWithKind = currentKeys.Count > 0
+            ? selectedListWithKind.Where(expected => !IsReplacementFullyPresent(expected.Replacement, currentKeys)).ToList()
+            : [];
+
+        using (var table = ImRaii.Table("##modlearning_table", 2, ImGuiTableFlags.RowBg))
+        {
+            if (table)
+            {
+                ImGui.TableSetupColumn("Game Paths", ImGuiTableColumnFlags.WidthStretch, 1f);
+                ImGui.TableSetupColumn("Resolved Path", ImGuiTableColumnFlags.WidthStretch, 1f);
+                ImGui.TableHeadersRow();
+                foreach (var replacement in selectedList)
+                {
+                    ImGui.TableNextRow();
+                    ImGui.TableNextColumn();
+                    var gamePaths = replacement.GamePaths.Count == 0 ? string.Empty : string.Join(", ", replacement.GamePaths);
+                    var present = IsReplacementFullyPresent(replacement, currentKeys);
+                    if (!present && currentKeys.Count > 0)
+                    {
+                        ImGui.PushStyleColor(ImGuiCol.Text, SpheneCustomTheme.Colors.Warning);
+                    }
+                    ImGui.TextWrapped(gamePaths);
+                    if (!present && currentKeys.Count > 0)
+                    {
+                        ImGui.PopStyleColor();
+                    }
+                    ImGui.TableNextColumn();
+                    if (!present && currentKeys.Count > 0)
+                    {
+                        ImGui.PushStyleColor(ImGuiCol.Text, SpheneCustomTheme.Colors.Warning);
+                    }
+                    ImGui.TextWrapped(replacement.ResolvedPath);
+                    if (!present && currentKeys.Count > 0)
+                    {
+                        ImGui.PopStyleColor();
+                    }
+                }
+            }
+        }
+
+        ImGuiHelpers.ScaledDummy(6);
+
+        if (currentKeys.Count > 0 && missingEntries.Count > 0)
+        {
+            var missingNotLoaded = missingEntries.Where(entry => !HasLocalEntriesForPaths(entry, currentEntries)).ToList();
+            var missingLoaded = missingEntries.Where(entry => HasLocalEntriesForPaths(entry, currentEntries)).ToList();
+            ImGuiHelpers.ScaledDummy(6);
+            if (resetCollapse) ImGui.SetNextItemOpen(false, ImGuiCond.Always);
+            if (ImGui.CollapsingHeader($"Missing expected entries (loaded): {missingLoaded.Count}", ImGuiTreeNodeFlags.None))
+            {
+                using (ImRaii.Child("##modlearning_missing_buttons", new Vector2(0, ImGui.GetFrameHeight()), false))
+                {
+                    if (ImGui.Button("Copy Missing", new Vector2(140 * ImGuiHelpers.GlobalScale, 0)))
+                    {
+                        var lines = missingLoaded
+                            .SelectMany(e => e.GamePaths.Select(gp => $"{gp} -> {e.ResolvedPath}"))
+                            .ToArray();
+                        ImGui.SetClipboardText(string.Join(Environment.NewLine, lines));
+                    }
+                    ImGui.SameLine();
+                    if (ImGui.Button("Copy Missing + Reasons", new Vector2(200 * ImGuiHelpers.GlobalScale, 0)))
+                    {
+                        var lines = missingLoaded.SelectMany(entry =>
+                        {
+                            var reason = GetCurrentMismatchInfo(entry, currentEntries);
+                            return entry.GamePaths.Select(gp => $"{gp} -> {entry.ResolvedPath} | {reason}");
+                        }).ToArray();
+                        ImGui.SetClipboardText(string.Join(Environment.NewLine, lines));
+                    }
+                    ImGui.SameLine();
+                    using (ImRaii.Disabled(missingEntriesWithKind.Count == 0))
+                    {
+                        if (ImGui.Button("Apply Missing", new Vector2(140 * ImGuiHelpers.GlobalScale, 0)))
+                        {
+                            _logger.LogDebug("[ModLearning] ApplyMissing clicked: totalMissing={totalMissing} candidates={candidates}", missingEntries.Count, missingEntriesWithKind.Count);
+                            _ = Task.Run(() => ApplyMissingToLocalCharacterDataAsync(missingEntriesWithKind));
+                        }
+                    }
+                    ImGui.SameLine();
+                    ImGui.TextUnformatted($"Apply candidates: {missingEntriesWithKind.Count}");
+                }
+                var missingHeight = 180f * ImGuiHelpers.GlobalScale;
+                using var missingChild = ImRaii.Child("##modlearning_missing", new Vector2(0, missingHeight), true, ImGuiWindowFlags.HorizontalScrollbar);
+                if (missingChild)
+                {
+                    foreach (var entry in missingLoaded)
+                    {
+                        ImGui.PushStyleColor(ImGuiCol.Text, SpheneCustomTheme.Colors.Warning);
+                        ImGui.TextUnformatted(entry.ResolvedPath);
+                        ImGui.PopStyleColor();
+                        using (ImRaii.PushIndent(12f))
+                        {
+                            foreach (var gp in entry.GamePaths)
+                            {
+                                ImGui.TextUnformatted(gp);
+                            }
+                            var mismatchInfo = GetCurrentMismatchInfo(entry, currentEntries);
+                            ImGui.PushStyleColor(ImGuiCol.Text, SpheneCustomTheme.Colors.AccentCyan);
+                            ImGui.TextUnformatted(mismatchInfo);
+                            ImGui.PopStyleColor();
+                            if (optionStatus.HasValue && !optionStatus.Value.IsActive)
+                            {
+                                ImGui.PushStyleColor(ImGuiCol.Text, optionStatus.Value.Color);
+                                ImGui.TextUnformatted(optionStatus.Value.Reason);
+                                ImGui.PopStyleColor();
+                            }
+                            if (jobStatus.HasValue && !jobStatus.Value.IsActive)
+                            {
+                                ImGui.PushStyleColor(ImGuiCol.Text, jobStatus.Value.Color);
+                                ImGui.TextUnformatted(jobStatus.Value.Reason);
+                                ImGui.PopStyleColor();
+                            }
+                        }
+                        ImGui.Separator();
+                    }
+                }
+            }
+
+            if (missingNotLoaded.Count > 0)
+            {
+                ImGuiHelpers.ScaledDummy(6);
+                if (resetCollapse) ImGui.SetNextItemOpen(false, ImGuiCond.Always);
+                if (ImGui.CollapsingHeader($"Missing expected entries (not loaded): {missingNotLoaded.Count}", ImGuiTreeNodeFlags.None))
+                {
+                    using (ImRaii.Child("##modlearning_missing_not_loaded_buttons", new Vector2(0, ImGui.GetFrameHeight()), false))
+                    {
+                        if (ImGui.Button("Redraw & Rebuild", new Vector2(160 * ImGuiHelpers.GlobalScale, 0)))
+                        {
+                            TriggerLocalRebuild();
+                        }
+                        ImGui.SameLine();
+                        var forceRestoreGlobal = _spheneConfigService.Current.ModLearningForceRestorePersistent;
+                        if (ImGui.Checkbox("Always force restore learned entries (persistent)", ref forceRestoreGlobal))
+                        {
+                            _spheneConfigService.Current.ModLearningForceRestorePersistent = forceRestoreGlobal;
+                            _spheneConfigService.Save();
+                        }
+                        ImGui.SameLine();
+                        var forceRestore = IsForceRestoreEnabledForSelectedMod();
+                        using (ImRaii.Disabled(string.IsNullOrWhiteSpace(_selectedModLearningMod)))
+                        {
+                            if (ImGui.Checkbox("Force restore this mod (persistent)", ref forceRestore))
+                            {
+                                SetForceRestoreForSelectedMod(forceRestore);
+                            }
+                        }
+                        ImGui.SameLine();
+                        ImGui.TextUnformatted("Try this after changing jobs or triggering the effect once.");
+                    }
+                    var missingHeight = 180f * ImGuiHelpers.GlobalScale;
+                    using var missingChild = ImRaii.Child("##modlearning_missing_not_loaded", new Vector2(0, missingHeight), true, ImGuiWindowFlags.HorizontalScrollbar);
+                    if (missingChild)
+                    {
+                        foreach (var entry in missingNotLoaded)
+                        {
+                            ImGui.PushStyleColor(ImGuiCol.Text, SpheneCustomTheme.Colors.Warning);
+                            ImGui.TextUnformatted(entry.ResolvedPath);
+                            ImGui.PopStyleColor();
+                            using (ImRaii.PushIndent(12f))
+                            {
+                                foreach (var gp in entry.GamePaths)
+                                {
+                                    ImGui.TextUnformatted(gp);
+                                }
+                                ImGui.PushStyleColor(ImGuiCol.Text, SpheneCustomTheme.Colors.AccentCyan);
+                                ImGui.TextUnformatted("Not loaded in current character data.");
+                                ImGui.PopStyleColor();
+                                if (optionStatus.HasValue && !optionStatus.Value.IsActive)
+                                {
+                                    ImGui.PushStyleColor(ImGuiCol.Text, optionStatus.Value.Color);
+                                    ImGui.TextUnformatted(optionStatus.Value.Reason);
+                                    ImGui.PopStyleColor();
+                                }
+                                if (jobStatus.HasValue && !jobStatus.Value.IsActive)
+                                {
+                                    ImGui.PushStyleColor(ImGuiCol.Text, jobStatus.Value.Color);
+                                    ImGui.TextUnformatted(jobStatus.Value.Reason);
+                                    ImGui.PopStyleColor();
+                                }
+                            }
+                            ImGui.Separator();
+                        }
+                    }
+                }
+            }
+        }
+
+        if (currentKeys.Count > 0 && presentEntries.Count > 0)
+        {
+            ImGuiHelpers.ScaledDummy(6);
+            if (resetCollapse) ImGui.SetNextItemOpen(false, ImGuiCond.Always);
+            if (ImGui.CollapsingHeader($"Present entries: {presentEntries.Count}", ImGuiTreeNodeFlags.None))
+            {
+                var presentHeight = 180f * ImGuiHelpers.GlobalScale;
+                using var presentChild = ImRaii.Child("##modlearning_present", new Vector2(0, presentHeight), true, ImGuiWindowFlags.HorizontalScrollbar);
+                if (presentChild)
+                {
+                    foreach (var entry in presentEntries)
+                    {
+                        ImGui.PushStyleColor(ImGuiCol.Text, SpheneCustomTheme.Colors.Success);
+                        ImGui.TextUnformatted(entry.ResolvedPath);
+                        ImGui.PopStyleColor();
+                        using (ImRaii.PushIndent(12f))
+                        {
+                            foreach (var gp in entry.GamePaths)
+                            {
+                                ImGui.TextUnformatted(gp);
+                            }
+                        }
+                        ImGui.Separator();
+                    }
+                }
+            }
+        }
+
+        if (currentKeys.Count > 0)
+        {
+            var extraEntries = currentEntries
+                .Where(e => IsCurrentEntryUnexpected(e, expectedKeys))
+                .ToList();
+            ImGuiHelpers.ScaledDummy(6);
+            if (resetCollapse) ImGui.SetNextItemOpen(false, ImGuiCond.Always);
+            if (ImGui.CollapsingHeader($"Current-only entries (not expected): {extraEntries.Count}", ImGuiTreeNodeFlags.None))
+            {
+                var extraHeight = 180f * ImGuiHelpers.GlobalScale;
+                using var extraChild = ImRaii.Child("##modlearning_current_only", new Vector2(0, extraHeight), true, ImGuiWindowFlags.HorizontalScrollbar);
+                if (extraChild)
+                {
+                    foreach (var entry in extraEntries)
+                    {
+                        ImGui.PushStyleColor(ImGuiCol.Text, SpheneCustomTheme.Colors.AccentCyan);
+                        var label = string.IsNullOrWhiteSpace(entry.Hash) ? entry.FileSwapPath : entry.Hash;
+                        ImGui.TextUnformatted(label);
+                        ImGui.PopStyleColor();
+                        using (ImRaii.PushIndent(12f))
+                        {
+                            foreach (var gp in entry.GamePaths)
+                            {
+                                ImGui.TextUnformatted(gp);
+                            }
+                        }
+                        ImGui.Separator();
+                    }
+                }
+            }
+        }
+        _modLearningCollapseResetRequested = false;
+        }
+    }
+
+    private void EnsureModLearningLoaded()
+    {
+        if (_modLearningLoadTask != null && !_modLearningLoadTask.IsCompleted) return;
+        if (_modLearningCharacters.Count == 0)
+        {
+            LoadModLearningStates(forceReload: true);
+        }
+    }
+
+    private void EnsureModLearningCurrentCharacterSelected()
+    {
+        if (_modLearningAutoSelected) return;
+        if (_modLearningCharacters.Count == 0) return;
+
+        var currentKey = GetCurrentCharacterKey();
+        if (string.IsNullOrWhiteSpace(currentKey)) return;
+
+        lock (_modLearningLock)
+        {
+            if (!_modLearningCharacters.Contains(currentKey, StringComparer.Ordinal)) return;
+        }
+
+        if (!string.Equals(_selectedModLearningCharacter, currentKey, StringComparison.Ordinal))
+        {
+            _selectedModLearningCharacter = currentKey;
+            _selectedModLearningMod = string.Empty;
+            _selectedModLearningOption = string.Empty;
+            _selectedModLearningJobId = 0;
+            _modLearningAutoSelected = true;
+            LoadModLearningStates(forceReload: true);
+        }
+    }
+
+    private void LoadModLearningStates(bool forceReload = false)
+    {
+        if (_modLearningLoadTask != null && !_modLearningLoadTask.IsCompleted && !forceReload) return;
+        _modLearningLoading = true;
+        var selectedCharacter = _selectedModLearningCharacter;
+        _modLearningLoadTask = Task.Run(async () =>
+        {
+            var characters = await _characterDataSqliteStore.GetLearnedModCharacterKeysAsync().ConfigureAwait(false);
+            var states = string.IsNullOrWhiteSpace(selectedCharacter)
+                ? new List<LearnedModState>()
+                : await _characterDataSqliteStore.GetLearnedModsAsync(selectedCharacter).ConfigureAwait(false);
+            var localCharacterData = await _characterDataSqliteStore.GetLocalCharacterDataAsync().ConfigureAwait(false);
+            var currentKeys = BuildCurrentReplacementKeySet(localCharacterData);
+            var currentReplacements = BuildCurrentReplacementEntries(localCharacterData);
+            var currentHash = localCharacterData?.DataHash?.Value ?? string.Empty;
+            var grouped = states
+                .GroupBy(s => s.ModDirectoryName, StringComparer.Ordinal)
+                .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.Ordinal);
+            var jsonByMod = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var entry in grouped.OrderBy(k => k.Key, StringComparer.OrdinalIgnoreCase))
+            {
+                jsonByMod[entry.Key] = JsonSerializer.Serialize(entry.Value, ModLearningJsonOptions);
+            }
+            lock (_modLearningLock)
+            {
+                _modLearningCharacters = characters;
+                _modLearningStatesByMod = grouped;
+                _modLearningJsonByMod = jsonByMod;
+                _modLearningCurrentReplacementKeys = currentKeys;
+                _modLearningCurrentReplacements = currentReplacements;
+                _modLearningCurrentDataHash = currentHash;
+            }
+        }).ContinueWith(_ =>
+        {
+            _modLearningLoading = false;
+        }, TaskScheduler.Default);
+    }
+
+    private string GetCurrentCharacterKey()
+    {
+        var playerName = _uiSharedService.PlayerName;
+        if (string.IsNullOrWhiteSpace(playerName)) return string.Empty;
+        if (!_uiSharedService.WorldData.TryGetValue((ushort)_uiSharedService.WorldId, out var worldName)) return string.Empty;
+        return $"{playerName}@{worldName}";
+    }
+
+    private static HashSet<string> BuildCurrentReplacementKeySet(Sphene.API.Data.CharacterData? data)
+    {
+        var keys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (data == null) return keys;
+
+        foreach (var list in data.FileReplacements.Values)
+        {
+            if (list == null) continue;
+            foreach (var entry in list)
+            {
+                var hash = entry.Hash ?? string.Empty;
+                var swap = entry.FileSwapPath ?? string.Empty;
+                var gamePaths = entry.GamePaths ?? Array.Empty<string>();
+                foreach (var gp in gamePaths)
+                {
+                    if (!string.IsNullOrWhiteSpace(hash))
+                    {
+                        keys.Add(BuildReplacementKey("hash", hash, gp));
+                    }
+                    else if (!string.IsNullOrWhiteSpace(swap))
+                    {
+                        keys.Add(BuildReplacementKey("swap", swap, gp));
+                    }
+                }
+            }
+        }
+
+        return keys;
+    }
+
+    private static List<CurrentReplacement> BuildCurrentReplacementEntries(Sphene.API.Data.CharacterData? data)
+    {
+        var results = new List<CurrentReplacement>();
+        if (data == null) return results;
+
+        foreach (var list in data.FileReplacements.Values)
+        {
+            if (list == null) continue;
+            foreach (var entry in list)
+            {
+                var gamePaths = entry.GamePaths ?? Array.Empty<string>();
+                results.Add(new CurrentReplacement(entry.Hash ?? string.Empty, entry.FileSwapPath ?? string.Empty, gamePaths));
+            }
+        }
+
+        return results;
+    }
+
+    private static string BuildReplacementKey(string prefix, string value, string gamePath)
+    {
+        return $"{prefix}|{NormalizePathString(value)}|{NormalizePathString(gamePath)}";
+    }
+
+    private static string NormalizePathString(string path)
+    {
+        return path.Replace('\\', '/').ToLowerInvariant();
+    }
+
+    private HashSet<string> GetCurrentReplacementKeysSnapshot()
+    {
+        lock (_modLearningLock)
+        {
+            return new HashSet<string>(_modLearningCurrentReplacementKeys, StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
+    private List<CurrentReplacement> GetCurrentReplacementEntriesSnapshot()
+    {
+        lock (_modLearningLock)
+        {
+            return _modLearningCurrentReplacements.ToList();
+        }
+    }
+
+    private static HashSet<string> BuildExpectedReplacementKeySet(List<FileReplacement> replacements)
+    {
+        var keys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var replacement in replacements)
+        {
+            var gamePaths = replacement.GamePaths ?? [];
+            if (replacement.IsFileSwap)
+            {
+                var swap = replacement.ResolvedPath ?? string.Empty;
+                foreach (var gp in gamePaths)
+                {
+                    keys.Add(BuildReplacementKey("swap", swap, gp));
+                }
+            }
+            else
+            {
+                var hash = replacement.Hash ?? string.Empty;
+                foreach (var gp in gamePaths)
+                {
+                    keys.Add(BuildReplacementKey("hash", hash, gp));
+                }
+            }
+        }
+        return keys;
+    }
+
+    private static bool IsReplacementFullyPresent(FileReplacement replacement, HashSet<string> currentKeys)
+    {
+        if (currentKeys.Count == 0) return true;
+        var gamePaths = replacement.GamePaths ?? [];
+        if (replacement.IsFileSwap)
+        {
+            var swap = replacement.ResolvedPath ?? string.Empty;
+            foreach (var gp in gamePaths)
+            {
+                if (!currentKeys.Contains(BuildReplacementKey("swap", swap, gp)))
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        var hash = replacement.Hash ?? string.Empty;
+        foreach (var gp in gamePaths)
+        {
+            if (!currentKeys.Contains(BuildReplacementKey("hash", hash, gp)))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool IsCurrentEntryUnexpected(CurrentReplacement entry, HashSet<string> expectedKeys)
+    {
+        if (expectedKeys.Count == 0) return false;
+        var gamePaths = entry.GamePaths ?? Array.Empty<string>();
+        if (!string.IsNullOrWhiteSpace(entry.Hash))
+        {
+            foreach (var gp in gamePaths)
+            {
+                if (!expectedKeys.Contains(BuildReplacementKey("hash", entry.Hash, gp)))
+                {
+                    return true;
+                }
+            }
+        }
+        else if (!string.IsNullOrWhiteSpace(entry.FileSwapPath))
+        {
+            foreach (var gp in gamePaths)
+            {
+                if (!expectedKeys.Contains(BuildReplacementKey("swap", entry.FileSwapPath, gp)))
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static string GetCurrentMismatchInfo(FileReplacement expected, List<CurrentReplacement> currentEntries)
+    {
+        if (currentEntries.Count == 0)
+        {
+            return "Local character data has no current entries.";
+        }
+
+        var expectedPaths = expected.GamePaths.Select(NormalizePathString).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (expected.IsFileSwap)
+        {
+            var swap = NormalizePathString(expected.ResolvedPath ?? string.Empty);
+            var matching = currentEntries.Where(e =>
+                string.Equals(NormalizePathString(e.FileSwapPath ?? string.Empty), swap, StringComparison.OrdinalIgnoreCase)).ToList();
+            if (matching.Count == 0)
+            {
+                var pathMatches = currentEntries.Where(e =>
+                        e.GamePaths.Any(p => expectedPaths.Contains(NormalizePathString(p))))
+                    .ToList();
+                if (pathMatches.Count > 0)
+                {
+                    var swaps = pathMatches.Select(e => e.FileSwapPath ?? string.Empty)
+                        .Where(p => !string.IsNullOrWhiteSpace(p))
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .Take(3);
+                    var hashes = pathMatches.Select(e => e.Hash ?? string.Empty)
+                        .Where(h => !string.IsNullOrWhiteSpace(h))
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .Take(3);
+                    return $"No local swap match for: {swap} (paths exist; swaps: {string.Join(", ", swaps)} hashes: {string.Join(", ", hashes)})";
+                }
+                return $"No local swap match for: {swap} (no local entries for paths)";
+            }
+            var currentPaths = matching.SelectMany(e => e.GamePaths ?? Array.Empty<string>())
+                .Select(NormalizePathString)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var missing = expectedPaths.Where(p => !currentPaths.Contains(p)).Take(5).ToList();
+            return missing.Count > 0
+                ? $"Local swap exists, missing paths: {string.Join(", ", missing)}"
+                : "Local swap exists with matching paths";
+        }
+
+        var hash = expected.Hash ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(hash))
+        {
+            return "Expected hash is empty.";
+        }
+        var hashMatches = currentEntries.Where(e => string.Equals(e.Hash, hash, StringComparison.OrdinalIgnoreCase)).ToList();
+        if (hashMatches.Count == 0)
+        {
+            var pathMatches = currentEntries.Where(e =>
+                    e.GamePaths.Any(p => expectedPaths.Contains(NormalizePathString(p))))
+                .ToList();
+            if (pathMatches.Count > 0)
+            {
+                var hashes = pathMatches.Select(e => e.Hash ?? string.Empty)
+                    .Where(h => !string.IsNullOrWhiteSpace(h))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Take(3);
+                var swaps = pathMatches.Select(e => e.FileSwapPath ?? string.Empty)
+                    .Where(p => !string.IsNullOrWhiteSpace(p))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Take(3);
+                return $"No local hash match for: {hash} (paths exist; hashes: {string.Join(", ", hashes)} swaps: {string.Join(", ", swaps)})";
+            }
+            return $"No local hash match for: {hash} (no local entries for paths)";
+        }
+        var hashPaths = hashMatches.SelectMany(e => e.GamePaths ?? Array.Empty<string>())
+            .Select(NormalizePathString)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var missingHashPaths = expectedPaths.Where(p => !hashPaths.Contains(p)).Take(5).ToList();
+        return missingHashPaths.Count > 0
+            ? $"Local hash exists, missing paths: {string.Join(", ", missingHashPaths)}"
+            : "Local hash exists with matching paths";
+    }
+
+    private static bool HasLocalEntriesForPaths(FileReplacement expected, List<CurrentReplacement> currentEntries)
+    {
+        if (currentEntries.Count == 0) return false;
+        var expectedPaths = expected.GamePaths.Select(NormalizePathString).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return currentEntries.Any(e => e.GamePaths.Any(p => expectedPaths.Contains(NormalizePathString(p))));
+    }
+
+    private readonly record struct ModOptionStatus(bool IsActive, string Reason, Vector4 Color);
+    private readonly record struct ModRuntimeStatus(bool Enabled, Dictionary<string, List<string>> Settings);
+
+    private ModOptionStatus? GetSelectedModOptionStatus(LearnedModState selectedState)
+    {
+        if (string.IsNullOrWhiteSpace(_selectedModLearningMod)) return null;
+        if (!_ipcManager.Penumbra.APIAvailable) return null;
+        var (valid, _, collection) = _ipcManager.Penumbra.GetCollectionForObject(0);
+        if (!valid) return null;
+        var (ec, settingsTuple) = _ipcManager.Penumbra.GetModSettings(collection.Id, _selectedModLearningMod);
+        if (ec != Penumbra.Api.Enums.PenumbraApiEc.Success || settingsTuple == null) return null;
+        var (enabled, _, settings, _) = settingsTuple.Value;
+        if (!enabled)
+        {
+            return new ModOptionStatus(false, "Mod disabled in current collection.", GetSubtleErrorColor());
+        }
+        var currentSettings = settings.ToDictionary(k => k.Key, k => k.Value.ToList(), StringComparer.Ordinal);
+        if (!SettingsSubsetMatch(currentSettings, selectedState.Settings))
+        {
+            var reason = BuildOptionDisabledReason(currentSettings, selectedState.Settings);
+            return new ModOptionStatus(false, reason, GetSubtleErrorColor());
+        }
+        return new ModOptionStatus(true, string.Empty, Vector4.Zero);
+    }
+
+    private ModOptionStatus? GetSelectedJobMismatchStatus()
+    {
+        if (_selectedModLearningJobId == 0) return null;
+        var currentJobId = _dalamudUtilService.ClassJobId;
+        if (currentJobId == 0) return null;
+        if (_selectedModLearningJobId == currentJobId) return null;
+        var jobLabel = _uiSharedService.JobData.TryGetValue(currentJobId, out var name) ? name : currentJobId.ToString();
+        return new ModOptionStatus(false, $"Job mismatch (current: {jobLabel}).", GetSubtleErrorColor());
+    }
+
+    private static bool SettingsSubsetMatch(Dictionary<string, List<string>> current, Dictionary<string, List<string>> state)
+    {
+        if (state.Count == 0) return true;
+        foreach (var kvp in state)
+        {
+            if (!current.TryGetValue(kvp.Key, out var currentValues)) return false;
+            var currentSet = currentValues.ToHashSet(StringComparer.Ordinal);
+            foreach (var value in kvp.Value)
+            {
+                if (!currentSet.Contains(value)) return false;
+            }
+        }
+        return true;
+    }
+
+    private static Vector4 GetSubtleErrorColor()
+    {
+        var c = SpheneCustomTheme.Colors.Error;
+        return new Vector4(c.X, c.Y, c.Z, 0.6f);
+    }
+
+    private static string BuildOptionDisabledReason(Dictionary<string, List<string>> currentSettings, Dictionary<string, List<string>> expectedSettings)
+    {
+        foreach (var kvp in expectedSettings)
+        {
+            if (!currentSettings.TryGetValue(kvp.Key, out var currentValues))
+            {
+                return $"Option disabled (group {kvp.Key} inactive).";
+            }
+            var expectedSet = kvp.Value.ToHashSet(StringComparer.Ordinal);
+            if (!currentValues.Any(v => expectedSet.Contains(v)))
+            {
+                var expected = kvp.Value.Count == 0 ? "none" : string.Join(", ", kvp.Value);
+                var current = currentValues.Count == 0 ? "none" : string.Join(", ", currentValues);
+                return $"Option disabled in group {kvp.Key} (expected: {expected}, current: {current}).";
+            }
+        }
+        var currentLabel = FormatSettingsLabel(currentSettings);
+        return $"Option mismatch (current: {currentLabel}).";
+    }
+
+    private ModRuntimeStatus GetCurrentModRuntimeStatus(string modName)
+    {
+        if (string.IsNullOrWhiteSpace(modName)) return new ModRuntimeStatus(false, new Dictionary<string, List<string>>(StringComparer.Ordinal));
+        if (!_ipcManager.Penumbra.APIAvailable) return new ModRuntimeStatus(false, new Dictionary<string, List<string>>(StringComparer.Ordinal));
+        var (valid, _, collection) = _ipcManager.Penumbra.GetCollectionForObject(0);
+        if (!valid) return new ModRuntimeStatus(false, new Dictionary<string, List<string>>(StringComparer.Ordinal));
+        var (ec, settingsTuple) = _ipcManager.Penumbra.GetModSettings(collection.Id, modName);
+        if (ec != Penumbra.Api.Enums.PenumbraApiEc.Success || settingsTuple == null)
+        {
+            return new ModRuntimeStatus(false, new Dictionary<string, List<string>>(StringComparer.Ordinal));
+        }
+        var (enabled, _, settings, _) = settingsTuple.Value;
+        if (!enabled)
+        {
+            return new ModRuntimeStatus(false, new Dictionary<string, List<string>>(StringComparer.Ordinal));
+        }
+        return new ModRuntimeStatus(true, settings.ToDictionary(k => k.Key, k => k.Value.ToList(), StringComparer.Ordinal));
+    }
+
+    private static Vector4 GetModListColor(bool usedByJob, ModRuntimeStatus runtime, (Vector4 Color, int TotalCount, int MissingCount)? comparison)
+    {
+        if (!usedByJob) return SpheneCustomTheme.Colors.TextSecondary;
+        if (!runtime.Enabled)
+        {
+            return GetSubtleErrorColor();
+        }
+        return comparison?.MissingCount == 0 ? SpheneCustomTheme.Colors.Success : (comparison?.Color ?? SpheneCustomTheme.Colors.SpheneGold);
+    }
+
+    private readonly record struct OptionRuntimeStatus(string Tag, Vector4 Color);
+
+    private static OptionRuntimeStatus GetOptionRuntimeStatus(LearnedModState state, bool isUsedByJob, ModRuntimeStatus runtime)
+    {
+        if (!isUsedByJob) return new OptionRuntimeStatus("off", SpheneCustomTheme.Colors.TextSecondary);
+        if (!runtime.Enabled) return new OptionRuntimeStatus("disabled", GetSubtleErrorColor());
+        if (runtime.Settings.Count > 0 && SettingsSubsetMatch(runtime.Settings, state.Settings))
+        {
+            return new OptionRuntimeStatus("active", SpheneCustomTheme.Colors.Success);
+        }
+        if (IsOptionDisabledByGroupSelection(runtime.Settings, state.Settings))
+        {
+            return new OptionRuntimeStatus("disabled", GetSubtleErrorColor());
+        }
+        return new OptionRuntimeStatus("job", SpheneCustomTheme.Colors.SpheneGold);
+    }
+
+    private static bool IsOptionDisabledByGroupSelection(Dictionary<string, List<string>> currentSettings, Dictionary<string, List<string>> expectedSettings)
+    {
+        foreach (var kvp in expectedSettings)
+        {
+            if (!currentSettings.TryGetValue(kvp.Key, out var currentValues)) return true;
+            var expectedSet = kvp.Value.ToHashSet(StringComparer.Ordinal);
+            if (!currentValues.Any(v => expectedSet.Contains(v)))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static (int ExpectedCount, int PresentCount, int MissingCount, int ExtraCount) GetKeyComparisonSummary(HashSet<string> expectedKeys, HashSet<string> currentKeys)
+    {
+        if (expectedKeys.Count == 0) return (0, 0, 0, currentKeys.Count);
+        var present = expectedKeys.Count(key => currentKeys.Contains(key));
+        var missing = expectedKeys.Count - present;
+        var extra = currentKeys.Count - present;
+        return (expectedKeys.Count, present, missing, extra);
+    }
+
+    private (Vector4 Color, int TotalCount, int MissingCount)? GetModComparison(string modName, uint jobId, ModRuntimeStatus runtime)
+    {
+        HashSet<string> currentKeys;
+        Dictionary<string, List<LearnedModState>> statesByMod;
+        lock (_modLearningLock)
+        {
+            currentKeys = new HashSet<string>(_modLearningCurrentReplacementKeys, StringComparer.OrdinalIgnoreCase);
+            statesByMod = _modLearningStatesByMod;
+        }
+
+        if (currentKeys.Count == 0)
+        {
+            return null;
+        }
+
+        if (!statesByMod.TryGetValue(modName, out var states) || states.Count == 0)
+        {
+            return null;
+        }
+
+        var learnedKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var relevantStates = states;
+        if (runtime.Enabled && runtime.Settings.Count > 0)
+        {
+            var matchingStates = states.Where(s => SettingsSubsetMatch(runtime.Settings, s.Settings)).ToList();
+            if (matchingStates.Count > 0)
+            {
+                relevantStates = matchingStates;
+            }
+        }
+
+        foreach (var state in relevantStates)
+        {
+            var list = GetDisplayListForJob(state, jobId);
+            foreach (var replacement in list)
+            {
+                foreach (var gp in replacement.GamePaths)
+                {
+                    if (replacement.IsFileSwap)
+                    {
+                        learnedKeys.Add(BuildReplacementKey("swap", replacement.ResolvedPath, gp));
+                    }
+                    else
+                    {
+                        learnedKeys.Add(BuildReplacementKey("hash", replacement.Hash, gp));
+                    }
+                }
+            }
+        }
+
+        var total = learnedKeys.Count;
+        if (total == 0)
+        {
+            return null;
+        }
+
+        var missing = learnedKeys.Count(key => !currentKeys.Contains(key));
+        var color = missing > 0 ? SpheneCustomTheme.Colors.Warning : SpheneCustomTheme.Colors.Success;
+        return (color, total, missing);
+    }
+
+    private HashSet<string> GetEmoteOverriddenModsForJob(IEnumerable<string> modsForJob, uint jobId, HashSet<string> currentKeys)
+    {
+        if (currentKeys.Count == 0) return [];
+        Dictionary<string, List<LearnedModState>> statesByMod;
+        lock (_modLearningLock)
+        {
+            statesByMod = _modLearningStatesByMod;
+        }
+
+        var emoteOwners = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+        var emoteMissingByMod = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var modName in modsForJob)
+        {
+            if (!statesByMod.TryGetValue(modName, out var states) || states.Count == 0) continue;
+            var runtime = GetCurrentModRuntimeStatus(modName);
+            if (!runtime.Enabled) continue;
+
+            var relevantStates = states;
+            if (runtime.Settings.Count > 0)
+            {
+                var matchingStates = states.Where(s => SettingsSubsetMatch(runtime.Settings, s.Settings)).ToList();
+                if (matchingStates.Count > 0)
+                {
+                    relevantStates = matchingStates;
+                }
+            }
+
+            foreach (var state in relevantStates)
+            {
+                if (state.PapEmotes == null || state.PapEmotes.Count == 0) continue;
+                var emoteReplacements = GetDisplayListForJob(state, jobId)
+                    .Where(replacement => replacement.GamePaths.Any(gp => state.PapEmotes.ContainsKey(NormalizePathString(gp))))
+                    .ToList();
+                foreach (var replacement in emoteReplacements)
+                {
+                    var present = IsReplacementFullyPresent(replacement, currentKeys);
+                    foreach (var gp in replacement.GamePaths)
+                    {
+                        var normalized = NormalizePathString(gp);
+                        if (!state.PapEmotes.TryGetValue(normalized, out var emoteNames) || string.IsNullOrWhiteSpace(emoteNames)) continue;
+                        var names = emoteNames.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                        foreach (var emoteName in names)
+                        {
+                            if (present)
+                            {
+                                if (!emoteOwners.TryGetValue(emoteName, out var owners))
+                                {
+                                    owners = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                                    emoteOwners[emoteName] = owners;
+                                }
+                                owners.Add(modName);
+                            }
+                            else
+                            {
+                                if (!emoteMissingByMod.TryGetValue(modName, out var missing))
+                                {
+                                    missing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                                    emoteMissingByMod[modName] = missing;
+                                }
+                                missing.Add(emoteName);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        var overridden = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var missingEntry in emoteMissingByMod)
+        {
+            foreach (var emoteName in missingEntry.Value)
+            {
+                if (!emoteOwners.TryGetValue(emoteName, out var owners)) continue;
+                if (owners.Any(owner => !string.Equals(owner, missingEntry.Key, StringComparison.OrdinalIgnoreCase)))
+                {
+                    overridden.Add(missingEntry.Key);
+                    break;
+                }
+            }
+        }
+        return overridden;
+    }
+
+    private bool ModUsedByJob(string modName, uint jobId)
+    {
+        lock (_modLearningLock)
+        {
+            if (!_modLearningStatesByMod.TryGetValue(modName, out var states)) return false;
+            return states.Any(state => OptionUsedByJob(state, jobId));
+        }
+    }
+
+    private void TriggerLocalRebuild()
+    {
+        var traceId = $"MLRB-{DateTime.UtcNow:yyyyMMddHHmmssfff}";
+        _logger.LogDebug("[Trace:ForceRebuild:{trace}] UI_REQUEST", traceId);
+        _ = _ipcManager.Penumbra.RedrawPlayerAsync();
+        Mediator.Publish(new ForceLocalCharacterDataRebuildMessage(ObjectKind.Player, traceId));
+        LoadModLearningStates(forceReload: true);
+    }
+
+    private bool IsForceRestoreEnabledForSelectedMod()
+    {
+        if (string.IsNullOrWhiteSpace(_selectedModLearningMod)) return false;
+        var key = GetSelectedModLearningCharacterKey();
+        if (string.IsNullOrWhiteSpace(key)) return false;
+        var forced = _spheneConfigService.Current.ModLearningForceRestoreMods;
+        if (!forced.TryGetValue(key, out var mods)) return false;
+        return mods.Any(m => string.Equals(m, _selectedModLearningMod, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private void SetForceRestoreForSelectedMod(bool enabled)
+    {
+        if (string.IsNullOrWhiteSpace(_selectedModLearningMod)) return;
+        var key = GetSelectedModLearningCharacterKey();
+        if (string.IsNullOrWhiteSpace(key)) return;
+        var forced = _spheneConfigService.Current.ModLearningForceRestoreMods;
+        if (!forced.TryGetValue(key, out var mods))
+        {
+            mods = [];
+            forced[key] = mods;
+        }
+
+        if (enabled)
+        {
+            if (!mods.Any(m => string.Equals(m, _selectedModLearningMod, StringComparison.OrdinalIgnoreCase)))
+            {
+                mods.Add(_selectedModLearningMod);
+            }
+        }
+        else
+        {
+            mods.RemoveAll(m => string.Equals(m, _selectedModLearningMod, StringComparison.OrdinalIgnoreCase));
+            if (mods.Count == 0)
+            {
+                forced.Remove(key);
+            }
+        }
+        _spheneConfigService.Save();
+    }
+
+    private string GetSelectedModLearningCharacterKey()
+    {
+        if (!string.IsNullOrWhiteSpace(_selectedModLearningCharacter))
+        {
+            return _selectedModLearningCharacter;
+        }
+        return GetCurrentCharacterKey();
+    }
+
+    private async Task ApplyMissingToLocalCharacterDataAsync(List<ExpectedReplacement> missingEntries)
+    {
+        if (missingEntries.Count == 0) return;
+
+        var localData = await _characterDataSqliteStore.GetLocalCharacterDataAsync().ConfigureAwait(false);
+        if (localData == null) return;
+
+        var updatedData = CloneCharacterData(localData);
+        var anyAdded = false;
+        var addedNew = 0;
+        var mergedPaths = 0;
+        var skippedNoChange = 0;
+        foreach (var entry in missingEntries)
+        {
+            if (!updatedData.FileReplacements.TryGetValue(entry.Kind, out var list))
+            {
+                list = [];
+                updatedData.FileReplacements[entry.Kind] = list;
+            }
+
+            var result = AddOrMergeFileReplacement(list, entry.Replacement);
+            if (result.Changed)
+            {
+                anyAdded = true;
+                if (result.AddedNew) addedNew++;
+                mergedPaths += result.AddedPaths;
+            }
+            else
+            {
+                skippedNoChange++;
+            }
+        }
+
+        if (!anyAdded) return;
+
+        _logger.LogDebug("[ModLearning] ApplyMissing: total={total} addedNew={addedNew} mergedPaths={mergedPaths} skippedNoChange={skipped}",
+            missingEntries.Count, addedNew, mergedPaths, skippedNoChange);
+        await _characterDataSqliteStore.UpsertLocalCharacterDataAsync(updatedData).ConfigureAwait(false);
+        Mediator.Publish(new CharacterDataReadyForPushMessage(updatedData));
+        LoadModLearningStates(forceReload: true);
+    }
+
+    private static Sphene.API.Data.CharacterData CloneCharacterData(Sphene.API.Data.CharacterData source)
+    {
+        var clone = new Sphene.API.Data.CharacterData
+        {
+            CustomizePlusData = new Dictionary<ObjectKind, string>(source.CustomizePlusData),
+            GlamourerData = new Dictionary<ObjectKind, string>(source.GlamourerData),
+            ManipulationData = source.ManipulationData,
+            HeelsData = source.HeelsData,
+            HonorificData = source.HonorificData,
+            MoodlesData = source.MoodlesData,
+            PetNamesData = source.PetNamesData,
+            BypassEmoteData = source.BypassEmoteData,
+        };
+
+        var replacements = new Dictionary<ObjectKind, List<FileReplacementData>>();
+        foreach (var kvp in source.FileReplacements)
+        {
+            var list = kvp.Value ?? [];
+            replacements[kvp.Key] = list.Select(entry => new FileReplacementData
+            {
+                Hash = entry.Hash ?? string.Empty,
+                FileSwapPath = entry.FileSwapPath ?? string.Empty,
+                GamePaths = entry.GamePaths?.ToArray() ?? Array.Empty<string>(),
+            }).ToList();
+        }
+        clone.FileReplacements = replacements;
+        return clone;
+    }
+
+    [StructLayout(LayoutKind.Auto)]
+    private readonly record struct ApplyMissingResult(bool Changed, bool AddedNew, int AddedPaths);
+
+    private static ApplyMissingResult AddOrMergeFileReplacement(List<FileReplacementData> list, FileReplacement replacement)
+    {
+        var dto = replacement.ToFileReplacementDto();
+        var hash = dto.Hash ?? string.Empty;
+        var swap = dto.FileSwapPath ?? string.Empty;
+        var existing = list.FirstOrDefault(e =>
+            string.Equals(e.Hash ?? string.Empty, hash, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(e.FileSwapPath ?? string.Empty, swap, StringComparison.OrdinalIgnoreCase));
+
+        var gamePaths = dto.GamePaths ?? Array.Empty<string>();
+        if (existing != null)
+        {
+            var merged = new HashSet<string>(existing.GamePaths ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+            var beforeCount = merged.Count;
+            foreach (var gp in gamePaths)
+            {
+                merged.Add(gp);
+            }
+            existing.GamePaths = merged.ToArray();
+            return new ApplyMissingResult(merged.Count > beforeCount, false, Math.Max(0, merged.Count - beforeCount));
+        }
+
+        list.Add(new FileReplacementData
+        {
+            Hash = hash,
+            FileSwapPath = swap,
+            GamePaths = gamePaths.ToArray()
+        });
+        return new ApplyMissingResult(true, true, gamePaths.Length);
+    }
+
+    private void DrawModLearningJsonBuild(bool resetCollapse)
+    {
+        if (resetCollapse) ImGui.SetNextItemOpen(false, ImGuiCond.Always);
+        if (!ImGui.CollapsingHeader("Mod Learning JSON Build", ImGuiTreeNodeFlags.None)) return;
+
+        ImGui.Checkbox("Show JSON", ref _showModLearningJson);
+        if (!_showModLearningJson) return;
+
+        Dictionary<string, string> snapshot;
+        lock (_modLearningLock)
+        {
+            snapshot = new Dictionary<string, string>(_modLearningJsonByMod, StringComparer.Ordinal);
+        }
+
+        if (snapshot.Count == 0)
+        {
+            ImGui.TextUnformatted("No mod learning data loaded.");
+            return;
+        }
+        var modDisplayNames = GetModDisplayNamesSnapshot();
+
+        var height = 260f * ImGuiHelpers.GlobalScale;
+        using var child = ImRaii.Child("##modlearning_json_build", new Vector2(0, height), true, ImGuiWindowFlags.HorizontalScrollbar);
+        if (!child) return;
+
+        foreach (var entry in snapshot.OrderBy(k => GetModDisplayName(modDisplayNames, k.Key), StringComparer.OrdinalIgnoreCase))
+        {
+            var color = GetModColor(entry.Key);
+            using var id = ImRaii.PushId(entry.Key);
+            ImGui.PushStyleColor(ImGuiCol.Text, color);
+            var label = GetModDisplayName(modDisplayNames, entry.Key);
+            var open = ImGui.TreeNodeEx(label, ImGuiTreeNodeFlags.Framed | ImGuiTreeNodeFlags.AllowItemOverlap);
+            ImGui.PopStyleColor();
+            ImGui.SetItemAllowOverlap();
+            ImGui.SameLine();
+            if (ImGui.SmallButton("Copy JSON"))
+            {
+                ImGui.SetClipboardText(entry.Value);
+            }
+
+            if (open)
+            {
+                using (ImRaii.PushIndent(12f))
+                {
+                    var lines = entry.Value.Split('\n');
+                    foreach (var line in lines)
+                    {
+                        ImGui.TextUnformatted(line);
+                    }
+                }
+                ImGui.TreePop();
+            }
+
+            ImGui.PushStyleColor(ImGuiCol.Separator, color);
+            ImGui.Separator();
+            ImGui.PopStyleColor();
+        }
+    }
+
+    private static Vector4 GetModColor(string modName)
+    {
+        var colors = new[]
+        {
+            SpheneCustomTheme.Colors.AccentBlue,
+            SpheneCustomTheme.Colors.AccentCyan,
+            SpheneCustomTheme.Colors.Success,
+            SpheneCustomTheme.Colors.Warning,
+            SpheneCustomTheme.Colors.Error,
+            SpheneCustomTheme.Colors.SpheneGold,
+            SpheneCustomTheme.Colors.EtherealGlow,
+        };
+        var hash = 17;
+        foreach (var c in modName)
+        {
+            hash = (hash * 31) + c;
+        }
+        var index = Math.Abs(hash) % colors.Length;
+        return colors[index];
+    }
+
+    private static string FormatSettingsLabel(Dictionary<string, List<string>> settings)
+    {
+        if (settings.Count == 0) return "Base";
+        var parts = settings
+            .OrderBy(k => k.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(kvp => $"{kvp.Key}: {string.Join(", ", kvp.Value)}");
+        return string.Join(" | ", parts);
+    }
+
+    private static Dictionary<uint, List<FileReplacement>> BuildJobFileMap(LearnedModState state)
+    {
+        var result = new Dictionary<uint, List<FileReplacement>>();
+        foreach (var fragmentEntry in state.Fragments)
+        {
+            var fragment = fragmentEntry.Value;
+            if (fragment?.FileReplacements != null)
+            {
+                foreach (var replacement in fragment.FileReplacements)
+                {
+                    AddReplacement(result, 0, replacement);
+                }
+            }
+
+            if (fragment?.JobFileReplacements == null) continue;
+            foreach (var jobEntry in fragment.JobFileReplacements)
+            {
+                foreach (var replacement in jobEntry.Value)
+                {
+                    AddReplacement(result, jobEntry.Key, replacement);
+                }
+            }
+        }
+
+        return result;
+    }
+
+    private static Dictionary<uint, List<ExpectedReplacement>> BuildJobFileMapWithKind(LearnedModState state)
+    {
+        var result = new Dictionary<uint, List<ExpectedReplacement>>();
+        foreach (var fragmentEntry in state.Fragments)
+        {
+            var kind = fragmentEntry.Key;
+            var fragment = fragmentEntry.Value;
+            if (fragment?.FileReplacements != null)
+            {
+                foreach (var replacement in fragment.FileReplacements)
+                {
+                    AddReplacementWithKind(result, 0, kind, replacement);
+                }
+            }
+
+            if (fragment?.JobFileReplacements == null) continue;
+            foreach (var jobEntry in fragment.JobFileReplacements)
+            {
+                foreach (var replacement in jobEntry.Value)
+                {
+                    AddReplacementWithKind(result, jobEntry.Key, kind, replacement);
+                }
+            }
+        }
+
+        return result;
+    }
+
+    private List<uint> GetJobsForSelectedCharacter()
+    {
+        var jobs = new HashSet<uint> { 0 };
+        lock (_modLearningLock)
+        {
+            foreach (var modEntry in _modLearningStatesByMod.Values)
+            {
+                foreach (var state in modEntry)
+                {
+                    foreach (var fragmentEntry in state.Fragments.Values)
+                    {
+                        if (fragmentEntry?.JobFileReplacements == null) continue;
+                        foreach (var jobId in fragmentEntry.JobFileReplacements.Keys)
+                        {
+                            jobs.Add(jobId);
+                        }
+                    }
+                }
+            }
+        }
+
+        return jobs.OrderBy(k => k == 0 ? uint.MinValue : k).ToList();
+    }
+
+    private Dictionary<string, string> GetModDisplayNamesSnapshot()
+    {
+        if (!_ipcManager.Penumbra.APIAvailable) return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            var mods = _ipcManager.Penumbra.GetMods();
+            return mods.ToDictionary(
+                k => k.Key,
+                v => string.IsNullOrWhiteSpace(v.Value) ? v.Key : v.Value,
+                StringComparer.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
+    private static string GetModDisplayName(IReadOnlyDictionary<string, string> displayNamesByFolder, string modFolder)
+    {
+        if (string.IsNullOrWhiteSpace(modFolder)) return string.Empty;
+        return displayNamesByFolder.TryGetValue(modFolder, out var displayName) ? displayName : modFolder;
+    }
+
+    private List<string> GetModsForSelectedJob()
+    {
+        Dictionary<string, List<LearnedModState>> mods;
+        lock (_modLearningLock)
+        {
+            mods = _modLearningStatesByMod;
+        }
+
+        var result = new List<string>();
+        foreach (var modEntry in mods)
+        {
+            if (_selectedModLearningJobId == 0)
+            {
+                if (modEntry.Value.Any(OptionUsedGlobally))
+                {
+                    result.Add(modEntry.Key);
+                }
+                continue;
+            }
+
+            var usedGlobally = modEntry.Value.Any(OptionUsedGlobally);
+            if (usedGlobally)
+            {
+                continue;
+            }
+
+            if (modEntry.Value.Any(state => OptionUsedBySpecificJob(state, _selectedModLearningJobId)))
+            {
+                result.Add(modEntry.Key);
+            }
+        }
+
+        return result.OrderBy(k => k, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    private Dictionary<string, LearnedModState> GetOptionsForSelectedMod()
+    {
+        if (string.IsNullOrWhiteSpace(_selectedModLearningMod)) return new Dictionary<string, LearnedModState>(StringComparer.Ordinal);
+        lock (_modLearningLock)
+        {
+            if (!_modLearningStatesByMod.TryGetValue(_selectedModLearningMod, out var states) || states.Count == 0)
+            {
+                return new Dictionary<string, LearnedModState>(StringComparer.Ordinal);
+            }
+            return states
+                .OrderBy(s => FormatSettingsLabel(s.Settings), StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(s => FormatSettingsLabel(s.Settings), s => s, StringComparer.Ordinal);
+        }
+    }
+
+    private LearnedModState? GetSelectedState()
+    {
+        if (string.IsNullOrWhiteSpace(_selectedModLearningMod) || string.IsNullOrWhiteSpace(_selectedModLearningOption))
+        {
+            return null;
+        }
+
+        var options = GetOptionsForSelectedMod();
+        return options.TryGetValue(_selectedModLearningOption, out var state) ? state : null;
+    }
+
+    private static bool OptionUsedByJob(LearnedModState state, uint jobId)
+    {
+        foreach (var fragmentEntry in state.Fragments.Values)
+        {
+            if (fragmentEntry?.FileReplacements != null && fragmentEntry.FileReplacements.Count > 0)
+            {
+                return true;
+            }
+
+            if (jobId != 0 && fragmentEntry?.JobFileReplacements != null && fragmentEntry.JobFileReplacements.ContainsKey(jobId))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool OptionUsedGlobally(LearnedModState state)
+    {
+        foreach (var fragmentEntry in state.Fragments.Values)
+        {
+            if (fragmentEntry?.FileReplacements != null && fragmentEntry.FileReplacements.Count > 0)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static bool OptionUsedBySpecificJob(LearnedModState state, uint jobId)
+    {
+        if (jobId == 0) return false;
+        foreach (var fragmentEntry in state.Fragments.Values)
+        {
+            if (fragmentEntry?.JobFileReplacements != null && fragmentEntry.JobFileReplacements.ContainsKey(jobId))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static List<FileReplacement> GetDisplayListForJob(LearnedModState state, uint jobId)
+    {
+        var jobMap = BuildJobFileMap(state);
+        if (jobId == 0)
+        {
+            return jobMap.TryGetValue(0, out var globalList) ? globalList : [];
+        }
+
+        var combined = new List<FileReplacement>();
+        if (jobMap.TryGetValue(0, out var global))
+        {
+            combined.AddRange(global);
+        }
+        if (jobMap.TryGetValue(jobId, out var jobList))
+        {
+            combined.AddRange(jobList);
+        }
+
+        return combined;
+    }
+
+    private static List<ExpectedReplacement> GetDisplayListForJobWithKind(LearnedModState state, uint jobId)
+    {
+        var jobMap = BuildJobFileMapWithKind(state);
+        if (jobId == 0)
+        {
+            return jobMap.TryGetValue(0, out var globalList) ? globalList : [];
+        }
+
+        var combined = new List<ExpectedReplacement>();
+        if (jobMap.TryGetValue(0, out var global))
+        {
+            combined.AddRange(global);
+        }
+        if (jobMap.TryGetValue(jobId, out var jobList))
+        {
+            combined.AddRange(jobList);
+        }
+
+        return combined;
+    }
+
+    private static void AddReplacement(Dictionary<uint, List<FileReplacement>> map, uint jobId, FileReplacement replacement)
+    {
+        if (!map.TryGetValue(jobId, out var list))
+        {
+            list = [];
+            map[jobId] = list;
+        }
+        if (list.Any(existing => string.Equals(existing.Hash, replacement.Hash, StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
+        list.Add(replacement);
+    }
+
+    private static void AddReplacementWithKind(Dictionary<uint, List<ExpectedReplacement>> map, uint jobId, ObjectKind kind, FileReplacement replacement)
+    {
+        if (!map.TryGetValue(jobId, out var list))
+        {
+            list = [];
+            map[jobId] = list;
+        }
+        var key = string.IsNullOrWhiteSpace(replacement.Hash) ? replacement.ResolvedPath : replacement.Hash;
+        if (list.Any(existing => string.Equals(string.IsNullOrWhiteSpace(existing.Replacement.Hash) ? existing.Replacement.ResolvedPath : existing.Replacement.Hash,
+                key, StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
+        list.Add(new ExpectedReplacement(kind, replacement));
+    }
 
     private void DrawStoredData()
     {
@@ -256,13 +1926,14 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
 
         var config = _transientConfigService.Current.TransientConfigs;
         Vector2 availableContentRegion = Vector2.Zero;
+        var listHeight = 220f * ImGuiHelpers.GlobalScale;
         using (ImRaii.Group())
         {
             ImGui.TextUnformatted("Character");
             ImGui.Separator();
             ImGuiHelpers.ScaledDummy(3);
             availableContentRegion = ImGui.GetContentRegionAvail();
-            using (ImRaii.ListBox("##characters", new Vector2(200, availableContentRegion.Y)))
+            using (ImRaii.ListBox("##characters", new Vector2(200, Math.Min(listHeight, availableContentRegion.Y))))
             {
                 foreach (var entry in config)
                 {
@@ -285,12 +1956,21 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
         }
         ImGui.SameLine();
         bool selectedData = config.TryGetValue(_selectedStoredCharacter, out var transientStorage) && transientStorage != null;
+        if (!selectedData && !string.IsNullOrEmpty(_selectedStoredCharacter))
+        {
+            _selectedStoredCharacter = string.Empty;
+            _selectedJobEntry = string.Empty;
+            _storedPathsToRemove.Clear();
+            _filePathResolve.Clear();
+            _filterFilePath = string.Empty;
+            _filterGamePath = string.Empty;
+        }
         using (ImRaii.Group())
         {
             ImGui.TextUnformatted("Job");
             ImGui.Separator();
             ImGuiHelpers.ScaledDummy(3);
-            using (ImRaii.ListBox("##data", new Vector2(150, availableContentRegion.Y)))
+            using (ImRaii.ListBox("##data", new Vector2(150, Math.Min(listHeight, availableContentRegion.Y))))
             {
                 if (selectedData)
                 {
@@ -316,9 +1996,20 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
         ImGui.SameLine();
         using (ImRaii.Group())
         {
-            var selectedList = string.Equals(_selectedJobEntry, "alljobs", StringComparison.Ordinal)
-                ? config[_selectedStoredCharacter].GlobalPersistentCache
-                : (string.IsNullOrEmpty(_selectedJobEntry) ? [] : config[_selectedStoredCharacter].JobSpecificCache[uint.Parse(_selectedJobEntry)]);
+            List<string> selectedList = [];
+            if (selectedData)
+            {
+                if (string.Equals(_selectedJobEntry, "alljobs", StringComparison.Ordinal))
+                {
+                    selectedList = transientStorage!.GlobalPersistentCache;
+                }
+                else if (!string.IsNullOrEmpty(_selectedJobEntry)
+                    && uint.TryParse(_selectedJobEntry, out var selectedJobId)
+                    && transientStorage!.JobSpecificCache.TryGetValue(selectedJobId, out var selectedJobList))
+                {
+                    selectedList = selectedJobList;
+                }
+            }
             ImGui.TextUnformatted($"Attached Files (Total Files: {selectedList.Count})");
             ImGui.Separator();
             ImGuiHelpers.ScaledDummy(3);
@@ -926,6 +2617,7 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
         _hasUpdate = true;
         _selectedHash = string.Empty;
         _texturesToConvert.Clear();
+        _modLearningCollapseResetRequested = true;
     }
 
     protected override void Dispose(bool disposing)
@@ -983,9 +2675,10 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
 
     private void DrawTable(IGrouping<string, CharacterAnalyzer.FileDataEntry> fileGroup)
     {
+        var modDisplayNames = GetModDisplayNamesSnapshot();
         var tableColumns = string.Equals(fileGroup.Key, "tex", StringComparison.Ordinal)
-            ? (_enableBc7ConversionMode ? 7 : 6)
-            : (string.Equals(fileGroup.Key, "mdl", StringComparison.Ordinal) ? 6 : 5);
+            ? (_enableBc7ConversionMode ? 8 : 7)
+            : (string.Equals(fileGroup.Key, "mdl", StringComparison.Ordinal) ? 7 : 6);
         using var table = ImRaii.Table("Analysis", tableColumns, ImGuiTableFlags.Sortable | ImGuiTableFlags.RowBg | ImGuiTableFlags.ScrollY | ImGuiTableFlags.SizingFixedFit,
             new Vector2(0, 300));
         if (!table.Success) return;
@@ -994,6 +2687,7 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
         ImGui.TableSetupColumn("Gamepaths");
         ImGui.TableSetupColumn("Original Size");
         ImGui.TableSetupColumn("Compressed Size");
+        ImGui.TableSetupColumn("Mod Name");
         if (string.Equals(fileGroup.Key, "tex", StringComparison.Ordinal))
         {
             ImGui.TableSetupColumn("Format");
@@ -1031,13 +2725,17 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                 _cachedAnalysis![_selectedObjectTab] = _cachedAnalysis[_selectedObjectTab].OrderBy(k => k.Value.CompressedSize).ToDictionary(d => d.Key, d => d.Value, StringComparer.Ordinal);
             if (idx == 4 && sortSpecs.Specs.SortDirection == ImGuiSortDirection.Descending)
                 _cachedAnalysis![_selectedObjectTab] = _cachedAnalysis[_selectedObjectTab].OrderByDescending(k => k.Value.CompressedSize).ToDictionary(d => d.Key, d => d.Value, StringComparer.Ordinal);
-            if (string.Equals(fileGroup.Key, "mdl", StringComparison.Ordinal) && idx == 5 && sortSpecs.Specs.SortDirection == ImGuiSortDirection.Ascending)
+            if (idx == 5 && sortSpecs.Specs.SortDirection == ImGuiSortDirection.Ascending)
+                _cachedAnalysis![_selectedObjectTab] = _cachedAnalysis[_selectedObjectTab].OrderBy(k => GetModDisplayName(modDisplayNames, k.Value.ModName), StringComparer.OrdinalIgnoreCase).ToDictionary(d => d.Key, d => d.Value, StringComparer.Ordinal);
+            if (idx == 5 && sortSpecs.Specs.SortDirection == ImGuiSortDirection.Descending)
+                _cachedAnalysis![_selectedObjectTab] = _cachedAnalysis[_selectedObjectTab].OrderByDescending(k => GetModDisplayName(modDisplayNames, k.Value.ModName), StringComparer.OrdinalIgnoreCase).ToDictionary(d => d.Key, d => d.Value, StringComparer.Ordinal);
+            if (string.Equals(fileGroup.Key, "mdl", StringComparison.Ordinal) && idx == 6 && sortSpecs.Specs.SortDirection == ImGuiSortDirection.Ascending)
                 _cachedAnalysis![_selectedObjectTab] = _cachedAnalysis[_selectedObjectTab].OrderBy(k => k.Value.Triangles).ToDictionary(d => d.Key, d => d.Value, StringComparer.Ordinal);
-            if (string.Equals(fileGroup.Key, "mdl", StringComparison.Ordinal) && idx == 5 && sortSpecs.Specs.SortDirection == ImGuiSortDirection.Descending)
+            if (string.Equals(fileGroup.Key, "mdl", StringComparison.Ordinal) && idx == 6 && sortSpecs.Specs.SortDirection == ImGuiSortDirection.Descending)
                 _cachedAnalysis![_selectedObjectTab] = _cachedAnalysis[_selectedObjectTab].OrderByDescending(k => k.Value.Triangles).ToDictionary(d => d.Key, d => d.Value, StringComparer.Ordinal);
-            if (string.Equals(fileGroup.Key, "tex", StringComparison.Ordinal) && idx == 5 && sortSpecs.Specs.SortDirection == ImGuiSortDirection.Ascending)
+            if (string.Equals(fileGroup.Key, "tex", StringComparison.Ordinal) && idx == 6 && sortSpecs.Specs.SortDirection == ImGuiSortDirection.Ascending)
                 _cachedAnalysis![_selectedObjectTab] = _cachedAnalysis[_selectedObjectTab].OrderBy(k => k.Value.Format.Value, StringComparer.Ordinal).ToDictionary(d => d.Key, d => d.Value, StringComparer.Ordinal);
-            if (string.Equals(fileGroup.Key, "tex", StringComparison.Ordinal) && idx == 5 && sortSpecs.Specs.SortDirection == ImGuiSortDirection.Descending)
+            if (string.Equals(fileGroup.Key, "tex", StringComparison.Ordinal) && idx == 6 && sortSpecs.Specs.SortDirection == ImGuiSortDirection.Descending)
                 _cachedAnalysis![_selectedObjectTab] = _cachedAnalysis[_selectedObjectTab].OrderByDescending(k => k.Value.Format.Value, StringComparer.Ordinal).ToDictionary(d => d.Key, d => d.Value, StringComparer.Ordinal);
 
             sortSpecs.SpecsDirty = false;
@@ -1071,6 +2769,9 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
             if (ImGui.IsItemClicked()) _selectedHash = item.Hash;
             ImGui.TableNextColumn();
             ImGui.TextUnformatted(UiSharedService.ByteToString(item.CompressedSize));
+            if (ImGui.IsItemClicked()) _selectedHash = item.Hash;
+            ImGui.TableNextColumn();
+            ImGui.TextUnformatted(GetModDisplayName(modDisplayNames, item.ModName));
             if (ImGui.IsItemClicked()) _selectedHash = item.Hash;
             if (string.Equals(fileGroup.Key, "tex", StringComparison.Ordinal))
             {

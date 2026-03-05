@@ -19,6 +19,8 @@ namespace Sphene.UI.Components;
 
 public class DrawFolderGroup : DrawFolderBase
 {
+    private static readonly Vector4 SoftToggleEnabledColor = new(0.56f, 0.82f, 0.62f, 1f);
+    private static readonly Vector4 SoftToggleDisabledColor = new(0.86f, 0.58f, 0.58f, 1f);
     private readonly ApiController _apiController;
     private readonly GroupFullInfoDto _groupFullInfoDto;
     private readonly IdDisplayHandler _idDisplayHandler;
@@ -334,7 +336,7 @@ public class DrawFolderGroup : DrawFolderBase
         }
 
         ImGui.Separator();
-        ImGui.TextUnformatted("Permission Settings");
+        ImGui.TextUnformatted("Syncshell Sync Settings");
         var perm = _groupFullInfoDto.GroupUserPermissions;
         bool disableSounds = perm.IsDisableSounds();
         bool disableAnims = perm.IsDisableAnimations();
@@ -352,21 +354,24 @@ public class DrawFolderGroup : DrawFolderBase
             ImGui.CloseCurrentPopup();
         }
 
-        if (_uiSharedService.IconTextActionButton(disableSounds ? FontAwesomeIcon.VolumeUp : FontAwesomeIcon.VolumeOff, disableSounds ? "Enable Sound Sync" : "Disable Sound Sync", menuWidth, ButtonStyleKeys.ContextMenu_Item))
+        var soundSyncIcon = disableSounds ? FontAwesomeIcon.ToggleOff : FontAwesomeIcon.ToggleOn;
+        if (DrawStateColoredToggleButton(soundSyncIcon, "Sound sync", !disableSounds, menuWidth))
         {
             perm.SetDisableSounds(!disableSounds);
             _ = _apiController.GroupChangeIndividualPermissionState(new(_groupFullInfoDto.Group, new(_apiController.UID), perm));
             ImGui.CloseCurrentPopup();
         }
 
-        if (_uiSharedService.IconTextActionButton(disableAnims ? FontAwesomeIcon.Running : FontAwesomeIcon.Stop, disableAnims ? "Enable Animation Sync" : "Disable Animation Sync", menuWidth, ButtonStyleKeys.ContextMenu_Item))
+        var animationSyncIcon = disableAnims ? FontAwesomeIcon.ToggleOff : FontAwesomeIcon.ToggleOn;
+        if (DrawStateColoredToggleButton(animationSyncIcon, "Animation sync", !disableAnims, menuWidth))
         {
             perm.SetDisableAnimations(!disableAnims);
             _ = _apiController.GroupChangeIndividualPermissionState(new(_groupFullInfoDto.Group, new(_apiController.UID), perm));
             ImGui.CloseCurrentPopup();
         }
 
-        if (_uiSharedService.IconTextActionButton(disableVfx ? FontAwesomeIcon.Sun : FontAwesomeIcon.Circle, disableVfx ? "Enable VFX Sync" : "Disable VFX Sync", menuWidth, ButtonStyleKeys.ContextMenu_Item))
+        var vfxSyncIcon = disableVfx ? FontAwesomeIcon.ToggleOff : FontAwesomeIcon.ToggleOn;
+        if (DrawStateColoredToggleButton(vfxSyncIcon, "VFX sync", !disableVfx, menuWidth))
         {
             perm.SetDisableVFX(!disableVfx);
             _ = _apiController.GroupChangeIndividualPermissionState(new(_groupFullInfoDto.Group, new(_apiController.UID), perm));
@@ -383,6 +388,12 @@ public class DrawFolderGroup : DrawFolderBase
                 _spheneMediator.Publish(new OpenSyncshellAdminPanel(_groupFullInfoDto));
             }
         }
+    }
+
+    private bool DrawStateColoredToggleButton(FontAwesomeIcon icon, string text, bool enabledState, float menuWidth)
+    {
+        using var _ = ImRaii.PushColor(ImGuiCol.Text, enabledState ? SoftToggleEnabledColor : SoftToggleDisabledColor);
+        return _uiSharedService.IconTextActionButton(icon, text, menuWidth, ButtonStyleKeys.ContextMenu_Item);
     }
 
     protected override void DrawName(float width)

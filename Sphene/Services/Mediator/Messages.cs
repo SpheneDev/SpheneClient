@@ -1,6 +1,7 @@
 using Dalamud.Game.ClientState.Objects.Types;
 using Dalamud.Interface.Textures.TextureWraps;
 using Sphene.API.Data;
+using Sphene.API.Data.Enum;
 using Sphene.API.Dto;
 using Sphene.API.Dto.CharaData;
 using Sphene.API.Dto.Group;
@@ -12,6 +13,7 @@ using Sphene.Services.Events;
 using Sphene.Services;
 using Sphene.WebAPI.Files.Models;
 using Sphene.API.Dto.Files;
+using Penumbra.Api.Enums;
 using System.Numerics;
 
 namespace Sphene.Services.Mediator;
@@ -38,7 +40,7 @@ public record CutsceneEndMessage : MessageBase;
 public record CutsceneFrameworkUpdateMessage : SameThreadMessage;
 public record ConnectedMessage(ConnectionDto Connection) : MessageBase;
 public record DisconnectedMessage : SameThreadMessage;
-public record PenumbraModSettingChangedMessage : MessageBase;
+public record PenumbraModSettingChangedMessage(ModSettingChange ChangeType, Guid CollectionId, string ModDirectoryName, bool Inherited) : MessageBase;
 public record PenumbraInitializedMessage : MessageBase;
 public record PenumbraDisposedMessage : MessageBase;
 public record PenumbraRedrawMessage(IntPtr Address, int ObjTblIdx, bool WasRequested) : SameThreadMessage;
@@ -61,7 +63,9 @@ public record NotificationMessage
     (string Title, string Message, NotificationType Type, TimeSpan? TimeShownOnScreen = null) : MessageBase;
 public record CreateCacheForObjectMessage(GameObjectHandler ObjectToCreateFor) : SameThreadMessage;
 public record ClearCacheForObjectMessage(GameObjectHandler ObjectToCreateFor) : SameThreadMessage;
-public record CharacterDataCreatedMessage(CharacterData CharacterData) : SameThreadMessage;
+public record ForceLocalCharacterDataRebuildMessage(ObjectKind ObjectKind, string TraceId) : SameThreadMessage;
+public record CharacterDataCreatedMessage(CharacterData CharacterData, Sphene.PlayerData.Data.CharacterData? RawData = null) : SameThreadMessage;
+public record CharacterDataReadyForPushMessage(CharacterData CharacterData) : MessageBase;
 public record CharacterDataBuildStartedMessage : MessageBase;
 public record CharacterDataApplicationCompletedMessage(string PlayerName, string UserUID, Guid ApplicationId, bool Success, string? DataHash) : MessageBase;
 public record CharacterDataAnalyzedMessage : MessageBase;
@@ -118,6 +122,7 @@ public record PenumbraRedrawCharacterMessage(ICharacter Character) : SameThreadM
 public record GameObjectHandlerCreatedMessage(GameObjectHandler GameObjectHandler, bool OwnedObject) : SameThreadMessage;
 public record GameObjectHandlerDestroyedMessage(GameObjectHandler GameObjectHandler, bool OwnedObject) : SameThreadMessage;
 public record HaltCharaDataCreation(bool Resume = false) : SameThreadMessage;
+public record ResetCharacterDataDatabaseMessage : MessageBase;
 public record GposeLobbyUserJoin(UserData UserData) : MessageBase;
 public record GPoseLobbyUserLeave(UserData UserData) : MessageBase;
 public record GPoseLobbyReceiveCharaData(CharaDataDownloadDto CharaDataDownloadDto) : MessageBase;
@@ -128,6 +133,9 @@ public record SendCharacterDataAcknowledgmentMessage(CharacterDataAcknowledgment
 public record ShowUpdateNotificationMessage(UpdateInfo UpdateInfo) : MessageBase;
 public record CheckForUpdatesMessage : MessageBase;
 public record ShowReleaseChangelogMessage(string CurrentVersion, string? ChangelogText, string? LastSeenVersionBeforeUpdate = null) : MessageBase;
+public record ReleaseChangelogStartupStateMessage(bool WillShow) : MessageBase;
+public record ReleaseChangelogClosedMessage : MessageBase;
+public record ShowOneTimeUpdateOptionsSummaryMessage(string PromptKey) : MessageBase;
 public record UiServiceInitializedMessage : MessageBase;
 
 public record ThemePickerModeToggleMessage(bool IsEnabled) : MessageBase;

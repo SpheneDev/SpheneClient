@@ -13,4 +13,5 @@ public class PlayerPerformanceConfig : ISpheneConfiguration
     public int VRAMSizeAutoPauseThresholdMiB { get; set; } = 550;
     public int TrisAutoPauseThresholdThousands { get; set; } = 250;
     public List<string> UIDsToIgnore { get; set; } = new();
+    public List<string> TemporaryCollectionWhitelist { get; set; } = new();
 }

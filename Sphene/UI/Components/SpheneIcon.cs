@@ -32,6 +32,7 @@ public class SpheneIcon : WindowMediatorSubscriberBase
     private readonly ApiController _apiController;
     private readonly IpcManager _ipcManager;
     private readonly IDalamudPluginInterface _pluginInterface;
+    private readonly DalamudUtilService _dalamudUtilService;
     private readonly ICommandManager _commandManager;
     private readonly ShrinkUHostService _shrinkuHostService;
     // Built-in ShrinkU integration
@@ -62,7 +63,7 @@ public class SpheneIcon : WindowMediatorSubscriberBase
     public SpheneIcon(ILogger<SpheneIcon> logger, SpheneMediator mediator, 
         SpheneConfigService configService, UiSharedService uiSharedService, ApiController apiController, 
         PerformanceCollectorService performanceCollectorService, IpcManager ipcManager, IDalamudPluginInterface pluginInterface,
-        ICommandManager commandManager, ShrinkUHostService shrinkuHostService,
+        DalamudUtilService dalamudUtilService, ICommandManager commandManager, ShrinkUHostService shrinkuHostService,
         ShrinkU.Configuration.ShrinkUConfigService shrinkuConfig,
         ShrinkU.UI.ConversionUI shrinkuConversion,
         ShrinkU.UI.SettingsUI shrinkuSettings,
@@ -76,6 +77,7 @@ public class SpheneIcon : WindowMediatorSubscriberBase
         _apiController = apiController;
         _ipcManager = ipcManager;
         _pluginInterface = pluginInterface;
+        _dalamudUtilService = dalamudUtilService;
         _commandManager = commandManager;
         _shrinkuHostService = shrinkuHostService;
         _shrinkuConfig = shrinkuConfig;
@@ -99,13 +101,15 @@ public class SpheneIcon : WindowMediatorSubscriberBase
         }
         
         // Show icon based on configuration setting
-        IsOpen = _configService.Current.ShowSpheneIcon;
+        IsOpen = _dalamudUtilService.IsLoggedIn && _configService.Current.ShowSpheneIcon;
         
         // Subscribe to configuration changes
         _configService.ConfigSave += OnConfigurationChanged;
         
         // Subscribe to update availability messages
         Mediator.Subscribe<ShowUpdateNotificationMessage>(this, OnUpdateAvailable);
+        Mediator.Subscribe<DalamudLoginMessage>(this, (_) => IsOpen = _configService.Current.ShowSpheneIcon);
+        Mediator.Subscribe<DalamudLogoutMessage>(this, (_) => IsOpen = false);
         
         _logger.LogDebug("SpheneIcon created at position {Position}", _iconPosition);
     }
@@ -635,7 +639,7 @@ public class SpheneIcon : WindowMediatorSubscriberBase
     private void OnConfigurationChanged(object? sender, EventArgs e)
     {
         // Update icon visibility when configuration changes
-        IsOpen = _configService.Current.ShowSpheneIcon;
+        IsOpen = _dalamudUtilService.IsLoggedIn && _configService.Current.ShowSpheneIcon;
     }
     
     protected override void Dispose(bool disposing)
