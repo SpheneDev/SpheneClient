@@ -413,14 +413,14 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
                 }
             }
 
-            var effectiveParentPaths = parentStatus.Where(p => p.Value && (forceRestoreMod || baselineParentPaths.Contains(p.Key)))
+            var effectiveParentPathsForScdLinks = parentStatus.Where(p => p.Value)
                 .Select(p => p.Key)
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
-            var scdWithEffectiveParents = GetScdWithEffectiveParents(scdLinksMap, effectiveParentPaths);
+            var scdWithEffectiveParents = GetScdWithEffectiveParents(scdLinksMap, effectiveParentPathsForScdLinks);
             var scdToRemove = GetScdToRemove(scdLinksMap, parentStatus, scdWithEffectiveParents);
             var modScdHashes = GetScdHashes(matchingStates);
             _logger.LogTrace("[ModLearning] SCD link snapshot: mod={mod} parents={parents} effectiveParents={effective} scdEffective={scdEffective} scdToRemove={scdRemove} modScdHashes={hashCount} linkParents={linkParents}",
-                modDirName, parentStatus.Count, effectiveParentPaths.Count, scdWithEffectiveParents.Count, scdToRemove.Count, modScdHashes.Count, scdLinksMap.Count);
+                modDirName, parentStatus.Count, effectiveParentPathsForScdLinks.Count, scdWithEffectiveParents.Count, scdToRemove.Count, modScdHashes.Count, scdLinksMap.Count);
 
             var removedLinkedTotal = 0;
             HashSet<string>? scdToRemoveAll = null;
@@ -436,7 +436,7 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
                     }
                 }
             }
-            if (effectiveParentPaths.Count == 0 && scdLinksMap.Count > 0)
+            if (effectiveParentPathsForScdLinks.Count == 0 && scdLinksMap.Count > 0)
             {
                 scdToRemoveAll = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 foreach (var scds in scdLinksMap.Values)
@@ -587,7 +587,8 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
 
                     foreach (var replacement in GetEffectiveReplacements(fragment, jobId))
                     {
-                    var isEffective = IsReplacementEffective(replacement, resolvedMap);
+                    var isEffective = IsReplacementEffective(replacement, resolvedMap)
+                        || IsScdLinkedToEffectiveParent(replacement, scdWithEffectiveParents);
                     if (!isEffective && !forceRestoreMod && !allowActiveDbBackfill)
                     {
                         skippedNotEffective++;
@@ -669,14 +670,14 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
 
                     var canAdd = replacement.IsFileSwap || File.Exists(replacement.ResolvedPath);
                     if (!existingHashes.Contains(replacement.Hash) && canAdd)
-                        {
+                    {
                         targetList.Add(replacement.ToFileReplacementDto());
                         existingHashes.Add(replacement.Hash);
                         modRestoredCount++;
                         modified = true;
                         _logger.LogTrace("[ModLearning] Restored missing file: {path} (Hash: {hash})", replacement.ResolvedPath, replacement.Hash);
                         _logger.LogTrace("[ModLearning] Restore add: mod={mod} kind={kind} hash={hash}", modDirName, kind, replacement.Hash);
-                        }
+                    }
                     else
                     {
                         if (!canAdd)
@@ -687,8 +688,18 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
                         }
                         else if (existingHashes.Contains(replacement.Hash))
                         {
-                            skippedExistingHash++;
-                            _logger.LogTrace("[ModLearning] Skip already present hash: mod={mod} kind={kind} hash={hash}", modDirName, kind, replacement.Hash);
+                            if (MergeGamePathsByHash(targetList, replacement))
+                            {
+                                modRestoredCount++;
+                                modified = true;
+                                _logger.LogTrace("[ModLearning] Restore merge by hash: mod={mod} kind={kind} hash={hash} paths={paths}",
+                                    modDirName, kind, replacement.Hash, string.Join(", ", replacement.GamePaths));
+                            }
+                            else
+                            {
+                                skippedExistingHash++;
+                                _logger.LogTrace("[ModLearning] Skip already present hash: mod={mod} kind={kind} hash={hash}", modDirName, kind, replacement.Hash);
+                            }
                         }
                     }
                     }
@@ -837,20 +848,56 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
     private static int AddLinkedScdReplacements(List<FileReplacementData> targetList, ModFileFragment fragment, HashSet<string> scdWithEffectiveParents, Dictionary<string, string> resolvedMap, HashSet<string> existingHashes)
     {
         if (scdWithEffectiveParents.Count == 0) return 0;
-        var added = 0;
+        var changed = 0;
         foreach (var replacement in GetAllReplacements(fragment))
         {
             if (!IsScdReplacement(replacement)) continue;
             if (!replacement.GamePaths.Any(p => scdWithEffectiveParents.Contains(NormalizePathString(p)))) continue;
-            if (!IsReplacementEffective(replacement, resolvedMap)) continue;
+            if (!IsReplacementEffective(replacement, resolvedMap) && !IsScdLinkedToEffectiveParent(replacement, scdWithEffectiveParents)) continue;
             if (!existingHashes.Contains(replacement.Hash))
             {
                 targetList.Add(replacement.ToFileReplacementDto());
                 existingHashes.Add(replacement.Hash);
-                added++;
+                changed++;
+            }
+            else if (MergeGamePathsByHash(targetList, replacement))
+            {
+                changed++;
             }
         }
-        return added;
+        return changed;
+    }
+
+    private static bool IsScdLinkedToEffectiveParent(FileReplacement replacement, HashSet<string> scdWithEffectiveParents)
+    {
+        if (!IsScdReplacement(replacement)) return false;
+        return replacement.GamePaths.Any(p => scdWithEffectiveParents.Contains(NormalizePathString(p)));
+    }
+
+    private static bool MergeGamePathsByHash(List<FileReplacementData> targetList, FileReplacement replacement)
+    {
+        if (string.IsNullOrWhiteSpace(replacement.Hash)) return false;
+        var existing = targetList.FirstOrDefault(x => string.Equals(x.Hash, replacement.Hash, StringComparison.OrdinalIgnoreCase));
+        if (existing == null) return false;
+
+        var mergedPaths = (existing.GamePaths ?? [])
+            .Select(NormalizePathString)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var changed = false;
+        foreach (var gp in replacement.GamePaths)
+        {
+            if (mergedPaths.Add(NormalizePathString(gp)))
+            {
+                changed = true;
+            }
+        }
+
+        if (changed)
+        {
+            existing.GamePaths = [.. mergedPaths];
+        }
+
+        return changed;
     }
 
     private static IEnumerable<FileReplacement> GetAllReplacements(ModFileFragment fragment)
