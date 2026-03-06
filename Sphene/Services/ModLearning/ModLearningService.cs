@@ -39,6 +39,7 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
     private readonly Dictionary<string, Dictionary<string, HashSet<string>>> _modResourceLinks = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, Dictionary<string, Dictionary<string, HashSet<string>>>> _modResourceLinksBySettings = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<(IntPtr, string), List<ResourceLoadStamp>> _recentResourceLoads = [];
+    private readonly Dictionary<string, Dictionary<uint, HashSet<string>>> _observedTransientPathsByCharacter = new(StringComparer.OrdinalIgnoreCase);
     private DateTime _lastPenumbraSettingChangeAt = DateTime.MinValue;
     private int _penumbraSettingChangeCount = 0;
     private readonly HashSet<string> _pendingModSettingChanges = new(StringComparer.OrdinalIgnoreCase);
@@ -70,6 +71,7 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
         Mediator.Subscribe<PenumbraModSettingChangedMessage>(this, OnPenumbraModSettingChanged);
         Mediator.Subscribe<ResetCharacterDataDatabaseMessage>(this, _ => ResetCaches());
         Mediator.Subscribe<PenumbraResourceLoadMessage>(this, OnPenumbraResourceLoad);
+        Mediator.Subscribe<TransientResourceObservedMessage>(this, OnTransientResourceObserved);
     }
 
     private void ResetCaches()
@@ -83,6 +85,7 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
             _modResourceLinks.Clear();
             _modResourceLinksBySettings.Clear();
             _recentResourceLoads.Clear();
+            _observedTransientPathsByCharacter.Clear();
             _pendingModSettingChanges.Clear();
             _hasGlobalModSettingChange = false;
         }
@@ -143,6 +146,34 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
                 list.Add(new ResourceLoadStamp(gamePath, ext, now));
                 _logger.LogDebug("[ModLearning] Parent loaded: mod={mod} ext={ext} path={path}", modName, ext, gamePath);
             }
+        }
+    }
+
+    private void OnTransientResourceObserved(TransientResourceObservedMessage msg)
+    {
+        if (!_configService.Current.EnableModLearning) return;
+        if (msg.ObjectKind != ObjectKind.Player) return;
+        if (msg.HomeWorldId == 0 || msg.JobId == 0 || string.IsNullOrWhiteSpace(msg.CharacterName) || string.IsNullOrWhiteSpace(msg.GamePath)) return;
+
+        var transientKey = $"{msg.CharacterName}_{msg.HomeWorldId}";
+        var normalizedPath = NormalizePathString(msg.GamePath);
+        if (string.IsNullOrWhiteSpace(normalizedPath)) return;
+
+        lock (_lock)
+        {
+            if (!_observedTransientPathsByCharacter.TryGetValue(transientKey, out var byJob))
+            {
+                byJob = new Dictionary<uint, HashSet<string>>();
+                _observedTransientPathsByCharacter[transientKey] = byJob;
+            }
+
+            if (!byJob.TryGetValue(msg.JobId, out var paths))
+            {
+                paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                byJob[msg.JobId] = paths;
+            }
+
+            paths.Add(normalizedPath);
         }
     }
 
@@ -1861,7 +1892,7 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
             int totalUpserts = 0;
             int totalSkipped = 0;
             int totalStates = 0;
-            var observedTransientPaths = GetObservedTransientGamePathsForCharacter(name, homeWorldId);
+            var observedTransientPaths = GetObservedTransientGamePathsForCharacter(name, homeWorldId, jobId);
 
             // We do not lock the whole process, but we should be careful with the dictionary access.
             // Since this runs in a task, and OnCharacterDataCreated spawns tasks, we might have concurrency.
@@ -2051,32 +2082,47 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
         }
     }
 
-    private HashSet<string> GetObservedTransientGamePathsForCharacter(string characterName, uint homeWorldId)
+    private HashSet<string> GetObservedTransientGamePathsForCharacter(string characterName, uint homeWorldId, uint jobId)
     {
         var transientKey = $"{characterName}_{homeWorldId}";
-        if (!_transientConfigService.Current.TransientConfigs.TryGetValue(transientKey, out var playerConfig))
-        {
-            return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        }
-
         var observed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var path in playerConfig.GlobalPersistentCache)
+        if (_transientConfigService.Current.TransientConfigs.TryGetValue(transientKey, out var playerConfig))
         {
-            if (!string.IsNullOrWhiteSpace(path))
-            {
-                observed.Add(NormalizePathString(path));
-            }
-        }
-        foreach (var jobCache in playerConfig.JobSpecificCache.Values)
-        {
-            foreach (var path in jobCache)
+            foreach (var path in playerConfig.GlobalPersistentCache)
             {
                 if (!string.IsNullOrWhiteSpace(path))
                 {
                     observed.Add(NormalizePathString(path));
                 }
             }
+
+            if (jobId != 0 && playerConfig.JobSpecificCache.TryGetValue(jobId, out var jobCache))
+            {
+                foreach (var path in jobCache)
+                {
+                    if (!string.IsNullOrWhiteSpace(path))
+                    {
+                        observed.Add(NormalizePathString(path));
+                    }
+                }
+            }
         }
+
+        lock (_lock)
+        {
+            if (_observedTransientPathsByCharacter.TryGetValue(transientKey, out var byJob)
+                && byJob.TryGetValue(jobId, out var livePaths))
+            {
+                foreach (var path in livePaths)
+                {
+                    if (!string.IsNullOrWhiteSpace(path))
+                    {
+                        observed.Add(path);
+                    }
+                }
+            }
+        }
+
         return observed;
     }
 

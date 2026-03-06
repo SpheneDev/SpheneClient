@@ -140,6 +140,13 @@ public class Pair : DisposableMediatorSubscriberBase
         return LastReceivedCharacterData?.DataHash?.Value;
     }
 
+    public bool IsLatestReceivedDataApplied()
+    {
+        return CachedPlayer != null
+            && LastReceivedCharacterData != null
+            && CachedPlayer.IsCharacterDataAppliedForCurrentCharacter(LastReceivedCharacterData);
+    }
+
     internal void SetMutualVisibility(bool isMutual)
     {
         if (IsMutuallyVisible == isMutual) return;
@@ -377,6 +384,20 @@ public class Pair : DisposableMediatorSubscriberBase
 
         if (shouldApply)
         {
+            // Immediately reset AckYou to false when new data arrives that needs application
+            // This ensures the yellow eye appears until application is successful
+            if (UserPair.OwnPermissions.IsAckYou())
+            {
+                var permissions = UserPair.OwnPermissions;
+                permissions.SetAckYou(false);
+                UserPair.OwnPermissions = permissions;
+                Logger.LogDebug("{tag} Setting AckYou=false for user {user} due to new data arrival", SyncProgressTag, UserData.AliasOrUID);
+                
+                // Use non-awaited fire-and-forget to preserve ordering with subsequent calls on the same connection
+                // Task.Run could cause this to be scheduled AFTER a subsequent synchronous call reaches the queue
+                _ = _apiController.Value.UserSetPairPermissions(new(UserData, permissions));
+            }
+
             ApplyLastReceivedData();
         }
         
@@ -463,14 +484,8 @@ public class Pair : DisposableMediatorSubscriberBase
         var applyShortHash = string.IsNullOrEmpty(applyHash) ? "NONE" : applyHash[..Math.Min(8, applyHash.Length)];
         if (!forced)
         {
-            if (CachedPlayer.IsApplyPipelineRunningForHash(applyHash))
-            {
-                AddApplyDebug($"Apply skipped pipeline in progress hash={applyShortHash}");
-                Logger.LogDebug("{tag} Apply skipped: pipeline in progress hash={hash} user={user}",
-                    SyncProgressTag, applyShortHash, UserData.AliasOrUID);
-                return;
-            }
-
+            // Removed check for IsApplyPipelineRunningForHash to allow new data to override existing pipeline
+            
             var now = DateTimeOffset.UtcNow;
             if (string.Equals(_lastApplyAttemptHash, applyHash, StringComparison.Ordinal)
                 && (now - _lastApplyAttemptTime).TotalMilliseconds < ApplyAttemptCooldownMs)
@@ -679,27 +694,6 @@ public class Pair : DisposableMediatorSubscriberBase
         LastAcknowledgmentTime = timestamp;
         HasPendingAcknowledgment = false;
 
-        // Update AckYou status based on current icon state
-        // Green checkmark (success) = true, no icon (cleared) = false
-        bool newAckYouStatus = success;
-
-        var permissions = UserPair.OwnPermissions;
-        var oldAckYou = permissions.IsAckYou();
-        permissions.SetAckYou(newAckYouStatus);
-
-        Logger.LogTrace("UpdateAcknowledgmentStatus: Setting AckYou from {oldAckYou} to {newAckYou} for user {user}",
-            oldAckYou, newAckYouStatus, UserData.AliasOrUID);
-
-        try
-        {
-            await _apiController.Value.UserSetPairPermissions(new(UserData, permissions)).ConfigureAwait(false);
-            Logger.LogTrace("UpdateAcknowledgmentStatus: API call succeeded for AckYou update user={user}", UserData.AliasOrUID);
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "Failed to update AckYou status for user {user}", UserData.AliasOrUID);
-        }
-
         // Publish specific pair acknowledgment status change event
         Mediator.Publish(new PairAcknowledgmentStatusChangedMessage(
             UserData,
@@ -731,28 +725,6 @@ public class Pair : DisposableMediatorSubscriberBase
         HasPendingAcknowledgment = true;
         LastAcknowledgmentSuccess = null;
         LastAcknowledgmentTime = null;
-        
-        // Update AckYou status based on current icon state
-        // Yellow clock (pending) = false
-        bool newAckYouStatus = false;
-        
-        // Update local permissions immediately for UI responsiveness
-        var permissions = UserPair.OwnPermissions;
-        permissions.SetAckYou(newAckYouStatus);
-        UserPair.OwnPermissions = permissions;
-        
-        try
-        {
-            await _apiController.Value.UserSetPairPermissions(new(UserData, permissions)).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "Failed to update AckYou status for user {user}", UserData.AliasOrUID);
-            // Revert local change if server update failed
-            var revertPermissions = UserPair.OwnPermissions;
-            revertPermissions.SetAckYou(!newAckYouStatus);
-            UserPair.OwnPermissions = revertPermissions;
-        }
         
         // Publish specific pair acknowledgment status change event
         Mediator.Publish(new PairAcknowledgmentStatusChangedMessage(
@@ -848,28 +820,6 @@ public class Pair : DisposableMediatorSubscriberBase
             HasPendingAcknowledgment = false;
             LastAcknowledgmentId = null;
             
-            // Update AckYou status based on current icon state
-            // No icon (cleared) = false
-            bool newAckYouStatus = false;
-            
-            // Update local permissions immediately for UI responsiveness
-            var permissions = UserPair.OwnPermissions;
-            permissions.SetAckYou(newAckYouStatus);
-            UserPair.OwnPermissions = permissions;
-            
-            try
-            {
-                await _apiController.Value.UserSetPairPermissions(new(UserData, permissions)).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError(ex, "Failed to update AckYou status for user {user}", UserData.AliasOrUID);
-                // Revert local change if server update failed
-                var revertPermissions = UserPair.OwnPermissions;
-                revertPermissions.SetAckYou(!newAckYouStatus);
-                UserPair.OwnPermissions = revertPermissions;
-            }
-            
             // Add notification if MessageService is available
             messageService?.AddTaggedMessage(
                 $"pair_clear_{acknowledgmentId}_{UserData.UID}",
@@ -964,10 +914,10 @@ public class Pair : DisposableMediatorSubscriberBase
 
 
 
-    private async Task SendAcknowledgmentIfRequired(OnlineUserCharaDataDto data, bool success, bool hashVerificationPassed = true)
+    private async Task SendAcknowledgmentIfRequired(OnlineUserCharaDataDto data, bool success, bool hashVerificationPassed = true, bool isLatestData = true)
     {
-        Logger.LogTrace("SendAcknowledgmentIfRequired called - RequiresAcknowledgment: {requires}, Hash: {hash}, Success: {success}, HashVerification: {hashVerification}", 
-            data.RequiresAcknowledgment, data.DataHash[..Math.Min(8, data.DataHash.Length)], success, hashVerificationPassed);
+        Logger.LogTrace("SendAcknowledgmentIfRequired called - RequiresAcknowledgment: {requires}, Hash: {hash}, Success: {success}, HashVerification: {hashVerification}, IsLatestData: {isLatestData}", 
+            data.RequiresAcknowledgment, data.DataHash[..Math.Min(8, data.DataHash.Length)], success, hashVerificationPassed, isLatestData);
 
         if (!data.RequiresAcknowledgment || string.IsNullOrEmpty(data.DataHash))
         {
@@ -1010,30 +960,38 @@ public class Pair : DisposableMediatorSubscriberBase
             Logger.LogTrace("Successfully published SendCharacterDataAcknowledgmentMessage for Hash: {hash}",
                 data.DataHash[..Math.Min(8, data.DataHash.Length)]);
 
-            var permissions = UserPair.OwnPermissions;
-            var currentAckYou = permissions.IsAckYou();
-            var newAckYouStatus = finalSuccess;
-            
-            Logger.LogTrace("SendAcknowledgmentIfRequired: Current AckYou={current}, newAckYouStatus={newStatus} for user {user}",
-                currentAckYou, newAckYouStatus, UserData.AliasOrUID);
-            
-            if (currentAckYou != newAckYouStatus)
+            if (isLatestData)
             {
-                Logger.LogTrace("SendAcknowledgmentIfRequired: Setting Own AckYou={status} for user {user}", newAckYouStatus, UserData.AliasOrUID);
-                permissions.SetAckYou(newAckYouStatus);
-                try
+                var permissions = UserPair.OwnPermissions;
+                var currentAckYou = permissions.IsAckYou();
+                var newAckYouStatus = finalSuccess;
+                
+                Logger.LogTrace("SendAcknowledgmentIfRequired: Current AckYou={current}, newAckYouStatus={newStatus} for user {user}",
+                    currentAckYou, newAckYouStatus, UserData.AliasOrUID);
+                
+                if (currentAckYou != newAckYouStatus)
                 {
-                    await _apiController.Value.UserSetPairPermissions(new(UserData, permissions)).ConfigureAwait(false);
-                    Logger.LogTrace("SendAcknowledgmentIfRequired: API call succeeded for AckYou update user={user}", UserData.AliasOrUID);
+                    Logger.LogTrace("SendAcknowledgmentIfRequired: Setting Own AckYou={status} for user {user}", newAckYouStatus, UserData.AliasOrUID);
+                    permissions.SetAckYou(newAckYouStatus);
+                    try
+                    {
+                        await _apiController.Value.UserSetPairPermissions(new(UserData, permissions)).ConfigureAwait(false);
+                        Logger.LogTrace("SendAcknowledgmentIfRequired: API call succeeded for AckYou update user={user}", UserData.AliasOrUID);
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogError(ex, "SendAcknowledgmentIfRequired: Failed to send Own AckYou update for user {user}", UserData.AliasOrUID);
+                    }
                 }
-                catch (Exception ex)
+                else
                 {
-                    Logger.LogError(ex, "SendAcknowledgmentIfRequired: Failed to send Own AckYou update for user {user}", UserData.AliasOrUID);
+                    Logger.LogTrace("SendAcknowledgmentIfRequired: AckYou already matches desired status - no API call needed user={user}", UserData.AliasOrUID);
                 }
             }
             else
             {
-                Logger.LogTrace("SendAcknowledgmentIfRequired: AckYou already matches desired status - no API call needed user={user}", UserData.AliasOrUID);
+                Logger.LogTrace("SendAcknowledgmentIfRequired: Skipping AckYou update for outdated hash={hash} user={user}",
+                    data.DataHash[..Math.Min(8, data.DataHash.Length)], UserData.AliasOrUID);
             }
         }
         catch (Exception ex)
@@ -1138,49 +1096,71 @@ public class Pair : DisposableMediatorSubscriberBase
                                 SyncProgressTag, verificationSuccess);
                         }
 
-                        Logger.LogTrace("{tag} Ack sending: appSuccess={appSuccess} hashVerified={hashSuccess} hash={hash}",
+                        // Check if this acknowledgment is still relevant (i.e. is it the LATEST one we expect?)
+                        // If newer data has already arrived or is being processed, we shouldn't confirm this old hash as "AckYou=true"
+                        bool isLatestData = LastReceivedCharacterData != null && string.Equals(matchingAcknowledgment.DataHash, LastReceivedCharacterData.DataHash.Value, StringComparison.Ordinal);
+                        
+                        // We always send success=true for the technical acknowledgment if the application succeeded
+                        // This ensures the sender gets the green checkmark for this specific upload
+                        // BUT: We handle the AckYou status separately inside SendAcknowledgmentIfRequired based on isLatestData
+                        
+                        Logger.LogTrace("{tag} Ack sending: appSuccess={appSuccess} hashVerified={hashSuccess} hash={hash} isLatest={isLatest}",
                             SyncProgressTag,
-                            message.Success, verificationSuccess, message.DataHash[..Math.Min(8, message.DataHash.Length)]);
+                            message.Success, verificationSuccess, message.DataHash[..Math.Min(8, message.DataHash.Length)], isLatestData);
 
-                        await SendAcknowledgmentIfRequired(matchingAcknowledgment, message.Success, verificationSuccess).ConfigureAwait(false);
+                        // We pass isLatestData as a custom flag to control AckYou update
+                        await SendAcknowledgmentIfRequired(matchingAcknowledgment, message.Success, verificationSuccess, isLatestData).ConfigureAwait(false);
                         
                         Logger.LogTrace("{tag} SendAcknowledgmentIfRequired completed for hash={hash}",
                             SyncProgressTag, message.DataHash[..Math.Min(8, message.DataHash.Length)]);
                     }
                     else
                     {
-                        // No matching acknowledgment in queue, but data was applied successfully
-                        // Update local acknowledgment status to indicate successful application
-                        Logger.LogTrace("{tag} No matching acknowledgment in queue - setting AckYou directly hash={hash}",
-                            SyncProgressTag, message.DataHash[..Math.Min(8, message.DataHash.Length)]);
-                        
-                        // Set AckYou permission to true to indicate successful application
-                        var permissions = UserPair.OwnPermissions;
-                        var wasAckYou = permissions.IsAckYou();
-                        Logger.LogTrace("{tag} Current AckYou status: {wasAckYou} - attempting to set to true",
-                            SyncProgressTag, wasAckYou);
-                        
-                        if (!wasAckYou)
+                        // No matching acknowledgment in queue, check if this is still the latest data
+                        bool isLatestData = LastReceivedCharacterData != null && string.Equals(message.DataHash, LastReceivedCharacterData.DataHash.Value, StringComparison.Ordinal);
+
+                        if (!isLatestData)
                         {
-                            Logger.LogTrace("{tag} Setting AckYou to true for user={user}",
-                                SyncProgressTag, UserData.AliasOrUID);
-                            permissions.SetAckYou(true);
-                            try
-                            {
-                                await _apiController.Value.UserSetPairPermissions(new(UserData, permissions)).ConfigureAwait(false);
-                                Logger.LogTrace("{tag} AckYou set to true after successful apply hash={hash} - API call succeeded",
-                                    SyncProgressTag, message.DataHash[..Math.Min(8, message.DataHash.Length)]);
-                            }
-                            catch (Exception ex)
-                            {
-                                Logger.LogError(ex, "{tag} Failed to set AckYou after successful apply hash={hash}",
-                                    SyncProgressTag, message.DataHash[..Math.Min(8, message.DataHash.Length)]);
-                            }
+                             Logger.LogDebug("{tag} Direct Ack skipped: applied hash={appliedHash} but latest is={latestHash}",
+                                SyncProgressTag, message.DataHash[..Math.Min(8, message.DataHash.Length)], 
+                                LastReceivedCharacterData?.DataHash?.Value != null ? LastReceivedCharacterData.DataHash.Value[..Math.Min(8, LastReceivedCharacterData.DataHash.Value.Length)] : "NULL");
                         }
                         else
                         {
-                            Logger.LogTrace("{tag} AckYou already true - no action needed hash={hash}",
+                            // No matching acknowledgment in queue, but data was applied successfully AND is latest
+                            // Update local acknowledgment status to indicate successful application
+                            Logger.LogTrace("{tag} No matching acknowledgment in queue - setting AckYou directly hash={hash}",
                                 SyncProgressTag, message.DataHash[..Math.Min(8, message.DataHash.Length)]);
+                            
+                            // Set AckYou permission to true to indicate successful application
+                            var permissions = UserPair.OwnPermissions;
+                            var wasAckYou = permissions.IsAckYou();
+                            Logger.LogTrace("{tag} Current AckYou status: {wasAckYou} - attempting to set to true",
+                                SyncProgressTag, wasAckYou);
+                            
+                            if (!wasAckYou)
+                            {
+                                Logger.LogTrace("{tag} Setting AckYou to true for user={user}",
+                                    SyncProgressTag, UserData.AliasOrUID);
+                                permissions.SetAckYou(true);
+                                try
+                                {
+                                    // Fire and forget permission update to server
+                                    _ = _apiController.Value.UserSetPairPermissions(new(UserData, permissions));
+                                    Logger.LogTrace("{tag} AckYou set to true after successful apply hash={hash} - API call initiated",
+                                        SyncProgressTag, message.DataHash[..Math.Min(8, message.DataHash.Length)]);
+                                }
+                                catch (Exception ex)
+                                {
+                                    Logger.LogError(ex, "{tag} Failed to set AckYou after successful apply hash={hash}",
+                                        SyncProgressTag, message.DataHash[..Math.Min(8, message.DataHash.Length)]);
+                                }
+                            }
+                            else
+                            {
+                                Logger.LogTrace("{tag} AckYou already true - no action needed hash={hash}",
+                                    SyncProgressTag, message.DataHash[..Math.Min(8, message.DataHash.Length)]);
+                            }
                         }
                     }
                 }

@@ -416,6 +416,7 @@ public sealed class TransientResourceManager : DisposableMediatorSubscriberBase
                 if (isAdded)
                 {
                     Logger.LogDebug("Adding {replacedGamePath} for {gameObject} ({filePath})", replacedGamePath, owner?.ToString() ?? gameObjectAddress.ToString("X"), filePath);
+                    PublishTransientObserved(objectKind, replacedGamePath);
                     SendTransients(gameObjectAddress, objectKind);
                 }
             }
@@ -492,6 +493,7 @@ public sealed class TransientResourceManager : DisposableMediatorSubscriberBase
             Logger.LogTrace("Adding recorded: {gamePath} => {filePath}", item.GamePath, item.FilePath);
 
             transient.Add(item.GamePath);
+            PublishTransientObserved(item.Owner.ObjectKind, item.GamePath);
             addedTransients.Add(item.Owner.Address);
         }
 
@@ -512,5 +514,42 @@ public sealed class TransientResourceManager : DisposableMediatorSubscriberBase
     public record TransientRecord(GameObjectHandler Owner, string GamePath, string FilePath, bool AlreadyTransient)
     {
         public bool AddTransient { get; set; }
+    }
+
+    private void PublishTransientObserved(ObjectKind objectKind, string gamePath)
+    {
+        if (objectKind != ObjectKind.Player || string.IsNullOrWhiteSpace(gamePath))
+        {
+            return;
+        }
+
+        var (characterName, homeWorldId) = GetCurrentCharacterIdentity();
+        if (string.IsNullOrWhiteSpace(characterName) || homeWorldId == 0)
+        {
+            return;
+        }
+
+        var jobId = _dalamudUtil.ClassJobId;
+        if (jobId == 0)
+        {
+            return;
+        }
+
+        Mediator.Publish(new TransientResourceObservedMessage(characterName, homeWorldId, jobId, objectKind, gamePath));
+    }
+
+    private (string CharacterName, uint HomeWorldId) GetCurrentCharacterIdentity()
+    {
+        try
+        {
+            var characterName = _dalamudUtil.GetPlayerNameAsync().GetAwaiter().GetResult();
+            var homeWorldId = _dalamudUtil.GetHomeWorldIdAsync().GetAwaiter().GetResult();
+            return (characterName, homeWorldId);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Could not resolve current character identity for transient observation");
+            return (string.Empty, 0);
+        }
     }
 }

@@ -554,6 +554,8 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         var isVisibleForIcon = _pair.IsMutuallyVisible || (_uiSharedService.IsInGpose && _pair.WasMutuallyVisibleInGpose);
         var partnerAckYou = _pair.UserPair.OtherPermissions.IsAckYou();
         var ownAckYou = _pair.UserPair.OwnPermissions.IsAckYou();
+        var latestDataApplied = _pair.IsLatestReceivedDataApplied();
+        var effectiveOwnAckYou = _pair.LastReceivedCharacterData != null ? latestDataApplied : ownAckYou;
         var suppressAckUi = _pair.IsInDuty;
 
         if (_pair.IsPaused)
@@ -580,7 +582,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
                 ImGui.SameLine();
             }
             
-            var iconColor = suppressAckUi ? ImGuiColors.ParsedGreen : (ownAckYou ? ImGuiColors.ParsedGreen : ImGuiColors.DalamudYellow);
+            var iconColor = suppressAckUi ? ImGuiColors.ParsedGreen : (effectiveOwnAckYou ? ImGuiColors.ParsedGreen : ImGuiColors.DalamudYellow);
             var icon = (_uiSharedService.IsInGpose || _pair.IsInGpose) ? FontAwesomeIcon.Camera : FontAwesomeIcon.Eye;
             _uiSharedService.IconText(icon, iconColor);
             
@@ -590,8 +592,8 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
             }
             else
             {
-                var ackStatus = ownAckYou ? "You acknowledge this user's data" : "You do not acknowledge this user's data";
-                if (partnerAckYou != ownAckYou)
+                var ackStatus = effectiveOwnAckYou ? "You acknowledge this user's data" : "You do not acknowledge this user's data";
+                if (partnerAckYou != effectiveOwnAckYou)
                 {
                     var partnerStatus = partnerAckYou ? "This user acknowledges your data" : "This user does not acknowledge your data";
                     ackStatus += Environment.NewLine + partnerStatus;
@@ -599,7 +601,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
                 userPairText = _pair.UserData.AliasOrUID + " is visible: " + _pair.PlayerName + Environment.NewLine + ackStatus + Environment.NewLine + "Click to target this player";
             }
             
-            HandleReloadTimer(ownAckYou);
+            HandleReloadTimer(effectiveOwnAckYou);
             
             if (ImGui.IsItemClicked())
             {

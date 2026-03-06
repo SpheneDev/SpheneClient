@@ -57,6 +57,7 @@ public record BypassEmoteReadyMessage : MessageBase;
 public record BypassEmoteMessage(string BypassEmoteData) : MessageBase;
 public record BypassEmoteUpdateMessage(string BypassEmoteData, string DataHash) : MessageBase;
 public record TransientResourceChangedMessage(IntPtr Address) : MessageBase;
+public record TransientResourceObservedMessage(string CharacterName, uint HomeWorldId, uint JobId, ObjectKind ObjectKind, string GamePath) : MessageBase;
 public record HaltScanMessage(string Source) : MessageBase;
 public record ResumeScanMessage(string Source) : MessageBase;
 public record NotificationMessage

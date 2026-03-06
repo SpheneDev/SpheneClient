@@ -470,8 +470,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
 
         if (_applyPipelineTask != null
             && !_applyPipelineTask.IsCompleted
-            && (AreComponentHashesEqual(characterData, _inProgressPenumbraHash, _inProgressGlamourerHash, _inProgressRestHash)
-                || AreDataHashesEqual(characterData, _inProgressPipelineDataHash)))
+            && AreDataHashesEqual(characterData, _inProgressPipelineDataHash))
         {
             if (requiresRedraw)
             {
@@ -484,8 +483,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
 
         if (_applicationTask != null
             && !_applicationTask.IsCompleted
-            && (AreComponentHashesEqual(characterData, _inProgressPenumbraHash, _inProgressGlamourerHash, _inProgressRestHash)
-                || AreDataHashesEqual(characterData, _inProgressDataHash)))
+            && AreDataHashesEqual(characterData, _inProgressDataHash))
         {
             if (requiresRedraw)
             {
@@ -522,6 +520,13 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             _cachedData = characterData;
             _pendingPenumbraReapply = true;
             return;
+        }
+
+        if (_applyPipelineTask != null && !_applyPipelineTask.IsCompleted)
+        {
+            Logger.LogDebug("[BASE-{appbase}] Previous application pipeline running, forcing full re-application to prevent dirty state", applicationBase);
+            forceApplyCustomization = true;
+            _forceApplyMods = true;
         }
 
         Mediator.Publish(new EventMessage(new Event(PlayerName, Pair.UserData, nameof(PairHandler), EventSeverity.Informational,
@@ -1213,20 +1218,15 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
 
         downloadToken.ThrowIfCancellationRequested();
 
-        CancellationToken appToken;
+        // Signal existing application to stop
         try
         {
-            appToken = _applicationCancellationTokenSource?.Token ?? CancellationToken.None;
+            _applicationCancellationTokenSource?.Cancel();
         }
-        catch (ObjectDisposedException)
-        {
-            Logger.LogDebug("{tag} Apply aborted: user={user} hash={hash} reason=appTokenDisposed",
-                SyncProgressTag, Pair.UserData.AliasOrUID, charaData.DataHash?.Value ?? "null");
-            return;
-        }
+        catch (ObjectDisposedException) { }
+
         while ((!_applicationTask?.IsCompleted ?? false)
-               && !downloadToken.IsCancellationRequested
-               && !appToken.IsCancellationRequested)
+               && !downloadToken.IsCancellationRequested)
         {
             // block until current application is done
             Logger.LogDebug("[BASE-{appBase}] Waiting for current data application (Id: {id}) for player ({handler}) to finish", applicationBase, _applicationId, PlayerName);
@@ -1235,7 +1235,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             await Task.Delay(250).ConfigureAwait(false);
         }
 
-        if (downloadToken.IsCancellationRequested || appToken.IsCancellationRequested)
+        if (downloadToken.IsCancellationRequested)
         {
             Logger.LogDebug("{tag} Apply aborted: user={user} hash={hash} reason=cancellation",
                 SyncProgressTag, Pair.UserData.AliasOrUID, charaData.DataHash?.Value ?? "null");
