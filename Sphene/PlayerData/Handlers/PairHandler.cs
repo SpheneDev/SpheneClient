@@ -56,9 +56,6 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
     private DateTime _lastTemporaryCollectionUse = DateTime.UtcNow;
     private DateTime _lastTemporaryCollectionDisableAttempt = DateTime.MinValue;
     private bool _forceRedrawAfterCurrentApplication = false;
-    private string? _inProgressPenumbraHash;
-    private string? _inProgressGlamourerHash;
-    private string? _inProgressRestHash;
     private string? _inProgressDataHash;
     private string? _inProgressPipelineDataHash;
     private string? _lastAppliedBypassEmoteData;
@@ -534,9 +531,6 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
 
         _forceApplyMods |= forceApplyCustomization;
 
-        _inProgressPenumbraHash = characterData.PenumbraHash.Value;
-        _inProgressGlamourerHash = characterData.GlamourerHash.Value;
-        _inProgressRestHash = characterData.RestHash.Value;
         _inProgressDataHash = characterData.DataHash?.Value;
         _inProgressPipelineDataHash = characterData.DataHash?.Value;
 
@@ -832,18 +826,6 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         return string.Equals(newData.PenumbraHash.Value, cachedData.PenumbraHash.Value, StringComparison.Ordinal)
             && string.Equals(newData.GlamourerHash.Value, cachedData.GlamourerHash.Value, StringComparison.Ordinal)
             && string.Equals(newData.RestHash.Value, cachedData.RestHash.Value, StringComparison.Ordinal);
-    }
-
-    private static bool AreComponentHashesEqual(CharacterData cachedData, string? penumbraHash, string? glamourerHash, string? restHash)
-    {
-        if (string.IsNullOrEmpty(penumbraHash) || string.IsNullOrEmpty(glamourerHash) || string.IsNullOrEmpty(restHash))
-        {
-            return false;
-        }
-
-        return string.Equals(cachedData.PenumbraHash.Value, penumbraHash, StringComparison.Ordinal)
-            && string.Equals(cachedData.GlamourerHash.Value, glamourerHash, StringComparison.Ordinal)
-            && string.Equals(cachedData.RestHash.Value, restHash, StringComparison.Ordinal);
     }
 
     private static bool AreDataHashesEqual(CharacterData newData, CharacterData? cachedData)
@@ -1219,11 +1201,18 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         downloadToken.ThrowIfCancellationRequested();
 
         // Signal existing application to stop
-        try
+        var currentApplicationCts = _applicationCancellationTokenSource;
+        if (currentApplicationCts != null)
         {
-            _applicationCancellationTokenSource?.Cancel();
+            try
+            {
+                await currentApplicationCts.CancelAsync().ConfigureAwait(false);
+            }
+            catch (ObjectDisposedException ex)
+            {
+                Logger.LogDebug(ex, "Application cancellation token source already disposed");
+            }
         }
-        catch (ObjectDisposedException) { }
 
         while ((!_applicationTask?.IsCompleted ?? false)
                && !downloadToken.IsCancellationRequested)
@@ -1385,9 +1374,6 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         }
         finally
         {
-            _inProgressPenumbraHash = null;
-            _inProgressGlamourerHash = null;
-            _inProgressRestHash = null;
             _inProgressDataHash = null;
         }
     }

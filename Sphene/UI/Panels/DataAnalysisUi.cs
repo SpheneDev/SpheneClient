@@ -1626,10 +1626,13 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
 
     private static string FormatSettingsLabel(Dictionary<string, List<string>> settings)
     {
-        if (settings.Count == 0) return "Base";
+        if (settings.Count == 0) return "Default";
         var parts = settings
             .OrderBy(k => k.Key, StringComparer.OrdinalIgnoreCase)
-            .Select(kvp => $"{kvp.Key}: {string.Join(", ", kvp.Value)}");
+            .Select(kvp => $"{kvp.Key}: {string.Join(", ", kvp.Value)}")
+            .Where(part => !string.IsNullOrWhiteSpace(part))
+            .ToList();
+        if (parts.Count == 0) return "Default";
         return string.Join(" | ", parts);
     }
 
@@ -1780,8 +1783,10 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                 return new Dictionary<string, LearnedModState>(StringComparer.Ordinal);
             }
             return states
-                .OrderBy(s => FormatSettingsLabel(s.Settings), StringComparer.OrdinalIgnoreCase)
-                .ToDictionary(s => FormatSettingsLabel(s.Settings), s => s, StringComparer.Ordinal);
+                .Select(state => new { State = state, Label = FormatSettingsLabel(state.Settings) })
+                .OrderBy(entry => string.Equals(entry.Label, "Default", StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+                .ThenBy(entry => entry.Label, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(entry => entry.Label, entry => entry.State, StringComparer.Ordinal);
         }
     }
 
