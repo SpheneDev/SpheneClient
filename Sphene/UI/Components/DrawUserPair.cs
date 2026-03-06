@@ -663,6 +663,11 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
             userPairText += UiSharedService.TooltipSeparator + "You are directly Paired";
         }
 
+        if (!string.IsNullOrWhiteSpace(_pair.RemoteClientVersion))
+        {
+            userPairText += UiSharedService.TooltipSeparator + "Client version: " + _pair.RemoteClientVersion;
+        }
+
         if (_pair.LastAppliedDataBytes >= 0)
         {
             userPairText += UiSharedService.TooltipSeparator;

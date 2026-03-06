@@ -99,6 +99,7 @@ public class Pair : DisposableMediatorSubscriberBase
     public long LastAppliedDataTris { get; set; } = -1;
     public long LastAppliedApproximateVRAMBytes { get; set; } = -1;
     public string Ident => _onlineUserIdentDto?.Ident ?? string.Empty;
+    public string RemoteClientVersion => _onlineUserIdentDto?.ClientVersion ?? UserPair.RemoteClientVersion ?? string.Empty;
     internal int ApplyRetryCount => _applyRetryCount;
 
     public bool TryGetPenumbraCollectionId(out Guid collectionId)

@@ -127,6 +127,7 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         else
         {
             _allClientPairs[dto.User].UserPair.IndividualPairStatus = dto.IndividualPairStatus;
+            _allClientPairs[dto.User].UserPair.RemoteClientVersion = dto.RemoteClientVersion;
             _allClientPairs[dto.User].ApplyLastReceivedData();
         }
 
@@ -147,6 +148,7 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         _allClientPairs[dto.User].UserPair.IndividualPairStatus = dto.IndividualPairStatus;
         _allClientPairs[dto.User].UserPair.OwnPermissions = dto.OwnPermissions;
         _allClientPairs[dto.User].UserPair.OtherPermissions = dto.OtherPermissions;
+        _allClientPairs[dto.User].UserPair.RemoteClientVersion = dto.RemoteClientVersion;
         if (addToLastAddedUser)
             LastAddedUser = _allClientPairs[dto.User];
         _allClientPairs[dto.User].ApplyLastReceivedData();

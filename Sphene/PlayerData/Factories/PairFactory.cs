@@ -48,7 +48,10 @@ public class PairFactory
 
     public Pair Create(UserPairDto userPairDto)
     {
-        return new Pair(_loggerFactory.CreateLogger<Pair>(), new(userPairDto.User, userPairDto.IndividualPairStatus, [], userPairDto.OwnPermissions, userPairDto.OtherPermissions),
+        return new Pair(_loggerFactory.CreateLogger<Pair>(), new(userPairDto.User, userPairDto.IndividualPairStatus, [], userPairDto.OwnPermissions, userPairDto.OtherPermissions)
+        {
+            RemoteClientVersion = userPairDto.RemoteClientVersion
+        },
             _cachedPlayerFactory, _spheneMediator, _serverConfigurationManager, _playerPerformanceConfigService, _apiController, _visibilityGateService, _dalamudUtilService, _configService, _characterDataSqliteStore);
     }
 }
