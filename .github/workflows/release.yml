@@ -3,8 +3,8 @@ name: Release SpheneClient
 on:
   workflow_dispatch:
     inputs:
-      is_testbuild:
-        description: 'Publish as Testbuild (updates DownloadLinkTesting/TestingAssemblyVersion)'
+      is_release_build:
+        description: 'Create Release build (unchecked = Testbuild)'
         required: true
         default: false
         type: boolean
@@ -83,7 +83,7 @@ jobs:
       run: dotnet restore Sphene.Actions.sln
       
     - name: Build Release
-      run: dotnet build Sphene.Actions.sln --configuration Release --no-restore /p:IsTestBuild=${{ github.event.inputs.is_testbuild }} /p:AutoIncrementVersion=false
+      run: dotnet build Sphene.Actions.sln --configuration Release --no-restore /p:IsTestBuild=${{ github.event.inputs.is_release_build == 'true' && 'false' || 'true' }} /p:AutoIncrementVersion=false
       shell: powershell
       
     - name: Create release package
@@ -134,14 +134,14 @@ jobs:
           exit 1
         }
         
-        $isTestBuildInput = "${{ github.event.inputs.is_testbuild }}"
-        if ($isTestBuildInput -eq "true") {
-          $spheneEntry.TestingAssemblyVersion = $version
-          $spheneEntry.DownloadLinkTesting = "https://github.com/SpheneDev/SpheneClient/releases/download/$newTag/latest.zip"
-        } else {
+        $isReleaseBuildInput = "${{ github.event.inputs.is_release_build }}"
+        if ($isReleaseBuildInput -eq "true") {
           $spheneEntry.AssemblyVersion = $version
           $spheneEntry.DownloadLinkInstall = "https://github.com/SpheneDev/SpheneClient/releases/download/$newTag/latest.zip"
           $spheneEntry.DownloadLinkUpdate = "https://github.com/SpheneDev/SpheneClient/releases/download/$newTag/latest.zip"
+        } else {
+          $spheneEntry.TestingAssemblyVersion = $version
+          $spheneEntry.DownloadLinkTesting = "https://github.com/SpheneDev/SpheneClient/releases/download/$newTag/latest.zip"
         }
         
         # Write back the full array, preserving all entries
@@ -156,11 +156,33 @@ jobs:
         Remove-Item -Recurse -Force temp-repo
       shell: powershell
       
+    - name: Remove existing testbuild release for same tag
+      if: ${{ github.event.inputs.is_release_build == 'true' }}
+      run: |
+        $repo = "${{ github.repository }}"
+        $tag = "${{ steps.get_version.outputs.tag }}"
+        $releaseInfo = gh release view $tag --repo $repo --json isPrerelease 2>$null
+        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($releaseInfo)) {
+          Write-Host "No existing release found for tag $tag."
+          exit 0
+        }
+
+        $release = $releaseInfo | ConvertFrom-Json
+        if ($release.isPrerelease -eq $true) {
+          Write-Host "Deleting existing prerelease/testbuild and tag for $tag before creating release build."
+          gh release delete $tag --repo $repo --yes --cleanup-tag
+        } else {
+          Write-Host "Existing release for $tag is already a non-prerelease. Keeping it."
+        }
+      shell: powershell
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
     - name: Create Release
       uses: softprops/action-gh-release@v2
       with:
         tag_name: ${{ steps.get_version.outputs.tag }}
-        name: ${{ github.event.inputs.is_testbuild == 'true' && format('Sphene Client Testbuild v{0}', steps.get_version.outputs.version) || format('Sphene Client v{0}', steps.get_version.outputs.version) }}
+        name: ${{ github.event.inputs.is_release_build == 'true' && format('Sphene Client v{0}', steps.get_version.outputs.version) || format('Sphene Client Testbuild v{0}', steps.get_version.outputs.version) }}
         body: |
           ## Sphene Client Release v${{ steps.get_version.outputs.version }}
           
@@ -187,6 +209,6 @@ jobs:
         files: |
           ${{ steps.package.outputs.zip_name }}
         draft: false
-        prerelease: ${{ github.event.inputs.is_testbuild == 'true' || contains(steps.get_version.outputs.version, '-') }}
+        prerelease: ${{ github.event.inputs.is_release_build != 'true' || contains(steps.get_version.outputs.version, '-') }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
