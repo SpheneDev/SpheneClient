@@ -527,13 +527,13 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
             ? selectedListWithKind.Where(expected => !IsReplacementFullyPresent(expected.Replacement, currentKeys)).ToList()
             : [];
 
-        using (var table = ImRaii.Table("##modlearning_table", 3, ImGuiTableFlags.RowBg))
+        using (var table = ImRaii.Table("##modlearning_table", 3, ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp))
         {
             if (table)
             {
                 ImGui.TableSetupColumn("Game Paths", ImGuiTableColumnFlags.WidthStretch, 1f);
                 ImGui.TableSetupColumn("Resolved Path", ImGuiTableColumnFlags.WidthStretch, 1f);
-                ImGui.TableSetupColumn("Scope", ImGuiTableColumnFlags.WidthFixed, 0.5f);
+                ImGui.TableSetupColumn("Scope", ImGuiTableColumnFlags.WidthFixed, 170f * ImGuiHelpers.GlobalScale);
                 ImGui.TableHeadersRow();
                 foreach (var entry in selectedListWithKind)
                 {
@@ -566,7 +566,13 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                     {
                         ImGui.PushStyleColor(ImGuiCol.Text, SpheneCustomTheme.Colors.Warning);
                     }
-                    ImGui.TextUnformatted(GetJobScopeLabel(entry.SourceJobId));
+                    var scopeLabel = GetJobScopeLabel(entry.SourceJobId);
+                    var availableWidth = ImGui.GetContentRegionAvail().X;
+                    ImGui.TextUnformatted(scopeLabel);
+                    if (ImGui.IsItemHovered() && ImGui.CalcTextSize(scopeLabel).X > availableWidth)
+                    {
+                        ImGui.SetTooltip(scopeLabel);
+                    }
                     if (!present && currentKeys.Count > 0)
                     {
                         ImGui.PopStyleColor();
