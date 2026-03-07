@@ -132,7 +132,7 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
         {
             _hasUpdate = true;
         });
-        Mediator.Subscribe<CharacterDataCreatedMessage>(this, (_) =>
+        Mediator.Subscribe<CharacterDataReadyForPushMessage>(this, (_) =>
         {
             if (_modLearningTabActive)
             {
