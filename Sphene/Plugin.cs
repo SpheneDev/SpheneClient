@@ -103,6 +103,8 @@ public sealed class Plugin : IDalamudPlugin
             collection.AddSingleton(commandManager);
             collection.AddSingleton(framework);
             collection.AddSingleton(pluginInterface);
+            collection.AddSingleton(textureProvider);
+            collection.AddSingleton(gameData);
 
             // ShrinkU integration services and windows
             collection.AddSingleton<Microsoft.Extensions.Logging.ILogger>(s => s.GetRequiredService<ILoggerFactory>().CreateLogger("ShrinkU"));

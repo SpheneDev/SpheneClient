@@ -3,6 +3,8 @@ using Dalamud.Interface;
 using Dalamud.Interface.Colors;
 using Dalamud.Interface.Utility;
 using Dalamud.Interface.Utility.Raii;
+using Dalamud.Interface.Textures.TextureWraps;
+using Dalamud.Plugin.Services;
 using Sphene.API.Data;
 using Sphene.API.Data.Enum;
 using Sphene.FileCache;
@@ -28,6 +30,7 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
 {
     private readonly record struct CurrentReplacement(string Hash, string FileSwapPath, string[] GamePaths);
     private readonly record struct ExpectedReplacement(ObjectKind Kind, FileReplacement Replacement, uint SourceJobId);
+    private readonly record struct ScopeDisplayInfo(uint[] JobIds, string Tooltip);
     private readonly CharacterAnalyzer _characterAnalyzer;
     private readonly Progress<(string, int)> _conversionProgress = new();
     private readonly IpcManager _ipcManager;
@@ -41,6 +44,9 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
     private readonly ShrinkU.Services.TextureConversionService _shrinkuConversionService;
     private readonly CharacterDataSqliteStore _characterDataSqliteStore;
     private readonly SpheneConfigService _spheneConfigService;
+    private readonly ITextureProvider _textureProvider;
+    private readonly Dictionary<uint, uint> _jobIconById = [];
+    private readonly HashSet<uint> _jobIconResolveFailedLogged = [];
     private readonly Dictionary<string, string[]> _texturesToConvert = new(StringComparer.Ordinal);
     private Dictionary<ObjectKind, Dictionary<string, CharacterAnalyzer.FileDataEntry>>? _cachedAnalysis;
     private readonly CancellationTokenSource _conversionCancellationTokenSource = new();
@@ -104,7 +110,8 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
         ShrinkU.Services.TextureBackupService shrinkuBackupService,
         ShrinkU.Services.TextureConversionService shrinkuConversionService,
         CharacterDataSqliteStore characterDataSqliteStore,
-        SpheneConfigService spheneConfigService)
+        SpheneConfigService spheneConfigService,
+        ITextureProvider textureProvider)
         : base(logger, mediator, "Sphene Character Data Analysis", performanceCollectorService)
     {
         _characterAnalyzer = characterAnalyzer;
@@ -119,6 +126,8 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
         _shrinkuConversionService = shrinkuConversionService;
         _characterDataSqliteStore = characterDataSqliteStore;
         _spheneConfigService = spheneConfigService;
+        _textureProvider = textureProvider;
+        BuildJobIconMap();
         Mediator.Subscribe<CharacterDataAnalyzedMessage>(this, (_) =>
         {
             _hasUpdate = true;
@@ -409,11 +418,29 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                     var jobName = jobId == 0
                         ? "All Jobs"
                         : (_uiSharedService.JobData.TryGetValue((ushort)jobId, out var jobLabel) ? jobLabel : jobId.ToString());
-                    if (ImGui.Selectable(jobName, _selectedModLearningJobId == jobId))
+                    var selected = _selectedModLearningJobId == jobId;
+                    using (ImRaii.PushId($"job_{jobId}"))
                     {
-                        _selectedModLearningJobId = jobId;
-                        _selectedModLearningMod = string.Empty;
-                        _selectedModLearningOption = string.Empty;
+                        var iconTexture = GetJobIconTexture(jobId);
+                        if (iconTexture != null)
+                        {
+                            ImGui.Image(iconTexture.Handle, new Vector2(16f * ImGuiHelpers.GlobalScale, 16f * ImGuiHelpers.GlobalScale));
+                        }
+                        else if (jobId == 0)
+                        {
+                            _uiSharedService.IconText(FontAwesomeIcon.Users);
+                        }
+                        else
+                        {
+                            _uiSharedService.IconText(FontAwesomeIcon.User);
+                        }
+                        ImGui.SameLine();
+                        if (ImGui.Selectable($"{jobName}##select", selected))
+                        {
+                            _selectedModLearningJobId = jobId;
+                            _selectedModLearningMod = string.Empty;
+                            _selectedModLearningOption = string.Empty;
+                        }
                     }
                 }
             }
@@ -492,8 +519,13 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
             return;
         }
 
-        var selectedList = GetDisplayListForJob(selectedState, _selectedModLearningJobId);
-        var selectedListWithKind = GetDisplayListForJobWithKind(selectedState, _selectedModLearningJobId);
+        var selectedListWithKind = GetDisplayListForAllJobsWithKind(selectedState);
+        var selectedList = selectedListWithKind
+            .Select(entry => entry.Replacement)
+            .GroupBy(GetReplacementIdentityKey, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .ToList();
+        var scopeDisplayByReplacement = GetScopeDisplayByReplacement(selectedListWithKind);
         var expectedKeys = BuildExpectedReplacementKeySet(selectedList);
         var currentKeys = currentKeysSnapshot;
         var keySummary = GetKeyComparisonSummary(expectedKeys, currentKeys);
@@ -509,7 +541,7 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
             var summaryColor = keySummary.MissingCount > 0 ? ImGuiColors.DalamudYellow : ImGuiColors.ParsedGreen;
             UiSharedService.ColorTextWrapped($"Comparison: {keySummary.PresentCount}/{keySummary.ExpectedCount} present, {keySummary.MissingCount} missing, {keySummary.ExtraCount} extra",
                 summaryColor);
-            ImGui.TextUnformatted($"Expected (job) entries: {keySummary.ExpectedCount}");
+            ImGui.TextUnformatted($"Expected (option) entries: {keySummary.ExpectedCount}");
             ImGui.TextUnformatted($"Current total entries: {currentKeys.Count}");
             if (!string.IsNullOrWhiteSpace(_modLearningCurrentDataHash))
             {
@@ -566,12 +598,13 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                     {
                         ImGui.PushStyleColor(ImGuiCol.Text, SpheneCustomTheme.Colors.Warning);
                     }
-                    var scopeLabel = GetJobScopeLabel(entry.SourceJobId);
-                    var availableWidth = ImGui.GetContentRegionAvail().X;
-                    ImGui.TextUnformatted(scopeLabel);
-                    if (ImGui.IsItemHovered() && ImGui.CalcTextSize(scopeLabel).X > availableWidth)
+                    var replacementKey = GetReplacementIdentityKey(replacement);
+                    var scopeInfo = scopeDisplayByReplacement.TryGetValue(replacementKey, out var displayInfo)
+                        ? displayInfo
+                        : new ScopeDisplayInfo([entry.SourceJobId], $"Scopes: {GetJobScopeLabel(entry.SourceJobId)}");
+                    if (DrawScopeIcons(scopeInfo.JobIds) && !string.IsNullOrWhiteSpace(scopeInfo.Tooltip))
                     {
-                        ImGui.SetTooltip(scopeLabel);
+                        ImGui.SetTooltip(scopeInfo.Tooltip);
                     }
                     if (!present && currentKeys.Count > 0)
                     {
@@ -1911,22 +1944,13 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
         return combined;
     }
 
-    private static List<ExpectedReplacement> GetDisplayListForJobWithKind(LearnedModState state, uint jobId)
+    private static List<ExpectedReplacement> GetDisplayListForAllJobsWithKind(LearnedModState state)
     {
         var jobMap = BuildJobFileMapWithKind(state);
-        if (jobId == 0)
-        {
-            return jobMap.TryGetValue(0, out var globalList) ? globalList : [];
-        }
-
         var combined = new List<ExpectedReplacement>();
-        if (jobMap.TryGetValue(0, out var global))
+        foreach (var entry in jobMap)
         {
-            combined.AddRange(global);
-        }
-        if (jobMap.TryGetValue(jobId, out var jobList))
-        {
-            combined.AddRange(jobList);
+            combined.AddRange(entry.Value);
         }
 
         return combined;
@@ -1968,6 +1992,134 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
         return _uiSharedService.JobData.TryGetValue((ushort)jobId, out var jobName)
             ? $"{jobName} ({jobId})"
             : $"Job {jobId}";
+    }
+
+    private Dictionary<string, ScopeDisplayInfo> GetScopeDisplayByReplacement(IEnumerable<ExpectedReplacement> entries)
+    {
+        var result = new Dictionary<string, ScopeDisplayInfo>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in entries)
+        {
+            var key = GetReplacementIdentityKey(entry.Replacement);
+            if (!result.TryGetValue(key, out var existing))
+            {
+                var scope = GetJobScopeLabel(entry.SourceJobId);
+                result[key] = new ScopeDisplayInfo([entry.SourceJobId], $"Scopes: {scope}");
+                continue;
+            }
+
+            var jobIds = existing.JobIds.ToHashSet();
+            jobIds.Add(entry.SourceJobId);
+            var orderedJobIds = jobIds.OrderBy(id => id == 0 ? uint.MinValue : id).ToArray();
+            var orderedLabels = orderedJobIds.Select(GetJobScopeLabel);
+            var tooltip = $"Scopes: {string.Join(", ", orderedLabels)}";
+            result[key] = new ScopeDisplayInfo(orderedJobIds, tooltip);
+        }
+
+        return result;
+    }
+
+    private bool DrawScopeIcons(IEnumerable<uint> jobIds)
+    {
+        var hadIcon = false;
+        var anyHovered = false;
+        foreach (var jobId in jobIds)
+        {
+            if (hadIcon)
+            {
+                ImGui.SameLine(0, 4f * ImGuiHelpers.GlobalScale);
+            }
+            hadIcon = true;
+            DrawSingleScopeIcon(jobId);
+            if (ImGui.IsItemHovered())
+            {
+                anyHovered = true;
+            }
+        }
+
+        return anyHovered;
+    }
+
+    private void DrawSingleScopeIcon(uint jobId)
+    {
+        var size = 18f * ImGuiHelpers.GlobalScale;
+        var iconTexture = GetJobIconTexture(jobId);
+        if (iconTexture != null)
+        {
+            ImGui.Image(iconTexture.Handle, new Vector2(size, size));
+            return;
+        }
+
+        _uiSharedService.IconText(jobId == 0 ? FontAwesomeIcon.Users : FontAwesomeIcon.User);
+    }
+
+    private IDalamudTextureWrap? GetJobIconTexture(uint jobId)
+    {
+        if (!_jobIconById.TryGetValue(jobId, out var iconId) || iconId == 0)
+        {
+            return null;
+        }
+        return ResolveGameIconTexture(iconId);
+    }
+
+    private IDalamudTextureWrap? ResolveGameIconTexture(uint iconId)
+    {
+        try
+        {
+            if (_textureProvider.TryGetFromGameIcon(new(iconId), out var texture)
+                && texture.TryGetWrap(out IDalamudTextureWrap? wrap, out Exception? _))
+            {
+                _jobIconResolveFailedLogged.Remove(iconId);
+                return wrap;
+            }
+
+            if (_jobIconResolveFailedLogged.Add(iconId))
+            {
+                _logger.LogDebug("[ModLearning] Failed to resolve game icon texture for iconId={iconId}", iconId);
+            }
+            return null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogTrace(ex, "Could not resolve game icon texture for iconId={iconId}", iconId);
+            return null;
+        }
+    }
+
+    private void BuildJobIconMap()
+    {
+        try
+        {
+            _jobIconById[0] = 62516u;
+            foreach (var jobId in _uiSharedService.JobData.Keys)
+            {
+                if (jobId == 0) continue;
+                _jobIconById[jobId] = GetGlowingJobIconId(jobId);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to build job icon map for Mod Learning scope display");
+        }
+    }
+
+    private static uint GetGlowingJobIconId(uint jobId)
+    {
+        return jobId switch
+        {
+            >= 1 and <= 7 => 62300u + jobId,
+            >= 8 and <= 18 => 62494u + jobId,
+            >= 19 and <= 25 => 62382u + jobId,
+            26 => 62308u,
+            >= 27 and <= 28 => 62381u + jobId,
+            29 => 62309u,
+            >= 30 and <= 42 => 62380u + jobId,
+            _ => 62301u
+        };
+    }
+
+    private static string GetReplacementIdentityKey(FileReplacement replacement)
+    {
+        return string.IsNullOrWhiteSpace(replacement.Hash) ? replacement.ResolvedPath : replacement.Hash;
     }
 
     private void DrawStoredData()
