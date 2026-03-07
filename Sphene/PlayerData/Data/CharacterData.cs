@@ -61,6 +61,7 @@ public class CharacterData
         {
             var fileSwapsToAdd = item.Value.Where(f => f.IsFileSwap).Select(f => f.ToFileReplacementDto());
             fileReplacements[item.Key].AddRange(fileSwapsToAdd);
+            fileReplacements[item.Key] = DeduplicateGamePaths(fileReplacements[item.Key]);
         }
 
         return new API.Data.CharacterData()
@@ -75,5 +76,41 @@ public class CharacterData
             PetNamesData = PetNamesData,
             BypassEmoteData = BypassEmoteData
         };
+    }
+
+    private static List<FileReplacementData> DeduplicateGamePaths(List<FileReplacementData> entries)
+    {
+        if (entries.Count == 0) return entries;
+
+        var result = new List<FileReplacementData>(entries.Count);
+        var claimedGamePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var swapGamePaths = entries
+            .Where(e => !string.IsNullOrEmpty(e.FileSwapPath))
+            .SelectMany(e => e.GamePaths ?? [])
+            .Where(p => !string.IsNullOrWhiteSpace(p))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var entry in entries)
+        {
+            var sourcePaths = entry.GamePaths ?? [];
+            var isSwap = !string.IsNullOrEmpty(entry.FileSwapPath);
+            var uniquePaths = sourcePaths
+                .Where(p => !string.IsNullOrWhiteSpace(p))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Where(p => isSwap || !swapGamePaths.Contains(p))
+                .Where(claimedGamePaths.Add)
+                .ToArray();
+
+            if (uniquePaths.Length == 0) continue;
+
+            result.Add(new FileReplacementData
+            {
+                FileSwapPath = entry.FileSwapPath,
+                Hash = entry.Hash,
+                GamePaths = uniquePaths
+            });
+        }
+
+        return result;
     }
 }

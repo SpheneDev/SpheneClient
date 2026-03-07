@@ -34,7 +34,7 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
     private readonly SpheneConfigService _configService;
     private readonly TransientConfigService _transientConfigService;
     private readonly Dictionary<string, Dictionary<string, Dictionary<string, HashSet<string>>>> _modOptionIndexCache = [];
-    private readonly Dictionary<string, Dictionary<string, Dictionary<string, OptionFileEntry>>> _modOptionFileMapCache = [];
+    private readonly Dictionary<string, Dictionary<string, OptionGroupFileEntry>> _modOptionFileMapCache = [];
     private readonly Dictionary<string, string> _stateHashCache = new(StringComparer.Ordinal);
     private readonly Dictionary<string, Dictionary<string, HashSet<string>>> _modResourceLinks = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, Dictionary<string, Dictionary<string, HashSet<string>>>> _modResourceLinksBySettings = new(StringComparer.OrdinalIgnoreCase);
@@ -702,6 +702,7 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
                     var canAdd = replacement.IsFileSwap || File.Exists(replacement.ResolvedPath);
                     if (!existingHashes.Contains(replacement.Hash) && canAdd)
                     {
+                        RemoveGamePathsFromOtherEntries(targetList, replacement.GamePaths);
                         targetList.Add(replacement.ToFileReplacementDto());
                         existingHashes.Add(replacement.Hash);
                         modRestoredCount++;
@@ -887,6 +888,7 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
             if (!IsReplacementEffective(replacement, resolvedMap) && !IsScdLinkedToEffectiveParent(replacement, scdWithEffectiveParents)) continue;
             if (!existingHashes.Contains(replacement.Hash))
             {
+                RemoveGamePathsFromOtherEntries(targetList, replacement.GamePaths);
                 targetList.Add(replacement.ToFileReplacementDto());
                 existingHashes.Add(replacement.Hash);
                 changed++;
@@ -911,6 +913,8 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
         var existing = targetList.FirstOrDefault(x => string.Equals(x.Hash, replacement.Hash, StringComparison.OrdinalIgnoreCase));
         if (existing == null) return false;
 
+        RemoveGamePathsFromOtherEntries(targetList, replacement.GamePaths, existing);
+
         var mergedPaths = (existing.GamePaths ?? [])
             .Select(NormalizePathString)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -929,6 +933,39 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
         }
 
         return changed;
+    }
+
+    private static void RemoveGamePathsFromOtherEntries(List<FileReplacementData> targetList, IEnumerable<string> gamePaths, FileReplacementData? keepEntry = null)
+    {
+        var normalizedPaths = gamePaths
+            .Select(NormalizePathString)
+            .Where(p => !string.IsNullOrWhiteSpace(p))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (normalizedPaths.Count == 0) return;
+
+        for (var i = targetList.Count - 1; i >= 0; i--)
+        {
+            var entry = targetList[i];
+            if (ReferenceEquals(entry, keepEntry)) continue;
+
+            var existingPaths = (entry.GamePaths ?? [])
+                .Select(NormalizePathString)
+                .ToList();
+            if (existingPaths.Count == 0) continue;
+
+            var filtered = existingPaths
+                .Where(p => !normalizedPaths.Contains(p))
+                .ToArray();
+            if (filtered.Length == existingPaths.Count) continue;
+
+            if (filtered.Length == 0)
+            {
+                targetList.RemoveAt(i);
+                continue;
+            }
+
+            entry.GamePaths = filtered;
+        }
     }
 
     private static IEnumerable<FileReplacement> GetAllReplacements(ModFileFragment fragment)
@@ -2133,7 +2170,10 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
     {
         var replacementSet = modReplacements.ToHashSet();
         var optionIndex = GetOptionIndex(modDirectoryPath, modDirectoryName);
-        var selectedOptions = settingsDict.ToDictionary(k => k.Key, k => new HashSet<string>(k.Value, StringComparer.Ordinal), StringComparer.Ordinal);
+        var optionFileMap = GetOptionFileMap(modDirectoryPath, modDirectoryName);
+        var selectedOptionLists = settingsDict.ToDictionary(k => k.Key, k => k.Value.ToList(), StringComparer.Ordinal);
+        var selectedOptionSets = selectedOptionLists.ToDictionary(k => k.Key, k => new HashSet<string>(k.Value, StringComparer.Ordinal), StringComparer.Ordinal);
+        var optionPriorityMap = BuildOptionPriorityMap(selectedOptionLists, optionFileMap);
         var states = new Dictionary<string, OptionState>(StringComparer.Ordinal);
         var baseKey = string.Empty;
         var baseFragments = new Dictionary<ObjectKind, ModFileFragment>();
@@ -2151,7 +2191,7 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
             {
                 foreach (var replacement in relevant)
                 {
-                    var optionMatches = GetOptionMatches(optionIndex, selectedOptions, replacement.GamePaths);
+                    var optionMatches = GetOptionMatches(optionIndex, selectedOptionSets, replacement.GamePaths);
                     var seenInTransient = !requireTransientObservation || replacement.GamePaths.Any(gp => observedTransientPaths.Contains(NormalizePathString(gp)));
                     if (optionMatches.Count == 0)
                     {
@@ -2159,28 +2199,32 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
                         continue;
                     }
 
-                    foreach (var match in optionMatches)
+                    var winningMatch = SelectWinningOptionMatch(optionMatches, optionPriorityMap);
+                    if (winningMatch == null)
                     {
-                        if (!states.TryGetValue(match.OptionKey, out var state))
-                        {
-                            var settings = new Dictionary<string, List<string>>(StringComparer.Ordinal)
-                            {
-                                [match.GroupName] = [match.OptionName]
-                            };
-                            state = new OptionState(settings, new Dictionary<ObjectKind, ModFileFragment>());
-                            states[match.OptionKey] = state;
-                        }
-                        if (!seenInTransient)
-                        {
-                            continue;
-                        }
-                        AddReplacementToOptionState(state, kind, replacement);
+                        AddReplacementToOptionState(states[baseKey], kind, replacement);
+                        continue;
                     }
+
+                    if (!states.TryGetValue(winningMatch.OptionKey, out var optionState))
+                    {
+                        var settings = new Dictionary<string, List<string>>(StringComparer.Ordinal)
+                        {
+                            [winningMatch.GroupName] = [winningMatch.OptionName]
+                        };
+                        optionState = new OptionState(settings, new Dictionary<ObjectKind, ModFileFragment>());
+                        states[winningMatch.OptionKey] = optionState;
+                    }
+                    if (!seenInTransient)
+                    {
+                        continue;
+                    }
+                    AddReplacementToOptionState(optionState, kind, replacement);
                 }
             }
         }
 
-        foreach (var kvp in selectedOptions)
+        foreach (var kvp in selectedOptionLists)
         {
             foreach (var optionName in kvp.Value)
             {
@@ -2196,7 +2240,7 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
             }
         }
 
-        var optionReplacements = await BuildOptionFileReplacementsAsync(modDirectoryPath, modDirectoryName, selectedOptions).ConfigureAwait(false);
+        var optionReplacements = await BuildOptionFileReplacementsAsync(modDirectoryPath, modDirectoryName, selectedOptionLists).ConfigureAwait(false);
         foreach (var optionEntry in optionReplacements)
         {
             if (!states.TryGetValue(optionEntry.Key, out var state))
@@ -2243,6 +2287,27 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
         return matches;
     }
 
+    private static OptionMatch? SelectWinningOptionMatch(List<OptionMatch> matches, Dictionary<string, OptionPriorityInfo> optionPriorityMap)
+    {
+        if (matches.Count == 0) return null;
+
+        var winner = matches[0];
+        var winnerPriority = GetOptionPriorityInfo(winner.OptionKey, optionPriorityMap);
+
+        for (var i = 1; i < matches.Count; i++)
+        {
+            var current = matches[i];
+            var currentPriority = GetOptionPriorityInfo(current.OptionKey, optionPriorityMap);
+            if (IsHigherOptionPriority(currentPriority, winnerPriority))
+            {
+                winner = current;
+                winnerPriority = currentPriority;
+            }
+        }
+
+        return winner;
+    }
+
     private static void AddReplacementToOptionState(OptionState state, ObjectKind kind, FileReplacement replacement)
     {
         if (!state.Fragments.TryGetValue(kind, out var fragment))
@@ -2271,7 +2336,7 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
         return index;
     }
 
-    private Dictionary<string, Dictionary<string, OptionFileEntry>> GetOptionFileMap(string modDirectoryPath, string modDirectoryName)
+    private Dictionary<string, OptionGroupFileEntry> GetOptionFileMap(string modDirectoryPath, string modDirectoryName)
     {
         lock (_lock)
         {
@@ -2356,11 +2421,14 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
         }
     }
 
-    private sealed record OptionFileEntry(Dictionary<string, string> Files, Dictionary<string, string> FileSwaps);
+    private sealed record OptionFileEntry(Dictionary<string, string> Files, Dictionary<string, string> FileSwaps, int Priority);
+    private sealed record OptionGroupFileEntry(int Priority, Dictionary<string, OptionFileEntry> Options);
+    private readonly record struct OptionPriorityWinner(string OptionKey, int GroupPriority, int OptionPriority, int SelectedOrder);
+    private readonly record struct OptionPriorityInfo(int GroupPriority, int OptionPriority, int SelectedOrder);
 
-    private Dictionary<string, Dictionary<string, OptionFileEntry>> BuildOptionFileMap(string modDirectoryPath, string modDirectoryName)
+    private Dictionary<string, OptionGroupFileEntry> BuildOptionFileMap(string modDirectoryPath, string modDirectoryName)
     {
-        var result = new Dictionary<string, Dictionary<string, OptionFileEntry>>(StringComparer.Ordinal);
+        var result = new Dictionary<string, OptionGroupFileEntry>(StringComparer.Ordinal);
         var modPath = Path.Combine(modDirectoryPath, modDirectoryName);
         if (!Directory.Exists(modPath)) return result;
 
@@ -2374,6 +2442,7 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
                 var groupName = root.TryGetProperty("Name", out var nameElement)
                     ? nameElement.GetString() ?? string.Empty
                     : Path.GetFileNameWithoutExtension(file);
+                var groupPriority = ReadPriority(root, "Priority", 0);
 
                 if (!root.TryGetProperty("Options", out var optionsElement) || optionsElement.ValueKind != JsonValueKind.Array)
                 {
@@ -2381,6 +2450,7 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
                 }
 
                 var optionsMap = new Dictionary<string, OptionFileEntry>(StringComparer.Ordinal);
+                var optionIndex = 0;
                 foreach (var optionElement in optionsElement.EnumerateArray())
                 {
                     if (!optionElement.TryGetProperty("Name", out var optionNameElement)) continue;
@@ -2392,12 +2462,14 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
                     CollectOptionMappings(optionElement, "Files", files);
                     CollectOptionMappings(optionElement, "FileSwaps", swaps);
                     if (files.Count == 0 && swaps.Count == 0) continue;
-                    optionsMap[optionName] = new OptionFileEntry(files, swaps);
+                    var optionPriority = ReadPriority(optionElement, "Priority", optionIndex);
+                    optionsMap[optionName] = new OptionFileEntry(files, swaps, optionPriority);
+                    optionIndex++;
                 }
 
                 if (optionsMap.Count > 0)
                 {
-                    result[groupName] = optionsMap;
+                    result[groupName] = new OptionGroupFileEntry(groupPriority, optionsMap);
                 }
             }
             catch (Exception ex)
@@ -2425,22 +2497,36 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
         }
     }
 
-    private async Task<Dictionary<string, List<FileReplacement>>> BuildOptionFileReplacementsAsync(string modDirectoryPath, string modDirectoryName, Dictionary<string, HashSet<string>> selectedOptions)
+    private async Task<Dictionary<string, List<FileReplacement>>> BuildOptionFileReplacementsAsync(string modDirectoryPath, string modDirectoryName, Dictionary<string, List<string>> selectedOptions)
     {
         var optionFileMap = GetOptionFileMap(modDirectoryPath, modDirectoryName);
         var optionReplacements = new Dictionary<string, List<FileReplacement>>(StringComparer.Ordinal);
         var filePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var winnerByGamePath = new Dictionary<string, OptionPriorityWinner>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var groupEntry in selectedOptions)
         {
-            if (!optionFileMap.TryGetValue(groupEntry.Key, out var options)) continue;
-            foreach (var optionName in groupEntry.Value)
+            if (!optionFileMap.TryGetValue(groupEntry.Key, out var groupFileEntry)) continue;
+            for (var selectedOrder = 0; selectedOrder < groupEntry.Value.Count; selectedOrder++)
             {
-                if (!options.TryGetValue(optionName, out var entry)) continue;
+                var optionName = groupEntry.Value[selectedOrder];
+                if (!groupFileEntry.Options.TryGetValue(optionName, out var entry)) continue;
+                var optionKey = $"{groupEntry.Key}\u001F{optionName}";
                 foreach (var fileEntry in entry.Files)
                 {
                     var resolvedPath = Path.Combine(modDirectoryPath, modDirectoryName, fileEntry.Value);
                     filePaths.Add(resolvedPath);
+                    if (ShouldReplaceWinner(winnerByGamePath, fileEntry.Key, optionKey, groupFileEntry.Priority, entry.Priority, selectedOrder))
+                    {
+                        winnerByGamePath[fileEntry.Key] = new OptionPriorityWinner(optionKey, groupFileEntry.Priority, entry.Priority, selectedOrder);
+                    }
+                }
+                foreach (var swapEntry in entry.FileSwaps)
+                {
+                    if (ShouldReplaceWinner(winnerByGamePath, swapEntry.Key, optionKey, groupFileEntry.Priority, entry.Priority, selectedOrder))
+                    {
+                        winnerByGamePath[swapEntry.Key] = new OptionPriorityWinner(optionKey, groupFileEntry.Priority, entry.Priority, selectedOrder);
+                    }
                 }
             }
         }
@@ -2453,10 +2539,10 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
 
         foreach (var groupEntry in selectedOptions)
         {
-            if (!optionFileMap.TryGetValue(groupEntry.Key, out var options)) continue;
+            if (!optionFileMap.TryGetValue(groupEntry.Key, out var groupFileEntry)) continue;
             foreach (var optionName in groupEntry.Value)
             {
-                if (!options.TryGetValue(optionName, out var entry)) continue;
+                if (!groupFileEntry.Options.TryGetValue(optionName, out var entry)) continue;
                 var optionKey = $"{groupEntry.Key}\u001F{optionName}";
                 if (!optionReplacements.TryGetValue(optionKey, out var list))
                 {
@@ -2466,6 +2552,10 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
 
                 foreach (var fileEntry in entry.Files)
                 {
+                    if (!winnerByGamePath.TryGetValue(fileEntry.Key, out var winner) || !string.Equals(winner.OptionKey, optionKey, StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
                     var resolvedPath = Path.Combine(modDirectoryPath, modDirectoryName, fileEntry.Value);
                     if (!fileCache.TryGetValue(resolvedPath, out var cacheEntry) || cacheEntry == null) continue;
                     var replacement = new FileReplacement([fileEntry.Key], resolvedPath);
@@ -2475,6 +2565,10 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
 
                 foreach (var swapEntry in entry.FileSwaps)
                 {
+                    if (!winnerByGamePath.TryGetValue(swapEntry.Key, out var winner) || !string.Equals(winner.OptionKey, optionKey, StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
                     var replacement = new FileReplacement([swapEntry.Key], swapEntry.Value);
                     list.Add(replacement);
                 }
@@ -2482,6 +2576,100 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
         }
 
         return optionReplacements;
+    }
+
+    private static Dictionary<string, OptionPriorityInfo> BuildOptionPriorityMap(Dictionary<string, List<string>> selectedOptions, Dictionary<string, OptionGroupFileEntry> optionFileMap)
+    {
+        var result = new Dictionary<string, OptionPriorityInfo>(StringComparer.Ordinal);
+        foreach (var groupEntry in selectedOptions)
+        {
+            optionFileMap.TryGetValue(groupEntry.Key, out var groupInfo);
+            var groupPriority = groupInfo?.Priority ?? 0;
+            for (var selectedOrder = 0; selectedOrder < groupEntry.Value.Count; selectedOrder++)
+            {
+                var optionName = groupEntry.Value[selectedOrder];
+                var optionKey = $"{groupEntry.Key}\u001F{optionName}";
+                var optionPriority = selectedOrder;
+                if (groupInfo != null && groupInfo.Options.TryGetValue(optionName, out var optionInfo))
+                {
+                    optionPriority = optionInfo.Priority;
+                }
+
+                result[optionKey] = new OptionPriorityInfo(groupPriority, optionPriority, selectedOrder);
+            }
+        }
+        return result;
+    }
+
+    private static OptionPriorityInfo GetOptionPriorityInfo(string optionKey, Dictionary<string, OptionPriorityInfo> optionPriorityMap)
+    {
+        if (optionPriorityMap.TryGetValue(optionKey, out var info))
+        {
+            return info;
+        }
+
+        return new OptionPriorityInfo(0, 0, -1);
+    }
+
+    private static bool IsHigherOptionPriority(OptionPriorityInfo candidate, OptionPriorityInfo current)
+    {
+        if (candidate.GroupPriority != current.GroupPriority)
+        {
+            return candidate.GroupPriority > current.GroupPriority;
+        }
+
+        if (candidate.OptionPriority != current.OptionPriority)
+        {
+            return candidate.OptionPriority > current.OptionPriority;
+        }
+
+        return candidate.SelectedOrder > current.SelectedOrder;
+    }
+
+    private static bool ShouldReplaceWinner(Dictionary<string, OptionPriorityWinner> winnerByGamePath, string gamePath, string optionKey, int groupPriority, int optionPriority, int selectedOrder)
+    {
+        if (!winnerByGamePath.TryGetValue(gamePath, out var current))
+        {
+            return true;
+        }
+
+        if (groupPriority != current.GroupPriority)
+        {
+            return groupPriority > current.GroupPriority;
+        }
+
+        if (optionPriority != current.OptionPriority)
+        {
+            return optionPriority > current.OptionPriority;
+        }
+
+        if (selectedOrder != current.SelectedOrder)
+        {
+            return selectedOrder > current.SelectedOrder;
+        }
+
+        return !string.Equals(optionKey, current.OptionKey, StringComparison.Ordinal);
+    }
+
+    private static int ReadPriority(JsonElement element, string propertyName, int fallback)
+    {
+        if (!element.TryGetProperty(propertyName, out var priorityElement))
+        {
+            return fallback;
+        }
+
+        if (priorityElement.ValueKind == JsonValueKind.Number && priorityElement.TryGetInt32(out var value))
+        {
+            return value;
+        }
+
+        if (priorityElement.ValueKind == JsonValueKind.String
+            && int.TryParse(priorityElement.GetString(), out var parsed))
+        {
+            return parsed;
+        }
+
+        return fallback;
     }
 
 
