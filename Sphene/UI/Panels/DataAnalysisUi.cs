@@ -426,9 +426,12 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                 foreach (var modName in sortedModsForJob)
                 {
                     var modDisplayName = GetModDisplayName(modDisplayNames, modName);
+                    var modVersionLabel = GetModVersionLabel(modName, _selectedModLearningJobId);
+                    var versionSuffix = $" [v{modVersionLabel}]";
                     if (!string.IsNullOrWhiteSpace(_modLearningFilter)
                         && !modDisplayName.Contains(_modLearningFilter, StringComparison.OrdinalIgnoreCase)
-                        && !modName.Contains(_modLearningFilter, StringComparison.OrdinalIgnoreCase))
+                        && !modName.Contains(_modLearningFilter, StringComparison.OrdinalIgnoreCase)
+                        && !modVersionLabel.Contains(_modLearningFilter, StringComparison.OrdinalIgnoreCase))
                     {
                         continue;
                     }
@@ -438,10 +441,15 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                     var labelColor = GetModListColor(usedByJob, modRuntime, comparison);
                     var emoteIndicator = emoteOverriddenMods.Contains(modName) ? " • emote overridden" : string.Empty;
                     ImGui.PushStyleColor(ImGuiCol.Text, labelColor);
-                    if (ImGui.Selectable($"{modDisplayName}{emoteIndicator}##{modName}", string.Equals(_selectedModLearningMod, modName, StringComparison.Ordinal)))
+                    if (ImGui.Selectable($"{modDisplayName}{versionSuffix}{emoteIndicator}##{modName}", string.Equals(_selectedModLearningMod, modName, StringComparison.Ordinal)))
                     {
                         _selectedModLearningMod = modName;
                         _selectedModLearningOption = string.Empty;
+                    }
+                    if (ImGui.IsItemHovered())
+                    {
+                        var tooltip = $"Display: {modDisplayName}{Environment.NewLine}Folder: {modName}{Environment.NewLine}Version: {modVersionLabel}";
+                        ImGui.SetTooltip(tooltip);
                     }
                     ImGui.PopStyleColor();
                 }
@@ -1736,6 +1744,31 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
     {
         if (string.IsNullOrWhiteSpace(modFolder)) return string.Empty;
         return displayNamesByFolder.TryGetValue(modFolder, out var displayName) ? displayName : modFolder;
+    }
+
+    private string GetModVersionLabel(string modName, uint jobId)
+    {
+        lock (_modLearningLock)
+        {
+            if (!_modLearningStatesByMod.TryGetValue(modName, out var states) || states.Count == 0)
+            {
+                return "unknown";
+            }
+
+            var versions = states
+                .Where(state => OptionUsedByJob(state, jobId))
+                .Select(state => state.ModVersion?.Trim())
+                .Where(version => !string.IsNullOrWhiteSpace(version))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            return versions.Count switch
+            {
+                0 => "unknown",
+                1 => versions[0]!,
+                _ => string.Join(" / ", versions.OrderBy(version => version, StringComparer.OrdinalIgnoreCase))
+            };
+        }
     }
 
     private List<string> GetModsForSelectedJob()

@@ -2933,25 +2933,40 @@ public class CompactUi : WindowMediatorSubscriberBase
         }
     }
 
-    private static List<(string Format, long OriginalSize, List<string> FilePaths)> GetTextureDataFromAnalysis(Dictionary<ObjectKind, Dictionary<string, CharacterAnalyzer.FileDataEntry>> analysis)
+   private List<(string Format, long OriginalSize, List<string> FilePaths)> GetTextureDataFromAnalysis(Dictionary<ObjectKind, Dictionary<string, CharacterAnalyzer.FileDataEntry>> analysis)
     {
-        var textureData = new List<(string Format, long OriginalSize, List<string> FilePaths)>();
-        var totalFiles = 0;
-        var textureFiles = 0;
-
-        foreach (var objectKindData in analysis.Values)
+        for (var attempt = 0; attempt < 3; attempt++)
         {
-            foreach (var fileData in objectKindData.Values)
+            var textureData = new List<(string Format, long OriginalSize, List<string> FilePaths)>();
+            try
             {
-                totalFiles++;
-                if (fileData.FilePaths != null && fileData.FilePaths.Count > 0 && fileData.Format != null && !string.IsNullOrEmpty(fileData.Format.Value))
+                var objectKindSnapshots = analysis.Values.ToArray();
+                foreach (var objectKindData in objectKindSnapshots)
                 {
-                    textureFiles++;
-                    textureData.Add((fileData.Format.Value, fileData.OriginalSize, fileData.FilePaths));
+                    var fileSnapshots = objectKindData.Values.ToArray();
+                    foreach (var fileData in fileSnapshots)
+                    {
+                        if (fileData.FilePaths != null && fileData.FilePaths.Count > 0 && fileData.Format != null && !string.IsNullOrEmpty(fileData.Format.Value))
+                        {
+                            textureData.Add((fileData.Format.Value, fileData.OriginalSize, fileData.FilePaths));
+                        }
+                    }
                 }
+
+                return textureData;
+            }
+            catch (InvalidOperationException ex) when (attempt < 2)
+            {
+                _logger.LogDebug(ex, "Analysis changed during texture enumeration, retrying ({attempt}/3)", attempt + 1);
+            }
+            catch (InvalidOperationException ex)
+            {
+                _logger.LogWarning(ex, "Analysis changed repeatedly during texture enumeration");
+                return [];
             }
         }
-        return textureData;
+
+        return [];
     }
 
     // Draw a small spinning arrows indicator to visualize auto conversion
