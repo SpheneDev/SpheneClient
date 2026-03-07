@@ -3327,6 +3327,12 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
             ImGui.TableNextRow();
             ImGui.TableSetColumnIndex(0);
+            ImGui.TextUnformatted("Patch Layer Entries");
+            ImGui.TableSetColumnIndex(1);
+            ImGui.TextUnformatted(_characterDataStats.PatchLayerEntryCount.ToString("N0"));
+
+            ImGui.TableNextRow();
+            ImGui.TableSetColumnIndex(0);
             ImGui.TextUnformatted("Local Data Size");
             ImGui.TableSetColumnIndex(1);
             ImGui.TextUnformatted(FormatBytes(_characterDataStats.LocalDataBytes));

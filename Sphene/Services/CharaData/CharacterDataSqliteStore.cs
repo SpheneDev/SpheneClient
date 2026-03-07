@@ -84,6 +84,8 @@ public sealed class CharacterDataSqliteStore : DisposableMediatorSubscriberBase,
                 "DELETE FROM pair_character_data;" +
                 "DELETE FROM learned_mods;" +
                 "DELETE FROM resource_links;" +
+                "DELETE FROM patch_layer_entry;" +
+                "DELETE FROM content_addressable_cache;" +
                 "VACUUM;";
             await command.ExecuteNonQueryAsync().ConfigureAwait(false);
         }
@@ -108,6 +110,7 @@ public sealed class CharacterDataSqliteStore : DisposableMediatorSubscriberBase,
         long LearnedModsCount,
         long ResourceLinksCount,
         long CacheEntryCount,
+        long PatchLayerEntryCount,
         long LocalDataBytes,
         long PairDataBytes,
         DateTimeOffset? LastPairReceivedUtc,
@@ -136,6 +139,7 @@ public sealed class CharacterDataSqliteStore : DisposableMediatorSubscriberBase,
             var learnedModsDistinct = await ScalarLongAsync("SELECT COUNT(DISTINCT mod_directory_name) FROM learned_mods;").ConfigureAwait(false);
             var resourceLinksCount = await ScalarLongAsync("SELECT COUNT(*) FROM resource_links;").ConfigureAwait(false);
             var cacheEntryCount = await ScalarLongAsync("SELECT COUNT(*) FROM content_addressable_cache;").ConfigureAwait(false);
+            var patchLayerEntryCount = await ScalarLongAsync("SELECT COUNT(*) FROM patch_layer_entry;").ConfigureAwait(false);
             var localBytes = await ScalarLongAsync("SELECT COALESCE(SUM(LENGTH(data_blob)), 0) FROM local_character_data;").ConfigureAwait(false);
             var pairBytes = await ScalarLongAsync("SELECT COALESCE(SUM(LENGTH(data_blob)), 0) FROM pair_character_data;").ConfigureAwait(false);
             var lastPairReceived = await ScalarLongAsync("SELECT COALESCE(MAX(received_utc), 0) FROM pair_character_data;").ConfigureAwait(false);
@@ -152,6 +156,7 @@ public sealed class CharacterDataSqliteStore : DisposableMediatorSubscriberBase,
                 learnedModsCount,
                 resourceLinksCount,
                 cacheEntryCount,
+                patchLayerEntryCount,
                 localBytes,
                 pairBytes,
                 lastReceivedUtc,
@@ -162,6 +167,7 @@ public sealed class CharacterDataSqliteStore : DisposableMediatorSubscriberBase,
             Logger.LogWarning(ex, "Failed to read character data database stats");
             return new CharacterDataDatabaseStats(
                 _databasePath,
+                0,
                 0,
                 0,
                 0,
@@ -275,6 +281,18 @@ public sealed class CharacterDataSqliteStore : DisposableMediatorSubscriberBase,
         var scdLinksJson = JsonSerializer.Serialize(state.ScdLinks);
         var papEmotesJson = JsonSerializer.Serialize(state.PapEmotes);
         var lastUpdated = new DateTimeOffset(state.LastUpdated).ToUnixTimeMilliseconds();
+        var layerPayload = JsonSerializer.Serialize(new LearnedModLayerPayload(
+            characterKey,
+            state.ModDirectoryName,
+            state.ModVersion,
+            settingsHash,
+            settingsJson,
+            fragmentsJson,
+            scdLinksJson,
+            papEmotesJson,
+            lastUpdated));
+        var layerPayloadBytes = System.Text.Encoding.UTF8.GetBytes(layerPayload);
+        var layerContentHash = ComputeHash(layerPayloadBytes);
         Logger.LogDebug("Upsert learned mod: key={key} mod={mod} settingsHash={settingsHash} scdLinksLength={length}",
             characterKey, state.ModDirectoryName, settingsHash, scdLinksJson.Length);
 
@@ -283,6 +301,9 @@ public sealed class CharacterDataSqliteStore : DisposableMediatorSubscriberBase,
         {
             using var connection = new SqliteConnection(GetConnectionString());
             await connection.OpenAsync().ConfigureAwait(false);
+
+            await UpsertContentAddressableCacheAsync(connection, layerContentHash, "learned_mod_state", layerPayloadBytes, lastUpdated).ConfigureAwait(false);
+            await UpsertPatchLayerEntryAsync(connection, characterKey, state.ModDirectoryName, settingsHash, layerContentHash, lastUpdated).ConfigureAwait(false);
 
             using var command = connection.CreateCommand();
             command.CommandText = @"
@@ -471,6 +492,13 @@ public sealed class CharacterDataSqliteStore : DisposableMediatorSubscriberBase,
         using var sha256 = System.Security.Cryptography.SHA256.Create();
         var bytes = System.Text.Encoding.UTF8.GetBytes(input);
         var hash = sha256.ComputeHash(bytes);
+        return Convert.ToHexString(hash);
+    }
+
+    private static string ComputeHash(byte[] input)
+    {
+        using var sha256 = System.Security.Cryptography.SHA256.Create();
+        var hash = sha256.ComputeHash(input);
         return Convert.ToHexString(hash);
     }
 
@@ -729,7 +757,8 @@ public sealed class CharacterDataSqliteStore : DisposableMediatorSubscriberBase,
                 "last_seen_utc INTEGER NOT NULL," +
                 "PRIMARY KEY(mod_name, parent_game_path, scd_game_path)" +
                 ");" +
-                "CREATE INDEX IF NOT EXISTS idx_resource_links_mod ON resource_links (mod_name);";
+                "CREATE INDEX IF NOT EXISTS idx_resource_links_mod ON resource_links (mod_name);" +
+                "CREATE INDEX IF NOT EXISTS idx_patch_layer_owner_mod_option ON patch_layer_entry (owner_uid, source_mod, option_path);";
             await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
             await EnsurePairCharacterDataPrimaryKeyAsync(connection, cancellationToken).ConfigureAwait(false);
             await EnsureLocalCharacterDataColumnsAsync(connection, cancellationToken).ConfigureAwait(false);
@@ -838,4 +867,56 @@ public sealed class CharacterDataSqliteStore : DisposableMediatorSubscriberBase,
     /// Represents persisted pair character data loaded from SQLite.
     /// </summary>
     public sealed record PersistedPairCharacterData(API.Data.CharacterData CharacterData, string DataHash, DateTimeOffset ReceivedAt, string? PlayerName, int? WorldId, byte? RaceId, byte? TribeId, byte? Gender);
+
+    private sealed record LearnedModLayerPayload(
+        string CharacterKey,
+        string ModDirectoryName,
+        string? ModVersion,
+        string SettingsHash,
+        string SettingsJson,
+        string FragmentsJson,
+        string ScdLinksJson,
+        string PapEmotesJson,
+        long LastUpdatedUtc);
+
+    private static async Task UpsertContentAddressableCacheAsync(SqliteConnection connection, string contentHash, string contentType, byte[] contentBlob, long createdUtc)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText =
+            "INSERT INTO content_addressable_cache (content_hash, content_type, content_blob, content_size, created_utc) " +
+            "VALUES ($content_hash, $content_type, $content_blob, $content_size, $created_utc) " +
+            "ON CONFLICT(content_hash) DO NOTHING;";
+        command.Parameters.AddWithValue("$content_hash", contentHash);
+        command.Parameters.AddWithValue("$content_type", contentType);
+        command.Parameters.AddWithValue("$content_blob", contentBlob);
+        command.Parameters.AddWithValue("$content_size", contentBlob.Length);
+        command.Parameters.AddWithValue("$created_utc", createdUtc);
+        await command.ExecuteNonQueryAsync().ConfigureAwait(false);
+    }
+
+    private static async Task UpsertPatchLayerEntryAsync(SqliteConnection connection, string ownerUid, string sourceMod, string optionPath, string contentHash, long createdUtc)
+    {
+        var priority = (int)Math.Min(createdUtc / 1000L, int.MaxValue);
+        using (var deleteCommand = connection.CreateCommand())
+        {
+            deleteCommand.CommandText =
+                "DELETE FROM patch_layer_entry WHERE owner_uid = $owner_uid AND source_mod = $source_mod AND option_path = $option_path;";
+            deleteCommand.Parameters.AddWithValue("$owner_uid", ownerUid);
+            deleteCommand.Parameters.AddWithValue("$source_mod", sourceMod);
+            deleteCommand.Parameters.AddWithValue("$option_path", optionPath);
+            await deleteCommand.ExecuteNonQueryAsync().ConfigureAwait(false);
+        }
+
+        using var insertCommand = connection.CreateCommand();
+        insertCommand.CommandText =
+            "INSERT INTO patch_layer_entry (owner_uid, priority, content_hash, source_mod, option_path, created_utc) " +
+            "VALUES ($owner_uid, $priority, $content_hash, $source_mod, $option_path, $created_utc);";
+        insertCommand.Parameters.AddWithValue("$owner_uid", ownerUid);
+        insertCommand.Parameters.AddWithValue("$priority", priority);
+        insertCommand.Parameters.AddWithValue("$content_hash", contentHash);
+        insertCommand.Parameters.AddWithValue("$source_mod", sourceMod);
+        insertCommand.Parameters.AddWithValue("$option_path", optionPath);
+        insertCommand.Parameters.AddWithValue("$created_utc", createdUtc);
+        await insertCommand.ExecuteNonQueryAsync().ConfigureAwait(false);
+    }
 }

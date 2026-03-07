@@ -27,7 +27,7 @@ namespace Sphene.UI.Panels;
 public class DataAnalysisUi : WindowMediatorSubscriberBase
 {
     private readonly record struct CurrentReplacement(string Hash, string FileSwapPath, string[] GamePaths);
-    private readonly record struct ExpectedReplacement(ObjectKind Kind, FileReplacement Replacement);
+    private readonly record struct ExpectedReplacement(ObjectKind Kind, FileReplacement Replacement, uint SourceJobId);
     private readonly CharacterAnalyzer _characterAnalyzer;
     private readonly Progress<(string, int)> _conversionProgress = new();
     private readonly IpcManager _ipcManager;
@@ -527,15 +527,17 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
             ? selectedListWithKind.Where(expected => !IsReplacementFullyPresent(expected.Replacement, currentKeys)).ToList()
             : [];
 
-        using (var table = ImRaii.Table("##modlearning_table", 2, ImGuiTableFlags.RowBg))
+        using (var table = ImRaii.Table("##modlearning_table", 3, ImGuiTableFlags.RowBg))
         {
             if (table)
             {
                 ImGui.TableSetupColumn("Game Paths", ImGuiTableColumnFlags.WidthStretch, 1f);
                 ImGui.TableSetupColumn("Resolved Path", ImGuiTableColumnFlags.WidthStretch, 1f);
+                ImGui.TableSetupColumn("Scope", ImGuiTableColumnFlags.WidthFixed, 0.5f);
                 ImGui.TableHeadersRow();
-                foreach (var replacement in selectedList)
+                foreach (var entry in selectedListWithKind)
                 {
+                    var replacement = entry.Replacement;
                     ImGui.TableNextRow();
                     ImGui.TableNextColumn();
                     var gamePaths = replacement.GamePaths.Count == 0 ? string.Empty : string.Join(", ", replacement.GamePaths);
@@ -555,6 +557,16 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                         ImGui.PushStyleColor(ImGuiCol.Text, SpheneCustomTheme.Colors.Warning);
                     }
                     ImGui.TextWrapped(replacement.ResolvedPath);
+                    if (!present && currentKeys.Count > 0)
+                    {
+                        ImGui.PopStyleColor();
+                    }
+                    ImGui.TableNextColumn();
+                    if (!present && currentKeys.Count > 0)
+                    {
+                        ImGui.PushStyleColor(ImGuiCol.Text, SpheneCustomTheme.Colors.Warning);
+                    }
+                    ImGui.TextUnformatted(GetJobScopeLabel(entry.SourceJobId));
                     if (!present && currentKeys.Count > 0)
                     {
                         ImGui.PopStyleColor();
@@ -1791,13 +1803,8 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                 continue;
             }
 
-            var usedGlobally = modEntry.Value.Any(OptionUsedGlobally);
-            if (usedGlobally)
-            {
-                continue;
-            }
-
-            if (modEntry.Value.Any(state => OptionUsedBySpecificJob(state, _selectedModLearningJobId)))
+            var usedBySelectedJob = modEntry.Value.Any(state => OptionUsedBySpecificJob(state, _selectedModLearningJobId));
+            if (usedBySelectedJob)
             {
                 result.Add(modEntry.Key);
             }
@@ -1946,7 +1953,15 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
         {
             return;
         }
-        list.Add(new ExpectedReplacement(kind, replacement));
+        list.Add(new ExpectedReplacement(kind, replacement, jobId));
+    }
+
+    private string GetJobScopeLabel(uint jobId)
+    {
+        if (jobId == 0) return "All Jobs";
+        return _uiSharedService.JobData.TryGetValue((ushort)jobId, out var jobName)
+            ? $"{jobName} ({jobId})"
+            : $"Job {jobId}";
     }
 
     private void DrawStoredData()
