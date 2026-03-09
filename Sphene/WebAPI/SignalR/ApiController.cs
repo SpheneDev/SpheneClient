@@ -45,6 +45,7 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
     private ServerState _serverState;
     private CensusUpdateMessage? _lastCensus;
     private readonly ConcurrentDictionary<string, FileTransferAckMessage> _pendingFileTransferAcks = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, DateTime> _recentCharacterDataAcknowledgmentSends = new(StringComparer.Ordinal);
 
     public ApiController(ILogger<ApiController> logger, HubFactory hubFactory, DalamudUtilService dalamudUtil,
         PairManager pairManager, ServerConfigurationManager serverManager, SpheneMediator mediator,
@@ -501,6 +502,7 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
         OnUserReceiveFileNotification(dto => _ = Client_UserReceiveFileNotification(dto));
         OnUserReceiveBypassEmote(dto => _ = Client_UserReceiveBypassEmote(dto));
         OnUserReceiveCharacterDataAcknowledgment(dto => _ = Client_UserReceiveCharacterDataAcknowledgment(dto));
+        OnUserReceiveCharacterDataAcknowledgmentV2(dto => _ = Client_UserReceiveCharacterDataAcknowledgmentV2(dto));
 
         OnGroupChangePermissions((dto) => _ = Client_GroupChangePermissions(dto));
         OnGroupDelete((dto) => _ = Client_GroupDelete(dto));

@@ -158,10 +158,24 @@ public partial class ApiController
 
     // UserUpdateAckOther method removed - AckOther is controlled by other player's AckYou
 
+    public Task UserSendCharacterDataAcknowledgmentV2(CharacterDataAcknowledgmentEventDto acknowledgmentEventDto)
+    {
+        Logger.LogInformation("Client acknowledgment V2 wrapper called - Hash: {hash}, Version: {version}", 
+            acknowledgmentEventDto.Acknowledgment.DataHash[..Math.Min(8, acknowledgmentEventDto.Acknowledgment.DataHash.Length)], acknowledgmentEventDto.ContractVersion);
+        return UserSendCharacterDataAcknowledgment(acknowledgmentEventDto.Acknowledgment);
+    }
+
     public async Task UserSendCharacterDataAcknowledgment(CharacterDataAcknowledgmentDto acknowledgmentDto)
     {
         Logger.LogDebug("UserSendCharacterDataAcknowledgment called - Hash: {hash}, User: {user}, Success: {success}, Connected: {connected}", 
             acknowledgmentDto.DataHash[..Math.Min(8, acknowledgmentDto.DataHash.Length)], acknowledgmentDto.User.AliasOrUID, acknowledgmentDto.Success, IsConnected);
+
+        if (string.IsNullOrEmpty(acknowledgmentDto.SessionId) && WasRecentlySentAcknowledgment(acknowledgmentDto.DataHash))
+        {
+            Logger.LogInformation("Skipping duplicate acknowledgment send without session - Hash: {hash}",
+                acknowledgmentDto.DataHash[..Math.Min(8, acknowledgmentDto.DataHash.Length)]);
+            return;
+        }
         
         if (!IsConnected) 
         {
@@ -172,14 +186,55 @@ public partial class ApiController
         
         try
         {
-            await _spheneHub!.SendAsync(nameof(UserSendCharacterDataAcknowledgment), acknowledgmentDto).ConfigureAwait(false);
-            Logger.LogDebug("Successfully sent acknowledgment to server - Hash: {hash}", 
-                acknowledgmentDto.DataHash[..Math.Min(8, acknowledgmentDto.DataHash.Length)]);
+            var acknowledgmentEventDto = new CharacterDataAcknowledgmentEventDto(acknowledgmentDto);
+            Logger.LogInformation("Sending acknowledgment via V2 - Hash: {hash}, Version: {version}, SessionId: {sessionId}", 
+                acknowledgmentDto.DataHash[..Math.Min(8, acknowledgmentDto.DataHash.Length)], acknowledgmentEventDto.ContractVersion,
+                string.IsNullOrEmpty(acknowledgmentDto.SessionId) ? "<empty>" : acknowledgmentDto.SessionId[..Math.Min(8, acknowledgmentDto.SessionId.Length)]);
+            await _spheneHub!.SendAsync(nameof(UserSendCharacterDataAcknowledgmentV2), acknowledgmentEventDto).ConfigureAwait(false);
+            Logger.LogInformation("Successfully sent acknowledgment V2 to server - Hash: {hash}, Version: {version}", 
+                acknowledgmentDto.DataHash[..Math.Min(8, acknowledgmentDto.DataHash.Length)], acknowledgmentEventDto.ContractVersion);
+            RememberAcknowledgmentSend(acknowledgmentDto.DataHash);
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Failed to send acknowledgment to server - Hash: {hash}", 
+            Logger.LogWarning(ex, "Failed to send acknowledgment V2 to server - Hash: {hash}, falling back to V1", 
                 acknowledgmentDto.DataHash[..Math.Min(8, acknowledgmentDto.DataHash.Length)]);
+            try
+            {
+                await _spheneHub!.SendAsync(nameof(UserSendCharacterDataAcknowledgment), acknowledgmentDto).ConfigureAwait(false);
+                Logger.LogInformation("Successfully sent acknowledgment V1 fallback to server - Hash: {hash}", 
+                    acknowledgmentDto.DataHash[..Math.Min(8, acknowledgmentDto.DataHash.Length)]);
+                RememberAcknowledgmentSend(acknowledgmentDto.DataHash);
+            }
+            catch (Exception fallbackEx)
+            {
+                Logger.LogError(fallbackEx, "Failed to send acknowledgment to server - Hash: {hash}", 
+                    acknowledgmentDto.DataHash[..Math.Min(8, acknowledgmentDto.DataHash.Length)]);
+            }
+        }
+    }
+
+    private void RememberAcknowledgmentSend(string hash)
+    {
+        PruneRecentAcknowledgmentSends();
+        _recentCharacterDataAcknowledgmentSends[hash] = DateTime.UtcNow;
+    }
+
+    private bool WasRecentlySentAcknowledgment(string hash)
+    {
+        PruneRecentAcknowledgmentSends();
+        return _recentCharacterDataAcknowledgmentSends.ContainsKey(hash);
+    }
+
+    private void PruneRecentAcknowledgmentSends()
+    {
+        var cutoff = DateTime.UtcNow.AddSeconds(-30);
+        foreach (var kvp in _recentCharacterDataAcknowledgmentSends)
+        {
+            if (kvp.Value < cutoff)
+            {
+                _recentCharacterDataAcknowledgmentSends.TryRemove(kvp.Key, out _);
+            }
         }
     }
 

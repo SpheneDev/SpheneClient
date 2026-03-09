@@ -741,9 +741,11 @@ public class Pair : DisposableMediatorSubscriberBase
         
         // Publish acknowledgment pending event
         Mediator.Publish(new AcknowledgmentPendingMessage(
-            acknowledgmentId,
-            UserData,
-            DateTime.UtcNow
+            new AcknowledgmentEventDto(
+                acknowledgmentId,
+                UserData,
+                AcknowledgmentStatus.Pending,
+                DateTime.UtcNow)
         ));
         
         // Publish granular UI refresh for this specific acknowledgment
@@ -754,10 +756,11 @@ public class Pair : DisposableMediatorSubscriberBase
         
         // Keep legacy acknowledgment status change event for backward compatibility
         Mediator.Publish(new AcknowledgmentStatusChangedMessage(
-            acknowledgmentId,
-            UserData,
-            AcknowledgmentStatus.Pending,
-            DateTime.UtcNow
+            new AcknowledgmentEventDto(
+                acknowledgmentId,
+                UserData,
+                AcknowledgmentStatus.Pending,
+                DateTime.UtcNow)
         ));
     }
 
@@ -794,10 +797,11 @@ public class Pair : DisposableMediatorSubscriberBase
         if (!string.IsNullOrEmpty(acknowledgmentId))
         {
             Mediator.Publish(new AcknowledgmentStatusChangedMessage(
-                acknowledgmentId,
-                UserData,
-                AcknowledgmentStatus.Received,
-                DateTime.UtcNow
+                new AcknowledgmentEventDto(
+                    acknowledgmentId,
+                    UserData,
+                    AcknowledgmentStatus.Received,
+                    DateTime.UtcNow)
             ));
         }
     }
@@ -846,10 +850,11 @@ public class Pair : DisposableMediatorSubscriberBase
             
             // Publish acknowledgment status change event
             Mediator.Publish(new AcknowledgmentStatusChangedMessage(
-                acknowledgmentId,
-                UserData,
-                AcknowledgmentStatus.Received,
-                DateTime.UtcNow
+                new AcknowledgmentEventDto(
+                    acknowledgmentId,
+                    UserData,
+                    AcknowledgmentStatus.Received,
+                    DateTime.UtcNow)
             ));
         }
         else
@@ -903,10 +908,11 @@ public class Pair : DisposableMediatorSubscriberBase
         if (previousAckId != null)
         {
             Mediator.Publish(new AcknowledgmentStatusChangedMessage(
-                previousAckId,
-                UserData,
-                AcknowledgmentStatus.Cancelled,
-                DateTime.UtcNow
+                new AcknowledgmentEventDto(
+                    previousAckId,
+                    UserData,
+                    AcknowledgmentStatus.Cancelled,
+                    DateTime.UtcNow)
             ));
         }
 

@@ -102,12 +102,17 @@ public sealed class SpheneMediator : IHostedService
         try
         {
             _subscriberDict.TryAdd(typeof(T), []);
-            var subscriberAction = new SubscriberAction(subscriber, action);
             _logger.LogDebug("Subscribing {subscriber} to {messageType}", subscriber.GetType().Name, typeof(T).Name);
-            if (!_subscriberDict[typeof(T)].Add(subscriberAction))
+
+            if (_subscriberDict[typeof(T)].Any(p => ReferenceEquals(p.Subscriber, subscriber)))
             {
-                throw new InvalidOperationException("Already subscribed");
+                _logger.LogWarning("Duplicate subscription blocked for {subscriber} to {messageType}. SubscriberHash={hash}",
+                    subscriber.GetType().Name, typeof(T).Name, subscriber.GetHashCode());
+                return;
             }
+
+            var subscriberAction = new SubscriberAction(subscriber, action);
+            _subscriberDict[typeof(T)].Add(subscriberAction);
             _logger.LogDebug("Successfully subscribed {subscriber} to {messageType}. Total subscribers for this message: {count}", 
                 subscriber.GetType().Name, typeof(T).Name, _subscriberDict[typeof(T)].Count);
         }

@@ -143,25 +143,41 @@ public partial class ApiController
 
     public Task Client_UserReceiveCharacterDataAcknowledgment(CharacterDataAcknowledgmentDto acknowledgmentDto)
     {
+        ProcessCharacterDataAcknowledgment(acknowledgmentDto, "V1");
+        return Task.CompletedTask;
+    }
+
+    public Task Client_UserReceiveCharacterDataAcknowledgmentV2(CharacterDataAcknowledgmentEventDto acknowledgmentEventDto)
+    {
+        ProcessCharacterDataAcknowledgment(acknowledgmentEventDto.Acknowledgment, $"V2(v{acknowledgmentEventDto.ContractVersion})");
+        return Task.CompletedTask;
+    }
+
+    private void ProcessCharacterDataAcknowledgment(CharacterDataAcknowledgmentDto acknowledgmentDto, string source)
+    {
+        Logger.LogInformation("Received acknowledgment callback via {source} - Hash: {hash}, SessionId: {sessionId}",
+            source,
+            acknowledgmentDto.DataHash[..Math.Min(8, acknowledgmentDto.DataHash.Length)],
+            string.IsNullOrEmpty(acknowledgmentDto.SessionId) ? "<empty>" : acknowledgmentDto.SessionId[..Math.Min(8, acknowledgmentDto.SessionId.Length)]);
+
         var processed = false;
-        ExecuteSafely(() => 
+        ExecuteSafely(() =>
         {
             _pairManager.ReceiveCharacterDataAcknowledgment(acknowledgmentDto);
             processed = true;
         });
-        
+
         if (processed)
         {
-            Logger.LogDebug("Successfully processed acknowledgment callback for Hash: {hash}", 
+            Logger.LogDebug("Successfully processed acknowledgment callback via {source} for Hash: {hash}",
+                source,
                 acknowledgmentDto.DataHash[..Math.Min(8, acknowledgmentDto.DataHash.Length)]);
+            return;
         }
-        else
-        {
-            Logger.LogWarning("Failed to process acknowledgment callback for Hash: {hash}", 
-                acknowledgmentDto.DataHash[..Math.Min(8, acknowledgmentDto.DataHash.Length)]);
-        }
-        
-        return Task.CompletedTask;
+
+        Logger.LogWarning("Failed to process acknowledgment callback via {source} for Hash: {hash}",
+            source,
+            acknowledgmentDto.DataHash[..Math.Min(8, acknowledgmentDto.DataHash.Length)]);
     }
 
     public Task Client_UserReceiveUploadStatus(UserUploadStatusDto dto)
@@ -399,6 +415,12 @@ public partial class ApiController
     {
         if (_initialized) return;
         _spheneHub!.On(nameof(Client_UserReceiveCharacterDataAcknowledgment), act);
+    }
+
+    public void OnUserReceiveCharacterDataAcknowledgmentV2(Action<CharacterDataAcknowledgmentEventDto> act)
+    {
+        if (_initialized) return;
+        _spheneHub!.On(nameof(Client_UserReceiveCharacterDataAcknowledgmentV2), act);
     }
 
     public void OnUserReceiveUploadStatus(Action<UserUploadStatusDto> act)

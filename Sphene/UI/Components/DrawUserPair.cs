@@ -133,7 +133,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
     private void OnAcknowledgmentPending(AcknowledgmentPendingMessage message)
     {
         // Only handle events for this specific pair
-        if (!string.Equals(message.User.UID, _pair.UserData.UID, StringComparison.Ordinal)) return;
+        if (!string.Equals(message.Event.User.UID, _pair.UserData.UID, StringComparison.Ordinal)) return;
         
         // Update cached acknowledgment status to pending
         _cachedHasPendingAck = true;
@@ -479,11 +479,13 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         if (_disposed) return;
         if (disposing)
         {
+            _mediator.Unsubscribe<UserPairIconUpdateMessage>(this);
             _mediator.Unsubscribe<PenumbraModTransferAvailableMessage>(this);
             _mediator.Unsubscribe<PenumbraModTransferCompletedMessage>(this);
             _mediator.Unsubscribe<PenumbraModTransferDiscardedMessage>(this);
             _mediator.Unsubscribe<PairAcknowledgmentStatusChangedMessage>(this);
             _mediator.Unsubscribe<AcknowledgmentPendingMessage>(this);
+            _mediator.Unsubscribe<AcknowledgmentUiRefreshMessage>(this);
             _timerLock.Enter();
             try
             {
