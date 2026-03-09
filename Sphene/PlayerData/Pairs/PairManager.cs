@@ -38,6 +38,8 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
     private readonly VisibilityGateService _visibilityGateService;
     private readonly Timer _ackStatusPollTimer;
     private int _ackStatusPollRunning = 0;
+    private readonly ConcurrentDictionary<string, DateTime> _lastOnlineNotificationByUid = new(StringComparer.Ordinal);
+    private static readonly TimeSpan OnlineNotificationDedupWindow = TimeSpan.FromSeconds(10);
 
     private volatile bool _localVisibilityGateActive = false;
 
@@ -176,6 +178,7 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         {
             Mediator.Publish(new ClearProfileDataMessage(pair.UserData));
             pair.MarkOffline();
+            _lastOnlineNotificationByUid.TryRemove(pair.UserData.UID, out _);
         }
 
         RecreateLazy();
@@ -188,8 +191,9 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         Mediator.Publish(new ClearProfileDataMessage(dto.User));
 
         var pair = _allClientPairs[dto.User];
-        if (pair.HasCachedPlayer)
+        if (pair.IsOnline)
         {
+            pair.CreateCachedPlayer(dto);
             RecreateLazy();
             return;
         }
@@ -198,7 +202,8 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
             && (_configurationService.Current.ShowOnlineNotificationsOnlyForIndividualPairs && pair.IsDirectlyPaired && !pair.IsOneSidedPair
             || !_configurationService.Current.ShowOnlineNotificationsOnlyForIndividualPairs)
             && (_configurationService.Current.ShowOnlineNotificationsOnlyForNamedPairs && !string.IsNullOrEmpty(pair.GetNote())
-            || !_configurationService.Current.ShowOnlineNotificationsOnlyForNamedPairs))
+            || !_configurationService.Current.ShowOnlineNotificationsOnlyForNamedPairs)
+            && ShouldSendOnlineNotification(pair.UserData.UID))
         {
             string? note = pair.GetNote();
             var msg = !string.IsNullOrEmpty(note)
@@ -210,6 +215,27 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         pair.CreateCachedPlayer(dto);
 
         RecreateLazy();
+    }
+
+    private bool ShouldSendOnlineNotification(string uid)
+    {
+        var now = DateTime.UtcNow;
+        foreach (var kvp in _lastOnlineNotificationByUid)
+        {
+            if (now - kvp.Value > OnlineNotificationDedupWindow)
+            {
+                _lastOnlineNotificationByUid.TryRemove(kvp.Key, out _);
+            }
+        }
+
+        if (_lastOnlineNotificationByUid.TryGetValue(uid, out var lastNotifiedAt) && now - lastNotifiedAt <= OnlineNotificationDedupWindow)
+        {
+            Logger.LogDebug("Suppressing duplicate online notification for {uid}", uid);
+            return false;
+        }
+
+        _lastOnlineNotificationByUid[uid] = now;
+        return true;
     }
 
     public void ReceiveBypassEmote(BypassEmoteUpdateDto dto)
