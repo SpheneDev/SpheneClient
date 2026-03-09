@@ -46,6 +46,7 @@ namespace Sphene;
 public sealed class Plugin : IDalamudPlugin
 {
     private readonly IHost _host;
+    private readonly ILogger<Plugin>? _logger;
 
     public Plugin(IDalamudPluginInterface pluginInterface, ICommandManager commandManager, IDataManager gameData,
         IFramework framework, IObjectTable objectTable, IClientState clientState, ICondition condition, IChatGui chatGui,
@@ -501,17 +502,83 @@ public sealed class Plugin : IDalamudPlugin
         })
         .Build();
 
+        _logger = _host.Services.GetService<ILogger<Plugin>>();
+        RegisterGlobalExceptionHooks();
+
         var startTask = _host.StartAsync();
         _ = startTask.ContinueWith(t =>
         {
-            var logger = _host.Services.GetService<ILogger<Plugin>>();
-            logger?.LogCritical(t.Exception, "Host StartAsync failed");
+            _logger?.LogCritical(t.Exception, "Host StartAsync failed");
         }, TaskContinuationOptions.OnlyOnFaulted);
     }
 
     public void Dispose()
     {
+        UnregisterGlobalExceptionHooks();
         _host.StopAsync().GetAwaiter().GetResult();
         _host.Dispose();
+    }
+
+    private void RegisterGlobalExceptionHooks()
+    {
+        AppDomain.CurrentDomain.UnhandledException += OnUnhandledException;
+        TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
+    }
+
+    private void UnregisterGlobalExceptionHooks()
+    {
+        AppDomain.CurrentDomain.UnhandledException -= OnUnhandledException;
+        TaskScheduler.UnobservedTaskException -= OnUnobservedTaskException;
+    }
+
+    private void OnUnhandledException(object sender, UnhandledExceptionEventArgs e)
+    {
+        if (e.ExceptionObject is Exception exception)
+        {
+            _logger?.LogCritical(exception,
+                "[CrashCorrelation] AppDomain unhandled exception. IsTerminating={isTerminating}, IsLikelySphene={isLikelySphene}",
+                e.IsTerminating,
+                IsLikelySpheneException(exception));
+            return;
+        }
+
+        _logger?.LogCritical("[CrashCorrelation] AppDomain unhandled non-exception object. IsTerminating={isTerminating}, Type={type}",
+            e.IsTerminating,
+            e.ExceptionObject?.GetType().FullName ?? "<null>");
+    }
+
+    private void OnUnobservedTaskException(object? sender, UnobservedTaskExceptionEventArgs e)
+    {
+        var exception = e.Exception;
+        _logger?.LogError(exception,
+            "[CrashCorrelation] Unobserved task exception. IsLikelySphene={isLikelySphene}",
+            IsLikelySpheneException(exception));
+    }
+
+    private static bool IsLikelySpheneException(Exception exception)
+    {
+        static bool IsSpheneType(Type? t)
+            => !string.IsNullOrEmpty(t?.FullName) && t.FullName.StartsWith("Sphene.", StringComparison.Ordinal);
+
+        static bool IsSpheneStack(string? stack)
+            => !string.IsNullOrEmpty(stack) && stack.Contains("Sphene.", StringComparison.Ordinal);
+
+        if (IsSpheneType(exception.TargetSite?.DeclaringType) || IsSpheneStack(exception.StackTrace))
+        {
+            return true;
+        }
+
+        var inner = exception.InnerException;
+        while (inner != null)
+        {
+            if (IsSpheneType(inner.TargetSite?.DeclaringType) || IsSpheneStack(inner.StackTrace))
+            {
+                return true;
+            }
+
+            inner = inner.InnerException;
+        }
+
+        return false;
     }
 }

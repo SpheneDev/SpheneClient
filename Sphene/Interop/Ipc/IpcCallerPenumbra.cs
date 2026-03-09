@@ -57,6 +57,8 @@ public sealed class IpcCallerPenumbra : DisposableMediatorSubscriberBase, IIpcCa
     private readonly GetModDirectory _penumbraResolveModDir;
     private readonly ResolvePlayerPathsAsync _penumbraResolvePaths;
     private readonly GetGameObjectResourcePaths _penumbraResourcePaths;
+    private readonly ConcurrentDictionary<int, (Guid CollectionId, DateTime LastAssignedAt)> _tempCollectionAssignmentsByIndex = new();
+    private static readonly TimeSpan TemporaryCollectionAssignDedupWindow = TimeSpan.FromMilliseconds(1250);
 
     public IpcCallerPenumbra(ILogger<IpcCallerPenumbra> logger, IDalamudPluginInterface pi, DalamudUtilService dalamudUtil,
         SpheneMediator spheneMediator, RedrawManager redrawManager) : base(logger, spheneMediator)
@@ -199,12 +201,37 @@ public sealed class IpcCallerPenumbra : DisposableMediatorSubscriberBase, IIpcCa
 
     public async Task AssignTemporaryCollectionAsync(ILogger logger, Guid collName, int idx)
     {
-        if (!APIAvailable) return;
+        if (!APIAvailable || collName == Guid.Empty || idx < 0) return;
+
+        var now = DateTime.UtcNow;
+        foreach (var kvp in _tempCollectionAssignmentsByIndex)
+        {
+            if (now - kvp.Value.LastAssignedAt > TimeSpan.FromSeconds(15))
+            {
+                _tempCollectionAssignmentsByIndex.TryRemove(kvp.Key, out _);
+            }
+        }
+
+        if (_tempCollectionAssignmentsByIndex.TryGetValue(idx, out var existing)
+            && existing.CollectionId == collName
+            && now - existing.LastAssignedAt <= TemporaryCollectionAssignDedupWindow)
+        {
+            logger.LogTrace("Skipping redundant Temp Collection assignment {collName} to index {idx}", collName, idx);
+            return;
+        }
 
         await _dalamudUtil.RunOnFrameworkThread(() =>
         {
             var retAssign = _penumbraAssignTemporaryCollection.Invoke(collName, idx, forceAssignment: true);
             logger.LogTrace("Assigning Temp Collection {collName} to index {idx}, Success: {ret}", collName, idx, retAssign);
+            if (retAssign == PenumbraApiEc.Success)
+            {
+                _tempCollectionAssignmentsByIndex[idx] = (collName, DateTime.UtcNow);
+            }
+            else
+            {
+                _tempCollectionAssignmentsByIndex.TryRemove(idx, out _);
+            }
             return collName;
         }).ConfigureAwait(false);
     }
@@ -330,6 +357,14 @@ public sealed class IpcCallerPenumbra : DisposableMediatorSubscriberBase, IIpcCa
             logger.LogTrace("[{applicationId}] Removing temp collection for {collId}", applicationId, collId);
             var ret2 = _penumbraRemoveTemporaryCollection.Invoke(collId);
             logger.LogTrace("[{applicationId}] RemoveTemporaryCollection: {ret2}", applicationId, ret2);
+            var indicesToClear = _tempCollectionAssignmentsByIndex
+                .Where(kvp => kvp.Value.CollectionId == collId)
+                .Select(kvp => kvp.Key)
+                .ToList();
+            foreach (var idx in indicesToClear)
+            {
+                _tempCollectionAssignmentsByIndex.TryRemove(idx, out _);
+            }
         }).ConfigureAwait(false);
     }
 
