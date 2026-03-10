@@ -81,6 +81,9 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
     private DateTime _lastMinionReapplyAttempt = DateTime.MinValue;
     private DateTime _lastMinionCollectionBindAttempt = DateTime.MinValue;
     private DateTime _lastPlayerCollectionBindAttempt = DateTime.MinValue;
+    private DateTime _lastSuccessfulPlayerCollectionBind = DateTime.MinValue;
+    private ushort _lastBoundPlayerObjectIndex = ushort.MaxValue;
+    private Guid _lastBoundPlayerCollection = Guid.Empty;
     private DateTime _lastMinionScdOverrideAttempt = DateTime.MinValue;
     private DateTime _lastMinionTempModsApplyAttempt = DateTime.MinValue;
     private nint _lastMinionTempModsAddress = nint.Zero;
@@ -89,6 +92,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
     private const int MinionReapplyRetryDelayMs = 500;
     private const int MinionCollectionBindRetryDelayMs = 1500;
     private const int MinionTempModsCooldownMs = 2000;
+    private const int PlayerCollectionPeriodicRebindMs = 20000;
 
     public PairHandler(ILogger<PairHandler> logger, Pair pair,
         GameObjectHandlerFactory gameObjectHandlerFactory,
@@ -899,6 +903,9 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         _lastTemporaryCollectionDisableAttempt = DateTime.UtcNow;
         var collectionId = _penumbraCollection;
         _penumbraCollection = Guid.Empty;
+        _lastSuccessfulPlayerCollectionBind = DateTime.MinValue;
+        _lastBoundPlayerObjectIndex = ushort.MaxValue;
+        _lastBoundPlayerCollection = Guid.Empty;
         _lastSuccessfullyAppliedPenumbraHash = null;
         _lastSuccessfullyAppliedGlamourerHash = null;
         _lastSuccessfullyAppliedRestHash = null;
@@ -1540,9 +1547,12 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                                 }
 
                                 var playerIndex = await _dalamudUtil.RunOnFrameworkThread(() => _charaHandler.GetGameObject()?.ObjectIndex).ConfigureAwait(false);
-                                if (playerIndex.HasValue)
+                                if (playerIndex.HasValue && ShouldBindPlayerCollection(playerIndex.Value, DateTime.UtcNow))
                                 {
                                     await _ipcManager.Penumbra.AssignTemporaryCollectionAsync(Logger, _penumbraCollection, playerIndex.Value).ConfigureAwait(false);
+                                    _lastSuccessfulPlayerCollectionBind = DateTime.UtcNow;
+                                    _lastBoundPlayerObjectIndex = playerIndex.Value;
+                                    _lastBoundPlayerCollection = _penumbraCollection;
                                     MarkTemporaryCollectionUsed();
                                 }
                             }
@@ -1584,6 +1594,26 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                 _lastFrameworkUpdateError = DateTime.UtcNow;
             }
         }
+    }
+
+    private bool ShouldBindPlayerCollection(ushort playerIndex, DateTime now)
+    {
+        if (_penumbraCollection == Guid.Empty)
+        {
+            return false;
+        }
+
+        if (_lastBoundPlayerObjectIndex != playerIndex)
+        {
+            return true;
+        }
+
+        if (_lastBoundPlayerCollection != _penumbraCollection)
+        {
+            return true;
+        }
+
+        return now - _lastSuccessfulPlayerCollectionBind >= TimeSpan.FromMilliseconds(PlayerCollectionPeriodicRebindMs);
     }
 
     private void Initialize(string name)

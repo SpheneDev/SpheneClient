@@ -102,7 +102,7 @@ public sealed class SpheneMediator : IHostedService
         try
         {
             _subscriberDict.TryAdd(typeof(T), []);
-            _logger.LogDebug("Subscribing {subscriber} to {messageType}", subscriber.GetType().Name, typeof(T).Name);
+            _logger.LogTrace("Subscribing {subscriber} to {messageType}", subscriber.GetType().Name, typeof(T).Name);
 
             if (_subscriberDict[typeof(T)].Any(p => ReferenceEquals(p.Subscriber, subscriber)))
             {
@@ -113,7 +113,7 @@ public sealed class SpheneMediator : IHostedService
 
             var subscriberAction = new SubscriberAction(subscriber, action);
             _subscriberDict[typeof(T)].Add(subscriberAction);
-            _logger.LogDebug("Successfully subscribed {subscriber} to {messageType}. Total subscribers for this message: {count}", 
+            _logger.LogTrace("Successfully subscribed {subscriber} to {messageType}. Total subscribers for this message: {count}", 
                 subscriber.GetType().Name, typeof(T).Name, _subscriberDict[typeof(T)].Count);
         }
         finally
@@ -148,7 +148,7 @@ public sealed class SpheneMediator : IHostedService
                 int unSubbed = _subscriberDict[kvp]?.RemoveWhere(p => p.Subscriber == subscriber) ?? 0;
                 if (unSubbed > 0)
                 {
-                    _logger.LogDebug("{sub} unsubscribed from {msg}", subscriber.GetType().Name, kvp.Name);
+                    _logger.LogTrace("{sub} unsubscribed from {msg}", subscriber.GetType().Name, kvp.Name);
                 }
             }
         }

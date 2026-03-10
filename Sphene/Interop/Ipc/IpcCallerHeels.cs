@@ -46,7 +46,29 @@ public sealed class IpcCallerHeels : IIpcCaller
     private void HeelsTagChanged(int gameObjectIndex, string tag, string? value)
     {
         _logger.LogTrace("SimpleHeels tag changed for object {index}: {tag} = {value}", gameObjectIndex, tag, value ?? "null");
-        // Tag changes can affect character appearance, so trigger a heels update
+        int localPlayerObjectIndex;
+        try
+        {
+            localPlayerObjectIndex = _dalamudUtil.RunOnFrameworkThread(() =>
+            {
+                var playerPtr = _dalamudUtil.GetPlayerPtr();
+                if (playerPtr == IntPtr.Zero) return -1;
+                var playerObj = _dalamudUtil.CreateGameObject(playerPtr);
+                return playerObj?.ObjectIndex ?? -1;
+            }).GetAwaiter().GetResult();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogTrace(ex, "Failed to resolve local player index for Heels tag change");
+            localPlayerObjectIndex = -1;
+        }
+
+        if (localPlayerObjectIndex != gameObjectIndex)
+        {
+            _logger.LogTrace("Ignoring Heels tag change for non-local object index {index} (local: {local})", gameObjectIndex, localPlayerObjectIndex);
+            return;
+        }
+
         _spheneMediator.Publish(new HeelsOffsetMessage());
     }
 

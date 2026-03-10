@@ -168,6 +168,9 @@ public class CompactUi : WindowMediatorSubscriberBase
     private readonly ShrinkU.Services.TextureBackupService _shrinkuBackupService;
     private readonly ShrinkU.Services.TextureConversionService _shrinkuConversionService;
     private readonly ShrinkUConfigService _shrinkuConfigService;
+    private readonly System.Threading.Lock _drawFoldersRefreshDebounceLock = new();
+    private CancellationTokenSource? _drawFoldersRefreshDebounceCts;
+    private static readonly TimeSpan DrawFoldersRefreshDebounceDelay = TimeSpan.FromMilliseconds(200);
 
     public CompactUi(ILogger<CompactUi> logger, UiSharedService uiShared, SpheneConfigService configService, ApiController apiController, PairManager pairManager,
         ServerConfigurationManager serverManager, SpheneMediator mediator, FileUploadManager fileTransferManager,
@@ -420,7 +423,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         Mediator.Subscribe<DownloadStartedMessage>(this, (msg) => _currentDownloads[msg.DownloadId] = msg.DownloadStatus);
         Mediator.Subscribe<DownloadFinishedMessage>(this, (msg) => _currentDownloads.TryRemove(msg.DownloadId, out _));
         Mediator.Subscribe<RefreshUiMessage>(this, (msg) => RefreshIconsOnly());
-        Mediator.Subscribe<StructuralRefreshUiMessage>(this, (msg) => RefreshDrawFolders());
+        Mediator.Subscribe<StructuralRefreshUiMessage>(this, (msg) => RequestRefreshDrawFolders());
         Mediator.Subscribe<QueryWindowOpenStateMessage>(this, (msg) =>
         {
             if (msg.UiType == GetType())
@@ -655,6 +658,11 @@ public class CompactUi : WindowMediatorSubscriberBase
             _conversionCancellationTokenSource?.Dispose();
             _restoreCancellationTokenSource?.Cancel();
             _restoreCancellationTokenSource?.Dispose();
+            lock (_drawFoldersRefreshDebounceLock)
+            {
+                _drawFoldersRefreshDebounceCts?.CancelDispose();
+                _drawFoldersRefreshDebounceCts = null;
+            }
         }
         base.Dispose(disposing);
     }
@@ -1688,6 +1696,35 @@ public class CompactUi : WindowMediatorSubscriberBase
         
         // Create new draw folders
         _drawFolders = GetDrawFolders().ToList();
+    }
+
+    private void RequestRefreshDrawFolders()
+    {
+        CancellationTokenSource cts;
+        lock (_drawFoldersRefreshDebounceLock)
+        {
+            _drawFoldersRefreshDebounceCts?.CancelDispose();
+            _drawFoldersRefreshDebounceCts = new CancellationTokenSource();
+            cts = _drawFoldersRefreshDebounceCts;
+        }
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(DrawFoldersRefreshDebounceDelay, cts.Token).ConfigureAwait(false);
+                if (cts.Token.IsCancellationRequested) return;
+                RefreshDrawFolders();
+            }
+            catch (TaskCanceledException ex)
+            {
+                _logger.LogTrace(ex, "Debounced draw-folder refresh canceled");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Debounced draw-folder refresh failed");
+            }
+        });
     }
 
     private void RefreshIconsOnly()

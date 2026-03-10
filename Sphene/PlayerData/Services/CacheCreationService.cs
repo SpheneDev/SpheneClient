@@ -54,6 +54,24 @@ public sealed class CacheCreationService : DisposableMediatorSubscriberBase
 
         Mediator.Subscribe<CreateCacheForObjectMessage>(this, (msg) =>
         {
+            if (_playerRelatedObjects.TryGetValue(msg.ObjectToCreateFor.ObjectKind, out var localHandler)
+                && !ReferenceEquals(localHandler, msg.ObjectToCreateFor))
+            {
+                Logger.LogTrace("Ignoring non-local cache request for {handler}", msg.ObjectToCreateFor);
+                return;
+            }
+
+            if (msg.ObjectToCreateFor.ObjectKind == ObjectKind.Player
+                && msg.AddressChanged
+                && !msg.EquipmentChanged
+                && !msg.CustomizeChanged
+                && !msg.NameChanged
+                && !msg.ClassJobChanged)
+            {
+                Logger.LogTrace("Ignoring player cache request caused by address-only change for {handler}", msg.ObjectToCreateFor);
+                return;
+            }
+
             Logger.LogDebug("Received CreateCacheForObject for {handler}, updating", msg.ObjectToCreateFor);
             AddCacheToCreate(msg.ObjectToCreateFor.ObjectKind);
         });
@@ -114,8 +132,40 @@ public sealed class CacheCreationService : DisposableMediatorSubscriberBase
         Mediator.Subscribe<HeelsOffsetMessage>(this, (msg) =>
         {
             if (_isZoning) return;
-            Logger.LogDebug("Received Heels Offset change, updating player");
-            AddCacheToCreate();
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    var heelsData = await _ipcManager.Heels.GetOffsetAsync().ConfigureAwait(false);
+                    lock (_playerDataLock)
+                    {
+                        if (string.Equals(heelsData, _playerData.HeelsData, StringComparison.Ordinal))
+                        {
+                            Logger.LogDebug("Received Heels Offset change, but data is unchanged. Skipping update");
+                            return;
+                        }
+
+                        Logger.LogDebug("Received Heels Offset change, fast-tracking update. Old Hash: {Hash}", _lastDataHash ?? "null");
+                        _playerData.HeelsData = heelsData;
+                        var newData = _playerData.ToAPI();
+                        var newHash = newData.DataHash?.Value;
+                        if (!string.Equals(newHash, _lastDataHash, StringComparison.Ordinal))
+                        {
+                            Logger.LogDebug("Character data changed (Heels), publishing update. Old hash: {OldHash}, New hash: {NewHash}", _lastDataHash ?? "null", newHash ?? "null");
+                            _lastDataHash = newHash;
+                            Mediator.Publish(new CharacterDataCreatedMessage(newData));
+                        }
+                        else
+                        {
+                            Logger.LogDebug("Character data hash unchanged after Heels fast path. Hash: {Hash}", newHash ?? "null");
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogDebug(ex, "Heels fast-track update failed");
+                }
+            });
         });
 
         Mediator.Subscribe<GlamourerChangedMessage>(this, (msg) =>

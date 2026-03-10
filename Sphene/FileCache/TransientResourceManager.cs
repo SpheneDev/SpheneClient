@@ -3,6 +3,7 @@ using Sphene.SpheneConfiguration;
 using Sphene.SpheneConfiguration.Configurations;
 using Sphene.PlayerData.Data;
 using Sphene.PlayerData.Handlers;
+using Sphene.Interop.Ipc;
 using Sphene.Services;
 using Sphene.Services.Mediator;
 using Sphene.Utils;
@@ -17,6 +18,7 @@ public sealed class TransientResourceManager : DisposableMediatorSubscriberBase
     private readonly HashSet<string> _cachedHandledPaths = new(StringComparer.Ordinal);
     private readonly TransientConfigService _configurationService;
     private readonly DalamudUtilService _dalamudUtil;
+    private readonly IpcManager _ipcManager;
     private readonly string[] _handledFileTypes = ["tmb", "pap", "avfx", "atex", "sklb", "eid", "phyb", "scd", "skp", "shpk"];
     private readonly string[] _handledRecordingFileTypes = ["tex", "mdl", "mtrl"];
     private readonly HashSet<GameObjectHandler> _playerRelatedPointers = [];
@@ -26,13 +28,14 @@ public sealed class TransientResourceManager : DisposableMediatorSubscriberBase
     public bool IsTransientRecording { get; private set; } = false;
 
     public TransientResourceManager(ILogger<TransientResourceManager> logger, TransientConfigService configurationService,
-            DalamudUtilService dalamudUtil, SpheneMediator mediator) : base(logger, mediator)
+            DalamudUtilService dalamudUtil, IpcManager ipcManager, SpheneMediator mediator) : base(logger, mediator)
     {
         _configurationService = configurationService;
         _dalamudUtil = dalamudUtil;
+        _ipcManager = ipcManager;
 
         Mediator.Subscribe<PenumbraResourceLoadMessage>(this, Manager_PenumbraResourceLoadEvent);
-        Mediator.Subscribe<PenumbraModSettingChangedMessage>(this, (_) => Manager_PenumbraModSettingChanged());
+        Mediator.Subscribe<PenumbraModSettingChangedMessage>(this, (msg) => Manager_PenumbraModSettingChanged(msg));
         Mediator.Subscribe<PriorityFrameworkUpdateMessage>(this, (_) => DalamudUtil_FrameworkUpdate());
         Mediator.Subscribe<GameObjectHandlerCreatedMessage>(this, (msg) =>
         {
@@ -280,16 +283,24 @@ public sealed class TransientResourceManager : DisposableMediatorSubscriberBase
         }
     }
 
-    private void Manager_PenumbraModSettingChanged()
+    private void Manager_PenumbraModSettingChanged(PenumbraModSettingChangedMessage msg)
     {
-        _ = Task.Run(() =>
+        if (!ShouldRebuildForPenumbraChange(msg))
         {
-            Logger.LogDebug("Penumbra Mod Settings changed, verifying SemiTransientResources");
-            foreach (var item in _playerRelatedPointers)
-            {
-                Mediator.Publish(new TransientResourceChangedMessage(item.Address));
-            }
-        });
+            Logger.LogTrace("Ignoring transient recheck for non-local Penumbra collection {collection}", msg.CollectionId);
+            return;
+        }
+
+        Logger.LogTrace("Ignoring Penumbra mod setting recheck for transients; rebuilds are triggered only by newly added transient paths");
+    }
+
+    private bool ShouldRebuildForPenumbraChange(PenumbraModSettingChangedMessage msg)
+    {
+        if (msg.CollectionId == Guid.Empty) return true;
+        if (!_ipcManager.Penumbra.APIAvailable) return true;
+        var (valid, _, collection) = _ipcManager.Penumbra.GetCollectionForObject(0);
+        if (!valid) return true;
+        return msg.CollectionId == collection.Id;
     }
 
     public void RebuildSemiTransientResources()

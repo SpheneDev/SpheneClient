@@ -199,6 +199,7 @@ public sealed class GameObjectHandler : DisposableMediatorSubscriberBase, IHighP
                 Name = name;
             }
             bool equipDiff = false;
+            bool classJobChanged = false;
 
             if (((DrawObject*)DrawObjectAddress)->Object.GetObjectType() == ObjectType.CharacterBase
                 && ((CharacterBase*)DrawObjectAddress)->GetModelType() == CharacterBase.ModelType.Human)
@@ -208,6 +209,7 @@ public sealed class GameObjectHandler : DisposableMediatorSubscriberBase, IHighP
                 {
                     Logger.LogTrace("[{this}] classjob changed from {old} to {new}", this, _classJob, classJob);
                     _classJob = classJob;
+                    classJobChanged = true;
                     Mediator.Publish(new ClassJobChangedMessage(this));
                 }
 
@@ -263,10 +265,21 @@ public sealed class GameObjectHandler : DisposableMediatorSubscriberBase, IHighP
                     Logger.LogTrace("Checking [{this}] customize data from game obj, result: {diff}", this, equipDiff);
             }
 
-            if ((addrDiff || drawObjDiff || equipDiff || customizeDiff || nameChange) && _isOwnedObject)
+            var shouldPublishOwnedCacheUpdate = addrDiff
+                || equipDiff
+                || customizeDiff
+                || nameChange
+                || (drawObjDiff && ObjectKind != ObjectKind.Player);
+            if (shouldPublishOwnedCacheUpdate && _isOwnedObject)
             {
                 Logger.LogDebug("[{this}] Changed, Sending CreateCacheObjectMessage", this);
-                Mediator.Publish(new CreateCacheForObjectMessage(this));
+                Mediator.Publish(new CreateCacheForObjectMessage(this,
+                    AddressChanged: addrDiff,
+                    DrawObjectChanged: drawObjDiff,
+                    EquipmentChanged: equipDiff,
+                    CustomizeChanged: customizeDiff,
+                    NameChanged: nameChange,
+                    ClassJobChanged: classJobChanged));
             }
         }
         else if (addrDiff || drawObjDiff)

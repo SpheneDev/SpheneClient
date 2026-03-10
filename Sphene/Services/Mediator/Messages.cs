@@ -62,7 +62,14 @@ public record HaltScanMessage(string Source) : MessageBase;
 public record ResumeScanMessage(string Source) : MessageBase;
 public record NotificationMessage
     (string Title, string Message, NotificationType Type, TimeSpan? TimeShownOnScreen = null) : MessageBase;
-public record CreateCacheForObjectMessage(GameObjectHandler ObjectToCreateFor) : SameThreadMessage;
+public record CreateCacheForObjectMessage(
+    GameObjectHandler ObjectToCreateFor,
+    bool AddressChanged = false,
+    bool DrawObjectChanged = false,
+    bool EquipmentChanged = false,
+    bool CustomizeChanged = false,
+    bool NameChanged = false,
+    bool ClassJobChanged = false) : SameThreadMessage;
 public record ClearCacheForObjectMessage(GameObjectHandler ObjectToCreateFor) : SameThreadMessage;
 public record ForceLocalCharacterDataRebuildMessage(ObjectKind ObjectKind, string TraceId) : SameThreadMessage;
 public record CharacterDataCreatedMessage(CharacterData CharacterData, Sphene.PlayerData.Data.CharacterData? RawData = null) : SameThreadMessage;
