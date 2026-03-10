@@ -85,6 +85,7 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
     private string _selectedModLearningOption = string.Empty;
     private uint _selectedModLearningJobId = 0;
     private string _modLearningFilter = string.Empty;
+    private string _modLearningEmoteFilter = string.Empty;
     private bool _showModLearningJson = true;
     private Dictionary<string, string> _modLearningJsonByMod = new(StringComparer.Ordinal);
     private HashSet<string> _modLearningCurrentReplacementKeys = new(StringComparer.OrdinalIgnoreCase);
@@ -509,7 +510,27 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
         ImGuiHelpers.ScaledDummy(8);
         using (ImRaii.Child("##modlearning_content", new Vector2(0, 0), false, ImGuiWindowFlags.HorizontalScrollbar))
         {
-            DrawModLearningJsonBuild(resetCollapse);
+            using var contentTabBar = ImRaii.TabBar("##modlearning_content_tabs");
+            using (var overviewTab = ImRaii.TabItem("Current View"))
+            {
+                if (overviewTab)
+                {
+                    DrawModLearningOverviewTab(resetCollapse, currentKeysSnapshot);
+                }
+            }
+            using (var emoteTab = ImRaii.TabItem("Emote List"))
+            {
+                if (emoteTab)
+                {
+                    DrawModLearningEmoteOverridesTab(sortedModsForJob, _selectedModLearningJobId, currentKeysSnapshot, modDisplayNames);
+                }
+            }
+        }
+    }
+
+    private void DrawModLearningOverviewTab(bool resetCollapse, HashSet<string> currentKeysSnapshot)
+    {
+        DrawModLearningJsonBuild(resetCollapse);
 
         var selectedState = GetSelectedState();
         if (selectedState == null)
@@ -820,7 +841,115 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                 }
             }
         }
+
         _modLearningCollapseResetRequested = false;
+    }
+
+    private void DrawModLearningEmoteOverridesTab(
+        IEnumerable<string> modsForJob,
+        uint jobId,
+        HashSet<string> currentKeys,
+        IReadOnlyDictionary<string, string> modDisplayNames)
+    {
+        ImGui.SetNextItemWidth(260f * ImGuiHelpers.GlobalScale);
+        ImGui.InputTextWithHint("##modlearning_emote_filter", "Filter emotes or mods", ref _modLearningEmoteFilter, 255);
+        ImGui.SameLine();
+        if (ImGui.Button("Clear##modlearning_emote_filter_clear"))
+        {
+            _modLearningEmoteFilter = string.Empty;
+        }
+
+        if (currentKeys.Count == 0)
+        {
+            UiSharedService.ColorTextWrapped("No local character data loaded. Emote override comparison needs current loaded replacements.", ImGuiColors.DalamudGrey);
+            return;
+        }
+
+        var rows = BuildEmoteOverrideRowsForJob(modsForJob, jobId, currentKeys);
+        if (!string.IsNullOrWhiteSpace(_modLearningEmoteFilter))
+        {
+            rows = rows
+                .Where(row =>
+                    row.EmoteName.Contains(_modLearningEmoteFilter, StringComparison.OrdinalIgnoreCase)
+                    || row.WinnerMods.Any(mod =>
+                        mod.Contains(_modLearningEmoteFilter, StringComparison.OrdinalIgnoreCase)
+                        || GetModDisplayName(modDisplayNames, mod).Contains(_modLearningEmoteFilter, StringComparison.OrdinalIgnoreCase))
+                    || row.OverriddenMods.Any(mod =>
+                        mod.Contains(_modLearningEmoteFilter, StringComparison.OrdinalIgnoreCase)
+                        || GetModDisplayName(modDisplayNames, mod).Contains(_modLearningEmoteFilter, StringComparison.OrdinalIgnoreCase)))
+                .ToList();
+        }
+
+        var overriddenCount = rows.Count(row => row.OverriddenMods.Count > 0);
+        var notLoadedCount = rows.Count(row => row.WinnerMods.Count == 0 && row.MissingMods.Count > 0);
+        ImGui.TextUnformatted($"Emotes: {rows.Count} total, {overriddenCount} overridden, {notLoadedCount} not loaded");
+        ImGuiHelpers.ScaledDummy(6);
+
+        using var table = ImRaii.Table("##modlearning_emote_overrides_table", 4,
+            ImGuiTableFlags.RowBg | ImGuiTableFlags.ScrollY | ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.BordersInnerV,
+            new Vector2(0, -1));
+        if (!table) return;
+
+        ImGui.TableSetupColumn("Emote", ImGuiTableColumnFlags.WidthStretch, 0.9f);
+        ImGui.TableSetupColumn("Active Winner", ImGuiTableColumnFlags.WidthStretch, 1.2f);
+        ImGui.TableSetupColumn("Overridden Mods", ImGuiTableColumnFlags.WidthStretch, 1.2f);
+        ImGui.TableSetupColumn("Status", ImGuiTableColumnFlags.WidthFixed, 130f * ImGuiHelpers.GlobalScale);
+        ImGui.TableHeadersRow();
+
+        foreach (var row in rows.OrderBy(r => r.EmoteName, StringComparer.OrdinalIgnoreCase))
+        {
+            var winnerDisplay = row.WinnerMods.Count == 0
+                ? "-"
+                : string.Join(", ", row.WinnerMods
+                .OrderBy(v => v, StringComparer.OrdinalIgnoreCase)
+                .Select(mod => GetModDisplayName(modDisplayNames, mod)));
+            var overriddenDisplay = row.WinnerMods.Count == 0 || row.OverriddenMods.Count == 0
+                ? "-"
+                : string.Join(", ", row.OverriddenMods
+                    .OrderBy(v => v, StringComparer.OrdinalIgnoreCase)
+                    .Select(mod => GetModDisplayName(modDisplayNames, mod)));
+
+            ImGui.TableNextRow();
+            ImGui.TableNextColumn();
+            ImGui.TextUnformatted(row.EmoteName);
+            ImGui.TableNextColumn();
+            ImGui.TextWrapped(winnerDisplay);
+            ImGui.TableNextColumn();
+            if (row.WinnerMods.Count > 0 && row.OverriddenMods.Count > 0)
+            {
+                ImGui.PushStyleColor(ImGuiCol.Text, SpheneCustomTheme.Colors.Warning);
+            }
+            ImGui.TextWrapped(overriddenDisplay);
+            if (row.WinnerMods.Count > 0 && row.OverriddenMods.Count > 0)
+            {
+                ImGui.PopStyleColor();
+            }
+            ImGui.TableNextColumn();
+            if (row.WinnerMods.Count == 0 && row.MissingMods.Count > 0)
+            {
+                ImGui.PushStyleColor(ImGuiCol.Text, SpheneCustomTheme.Colors.Warning);
+                ImGui.TextUnformatted("Not Loaded");
+                if (ImGui.IsItemHovered())
+                {
+                    var missingDisplay = string.Join(", ", row.MissingMods
+                        .OrderBy(v => v, StringComparer.OrdinalIgnoreCase)
+                        .Select(mod => GetModDisplayName(modDisplayNames, mod)));
+                    ImGui.SetTooltip($"Missing contenders: {missingDisplay}");
+                }
+                ImGui.PopStyleColor();
+            }
+            else if (row.OverriddenMods.Count > 0)
+            {
+                ImGui.PushStyleColor(ImGuiCol.Text, SpheneCustomTheme.Colors.Warning);
+                ImGui.TextUnformatted("Overridden");
+                ImGui.PopStyleColor();
+            }
+            else
+            {
+                ImGui.PushStyleColor(ImGuiCol.Text, SpheneCustomTheme.Colors.Success);
+                ImGui.TextUnformatted("Active");
+                ImGui.PopStyleColor();
+            }
         }
     }
 
@@ -1349,6 +1478,14 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
 
     private HashSet<string> GetEmoteOverriddenModsForJob(IEnumerable<string> modsForJob, uint jobId, HashSet<string> currentKeys)
     {
+        var rows = BuildEmoteOverrideRowsForJob(modsForJob, jobId, currentKeys);
+        return rows
+            .SelectMany(row => row.OverriddenMods)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private List<EmoteOverrideRow> BuildEmoteOverrideRowsForJob(IEnumerable<string> modsForJob, uint jobId, HashSet<string> currentKeys)
+    {
         if (currentKeys.Count == 0) return [];
         Dictionary<string, List<LearnedModState>> statesByMod;
         lock (_modLearningLock)
@@ -1356,8 +1493,8 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
             statesByMod = _modLearningStatesByMod;
         }
 
-        var emoteOwners = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
-        var emoteMissingByMod = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+        var winnerByEmote = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+        var missingByEmote = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var modName in modsForJob)
         {
@@ -1391,45 +1528,44 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                         var names = emoteNames.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
                         foreach (var emoteName in names)
                         {
-                            if (present)
+                            var targetMap = present ? winnerByEmote : missingByEmote;
+                            if (!targetMap.TryGetValue(emoteName, out var mods))
                             {
-                                if (!emoteOwners.TryGetValue(emoteName, out var owners))
-                                {
-                                    owners = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                                    emoteOwners[emoteName] = owners;
-                                }
-                                owners.Add(modName);
+                                mods = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                                targetMap[emoteName] = mods;
                             }
-                            else
-                            {
-                                if (!emoteMissingByMod.TryGetValue(modName, out var missing))
-                                {
-                                    missing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                                    emoteMissingByMod[modName] = missing;
-                                }
-                                missing.Add(emoteName);
-                            }
+                            mods.Add(modName);
                         }
                     }
                 }
             }
         }
 
-        var overridden = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var missingEntry in emoteMissingByMod)
+        var allEmotes = winnerByEmote.Keys
+            .Concat(missingByEmote.Keys)
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+        var rows = new List<EmoteOverrideRow>();
+        foreach (var emoteName in allEmotes)
         {
-            foreach (var emoteName in missingEntry.Value)
+            winnerByEmote.TryGetValue(emoteName, out var winners);
+            missingByEmote.TryGetValue(emoteName, out var missing);
+            winners ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            missing ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            var overridden = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (winners.Count > 0)
             {
-                if (!emoteOwners.TryGetValue(emoteName, out var owners)) continue;
-                if (owners.Any(owner => !string.Equals(owner, missingEntry.Key, StringComparison.OrdinalIgnoreCase)))
-                {
-                    overridden.Add(missingEntry.Key);
-                    break;
-                }
+                overridden = new HashSet<string>(missing, StringComparer.OrdinalIgnoreCase);
+                overridden.ExceptWith(winners);
             }
+
+            rows.Add(new EmoteOverrideRow(emoteName, winners, overridden, missing));
         }
-        return overridden;
+
+        return rows;
     }
+
+    private sealed record EmoteOverrideRow(string EmoteName, HashSet<string> WinnerMods, HashSet<string> OverriddenMods, HashSet<string> MissingMods);
 
     private bool ModUsedByJob(string modName, uint jobId)
     {

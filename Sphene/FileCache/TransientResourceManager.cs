@@ -22,9 +22,12 @@ public sealed class TransientResourceManager : DisposableMediatorSubscriberBase
     private readonly string[] _handledFileTypes = ["tmb", "pap", "avfx", "atex", "sklb", "eid", "phyb", "scd", "skp", "shpk"];
     private readonly string[] _handledRecordingFileTypes = ["tex", "mdl", "mtrl"];
     private readonly HashSet<GameObjectHandler> _playerRelatedPointers = [];
+    private readonly System.Threading.Lock _sendTransientLock = new();
+    private readonly HashSet<string> _pendingPlayerTransientPublishPaths = new(StringComparer.OrdinalIgnoreCase);
     private ConcurrentDictionary<IntPtr, ObjectKind> _cachedFrameAddresses = [];
     private ConcurrentDictionary<ObjectKind, HashSet<string>>? _semiTransientResources = null;
     private uint _lastClassJobId = uint.MaxValue;
+    private DateTime _lastPlayerTransientPublishUtc = DateTime.MinValue;
     public bool IsTransientRecording { get; private set; } = false;
 
     public TransientResourceManager(ILogger<TransientResourceManager> logger, TransientConfigService configurationService,
@@ -428,7 +431,7 @@ public sealed class TransientResourceManager : DisposableMediatorSubscriberBase
                 {
                     Logger.LogDebug("Adding {replacedGamePath} for {gameObject} ({filePath})", replacedGamePath, owner?.ToString() ?? gameObjectAddress.ToString("X"), filePath);
                     PublishTransientObserved(objectKind, replacedGamePath);
-                    SendTransients(gameObjectAddress, objectKind);
+                    SendTransients(gameObjectAddress, objectKind, replacedGamePath);
                 }
             }
         }
@@ -439,8 +442,27 @@ public sealed class TransientResourceManager : DisposableMediatorSubscriberBase
         }
     }
 
-    private void SendTransients(nint gameObject, ObjectKind objectKind)
+    private void SendTransients(nint gameObject, ObjectKind objectKind, string addedGamePath)
     {
+        if (objectKind == ObjectKind.Player && !IsPlayerTransientPublishRelevant(addedGamePath))
+        {
+            Logger.LogTrace("Skipping delayed transient publish for non-emote path {path}", addedGamePath);
+            return;
+        }
+
+        if (objectKind == ObjectKind.Player)
+        {
+            _sendTransientLock.Enter();
+            try
+            {
+                _pendingPlayerTransientPublishPaths.Add(addedGamePath);
+            }
+            finally
+            {
+                _sendTransientLock.Exit();
+            }
+        }
+
         _ = Task.Run(async () =>
         {
             _sendTransientCts?.Cancel();
@@ -448,15 +470,73 @@ public sealed class TransientResourceManager : DisposableMediatorSubscriberBase
             _sendTransientCts = new();
             var token = _sendTransientCts.Token;
             await Task.Delay(TimeSpan.FromSeconds(5), token).ConfigureAwait(false);
-            foreach (var kvp in TransientResources)
+
+            if (objectKind == ObjectKind.Player)
             {
-                if (TransientResources.TryGetValue(objectKind, out var values) && values.Any())
+                var sinceLastPublish = DateTime.UtcNow - _lastPlayerTransientPublishUtc;
+                var cooldown = TimeSpan.FromSeconds(8);
+                if (_lastPlayerTransientPublishUtc != DateTime.MinValue && sinceLastPublish < cooldown)
                 {
-                    Logger.LogTrace("Sending Transients for {kind}", objectKind);
-                    Mediator.Publish(new TransientResourceChangedMessage(gameObject));
+                    await Task.Delay(cooldown - sinceLastPublish, token).ConfigureAwait(false);
                 }
             }
+
+            if (!TransientResources.TryGetValue(objectKind, out var values) || !values.Any())
+            {
+                if (objectKind == ObjectKind.Player)
+                {
+                    _sendTransientLock.Enter();
+                    try
+                    {
+                        _pendingPlayerTransientPublishPaths.Clear();
+                    }
+                    finally
+                    {
+                        _sendTransientLock.Exit();
+                    }
+                }
+                return;
+            }
+
+            if (objectKind == ObjectKind.Player)
+            {
+                var pendingCount = 0;
+                _sendTransientLock.Enter();
+                try
+                {
+                    pendingCount = _pendingPlayerTransientPublishPaths.Count;
+                    if (pendingCount == 0) return;
+                    _pendingPlayerTransientPublishPaths.Clear();
+                    _lastPlayerTransientPublishUtc = DateTime.UtcNow;
+                }
+                finally
+                {
+                    _sendTransientLock.Exit();
+                }
+
+                Logger.LogTrace("Sending Transients for {kind} after {count} new relevant paths", objectKind, pendingCount);
+            }
+            else
+            {
+                Logger.LogTrace("Sending Transients for {kind}", objectKind);
+            }
+
+            Mediator.Publish(new TransientResourceChangedMessage(gameObject));
         });
+    }
+
+    private static bool IsPlayerTransientPublishRelevant(string gamePath)
+    {
+        if (string.IsNullOrWhiteSpace(gamePath))
+        {
+            return false;
+        }
+
+        var normalized = gamePath.Replace('\\', '/').ToLowerInvariant();
+        return normalized.Contains("/emote/", StringComparison.Ordinal)
+            || normalized.Contains("/emote_sp/", StringComparison.Ordinal)
+            || normalized.Contains("_emote.", StringComparison.Ordinal)
+            || normalized.Contains("emote_", StringComparison.Ordinal);
     }
 
     public void StartRecording(CancellationToken token)

@@ -398,6 +398,7 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
 
         var resolvedMap = await ResolveEffectivePathsAsync(allStates).ConfigureAwait(false);
         var emoteOwners = BuildEffectiveEmoteOwners(enabledMods, resolvedMap);
+        LogEmoteOverrideOverview(enabledMods, resolvedMap);
 
         foreach (var modEntry in enabledMods)
         {
@@ -1365,6 +1366,97 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
         return owners;
     }
 
+    private void LogEmoteOverrideOverview(
+        IEnumerable<(string ModDirName, Dictionary<string, List<string>> Settings, List<LearnedModState> States)> mods,
+        Dictionary<string, string> resolvedMap)
+    {
+        var overview = BuildEmoteOverrideOverview(mods, resolvedMap);
+        if (overview.Count == 0)
+        {
+            _logger.LogDebug("[ModLearning] Emote override overview: no overrides detected");
+            return;
+        }
+
+        foreach (var item in overview.OrderBy(k => k.EmoteName, StringComparer.OrdinalIgnoreCase))
+        {
+            _logger.LogDebug("[ModLearning] Emote override overview: emote={emote} winner={winner} overridden={overridden}",
+                item.EmoteName,
+                string.Join(", ", item.WinnerMods.OrderBy(v => v, StringComparer.OrdinalIgnoreCase)),
+                string.Join(", ", item.OverriddenMods.OrderBy(v => v, StringComparer.OrdinalIgnoreCase)));
+        }
+    }
+
+    private static List<EmoteOverrideOverviewItem> BuildEmoteOverrideOverview(
+        IEnumerable<(string ModDirName, Dictionary<string, List<string>> Settings, List<LearnedModState> States)> mods,
+        Dictionary<string, string> resolvedMap)
+    {
+        var winnerByEmote = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+        var overriddenByEmote = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var modEntry in mods)
+        {
+            var modName = modEntry.ModDirName;
+            foreach (var state in modEntry.States)
+            {
+                foreach (var fragment in state.Fragments.Values)
+                {
+                    foreach (var replacement in GetAllReplacements(fragment))
+                    {
+                        if (!IsTrackedParentReplacement(replacement)) continue;
+                        var normalizedResolved = NormalizePathString(replacement.ResolvedPath);
+                        foreach (var gp in replacement.GamePaths)
+                        {
+                            if (!gp.EndsWith(".pap", StringComparison.OrdinalIgnoreCase)) continue;
+                            var normalizedGp = NormalizePathString(gp);
+                            if (!state.PapEmotes.TryGetValue(normalizedGp, out var emoteName) || string.IsNullOrWhiteSpace(emoteName))
+                            {
+                                continue;
+                            }
+
+                            if (resolvedMap.TryGetValue(normalizedGp, out var resolved) &&
+                                string.Equals(NormalizePathString(resolved), normalizedResolved, StringComparison.OrdinalIgnoreCase))
+                            {
+                                if (!winnerByEmote.TryGetValue(emoteName, out var winners))
+                                {
+                                    winners = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                                    winnerByEmote[emoteName] = winners;
+                                }
+                                winners.Add(modName);
+                            }
+                            else
+                            {
+                                if (!overriddenByEmote.TryGetValue(emoteName, out var overridden))
+                                {
+                                    overridden = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                                    overriddenByEmote[emoteName] = overridden;
+                                }
+                                overridden.Add(modName);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        var result = new List<EmoteOverrideOverviewItem>();
+        foreach (var kvp in overriddenByEmote)
+        {
+            var emoteName = kvp.Key;
+            var overridden = kvp.Value;
+            if (overridden.Count == 0) continue;
+            if (!winnerByEmote.TryGetValue(emoteName, out var winners) || winners.Count == 0) continue;
+
+            overridden.ExceptWith(winners);
+            if (overridden.Count == 0) continue;
+
+            result.Add(new EmoteOverrideOverviewItem(emoteName, winners, overridden));
+        }
+
+        return result;
+    }
+
+    private sealed record EmoteOverrideOverviewItem(string EmoteName, HashSet<string> WinnerMods, HashSet<string> OverriddenMods);
+
     private static bool TryGetEmoteNameForPap(string papPath, IEnumerable<LearnedModState> states, out string emoteName)
     {
         var normalized = NormalizePathString(papPath);
@@ -2191,35 +2283,39 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
             {
                 foreach (var replacement in relevant)
                 {
-                    var optionMatches = GetOptionMatches(optionIndex, selectedOptionSets, replacement.GamePaths);
-                    var seenInTransient = !requireTransientObservation || replacement.GamePaths.Any(gp => observedTransientPaths.Contains(NormalizePathString(gp)));
-                    if (optionMatches.Count == 0)
+                    foreach (var gamePath in replacement.GamePaths)
                     {
-                        AddReplacementToOptionState(states[baseKey], kind, replacement);
-                        continue;
-                    }
-
-                    var winningMatch = SelectWinningOptionMatch(optionMatches, optionPriorityMap);
-                    if (winningMatch == null)
-                    {
-                        AddReplacementToOptionState(states[baseKey], kind, replacement);
-                        continue;
-                    }
-
-                    if (!states.TryGetValue(winningMatch.OptionKey, out var optionState))
-                    {
-                        var settings = new Dictionary<string, List<string>>(StringComparer.Ordinal)
+                        if (requireTransientObservation && !observedTransientPaths.Contains(NormalizePathString(gamePath)))
                         {
-                            [winningMatch.GroupName] = [winningMatch.OptionName]
-                        };
-                        optionState = new OptionState(settings, new Dictionary<ObjectKind, ModFileFragment>());
-                        states[winningMatch.OptionKey] = optionState;
+                            continue;
+                        }
+
+                        var optionMatches = GetOptionMatches(optionIndex, selectedOptionSets, [gamePath]);
+                        if (optionMatches.Count == 0)
+                        {
+                            AddReplacementPathToOptionState(states[baseKey], kind, replacement, gamePath);
+                            continue;
+                        }
+
+                        var winningMatch = SelectWinningOptionMatch(optionMatches, optionPriorityMap);
+                        if (winningMatch == null)
+                        {
+                            AddReplacementPathToOptionState(states[baseKey], kind, replacement, gamePath);
+                            continue;
+                        }
+
+                        if (!states.TryGetValue(winningMatch.OptionKey, out var optionState))
+                        {
+                            var settings = new Dictionary<string, List<string>>(StringComparer.Ordinal)
+                            {
+                                [winningMatch.GroupName] = [winningMatch.OptionName]
+                            };
+                            optionState = new OptionState(settings, new Dictionary<ObjectKind, ModFileFragment>());
+                            states[winningMatch.OptionKey] = optionState;
+                        }
+
+                        AddReplacementPathToOptionState(optionState, kind, replacement, gamePath);
                     }
-                    if (!seenInTransient)
-                    {
-                        continue;
-                    }
-                    AddReplacementToOptionState(optionState, kind, replacement);
                 }
             }
         }
@@ -2316,6 +2412,15 @@ public class ModLearningService : DisposableMediatorSubscriberBase, Microsoft.Ex
             state.Fragments[kind] = fragment;
         }
         fragment.FileReplacements.Add(replacement);
+    }
+
+    private static void AddReplacementPathToOptionState(OptionState state, ObjectKind kind, FileReplacement sourceReplacement, string gamePath)
+    {
+        var replacement = new FileReplacement([gamePath], sourceReplacement.ResolvedPath)
+        {
+            Hash = sourceReplacement.Hash
+        };
+        AddReplacementToOptionState(state, kind, replacement);
     }
 
     private Dictionary<string, Dictionary<string, HashSet<string>>> GetOptionIndex(string modDirectoryPath, string modDirectoryName)
