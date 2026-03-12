@@ -31,6 +31,7 @@ public sealed class ShrinkUHostService : IHostedService, IDisposable
     private bool _registered;
     private readonly ShrinkU.Services.TextureBackupService _backupService;
     private readonly ShrinkU.Services.TextureConversionService _shrinkuConversionService;
+    private readonly PenumbraFolderWatcherService _penumbraFolderWatcher;
     private CancellationTokenSource? _refreshCts;
     private readonly PenumbraIpc _penumbraIpc;
     private PenumbraExtensionService? _penumbraExtension;
@@ -47,6 +48,7 @@ public sealed class ShrinkUHostService : IHostedService, IDisposable
         ShrinkUConfigService shrinkuConfigService,
         ShrinkU.Services.TextureBackupService backupService,
         ShrinkU.Services.TextureConversionService shrinkuConversionService,
+        PenumbraFolderWatcherService penumbraFolderWatcher,
         ShrinkU.UI.StartupProgressUI startupProgressUi,
         Sphene.Interop.Ipc.IpcManager ipcManager,
         PenumbraIpc penumbraIpc)
@@ -63,6 +65,7 @@ public sealed class ShrinkUHostService : IHostedService, IDisposable
         _shrinkuConfigService = shrinkuConfigService;
         _backupService = backupService;
         _shrinkuConversionService = shrinkuConversionService;
+        _penumbraFolderWatcher = penumbraFolderWatcher;
         _ = ipcManager;
         _penumbraIpc = penumbraIpc;
 
@@ -248,6 +251,8 @@ public sealed class ShrinkUHostService : IHostedService, IDisposable
             catch (Exception ex) { _logger.LogDebug(ex, "Failed to disable mod state saving"); }
             try { _conversionUi.ShutdownBackgroundWork(); }
             catch (Exception ex) { _logger.LogDebug(ex, "Failed to shutdown background work"); }
+            try { _penumbraFolderWatcher.Dispose(); }
+            catch (Exception ex) { _logger.LogDebug(ex, "Failed to dispose Penumbra folder watcher"); }
             UnregisterWindows();
         }
         catch (Exception ex)
@@ -531,6 +536,8 @@ public sealed class ShrinkUHostService : IHostedService, IDisposable
 
     public void Dispose()
     {
+        try { _penumbraFolderWatcher.Dispose(); }
+        catch (Exception ex) { _logger.LogDebug(ex, "Failed to dispose Penumbra folder watcher on Dispose"); }
         _penumbraExtension?.Dispose();
     }
 }
