@@ -42,7 +42,11 @@ public class PairFactory
 
     public Pair Create(UserPairDto userPairDto)
     {
-        return new Pair(_loggerFactory.CreateLogger<Pair>(), new(userPairDto.User, userPairDto.IndividualPairStatus, [], userPairDto.OwnPermissions, userPairDto.OtherPermissions),
+        var userFullPairDto = new UserFullPairDto(userPairDto.User, userPairDto.IndividualPairStatus, [], userPairDto.OwnPermissions, userPairDto.OtherPermissions)
+        {
+            RemoteClientVersion = userPairDto.RemoteClientVersion
+        };
+        return new Pair(_loggerFactory.CreateLogger<Pair>(), userFullPairDto,
             _cachedPlayerFactory, _spheneMediator, _serverConfigurationManager, _playerPerformanceConfigService, _apiController, _visibilityGateService, _dalamudUtilService);
     }
 }

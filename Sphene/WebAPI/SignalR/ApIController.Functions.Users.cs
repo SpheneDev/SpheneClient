@@ -158,8 +158,14 @@ public partial class ApiController
 
     // UserUpdateAckOther method removed - AckOther is controlled by other player's AckYou
 
-    public async Task UserSendCharacterDataAcknowledgment(CharacterDataAcknowledgmentDto acknowledgmentDto)
+    public Task UserSendCharacterDataAcknowledgment(CharacterDataAcknowledgmentDto acknowledgmentDto)
     {
+        return UserSendCharacterDataAcknowledgmentV2(new CharacterDataAcknowledgmentEventDto(acknowledgmentDto));
+    }
+
+    public async Task UserSendCharacterDataAcknowledgmentV2(CharacterDataAcknowledgmentEventDto acknowledgmentEventDto)
+    {
+        var acknowledgmentDto = acknowledgmentEventDto.Acknowledgment;
         Logger.LogDebug("UserSendCharacterDataAcknowledgment called - Hash: {hash}, User: {user}, Success: {success}, Connected: {connected}", 
             acknowledgmentDto.DataHash[..Math.Min(8, acknowledgmentDto.DataHash.Length)], acknowledgmentDto.User.AliasOrUID, acknowledgmentDto.Success, IsConnected);
         
@@ -172,7 +178,7 @@ public partial class ApiController
         
         try
         {
-            await _spheneHub!.SendAsync(nameof(UserSendCharacterDataAcknowledgment), acknowledgmentDto).ConfigureAwait(false);
+            await _spheneHub!.SendAsync(nameof(UserSendCharacterDataAcknowledgmentV2), acknowledgmentEventDto).ConfigureAwait(false);
             Logger.LogDebug("Successfully sent acknowledgment to server - Hash: {hash}", 
                 acknowledgmentDto.DataHash[..Math.Min(8, acknowledgmentDto.DataHash.Length)]);
         }

@@ -69,7 +69,7 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
         Mediator.Subscribe<CyclePauseMessage>(this, (msg) => _ = CyclePauseAsync(msg.UserData));
         Mediator.Subscribe<CensusUpdateMessage>(this, (msg) => _lastCensus = msg);
         Mediator.Subscribe<PauseMessage>(this, (msg) => _ = PauseAsync(msg.UserData));
-        Mediator.Subscribe<SendCharacterDataAcknowledgmentMessage>(this, (msg) => _ = UserSendCharacterDataAcknowledgment(msg.AcknowledgmentDto));
+        Mediator.Subscribe<SendCharacterDataAcknowledgmentMessage>(this, (msg) => _ = UserSendCharacterDataAcknowledgmentV2(new CharacterDataAcknowledgmentEventDto(msg.AcknowledgmentDto)));
         Mediator.Subscribe<FileTransferAckMessage>(this, (msg) => _ = UserAckFileTransfer(msg));
 
         ServerState = ServerState.Offline;
@@ -501,6 +501,7 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
         OnUserReceiveFileNotification(dto => _ = Client_UserReceiveFileNotification(dto));
         OnUserReceiveBypassEmote(dto => _ = Client_UserReceiveBypassEmote(dto));
         OnUserReceiveCharacterDataAcknowledgment(dto => _ = Client_UserReceiveCharacterDataAcknowledgment(dto));
+        OnUserReceiveCharacterDataAcknowledgmentV2(dto => _ = Client_UserReceiveCharacterDataAcknowledgmentV2(dto));
 
         OnGroupChangePermissions((dto) => _ = Client_GroupChangePermissions(dto));
         OnGroupDelete((dto) => _ = Client_GroupDelete(dto));

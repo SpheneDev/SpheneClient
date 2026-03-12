@@ -616,6 +616,21 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
             userPairText += UiSharedService.TooltipSeparator + "You are directly Paired";
         }
 
+        if (_pair.IsOnline && !string.IsNullOrWhiteSpace(UserPair.RemoteClientVersion))
+        {
+            var remoteClientVersion = UserPair.RemoteClientVersion;
+            if (Version.TryParse(remoteClientVersion, out var parsedRemoteClientVersion))
+            {
+                var normalizedVersion = parsedRemoteClientVersion.Build >= 0
+                    ? $"{parsedRemoteClientVersion.Major}.{parsedRemoteClientVersion.Minor}.{parsedRemoteClientVersion.Build}"
+                    : $"{parsedRemoteClientVersion.Major}.{parsedRemoteClientVersion.Minor}";
+                var buildText = parsedRemoteClientVersion.Build >= 0 ? parsedRemoteClientVersion.Build.ToString() : "n/a";
+                remoteClientVersion = $"{normalizedVersion} (build {buildText})";
+            }
+
+            userPairText += UiSharedService.TooltipSeparator + $"Client Version: {remoteClientVersion}";
+        }
+
         if (_pair.LastAppliedDataBytes >= 0)
         {
             userPairText += UiSharedService.TooltipSeparator;

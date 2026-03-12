@@ -164,6 +164,11 @@ public partial class ApiController
         return Task.CompletedTask;
     }
 
+    public Task Client_UserReceiveCharacterDataAcknowledgmentV2(CharacterDataAcknowledgmentEventDto acknowledgmentEventDto)
+    {
+        return Client_UserReceiveCharacterDataAcknowledgment(acknowledgmentEventDto.Acknowledgment);
+    }
+
     public Task Client_UserReceiveUploadStatus(UserUploadStatusDto dto)
     {
         Logger.LogTrace("Client_UserReceiveUploadStatus: {dto}", dto);
@@ -399,6 +404,12 @@ public partial class ApiController
     {
         if (_initialized) return;
         _spheneHub!.On(nameof(Client_UserReceiveCharacterDataAcknowledgment), act);
+    }
+
+    public void OnUserReceiveCharacterDataAcknowledgmentV2(Action<CharacterDataAcknowledgmentEventDto> act)
+    {
+        if (_initialized) return;
+        _spheneHub!.On(nameof(Client_UserReceiveCharacterDataAcknowledgmentV2), act);
     }
 
     public void OnUserReceiveUploadStatus(Action<UserUploadStatusDto> act)
