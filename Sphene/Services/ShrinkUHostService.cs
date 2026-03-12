@@ -32,6 +32,7 @@ public sealed class ShrinkUHostService : IHostedService, IDisposable
     private readonly ShrinkU.Services.TextureBackupService _backupService;
     private readonly ShrinkU.Services.TextureConversionService _shrinkuConversionService;
     private readonly PenumbraFolderWatcherService _penumbraFolderWatcher;
+    private readonly BackupFolderWatcherService _backupFolderWatcher;
     private CancellationTokenSource? _refreshCts;
     private readonly PenumbraIpc _penumbraIpc;
     private PenumbraExtensionService? _penumbraExtension;
@@ -49,6 +50,7 @@ public sealed class ShrinkUHostService : IHostedService, IDisposable
         ShrinkU.Services.TextureBackupService backupService,
         ShrinkU.Services.TextureConversionService shrinkuConversionService,
         PenumbraFolderWatcherService penumbraFolderWatcher,
+        BackupFolderWatcherService backupFolderWatcher,
         ShrinkU.UI.StartupProgressUI startupProgressUi,
         Sphene.Interop.Ipc.IpcManager ipcManager,
         PenumbraIpc penumbraIpc)
@@ -66,6 +68,7 @@ public sealed class ShrinkUHostService : IHostedService, IDisposable
         _backupService = backupService;
         _shrinkuConversionService = shrinkuConversionService;
         _penumbraFolderWatcher = penumbraFolderWatcher;
+        _backupFolderWatcher = backupFolderWatcher;
         _ = ipcManager;
         _penumbraIpc = penumbraIpc;
 
@@ -186,21 +189,46 @@ public sealed class ShrinkUHostService : IHostedService, IDisposable
                             if (token.IsCancellationRequested) return;
                             try { _startupProgressUi.SetStep(1); }
                             catch (Exception ex) { _logger.LogDebug(ex, "Failed to set StartupProgressUI step 1"); }
-                            var maxBackupSeconds = 5;
-                            var refreshTask = _backupService.RefreshAllBackupStateAsync();
-                            var completed = await Task.WhenAny(refreshTask, Task.Delay(TimeSpan.FromSeconds(maxBackupSeconds), token)).ConfigureAwait(false);
-                            if (completed != refreshTask)
+                            bool backupUnchanged = false;
+                            try { backupUnchanged = _backupService.IsBackupFolderFingerprintUnchanged(); }
+                            catch (Exception ex) { _logger.LogDebug(ex, "Failed to evaluate backup fingerprint state"); }
+                            if (!backupUnchanged)
                             {
-                                _logger.LogWarning("Backup refresh timed out after {sec}s; continuing", maxBackupSeconds);
+                                var maxBackupSeconds = 5;
+                                var refreshTask = _backupService.RefreshAllBackupStateAsync();
+                                var completed = await Task.WhenAny(refreshTask, Task.Delay(TimeSpan.FromSeconds(maxBackupSeconds), token)).ConfigureAwait(false);
+                                if (completed != refreshTask)
+                                {
+                                    _logger.LogWarning("Backup refresh timed out after {sec}s; continuing", maxBackupSeconds);
+                                }
+                                else
+                                {
+                                    try { await refreshTask.ConfigureAwait(false); }
+                                    catch (Exception ex) { _logger.LogDebug(ex, "RefreshAllBackupStateAsync completed with error"); }
+                                }
                             }
                             else
                             {
-                                try { await refreshTask.ConfigureAwait(false); }
-                                catch (Exception ex) { _logger.LogDebug(ex, "RefreshAllBackupStateAsync completed with error"); }
+                                _logger.LogDebug("Startup fast path: skipping RefreshAllBackupState (backups unchanged)");
                             }
                             try { _startupProgressUi.MarkBackupDone(); _startupProgressUi.SetStep(3); }
                             catch (Exception ex) { _logger.LogDebug(ex, "Failed to mark backup done / set step 3"); }
-                            await _backupService.PopulateMissingOriginalBytesAsync(token).ConfigureAwait(false);
+                            bool skipHeavy = false;
+                            try
+                            {
+                                await _penumbraFolderWatcher.WaitForInitialScanAsync(TimeSpan.FromSeconds(3), token).ConfigureAwait(false);
+                                skipHeavy = _penumbraFolderWatcher.IsStartupSnapshotUnchanged();
+                            }
+                            catch (Exception ex) { _logger.LogDebug(ex, "Failed to evaluate startup snapshot state"); }
+
+                            if (!skipHeavy)
+                            {
+                                await _backupService.PopulateMissingOriginalBytesAsync(token).ConfigureAwait(false);
+                            }
+                            else
+                            {
+                                _logger.LogDebug("Startup fast path: skipping PopulateMissingOriginalBytes (Penumbra unchanged)");
+                            }
                             try { _startupProgressUi.SetStep(4); }
                             catch (Exception ex) { _logger.LogDebug(ex, "Failed to set StartupProgressUI step 4"); }
                             try { await _shrinkuConversionService.UpdateAllModUsedTextureFilesAsync().ConfigureAwait(false); }
@@ -213,11 +241,18 @@ public sealed class ShrinkUHostService : IHostedService, IDisposable
                             catch (Exception ex) { _logger.LogDebug(ex, "Failed to save mod state"); }
                             try { _startupProgressUi.MarkSaveDone(); }
                             catch (Exception ex) { _logger.LogDebug(ex, "Failed to mark save done"); }
-                            try { _conversionUi.TriggerStartupRescan(); }
-                            catch (Exception ex) { _logger.LogDebug(ex, "Failed to trigger startup rescan"); }
-                            var threads = Math.Max(1, _shrinkuConfigService.Current.MaxStartupThreads);
-                            await _shrinkuConversionService.RunInitialParallelUpdateAsync(threads, token).ConfigureAwait(false);
-                            _logger.LogDebug("Initial ShrinkU startup update completed");
+                            if (!skipHeavy)
+                            {
+                                try { _conversionUi.TriggerStartupRescan(); }
+                                catch (Exception ex) { _logger.LogDebug(ex, "Failed to trigger startup rescan"); }
+                                var threads = Math.Max(1, _shrinkuConfigService.Current.MaxStartupThreads);
+                                await _shrinkuConversionService.RunInitialParallelUpdateAsync(threads, token).ConfigureAwait(false);
+                                _logger.LogDebug("Initial ShrinkU startup update completed");
+                            }
+                            else
+                            {
+                                _logger.LogDebug("Startup fast path: Penumbra folder unchanged, using persisted mod state");
+                            }
                         }
                         catch (Exception ex)
                         {
@@ -253,6 +288,8 @@ public sealed class ShrinkUHostService : IHostedService, IDisposable
             catch (Exception ex) { _logger.LogDebug(ex, "Failed to shutdown background work"); }
             try { _penumbraFolderWatcher.Dispose(); }
             catch (Exception ex) { _logger.LogDebug(ex, "Failed to dispose Penumbra folder watcher"); }
+            try { _backupFolderWatcher.Dispose(); }
+            catch (Exception ex) { _logger.LogDebug(ex, "Failed to dispose backup folder watcher"); }
             UnregisterWindows();
         }
         catch (Exception ex)
@@ -538,6 +575,8 @@ public sealed class ShrinkUHostService : IHostedService, IDisposable
     {
         try { _penumbraFolderWatcher.Dispose(); }
         catch (Exception ex) { _logger.LogDebug(ex, "Failed to dispose Penumbra folder watcher on Dispose"); }
+        try { _backupFolderWatcher.Dispose(); }
+        catch (Exception ex) { _logger.LogDebug(ex, "Failed to dispose backup folder watcher on Dispose"); }
         _penumbraExtension?.Dispose();
     }
 }

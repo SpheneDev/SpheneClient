@@ -154,6 +154,10 @@ public class CompactUi : WindowMediatorSubscriberBase
     private Task<Dictionary<string, List<string>>>? _textureDetectionTask;
     private DateTime _lastTextureDetectionUpdate = DateTime.MinValue;
     private DateTime _backupScanTriggeredAt = DateTime.MinValue;
+    private readonly object _backupScanDebounceLock = new();
+    private CancellationTokenSource? _backupScanDebounceCts;
+    private string _pendingBackupScanReason = string.Empty;
+    private readonly SemaphoreSlim _shrinkUDetectionSemaphore = new(1, 1);
 
     // Stable UI text caching to avoid flicker in backup sections
     private string _allBackupsKey = string.Empty;
@@ -507,9 +511,41 @@ public class CompactUi : WindowMediatorSubscriberBase
 
     private void TriggerImmediateBackupScan(string reason)
     {
-        _logger.LogDebug("Triggering immediate backup scan: {reason}", reason);
+        var r = string.IsNullOrWhiteSpace(reason) ? "unknown" : reason;
+        int delayMs = 350;
+        if (r.StartsWith("penumbra-mod-setting-changed", StringComparison.OrdinalIgnoreCase))
+            delayMs = 1200;
+        else if (r.StartsWith("external-textures-changed", StringComparison.OrdinalIgnoreCase))
+            delayMs = 900;
+
+        CancellationTokenSource cts;
+        lock (_backupScanDebounceLock)
+        {
+            _pendingBackupScanReason = r;
+            try { _backupScanDebounceCts?.Cancel(); } catch { }
+            try { _backupScanDebounceCts?.Dispose(); } catch { }
+            _backupScanDebounceCts = new CancellationTokenSource();
+            cts = _backupScanDebounceCts;
+        }
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(delayMs, cts.Token).ConfigureAwait(false);
+                if (cts.Token.IsCancellationRequested)
+                    return;
+                ExecuteBackupScanNow(_pendingBackupScanReason);
+            }
+            catch (TaskCanceledException) { }
+            catch (Exception ex) { _logger.LogDebug(ex, "Backup scan debounce task failed"); }
+        });
+    }
+
+    private void ExecuteBackupScanNow(string reason)
+    {
+        _logger.LogDebug("Triggering backup scan: {reason}", reason);
         _backupScanTriggeredAt = DateTime.UtcNow;
-        // Invalidate caches so UI shows scanning state immediately
         _lastBackupAnalysisUpdate = DateTime.MinValue;
         _cachedBackupsForAnalysis = null;
         _cachedTextureBackupsFiltered = null;
@@ -519,7 +555,6 @@ public class CompactUi : WindowMediatorSubscriberBase
         _shrinkUDetectionTask = null;
         _lastShrinkUDetectionUpdate = DateTime.MinValue;
 
-        // Start texture backup detection
         try
         {
             _isTextureBackupScanInProgress = true;
@@ -533,7 +568,6 @@ public class CompactUi : WindowMediatorSubscriberBase
         }
         catch (Exception ex) { _isTextureBackupScanInProgress = false; _logger.LogDebug(ex, "Failed to start texture backup detection"); }
 
-        // Start ShrinkU mod backup detection
         try { _shrinkUDetectionTask = DetectShrinkUModBackupsAsync(); }
         catch (Exception ex) { _logger.LogDebug(ex, "Failed to start ShrinkU mod backup detection"); }
     }
@@ -641,6 +675,10 @@ public class CompactUi : WindowMediatorSubscriberBase
             _conversionCancellationTokenSource?.Dispose();
             _restoreCancellationTokenSource?.Cancel();
             _restoreCancellationTokenSource?.Dispose();
+            try { _backupScanDebounceCts?.Cancel(); } catch { }
+            try { _backupScanDebounceCts?.Dispose(); } catch { }
+            _backupScanDebounceCts = null;
+            _shrinkUDetectionSemaphore.Dispose();
         }
         base.Dispose(disposing);
     }
@@ -3134,6 +3172,8 @@ public class CompactUi : WindowMediatorSubscriberBase
 
     private async Task DetectShrinkUModBackupsAsync()
     {
+        if (!await _shrinkUDetectionSemaphore.WaitAsync(0).ConfigureAwait(false))
+            return;
         try
         {
             var usedPaths = await _shrinkuConversionService.GetUsedModTexturePathsAsync().ConfigureAwait(false);
@@ -3193,6 +3233,10 @@ public class CompactUi : WindowMediatorSubscriberBase
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to detect ShrinkU mod backups asynchronously");
+        }
+        finally
+        {
+            _shrinkUDetectionSemaphore.Release();
         }
     }
     

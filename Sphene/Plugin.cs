@@ -156,6 +156,10 @@ public sealed class Plugin : IDalamudPlugin
                 s.GetRequiredService<Microsoft.Extensions.Logging.ILogger>(),
                 s.GetRequiredService<ShrinkU.Services.PenumbraIpc>(),
                 s.GetRequiredService<ShrinkU.Services.ModStateService>()));
+            collection.AddSingleton<ShrinkU.Services.BackupFolderWatcherService>(s => new ShrinkU.Services.BackupFolderWatcherService(
+                s.GetRequiredService<Microsoft.Extensions.Logging.ILogger>(),
+                s.GetRequiredService<ShrinkUConfigService>(),
+                s.GetRequiredService<ShrinkU.Services.TextureBackupService>()));
             collection.AddSingleton<ShrinkU.Services.ChangelogService>(s => new ShrinkU.Services.ChangelogService(
                 s.GetRequiredService<Microsoft.Extensions.Logging.ILogger>(),
                 new System.Net.Http.HttpClient(),
@@ -169,7 +173,8 @@ public sealed class Plugin : IDalamudPlugin
                 s.GetRequiredService<Microsoft.Extensions.Logging.ILogger>(),
                 s.GetRequiredService<ShrinkUConfigService>(),
                 s.GetRequiredService<ShrinkU.Services.DebugTraceService>(),
-                s.GetRequiredService<ShrinkU.Services.PenumbraFolderWatcherService>()));
+                s.GetRequiredService<ShrinkU.Services.PenumbraFolderWatcherService>(),
+                s.GetRequiredService<ShrinkU.Services.BackupFolderWatcherService>()));
             collection.AddSingleton<ShrinkU.UI.StartupProgressUI>(s => new ShrinkU.UI.StartupProgressUI(
                 s.GetRequiredService<Microsoft.Extensions.Logging.ILogger>(),
                 s.GetRequiredService<ShrinkUConfigService>(),
