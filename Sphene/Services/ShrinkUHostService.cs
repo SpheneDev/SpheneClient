@@ -15,6 +15,9 @@ namespace Sphene.Services;
 
 public sealed class ShrinkUHostService : IHostedService, IDisposable
 {
+    private static readonly TimeSpan PenumbraReadinessPollInterval = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan PenumbraReadinessTimeout = TimeSpan.FromSeconds(90);
+
     private readonly ILogger<ShrinkUHostService> _logger;
     private readonly WindowSystem _windowSystem;
     private readonly ConversionUI _conversionUi;
@@ -169,6 +172,11 @@ public sealed class ShrinkUHostService : IHostedService, IDisposable
                         try
                         {
                             _logger.LogDebug("ShrinkU startup via Sphene: skipping Penumbra wait");
+                            var penumbraReady = await WaitForPenumbraReadinessAsync(token).ConfigureAwait(false);
+                            if (!penumbraReady)
+                            {
+                                _logger.LogWarning("Penumbra API did not become ready within timeout. Continuing ShrinkU startup with best effort.");
+                            }
                             try { _backupService.SetSavingEnabled(false); }
                             catch (Exception ex) { _logger.LogDebug(ex, "Failed to disable backup saving at startup"); }
                             await Task.Delay(TimeSpan.FromSeconds(1), token).ConfigureAwait(false);
@@ -474,6 +482,34 @@ public sealed class ShrinkUHostService : IHostedService, IDisposable
             }
         }
         catch (Exception ex) { _logger.LogDebug(ex, "Failed handling ShrinkU OnConfigSaved"); }
+    }
+
+    private async Task<bool> WaitForPenumbraReadinessAsync(CancellationToken token)
+    {
+        try
+        {
+            var startedAt = DateTime.UtcNow;
+            while (!token.IsCancellationRequested)
+            {
+                if (_penumbraIpc.APIAvailable && !string.IsNullOrWhiteSpace(_penumbraIpc.ModDirectory))
+                {
+                    return true;
+                }
+
+                if (DateTime.UtcNow - startedAt >= PenumbraReadinessTimeout)
+                {
+                    return false;
+                }
+
+                await Task.Delay(PenumbraReadinessPollInterval, token).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            return false;
+        }
+
+        return false;
     }
 
     private void CleanupDuplicateShrinkUConfig()
