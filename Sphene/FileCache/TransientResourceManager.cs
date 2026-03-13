@@ -111,6 +111,13 @@ public sealed class TransientResourceManager : DisposableMediatorSubscriberBase
         return result ?? new HashSet<string>(StringComparer.Ordinal);
     }
 
+    public HashSet<string> GetTransientResourcesSnapshot(ObjectKind objectKind)
+    {
+        if (TransientResources.TryGetValue(objectKind, out var result) && result != null)
+            return new HashSet<string>(result, StringComparer.OrdinalIgnoreCase);
+        return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    }
+
     public void PersistTransientResources(ObjectKind objectKind)
     {
         if (!SemiTransientResources.TryGetValue(objectKind, out HashSet<string>? semiTransientResources))

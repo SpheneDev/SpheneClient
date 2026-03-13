@@ -234,6 +234,9 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
 
     private bool _showAlreadyAddedTransients = false;
     private bool _acknowledgeReview = false;
+    private const string StoredAllJobsKey = "alljobs";
+    private const string StoredPetPrefix = "pet:";
+    private const string StoredMinionMountSessionKey = "minionmount:session";
     private string _selectedStoredCharacter = string.Empty;
     private string _selectedJobEntry = string.Empty;
     private readonly List<string> _storedPathsToRemove = [];
@@ -294,10 +297,11 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
             {
                 if (selectedData)
                 {
-                    if (ImGui.Selectable("All Jobs", string.Equals(_selectedJobEntry, "alljobs", StringComparison.Ordinal)))
+                    if (ImGui.Selectable("All Jobs", string.Equals(_selectedJobEntry, StoredAllJobsKey, StringComparison.Ordinal)))
                     {
-                        _selectedJobEntry = "alljobs";
+                        _selectedJobEntry = StoredAllJobsKey;
                     }
+                    var renderedPetJobs = new HashSet<uint>();
                     foreach (var job in transientStorage!.JobSpecificCache)
                     {
                         if (!_uiSharedService.JobData.TryGetValue(job.Key, out var jobName)) continue;
@@ -309,6 +313,43 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                             _filterFilePath = string.Empty;
                             _filterGamePath = string.Empty;
                         }
+
+                        if (transientStorage.JobSpecificPetCache.TryGetValue(job.Key, out var petList) && petList != null && petList.Count > 0)
+                        {
+                            renderedPetJobs.Add(job.Key);
+                            var petKeyForJob = string.Concat(StoredPetPrefix, job.Key.ToString());
+                            if (ImGui.Selectable(string.Concat("  Pets - ", jobName), string.Equals(_selectedJobEntry, petKeyForJob, StringComparison.Ordinal)))
+                            {
+                                _selectedJobEntry = petKeyForJob;
+                                _storedPathsToRemove.Clear();
+                                _filePathResolve.Clear();
+                                _filterFilePath = string.Empty;
+                                _filterGamePath = string.Empty;
+                            }
+                        }
+                    }
+                    foreach (var petJob in transientStorage.JobSpecificPetCache)
+                    {
+                        if (renderedPetJobs.Contains(petJob.Key))
+                            continue;
+                        if (!_uiSharedService.JobData.TryGetValue(petJob.Key, out var jobName)) continue;
+                        var petKey = string.Concat(StoredPetPrefix, petJob.Key.ToString());
+                        if (ImGui.Selectable(string.Concat("Pets - ", jobName), string.Equals(_selectedJobEntry, petKey, StringComparison.Ordinal)))
+                        {
+                            _selectedJobEntry = petKey;
+                            _storedPathsToRemove.Clear();
+                            _filePathResolve.Clear();
+                            _filterFilePath = string.Empty;
+                            _filterGamePath = string.Empty;
+                        }
+                    }
+                    if (ImGui.Selectable("Minion/Mount (Session)", string.Equals(_selectedJobEntry, StoredMinionMountSessionKey, StringComparison.Ordinal)))
+                    {
+                        _selectedJobEntry = StoredMinionMountSessionKey;
+                        _storedPathsToRemove.Clear();
+                        _filePathResolve.Clear();
+                        _filterFilePath = string.Empty;
+                        _filterGamePath = string.Empty;
                     }
                 }
             }
@@ -316,9 +357,35 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
         ImGui.SameLine();
         using (ImRaii.Group())
         {
-            var selectedList = string.Equals(_selectedJobEntry, "alljobs", StringComparison.Ordinal)
-                ? config[_selectedStoredCharacter].GlobalPersistentCache
-                : (string.IsNullOrEmpty(_selectedJobEntry) ? [] : config[_selectedStoredCharacter].JobSpecificCache[uint.Parse(_selectedJobEntry)]);
+            List<string> selectedList;
+            var isMinionMountSession = string.Equals(_selectedJobEntry, StoredMinionMountSessionKey, StringComparison.Ordinal);
+            if (string.Equals(_selectedJobEntry, StoredAllJobsKey, StringComparison.Ordinal))
+            {
+                selectedList = config[_selectedStoredCharacter].GlobalPersistentCache;
+            }
+            else if (!string.IsNullOrEmpty(_selectedJobEntry) && _selectedJobEntry.StartsWith(StoredPetPrefix, StringComparison.Ordinal))
+            {
+                var parsed = uint.TryParse(_selectedJobEntry[StoredPetPrefix.Length..], out var jobId);
+                if (parsed && config[_selectedStoredCharacter].JobSpecificPetCache.TryGetValue(jobId, out var petList) && petList != null)
+                    selectedList = petList;
+                else
+                    selectedList = [];
+            }
+            else if (isMinionMountSession)
+            {
+                selectedList = _transientResourceManager.GetTransientResourcesSnapshot(ObjectKind.MinionOrMount)
+                    .OrderBy(p => p, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+            }
+            else if (!string.IsNullOrEmpty(_selectedJobEntry) && uint.TryParse(_selectedJobEntry, out var selectedJobId)
+                && config[_selectedStoredCharacter].JobSpecificCache.TryGetValue(selectedJobId, out var jobList) && jobList != null)
+            {
+                selectedList = jobList;
+            }
+            else
+            {
+                selectedList = [];
+            }
             ImGui.TextUnformatted($"Attached Files (Total Files: {selectedList.Count})");
             ImGui.Separator();
             ImGuiHelpers.ScaledDummy(3);
@@ -344,7 +411,7 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                 ImGui.SameLine();
                 ImGuiHelpers.ScaledDummy(20, 1);
                 ImGui.SameLine();
-                using (ImRaii.Disabled(!_storedPathsToRemove.Any()))
+                using (ImRaii.Disabled(!_storedPathsToRemove.Any() || isMinionMountSession))
                 {
                     if (_uiSharedService.IconTextButton(FontAwesomeIcon.Trash, "Remove selected Game Paths"))
                     {
@@ -360,7 +427,7 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                     }
                 }
                 ImGui.SameLine();
-                using (ImRaii.Disabled(!UiSharedService.CtrlPressed()))
+                using (ImRaii.Disabled(!UiSharedService.CtrlPressed() || isMinionMountSession))
                 {
                     if (_uiSharedService.IconTextButton(FontAwesomeIcon.Trash, "Clear ALL Game Paths"))
                     {
@@ -370,6 +437,10 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                         _filterFilePath = string.Empty;
                         _filterGamePath = string.Empty;
                     }
+                }
+                if (isMinionMountSession)
+                {
+                    UiSharedService.AttachToolTip("Minion/Mount Session entries are runtime transients and currently read-only in this view.");
                 }
                 UiSharedService.AttachToolTip("Hold CTRL to delete all game paths from the displayed list"
                     + UiSharedService.TooltipSeparator + "You usually do not need to do this. All animation and VFX data will be automatically handled through Sphene.");
