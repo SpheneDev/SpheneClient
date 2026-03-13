@@ -188,14 +188,16 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         Mediator.Publish(new ClearProfileDataMessage(dto.User));
 
         var pair = _allClientPairs[dto.User];
+        var wasOnline = pair.IsOnline;
         pair.UserPair.RemoteClientVersion = dto.ClientVersion;
-        if (pair.HasCachedPlayer)
+        if (wasOnline)
         {
             RecreateLazy();
             return;
         }
 
-        if (sendNotif && _configurationService.Current.ShowOnlineNotifications
+        if (!wasOnline
+            && sendNotif && _configurationService.Current.ShowOnlineNotifications
             && (_configurationService.Current.ShowOnlineNotificationsOnlyForIndividualPairs && pair.IsDirectlyPaired && !pair.IsOneSidedPair
             || !_configurationService.Current.ShowOnlineNotificationsOnlyForIndividualPairs)
             && (_configurationService.Current.ShowOnlineNotificationsOnlyForNamedPairs && !string.IsNullOrEmpty(pair.GetNote())
