@@ -7,6 +7,7 @@ using Sphene.Services;
 using Sphene.Services.Events;
 using Sphene.Services.Mediator;
 using Sphene.Services.ServerConfiguration;
+using Sphene.SpheneConfiguration;
 using Sphene.Utils;
 using Sphene.WebAPI.Files;
 using Microsoft.Extensions.Hosting;
@@ -32,6 +33,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
     private readonly IHostApplicationLifetime _lifetime;
     private readonly PlayerPerformanceService _playerPerformanceService;
     private readonly ServerConfigurationManager _serverConfigManager;
+    private readonly SpheneConfigService _configService;
     private volatile bool _localVisibilityGateActive = false;
     private readonly PluginWarningNotificationService _pluginWarningNotificationManager;
     private CancellationTokenSource? _applicationCancellationTokenSource = new();
@@ -96,6 +98,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         FileCacheManager fileDbManager, SpheneMediator mediator,
         PlayerPerformanceService playerPerformanceService,
         ServerConfigurationManager serverConfigManager,
+        SpheneConfigService configService,
         VisibilityGateService visibilityGateService) : base(logger, mediator)
     {
         Pair = pair;
@@ -108,6 +111,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         _fileDbManager = fileDbManager;
         _playerPerformanceService = playerPerformanceService;
         _serverConfigManager = serverConfigManager;
+        _configService = configService;
         _localVisibilityGateActive = visibilityGateService.IsGateActive;
         // Initialize Penumbra collection asynchronously to avoid blocking constructor
         _ = Task.Run(async () => 
@@ -420,9 +424,13 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         }
     }
 
+    private bool IsDutyCombatNoRedrawModeActive()
+        => _configService.Current.EnableDutyCombatSyncWithoutRedraw
+           && (_dalamudUtil.IsInCombatOrPerforming || _dalamudUtil.IsInDuty);
+
     public void ApplyCharacterData(Guid applicationBase, CharacterData characterData, bool forceApplyCustomization = false)
     {
-        if (_dalamudUtil.IsInCombatOrPerforming)
+        if (_dalamudUtil.IsInCombatOrPerforming && !IsDutyCombatNoRedrawModeActive())
         {
             Mediator.Publish(new EventMessage(new Event(PlayerName, Pair.UserData, nameof(PairHandler), EventSeverity.Warning,
                 "Cannot apply character data: you are in combat or performing music, deferring application")));
@@ -751,7 +759,8 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                         {
                             await EnsureMinionCollectionBindingsAsync(handler.Address).ConfigureAwait(false);
                         }
-                        await _ipcManager.Penumbra.RedrawAsync(Logger, handler, applicationId, token).ConfigureAwait(false);
+                        if (!IsDutyCombatNoRedrawModeActive())
+                            await _ipcManager.Penumbra.RedrawAsync(Logger, handler, applicationId, token).ConfigureAwait(false);
                         break;
 
                     default:
@@ -952,7 +961,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             return Task.CompletedTask;
         }
 
-        if (_dalamudUtil.IsInCombatOrPerforming)
+        if (_dalamudUtil.IsInCombatOrPerforming && !IsDutyCombatNoRedrawModeActive())
         {
             Logger.LogDebug("{tag} Apply deferred: user={user} hash={hash} reason=combat",
                 SyncProgressTag, Pair.UserData.AliasOrUID, charaData.DataHash?.Value ?? "null");
@@ -1218,7 +1227,8 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             if (_charaHandler != null
                 && updatedData.TryGetValue(ObjectKind.Player, out var playerChanges)
                 && playerChanges.Contains(PlayerChanges.ModFiles)
-                && !playerChanges.Contains(PlayerChanges.ForcedRedraw))
+                && !playerChanges.Contains(PlayerChanges.ForcedRedraw)
+                && !IsDutyCombatNoRedrawModeActive())
             {
                 await _ipcManager.Penumbra.RedrawAsync(Logger, _charaHandler, _applicationId, token).ConfigureAwait(false);
             }
@@ -1229,7 +1239,8 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                     || (!playerUpdates.Contains(PlayerChanges.ForcedRedraw) && !playerUpdates.Contains(PlayerChanges.ModFiles))))
             {
                 _forceRedrawAfterCurrentApplication = false;
-                await _ipcManager.Penumbra.RedrawAsync(Logger, _charaHandler, _applicationId, token).ConfigureAwait(false);
+                if (!IsDutyCombatNoRedrawModeActive())
+                    await _ipcManager.Penumbra.RedrawAsync(Logger, _charaHandler, _applicationId, token).ConfigureAwait(false);
             }
             else
             {

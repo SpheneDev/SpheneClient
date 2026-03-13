@@ -95,6 +95,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         Performance,
         Transfers,
         Storage,
+        SyncBehavior,
         Acknowledgment,
         Debug
     }
@@ -1866,7 +1867,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
 #endif
         
         // Calculate optimal sidebar width based on longest button text + reduced padding
-        var buttonLabels = new[] { "Home", "Connectivity", "People & Notes", "Appearance", "Theme", "Notifications", "Performance", "Transfers", "Storage", "Acknowledgment", diagnosticsPageLabel };
+        var buttonLabels = new[] { "Home", "Connectivity", "People & Notes", "Appearance", "Theme", "Notifications", "Performance", "Transfers", "Storage", "Sync Behavior", "Acknowledgment", diagnosticsPageLabel };
         var maxTextWidth = 0f;
         foreach (var label in buttonLabels)
         {
@@ -1900,6 +1901,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         SidebarButton("Performance", SettingsPage.Performance);
         SidebarButton("Transfers", SettingsPage.Transfers);
         SidebarButton("Storage", SettingsPage.Storage);
+        SidebarButton("Sync", SettingsPage.SyncBehavior);
         SidebarButton("Acknowledgment", SettingsPage.Acknowledgment);
         SidebarButton(diagnosticsPageLabel, SettingsPage.Debug);
 
@@ -1938,6 +1940,9 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 break;
             case SettingsPage.Storage:
                 DrawFileStorageSettings();
+                break;
+            case SettingsPage.SyncBehavior:
+                DrawSyncBehaviorSettings();
                 break;
             case SettingsPage.Acknowledgment:
                 DrawAcknowledgmentSettings();
@@ -2868,6 +2873,66 @@ public class SettingsUi : WindowMediatorSubscriberBase
             _configService.Save();
         }
         _uiShared.DrawHelpText("Reset all acknowledgment settings to their default values.");
+    }
+
+    private void DrawSyncBehaviorSettings()
+    {
+        _lastTab = "Sync Behavior";
+        _uiShared.BigText("Sync Behavior");
+        ImGui.Separator();
+
+        UiSharedService.TextWrapped("Controls how incoming synchronization data is applied.");
+        ImGui.Spacing();
+
+        var dutyCombatNoRedraw = _configService.Current.EnableDutyCombatSyncWithoutRedraw;
+        if (ImGui.Checkbox("Allow sync in duties/combat without redraw", ref dutyCombatNoRedraw))
+        {
+            _configService.Current.EnableDutyCombatSyncWithoutRedraw = dutyCombatNoRedraw;
+            _configService.Save();
+        }
+        _uiShared.DrawHelpText("When enabled, incoming sync changes are applied during duties or combat/performance without triggering redraw. This helps avoid temporary invisibility caused by redraw. If you notice performance issues, disable this option again.");
+        if (dutyCombatNoRedraw)
+        {
+            UiSharedService.ColorTextWrapped("Tip: This option is active. If you notice performance issues or crashes during combat, disable this option again.", ImGuiColors.ParsedGreen);
+        }
+        else
+        {
+            UiSharedService.ColorTextWrapped("Tip: This option is currently disabled. Enable it only if you want duty/combat sync without redraw.", ImGuiColors.DalamudGrey);
+        }
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        _uiShared.BigText("Outgoing Sync Batching");
+        var outgoingBatching = _configService.Current.EnableDutyCombatOutgoingSyncBatching;
+        if (ImGui.Checkbox("Batch outgoing sync updates in duties/combat", ref outgoingBatching))
+        {
+            _configService.Current.EnableDutyCombatOutgoingSyncBatching = outgoingBatching;
+            _configService.Save();
+        }
+        _uiShared.DrawHelpText("When enabled, outgoing sync updates are collected for a configurable window during duty/combat, then sent as one update burst.");
+
+        ImGui.Indent();
+        var batchSeconds = _configService.Current.DutyCombatOutgoingSyncBatchSeconds;
+        using (ImRaii.Disabled(!outgoingBatching))
+        {
+            ImGui.SetNextItemWidth(220f * ImGuiHelpers.GlobalScale);
+            if (ImGui.SliderInt("Outgoing batch window (seconds)", ref batchSeconds, 1, 60))
+            {
+                _configService.Current.DutyCombatOutgoingSyncBatchSeconds = batchSeconds;
+                _configService.Save();
+            }
+        }
+        _uiShared.DrawHelpText("Recommended default is 10 seconds. Higher values reduce update frequency but increase sync latency.");
+        ImGui.Unindent();
+
+        if (outgoingBatching)
+        {
+            UiSharedService.ColorTextWrapped("Tip: Outgoing batching is active. If you notice performance issues or crashes during combat, disable this option.", ImGuiColors.ParsedGreen);
+        }
+        else
+        {
+            UiSharedService.ColorTextWrapped("Tip: Outgoing batching is currently disabled. Enable it if you want fewer sync sends during combat to reduce performance impact.", ImGuiColors.DalamudGrey);
+        }
     }
 
     private void UiSharedService_GposeEnd()

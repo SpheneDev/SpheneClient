@@ -99,6 +99,9 @@ public class SpheneConfig : ISpheneConfiguration
     public bool ShowWaitingForAcknowledgmentPopups { get; set; } = false;
     public bool EnableAcknowledgmentBatching { get; set; } = true;
     public bool EnableAcknowledgmentAutoRetry { get; set; } = true;
+    public bool EnableDutyCombatSyncWithoutRedraw { get; set; } = false;
+    public bool EnableDutyCombatOutgoingSyncBatching { get; set; } = false;
+    public int DutyCombatOutgoingSyncBatchSeconds { get; set; } = 10;
 
     public int AcknowledgmentTimeoutSeconds { get; set; } = 30;
     public NotificationLocation AcknowledgmentNotification { get; set; } = NotificationLocation.Toast;

@@ -1,6 +1,7 @@
 using Sphene.API.Data;
 using Sphene.API.Data.Enum;
 using Sphene.PlayerData.Factories;
+using Sphene.SpheneConfiguration;
 using Sphene.Services;
 using Sphene.Services.Mediator;
 using Sphene.Utils;
@@ -18,6 +19,7 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
     private readonly FileUploadManager _fileTransferManager;
     private readonly GameObjectHandlerFactory _gameObjectHandlerFactory;
     private readonly PairManager _pairManager;
+    private readonly SpheneConfigService _configService;
     private readonly SessionAcknowledgmentManager _sessionAcknowledgmentManager;
     private CharacterData? _lastCreatedData;
     private CharacterData? _uploadingCharacterData = null;
@@ -35,6 +37,8 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
     private readonly Dictionary<UserData, DateTime> _delayedReloadUsers = new();
     private readonly Timer _delayedPushTimer;
     private readonly Timer _characterReloadTimer;
+    private DateTime _nextOutgoingBatchPushUtc = DateTime.MinValue;
+    private bool _hasPendingOutgoingBatchPush = false;
     
     private const int DELAYED_PUSH_SECONDS = 3;
     private const int CHARACTER_RELOAD_DELAY_SECONDS = 3;
@@ -42,7 +46,7 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
 
     public VisibleUserDataDistributor(ILogger<VisibleUserDataDistributor> logger, ApiController apiController, DalamudUtilService dalamudUtil,
         PairManager pairManager, SpheneMediator mediator, FileUploadManager fileTransferManager, SessionAcknowledgmentManager sessionAcknowledgmentManager,
-        GameObjectHandlerFactory gameObjectHandlerFactory) : base(logger, mediator)
+        GameObjectHandlerFactory gameObjectHandlerFactory, SpheneConfigService configService) : base(logger, mediator)
     {
         _apiController = apiController;
         _dalamudUtil = dalamudUtil;
@@ -50,6 +54,7 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
         _fileTransferManager = fileTransferManager;
         _sessionAcknowledgmentManager = sessionAcknowledgmentManager;
         _gameObjectHandlerFactory = gameObjectHandlerFactory;
+        _configService = configService;
         
 
         
@@ -88,6 +93,16 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
             _previouslyVisiblePlayers.Clear();
             _lastSentHashPerUser.Clear();
         });
+    }
+
+    private bool IsDutyCombatOutgoingBatchingActive()
+        => _configService.Current.EnableDutyCombatOutgoingSyncBatching
+           && (_dalamudUtil.IsInCombatOrPerforming || _dalamudUtil.IsInDuty);
+
+    private int GetDutyCombatOutgoingBatchSeconds()
+    {
+        var seconds = _configService.Current.DutyCombatOutgoingSyncBatchSeconds;
+        return Math.Clamp(seconds, 1, 60);
     }
 
     protected override void Dispose(bool disposing)
@@ -180,9 +195,19 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
         }
     }
 
-    private void PushCharacterData(bool forced = false)
+    private void PushCharacterData(bool forced = false, bool bypassBatching = false)
     {
         if (_lastCreatedData == null || _usersToPushDataTo.Count == 0) return;
+
+        if (!bypassBatching && IsDutyCombatOutgoingBatchingActive())
+        {
+            var batchSeconds = GetDutyCombatOutgoingBatchSeconds();
+            _hasPendingOutgoingBatchPush = true;
+            _nextOutgoingBatchPushUtc = DateTime.UtcNow.AddSeconds(batchSeconds);
+            Logger.LogDebug("{tag} Outgoing batch queued: hash={hash} users={count} flushIn={seconds}s",
+                SyncProgressTag, _lastCreatedData.DataHash?.Value ?? "null", _usersToPushDataTo.Count, batchSeconds);
+            return;
+        }
 
         _ = Task.Run(async () =>
         {
@@ -319,6 +344,14 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
                 Logger.LogDebug("{tag} Delayed push skipped: no data users={users}",
                     SyncProgressTag, string.Join(", ", usersToProcess.Select(u => u.AliasOrUID)));
             }
+        }
+
+        if (_hasPendingOutgoingBatchPush && _usersToPushDataTo.Count > 0 && DateTime.UtcNow >= _nextOutgoingBatchPushUtc)
+        {
+            _hasPendingOutgoingBatchPush = false;
+            Logger.LogDebug("{tag} Outgoing batch flush: hash={hash} users={count}",
+                SyncProgressTag, _lastCreatedData?.DataHash?.Value ?? "null", _usersToPushDataTo.Count);
+            PushCharacterData(forced: true, bypassBatching: true);
         }
     }
     
