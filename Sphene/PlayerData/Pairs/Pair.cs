@@ -547,6 +547,7 @@ public class Pair : DisposableMediatorSubscriberBase
         
         var permissions = UserPair.OwnPermissions;
         permissions.SetAckYou(newAckYouStatus);
+        UserPair.OwnPermissions = permissions;
         
         try
         {
