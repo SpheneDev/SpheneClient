@@ -12,6 +12,10 @@ on:
         description: 'SpheneAPI Branch (Leave empty to use same as Client)'
         required: false
         type: string
+      shrinku_branch:
+        description: 'ShrinkU Branch (Leave empty to use same as Client)'
+        required: false
+        type: string
 
 jobs:
   release:
@@ -39,6 +43,7 @@ jobs:
         repository: SpheneDev/ShrinkU  # Replace with actual ShrinkU repository
         path: ./ShrinkU
         token: ${{ secrets.GITHUB_TOKEN }}  # Use PAT if private repo: ${{ secrets.SHRINKU_ACCESS_TOKEN }}
+        ref: ${{ github.event.inputs.shrinku_branch || github.ref_name }}
         
     - name: Setup .NET
       uses: actions/setup-dotnet@v4
