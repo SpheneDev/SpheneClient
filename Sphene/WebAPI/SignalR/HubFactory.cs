@@ -96,7 +96,9 @@ public class HubFactory : MediatorSubscriberBase
         Logger.LogDebug("Building new HubConnection using transport {transport}", transportType);
 
         var version = Assembly.GetExecutingAssembly().GetName().Version;
-        var userAgent = $"Sphene/{version!.Major}.{version!.Minor}.{version!.Build}";
+        var userAgent = version!.Revision >= 0
+            ? $"Sphene/{version.Major}.{version.Minor}.{version.Build}.{version.Revision}"
+            : $"Sphene/{version.Major}.{version.Minor}.{version.Build}";
         
         var baseUrl = GetBaseApiUrl();
         _instance = new HubConnectionBuilder()

@@ -626,8 +626,10 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
                 var normalizedVersion = parsedRemoteClientVersion.Build >= 0
                     ? $"{parsedRemoteClientVersion.Major}.{parsedRemoteClientVersion.Minor}.{parsedRemoteClientVersion.Build}"
                     : $"{parsedRemoteClientVersion.Major}.{parsedRemoteClientVersion.Minor}";
-                var buildText = parsedRemoteClientVersion.Build >= 0 ? parsedRemoteClientVersion.Build.ToString() : "n/a";
-                remoteClientVersion = $"{normalizedVersion} (build {buildText})";
+                if (parsedRemoteClientVersion.Revision >= 0)
+                    remoteClientVersion = $"{normalizedVersion} rev.{parsedRemoteClientVersion.Revision}";
+                else
+                    remoteClientVersion = normalizedVersion;
             }
 
             userPairText += UiSharedService.TooltipSeparator + $"Client Version: {remoteClientVersion}";
