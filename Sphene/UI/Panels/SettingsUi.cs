@@ -333,133 +333,43 @@ public class SettingsUi : WindowMediatorSubscriberBase
     {
         DrawSettingsPageHeader("Transfers", "Control transfer limits, monitor behavior, and transmission visuals.");
 
-        int maxParallelDownloads = _configService.Current.ParallelDownloads;
-        bool useAlternativeUpload = _configService.Current.UseAlternativeFileUpload;
-        int downloadSpeedLimit = _configService.Current.DownloadSpeedLimitInBytes;
-
         ImGui.AlignTextToFramePadding();
         ImGui.TextUnformatted("Global Receive Limit");
         ImGui.SameLine();
-        ImGui.SetNextItemWidth(ClampSettingsItemWidth(100f));
-        if (ImGui.InputInt("###speedlimit", ref downloadSpeedLimit))
-        {
-            _configService.Current.DownloadSpeedLimitInBytes = downloadSpeedLimit;
-            _configService.Save();
-            Mediator.Publish(new DownloadLimitChangedMessage());
-        }
+        TransfersOptionBlock.DrawGlobalReceiveLimitValueOption(_configService, Mediator, ClampSettingsItemWidth(100f), "TransfersGlobalReceiveLimitValue");
         ImGui.SameLine();
         ImGui.SetNextItemWidth(ClampSettingsItemWidth(100f));
-        _uiShared.DrawCombo("###speed", [DownloadSpeeds.Bps, DownloadSpeeds.KBps, DownloadSpeeds.MBps],
-            (s) => s switch
-            {
-                DownloadSpeeds.Bps => "Byte/s",
-                DownloadSpeeds.KBps => "KB/s",
-                DownloadSpeeds.MBps => "MB/s",
-                _ => throw new NotSupportedException()
-            }, (s) =>
-            {
-                _configService.Current.DownloadSpeedType = s;
-                _configService.Save();
-                Mediator.Publish(new DownloadLimitChangedMessage());
-            }, _configService.Current.DownloadSpeedType);
+        TransfersOptionBlock.DrawGlobalReceiveLimitSpeedUnitOption(_configService, _uiShared, Mediator, "TransfersGlobalReceiveLimitSpeedUnit");
         ImGui.SameLine();
         ImGui.AlignTextToFramePadding();
         ImGui.TextUnformatted("0 = No limit/infinite");
 
-        if (ImGui.SliderInt("Maximum Parallel Data Streams", ref maxParallelDownloads, 1, 10))
-        {
-            _configService.Current.ParallelDownloads = maxParallelDownloads;
-            _configService.Save();
-        }
-
-        bool allowPenumbraMods = _configService.Current.AllowReceivingPenumbraMods;
-        if (ImGui.Checkbox("Allow receiving Penumbra mod packages", ref allowPenumbraMods))
-        {
-            _configService.Current.AllowReceivingPenumbraMods = allowPenumbraMods;
-            _configService.Save();
-            _ = ApiController.UserUpdatePenumbraReceivePreference(allowPenumbraMods);
-        }
-        _uiShared.DrawHelpText("When disabled, incoming Penumbra mod packages are ignored and no install popups are shown.");
-
-        if (ImGui.Checkbox("Use Alternative Transmission Method", ref useAlternativeUpload))
-        {
-            _configService.Current.UseAlternativeFileUpload = useAlternativeUpload;
-            _configService.Save();
-        }
-        _uiShared.DrawHelpText("Attempts a single-shot transmission instead of streaming. Not usually required; enable only if you encounter transfer issues.");
+        TransfersOptionBlock.DrawMaximumParallelDataStreamsOption(_configService, "TransfersMaximumParallelDataStreams");
+        TransfersOptionBlock.DrawAllowReceivingPenumbraModPackagesOption(_configService, _uiShared, ApiController, "TransfersAllowReceivingPenumbraModPackages");
+        TransfersOptionBlock.DrawUseAlternativeTransmissionMethodOption(_configService, _uiShared, "TransfersUseAlternativeTransmissionMethod");
 
         DrawSettingsSectionHeader("Transfer Monitor");
 
-        bool showTransferWindow = _configService.Current.ShowTransferWindow;
-        if (ImGui.Checkbox("Show separate transmission monitor", ref showTransferWindow))
-        {
-            _configService.Current.ShowTransferWindow = showTransferWindow;
-            _configService.Save();
-        }
-        _uiShared.DrawHelpText($"The transmission monitor displays current progress of active data streams.{Environment.NewLine}{Environment.NewLine}" +
-            $"Status indicators:{Environment.NewLine}W = Waiting for Slot (see Maximum Parallel Data Streams){Environment.NewLine}" +
-            $"Q = Queued on Network Node, awaiting signal{Environment.NewLine}" +
-            $"P = Processing transmission (receiving data){Environment.NewLine}" +
-            $"D = Decompressing received data");
-        if (!_configService.Current.ShowTransferWindow) ImGui.BeginDisabled();
+        var showTransferWindow = TransfersOptionBlock.DrawShowSeparateTransmissionMonitorOption(_configService, _uiShared, "TransfersShowSeparateTransmissionMonitor");
+        if (!showTransferWindow) ImGui.BeginDisabled();
         ImGui.Indent();
-        bool editTransferWindowPosition = _uiShared.EditTrackerPosition;
-        if (ImGui.Checkbox("Edit Transmission Monitor position", ref editTransferWindowPosition))
-        {
-            _uiShared.EditTrackerPosition = editTransferWindowPosition;
-        }
+        TransfersOptionBlock.DrawEditTransmissionMonitorPositionOption(_uiShared, "TransfersEditTransmissionMonitorPosition");
         ImGui.Unindent();
-        if (!_configService.Current.ShowTransferWindow) ImGui.EndDisabled();
+        if (!showTransferWindow) ImGui.EndDisabled();
 
-        bool showTransferBars = _configService.Current.ShowTransferBars;
-        if (ImGui.Checkbox("Show transmission indicators below players", ref showTransferBars))
-        {
-            _configService.Current.ShowTransferBars = showTransferBars;
-            _configService.Save();
-        }
-        _uiShared.DrawHelpText("This will render a progress indicator during data reception at the feet of the connected player.");
+        var showTransferBars = TransfersOptionBlock.DrawShowTransmissionIndicatorsBelowPlayersOption(_configService, _uiShared, "TransfersShowTransmissionIndicatorsBelowPlayers");
 
         if (!showTransferBars) ImGui.BeginDisabled();
         ImGui.Indent();
-        bool transferBarShowText = _configService.Current.TransferBarsShowText;
-        if (ImGui.Checkbox("Show Transmission Text", ref transferBarShowText))
-        {
-            _configService.Current.TransferBarsShowText = transferBarShowText;
-            _configService.Save();
-        }
-        _uiShared.DrawHelpText("Shows transmission text (amount of MiB received) in the progress indicators");
-        int transferBarWidth = _configService.Current.TransferBarsWidth;
-        if (ImGui.SliderInt("Transmission Indicator Width", ref transferBarWidth, 10, 500))
-        {
-            _configService.Current.TransferBarsWidth = transferBarWidth;
-            _configService.Save();
-        }
-        _uiShared.DrawHelpText("Width of the displayed transmission indicators (will never be less wide than the displayed text)");
-        int transferBarHeight = _configService.Current.TransferBarsHeight;
-        if (ImGui.SliderInt("Transmission Indicator Height", ref transferBarHeight, 2, 50))
-        {
-            _configService.Current.TransferBarsHeight = transferBarHeight;
-            _configService.Save();
-        }
-        _uiShared.DrawHelpText("Height of the displayed transmission indicators (will never be less tall than the displayed text)");
-        bool showUploading = _configService.Current.ShowUploading;
-        if (ImGui.Checkbox("Show 'Transmitting' text below players that are currently transmitting", ref showUploading))
-        {
-            _configService.Current.ShowUploading = showUploading;
-            _configService.Save();
-        }
-        _uiShared.DrawHelpText("This will render a 'Transmitting' text at the feet of the player that is in progress of transmitting data.");
+        TransfersOptionBlock.DrawShowTransmissionTextOption(_configService, _uiShared, "TransfersShowTransmissionText");
+        TransfersOptionBlock.DrawTransmissionIndicatorWidthOption(_configService, _uiShared, "TransfersTransmissionIndicatorWidth");
+        TransfersOptionBlock.DrawTransmissionIndicatorHeightOption(_configService, _uiShared, "TransfersTransmissionIndicatorHeight");
+        var showUploading = TransfersOptionBlock.DrawShowTransmittingTextBelowPlayersOption(_configService, _uiShared, "TransfersShowTransmittingTextBelowPlayers");
 
         ImGui.Unindent();
         if (!showUploading) ImGui.BeginDisabled();
         ImGui.Indent();
-        bool showUploadingBigText = _configService.Current.ShowUploadingBigText;
-        if (ImGui.Checkbox("Large font for 'Transmitting' text", ref showUploadingBigText))
-        {
-            _configService.Current.ShowUploadingBigText = showUploadingBigText;
-            _configService.Save();
-        }
-        _uiShared.DrawHelpText("This will render an 'Transferring' text in a larger font.");
+        TransfersOptionBlock.DrawLargeFontForTransmittingTextOption(_configService, _uiShared, "TransfersLargeFontForTransmittingText");
 
         ImGui.Unindent();
 
@@ -721,60 +631,20 @@ public class SettingsUi : WindowMediatorSubscriberBase
         }
         UiSharedService.AttachToolTip("Use this when reporting modifications being rejected from the Network.");
 
-        _uiShared.DrawCombo("Log Level", Enum.GetValues<LogLevel>(), (l) => l.ToString(), (l) =>
-        {
-            _configService.Current.LogLevel = l;
-            _configService.Save();
-        }, _configService.Current.LogLevel);
-        _uiShared.DrawHelpText("Controls verbosity of logs written to /xllog and plugin console.");
+        DebugOptionBlock.DrawLogLevelOption(_configService, _uiShared, "DebugLogLevel");
 
         ImGuiHelpers.ScaledDummy(5);
         _uiShared.BigText("Performance Metrics");
 
-        bool logPerformance = _configService.Current.LogPerformance;
-        if (ImGui.Checkbox("Log Network Performance Metrics", ref logPerformance))
-        {
-            _configService.Current.LogPerformance = logPerformance;
-            _configService.Save();
-        }
-        _uiShared.DrawHelpText("Enabling this can incur a slight performance impact. Extended monitoring is not recommended.");
-
-        using (ImRaii.Disabled(!logPerformance))
-        {
-            if (_uiShared.IconTextButton(FontAwesomeIcon.StickyNote, "Print Network Metrics to /xllog"))
-            {
-                _performanceCollector.PrintPerformanceStats();
-            }
-            ImGui.SameLine();
-            if (_uiShared.IconTextButton(FontAwesomeIcon.StickyNote, "Print Network Metrics (last 60s) to /xllog"))
-            {
-                _performanceCollector.PrintPerformanceStats(60);
-            }
-        }
-
-        bool stopWhining = _configService.Current.DebugStopWhining;
-        if (ImGui.Checkbox("Do not notify for modified game files or enabled LOD", ref stopWhining))
-        {
-            _configService.Current.DebugStopWhining = stopWhining;
-            _configService.Save();
-        }
-        _uiShared.DrawHelpText("Having modified game files will still mark your logs with UNSUPPORTED and you will not receive Network support, message shown or not." + UiSharedService.TooltipSeparator
-            + "Keeping LOD enabled can lead to more crashes. Use at your own risk.");
+        bool logPerformance = DebugOptionBlock.DrawLogNetworkPerformanceMetricsOption(_configService, _uiShared, "DebugLogNetworkPerformanceMetrics");
+        DebugOptionBlock.DrawPrintNetworkMetricsActions(_uiShared, logPerformance, () => _performanceCollector.PrintPerformanceStats(), () => _performanceCollector.PrintPerformanceStats(60), "DebugPrintNetworkMetricsActions");
+        DebugOptionBlock.DrawDoNotNotifyForModifiedGameFilesOrEnabledLodOption(_configService, _uiShared, "DebugDoNotNotifyForModifiedGameFilesOrEnabledLod");
 
         DrawSettingsSectionHeader("Diagnostic Windows", "Open dedicated windows for acknowledgment and status monitoring.");
         
-        if (_uiShared.IconTextButton(FontAwesomeIcon.Desktop, "Open Acknowledgment Monitor"))
-        {
-            Mediator.Publish(new UiToggleMessage(typeof(AcknowledgmentMonitorUI)));
-        }
-        UiSharedService.AttachToolTip("Opens the Acknowledgment Monitor window for monitoring acknowledgment system status and metrics.");
-        
+        DebugOptionBlock.DrawOpenAcknowledgmentMonitorAction(_uiShared, Mediator, "DebugOpenAcknowledgmentMonitor");
         ImGui.SameLine();
-        if (_uiShared.IconTextButton(FontAwesomeIcon.Bug, "Open Status Debug"))
-        {
-            Mediator.Publish(new UiToggleMessage(typeof(StatusDebugUi)));
-        }
-        UiSharedService.AttachToolTip("Opens the Status Debug window for connection status monitoring and debugging.");
+        DebugOptionBlock.DrawOpenStatusDebugAction(_uiShared, Mediator, "DebugOpenStatusDebug");
         
 
     }
@@ -840,13 +710,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         ImGuiHelpers.ScaledDummy(5);
         _uiShared.DrawPenumbraModDownloadFolderSetting();
 
-        bool deleteAfterInstall = _configService.Current.DeletePenumbraModAfterInstall;
-        if (ImGui.Checkbox("Delete downloaded mods after successful install", ref deleteAfterInstall))
-        {
-            _configService.Current.DeletePenumbraModAfterInstall = deleteAfterInstall;
-            _configService.Save();
-        }
-        _uiShared.DrawHelpText("If enabled, the downloaded .pmp file will be deleted automatically after it has been successfully imported into Penumbra.");
+        StorageOptionBlock.DrawDeleteDownloadedModsAfterSuccessfulInstallOption(_configService, _uiShared, "StorageDeleteDownloadedModsAfterSuccessfulInstall");
 
         ImGui.AlignTextToFramePadding();
         if (_cacheMonitor.FileCacheSize >= 0)
@@ -861,13 +725,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             UiSharedService.ColorTextWrapped("Hint: Consider enabling the File Compactor to reduce disk usage.", ImGuiColors.DalamudYellow);
         }
         if (isLinux || !_cacheMonitor.StorageisNTFS) ImGui.BeginDisabled();
-        if (ImGui.Checkbox("Use file compactor", ref useFileCompactor))
-        {
-            _configService.Current.UseCompactor = useFileCompactor;
-            _configService.Save();
-        }
-        _uiShared.DrawHelpText("The file compactor can massively reduce your saved files. It might incur a minor penalty on loading files on a slow CPU." + Environment.NewLine
-            + "It is recommended to leave it enabled to save on space.");
+        StorageOptionBlock.DrawUseFileCompactorOption(_configService, _uiShared, "StorageUseFileCompactor");
         ImGui.SameLine();
         if (!_fileCompactor.MassCompactRunning)
         {
@@ -943,7 +801,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         }
         DrawSettingsSectionHeader("Clear Local Storage", "Read and accept the disclaimer before running this action.");
         ImGui.Indent();
-        ImGui.Checkbox("##readClearCache", ref _readClearCache);
+        StorageOptionBlock.DrawReadClearLocalStorageDisclaimerOption(ref _readClearCache, "StorageReadClearLocalStorageDisclaimer");
         ImGui.SameLine();
         UiSharedService.TextWrapped("I understand that: " + Environment.NewLine + "- By clearing the local storage I put the file servers of my connected service under extra strain by having to redownload all data."
             + Environment.NewLine + "- This is not a step to try to fix sync issues."
@@ -976,99 +834,26 @@ public class SettingsUi : WindowMediatorSubscriberBase
         DrawSettingsPageHeader("Performance",
             "Configure warning indicators and automatic actions for performance-heavy synced players.");
         DrawSettingsSectionHeader("Warnings & Indicators");
-        bool showPerformanceIndicator = _playerPerformanceConfigService.Current.ShowPerformanceIndicator;
-        if (ImGui.Checkbox("Show performance indicator", ref showPerformanceIndicator))
-        {
-            _playerPerformanceConfigService.Current.ShowPerformanceIndicator = showPerformanceIndicator;
-            _playerPerformanceConfigService.Save();
-        }
-        _uiShared.DrawHelpText("Will show a performance indicator when players exceed defined thresholds in Sphenes UI." + Environment.NewLine + "Will use warning thresholds.");
-        bool warnOnExceedingThresholds = _playerPerformanceConfigService.Current.WarnOnExceedingThresholds;
-        if (ImGui.Checkbox("Warn on loading in players exceeding performance thresholds", ref warnOnExceedingThresholds))
-        {
-            _playerPerformanceConfigService.Current.WarnOnExceedingThresholds = warnOnExceedingThresholds;
-            _playerPerformanceConfigService.Save();
-        }
-        _uiShared.DrawHelpText("Sphene will print a warning in chat once per session of meeting those people. Will not warn on players with preferred permissions.");
+        bool showPerformanceIndicator = PerformanceOptionBlock.DrawShowPerformanceIndicatorOption(_playerPerformanceConfigService, _uiShared, "PerformanceShowPerformanceIndicator");
+        bool warnOnExceedingThresholds = PerformanceOptionBlock.DrawWarnOnLoadingInPlayersExceedingThresholdsOption(_playerPerformanceConfigService, _uiShared, "PerformanceWarnOnLoadingInPlayersExceedingThresholds");
         using (ImRaii.Disabled(!warnOnExceedingThresholds && !showPerformanceIndicator))
         {
             using var indent = ImRaii.PushIndent();
-            var warnOnPref = _playerPerformanceConfigService.Current.WarnOnPreferredPermissionsExceedingThresholds;
-            if (ImGui.Checkbox("Warn/Indicate also on players with preferred permissions", ref warnOnPref))
-            {
-                _playerPerformanceConfigService.Current.WarnOnPreferredPermissionsExceedingThresholds = warnOnPref;
-                _playerPerformanceConfigService.Save();
-            }
-            _uiShared.DrawHelpText("Sphene will also print warnings and show performance indicator for players where you enabled preferred permissions. If warning in general is disabled, this will not produce any warnings.");
+            PerformanceOptionBlock.DrawWarnIndicateAlsoOnPreferredPermissionsOption(_playerPerformanceConfigService, _uiShared, "PerformanceWarnIndicateAlsoOnPreferredPermissions");
         }
         using (ImRaii.Disabled(!showPerformanceIndicator && !warnOnExceedingThresholds))
         {
-            var vram = _playerPerformanceConfigService.Current.VRAMSizeWarningThresholdMiB;
-            var tris = _playerPerformanceConfigService.Current.TrisWarningThresholdThousands;
-            ImGui.SetNextItemWidth(ClampSettingsItemWidth(100f));
-            if (ImGui.InputInt("Warning VRAM threshold", ref vram))
-            {
-                _playerPerformanceConfigService.Current.VRAMSizeWarningThresholdMiB = vram;
-                _playerPerformanceConfigService.Save();
-            }
-            ImGui.SameLine();
-            ImGui.Text("(MiB)");
-            _uiShared.DrawHelpText("Limit in MiB of approximate VRAM usage to trigger warning or performance indicator on UI." + UiSharedService.TooltipSeparator
-                + "Default: 375 MiB");
-            ImGui.SetNextItemWidth(ClampSettingsItemWidth(100f));
-            if (ImGui.InputInt("Warning Triangle threshold", ref tris))
-            {
-                _playerPerformanceConfigService.Current.TrisWarningThresholdThousands = tris;
-                _playerPerformanceConfigService.Save();
-            }
-            ImGui.SameLine();
-            ImGui.Text("(thousand triangles)");
-            _uiShared.DrawHelpText("Limit in approximate used triangles from mods to trigger warning or performance indicator on UI." + UiSharedService.TooltipSeparator
-                + "Default: 165 thousand");
+            PerformanceOptionBlock.DrawWarningVramThresholdOption(_playerPerformanceConfigService, _uiShared, ClampSettingsItemWidth(100f), "PerformanceWarningVramThreshold");
+            PerformanceOptionBlock.DrawWarningTriangleThresholdOption(_playerPerformanceConfigService, _uiShared, ClampSettingsItemWidth(100f), "PerformanceWarningTriangleThreshold");
         }
         DrawSettingsSectionHeader("Auto Pause");
-        bool autoPause = _playerPerformanceConfigService.Current.AutoPausePlayersExceedingThresholds;
-        bool autoPauseEveryone = _playerPerformanceConfigService.Current.AutoPausePlayersWithPreferredPermissionsExceedingThresholds;
-        if (ImGui.Checkbox("Automatically pause players exceeding thresholds", ref autoPause))
-        {
-            _playerPerformanceConfigService.Current.AutoPausePlayersExceedingThresholds = autoPause;
-            _playerPerformanceConfigService.Save();
-        }
-        _uiShared.DrawHelpText("When enabled, it will automatically pause all players without preferred permissions that exceed the thresholds defined below." + Environment.NewLine
-            + "Will print a warning in chat when a player got paused automatically."
-            + UiSharedService.TooltipSeparator + "Warning: this will not automatically unpause those people again, you will have to do this manually.");
+        bool autoPause = PerformanceOptionBlock.DrawAutomaticallyPausePlayersExceedingThresholdsOption(_playerPerformanceConfigService, _uiShared, "PerformanceAutomaticallyPausePlayersExceedingThresholds");
         using (ImRaii.Disabled(!autoPause))
         {
             using var indent = ImRaii.PushIndent();
-            if (ImGui.Checkbox("Automatically pause also players with preferred permissions", ref autoPauseEveryone))
-            {
-                _playerPerformanceConfigService.Current.AutoPausePlayersWithPreferredPermissionsExceedingThresholds = autoPauseEveryone;
-                _playerPerformanceConfigService.Save();
-            }
-            _uiShared.DrawHelpText("When enabled, will automatically pause all players regardless of preferred permissions that exceed thresholds defined below." + UiSharedService.TooltipSeparator +
-                "Warning: this will not automatically unpause those people again, you will have to do this manually.");
-            var vramAuto = _playerPerformanceConfigService.Current.VRAMSizeAutoPauseThresholdMiB;
-            var trisAuto = _playerPerformanceConfigService.Current.TrisAutoPauseThresholdThousands;
-            ImGui.SetNextItemWidth(ClampSettingsItemWidth(100f));
-            if (ImGui.InputInt("Auto Pause VRAM threshold", ref vramAuto))
-            {
-                _playerPerformanceConfigService.Current.VRAMSizeAutoPauseThresholdMiB = vramAuto;
-                _playerPerformanceConfigService.Save();
-            }
-            ImGui.SameLine();
-            ImGui.Text("(MiB)");
-            _uiShared.DrawHelpText("When a loading in player and their VRAM usage exceeds this amount, automatically pauses the synced player." + UiSharedService.TooltipSeparator
-                + "Default: 550 MiB");
-            ImGui.SetNextItemWidth(ClampSettingsItemWidth(100f));
-            if (ImGui.InputInt("Auto Pause Triangle threshold", ref trisAuto))
-            {
-                _playerPerformanceConfigService.Current.TrisAutoPauseThresholdThousands = trisAuto;
-                _playerPerformanceConfigService.Save();
-            }
-            ImGui.SameLine();
-            ImGui.Text("(thousand triangles)");
-            _uiShared.DrawHelpText("When a loading in player and their triangle count exceeds this amount, automatically pauses the synced player." + UiSharedService.TooltipSeparator
-                + "Default: 250 thousand");
+            PerformanceOptionBlock.DrawAutomaticallyPauseAlsoPreferredPermissionsOption(_playerPerformanceConfigService, _uiShared, "PerformanceAutomaticallyPauseAlsoPreferredPermissions");
+            PerformanceOptionBlock.DrawAutoPauseVramThresholdOption(_playerPerformanceConfigService, _uiShared, ClampSettingsItemWidth(100f), "PerformanceAutoPauseVramThreshold");
+            PerformanceOptionBlock.DrawAutoPauseTriangleThresholdOption(_playerPerformanceConfigService, _uiShared, ClampSettingsItemWidth(100f), "PerformanceAutoPauseTriangleThreshold");
         }
         DrawSettingsSectionHeader("Whitelisted UIDs", "Entries below are ignored for warnings and auto-pause operations.");
         ImGui.SetNextItemWidth(ClampSettingsItemWidth(220f, 140f));
@@ -1230,19 +1015,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
         _uiShared.BigText("Service & Character Settings");
         ImGuiHelpers.ScaledDummy(new Vector2(5, 5));
-        var sendCensus = _serverConfigurationManager.SendCensusData;
-        if (ImGui.Checkbox("Send Statistical Census Data", ref sendCensus))
-        {
-            _serverConfigurationManager.SendCensusData = sendCensus;
-        }
-        _uiShared.DrawHelpText("This will allow sending census data to the currently connected service." + UiSharedService.TooltipSeparator
-            + "Census data contains:" + Environment.NewLine
-            + "- Current World" + Environment.NewLine
-            + "- Current Gender" + Environment.NewLine
-            + "- Current Race" + Environment.NewLine
-            + "- Current Clan (this is not your Free Company, this is e.g. Keeper or Seeker for Miqo'te)" + UiSharedService.TooltipSeparator
-            + "The census data is only saved temporarily and will be removed from the server on disconnect. It is stored temporarily associated with your UID while you are connected." + UiSharedService.TooltipSeparator
-            + "If you do not wish to participate in the statistical census, untick this box and reconnect to the server.");
+        ConnectivityOptionBlock.DrawSendStatisticalCensusDataOption(_serverConfigurationManager, _uiShared, "ConnectivitySendStatisticalCensusData");
         ImGuiHelpers.ScaledDummy(new Vector2(10, 10));
 
         int idx = _uiShared.DrawServiceSelection();
@@ -1476,13 +1249,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                         {
                             _uiShared.DrawUIDComboForAuthentication(i, item, selectedServer.ServerUri, _logger);
                         }
-                        bool isAutoLogin = item.AutoLogin;
-                        if (ImGui.Checkbox("Automatically login to Sphene", ref isAutoLogin))
-                        {
-                            item.AutoLogin = isAutoLogin;
-                            _serverConfigurationManager.Save();
-                        }
-                        _uiShared.DrawHelpText("When enabled and logging into this character in XIV, Sphene will automatically connect to the current service.");
+                        ConnectivityOptionBlock.DrawCharacterAutoLoginOption(item, _serverConfigurationManager, _uiShared, "ConnectivityCharacterAutoLogin");
                         if (_uiShared.IconTextButton(FontAwesomeIcon.Trash, "Delete Character") && UiSharedService.CtrlPressed())
                             _serverConfigurationManager.RemoveCharacterFromServer(idx, item);
                         UiSharedService.AttachToolTip("Hold CTRL to delete this entry.");
@@ -1619,54 +1386,16 @@ public class SettingsUi : WindowMediatorSubscriberBase
                     _uiShared.DrawHelpText("You cannot edit the name of the main service.");
                 }
 
-                ImGui.SetNextItemWidth(ClampSettingsItemWidth(220f, 140f));
-                var serverTransport = _serverConfigurationManager.GetTransport();
-                _uiShared.DrawCombo("Server Transport Type", Enum.GetValues<HttpTransportType>().Where(t => t != HttpTransportType.None),
-                    (v) => v.ToString(),
-                    onSelected: (t) => _serverConfigurationManager.SetTransportType(t),
-                    serverTransport);
-                _uiShared.DrawHelpText("You normally do not need to change this, if you don't know what this is or what it's for, keep it to WebSockets." + Environment.NewLine
-                    + "If you run into connection issues with e.g. VPNs, try ServerSentEvents first before trying out LongPolling." + UiSharedService.TooltipSeparator
-                    + "Note: if the server does not support a specific Transport Type it will fall through to the next automatically: WebSockets > ServerSentEvents > LongPolling");
+                ConnectivityOptionBlock.DrawServerTransportTypeOption(_serverConfigurationManager, _uiShared, ClampSettingsItemWidth(220f, 140f), "ConnectivityServerTransportType");
 
                 if (_dalamudUtilService.IsWine)
                 {
-                    bool forceWebSockets = selectedServer.ForceWebSockets;
-                    if (ImGui.Checkbox("[wine only] Force WebSockets", ref forceWebSockets))
-                    {
-                        selectedServer.ForceWebSockets = forceWebSockets;
-                        _serverConfigurationManager.Save();
-                    }
-                    _uiShared.DrawHelpText("On wine, Sphene will automatically fall back to ServerSentEvents/LongPolling, even if WebSockets is selected. "
-                        + "WebSockets are known to crash XIV entirely on wine 8.5 shipped with Dalamud. "
-                        + "Only enable this if you are not running wine 8.5." + Environment.NewLine
-                        + "Note: If the issue gets resolved at some point this option will be removed.");
+                    ConnectivityOptionBlock.DrawWineForceWebSocketsOption(selectedServer, _serverConfigurationManager, _uiShared, "ConnectivityWineForceWebSockets");
                 }
 
                 ImGuiHelpers.ScaledDummy(5);
 
-                if (ImGui.Checkbox("Use Discord OAuth2 Authentication", ref useOauth))
-                {
-                    selectedServer.UseOAuth2 = useOauth;
-                    _serverConfigurationManager.Save();
-                }
-                _uiShared.DrawHelpText("Use Discord OAuth2 Authentication to identify with this server instead of secret keys");
-                if (useOauth)
-                {
-                    _uiShared.DrawOAuth(selectedServer);
-                    if (string.IsNullOrEmpty(_serverConfigurationManager.GetDiscordUserFromToken(selectedServer)))
-                    {
-                        ImGuiHelpers.ScaledDummy(10f);
-                        UiSharedService.ColorTextWrapped("You have enabled OAuth2 but it is not linked. Press the buttons Check, then Authenticate to link properly.", ImGuiColors.DalamudRed);
-                    }
-                    if (!string.IsNullOrEmpty(_serverConfigurationManager.GetDiscordUserFromToken(selectedServer))
-                        && selectedServer.Authentications.TrueForAll(u => string.IsNullOrEmpty(u.UID)))
-                    {
-                        ImGuiHelpers.ScaledDummy(10f);
-                        UiSharedService.ColorTextWrapped("You have enabled OAuth2 but no characters configured. Set the correct UIDs for your characters in \"Character Management\".",
-                            ImGuiColors.DalamudRed);
-                    }
-                }
+                ConnectivityOptionBlock.DrawUseDiscordOAuthOption(selectedServer, useOauth, _serverConfigurationManager, _uiShared, "ConnectivityUseDiscordOAuth");
 
                 ImGui.EndTabItem();
             }
@@ -1680,65 +1409,15 @@ public class SettingsUi : WindowMediatorSubscriberBase
                     UiSharedService.TextWrapped("Note: The default permissions settings here are sent and stored on the connected service.");
                     ImGuiHelpers.ScaledDummy(5f);
                     var perms = _apiController.DefaultPermissions!;
-                    bool individualIsSticky = perms.IndividualIsSticky;
-                    bool disableIndividualSounds = perms.DisableIndividualSounds;
-                    bool disableIndividualAnimations = perms.DisableIndividualAnimations;
-                    bool disableIndividualVFX = perms.DisableIndividualVFX;
-                    if (ImGui.Checkbox("Individually set permissions become preferred permissions", ref individualIsSticky))
-                    {
-                        perms.IndividualIsSticky = individualIsSticky;
-                        _ = _apiController.UserUpdateDefaultPermissions(perms);
-                    }
-                    _uiShared.DrawHelpText("The preferred attribute means that the permissions to that user will never change through any of your permission changes to Syncshells " +
-                        "(i.e. if you have paused one specific user in a Syncshell and they become preferred permissions, then pause and unpause the same Syncshell, the user will remain paused - " +
-                        "if a user does not have preferred permissions, it will follow the permissions of the Syncshell and be unpaused)." + Environment.NewLine + Environment.NewLine +
-                        "This setting means:" + Environment.NewLine +
-                        "  - All new individual pairs get their permissions defaulted to preferred permissions." + Environment.NewLine +
-                        "  - All individually set permissions for any pair will also automatically become preferred permissions. This includes pairs in Syncshells." + Environment.NewLine + Environment.NewLine +
-                        "It is possible to remove or set the preferred permission state for any pair at any time." + Environment.NewLine + Environment.NewLine +
-                        "If unsure, leave this setting off.");
+                    ConnectivityOptionBlock.DrawPreferredPermissionsOption(perms, _apiController, _uiShared, "ConnectivityPreferredPermissions");
                     ImGuiHelpers.ScaledDummy(3f);
-
-                    if (ImGui.Checkbox("Disable individual pair sounds", ref disableIndividualSounds))
-                    {
-                        perms.DisableIndividualSounds = disableIndividualSounds;
-                        _ = _apiController.UserUpdateDefaultPermissions(perms);
-                    }
-                    _uiShared.DrawHelpText("This setting will disable sound sync for all new individual pairs.");
-                    if (ImGui.Checkbox("Disable individual pair animations", ref disableIndividualAnimations))
-                    {
-                        perms.DisableIndividualAnimations = disableIndividualAnimations;
-                        _ = _apiController.UserUpdateDefaultPermissions(perms);
-                    }
-                    _uiShared.DrawHelpText("This setting will disable animation sync for all new individual pairs.");
-                    if (ImGui.Checkbox("Disable individual pair VFX", ref disableIndividualVFX))
-                    {
-                        perms.DisableIndividualVFX = disableIndividualVFX;
-                        _ = _apiController.UserUpdateDefaultPermissions(perms);
-                    }
-                    _uiShared.DrawHelpText("This setting will disable VFX sync for all new individual pairs.");
+                    ConnectivityOptionBlock.DrawDisableIndividualPairSoundsOption(perms, _apiController, _uiShared, "ConnectivityDisableIndividualPairSounds");
+                    ConnectivityOptionBlock.DrawDisableIndividualPairAnimationsOption(perms, _apiController, _uiShared, "ConnectivityDisableIndividualPairAnimations");
+                    ConnectivityOptionBlock.DrawDisableIndividualPairVfxOption(perms, _apiController, _uiShared, "ConnectivityDisableIndividualPairVfx");
                     ImGuiHelpers.ScaledDummy(5f);
-                    bool disableGroundSounds = perms.DisableGroupSounds;
-                    bool disableGroupAnimations = perms.DisableGroupAnimations;
-                    bool disableGroupVFX = perms.DisableGroupVFX;
-                    if (ImGui.Checkbox("Disable Syncshell pair sounds", ref disableGroundSounds))
-                    {
-                        perms.DisableGroupSounds = disableGroundSounds;
-                        _ = _apiController.UserUpdateDefaultPermissions(perms);
-                    }
-                    _uiShared.DrawHelpText("This setting will disable sound sync for all non-sticky pairs in newly joined syncshells.");
-                    if (ImGui.Checkbox("Disable Syncshell pair animations", ref disableGroupAnimations))
-                    {
-                        perms.DisableGroupAnimations = disableGroupAnimations;
-                        _ = _apiController.UserUpdateDefaultPermissions(perms);
-                    }
-                    _uiShared.DrawHelpText("This setting will disable animation sync for all non-sticky pairs in newly joined syncshells.");
-                    if (ImGui.Checkbox("Disable Syncshell pair VFX", ref disableGroupVFX))
-                    {
-                        perms.DisableGroupVFX = disableGroupVFX;
-                        _ = _apiController.UserUpdateDefaultPermissions(perms);
-                    }
-                    _uiShared.DrawHelpText("This setting will disable VFX sync for all non-sticky pairs in newly joined syncshells.");
+                    ConnectivityOptionBlock.DrawDisableSyncshellPairSoundsOption(perms, _apiController, _uiShared, "ConnectivityDisableSyncshellPairSounds");
+                    ConnectivityOptionBlock.DrawDisableSyncshellPairAnimationsOption(perms, _apiController, _uiShared, "ConnectivityDisableSyncshellPairAnimations");
+                    ConnectivityOptionBlock.DrawDisableSyncshellPairVfxOption(perms, _apiController, _uiShared, "ConnectivityDisableSyncshellPairVfx");
                 }
                 else
                 {
@@ -2552,7 +2231,6 @@ public class SettingsUi : WindowMediatorSubscriberBase
     {
         DrawSettingsPageHeader("People & Notes", "Manage note import/export and default note popup behavior.");
 
-        var currentProfile = _configService.Current;
         var overwriteExistingLabels = _overwriteExistingLabels;
         if (ImGui.Button("Export Notes"))
         {
@@ -2570,7 +2248,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             _notesSuccessfullyApplied = _uiShared.ApplyNotesFromClipboard(notes, overwriteExistingLabels);
         }
         ImGui.SameLine();
-        ImGui.Checkbox("Overwrite existing labels", ref overwriteExistingLabels);
+        PeopleNotesOptionBlock.DrawOverwriteExistingLabelsOption(ref overwriteExistingLabels, _uiShared, "PeopleNotesOverwriteExistingLabels");
         _overwriteExistingLabels = overwriteExistingLabels;
 
         if (_notesSuccessfullyApplied is not null)
@@ -2583,182 +2261,54 @@ public class SettingsUi : WindowMediatorSubscriberBase
         }
 
         DrawSettingsSectionHeader("Labels & Popups");
-        var openPopupOnAddition = currentProfile.OpenPopupOnAdd;
-        if (ImGui.Checkbox("Open Notes Popup on user addition", ref openPopupOnAddition))
-        {
-            currentProfile.OpenPopupOnAdd = openPopupOnAddition;
-            _configService.Save();
-        }
-
-        var autoPopulateNotes = currentProfile.AutoPopulateEmptyNotesFromCharaName;
-        if (ImGui.Checkbox("Automatically populate notes using player names", ref autoPopulateNotes))
-        {
-            currentProfile.AutoPopulateEmptyNotesFromCharaName = autoPopulateNotes;
-            _configService.Save();
-        }
+        PeopleNotesOptionBlock.DrawOpenNotesPopupOnUserAdditionOption(_configService, _uiShared, "PeopleNotesOpenNotesPopupOnUserAddition");
+        PeopleNotesOptionBlock.DrawAutoPopulateNotesUsingPlayerNamesOption(_configService, _uiShared, "PeopleNotesAutoPopulateNotesUsingPlayerNames");
     }
 
     private void DrawGeneralUiDisplaySettings()
     {
         DrawSettingsPageHeader("Appearance", "Configure interface behavior, user list presentation, and profile display options.");
 
-        var currentProfile = _configService.Current;
-
         DrawSettingsSectionHeader("Basic Interface");
-        var showSpheneIcon = currentProfile.ShowSpheneIcon;
-        if (ImGui.Checkbox("Show Sphene Icon", ref showSpheneIcon))
-        {
-            currentProfile.ShowSpheneIcon = showSpheneIcon;
-            _configService.Save();
-        }
-        var lockSpheneIcon = currentProfile.LockSpheneIcon;
-        if (ImGui.Checkbox("Lock Sphene Icon position", ref lockSpheneIcon))
-        {
-            currentProfile.LockSpheneIcon = lockSpheneIcon;
-            _configService.Save();
-        }
-        var enableRightClickMenu = currentProfile.EnableRightClickMenus;
-        if (ImGui.Checkbox("Enable game right-click menus", ref enableRightClickMenu))
-        {
-            currentProfile.EnableRightClickMenus = enableRightClickMenu;
-            _configService.Save();
-        }
+        AppearanceOptionBlock.DrawShowSpheneIconOption(_configService, "AppearanceShowSpheneIcon");
+        AppearanceOptionBlock.DrawLockSpheneIconPositionOption(_configService, "AppearanceLockSpheneIconPosition");
+        AppearanceOptionBlock.DrawEnableGameRightClickMenusOption(_configService, "AppearanceEnableGameRightClickMenus");
 
         // ShrinkU integration settings moved to Overview page alongside version info
 
         DrawSettingsSectionHeader("Server Info Bar");
-        var enableDtrEntry = currentProfile.EnableDtrEntry;
-        if (ImGui.Checkbox("Show status in Server Info Bar", ref enableDtrEntry))
-        {
-            currentProfile.EnableDtrEntry = enableDtrEntry;
-            _configService.Save();
-        }
+        var enableDtrEntry = AppearanceOptionBlock.DrawShowStatusInServerInfoBarOption(_configService, "AppearanceShowStatusInServerInfoBar");
         using (ImRaii.Disabled(!enableDtrEntry))
         {
             using var indent = ImRaii.PushIndent();
-            var showUidInDtrTooltip = currentProfile.ShowUidInDtrTooltip;
-            if (ImGui.Checkbox("Show UID in tooltip", ref showUidInDtrTooltip))
-            {
-                currentProfile.ShowUidInDtrTooltip = showUidInDtrTooltip;
-                _configService.Save();
-            }
-            var preferNoteInDtrTooltip = currentProfile.PreferNoteInDtrTooltip;
-            if (ImGui.Checkbox("Prefer notes in tooltip", ref preferNoteInDtrTooltip))
-            {
-                currentProfile.PreferNoteInDtrTooltip = preferNoteInDtrTooltip;
-                _configService.Save();
-            }
-            var useColorsInDtr = currentProfile.UseColorsInDtr;
-            if (ImGui.Checkbox("Use status colors", ref useColorsInDtr))
-            {
-                currentProfile.UseColorsInDtr = useColorsInDtr;
-                _configService.Save();
-            }
+            AppearanceOptionBlock.DrawShowUidInTooltipOption(_configService, "AppearanceShowUidInTooltip");
+            AppearanceOptionBlock.DrawPreferNotesInTooltipOption(_configService, "AppearancePreferNotesInTooltip");
+            AppearanceOptionBlock.DrawUseStatusColorsOption(_configService, "AppearanceUseStatusColors");
         }
 
         DrawSettingsSectionHeader("User List Options");
-       
-        var useFocusTarget = _configService.Current.UseFocusTarget;
-        if (ImGui.Checkbox("Set visible pairs as focus targets when clicking the eye", ref useFocusTarget))
-        {
-            _configService.Current.UseFocusTarget = useFocusTarget;
-            _configService.Save();
-        }
+        AppearanceOptionBlock.DrawSetVisiblePairsAsFocusTargetsOption(_configService, "AppearanceSetVisiblePairsAsFocusTargets");
         
         ImGuiHelpers.ScaledDummy(10);
 
-        var showNameInsteadOfNotes = currentProfile.ShowCharacterNameInsteadOfNotesForVisible;
-        if (ImGui.Checkbox("Show character name instead of notes", ref showNameInsteadOfNotes))
-        {
-            currentProfile.ShowCharacterNameInsteadOfNotesForVisible = showNameInsteadOfNotes;
-            _configService.Save();
-            Mediator.Publish(new RefreshUiMessage());
-        }
-        _uiShared.DrawHelpText("When enabled, visible users will display their character name instead of your custom notes for them.");
-        
-        var showVisibleSeparate = currentProfile.ShowVisibleUsersSeparately;
-        if (ImGui.Checkbox("Show visible users separately", ref showVisibleSeparate))
-        {
-            currentProfile.ShowVisibleUsersSeparately = showVisibleSeparate;
-            _configService.Save();
-            Mediator.Publish(new StructuralRefreshUiMessage());
-        }
-        _uiShared.DrawHelpText("Visible users will appear in a separate 'Visible' group instead of being mixed with other users.");
-        
-        var showVisibleSyncshellUsersOnlyInSyncshells = _configService.Current.ShowVisibleSyncshellUsersOnlyInSyncshells;
-        if (ImGui.Checkbox("Show visible Syncshell users only in Syncshells", ref showVisibleSyncshellUsersOnlyInSyncshells))
-        {
-            _configService.Current.ShowVisibleSyncshellUsersOnlyInSyncshells = showVisibleSyncshellUsersOnlyInSyncshells;
-            _configService.Save();
-            Mediator.Publish(new StructuralRefreshUiMessage());
-        }
-        _uiShared.DrawHelpText("When enabled, visible users who are only connected through Syncshells will only appear in their respective Syncshells and not in the separate 'Visible' group.");
-        
-        var showOfflineSeparate = currentProfile.ShowOfflineUsersSeparately;
-        if (ImGui.Checkbox("Show offline users separately", ref showOfflineSeparate))
-        {
-            currentProfile.ShowOfflineUsersSeparately = showOfflineSeparate;
-            _configService.Save();
-            Mediator.Publish(new StructuralRefreshUiMessage());
-        }
-        _uiShared.DrawHelpText("Directly paired offline users will appear in a separate 'Offline' group. Offline syncshell members remain in their syncshells.");
-        
-        var showSyncshellOfflineSeparate = currentProfile.ShowSyncshellOfflineUsersSeparately;
-        if (ImGui.Checkbox("Also show offline Syncshell users separately", ref showSyncshellOfflineSeparate))
-        {
-            currentProfile.ShowSyncshellOfflineUsersSeparately = showSyncshellOfflineSeparate;
-            _configService.Save();
-            Mediator.Publish(new StructuralRefreshUiMessage());
-        }
-        _uiShared.DrawHelpText("When enabled, offline syncshell members will also appear in a separate 'Offline Syncshell' group instead of remaining in their syncshells.");
+        AppearanceOptionBlock.DrawShowCharacterNameInsteadOfNotesOption(_configService, _uiShared, Mediator, "AppearanceShowCharacterNameInsteadOfNotes");
+        AppearanceOptionBlock.DrawShowVisibleUsersSeparatelyOption(_configService, _uiShared, Mediator, "AppearanceShowVisibleUsersSeparately");
+        AppearanceOptionBlock.DrawShowVisibleSyncshellUsersOnlyInSyncshellsOption(_configService, _uiShared, Mediator, "AppearanceShowVisibleSyncshellUsersOnlyInSyncshells");
+        AppearanceOptionBlock.DrawShowOfflineUsersSeparatelyOption(_configService, _uiShared, Mediator, "AppearanceShowOfflineUsersSeparately");
+        AppearanceOptionBlock.DrawAlsoShowOfflineSyncshellUsersSeparatelyOption(_configService, _uiShared, Mediator, "AppearanceAlsoShowOfflineSyncshellUsersSeparately");
         ImGuiHelpers.ScaledDummy(10);
-       
-        var groupUpSyncshells = _configService.Current.GroupUpSyncshells;
-        if (ImGui.Checkbox("Group up all syncshells in one folder", ref groupUpSyncshells))
-        {
-            _configService.Current.GroupUpSyncshells = groupUpSyncshells;
-            _configService.Save();
-            Mediator.Publish(new StructuralRefreshUiMessage());
-        }
-        _uiShared.DrawHelpText("This will group up all Syncshells in a special 'All Syncshells' folder in the main UI.");
+        AppearanceOptionBlock.DrawGroupUpAllSyncshellsInOneFolderOption(_configService, _uiShared, Mediator, "AppearanceGroupUpAllSyncshellsInOneFolder");
         
 
         DrawSettingsSectionHeader("Profile Settings");
-        var showProfiles = _configService.Current.ProfilesShow;
-        if (ImGui.Checkbox("Show Sphene Profiles on Hover", ref showProfiles))
-        {
-            Mediator.Publish(new ClearProfileDataMessage());
-            _configService.Current.ProfilesShow = showProfiles;
-            _configService.Save();
-        }
-        _uiShared.DrawHelpText("This will show the configured user profile after a set delay");
+        var showProfiles = AppearanceOptionBlock.DrawShowSpheneProfilesOnHoverOption(_configService, _uiShared, Mediator, "AppearanceShowSpheneProfilesOnHover");
         ImGui.Indent();
         if (!showProfiles) ImGui.BeginDisabled();
-        var profileOnRight = _configService.Current.ProfilePopoutRight;
-        if (ImGui.Checkbox("Popout profiles on the right", ref profileOnRight))
-        {
-            _configService.Current.ProfilePopoutRight = profileOnRight;
-            _configService.Save();
-            Mediator.Publish(new CompactUiChange(Vector2.Zero, Vector2.Zero));
-        }
-        _uiShared.DrawHelpText("Will show profiles on the right side of the main UI");
-        var profileDelay = _configService.Current.ProfileDelay;
-        if (ImGui.SliderFloat("Hover Delay", ref profileDelay, 1, 10))
-        {
-            _configService.Current.ProfileDelay = profileDelay;
-            _configService.Save();
-        }
-        _uiShared.DrawHelpText("Delay until the profile should be displayed");
+        AppearanceOptionBlock.DrawPopoutProfilesOnTheRightOption(_configService, _uiShared, Mediator, "AppearancePopoutProfilesOnTheRight");
+        AppearanceOptionBlock.DrawHoverDelayOption(_configService, _uiShared, "AppearanceHoverDelay");
         if (!showProfiles) ImGui.EndDisabled();
         ImGui.Unindent();
-        var showNsfwProfiles = _configService.Current.ProfilesAllowNsfw;
-        if (ImGui.Checkbox("Show profiles marked as NSFW", ref showNsfwProfiles))
-        {
-            Mediator.Publish(new ClearProfileDataMessage());
-            _configService.Current.ProfilesAllowNsfw = showNsfwProfiles;
-            _configService.Save();
-        }
-        _uiShared.DrawHelpText("Will show profiles that have the NSFW tag enabled");
+        AppearanceOptionBlock.DrawShowProfilesMarkedAsNsfwOption(_configService, _uiShared, Mediator, "AppearanceShowProfilesMarkedAsNsfw");
     }
 
     private static string GetShrinkUAssemblyVersion()
@@ -2779,239 +2329,65 @@ public class SettingsUi : WindowMediatorSubscriberBase
     {
         DrawSettingsPageHeader("Notifications", "Configure where notifications appear and which sync events should trigger them.");
 
-        var currentProfile = _configService.Current;
-
         DrawSettingsSectionHeader("Notification Channels");
-
-        _uiShared.DrawCombo("Info Notification Display##settingsUi", (NotificationLocation[])Enum.GetValues(typeof(NotificationLocation)), (i) => i.ToString(),
-        (i) =>
-        {
-            currentProfile.InfoNotification = i;
-            _configService.Save();
-        }, currentProfile.InfoNotification);
-        _uiShared.DrawHelpText("The location where 'Info' notifications will display. Nowhere will not show any Info notifications; Chat prints in chat; Toast shows a toast; Both shows chat and toast.");
-
-        _uiShared.DrawCombo("Warning Notification Display##settingsUi", (NotificationLocation[])Enum.GetValues(typeof(NotificationLocation)), (i) => i.ToString(),
-        (i) =>
-        {
-            currentProfile.WarningNotification = i;
-            _configService.Save();
-        }, currentProfile.WarningNotification);
-        _uiShared.DrawHelpText("The location where 'Warning' notifications will display. Nowhere, Chat, Toast, or Both.");
-
-        _uiShared.DrawCombo("Error Notification Display##settingsUi", (NotificationLocation[])Enum.GetValues(typeof(NotificationLocation)), (i) => i.ToString(),
-        (i) =>
-        {
-            currentProfile.ErrorNotification = i;
-            _configService.Save();
-        }, currentProfile.ErrorNotification);
-        _uiShared.DrawHelpText("The location where 'Error' notifications will display. Nowhere, Chat, Toast, or Both.");
-
-        var disableOptionalPluginWarnings = currentProfile.DisableOptionalPluginWarnings;
-        if (ImGui.Checkbox("Disable optional plugin warnings", ref disableOptionalPluginWarnings))
-        {
-            currentProfile.DisableOptionalPluginWarnings = disableOptionalPluginWarnings;
-            _configService.Save();
-        }
-        _uiShared.DrawHelpText("Suppress 'Warning' messages for missing optional plugins.");
-
-        var onlineNotifs = currentProfile.ShowOnlineNotifications;
-        if (ImGui.Checkbox("Enable online notifications", ref onlineNotifs))
-        {
-            currentProfile.ShowOnlineNotifications = onlineNotifs;
-            _configService.Save();
-        }
-        var onlineNotifsPairsOnly = currentProfile.ShowOnlineNotificationsOnlyForIndividualPairs;
-        if (ImGui.Checkbox("Only for individual pairs", ref onlineNotifsPairsOnly))
-        {
-            currentProfile.ShowOnlineNotificationsOnlyForIndividualPairs = onlineNotifsPairsOnly;
-            _configService.Save();
-        }
-        var onlineNotifsNamedOnly = currentProfile.ShowOnlineNotificationsOnlyForNamedPairs;
-        if (ImGui.Checkbox("Only for named pairs", ref onlineNotifsNamedOnly))
-        {
-            currentProfile.ShowOnlineNotificationsOnlyForNamedPairs = onlineNotifsNamedOnly;
-            _configService.Save();
-        }
+        NotificationsOptionBlock.DrawInfoNotificationDisplayOption(_configService, _uiShared, "NotificationsInfoNotificationDisplay");
+        NotificationsOptionBlock.DrawWarningNotificationDisplayOption(_configService, _uiShared, "NotificationsWarningNotificationDisplay");
+        NotificationsOptionBlock.DrawErrorNotificationDisplayOption(_configService, _uiShared, "NotificationsErrorNotificationDisplay");
+        NotificationsOptionBlock.DrawDisableOptionalPluginWarningsOption(_configService, _uiShared, "NotificationsDisableOptionalPluginWarnings");
+        NotificationsOptionBlock.DrawEnableOnlineNotificationsOption(_configService, "NotificationsEnableOnlineNotifications");
+        NotificationsOptionBlock.DrawOnlyForIndividualPairsOption(_configService, "NotificationsOnlyForIndividualPairs");
+        NotificationsOptionBlock.DrawOnlyForNamedPairsOption(_configService, "NotificationsOnlyForNamedPairs");
 
         DrawSettingsSectionHeader("Area-bound Syncshell Notifications");
-        
-        var areaBoundNotifs = currentProfile.ShowAreaBoundSyncshellNotifications;
-        if (ImGui.Checkbox("Enable area-bound syncshell notifications", ref areaBoundNotifs))
-        {
-            currentProfile.ShowAreaBoundSyncshellNotifications = areaBoundNotifs;
-            _configService.Save();
-        }
-        _uiShared.DrawHelpText("Show notifications when area-bound syncshells become available to join in your current location.");
-
-        if (currentProfile.ShowAreaBoundSyncshellNotifications)
+        if (NotificationsOptionBlock.DrawEnableAreaBoundSyncshellNotificationsOption(_configService, _uiShared, "NotificationsEnableAreaBoundSyncshellNotifications"))
         {
             ImGui.Indent();
-            _uiShared.DrawCombo("Area-bound Notification Display##settingsUi", (NotificationLocation[])Enum.GetValues(typeof(NotificationLocation)), (i) => i.ToString(),
-            (i) =>
-            {
-                currentProfile.AreaBoundSyncshellNotification = i;
-                _configService.Save();
-            }, currentProfile.AreaBoundSyncshellNotification);
-            _uiShared.DrawHelpText("Choose where area-bound syncshell notifications should appear. Nowhere, Chat, Toast, or Both.");
+            NotificationsOptionBlock.DrawAreaBoundNotificationDisplayOption(_configService, _uiShared, "NotificationsAreaBoundNotificationDisplay");
             ImGui.Unindent();
         }
-        
-        var showWelcomeMessages = currentProfile.ShowAreaBoundSyncshellWelcomeMessages;
-        if (ImGui.Checkbox("Show area-bound syncshell welcome messages", ref showWelcomeMessages))
-        {
-            currentProfile.ShowAreaBoundSyncshellWelcomeMessages = showWelcomeMessages;
-            _configService.Save();
-        }
-        _uiShared.DrawHelpText("Automatically show welcome messages when joining area-bound syncshells. When disabled, you can still view welcome messages by clicking the area-bound indicator next to the syncshell name.");
-        
-        var autoShowConsent = currentProfile.AutoShowAreaBoundSyncshellConsent;
-        if (ImGui.Checkbox("Automatically show area-bound syncshell consent", ref autoShowConsent))
-        {
-            currentProfile.AutoShowAreaBoundSyncshellConsent = autoShowConsent;
-            _configService.Save();
-        }
-        _uiShared.DrawHelpText("When enabled, consent dialogs for area-bound syncshells will appear automatically when entering areas. When disabled, you can manually trigger consent using the button in the Compact UI. This setting also controls city syncshell join requests.");
+        NotificationsOptionBlock.DrawShowAreaBoundSyncshellWelcomeMessagesOption(_configService, _uiShared, "NotificationsShowAreaBoundSyncshellWelcomeMessages");
+        NotificationsOptionBlock.DrawAutomaticallyShowAreaBoundSyncshellConsentOption(_configService, _uiShared, "NotificationsAutomaticallyShowAreaBoundSyncshellConsent");
     }
 
     private void DrawAcknowledgmentSettings()
     {
         DrawSettingsPageHeader("Acknowledgment", "Tune acknowledgment notifications, reliability, and batching behavior.");
         DrawSettingsSectionHeader("Popup Settings");
-        
-        var showPopups = _configService.Current.ShowAcknowledgmentPopups;
-        if (ImGui.Checkbox("Show Acknowledgment Notifications", ref showPopups))
-        {
-            _configService.Current.ShowAcknowledgmentPopups = showPopups;
-            _configService.Save();
-        }
-        _uiShared.DrawHelpText("Enable or disable notifications for acknowledgment requests. Disable to prevent spam when receiving many requests.");
-        
-        var showWaitingPopups = _configService.Current.ShowWaitingForAcknowledgmentPopups;
-        if (ImGui.Checkbox("Show 'Waiting for Acknowledgment' Popups", ref showWaitingPopups))
-        {
-            _configService.Current.ShowWaitingForAcknowledgmentPopups = showWaitingPopups;
-            _configService.Save();
-        }
-        _uiShared.DrawHelpText("Enable or disable 'waiting for acknowledgment' popups. Success notifications show regardless of this setting.");
-        
-        if (_configService.Current.ShowAcknowledgmentPopups)
+
+        var showPopups = AcknowledgmentOptionBlock.DrawShowAcknowledgmentNotificationsOption(_configService, _uiShared, "AcknowledgmentShowAcknowledgmentNotifications");
+        AcknowledgmentOptionBlock.DrawShowWaitingForAcknowledgmentPopupsOption(_configService, _uiShared, "AcknowledgmentShowWaitingForAcknowledgmentPopups");
+
+        if (showPopups)
         {
             ImGui.Indent();
-            
-            var notificationLocation = (int)_configService.Current.AcknowledgmentNotification;
-            var notificationOptions = new[] { "None", "Chat", "Toast", "Both" };
-            if (ImGui.Combo("Notification Location", ref notificationLocation, notificationOptions, notificationOptions.Length))
-            {
-                _configService.Current.AcknowledgmentNotification = (NotificationLocation)notificationLocation;
-                _configService.Save();
-            }
-            _uiShared.DrawHelpText("Choose where acknowledgment notifications should appear.");
-            
+            AcknowledgmentOptionBlock.DrawAcknowledgmentNotificationLocationOption(_configService, _uiShared, "AcknowledgmentNotificationLocation");
             ImGui.Unindent();
         }
-        
+
         DrawSettingsSectionHeader("Performance Settings");
-        
-        var enableBatching = _configService.Current.EnableAcknowledgmentBatching;
-        if (ImGui.Checkbox("Enable Batching", ref enableBatching))
-        {
-            _configService.Current.EnableAcknowledgmentBatching = enableBatching;
-            _configService.Save();
-        }
-        _uiShared.DrawHelpText("Group multiple acknowledgments for better performance. Recommended with many active connections.");
-        
-        var enableAutoRetry = _configService.Current.EnableAcknowledgmentAutoRetry;
-        if (ImGui.Checkbox("Enable Auto Retry", ref enableAutoRetry))
-        {
-            _configService.Current.EnableAcknowledgmentAutoRetry = enableAutoRetry;
-            _configService.Save();
-        }
-        _uiShared.DrawHelpText("Automatically retry failed acknowledgments to improve reliability.");
-        
+        AcknowledgmentOptionBlock.DrawEnableBatchingOption(_configService, _uiShared, "AcknowledgmentEnableBatching");
+        AcknowledgmentOptionBlock.DrawEnableAutoRetryOption(_configService, _uiShared, "AcknowledgmentEnableAutoRetry");
+
         DrawSettingsSectionHeader("Timeout & Reliability");
-        
-        var timeoutSeconds = _configService.Current.AcknowledgmentTimeoutSeconds;
-        if (ImGui.SliderInt("Acknowledgment Timeout (seconds)", ref timeoutSeconds, 5, 120))
-        {
-            _configService.Current.AcknowledgmentTimeoutSeconds = timeoutSeconds;
-            _configService.Save();
-        }
-        _uiShared.DrawHelpText("How long to wait for acknowledgment responses before timing out.");
-        
+        AcknowledgmentOptionBlock.DrawAcknowledgmentTimeoutOption(_configService, _uiShared, "AcknowledgmentTimeout");
+
         DrawSettingsSectionHeader("Information");
         UiSharedService.TextWrapped("The acknowledgment system helps maintain synchronization between connected users. " +
                           "When disabled, popup notifications will not appear, but the system will continue to function in the background. " +
                           "This is useful when you have many active connections to prevent notification spam.");
-        
+
         ImGui.Spacing();
-        
-        // Reset to defaults button
-        if (ImGui.Button("Reset Acknowledgment Settings to Defaults"))
-        {
-            _configService.Current.ShowAcknowledgmentPopups = false;
-            _configService.Current.ShowWaitingForAcknowledgmentPopups = false;
-            _configService.Current.EnableAcknowledgmentBatching = true;
-            _configService.Current.EnableAcknowledgmentAutoRetry = true;
-            _configService.Current.AcknowledgmentTimeoutSeconds = 30;
-            _configService.Current.AcknowledgmentNotification = NotificationLocation.Chat;
-            _configService.Save();
-        }
-        _uiShared.DrawHelpText("Reset all acknowledgment settings to their default values.");
+        AcknowledgmentOptionBlock.DrawResetAcknowledgmentSettingsToDefaultsOption(_configService, _uiShared, "AcknowledgmentResetAcknowledgmentSettingsToDefaults");
     }
 
     private void DrawSyncBehaviorSettings()
     {
         DrawSettingsPageHeader("Sync Behavior", "Control how incoming and outgoing synchronization data is handled.");
         DrawSettingsSectionHeader("Incoming Sync");
-
-        var dutyCombatNoRedraw = _configService.Current.EnableDutyCombatSyncWithoutRedraw;
-        if (ImGui.Checkbox("Allow sync in duties/combat without redraw", ref dutyCombatNoRedraw))
-        {
-            _configService.Current.EnableDutyCombatSyncWithoutRedraw = dutyCombatNoRedraw;
-            _configService.Save();
-        }
-        _uiShared.DrawHelpText("When enabled, incoming sync changes are applied during duties or combat/performance without triggering redraw. This helps avoid temporary invisibility caused by redraw. If you notice performance issues, disable this option again.");
-        if (dutyCombatNoRedraw)
-        {
-            UiSharedService.ColorTextWrapped("Tip: This option is active. If you notice performance issues or crashes during combat, disable this option again.", ImGuiColors.ParsedGreen);
-        }
-        else
-        {
-            UiSharedService.ColorTextWrapped("Tip: This option is currently disabled. Enable it only if you want duty/combat sync without redraw.", ImGuiColors.DalamudGrey);
-        }
+        SyncBehaviorOptionBlock.DrawIncomingSyncWithoutRedraw(_configService, _uiShared, "SettingsIncomingSyncWithoutRedraw");
 
         DrawSettingsSectionHeader("Outgoing Sync Batching");
-        var outgoingBatching = _configService.Current.EnableDutyCombatOutgoingSyncBatching;
-        if (ImGui.Checkbox("Batch outgoing sync updates in duties/combat", ref outgoingBatching))
-        {
-            _configService.Current.EnableDutyCombatOutgoingSyncBatching = outgoingBatching;
-            _configService.Save();
-        }
-        _uiShared.DrawHelpText("When enabled, outgoing sync updates are collected for a configurable window during duty/combat, then sent as one update burst.");
-
-        ImGui.Indent();
-        var batchSeconds = _configService.Current.DutyCombatOutgoingSyncBatchSeconds;
-        using (ImRaii.Disabled(!outgoingBatching))
-        {
-            ImGui.SetNextItemWidth(ClampSettingsItemWidth(240f, 160f));
-            if (ImGui.SliderInt("Outgoing batch window (seconds)", ref batchSeconds, 1, 60))
-            {
-                _configService.Current.DutyCombatOutgoingSyncBatchSeconds = batchSeconds;
-                _configService.Save();
-            }
-        }
-        _uiShared.DrawHelpText("Recommended default is 10 seconds. Higher values reduce update frequency but increase sync latency.");
-        ImGui.Unindent();
-
-        if (outgoingBatching)
-        {
-            UiSharedService.ColorTextWrapped("Tip: Outgoing batching is active. If you notice performance issues or crashes during combat, disable this option.", ImGuiColors.ParsedGreen);
-        }
-        else
-        {
-            UiSharedService.ColorTextWrapped("Tip: Outgoing batching is currently disabled. Enable it if you want fewer sync sends during combat to reduce performance impact.", ImGuiColors.DalamudGrey);
-        }
+        SyncBehaviorOptionBlock.DrawOutgoingSyncBatching(_configService, _uiShared, ClampSettingsItemWidth(240f, 160f), "SettingsOutgoingSyncBatching");
     }
 
     private void UiSharedService_GposeEnd()

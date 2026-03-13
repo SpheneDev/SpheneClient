@@ -45,6 +45,7 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
     private ServerState _serverState;
     private CensusUpdateMessage? _lastCensus;
     private readonly ConcurrentDictionary<string, FileTransferAckMessage> _pendingFileTransferAcks = new(StringComparer.Ordinal);
+    private readonly SemaphoreSlim _connectionLifecycleGate = new(1, 1);
 
     public ApiController(ILogger<ApiController> logger, HubFactory hubFactory, DalamudUtilService dalamudUtil,
         PairManager pairManager, ServerConfigurationManager serverManager, SpheneMediator mediator,
@@ -122,239 +123,246 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
 
     public async Task CreateConnectionsAsync()
     {
-        if (!_serverManager.ShownCensusPopup)
+        await _connectionLifecycleGate.WaitAsync().ConfigureAwait(false);
+        try
         {
-            Mediator.Publish(new OpenCensusPopupMessage());
-            while (!_serverManager.ShownCensusPopup)
+            if (!_serverManager.ShownCensusPopup)
             {
-                await Task.Delay(500).ConfigureAwait(false);
+                Mediator.Publish(new OpenCensusPopupMessage());
+                while (!_serverManager.ShownCensusPopup)
+                {
+                    await Task.Delay(500).ConfigureAwait(false);
+                }
             }
-        }
-
-        Logger.LogDebug("CreateConnections called");
-
-        if (_serverManager.CurrentServer?.FullPause ?? true)
-        {
-            Logger.LogDebug("Not recreating Connection, paused");
-            _connectionDto = null;
             await StopConnectionAsync(ServerState.Disconnected).ConfigureAwait(false);
+
+            Logger.LogDebug("CreateConnections called");
+
+            if (_serverManager.CurrentServer?.FullPause ?? true)
+            {
+                Logger.LogDebug("Not recreating Connection, paused");
+                _connectionDto = null;
+                await StopConnectionAsync(ServerState.Disconnected).ConfigureAwait(false);
+                if (_connectionCancellationTokenSource is not null)
+                    await _connectionCancellationTokenSource.CancelAsync().ConfigureAwait(false);
+                return;
+            }
+
+            if (!_serverManager.CurrentServer.UseOAuth2)
+            {
+                var secretKey = _serverManager.GetSecretKey(out bool multi);
+                if (multi)
+                {
+                    Logger.LogWarning("Multiple secret keys for current character");
+                    _connectionDto = null;
+                    Mediator.Publish(new NotificationMessage("Multiple Identical Characters detected", "Your Service configuration has multiple characters with the same name and world set up. Delete the duplicates in the character management to be able to connect to Sphene.",
+                        NotificationType.Error));
+                    await StopConnectionAsync(ServerState.MultiChara).ConfigureAwait(false);
+                    if (_connectionCancellationTokenSource is not null)
+                        await _connectionCancellationTokenSource.CancelAsync().ConfigureAwait(false);
+                    return;
+                }
+
+                if (secretKey.IsNullOrEmpty())
+                {
+                    Logger.LogWarning("No secret key set for current character");
+                    _connectionDto = null;
+                    await StopConnectionAsync(ServerState.NoSecretKey).ConfigureAwait(false);
+                    if (_connectionCancellationTokenSource is not null)
+                        await _connectionCancellationTokenSource.CancelAsync().ConfigureAwait(false);
+                    return;
+                }
+            }
+            else
+            {
+                var oauth2 = _serverManager.GetOAuth2(out bool multi);
+                if (multi)
+                {
+                    Logger.LogWarning("Multiple secret keys for current character");
+                    _connectionDto = null;
+                    Mediator.Publish(new NotificationMessage("Multiple Identical Characters detected", "Your Service configuration has multiple characters with the same name and world set up. Delete the duplicates in the character management to be able to connect to Sphene.",
+                        NotificationType.Error));
+                    await StopConnectionAsync(ServerState.MultiChara).ConfigureAwait(false);
+                    if (_connectionCancellationTokenSource is not null)
+                        await _connectionCancellationTokenSource.CancelAsync().ConfigureAwait(false);
+                    return;
+                }
+
+                if (!oauth2.HasValue)
+                {
+                    Logger.LogWarning("No UID/OAuth set for current character");
+                    _connectionDto = null;
+                    await StopConnectionAsync(ServerState.OAuthMisconfigured).ConfigureAwait(false);
+                    if (_connectionCancellationTokenSource is not null)
+                        await _connectionCancellationTokenSource.CancelAsync().ConfigureAwait(false);
+                    return;
+                }
+
+                if (!await _tokenProvider.TryUpdateOAuth2LoginTokenAsync(_serverManager.CurrentServer).ConfigureAwait(false))
+                {
+                    Logger.LogWarning("OAuth2 login token could not be updated");
+                    _connectionDto = null;
+                    await StopConnectionAsync(ServerState.OAuthLoginTokenStale).ConfigureAwait(false);
+                    if (_connectionCancellationTokenSource is not null)
+                        await _connectionCancellationTokenSource.CancelAsync().ConfigureAwait(false);
+                    return;
+                }
+            }
+
+            await StopConnectionAsync(ServerState.Disconnected).ConfigureAwait(false);
+
+            Logger.LogDebug("Recreating Connection");
+            Mediator.Publish(new EventMessage(new Services.Events.Event(nameof(ApiController), Services.Events.EventSeverity.Informational,
+                $"Starting Connection to {_serverManager.CurrentServer.ServerName}")));
+
             if (_connectionCancellationTokenSource is not null)
                 await _connectionCancellationTokenSource.CancelAsync().ConfigureAwait(false);
-            return;
-        }
-
-        if (!_serverManager.CurrentServer.UseOAuth2)
-        {
-            var secretKey = _serverManager.GetSecretKey(out bool multi);
-            if (multi)
+            _connectionCancellationTokenSource?.Dispose();
+            _connectionCancellationTokenSource = new CancellationTokenSource();
+            var token = _connectionCancellationTokenSource.Token;
+            while (ServerState is not ServerState.Connected && !token.IsCancellationRequested)
             {
-                Logger.LogWarning("Multiple secret keys for current character");
-                _connectionDto = null;
-                Mediator.Publish(new NotificationMessage("Multiple Identical Characters detected", "Your Service configuration has multiple characters with the same name and world set up. Delete the duplicates in the character management to be able to connect to Sphene.",
-                    NotificationType.Error));
-                await StopConnectionAsync(ServerState.MultiChara).ConfigureAwait(false);
-                if (_connectionCancellationTokenSource is not null)
-                    await _connectionCancellationTokenSource.CancelAsync().ConfigureAwait(false);
-                return;
-            }
+                AuthFailureMessage = string.Empty;
 
-            if (secretKey.IsNullOrEmpty())
-            {
-                Logger.LogWarning("No secret key set for current character");
-                _connectionDto = null;
-                await StopConnectionAsync(ServerState.NoSecretKey).ConfigureAwait(false);
-                if (_connectionCancellationTokenSource is not null)
-                    await _connectionCancellationTokenSource.CancelAsync().ConfigureAwait(false);
-                return;
-            }
-        }
-        else
-        {
-            var oauth2 = _serverManager.GetOAuth2(out bool multi);
-            if (multi)
-            {
-                Logger.LogWarning("Multiple secret keys for current character");
-                _connectionDto = null;
-                Mediator.Publish(new NotificationMessage("Multiple Identical Characters detected", "Your Service configuration has multiple characters with the same name and world set up. Delete the duplicates in the character management to be able to connect to Sphene.",
-                    NotificationType.Error));
-                await StopConnectionAsync(ServerState.MultiChara).ConfigureAwait(false);
-                if (_connectionCancellationTokenSource is not null)
-                    await _connectionCancellationTokenSource.CancelAsync().ConfigureAwait(false);
-                return;
-            }
-
-            if (!oauth2.HasValue)
-            {
-                Logger.LogWarning("No UID/OAuth set for current character");
-                _connectionDto = null;
-                await StopConnectionAsync(ServerState.OAuthMisconfigured).ConfigureAwait(false);
-                if (_connectionCancellationTokenSource is not null)
-                    await _connectionCancellationTokenSource.CancelAsync().ConfigureAwait(false);
-                return;
-            }
-
-            if (!await _tokenProvider.TryUpdateOAuth2LoginTokenAsync(_serverManager.CurrentServer).ConfigureAwait(false))
-            {
-                Logger.LogWarning("OAuth2 login token could not be updated");
-                _connectionDto = null;
-                await StopConnectionAsync(ServerState.OAuthLoginTokenStale).ConfigureAwait(false);
-                if (_connectionCancellationTokenSource is not null)
-                    await _connectionCancellationTokenSource.CancelAsync().ConfigureAwait(false);
-                return;
-            }
-        }
-
-        await StopConnectionAsync(ServerState.Disconnected).ConfigureAwait(false);
-
-        Logger.LogDebug("Recreating Connection");
-        Mediator.Publish(new EventMessage(new Services.Events.Event(nameof(ApiController), Services.Events.EventSeverity.Informational,
-            $"Starting Connection to {_serverManager.CurrentServer.ServerName}")));
-
-        if (_connectionCancellationTokenSource is not null)
-            await _connectionCancellationTokenSource.CancelAsync().ConfigureAwait(false);
-        _connectionCancellationTokenSource?.Dispose();
-        _connectionCancellationTokenSource = new CancellationTokenSource();
-        var token = _connectionCancellationTokenSource.Token;
-        while (ServerState is not ServerState.Connected && !token.IsCancellationRequested)
-        {
-            AuthFailureMessage = string.Empty;
-
-            await StopConnectionAsync(ServerState.Disconnected).ConfigureAwait(false);
-            ServerState = ServerState.Connecting;
-
-            try
-            {
-                Logger.LogDebug("Building connection");
+                await StopConnectionAsync(ServerState.Disconnected).ConfigureAwait(false);
+                ServerState = ServerState.Connecting;
 
                 try
                 {
-                    _lastUsedToken = await _tokenProvider.GetOrUpdateToken(token).ConfigureAwait(false);
-                }
-                catch (SpheneAuthFailureException ex)
-                {
-                    AuthFailureMessage = ex.Reason;
-                    throw new HttpRequestException("Error during authentication", ex, System.Net.HttpStatusCode.Unauthorized);
-                }
+                    Logger.LogDebug("Building connection");
 
-                while (!await _dalamudUtil.GetIsPlayerPresentAsync().ConfigureAwait(false) && !token.IsCancellationRequested)
-                {
-                    Logger.LogDebug("Player not loaded in yet, waiting");
-                    await Task.Delay(TimeSpan.FromSeconds(1), token).ConfigureAwait(false);
-                }
+                    try
+                    {
+                        _lastUsedToken = await _tokenProvider.GetOrUpdateToken(token).ConfigureAwait(false);
+                    }
+                    catch (SpheneAuthFailureException ex)
+                    {
+                        AuthFailureMessage = ex.Reason;
+                        throw new HttpRequestException("Error during authentication", ex, System.Net.HttpStatusCode.Unauthorized);
+                    }
 
-                if (token.IsCancellationRequested) break;
+                    while (!await _dalamudUtil.GetIsPlayerPresentAsync().ConfigureAwait(false) && !token.IsCancellationRequested)
+                    {
+                        Logger.LogDebug("Player not loaded in yet, waiting");
+                        await Task.Delay(TimeSpan.FromSeconds(1), token).ConfigureAwait(false);
+                    }
 
-                _spheneHub = _hubFactory.GetOrCreate(token);
-                InitializeApiHooks();
+                    if (token.IsCancellationRequested) break;
 
-                await _spheneHub.StartAsync(token).ConfigureAwait(false);
+                    _spheneHub = _hubFactory.GetOrCreate(token);
+                    InitializeApiHooks();
 
-                _connectionDto = await GetConnectionDto().ConfigureAwait(false);
+                    await _spheneHub.StartAsync(token).ConfigureAwait(false);
 
-                ServerState = ServerState.Connected;
-                _healthMonitor.RecordSuccessfulConnection();
+                    _connectionDto = await GetConnectionDto().ConfigureAwait(false);
 
-                var currentClientVer = Assembly.GetExecutingAssembly().GetName().Version!;
+                    ServerState = ServerState.Connected;
+                    _healthMonitor.RecordSuccessfulConnection();
 
-                if (_connectionDto.ServerVersion != ISpheneHub.ApiVersion)
-                {
+                    var currentClientVer = Assembly.GetExecutingAssembly().GetName().Version!;
+
+                    if (_connectionDto.ServerVersion != ISpheneHub.ApiVersion)
+                    {
+                        if (_connectionDto.CurrentClientVersion > currentClientVer)
+                        {
+                            Mediator.Publish(new NotificationMessage("Client incompatible",
+                                $"Your client is outdated ({currentClientVer.Major}.{currentClientVer.Minor}.{currentClientVer.Build}), current is: " +
+                                $"{_connectionDto.CurrentClientVersion.Major}.{_connectionDto.CurrentClientVersion.Minor}.{_connectionDto.CurrentClientVersion.Build}. " +
+                                $"This client version is incompatible and will not be able to connect. Please update your Sphene client.",
+                                NotificationType.Error));
+                        }
+                        await StopConnectionAsync(ServerState.VersionMisMatch).ConfigureAwait(false);
+                        return;
+                    }
+
                     if (_connectionDto.CurrentClientVersion > currentClientVer)
                     {
-                        Mediator.Publish(new NotificationMessage("Client incompatible",
+                        Mediator.Publish(new NotificationMessage("Client outdated",
                             $"Your client is outdated ({currentClientVer.Major}.{currentClientVer.Minor}.{currentClientVer.Build}), current is: " +
                             $"{_connectionDto.CurrentClientVersion.Major}.{_connectionDto.CurrentClientVersion.Minor}.{_connectionDto.CurrentClientVersion.Build}. " +
-                            $"This client version is incompatible and will not be able to connect. Please update your Sphene client.",
-                            NotificationType.Error));
+                            $"Please keep your Sphene client up-to-date.",
+                            NotificationType.Warning));
                     }
-                    await StopConnectionAsync(ServerState.VersionMisMatch).ConfigureAwait(false);
-                    return;
-                }
 
-                if (_connectionDto.CurrentClientVersion > currentClientVer)
-                {
-                    Mediator.Publish(new NotificationMessage("Client outdated",
-                        $"Your client is outdated ({currentClientVer.Major}.{currentClientVer.Minor}.{currentClientVer.Build}), current is: " +
-                        $"{_connectionDto.CurrentClientVersion.Major}.{_connectionDto.CurrentClientVersion.Minor}.{_connectionDto.CurrentClientVersion.Build}. " +
-                        $"Please keep your Sphene client up-to-date.",
-                        NotificationType.Warning));
-                }
+                    await FlushPendingFileTransferAcksAsync().ConfigureAwait(false);
 
-                await FlushPendingFileTransferAcksAsync().ConfigureAwait(false);
-
-                if (_dalamudUtil.HasModifiedGameFiles)
-                {
-                    Logger.LogError("Detected modified game files on connection");
-                    if (!_SpheneConfigService.Current.DebugStopWhining)
-                        Mediator.Publish(new NotificationMessage("Modified Game Files detected",
-                            "Dalamud is reporting your FFXIV installation has modified game files. Any mods installed through TexTools will produce this message. " +
-                            "Sphene, Penumbra, and some other plugins assume your FFXIV installation is unmodified in order to work. " +
-                            "Synchronization with pairs/shells can break because of this. Exit the game, open XIVLauncher, click the arrow next to Log In " +
-                            "and select 'repair game files' to resolve this issue. Afterwards, do not install any mods with TexTools. Your plugin configurations will remain, as will mods enabled in Penumbra.",
-                            NotificationType.Error, TimeSpan.FromSeconds(15)));
-                }
-
-                if (_dalamudUtil.IsLodEnabled && !_naggedAboutLod)
-                {
-                    _naggedAboutLod = true;
-                    Logger.LogWarning("Model LOD is enabled during connection");
-                    if (!_SpheneConfigService.Current.DebugStopWhining)
+                    if (_dalamudUtil.HasModifiedGameFiles)
                     {
-                        Mediator.Publish(new NotificationMessage("Model LOD is enabled",
-                            "You have \"Use low-detail models on distant objects (LOD)\" enabled. Having model LOD enabled is known to be a reason to cause " +
-                            "random crashes when loading in or rendering modded pairs. Disabling LOD has a very low performance impact. Disable LOD while using Sphene: " +
-                            "Go to XIV Menu -> System Configuration -> Graphics Settings and disable the model LOD option.", NotificationType.Warning, TimeSpan.FromSeconds(15)));
+                        Logger.LogError("Detected modified game files on connection");
+                        if (!_SpheneConfigService.Current.DebugStopWhining)
+                            Mediator.Publish(new NotificationMessage("Modified Game Files detected",
+                                "Dalamud is reporting your FFXIV installation has modified game files. Any mods installed through TexTools will produce this message. " +
+                                "Sphene, Penumbra, and some other plugins assume your FFXIV installation is unmodified in order to work. " +
+                                "Synchronization with pairs/shells can break because of this. Exit the game, open XIVLauncher, click the arrow next to Log In " +
+                                "and select 'repair game files' to resolve this issue. Afterwards, do not install any mods with TexTools. Your plugin configurations will remain, as will mods enabled in Penumbra.",
+                                NotificationType.Error, TimeSpan.FromSeconds(15)));
                     }
+
+                    if (_dalamudUtil.IsLodEnabled && !_naggedAboutLod)
+                    {
+                        _naggedAboutLod = true;
+                        Logger.LogWarning("Model LOD is enabled during connection");
+                        if (!_SpheneConfigService.Current.DebugStopWhining)
+                        {
+                            Mediator.Publish(new NotificationMessage("Model LOD is enabled",
+                                "You have \"Use low-detail models on distant objects (LOD)\" enabled. Having model LOD enabled is known to be a reason to cause " +
+                                "random crashes when loading in or rendering modded pairs. Disabling LOD has a very low performance impact. Disable LOD while using Sphene: " +
+                                "Go to XIV Menu -> System Configuration -> Graphics Settings and disable the model LOD option.", NotificationType.Warning, TimeSpan.FromSeconds(15)));
+                        }
+                    }
+
+                    if (_naggedAboutLod && !_dalamudUtil.IsLodEnabled)
+                    {
+                        _naggedAboutLod = false;
+                    }
+
+                    await LoadIninitialPairsAsync().ConfigureAwait(false);
+                    await LoadOnlinePairsAsync().ConfigureAwait(false);
                 }
-
-                if (_naggedAboutLod && !_dalamudUtil.IsLodEnabled)
+                catch (OperationCanceledException)
                 {
-                    _naggedAboutLod = false;
-                }
-
-                await LoadIninitialPairsAsync().ConfigureAwait(false);
-                await LoadOnlinePairsAsync().ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-                Logger.LogWarning("Connection attempt cancelled");
-                return;
-            }
-            catch (HttpRequestException ex)
-            {
-                Logger.LogWarning(ex, "HttpRequestException on Connection");
-                _healthMonitor.RecordConnectionFailure(ex);
-
-                if (ex.StatusCode == System.Net.HttpStatusCode.Unauthorized)
-                {
-                    await StopConnectionAsync(ServerState.Unauthorized).ConfigureAwait(false);
+                    Logger.LogWarning("Connection attempt cancelled");
                     return;
                 }
+                catch (HttpRequestException ex)
+                {
+                    Logger.LogWarning(ex, "HttpRequestException on Connection");
+                    _healthMonitor.RecordConnectionFailure(ex);
 
-                ServerState = ServerState.Reconnecting;
-                Logger.LogInformation("Failed to establish connection, retrying");
-                
-                // Use exponential backoff instead of random delay
-                var delay = CalculateRetryDelay(_healthMonitor.ConsecutiveFailures);
-                await Task.Delay(delay, token).ConfigureAwait(false);
-            }
-            catch (InvalidOperationException ex)
-            {
-                Logger.LogWarning(ex, "InvalidOperationException on connection");
-                _healthMonitor.RecordConnectionFailure(ex);
-                await StopConnectionAsync(ServerState.Disconnected).ConfigureAwait(false);
-                return;
-            }
-            catch (Exception ex)
-            {
-                Logger.LogWarning(ex, "Exception on Connection");
-                _healthMonitor.RecordConnectionFailure(ex);
+                    if (ex.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+                    {
+                        await StopConnectionAsync(ServerState.Unauthorized).ConfigureAwait(false);
+                        return;
+                    }
 
-                Logger.LogInformation("Failed to establish connection, retrying");
-                
-                // Use exponential backoff instead of random delay
-                var delay = CalculateRetryDelay(_healthMonitor.ConsecutiveFailures);
-                await Task.Delay(delay, token).ConfigureAwait(false);
+                    ServerState = ServerState.Reconnecting;
+                    Logger.LogInformation("Failed to establish connection, retrying");
+
+                    var delay = CalculateRetryDelay(_healthMonitor.ConsecutiveFailures);
+                    await Task.Delay(delay, token).ConfigureAwait(false);
+                }
+                catch (InvalidOperationException ex)
+                {
+                    Logger.LogWarning(ex, "InvalidOperationException on connection");
+                    _healthMonitor.RecordConnectionFailure(ex);
+                    await StopConnectionAsync(ServerState.Disconnected).ConfigureAwait(false);
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogWarning(ex, "Exception on Connection");
+                    _healthMonitor.RecordConnectionFailure(ex);
+
+                    Logger.LogInformation("Failed to establish connection, retrying");
+
+                    var delay = CalculateRetryDelay(_healthMonitor.ConsecutiveFailures);
+                    await Task.Delay(delay, token).ConfigureAwait(false);
+                }
             }
+        }
+        finally
+        {
+            _connectionLifecycleGate.Release();
         }
     }
 
@@ -478,6 +486,8 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
     {
         if (_spheneHub == null) return;
 
+        ClearApiHooks();
+
         Logger.LogDebug("Initializing data");
         OnDownloadReady((guid) => _ = Client_DownloadReady(guid));
         OnReceiveServerMessage((sev, msg) => _ = Client_ReceiveServerMessage(sev, msg));
@@ -531,6 +541,51 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
         _ = ClientHealthCheckAsync(_healthCheckTokenSource.Token);
 
         _initialized = true;
+    }
+
+    private void ClearApiHooks()
+    {
+        if (_spheneHub == null) return;
+
+        _spheneHub.Remove(nameof(Client_DownloadReady));
+        _spheneHub.Remove(nameof(Client_ReceiveServerMessage));
+        _spheneHub.Remove(nameof(Client_UpdateSystemInfo));
+        _spheneHub.Remove(nameof(Client_UserSendOffline));
+        _spheneHub.Remove(nameof(Client_UserAddClientPair));
+        _spheneHub.Remove(nameof(Client_UserReceiveCharacterData));
+        _spheneHub.Remove(nameof(Client_UserRemoveClientPair));
+        _spheneHub.Remove(nameof(Client_UserSendOnline));
+        _spheneHub.Remove(nameof(Client_UserUpdateOtherPairPermissions));
+        _spheneHub.Remove(nameof(Client_UserUpdateSelfPairPermissions));
+        _spheneHub.Remove(nameof(Client_UserAckYouUpdate));
+        _spheneHub.Remove(nameof(Client_UserPenumbraReceivePreferenceUpdate));
+        _spheneHub.Remove(nameof(Client_UserMutualVisibilityUpdate));
+        _spheneHub.Remove(nameof(Client_UserGposeStateUpdate));
+        _spheneHub.Remove(nameof(Client_UserReceiveUploadStatus));
+        _spheneHub.Remove(nameof(Client_UserUpdateProfile));
+        _spheneHub.Remove(nameof(Client_UserUpdateDefaultPermissions));
+        _spheneHub.Remove(nameof(Client_UpdateUserIndividualPairStatusDto));
+        _spheneHub.Remove(nameof(Client_UserReceiveFileNotification));
+        _spheneHub.Remove(nameof(Client_UserReceiveBypassEmote));
+        _spheneHub.Remove(nameof(Client_UserReceiveCharacterDataAcknowledgment));
+        _spheneHub.Remove(nameof(Client_UserReceiveCharacterDataAcknowledgmentV2));
+        _spheneHub.Remove(nameof(Client_GroupChangePermissions));
+        _spheneHub.Remove(nameof(Client_GroupDelete));
+        _spheneHub.Remove(nameof(Client_GroupPairChangeUserInfo));
+        _spheneHub.Remove(nameof(Client_GroupPairJoined));
+        _spheneHub.Remove(nameof(Client_GroupPairLeft));
+        _spheneHub.Remove(nameof(Client_GroupSendFullInfo));
+        _spheneHub.Remove(nameof(Client_GroupSendInfo));
+        _spheneHub.Remove(nameof(Client_GroupChangeUserPairPermissions));
+        _spheneHub.Remove(nameof(Client_AreaBoundSyncshellBroadcast));
+        _spheneHub.Remove(nameof(Client_AreaBoundJoinRequest));
+        _spheneHub.Remove(nameof(Client_AreaBoundJoinResponse));
+        _spheneHub.Remove(nameof(Client_AreaBoundSyncshellConfigurationUpdate));
+        _spheneHub.Remove(nameof(Client_GposeLobbyJoin));
+        _spheneHub.Remove(nameof(Client_GposeLobbyLeave));
+        _spheneHub.Remove(nameof(Client_GposeLobbyPushCharacterData));
+        _spheneHub.Remove(nameof(Client_GposeLobbyPushPoseData));
+        _spheneHub.Remove(nameof(Client_GposeLobbyPushWorldData));
     }
 
     private async Task LoadIninitialPairsAsync()

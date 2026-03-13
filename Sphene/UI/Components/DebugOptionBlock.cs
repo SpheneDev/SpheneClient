@@ -1,0 +1,79 @@
+using Dalamud.Bindings.ImGui;
+using Dalamud.Interface;
+using Microsoft.Extensions.Logging;
+using Sphene.Services.Mediator;
+using Sphene.SpheneConfiguration;
+using Sphene.UI;
+using Sphene.UI.Panels;
+
+namespace Sphene.UI.Components;
+
+public static class DebugOptionBlock
+{
+    public static void DrawLogLevelOption(SpheneConfigService configService, UiSharedService uiShared, string blockId = "LogLevel")
+    {
+        uiShared.DrawCombo("Log Level##" + blockId, Enum.GetValues<LogLevel>(), l => l.ToString(), l =>
+        {
+            configService.Current.LogLevel = l;
+            configService.Save();
+        }, configService.Current.LogLevel);
+        uiShared.DrawHelpText("Controls verbosity of logs written to /xllog and plugin console.");
+    }
+
+    public static bool DrawLogNetworkPerformanceMetricsOption(SpheneConfigService configService, UiSharedService uiShared, string blockId = "LogNetworkPerformanceMetrics")
+    {
+        var logPerformance = configService.Current.LogPerformance;
+        if (ImGui.Checkbox("Log Network Performance Metrics##" + blockId, ref logPerformance))
+        {
+            configService.Current.LogPerformance = logPerformance;
+            configService.Save();
+        }
+        uiShared.DrawHelpText("Enabling this can incur a slight performance impact. Extended monitoring is not recommended.");
+        return logPerformance;
+    }
+
+    public static void DrawPrintNetworkMetricsActions(UiSharedService uiShared, bool logPerformance, Action printMetrics, Action printMetricsLast60, string blockId = "PrintNetworkMetricsActions")
+    {
+        if (!logPerformance) ImGui.BeginDisabled();
+        if (uiShared.IconTextButton(FontAwesomeIcon.StickyNote, "Print Network Metrics to /xllog##" + blockId))
+        {
+            printMetrics.Invoke();
+        }
+        ImGui.SameLine();
+        if (uiShared.IconTextButton(FontAwesomeIcon.StickyNote, "Print Network Metrics (last 60s) to /xllog##last60" + blockId))
+        {
+            printMetricsLast60.Invoke();
+        }
+        if (!logPerformance) ImGui.EndDisabled();
+    }
+
+    public static void DrawDoNotNotifyForModifiedGameFilesOrEnabledLodOption(SpheneConfigService configService, UiSharedService uiShared, string blockId = "DoNotNotifyForModifiedGameFilesOrEnabledLod")
+    {
+        var stopWhining = configService.Current.DebugStopWhining;
+        if (ImGui.Checkbox("Do not notify for modified game files or enabled LOD##" + blockId, ref stopWhining))
+        {
+            configService.Current.DebugStopWhining = stopWhining;
+            configService.Save();
+        }
+        uiShared.DrawHelpText("Having modified game files will still mark your logs with UNSUPPORTED and you will not receive Network support, message shown or not." + UiSharedService.TooltipSeparator
+            + "Keeping LOD enabled can lead to more crashes. Use at your own risk.");
+    }
+
+    public static void DrawOpenAcknowledgmentMonitorAction(UiSharedService uiShared, SpheneMediator mediator, string blockId = "OpenAcknowledgmentMonitor")
+    {
+        if (uiShared.IconTextButton(FontAwesomeIcon.Desktop, "Open Acknowledgment Monitor##" + blockId))
+        {
+            mediator.Publish(new UiToggleMessage(typeof(AcknowledgmentMonitorUI)));
+        }
+        UiSharedService.AttachToolTip("Opens the Acknowledgment Monitor window for monitoring acknowledgment system status and metrics.");
+    }
+
+    public static void DrawOpenStatusDebugAction(UiSharedService uiShared, SpheneMediator mediator, string blockId = "OpenStatusDebug")
+    {
+        if (uiShared.IconTextButton(FontAwesomeIcon.Bug, "Open Status Debug##" + blockId))
+        {
+            mediator.Publish(new UiToggleMessage(typeof(StatusDebugUi)));
+        }
+        UiSharedService.AttachToolTip("Opens the Status Debug window for connection status monitoring and debugging.");
+    }
+}
