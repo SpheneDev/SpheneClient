@@ -154,7 +154,7 @@ public class CompactUi : WindowMediatorSubscriberBase
     private Task<Dictionary<string, List<string>>>? _textureDetectionTask;
     private DateTime _lastTextureDetectionUpdate = DateTime.MinValue;
     private DateTime _backupScanTriggeredAt = DateTime.MinValue;
-    private readonly object _backupScanDebounceLock = new();
+    private readonly Lock _backupScanDebounceLock = new();
     private CancellationTokenSource? _backupScanDebounceCts;
     private string _pendingBackupScanReason = string.Empty;
     private readonly SemaphoreSlim _shrinkUDetectionSemaphore = new(1, 1);
@@ -522,8 +522,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         lock (_backupScanDebounceLock)
         {
             _pendingBackupScanReason = r;
-            try { _backupScanDebounceCts?.Cancel(); } catch { }
-            try { _backupScanDebounceCts?.Dispose(); } catch { }
+            DisposeCancellationTokenSource(ref _backupScanDebounceCts);
             _backupScanDebounceCts = new CancellationTokenSource();
             cts = _backupScanDebounceCts;
         }
@@ -537,9 +536,39 @@ public class CompactUi : WindowMediatorSubscriberBase
                     return;
                 ExecuteBackupScanNow(_pendingBackupScanReason);
             }
-            catch (TaskCanceledException) { }
+            catch (TaskCanceledException ex) when (cts.Token.IsCancellationRequested)
+            {
+                _logger.LogTrace(ex, "Backup scan debounce task canceled");
+            }
             catch (Exception ex) { _logger.LogDebug(ex, "Backup scan debounce task failed"); }
         });
+    }
+
+    private void DisposeCancellationTokenSource(ref CancellationTokenSource? source)
+    {
+        var local = Interlocked.Exchange(ref source, null);
+        if (local == null)
+            return;
+        try
+        {
+            local.Cancel();
+        }
+        catch (ObjectDisposedException ex)
+        {
+            _logger.LogTrace(ex, "Cancellation token source already disposed before cancel");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogTrace(ex, "Failed to cancel cancellation token source");
+        }
+        try
+        {
+            local.Dispose();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogTrace(ex, "Failed to dispose cancellation token source");
+        }
     }
 
     private void ExecuteBackupScanNow(string reason)
@@ -675,9 +704,7 @@ public class CompactUi : WindowMediatorSubscriberBase
             _conversionCancellationTokenSource?.Dispose();
             _restoreCancellationTokenSource?.Cancel();
             _restoreCancellationTokenSource?.Dispose();
-            try { _backupScanDebounceCts?.Cancel(); } catch { }
-            try { _backupScanDebounceCts?.Dispose(); } catch { }
-            _backupScanDebounceCts = null;
+            DisposeCancellationTokenSource(ref _backupScanDebounceCts);
             _shrinkUDetectionSemaphore.Dispose();
         }
         base.Dispose(disposing);
