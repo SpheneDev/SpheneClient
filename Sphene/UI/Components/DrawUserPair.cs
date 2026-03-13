@@ -438,11 +438,13 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         if (_disposed) return;
         if (disposing)
         {
+            _mediator.Unsubscribe<UserPairIconUpdateMessage>(this);
             _mediator.Unsubscribe<PenumbraModTransferAvailableMessage>(this);
             _mediator.Unsubscribe<PenumbraModTransferCompletedMessage>(this);
             _mediator.Unsubscribe<PenumbraModTransferDiscardedMessage>(this);
             _mediator.Unsubscribe<PairAcknowledgmentStatusChangedMessage>(this);
             _mediator.Unsubscribe<AcknowledgmentPendingMessage>(this);
+            _mediator.Unsubscribe<AcknowledgmentUiRefreshMessage>(this);
             _timerLock.Enter();
             try
             {
