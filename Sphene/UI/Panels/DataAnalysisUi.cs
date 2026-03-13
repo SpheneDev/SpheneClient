@@ -258,6 +258,15 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
         ImGuiHelpers.ScaledDummy(5);
 
         var config = _transientConfigService.Current.TransientConfigs;
+        if (!string.IsNullOrWhiteSpace(_selectedStoredCharacter) && !config.ContainsKey(_selectedStoredCharacter))
+        {
+            _selectedStoredCharacter = string.Empty;
+            _selectedJobEntry = string.Empty;
+            _storedPathsToRemove.Clear();
+            _filePathResolve.Clear();
+            _filterFilePath = string.Empty;
+            _filterGamePath = string.Empty;
+        }
         Vector2 availableContentRegion = Vector2.Zero;
         using (ImRaii.Group())
         {
@@ -287,7 +296,8 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
             }
         }
         ImGui.SameLine();
-        bool selectedData = config.TryGetValue(_selectedStoredCharacter, out var transientStorage) && transientStorage != null;
+        config.TryGetValue(_selectedStoredCharacter ?? string.Empty, out var transientStorage);
+        bool selectedData = !string.IsNullOrWhiteSpace(_selectedStoredCharacter) && transientStorage != null;
         using (ImRaii.Group())
         {
             ImGui.TextUnformatted("Job");
@@ -359,14 +369,14 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
         {
             List<string> selectedList;
             var isMinionMountSession = string.Equals(_selectedJobEntry, StoredMinionMountSessionKey, StringComparison.Ordinal);
-            if (string.Equals(_selectedJobEntry, StoredAllJobsKey, StringComparison.Ordinal))
+            if (selectedData && string.Equals(_selectedJobEntry, StoredAllJobsKey, StringComparison.Ordinal))
             {
-                selectedList = config[_selectedStoredCharacter].GlobalPersistentCache;
+                selectedList = transientStorage!.GlobalPersistentCache;
             }
-            else if (!string.IsNullOrEmpty(_selectedJobEntry) && _selectedJobEntry.StartsWith(StoredPetPrefix, StringComparison.Ordinal))
+            else if (selectedData && !string.IsNullOrEmpty(_selectedJobEntry) && _selectedJobEntry.StartsWith(StoredPetPrefix, StringComparison.Ordinal))
             {
                 var parsed = uint.TryParse(_selectedJobEntry[StoredPetPrefix.Length..], out var jobId);
-                if (parsed && config[_selectedStoredCharacter].JobSpecificPetCache.TryGetValue(jobId, out var petList) && petList != null)
+                if (parsed && transientStorage!.JobSpecificPetCache.TryGetValue(jobId, out var petList) && petList != null)
                     selectedList = petList;
                 else
                     selectedList = [];
@@ -377,8 +387,8 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                     .OrderBy(p => p, StringComparer.OrdinalIgnoreCase)
                     .ToList();
             }
-            else if (!string.IsNullOrEmpty(_selectedJobEntry) && uint.TryParse(_selectedJobEntry, out var selectedJobId)
-                && config[_selectedStoredCharacter].JobSpecificCache.TryGetValue(selectedJobId, out var jobList) && jobList != null)
+            else if (selectedData && !string.IsNullOrEmpty(_selectedJobEntry) && uint.TryParse(_selectedJobEntry, out var selectedJobId)
+                && transientStorage!.JobSpecificCache.TryGetValue(selectedJobId, out var jobList) && jobList != null)
             {
                 selectedList = jobList;
             }
