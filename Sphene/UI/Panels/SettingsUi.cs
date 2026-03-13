@@ -331,8 +331,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
     private void DrawCurrentTransfers()
     {
-        _lastTab = "Transfers";
-        _uiShared.BigText("Transfers & Limits");
+        DrawSettingsPageHeader("Transfers", "Control transfer limits, monitor behavior, and transmission visuals.");
 
         int maxParallelDownloads = _configService.Current.ParallelDownloads;
         bool useAlternativeUpload = _configService.Current.UseAlternativeFileUpload;
@@ -341,7 +340,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         ImGui.AlignTextToFramePadding();
         ImGui.TextUnformatted("Global Receive Limit");
         ImGui.SameLine();
-        ImGui.SetNextItemWidth(100 * ImGuiHelpers.GlobalScale);
+        ImGui.SetNextItemWidth(ClampSettingsItemWidth(100f));
         if (ImGui.InputInt("###speedlimit", ref downloadSpeedLimit))
         {
             _configService.Current.DownloadSpeedLimitInBytes = downloadSpeedLimit;
@@ -349,7 +348,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             Mediator.Publish(new DownloadLimitChangedMessage());
         }
         ImGui.SameLine();
-        ImGui.SetNextItemWidth(100 * ImGuiHelpers.GlobalScale);
+        ImGui.SetNextItemWidth(ClampSettingsItemWidth(100f));
         _uiShared.DrawCombo("###speed", [DownloadSpeeds.Bps, DownloadSpeeds.KBps, DownloadSpeeds.MBps],
             (s) => s switch
             {
@@ -389,8 +388,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         }
         _uiShared.DrawHelpText("Attempts a single-shot transmission instead of streaming. Not usually required; enable only if you encounter transfer issues.");
 
-        ImGui.Separator();
-        _uiShared.BigText("Transfer Monitor");
+        DrawSettingsSectionHeader("Transfer Monitor");
 
         bool showTransferWindow = _configService.Current.ShowTransferWindow;
         if (ImGui.Checkbox("Show separate transmission monitor", ref showTransferWindow))
@@ -687,17 +685,13 @@ public class SettingsUi : WindowMediatorSubscriberBase
     private void DrawDebug()
     {
         string pageLabel;
-        string title;
 #if IS_TEST_BUILD
         pageLabel = "Debug Diagnostics";
-        title = "Debug Build & Diagnostics";
 #else
         pageLabel = "Diagnostics";
-        title = "Diagnostics";
 #endif
 
-        _lastTab = pageLabel;
-        _uiShared.BigText(title);
+        DrawSettingsPageHeader(pageLabel, "Diagnostics and troubleshooting tools for sync, logs, and runtime status.");
 #if IS_TEST_BUILD
         if (LastCreatedCharacterData != null && ImGui.TreeNode("Last created character data"))
         {
@@ -767,12 +761,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         _uiShared.DrawHelpText("Having modified game files will still mark your logs with UNSUPPORTED and you will not receive Network support, message shown or not." + UiSharedService.TooltipSeparator
             + "Keeping LOD enabled can lead to more crashes. Use at your own risk.");
 
-        ImGui.Separator();
-        ImGuiHelpers.ScaledDummy(10);
-        
-        _uiShared.BigText("Diagnostic Windows");
-        UiSharedService.TextWrapped("Open diagnostic windows for monitoring and troubleshooting.");
-        ImGuiHelpers.ScaledDummy(5);
+        DrawSettingsSectionHeader("Diagnostic Windows", "Open dedicated windows for acknowledgment and status monitoring.");
         
         if (_uiShared.IconTextButton(FontAwesomeIcon.Desktop, "Open Acknowledgment Monitor"))
         {
@@ -792,16 +781,11 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
     private void DrawFileStorageSettings()
     {
-        _lastTab = "FileCache";
-
-        _uiShared.BigText("Storage & Cache");
-
-        UiSharedService.TextWrapped("Sphene stores downloaded files from paired people permanently. This is to improve loading performance and requiring less downloads. " +
-            "The storage governs itself by clearing data beyond the set storage size. Please set the storage size accordingly. It is not necessary to manually clear the storage.");
+        DrawSettingsPageHeader("Storage",
+            "Sphene stores downloaded files from paired users to improve loading speed and reduce repeated downloads. Storage is self-managed by size limit.");
 
         _uiShared.DrawFileScanState();
-        ImGuiHelpers.ScaledDummy(5);
-        _uiShared.BigText("Monitoring");
+        DrawSettingsSectionHeader("Monitoring");
         ImGui.AlignTextToFramePadding();
         ImGui.TextUnformatted("Monitoring Penumbra Folder: " + (_cacheMonitor.PenumbraWatcher?.Path ?? "Not monitoring"));
         if (string.IsNullOrEmpty(_cacheMonitor.PenumbraWatcher?.Path))
@@ -919,10 +903,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
         }
         ImGuiHelpers.ScaledDummy(new Vector2(10, 10));
 
-        ImGui.Separator();
-        UiSharedService.TextWrapped("File Storage validation can make sure that all files in your local Sphene Storage are valid. " +
-            "Run the validation before you clear the Storage for no reason. " + Environment.NewLine +
-            "This operation, depending on how many files you have in your storage, can take a while and will be CPU and drive intensive.");
+        DrawSettingsSectionHeader("Storage Validation",
+            "Validation checks local storage integrity and removes invalid files. This can take time and may be CPU and disk intensive.");
         using (ImRaii.Disabled(_validationTask != null && !_validationTask.IsCompleted))
         {
             if (_uiShared.IconTextButton(FontAwesomeIcon.Check, "Start File Storage Validation"))
@@ -959,10 +941,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 }
             }
         }
-        ImGui.Separator();
-
-        ImGuiHelpers.ScaledDummy(new Vector2(10, 10));
-        ImGui.TextUnformatted("To clear the local storage accept the following disclaimer");
+        DrawSettingsSectionHeader("Clear Local Storage", "Read and accept the disclaimer before running this action.");
         ImGui.Indent();
         ImGui.Checkbox("##readClearCache", ref _readClearCache);
         ImGui.SameLine();
@@ -994,11 +973,9 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
     private void DrawPerformance()
     {
-        _uiShared.BigText("Performance Settings");
-        UiSharedService.TextWrapped("The configuration options here are to give you more informed warnings and automation when it comes to other performance-intensive synced players.");
-        ImGui.Dummy(new Vector2(10));
-        ImGui.Separator();
-        ImGui.Dummy(new Vector2(10));
+        DrawSettingsPageHeader("Performance",
+            "Configure warning indicators and automatic actions for performance-heavy synced players.");
+        DrawSettingsSectionHeader("Warnings & Indicators");
         bool showPerformanceIndicator = _playerPerformanceConfigService.Current.ShowPerformanceIndicator;
         if (ImGui.Checkbox("Show performance indicator", ref showPerformanceIndicator))
         {
@@ -1028,7 +1005,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         {
             var vram = _playerPerformanceConfigService.Current.VRAMSizeWarningThresholdMiB;
             var tris = _playerPerformanceConfigService.Current.TrisWarningThresholdThousands;
-            ImGui.SetNextItemWidth(100 * ImGuiHelpers.GlobalScale);
+            ImGui.SetNextItemWidth(ClampSettingsItemWidth(100f));
             if (ImGui.InputInt("Warning VRAM threshold", ref vram))
             {
                 _playerPerformanceConfigService.Current.VRAMSizeWarningThresholdMiB = vram;
@@ -1038,7 +1015,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             ImGui.Text("(MiB)");
             _uiShared.DrawHelpText("Limit in MiB of approximate VRAM usage to trigger warning or performance indicator on UI." + UiSharedService.TooltipSeparator
                 + "Default: 375 MiB");
-            ImGui.SetNextItemWidth(100 * ImGuiHelpers.GlobalScale);
+            ImGui.SetNextItemWidth(ClampSettingsItemWidth(100f));
             if (ImGui.InputInt("Warning Triangle threshold", ref tris))
             {
                 _playerPerformanceConfigService.Current.TrisWarningThresholdThousands = tris;
@@ -1049,7 +1026,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             _uiShared.DrawHelpText("Limit in approximate used triangles from mods to trigger warning or performance indicator on UI." + UiSharedService.TooltipSeparator
                 + "Default: 165 thousand");
         }
-        ImGui.Dummy(new Vector2(10));
+        DrawSettingsSectionHeader("Auto Pause");
         bool autoPause = _playerPerformanceConfigService.Current.AutoPausePlayersExceedingThresholds;
         bool autoPauseEveryone = _playerPerformanceConfigService.Current.AutoPausePlayersWithPreferredPermissionsExceedingThresholds;
         if (ImGui.Checkbox("Automatically pause players exceeding thresholds", ref autoPause))
@@ -1072,7 +1049,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 "Warning: this will not automatically unpause those people again, you will have to do this manually.");
             var vramAuto = _playerPerformanceConfigService.Current.VRAMSizeAutoPauseThresholdMiB;
             var trisAuto = _playerPerformanceConfigService.Current.TrisAutoPauseThresholdThousands;
-            ImGui.SetNextItemWidth(100 * ImGuiHelpers.GlobalScale);
+            ImGui.SetNextItemWidth(ClampSettingsItemWidth(100f));
             if (ImGui.InputInt("Auto Pause VRAM threshold", ref vramAuto))
             {
                 _playerPerformanceConfigService.Current.VRAMSizeAutoPauseThresholdMiB = vramAuto;
@@ -1082,7 +1059,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             ImGui.Text("(MiB)");
             _uiShared.DrawHelpText("When a loading in player and their VRAM usage exceeds this amount, automatically pauses the synced player." + UiSharedService.TooltipSeparator
                 + "Default: 550 MiB");
-            ImGui.SetNextItemWidth(100 * ImGuiHelpers.GlobalScale);
+            ImGui.SetNextItemWidth(ClampSettingsItemWidth(100f));
             if (ImGui.InputInt("Auto Pause Triangle threshold", ref trisAuto))
             {
                 _playerPerformanceConfigService.Current.TrisAutoPauseThresholdThousands = trisAuto;
@@ -1093,11 +1070,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
             _uiShared.DrawHelpText("When a loading in player and their triangle count exceeds this amount, automatically pauses the synced player." + UiSharedService.TooltipSeparator
                 + "Default: 250 thousand");
         }
-        ImGui.Dummy(new Vector2(10));
-        _uiShared.BigText("Whitelisted UIDs");
-        UiSharedService.TextWrapped("The entries in the list below will be ignored for all warnings and auto pause operations.");
-        ImGui.Dummy(new Vector2(10));
-        ImGui.SetNextItemWidth(200 * ImGuiHelpers.GlobalScale);
+        DrawSettingsSectionHeader("Whitelisted UIDs", "Entries below are ignored for warnings and auto-pause operations.");
+        ImGui.SetNextItemWidth(ClampSettingsItemWidth(220f, 140f));
         ImGui.InputText("##ignoreuid", ref _uidToAddForIgnore, 20);
         ImGui.SameLine();
         using (ImRaii.Disabled(string.IsNullOrEmpty(_uidToAddForIgnore)))
@@ -1114,7 +1088,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         }
         _uiShared.DrawHelpText("Hint: UIDs are case sensitive.");
         var playerList = _playerPerformanceConfigService.Current.UIDsToIgnore;
-        ImGui.SetNextItemWidth(400 * ImGuiHelpers.GlobalScale);
+        ImGui.SetNextItemWidth(ClampSettingsItemWidth(420f, 200f));
         using (var lb = ImRaii.ListBox("UID whitelist"))
         {
             if (lb)
@@ -1167,10 +1141,10 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
     private void DrawServerConfiguration()
     {
-        _lastTab = "Network Configuration";
+        DrawSettingsPageHeader("Connectivity", "Manage server connection, account actions, and service-related settings.");
         if (ApiController.ServerAlive)
         {
-            _uiShared.BigText("Service Actions");
+            DrawSettingsSectionHeader("Service Actions");
             ImGuiHelpers.ScaledDummy(new Vector2(5, 5));
             if (ImGui.Button("Delete all my files"))
             {
@@ -1645,7 +1619,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                     _uiShared.DrawHelpText("You cannot edit the name of the main service.");
                 }
 
-                ImGui.SetNextItemWidth(200);
+                ImGui.SetNextItemWidth(ClampSettingsItemWidth(220f, 140f));
                 var serverTransport = _serverConfigurationManager.GetTransport();
                 _uiShared.DrawCombo("Server Transport Type", Enum.GetValues<HttpTransportType>().Where(t => t != HttpTransportType.None),
                     (v) => v.ToString(),
@@ -1856,7 +1830,6 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
     private void DrawSettingsContent()
     {
-        // Split layout: Sidebar navigation + Content pane
         var available = ImGui.GetContentRegionAvail();
 
         string diagnosticsPageLabel;
@@ -1865,9 +1838,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
 #else
         diagnosticsPageLabel = "Diagnostics";
 #endif
-        
-        // Calculate optimal sidebar width based on longest button text + reduced padding
-        var buttonLabels = new[] { "Home", "Connectivity", "People & Notes", "Appearance", "Theme", "Notifications", "Performance", "Transfers", "Storage", "Sync Behavior", "Acknowledgment", diagnosticsPageLabel };
+
+        var buttonLabels = new[] { "Home", "Connectivity", "People & Notes", "Appearance", "Theme", "Notifications", "Performance", "Transfers", "Storage", "Sync", "Acknowledgment", diagnosticsPageLabel };
         var maxTextWidth = 0f;
         foreach (var label in buttonLabels)
         {
@@ -1875,42 +1847,113 @@ public class SettingsUi : WindowMediatorSubscriberBase
             if (textSize.X > maxTextWidth)
                 maxTextWidth = textSize.X;
         }
-        var sidebarWidth = (maxTextWidth + 16f) * ImGuiHelpers.GlobalScale; // Reduced padding from 32f to 16f
+        var style = ImGui.GetStyle();
+        var sidebarButtonPaddingX = MathF.Max(4f * ImGuiHelpers.GlobalScale, style.FramePadding.X * 0.65f);
+        var sidebarButtonInnerWidth = maxTextWidth + (sidebarButtonPaddingX * 2f);
+        var sidebarWidth = sidebarButtonInnerWidth + (style.WindowPadding.X * 2f) + (2f * ImGuiHelpers.GlobalScale);
 
-        // Sidebar
         ImGui.BeginChild("settings-sidebar", new Vector2(sidebarWidth, available.Y), true);
+
+        void SidebarCategory(string label)
+        {
+            ImGuiHelpers.ScaledDummy(0, 5);
+            UiSharedService.ColorText(label.ToUpperInvariant(), ImGuiColors.ParsedBlue);
+            ImGuiHelpers.ScaledDummy(0, 3);
+        }
 
         void SidebarButton(string label, SettingsPage page)
         {
-            var buttonSize = new Vector2(-1, 0); // Use full available width
+            var buttonSize = new Vector2(-1, 24f * ImGuiHelpers.GlobalScale);
             var isActive = _activeSettingsPage == page;
-            if (isActive) ImGui.PushStyleColor(ImGuiCol.Button, ImGuiColors.ParsedBlue);
+            using var buttonPadding = ImRaii.PushStyle(ImGuiStyleVar.FramePadding, new Vector2(sidebarButtonPaddingX, style.FramePadding.Y));
+            using var buttonRounding = ImRaii.PushStyle(ImGuiStyleVar.FrameRounding, 5f * ImGuiHelpers.GlobalScale);
+            if (isActive)
+            {
+                ImGui.PushStyleColor(ImGuiCol.Button, ImGuiColors.ParsedBlue);
+                ImGui.PushStyleColor(ImGuiCol.ButtonHovered, ImGuiColors.ParsedBlue);
+            }
             if (ImGui.Button(label, buttonSize))
             {
                 _activeSettingsPage = page;
             }
-            if (isActive) ImGui.PopStyleColor();
+            if (isActive)
+            {
+                ImGui.PopStyleColor(2);
+            }
         }
 
+        SidebarCategory("General");
         SidebarButton("Home", SettingsPage.Home);
         SidebarButton("Connectivity", SettingsPage.Connectivity);
         SidebarButton("People & Notes", SettingsPage.PeopleNotes);
+        SidebarButton("Notifications", SettingsPage.Alerts);
+        ImGui.Separator();
+
+        SidebarCategory("Appearance");
         SidebarButton("Appearance", SettingsPage.Display);
         SidebarButton("Theme", SettingsPage.Theme);
-        SidebarButton("Notifications", SettingsPage.Alerts);
-        SidebarButton("Performance", SettingsPage.Performance);
-        SidebarButton("Transfers", SettingsPage.Transfers);
-        SidebarButton("Storage", SettingsPage.Storage);
+        ImGui.Separator();
+
+        SidebarCategory("Sync & Data");
         SidebarButton("Sync", SettingsPage.SyncBehavior);
         SidebarButton("Acknowledgment", SettingsPage.Acknowledgment);
+        SidebarButton("Transfers", SettingsPage.Transfers);
+        SidebarButton("Storage", SettingsPage.Storage);
+        ImGui.Separator();
+
+        SidebarCategory("Advanced");
+        SidebarButton("Performance", SettingsPage.Performance);
         SidebarButton(diagnosticsPageLabel, SettingsPage.Debug);
 
         ImGui.EndChild();
 
         ImGui.SameLine();
-
-        // Content pane without horizontal scrolling - content should fit within available width
         ImGui.BeginChild("settings-content", new Vector2(available.X - sidebarWidth - ImGui.GetStyle().ItemSpacing.X, available.Y), false);
+        var contentAvail = ImGui.GetContentRegionAvail().X;
+        var scrollbarReserve = ImGui.GetStyle().ScrollbarSize + 10f * ImGuiHelpers.GlobalScale;
+        var safeContentWidth = MathF.Max(220f * ImGuiHelpers.GlobalScale, contentAvail - scrollbarReserve);
+        var maxPageWidth = MathF.Min(safeContentWidth, 1040f * ImGuiHelpers.GlobalScale);
+        var pageStartX = ImGui.GetCursorPosX();
+        if (contentAvail > maxPageWidth)
+        {
+            pageStartX = ImGui.GetCursorPosX() + (contentAvail - maxPageWidth) * 0.5f;
+            ImGui.SetCursorPosX(pageStartX);
+        }
+
+        var pageInfo = _activeSettingsPage switch
+        {
+            SettingsPage.Home => ("General", "Home"),
+            SettingsPage.Connectivity => ("General", "Connectivity"),
+            SettingsPage.PeopleNotes => ("General", "People & Notes"),
+            SettingsPage.Display => ("Appearance", "Appearance"),
+            SettingsPage.Theme => ("Appearance", "Theme"),
+            SettingsPage.Alerts => ("General", "Notifications"),
+            SettingsPage.Performance => ("Advanced", "Performance"),
+            SettingsPage.Transfers => ("Sync & Data", "Transfers"),
+            SettingsPage.Storage => ("Sync & Data", "Storage"),
+            SettingsPage.SyncBehavior => ("Sync & Data", "Sync"),
+            SettingsPage.Acknowledgment => ("Sync & Data", "Acknowledgment"),
+            SettingsPage.Debug => ("Advanced", diagnosticsPageLabel),
+            _ => ("General", "Home")
+        };
+
+        using var pageGroup = ImRaii.Group();
+        ImGui.PushTextWrapPos(pageStartX + maxPageWidth - 6f * ImGuiHelpers.GlobalScale);
+        ImGui.PushItemWidth(MathF.Min(360f * ImGuiHelpers.GlobalScale, maxPageWidth * 0.6f));
+        UiSharedService.ColorText(pageInfo.Item1, ImGuiColors.DalamudGrey);
+        ImGui.SameLine();
+        UiSharedService.ColorText("•", ImGuiColors.DalamudGrey3);
+        ImGui.SameLine();
+        ImGui.TextUnformatted(pageInfo.Item2);
+        ImGui.Separator();
+        ImGuiHelpers.ScaledDummy(0, 4);
+
+        var settingsOptionsIndentX = GetSettingsOptionsIndentX(_activeSettingsPage);
+        IDisposable? contentIndent = null;
+        if (_activeSettingsPage != SettingsPage.Home)
+        {
+            contentIndent = ImRaii.PushIndent(settingsOptionsIndentX);
+        }
 
         switch (_activeSettingsPage)
         {
@@ -1951,8 +1994,76 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 DrawDebug();
                 break;
         }
+        contentIndent?.Dispose();
+        ImGui.PopItemWidth();
+        ImGui.PopTextWrapPos();
 
         ImGui.EndChild();
+    }
+
+    private void DrawSettingsPageHeader(string tabKey, string? description = null)
+    {
+        var settingsOptionsIndentX = GetSettingsOptionsIndentX(_activeSettingsPage);
+        if (_activeSettingsPage != SettingsPage.Home)
+            ImGui.Unindent(settingsOptionsIndentX);
+        _lastTab = tabKey;
+        if (!string.IsNullOrWhiteSpace(description))
+        {
+            UiSharedService.ColorTextWrapped(description, ImGuiColors.DalamudGrey);
+            ImGuiHelpers.ScaledDummy(0, 6);
+        }
+        if (_activeSettingsPage != SettingsPage.Home)
+            ImGui.Indent(settingsOptionsIndentX);
+    }
+
+    private void DrawSettingsSectionHeader(string title, string? description = null)
+    {
+        var settingsOptionsIndentX = GetSettingsOptionsIndentX(_activeSettingsPage);
+        if (_activeSettingsPage != SettingsPage.Home)
+            ImGui.Unindent(settingsOptionsIndentX);
+        ImGuiHelpers.ScaledDummy(0, 4);
+        ImGui.Separator();
+        ImGuiHelpers.ScaledDummy(0, 5);
+        UiSharedService.ColorText(title, ImGuiColors.ParsedBlue);
+        if (!string.IsNullOrWhiteSpace(description))
+        {
+            UiSharedService.ColorTextWrapped(description, ImGuiColors.DalamudGrey);
+        }
+        ImGuiHelpers.ScaledDummy(0, 5);
+        if (_activeSettingsPage != SettingsPage.Home)
+            ImGui.Indent(settingsOptionsIndentX);
+    }
+
+    private static float GetSettingsOptionsIndentX(SettingsPage page)
+        => page switch
+        {
+            SettingsPage.Theme => 8f * ImGuiHelpers.GlobalScale,
+            SettingsPage.Connectivity => 14f * ImGuiHelpers.GlobalScale,
+            SettingsPage.Storage => 14f * ImGuiHelpers.GlobalScale,
+            SettingsPage.Transfers => 13f * ImGuiHelpers.GlobalScale,
+            SettingsPage.Performance => 13f * ImGuiHelpers.GlobalScale,
+            SettingsPage.Acknowledgment => 13f * ImGuiHelpers.GlobalScale,
+            SettingsPage.SyncBehavior => 13f * ImGuiHelpers.GlobalScale,
+            SettingsPage.Debug => 12f * ImGuiHelpers.GlobalScale,
+            SettingsPage.PeopleNotes => 12f * ImGuiHelpers.GlobalScale,
+            SettingsPage.Display => 12f * ImGuiHelpers.GlobalScale,
+            SettingsPage.Alerts => 12f * ImGuiHelpers.GlobalScale,
+            _ => 12f * ImGuiHelpers.GlobalScale,
+        };
+
+    private static float GetSettingsSafeContentWidth()
+    {
+        var scale = ImGuiHelpers.GlobalScale;
+        var reserve = ImGui.GetStyle().ScrollbarSize + 10f * scale;
+        return MathF.Max(220f * scale, ImGui.GetContentRegionAvail().X - reserve);
+    }
+
+    private static float ClampSettingsItemWidth(float desiredWidth, float minWidth = 80f)
+    {
+        var scale = ImGuiHelpers.GlobalScale;
+        var desired = desiredWidth * scale;
+        var minimum = minWidth * scale;
+        return MathF.Min(desired, MathF.Max(minimum, GetSettingsSafeContentWidth()));
     }
 
     private bool IsPluginInstallInProgress => Volatile.Read(ref _pluginInstallInProgress) == 1;
@@ -2439,9 +2550,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
     private void DrawGeneralUserManagement()
     {
-        _lastTab = "People & Notes";
-        _uiShared.BigText("People & Notes");
-        ImGui.Spacing();
+        DrawSettingsPageHeader("People & Notes", "Manage note import/export and default note popup behavior.");
 
         var currentProfile = _configService.Current;
         var overwriteExistingLabels = _overwriteExistingLabels;
@@ -2473,8 +2582,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 ImGui.TextColored(ImGuiColors.DalamudRed, "Failed to apply notes.");
         }
 
-        ImGui.Separator();
-        _uiShared.BigText("Labels & Popups");
+        DrawSettingsSectionHeader("Labels & Popups");
         var openPopupOnAddition = currentProfile.OpenPopupOnAdd;
         if (ImGui.Checkbox("Open Notes Popup on user addition", ref openPopupOnAddition))
         {
@@ -2492,13 +2600,11 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
     private void DrawGeneralUiDisplaySettings()
     {
-        _lastTab = "Appearance";
-        _uiShared.BigText("Appearance");
+        DrawSettingsPageHeader("Appearance", "Configure interface behavior, user list presentation, and profile display options.");
 
         var currentProfile = _configService.Current;
 
-        ImGui.Separator();
-        _uiShared.BigText("Basic Interface");
+        DrawSettingsSectionHeader("Basic Interface");
         var showSpheneIcon = currentProfile.ShowSpheneIcon;
         if (ImGui.Checkbox("Show Sphene Icon", ref showSpheneIcon))
         {
@@ -2520,8 +2626,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
         // ShrinkU integration settings moved to Overview page alongside version info
 
-        ImGui.Separator();
-        _uiShared.BigText("Server Info Bar");
+        DrawSettingsSectionHeader("Server Info Bar");
         var enableDtrEntry = currentProfile.EnableDtrEntry;
         if (ImGui.Checkbox("Show status in Server Info Bar", ref enableDtrEntry))
         {
@@ -2551,8 +2656,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             }
         }
 
-        ImGui.Separator();
-        _uiShared.BigText("User List Options");
+        DrawSettingsSectionHeader("User List Options");
        
         var useFocusTarget = _configService.Current.UseFocusTarget;
         if (ImGui.Checkbox("Set visible pairs as focus targets when clicking the eye", ref useFocusTarget))
@@ -2619,9 +2723,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         _uiShared.DrawHelpText("This will group up all Syncshells in a special 'All Syncshells' folder in the main UI.");
         
 
-        ImGui.Separator();
-        // Profile Settings
-        _uiShared.BigText("Profile Settings");
+        DrawSettingsSectionHeader("Profile Settings");
         var showProfiles = _configService.Current.ProfilesShow;
         if (ImGui.Checkbox("Show Sphene Profiles on Hover", ref showProfiles))
         {
@@ -2675,10 +2777,11 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
     private void DrawGeneralNotifications()
     {
-        _lastTab = "Notifications";
-        _uiShared.BigText("Notifications");
+        DrawSettingsPageHeader("Notifications", "Configure where notifications appear and which sync events should trigger them.");
 
         var currentProfile = _configService.Current;
+
+        DrawSettingsSectionHeader("Notification Channels");
 
         _uiShared.DrawCombo("Info Notification Display##settingsUi", (NotificationLocation[])Enum.GetValues(typeof(NotificationLocation)), (i) => i.ToString(),
         (i) =>
@@ -2731,8 +2834,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             _configService.Save();
         }
 
-        ImGui.Separator();
-        _uiShared.BigText("Area-bound Syncshell Notifications");
+        DrawSettingsSectionHeader("Area-bound Syncshell Notifications");
         
         var areaBoundNotifs = currentProfile.ShowAreaBoundSyncshellNotifications;
         if (ImGui.Checkbox("Enable area-bound syncshell notifications", ref areaBoundNotifs))
@@ -2774,11 +2876,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
     private void DrawAcknowledgmentSettings()
     {
-        _uiShared.BigText("Acknowledgment System");
-        ImGui.Separator();
-        
-        // Popup Settings Section
-        _uiShared.BigText("Popup Settings");
+        DrawSettingsPageHeader("Acknowledgment", "Tune acknowledgment notifications, reliability, and batching behavior.");
+        DrawSettingsSectionHeader("Popup Settings");
         
         var showPopups = _configService.Current.ShowAcknowledgmentPopups;
         if (ImGui.Checkbox("Show Acknowledgment Notifications", ref showPopups))
@@ -2812,11 +2911,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             ImGui.Unindent();
         }
         
-        ImGui.Spacing();
-        ImGui.Separator();
-        
-        // Performance Settings Section
-        _uiShared.BigText("Performance Settings");
+        DrawSettingsSectionHeader("Performance Settings");
         
         var enableBatching = _configService.Current.EnableAcknowledgmentBatching;
         if (ImGui.Checkbox("Enable Batching", ref enableBatching))
@@ -2834,13 +2929,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         }
         _uiShared.DrawHelpText("Automatically retry failed acknowledgments to improve reliability.");
         
-
-        
-        ImGui.Spacing();
-        ImGui.Separator();
-        
-        // Timeout Settings Section
-        _uiShared.BigText("Timeout & Reliability");
+        DrawSettingsSectionHeader("Timeout & Reliability");
         
         var timeoutSeconds = _configService.Current.AcknowledgmentTimeoutSeconds;
         if (ImGui.SliderInt("Acknowledgment Timeout (seconds)", ref timeoutSeconds, 5, 120))
@@ -2850,11 +2939,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         }
         _uiShared.DrawHelpText("How long to wait for acknowledgment responses before timing out.");
         
-        ImGui.Spacing();
-        ImGui.Separator();
-        
-        // Information Section
-        _uiShared.BigText("Information");
+        DrawSettingsSectionHeader("Information");
         UiSharedService.TextWrapped("The acknowledgment system helps maintain synchronization between connected users. " +
                           "When disabled, popup notifications will not appear, but the system will continue to function in the background. " +
                           "This is useful when you have many active connections to prevent notification spam.");
@@ -2877,12 +2962,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
     private void DrawSyncBehaviorSettings()
     {
-        _lastTab = "Sync Behavior";
-        _uiShared.BigText("Sync Behavior");
-        ImGui.Separator();
-
-        UiSharedService.TextWrapped("Controls how incoming synchronization data is applied.");
-        ImGui.Spacing();
+        DrawSettingsPageHeader("Sync Behavior", "Control how incoming and outgoing synchronization data is handled.");
+        DrawSettingsSectionHeader("Incoming Sync");
 
         var dutyCombatNoRedraw = _configService.Current.EnableDutyCombatSyncWithoutRedraw;
         if (ImGui.Checkbox("Allow sync in duties/combat without redraw", ref dutyCombatNoRedraw))
@@ -2900,9 +2981,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             UiSharedService.ColorTextWrapped("Tip: This option is currently disabled. Enable it only if you want duty/combat sync without redraw.", ImGuiColors.DalamudGrey);
         }
 
-        ImGui.Spacing();
-        ImGui.Separator();
-        _uiShared.BigText("Outgoing Sync Batching");
+        DrawSettingsSectionHeader("Outgoing Sync Batching");
         var outgoingBatching = _configService.Current.EnableDutyCombatOutgoingSyncBatching;
         if (ImGui.Checkbox("Batch outgoing sync updates in duties/combat", ref outgoingBatching))
         {
@@ -2915,7 +2994,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         var batchSeconds = _configService.Current.DutyCombatOutgoingSyncBatchSeconds;
         using (ImRaii.Disabled(!outgoingBatching))
         {
-            ImGui.SetNextItemWidth(220f * ImGuiHelpers.GlobalScale);
+            ImGui.SetNextItemWidth(ClampSettingsItemWidth(240f, 160f));
             if (ImGui.SliderInt("Outgoing batch window (seconds)", ref batchSeconds, 1, 60))
             {
                 _configService.Current.DutyCombatOutgoingSyncBatchSeconds = batchSeconds;
@@ -2948,14 +3027,12 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
     private void DrawThemeSettings()
     {
-        _uiShared.BigText("Theme Customization");
-        
-        ImGui.Separator();
+        DrawSettingsPageHeader("Theme", "Customize colors and styling for Sphene UI elements.");
         
         // Theme Selector
         DrawThemeSelector();
         
-        ImGui.Separator();
+        DrawSettingsSectionHeader("Theme Editor");
         
         if (ApiController.IsAdmin)
         {
@@ -4608,7 +4685,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         var currentIndex = allThemes.IndexOf(_selectedPresetTheme);
         if (currentIndex == -1) currentIndex = 0;
         
-        ImGui.SetNextItemWidth(300);
+        ImGui.SetNextItemWidth(ClampSettingsItemWidth(320f, 180f));
         if (ImGui.Combo("##ThemeSelector", ref currentIndex, allThemes.ToArray(), allThemes.Count))
         {
             var selectedTheme = allThemes[currentIndex];
