@@ -77,6 +77,7 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
             // Only push if hash actually changed or if we have users waiting for data
             if (!string.Equals(previousHash, newHash, StringComparison.Ordinal) || _usersToPushDataTo.Count > 0)
             {
+                EnsureServerWarmUpload();
                 Logger.LogDebug("{tag} Data change detected: oldHash={oldHash} newHash={newHash} queuedUsers={count}",
                     SyncProgressTag, previousHash ?? "null", newHash ?? "null", _usersToPushDataTo.Count);
                 PushToAllVisibleUsers(forced: true);
@@ -103,6 +104,24 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
     {
         var seconds = _configService.Current.DutyCombatOutgoingSyncBatchSeconds;
         return Math.Clamp(seconds, 1, 60);
+    }
+
+    private void EnsureServerWarmUpload()
+    {
+        if (!_apiController.IsConnected || _lastCreatedData == null)
+            return;
+
+        var currentHash = _lastCreatedData.DataHash?.Value ?? string.Empty;
+        if (string.IsNullOrEmpty(currentHash))
+            return;
+
+        if (string.Equals(_uploadingCharacterData?.DataHash?.Value, currentHash, StringComparison.Ordinal)
+            && _fileUploadTask != null && !_fileUploadTask.IsCompleted)
+            return;
+
+        _uploadingCharacterData = _lastCreatedData.DeepClone();
+        Logger.LogDebug("{tag} Warm upload start: hash={hash}", SyncProgressTag, currentHash);
+        _fileUploadTask = _fileTransferManager.UploadFiles(_uploadingCharacterData, []);
     }
 
     protected override void Dispose(bool disposing)
