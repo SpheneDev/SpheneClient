@@ -1144,12 +1144,12 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
     
     private void OnAcknowledgmentStatusChanged(AcknowledgmentStatusChangedMessage message)
     {
-        LogCommunication($"Acknowledgment {message.Status}: {message.User.AliasOrUID} - ID: {message.AcknowledgmentId}", "ACK");
+        LogCommunication($"Acknowledgment {message.Event.Status}: {message.Event.User.AliasOrUID} - ID: {message.Event.AcknowledgmentId}", "ACK");
     }
     
     private void OnAcknowledgmentReceived(AcknowledgmentReceivedMessage message)
     {
-        LogCommunication($"Acknowledgment received from {message.User.AliasOrUID} - ID: {message.AcknowledgmentId}", "ACK");
+        LogCommunication($"Acknowledgment received from {message.Event.User.AliasOrUID} - ID: {message.Event.AcknowledgmentId}", "ACK");
     }
     
     private void OnAcknowledgmentTimeout(AcknowledgmentTimeoutMessage message)

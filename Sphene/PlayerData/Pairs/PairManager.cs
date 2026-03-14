@@ -851,16 +851,16 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
             return;
         }
 
-        var pollUserUids = new HashSet<string>(StringComparer.Ordinal);
+        var pendingUserUids = new HashSet<string>(StringComparer.Ordinal);
         foreach (var pair in _allClientPairs.Values)
         {
-            if (!string.IsNullOrEmpty(pair.UserData.UID) && (pair.HasPendingAcknowledgment || (pair.IsOnline && pair.IsMutuallyVisible)))
+            if (pair.HasPendingAcknowledgment && !string.IsNullOrEmpty(pair.UserData.UID))
             {
-                pollUserUids.Add(pair.UserData.UID);
+                pendingUserUids.Add(pair.UserData.UID);
             }
         }
 
-        if (pollUserUids.Count == 0)
+        if (pendingUserUids.Count == 0)
         {
             return;
         }
@@ -877,12 +877,13 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
                 var pairs = await _apiController.Value.UserGetPairedClients().ConfigureAwait(false);
                 foreach (var dto in pairs)
                 {
-                    if (!string.IsNullOrEmpty(dto.User.UID) && !pollUserUids.Contains(dto.User.UID))
+                    if (!string.IsNullOrEmpty(dto.User.UID) && !pendingUserUids.Contains(dto.User.UID))
                     {
                         continue;
                     }
 
                     if (_allClientPairs.TryGetValue(dto.User, out var pair)
+                        && pair.HasPendingAcknowledgment
                         && pair.UserPair.OtherPermissions.IsAckYou() != dto.OtherPermissions.IsAckYou())
                     {
                         UpdatePairPermissions(new UserPermissionsDto(dto.User, dto.OtherPermissions));
@@ -890,8 +891,8 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
 
                     if (!string.IsNullOrEmpty(dto.User.UID))
                     {
-                        pollUserUids.Remove(dto.User.UID);
-                        if (pollUserUids.Count == 0)
+                        pendingUserUids.Remove(dto.User.UID);
+                        if (pendingUserUids.Count == 0)
                         {
                             break;
                         }
@@ -923,24 +924,6 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
             foreach (var pair in visiblePairs)
             {
                 pair.SetBuildStartPendingStatus();
-
-                // Immediately set our own AckYou to false so both sides reflect pending state at build start
-                var permissions = pair.UserPair.OwnPermissions;
-                if (permissions.IsAckYou())
-                {
-                    Logger.LogDebug("BuildStart: Setting Own AckYou=false for user {user}", pair.UserData.AliasOrUID);
-                    permissions.SetAckYou(false);
-                    pair.UserPair.OwnPermissions = permissions;
-
-                    try
-                    {
-                        _ = _apiController.Value.UserSetPairPermissions(new(pair.UserData, permissions));
-                    }
-                    catch (Exception ex)
-                    {
-                        Logger.LogDebug(ex, "BuildStart: Failed to send Own AckYou=false for user {user}", pair.UserData.AliasOrUID);
-                    }
-                }
             }
             
             // Add notification for build start

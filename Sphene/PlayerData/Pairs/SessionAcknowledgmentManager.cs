@@ -172,9 +172,11 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
         
         // Publish acknowledgment pending event
         Mediator.Publish(new AcknowledgmentPendingMessage(
-            hashVersionKey,
-            recipient,
-            DateTime.UtcNow
+            new AcknowledgmentEventDto(
+                hashVersionKey,
+                recipient,
+                AcknowledgmentStatus.Pending,
+                DateTime.UtcNow)
         ));
         
         // Publish UI refresh
@@ -226,9 +228,11 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
             
             // Publish acknowledgment received event
             Mediator.Publish(new AcknowledgmentReceivedMessage(
-                hashVersionKey,
-                acknowledgingUser,
-                DateTime.UtcNow
+                new AcknowledgmentEventDto(
+                    hashVersionKey,
+                    acknowledgingUser,
+                    AcknowledgmentStatus.Received,
+                    DateTime.UtcNow)
             ));
         }
         else

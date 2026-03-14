@@ -131,7 +131,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
     private void OnAcknowledgmentPending(AcknowledgmentPendingMessage message)
     {
         // Only handle events for this specific pair
-        if (!string.Equals(message.User.UID, _pair.UserData.UID, StringComparison.Ordinal)) return;
+        if (!string.Equals(message.Event.User.UID, _pair.UserData.UID, StringComparison.Ordinal)) return;
         
         // Update cached acknowledgment status to pending
         _cachedHasPendingAck = true;
@@ -514,6 +514,9 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
 
         var isVisibleForIcon = _pair.IsMutuallyVisible || (_uiSharedService.IsInGpose && _pair.WasMutuallyVisibleInGpose);
         var partnerAckYou = _pair.UserPair.OtherPermissions.IsAckYou();
+        var ownAckYou = _pair.UserPair.OwnPermissions.IsAckYou();
+        var latestDataApplied = _pair.IsLatestReceivedDataApplied();
+        var effectiveOwnAckYou = _pair.LastReceivedCharacterData != null ? latestDataApplied : ownAckYou;
         var suppressAckUi = _pair.IsInDuty;
 
         if (_pair.IsPaused)
@@ -540,7 +543,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
                 ImGui.SameLine();
             }
             
-            var iconColor = suppressAckUi ? ImGuiColors.ParsedGreen : (partnerAckYou ? ImGuiColors.ParsedGreen : ImGuiColors.DalamudYellow);
+            var iconColor = suppressAckUi ? ImGuiColors.ParsedGreen : (effectiveOwnAckYou ? ImGuiColors.ParsedGreen : ImGuiColors.DalamudYellow);
             var icon = (_uiSharedService.IsInGpose || _pair.IsInGpose) ? FontAwesomeIcon.Camera : FontAwesomeIcon.Eye;
             _uiSharedService.IconText(icon, iconColor);
             
@@ -550,11 +553,16 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
             }
             else
             {
-                var ackStatus = partnerAckYou ? "acknowledges your data" : "does not acknowledge your data";
-                userPairText = _pair.UserData.AliasOrUID + " is visible: " + _pair.PlayerName + Environment.NewLine + "This user " + ackStatus + Environment.NewLine + "Click to target this player";
+                var ackStatus = effectiveOwnAckYou ? "You acknowledge this user's data" : "You do not acknowledge this user's data";
+                if (partnerAckYou != effectiveOwnAckYou)
+                {
+                    var partnerStatus = partnerAckYou ? "This user acknowledges your data" : "This user does not acknowledge your data";
+                    ackStatus += Environment.NewLine + partnerStatus;
+                }
+                userPairText = _pair.UserData.AliasOrUID + " is visible: " + _pair.PlayerName + Environment.NewLine + ackStatus + Environment.NewLine + "Click to target this player";
             }
             
-            HandleReloadTimer(partnerAckYou);
+            HandleReloadTimer(effectiveOwnAckYou);
             
             if (ImGui.IsItemClicked())
             {

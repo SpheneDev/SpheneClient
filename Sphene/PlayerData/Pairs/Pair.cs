@@ -117,6 +117,13 @@ public class Pair : DisposableMediatorSubscriberBase
         return LastReceivedCharacterData?.DataHash?.Value;
     }
 
+    public bool IsLatestReceivedDataApplied()
+    {
+        return CachedPlayer != null
+            && LastReceivedCharacterData != null
+            && CachedPlayer.IsCharacterDataAppliedForCurrentCharacter(LastReceivedCharacterData);
+    }
+
     internal void SetMutualVisibility(bool isMutual)
     {
         if (IsMutuallyVisible == isMutual) return;
@@ -541,23 +548,6 @@ public class Pair : DisposableMediatorSubscriberBase
         LastAcknowledgmentTime = timestamp;
         HasPendingAcknowledgment = false;
         
-        // Update AckYou status based on current icon state
-        // Green checkmark (success) = true, no icon (cleared) = false
-        bool newAckYouStatus = success;
-        
-        var permissions = UserPair.OwnPermissions;
-        permissions.SetAckYou(newAckYouStatus);
-        UserPair.OwnPermissions = permissions;
-        
-        try
-        {
-            await _apiController.Value.UserSetPairPermissions(new(UserData, permissions)).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "Failed to update AckYou status for user {user}", UserData.AliasOrUID);
-        }
-        
         // Publish specific pair acknowledgment status change event
         Mediator.Publish(new PairAcknowledgmentStatusChangedMessage(
             UserData,
@@ -586,28 +576,6 @@ public class Pair : DisposableMediatorSubscriberBase
         LastAcknowledgmentSuccess = null;
         LastAcknowledgmentTime = null;
         
-        // Update AckYou status based on current icon state
-        // Yellow clock (pending) = false
-        bool newAckYouStatus = false;
-        
-        // Update local permissions immediately for UI responsiveness
-        var permissions = UserPair.OwnPermissions;
-        permissions.SetAckYou(newAckYouStatus);
-        UserPair.OwnPermissions = permissions;
-        
-        try
-        {
-            await _apiController.Value.UserSetPairPermissions(new(UserData, permissions)).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "Failed to update AckYou status for user {user}", UserData.AliasOrUID);
-            // Revert local change if server update failed
-            var revertPermissions = UserPair.OwnPermissions;
-            revertPermissions.SetAckYou(!newAckYouStatus);
-            UserPair.OwnPermissions = revertPermissions;
-        }
-        
         // Publish specific pair acknowledgment status change event
         Mediator.Publish(new PairAcknowledgmentStatusChangedMessage(
             UserData,
@@ -623,9 +591,11 @@ public class Pair : DisposableMediatorSubscriberBase
         
         // Publish acknowledgment pending event
         Mediator.Publish(new AcknowledgmentPendingMessage(
-            acknowledgmentId,
-            UserData,
-            DateTime.UtcNow
+            new AcknowledgmentEventDto(
+                acknowledgmentId,
+                UserData,
+                AcknowledgmentStatus.Pending,
+                DateTime.UtcNow)
         ));
         
         // Publish granular UI refresh for this specific acknowledgment
@@ -636,10 +606,11 @@ public class Pair : DisposableMediatorSubscriberBase
         
         // Keep legacy acknowledgment status change event for backward compatibility
         Mediator.Publish(new AcknowledgmentStatusChangedMessage(
-            acknowledgmentId,
-            UserData,
-            AcknowledgmentStatus.Pending,
-            DateTime.UtcNow
+            new AcknowledgmentEventDto(
+                acknowledgmentId,
+                UserData,
+                AcknowledgmentStatus.Pending,
+                DateTime.UtcNow)
         ));
     }
 
@@ -676,10 +647,11 @@ public class Pair : DisposableMediatorSubscriberBase
         if (!string.IsNullOrEmpty(acknowledgmentId))
         {
             Mediator.Publish(new AcknowledgmentStatusChangedMessage(
-                acknowledgmentId,
-                UserData,
-                AcknowledgmentStatus.Received,
-                DateTime.UtcNow
+                new AcknowledgmentEventDto(
+                    acknowledgmentId,
+                    UserData,
+                    AcknowledgmentStatus.Received,
+                    DateTime.UtcNow)
             ));
         }
     }
@@ -701,28 +673,6 @@ public class Pair : DisposableMediatorSubscriberBase
             Logger.LogDebug("Clearing pending acknowledgment: {acknowledgmentId} for user {user}", acknowledgmentId, UserData.AliasOrUID);
             HasPendingAcknowledgment = false;
             LastAcknowledgmentId = null;
-            
-            // Update AckYou status based on current icon state
-            // No icon (cleared) = false
-            bool newAckYouStatus = false;
-            
-            // Update local permissions immediately for UI responsiveness
-            var permissions = UserPair.OwnPermissions;
-            permissions.SetAckYou(newAckYouStatus);
-            UserPair.OwnPermissions = permissions;
-            
-            try
-            {
-                await _apiController.Value.UserSetPairPermissions(new(UserData, permissions)).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError(ex, "Failed to update AckYou status for user {user}", UserData.AliasOrUID);
-                // Revert local change if server update failed
-                var revertPermissions = UserPair.OwnPermissions;
-                revertPermissions.SetAckYou(!newAckYouStatus);
-                UserPair.OwnPermissions = revertPermissions;
-            }
             
             // Add notification if MessageService is available
             messageService?.AddTaggedMessage(
@@ -750,10 +700,11 @@ public class Pair : DisposableMediatorSubscriberBase
             
             // Publish acknowledgment status change event
             Mediator.Publish(new AcknowledgmentStatusChangedMessage(
-                acknowledgmentId,
-                UserData,
-                AcknowledgmentStatus.Received,
-                DateTime.UtcNow
+                new AcknowledgmentEventDto(
+                    acknowledgmentId,
+                    UserData,
+                    AcknowledgmentStatus.Received,
+                    DateTime.UtcNow)
             ));
         }
         else
@@ -807,10 +758,11 @@ public class Pair : DisposableMediatorSubscriberBase
         if (previousAckId != null)
         {
             Mediator.Publish(new AcknowledgmentStatusChangedMessage(
-                previousAckId,
-                UserData,
-                AcknowledgmentStatus.Cancelled,
-                DateTime.UtcNow
+                new AcknowledgmentEventDto(
+                    previousAckId,
+                    UserData,
+                    AcknowledgmentStatus.Cancelled,
+                    DateTime.UtcNow)
             ));
         }
 
