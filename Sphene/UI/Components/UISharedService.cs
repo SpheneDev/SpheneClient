@@ -87,6 +87,7 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
     private readonly Dictionary<string, object?> _selectedComboItems = new(StringComparer.Ordinal);
     private readonly ServerConfigurationManager _serverConfigurationManager;
     private static readonly ConcurrentDictionary<string, Vector2> _pendingWindowSizes = new(StringComparer.Ordinal);
+    private static readonly ConcurrentDictionary<string, string[]> _tooltipSegmentsCache = new(StringComparer.Ordinal);
     private readonly ITextureProvider _textureProvider;
     private readonly TokenProvider _tokenProvider;
     private bool _brioExists = false;
@@ -205,9 +206,10 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
             {
                 ImGui.BeginTooltip();
                 ImGui.PushTextWrapPos(ImGui.GetFontSize() * 35f);
-                if (text.Contains(TooltipSeparator, StringComparison.Ordinal))
+                if (text.IndexOf(TooltipSeparator, StringComparison.Ordinal) >= 0)
                 {
-                    var splitText = text.Split(TooltipSeparator, StringSplitOptions.RemoveEmptyEntries);
+                    var splitText = _tooltipSegmentsCache.GetOrAdd(text,
+                        t => t.Split(TooltipSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
                     for (int i = 0; i < splitText.Length; i++)
                     {
                         ImGui.TextUnformatted(splitText[i]);

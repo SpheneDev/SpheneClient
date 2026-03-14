@@ -643,7 +643,6 @@ public class SettingsUi : WindowMediatorSubscriberBase
         DrawSettingsSectionHeader("Diagnostic Windows", "Open dedicated windows for acknowledgment and status monitoring.");
         
         DebugOptionBlock.DrawOpenAcknowledgmentMonitorAction(_uiShared, Mediator, "DebugOpenAcknowledgmentMonitor");
-        ImGui.SameLine();
         DebugOptionBlock.DrawOpenStatusDebugAction(_uiShared, Mediator, "DebugOpenStatusDebug");
         
 

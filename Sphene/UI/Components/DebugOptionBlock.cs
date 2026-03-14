@@ -35,12 +35,12 @@ public static class DebugOptionBlock
     public static void DrawPrintNetworkMetricsActions(UiSharedService uiShared, bool logPerformance, Action printMetrics, Action printMetricsLast60, string blockId = "PrintNetworkMetricsActions")
     {
         if (!logPerformance) ImGui.BeginDisabled();
-        if (uiShared.IconTextButton(FontAwesomeIcon.StickyNote, "Print Network Metrics to /xllog##" + blockId))
+        if (uiShared.IconTextButton(FontAwesomeIcon.StickyNote, "Print Network Metrics to /xllog"))
         {
             printMetrics.Invoke();
         }
-        ImGui.SameLine();
-        if (uiShared.IconTextButton(FontAwesomeIcon.StickyNote, "Print Network Metrics (last 60s) to /xllog##last60" + blockId))
+
+        if (uiShared.IconTextButton(FontAwesomeIcon.StickyNote, "Print Network Metrics (last 60s) to /xllog"))
         {
             printMetricsLast60.Invoke();
         }
@@ -61,7 +61,7 @@ public static class DebugOptionBlock
 
     public static void DrawOpenAcknowledgmentMonitorAction(UiSharedService uiShared, SpheneMediator mediator, string blockId = "OpenAcknowledgmentMonitor")
     {
-        if (uiShared.IconTextButton(FontAwesomeIcon.Desktop, "Open Acknowledgment Monitor##" + blockId))
+        if (uiShared.IconTextButton(FontAwesomeIcon.Desktop, "Open Acknowledgment Monitor"))
         {
             mediator.Publish(new UiToggleMessage(typeof(AcknowledgmentMonitorUI)));
         }
@@ -70,7 +70,7 @@ public static class DebugOptionBlock
 
     public static void DrawOpenStatusDebugAction(UiSharedService uiShared, SpheneMediator mediator, string blockId = "OpenStatusDebug")
     {
-        if (uiShared.IconTextButton(FontAwesomeIcon.Bug, "Open Status Debug##" + blockId))
+        if (uiShared.IconTextButton(FontAwesomeIcon.Bug, "Open Status Debug"))
         {
             mediator.Publish(new UiToggleMessage(typeof(StatusDebugUi)));
         }

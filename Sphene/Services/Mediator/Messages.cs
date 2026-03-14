@@ -128,6 +128,7 @@ public record SendCharacterDataAcknowledgmentMessage(CharacterDataAcknowledgment
 public record ShowUpdateNotificationMessage(UpdateInfo UpdateInfo) : MessageBase;
 public record CheckForUpdatesMessage : MessageBase;
 public record ShowReleaseChangelogMessage(string CurrentVersion, string? ChangelogText, string? LastSeenVersionBeforeUpdate = null) : MessageBase;
+public record ReleaseChangelogClosedMessage : MessageBase;
 public record UiServiceInitializedMessage : MessageBase;
 
 public record ThemePickerModeToggleMessage(bool IsEnabled) : MessageBase;

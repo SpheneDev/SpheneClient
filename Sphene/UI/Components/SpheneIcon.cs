@@ -47,6 +47,7 @@ public class SpheneIcon : WindowMediatorSubscriberBase
     private Vector2 _dragStartMousePos;
     private Vector2 _dragStartIconPos;
     private DateTime _mouseDownAt;
+    private Vector2 _lastSavedIconPosition = new(float.NaN, float.NaN);
     private const int DragStartDelayMs = 100; // delay (ms) before drag begins on hold
     private IDalamudTextureWrap? _spheneLogoTexture;
     
@@ -57,6 +58,14 @@ public class SpheneIcon : WindowMediatorSubscriberBase
     private bool _updateAvailable = false;
     private UpdateInfo? _updateInfo = null;
     private bool _updateToastShown = false;
+    private bool _tooltipCacheInitialized = false;
+    private bool _tooltipCachedIconLocked = false;
+    private ServerState _tooltipCachedServerState = ServerState.Disconnected;
+    private Version? _tooltipCachedUpdateFromVersion = null;
+    private Version? _tooltipCachedUpdateToVersion = null;
+    private string _tooltipHeaderText = string.Empty;
+    private string _tooltipStatusText = string.Empty;
+    private string _tooltipUpdateText = string.Empty;
     
     
     public SpheneIcon(ILogger<SpheneIcon> logger, SpheneMediator mediator, 
@@ -442,38 +451,54 @@ public class SpheneIcon : WindowMediatorSubscriberBase
         // Show tooltip
         if (ImGui.IsItemHovered())
         {
+            RefreshTooltipCache(iconLocked);
             using (SpheneCustomTheme.ApplyTooltipTheme())
             {
                 ImGui.BeginTooltip();
-                var dragHint = iconLocked ? "Drag is locked" : "Hold and drag to move";
-                ImGui.Text($"Click to toggle Sphene | {dragHint} | Right-click for menu");
+                ImGui.TextUnformatted(_tooltipHeaderText);
                 ImGui.Separator();
-                ImGui.Text($"Server Status: {GetStatusText(_apiController.ServerState)}");
-                if (_updateAvailable && _updateInfo != null)
+                ImGui.TextUnformatted(_tooltipStatusText);
+                if (_updateAvailable && _updateInfo != null && !string.IsNullOrEmpty(_tooltipUpdateText))
                 {
                     ImGui.Separator();
-                    ImGui.Text($"Update available: {_updateInfo.CurrentVersion} -> {_updateInfo.LatestVersion}");
+                    ImGui.TextUnformatted(_tooltipUpdateText);
                 }
                 ImGui.EndTooltip();
             }
         }
         
-        // Update stored position if window was moved
-        if (!_isDragging)
-        {
-            var windowPos = ImGui.GetWindowPos();
-            if (windowPos != _iconPosition)
-            {
-                _iconPosition = windowPos;
-                if (_hasStoredIconPosition)
-                {
-                    SaveIconPositionToConfig();
-                }
-            }
-        }
-        
         // Draw context menu
         DrawContextMenu();
+    }
+
+    private void RefreshTooltipCache(bool iconLocked)
+    {
+        var currentState = _apiController.ServerState;
+        var currentFromVersion = _updateInfo?.CurrentVersion;
+        var currentToVersion = _updateInfo?.LatestVersion;
+
+        if (_tooltipCacheInitialized
+            && _tooltipCachedIconLocked == iconLocked
+            && _tooltipCachedServerState == currentState
+            && EqualityComparer<Version?>.Default.Equals(_tooltipCachedUpdateFromVersion, currentFromVersion)
+            && EqualityComparer<Version?>.Default.Equals(_tooltipCachedUpdateToVersion, currentToVersion))
+        {
+            return;
+        }
+
+        _tooltipCacheInitialized = true;
+        _tooltipCachedIconLocked = iconLocked;
+        _tooltipCachedServerState = currentState;
+        _tooltipCachedUpdateFromVersion = currentFromVersion;
+        _tooltipCachedUpdateToVersion = currentToVersion;
+
+        _tooltipHeaderText = iconLocked
+            ? "Click to toggle Sphene | Drag is locked | Right-click for menu"
+            : "Click to toggle Sphene | Hold and drag to move | Right-click for menu";
+        _tooltipStatusText = "Server Status: " + GetStatusText(currentState);
+        _tooltipUpdateText = (_updateAvailable && _updateInfo != null)
+            ? $"Update available: {_updateInfo.CurrentVersion} -> {_updateInfo.LatestVersion}"
+            : string.Empty;
     }
     
     private void ToggleMainWindow()
@@ -504,10 +529,17 @@ public class SpheneIcon : WindowMediatorSubscriberBase
     
     private void SaveIconPositionToConfig()
     {
+        if (Math.Abs(_iconPosition.X - _lastSavedIconPosition.X) < 0.5f
+            && Math.Abs(_iconPosition.Y - _lastSavedIconPosition.Y) < 0.5f)
+        {
+            return;
+        }
+
         _logger.LogDebug("Saving icon position: {X}, {Y}", _iconPosition.X, _iconPosition.Y);
         _configService.Current.IconPositionX = _iconPosition.X;
         _configService.Current.IconPositionY = _iconPosition.Y;
         _configService.Save();
+        _lastSavedIconPosition = _iconPosition;
     }
     
     private void LoadSpheneLogoTexture()

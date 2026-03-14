@@ -116,6 +116,7 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
             _configService.Current.LastSeenVersionChangelog = _version;
             _configService.Save();
         }
+        Mediator.Publish(new ReleaseChangelogClosedMessage());
     }
 
     protected override void DrawInternal()

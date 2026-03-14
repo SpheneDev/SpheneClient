@@ -122,6 +122,7 @@ public class SpheneConfig : ISpheneConfiguration
 
     // Release Changelog
     public string LastSeenVersionChangelog { get; set; } = string.Empty;
+    public string LastSeenNewOptionsTag { get; set; } = string.Empty;
     public string ReleaseChangelogUrl { get; set; } = string.Empty;
     public bool ShowTestBuildChangelogs { get; set; } = false;
 

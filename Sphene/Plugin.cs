@@ -374,6 +374,7 @@ public sealed class Plugin : IDalamudPlugin
             collection.AddScoped<WindowMediatorSubscriberBase, EventViewerUI>();
             collection.AddScoped<WindowMediatorSubscriberBase, CharaDataHubUi>();
             collection.AddScoped<WindowMediatorSubscriberBase, StatusDebugUi>();
+            collection.AddScoped<WindowMediatorSubscriberBase, NewOptionsUi>();
             collection.AddScoped<PenumbraSendModUi>();
             collection.AddScoped<WindowMediatorSubscriberBase>(s => s.GetRequiredService<PenumbraSendModUi>());
             collection.AddScoped<PenumbraReceiveModUi>();
