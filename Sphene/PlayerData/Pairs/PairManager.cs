@@ -127,6 +127,7 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         else
         {
             _allClientPairs[dto.User].UserPair.IndividualPairStatus = dto.IndividualPairStatus;
+            _allClientPairs[dto.User].UserPair.IsOutgoingIndividualPair = dto.IsOutgoingIndividualPair;
             _allClientPairs[dto.User].UserPair.RemoteClientVersion = dto.RemoteClientVersion;
             _allClientPairs[dto.User].ApplyLastReceivedData();
         }
@@ -146,6 +147,7 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         }
 
         _allClientPairs[dto.User].UserPair.IndividualPairStatus = dto.IndividualPairStatus;
+        _allClientPairs[dto.User].UserPair.IsOutgoingIndividualPair = dto.IsOutgoingIndividualPair;
         _allClientPairs[dto.User].UserPair.OwnPermissions = dto.OwnPermissions;
         _allClientPairs[dto.User].UserPair.OtherPermissions = dto.OtherPermissions;
         _allClientPairs[dto.User].UserPair.RemoteClientVersion = dto.RemoteClientVersion;
@@ -594,6 +596,10 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         if (_allClientPairs.TryGetValue(dto.User, out var pair))
         {
             pair.UserPair.IndividualPairStatus = dto.IndividualPairStatus;
+            if (dto.IndividualPairStatus != API.Data.Enum.IndividualPairStatus.OneSided)
+            {
+                pair.UserPair.IsOutgoingIndividualPair = false;
+            }
             RecreateLazy();
         }
     }

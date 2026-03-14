@@ -44,6 +44,7 @@ public class PairFactory
     {
         var userFullPairDto = new UserFullPairDto(userPairDto.User, userPairDto.IndividualPairStatus, [], userPairDto.OwnPermissions, userPairDto.OtherPermissions)
         {
+            IsOutgoingIndividualPair = userPairDto.IsOutgoingIndividualPair,
             RemoteClientVersion = userPairDto.RemoteClientVersion
         };
         return new Pair(_loggerFactory.CreateLogger<Pair>(), userFullPairDto,

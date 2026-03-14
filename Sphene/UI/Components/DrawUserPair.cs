@@ -506,11 +506,14 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         }
         else if (_pair.IndividualPairStatus == API.Data.Enum.IndividualPairStatus.OneSided)
         {
-            if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.Plus, "Pair individually", _menuWidth, ButtonStyleKeys.ContextMenu_Item))
+            if (!_pair.UserPair.IsOutgoingIndividualPair && _uiSharedService.IconTextActionButton(FontAwesomeIcon.Plus, "Pair individually", _menuWidth, ButtonStyleKeys.ContextMenu_Item))
             {
                 _ = _apiController.UserAddPair(new(_pair.UserData));
             }
-            UiSharedService.AttachToolTip("Complete one-sided pairing with " + entryUID);
+            if (!_pair.UserPair.IsOutgoingIndividualPair)
+            {
+                UiSharedService.AttachToolTip("Complete one-sided pairing with " + entryUID);
+            }
 
             if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.Trash, "Unpair Permanently", _menuWidth, ButtonStyleKeys.ContextMenu_Item) && UiSharedService.CtrlPressed())
             {
@@ -829,7 +832,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
             UiSharedService.AttachToolTip("Reload last received character data");
         }
 
-        if (isOneSidedIndividualPair)
+        if (isOneSidedIndividualPair && !_pair.UserPair.IsOutgoingIndividualPair)
         {
             currentRightSide -= (pairButtonSize.X + spacingX);
             ImGui.SameLine(currentRightSide);

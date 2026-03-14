@@ -97,8 +97,34 @@ public sealed class CacheCreationService : DisposableMediatorSubscriberBase
         Mediator.Subscribe<HeelsOffsetMessage>(this, (msg) =>
         {
             if (_isZoning) return;
-            Logger.LogDebug("Received Heels Offset change, updating player");
-            AddCacheToCreate();
+
+            if (string.IsNullOrEmpty(msg.HeelsData))
+            {
+                Logger.LogDebug("Received Heels Offset change without payload, updating player via full rebuild");
+                AddCacheToCreate();
+                return;
+            }
+
+            lock (_playerDataLock)
+            {
+                if (string.Equals(msg.HeelsData, _playerData.HeelsData, StringComparison.Ordinal))
+                {
+                    Logger.LogDebug("Received Heels Offset change but data is unchanged, skipping rebuild");
+                    return;
+                }
+
+                Logger.LogDebug("Received Heels Offset change, applying fast path update");
+                _playerData.HeelsData = msg.HeelsData;
+
+                var newData = _playerData.ToAPI();
+                var newHash = newData.DataHash?.Value;
+                if (!string.Equals(newHash, _lastDataHash, StringComparison.Ordinal))
+                {
+                    Logger.LogDebug("Character data changed (Heels), publishing update. Old hash: {OldHash}, New hash: {NewHash}", _lastDataHash ?? "null", newHash ?? "null");
+                    _lastDataHash = newHash;
+                    Mediator.Publish(new CharacterDataCreatedMessage(newData));
+                }
+            }
         });
 
         Mediator.Subscribe<GlamourerChangedMessage>(this, (msg) =>

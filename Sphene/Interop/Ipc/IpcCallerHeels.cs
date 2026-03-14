@@ -40,14 +40,14 @@ public sealed class IpcCallerHeels : IIpcCaller
 
     private void HeelsOffsetChange(string offset)
     {
-        _spheneMediator.Publish(new HeelsOffsetMessage());
+        _spheneMediator.Publish(new HeelsOffsetMessage(offset));
     }
 
     private void HeelsTagChanged(int gameObjectIndex, string tag, string? value)
     {
         _logger.LogTrace("SimpleHeels tag changed for object {index}: {tag} = {value}", gameObjectIndex, tag, value ?? "null");
         // Tag changes can affect character appearance, so trigger a heels update
-        _spheneMediator.Publish(new HeelsOffsetMessage());
+        _spheneMediator.Publish(new HeelsOffsetMessage(value));
     }
 
     public async Task<string> GetOffsetAsync()
