@@ -45,6 +45,8 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
     private readonly SpheneConfigService _configService;
     private float _menuWidth = -1;
     private bool _wasHovered = false;
+    private static readonly Vector4 SoftToggleEnabledColor = new(0.56f, 0.82f, 0.62f, 1f);
+    private static readonly Vector4 SoftToggleDisabledColor = new(0.86f, 0.58f, 0.58f, 1f);
     
     // Static dictionary to track reload timers for each user
     private static readonly Dictionary<string, System.Threading.Timer> _reloadTimers = new(StringComparer.Ordinal);
@@ -332,9 +334,9 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         UiSharedService.AttachToolTip("Opens the Permissions Window which allows you to manage multiple permissions at once.");
 
         var isSticky = _pair.UserPair!.OwnPermissions.IsSticky();
-        string stickyText = isSticky ? "Disable Preferred Permissions" : "Enable Preferred Permissions";
-        var stickyIcon = isSticky ? FontAwesomeIcon.ArrowCircleDown : FontAwesomeIcon.ArrowCircleUp;
-        if (_uiSharedService.IconTextActionButton(stickyIcon, stickyText, _menuWidth, ButtonStyleKeys.ContextMenu_Item))
+        string stickyText = "Preferred Permissions";
+        var stickyIcon = isSticky ? FontAwesomeIcon.ToggleOn : FontAwesomeIcon.ToggleOff;
+        if (DrawStateColoredToggleButton(stickyIcon, stickyText, isSticky))
         {
             var permissions = _pair.UserPair.OwnPermissions;
             permissions.SetSticky(!isSticky);
@@ -348,9 +350,9 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         bool individual = !_pair.IsDirectlyPaired && _apiController.DefaultPermissions!.IndividualIsSticky;
 
         var isDisableSounds = _pair.UserPair!.OwnPermissions.IsDisableSounds();
-        string disableSoundsText = isDisableSounds ? "Enable sound sync" : "Disable sound sync";
-        var disableSoundsIcon = isDisableSounds ? FontAwesomeIcon.VolumeUp : FontAwesomeIcon.VolumeMute;
-        if (_uiSharedService.IconTextActionButton(disableSoundsIcon, disableSoundsText, _menuWidth, ButtonStyleKeys.ContextMenu_Item))
+        string disableSoundsText = "Sound sync";
+        var disableSoundsIcon = isDisableSounds ? FontAwesomeIcon.ToggleOff : FontAwesomeIcon.ToggleOn;
+        if (DrawStateColoredToggleButton(disableSoundsIcon, disableSoundsText, !isDisableSounds))
         {
             var permissions = _pair.UserPair.OwnPermissions;
             permissions.SetDisableSounds(!isDisableSounds);
@@ -359,9 +361,9 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         UiSharedService.AttachToolTip("Changes sound sync permissions with this user." + (individual ? individualText : string.Empty));
 
         var isDisableAnims = _pair.UserPair!.OwnPermissions.IsDisableAnimations();
-        string disableAnimsText = isDisableAnims ? "Enable animation sync" : "Disable animation sync";
-        var disableAnimsIcon = isDisableAnims ? FontAwesomeIcon.Running : FontAwesomeIcon.Stop;
-        if (_uiSharedService.IconTextActionButton(disableAnimsIcon, disableAnimsText, _menuWidth, ButtonStyleKeys.ContextMenu_Item))
+        string disableAnimsText = "Animation sync";
+        var disableAnimsIcon = isDisableAnims ? FontAwesomeIcon.ToggleOff : FontAwesomeIcon.ToggleOn;
+        if (DrawStateColoredToggleButton(disableAnimsIcon, disableAnimsText, !isDisableAnims))
         {
             var permissions = _pair.UserPair.OwnPermissions;
             permissions.SetDisableAnimations(!isDisableAnims);
@@ -370,9 +372,9 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         UiSharedService.AttachToolTip("Changes animation sync permissions with this user." + (individual ? individualText : string.Empty));
 
         var isDisableVFX = _pair.UserPair!.OwnPermissions.IsDisableVFX();
-        string disableVFXText = isDisableVFX ? "Enable VFX sync" : "Disable VFX sync";
-        var disableVFXIcon = isDisableVFX ? FontAwesomeIcon.Sun : FontAwesomeIcon.Circle;
-        if (_uiSharedService.IconTextActionButton(disableVFXIcon, disableVFXText, _menuWidth, ButtonStyleKeys.ContextMenu_Item))
+        string disableVFXText = "VFX sync";
+        var disableVFXIcon = isDisableVFX ? FontAwesomeIcon.ToggleOff : FontAwesomeIcon.ToggleOn;
+        if (DrawStateColoredToggleButton(disableVFXIcon, disableVFXText, !isDisableVFX))
         {
             var permissions = _pair.UserPair.OwnPermissions;
             permissions.SetDisableVFX(!isDisableVFX);
@@ -381,9 +383,9 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         UiSharedService.AttachToolTip("Changes VFX sync permissions with this user." + (individual ? individualText : string.Empty));
 
         var isDisableVfxInDuty = _pair.UserPair!.OwnPermissions.IsDisableVFXInDuty();
-        string disableVfxInDutyText = isDisableVfxInDuty ? "Enable VFX sync in duty" : "Disable VFX sync in duty";
-        var disableVfxInDutyIcon = isDisableVfxInDuty ? FontAwesomeIcon.Sun : FontAwesomeIcon.ShieldAlt;
-        if (_uiSharedService.IconTextActionButton(disableVfxInDutyIcon, disableVfxInDutyText, _menuWidth, ButtonStyleKeys.ContextMenu_Item))
+        string disableVfxInDutyText = "VFX sync in duty";
+        var disableVfxInDutyIcon = isDisableVfxInDuty ? FontAwesomeIcon.ToggleOff : FontAwesomeIcon.ToggleOn;
+        if (DrawStateColoredToggleButton(disableVfxInDutyIcon, disableVfxInDutyText, !isDisableVfxInDuty))
         {
             var permissions = _pair.UserPair.OwnPermissions;
             permissions.SetDisableVFXInDuty(!isDisableVfxInDuty);
@@ -401,7 +403,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         
         if (!isWhitelisted)
         {
-            if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.Shield, "Add to Performance Whitelist", _menuWidth, ButtonStyleKeys.ContextMenu_Item))
+            if (DrawStateColoredToggleButton(FontAwesomeIcon.Shield, "Add to Performance Whitelist", false))
             {
                 // Use alias if available, otherwise use UID
                 var identifierToAdd = !string.IsNullOrEmpty(_pair.UserData.Alias) ? _pair.UserData.Alias : _pair.UserData.UID;
@@ -418,7 +420,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         }
         else
         {
-            if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.ShieldAlt, "Remove from Performance Whitelist", _menuWidth, ButtonStyleKeys.ContextMenu_Item))
+            if (DrawStateColoredToggleButton(FontAwesomeIcon.ShieldAlt, "Remove from Performance Whitelist", true))
             {
                 // Remove both alias and UID if they exist in the list
                 _performanceConfigService.Current.UIDsToIgnore.RemoveAll(uid => 
@@ -429,6 +431,12 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
             }
             UiSharedService.AttachToolTip("Removes this user from the performance whitelist.");
         }
+    }
+
+    private bool DrawStateColoredToggleButton(FontAwesomeIcon icon, string text, bool enabledState)
+    {
+        using var _ = ImRaii.PushColor(ImGuiCol.Text, enabledState ? SoftToggleEnabledColor : SoftToggleDisabledColor);
+        return _uiSharedService.IconTextActionButton(icon, text, _menuWidth, ButtonStyleKeys.ContextMenu_Item);
     }
 
     private bool _disposed;
@@ -994,8 +1002,9 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         if (selfIsOwner || ((selfIsModerator) && (!userIsModerator)))
         {
             ImGui.TextUnformatted("Syncshell Moderator Functions");
-            var pinText = userIsPinned ? "Unpin user" : "Pin user";
-            if (_uiSharedService.IconTextButton(FontAwesomeIcon.Thumbtack, pinText, _menuWidth, true, ButtonStyleKeys.Pair_Pin))
+            var pinText = "Pinned in syncshell";
+            var pinIcon = userIsPinned ? FontAwesomeIcon.ToggleOn : FontAwesomeIcon.ToggleOff;
+            if (DrawStateColoredToggleButton(pinIcon, pinText, userIsPinned))
             {
                 ImGui.CloseCurrentPopup();
                 if (!group.GroupPairUserInfos.TryGetValue(_pair.UserData.UID, out var userinfo))
@@ -1030,8 +1039,9 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         if (selfIsOwner)
         {
             ImGui.TextUnformatted("Syncshell Owner Functions");
-            string modText = userIsModerator ? "Demod user" : "Mod user";
-            if (_uiSharedService.IconTextButton(FontAwesomeIcon.UserShield, modText, _menuWidth, true, ButtonStyleKeys.Pair_Mod) && UiSharedService.CtrlPressed())
+            var modText = "Syncshell moderator";
+            var modIcon = userIsModerator ? FontAwesomeIcon.ToggleOn : FontAwesomeIcon.ToggleOff;
+            if (DrawStateColoredToggleButton(modIcon, modText, userIsModerator) && UiSharedService.CtrlPressed())
             {
                 ImGui.CloseCurrentPopup();
                 if (!group.GroupPairUserInfos.TryGetValue(_pair.UserData.UID, out var userinfo))
