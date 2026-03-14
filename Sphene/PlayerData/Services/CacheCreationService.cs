@@ -142,31 +142,87 @@ public sealed class CacheCreationService : DisposableMediatorSubscriberBase
         Mediator.Subscribe<HonorificMessage>(this, (msg) =>
         {
             if (_isZoning) return;
-            if (!string.Equals(msg.NewHonorificTitle, _playerData.HonorificData, StringComparison.Ordinal))
+
+            lock (_playerDataLock)
             {
-                Logger.LogDebug("Received Honorific change, updating player");
-                AddCacheToCreate(ObjectKind.Player);
+                if (string.Equals(msg.NewHonorificTitle, _playerData.HonorificData, StringComparison.Ordinal))
+                {
+                    return;
+                }
+
+                Logger.LogDebug("Received Honorific change, applying fast path update");
+                _playerData.HonorificData = msg.NewHonorificTitle;
+
+                var newData = _playerData.ToAPI();
+                var newHash = newData.DataHash?.Value;
+                if (!string.Equals(newHash, _lastDataHash, StringComparison.Ordinal))
+                {
+                    Logger.LogDebug("Character data changed (Honorific), publishing update. Old hash: {OldHash}, New hash: {NewHash}", _lastDataHash ?? "null", newHash ?? "null");
+                    _lastDataHash = newHash;
+                    Mediator.Publish(new CharacterDataCreatedMessage(newData));
+                }
             }
         });
 
         Mediator.Subscribe<MoodlesMessage>(this, (msg) =>
         {
             if (_isZoning) return;
-            var changedType = _playerRelatedObjects.FirstOrDefault(f => f.Value.Address == msg.Address);
-            if (changedType.Value != null && changedType.Key == ObjectKind.Player)
+
+            if (_playerRelatedObjects[ObjectKind.Player].Address != msg.Address)
             {
-                Logger.LogDebug("Received Moodles change, updating player");
+                return;
+            }
+
+            if (msg.MoodlesData == null)
+            {
+                Logger.LogDebug("Received Moodles change without payload, updating player via full rebuild");
                 AddCacheToCreate(ObjectKind.Player);
+                return;
+            }
+
+            lock (_playerDataLock)
+            {
+                if (string.Equals(msg.MoodlesData, _playerData.MoodlesData, StringComparison.Ordinal))
+                {
+                    return;
+                }
+
+                Logger.LogDebug("Received Moodles change, applying fast path update");
+                _playerData.MoodlesData = msg.MoodlesData;
+
+                var newData = _playerData.ToAPI();
+                var newHash = newData.DataHash?.Value;
+                if (!string.Equals(newHash, _lastDataHash, StringComparison.Ordinal))
+                {
+                    Logger.LogDebug("Character data changed (Moodles), publishing update. Old hash: {OldHash}, New hash: {NewHash}", _lastDataHash ?? "null", newHash ?? "null");
+                    _lastDataHash = newHash;
+                    Mediator.Publish(new CharacterDataCreatedMessage(newData));
+                }
             }
         });
 
         Mediator.Subscribe<PetNamesMessage>(this, (msg) =>
         {
             if (_isZoning) return;
-            if (!string.Equals(msg.PetNicknamesData, _playerData.PetNamesData, StringComparison.Ordinal))
+
+            lock (_playerDataLock)
             {
-                Logger.LogDebug("Received Pet Nicknames change, updating player");
-                AddCacheToCreate(ObjectKind.Player);
+                if (string.Equals(msg.PetNicknamesData, _playerData.PetNamesData, StringComparison.Ordinal))
+                {
+                    return;
+                }
+
+                Logger.LogDebug("Received Pet Nicknames change, applying fast path update");
+                _playerData.PetNamesData = msg.PetNicknamesData;
+
+                var newData = _playerData.ToAPI();
+                var newHash = newData.DataHash?.Value;
+                if (!string.Equals(newHash, _lastDataHash, StringComparison.Ordinal))
+                {
+                    Logger.LogDebug("Character data changed (PetNames), publishing update. Old hash: {OldHash}, New hash: {NewHash}", _lastDataHash ?? "null", newHash ?? "null");
+                    _lastDataHash = newHash;
+                    Mediator.Publish(new CharacterDataCreatedMessage(newData));
+                }
             }
         });
 

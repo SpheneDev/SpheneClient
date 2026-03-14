@@ -38,7 +38,13 @@ public sealed class IpcCallerMoodles : IIpcCaller
 
     private void OnMoodlesChange(nint characterAddress)
     {
-        _spheneMediator.Publish(new MoodlesMessage(characterAddress));
+        _ = PublishMoodlesChangeAsync(characterAddress);
+    }
+
+    private async Task PublishMoodlesChangeAsync(nint characterAddress)
+    {
+        var data = await GetStatusAsync(characterAddress).ConfigureAwait(false);
+        _spheneMediator.Publish(new MoodlesMessage(characterAddress, data));
     }
 
     public bool APIAvailable { get; private set; } = false;
