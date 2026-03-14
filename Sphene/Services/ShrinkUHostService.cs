@@ -216,7 +216,8 @@ public sealed class ShrinkUHostService : IHostedService, IDisposable
                             bool skipHeavy = false;
                             try
                             {
-                                await _penumbraFolderWatcher.WaitForInitialScanAsync(TimeSpan.FromSeconds(3), token).ConfigureAwait(false);
+                                var folderTimeoutSeconds = Math.Max(3, Math.Min(120, _shrinkuConfigService.Current.StartupFolderTimeoutSeconds));
+                                await _penumbraFolderWatcher.WaitForInitialScanAsync(TimeSpan.FromSeconds(folderTimeoutSeconds), token).ConfigureAwait(false);
                                 skipHeavy = _penumbraFolderWatcher.IsStartupSnapshotUnchanged();
                             }
                             catch (Exception ex) { _logger.LogDebug(ex, "Failed to evaluate startup snapshot state"); }
