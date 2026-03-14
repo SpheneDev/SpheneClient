@@ -491,13 +491,27 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         ImGui.TextUnformatted("Individual Pair Functions");
         var entryUID = _pair.UserData.AliasOrUID;
 
-        if (_pair.IndividualPairStatus != API.Data.Enum.IndividualPairStatus.None)
+        if (_pair.IndividualPairStatus == API.Data.Enum.IndividualPairStatus.Bidirectional)
         {
             if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.Folder, "Pair Groups", _menuWidth, ButtonStyleKeys.ContextMenu_Item))
             {
                 _selectTagForPairUi.Open(_pair);
             }
             UiSharedService.AttachToolTip("Choose pair groups for " + entryUID);
+            if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.Trash, "Unpair Permanently", _menuWidth, ButtonStyleKeys.ContextMenu_Item) && UiSharedService.CtrlPressed())
+            {
+                _ = _apiController.UserRemovePair(new(_pair.UserData));
+            }
+            UiSharedService.AttachToolTip("Hold CTRL and click to unpair permanently from " + entryUID);
+        }
+        else if (_pair.IndividualPairStatus == API.Data.Enum.IndividualPairStatus.OneSided)
+        {
+            if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.Plus, "Pair individually", _menuWidth, ButtonStyleKeys.ContextMenu_Item))
+            {
+                _ = _apiController.UserAddPair(new(_pair.UserData));
+            }
+            UiSharedService.AttachToolTip("Complete one-sided pairing with " + entryUID);
+
             if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.Trash, "Unpair Permanently", _menuWidth, ButtonStyleKeys.ContextMenu_Item) && UiSharedService.CtrlPressed())
             {
                 _ = _apiController.UserRemovePair(new(_pair.UserData));
@@ -627,7 +641,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
 
         if (_pair.IndividualPairStatus == API.Data.Enum.IndividualPairStatus.OneSided)
         {
-            userPairText += UiSharedService.TooltipSeparator + "User has not added you back";
+            userPairText += UiSharedService.TooltipSeparator + "One-sided individual pair";
         }
         else if (_pair.IndividualPairStatus == API.Data.Enum.IndividualPairStatus.Bidirectional)
         {
@@ -770,8 +784,12 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
     {
         var pauseIcon = _pair.UserPair!.OwnPermissions.IsPaused() ? FontAwesomeIcon.Play : FontAwesomeIcon.Pause;
         var pauseButtonSize = _uiSharedService.GetIconButtonSize(pauseIcon);
-        var barButtonSize = _uiSharedService.GetIconButtonSize(FontAwesomeIcon.EllipsisV);
+        var isOneSidedIndividualPair = _pair.IndividualPairStatus == API.Data.Enum.IndividualPairStatus.OneSided;
+        var rightmostIcon = isOneSidedIndividualPair ? FontAwesomeIcon.User : FontAwesomeIcon.EllipsisV;
+        var rightmostButtonSize = _uiSharedService.GetIconButtonSize(rightmostIcon);
         var reloadButtonSize = _pair.IsVisible ? _uiSharedService.GetIconButtonSize(FontAwesomeIcon.Sync) : Vector2.Zero;
+        var pairButtonSize = _uiSharedService.GetIconButtonSize(FontAwesomeIcon.Plus);
+        var unpairButtonSize = _uiSharedService.GetIconButtonSize(FontAwesomeIcon.Trash);
         var spacingX = ImGui.GetStyle().ItemSpacing.X;
         // Use container-relative positioning for buttons
         var containerWidth = ImGui.GetContentRegionAvail().X;
@@ -779,15 +797,25 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         
         // Adjust button positioning for grouped syncshell folders
         var buttonOffset = (_currentGroup != null && _configService.Current.GroupUpSyncshells) ? 20f : 0f;
-        float currentRightSide = actualWindowEndX - barButtonSize.X - buttonOffset;
+        float currentRightSide = actualWindowEndX - rightmostButtonSize.X - buttonOffset;
 
-        // Context menu button (rightmost)
+        // Rightmost action button
         ImGui.SameLine(currentRightSide);
         ImGui.AlignTextToFramePadding();
-        if (_uiSharedService.IconButton(FontAwesomeIcon.EllipsisV, null, null, null, null, ButtonStyleKeys.Pair_Menu))
+        if (_uiSharedService.IconButton(rightmostIcon, null, null, null, null, ButtonStyleKeys.Pair_Menu))
         {
-            ImGui.OpenPopup("User Flyout Menu");
+            if (isOneSidedIndividualPair)
+            {
+                _displayHandler.OpenProfile(_pair);
+            }
+            else
+            {
+                ImGui.OpenPopup("User Flyout Menu");
+            }
         }
+        UiSharedService.AttachToolTip(isOneSidedIndividualPair
+            ? "Open profile of " + _pair.UserData.AliasOrUID
+            : "Open user menu");
 
         // Reload button (only if pair is visible)
         if (_pair.IsVisible)
@@ -801,26 +829,48 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
             UiSharedService.AttachToolTip("Reload last received character data");
         }
 
-        // Pause/Play button (leftmost of the three)
-        currentRightSide -= (pauseButtonSize.X + spacingX);
-        ImGui.SameLine(currentRightSide);
-        if (_uiSharedService.IconButton(pauseIcon, null, null, null, null, ButtonStyleKeys.Pair_Pause))
+        if (isOneSidedIndividualPair)
         {
-            var perm = _pair.UserPair!.OwnPermissions;
-
-            if (UiSharedService.CtrlPressed() && !perm.IsPaused())
+            currentRightSide -= (pairButtonSize.X + spacingX);
+            ImGui.SameLine(currentRightSide);
+            if (_uiSharedService.IconButton(FontAwesomeIcon.Plus))
             {
-                perm.SetSticky(true);
+                _ = _apiController.UserAddPair(new(_pair.UserData));
             }
-            perm.SetPaused(!perm.IsPaused());
-            _ = _apiController.UserSetPairPermissions(new(_pair.UserData, perm));
+            UiSharedService.AttachToolTip("Pair individually with " + _pair.UserData.AliasOrUID);
+
+            currentRightSide -= (unpairButtonSize.X + spacingX);
+            ImGui.SameLine(currentRightSide);
+            if (_uiSharedService.IconButton(FontAwesomeIcon.Trash) && UiSharedService.CtrlPressed())
+            {
+                _ = _apiController.UserRemovePair(new(_pair.UserData));
+            }
+            UiSharedService.AttachToolTip("Hold CTRL and click to unpair permanently from " + _pair.UserData.AliasOrUID);
         }
-        UiSharedService.AttachToolTip(!_pair.UserPair!.OwnPermissions.IsPaused()
-            ? ("Pause pairing with " + _pair.UserData.AliasOrUID
-                + (_pair.UserPair!.OwnPermissions.IsSticky()
-                    ? string.Empty
-                    : UiSharedService.TooltipSeparator + "Hold CTRL to enable preferred permissions while pausing." + Environment.NewLine + "This will leave this pair paused even if unpausing syncshells including this pair."))
-            : "Resume pairing with " + _pair.UserData.AliasOrUID);
+
+        if (!isOneSidedIndividualPair)
+        {
+            // Pause/Play button (leftmost of the three)
+            currentRightSide -= (pauseButtonSize.X + spacingX);
+            ImGui.SameLine(currentRightSide);
+            if (_uiSharedService.IconButton(pauseIcon, null, null, null, null, ButtonStyleKeys.Pair_Pause))
+            {
+                var perm = _pair.UserPair!.OwnPermissions;
+
+                if (UiSharedService.CtrlPressed() && !perm.IsPaused())
+                {
+                    perm.SetSticky(true);
+                }
+                perm.SetPaused(!perm.IsPaused());
+                _ = _apiController.UserSetPairPermissions(new(_pair.UserData, perm));
+            }
+            UiSharedService.AttachToolTip(!_pair.UserPair!.OwnPermissions.IsPaused()
+                ? ("Pause pairing with " + _pair.UserData.AliasOrUID
+                    + (_pair.UserPair!.OwnPermissions.IsSticky()
+                        ? string.Empty
+                        : UiSharedService.TooltipSeparator + "Hold CTRL to enable preferred permissions while pausing." + Environment.NewLine + "This will leave this pair paused even if unpausing syncshells including this pair."))
+                : "Resume pairing with " + _pair.UserData.AliasOrUID);
+        }
 
         if (_pair.IsPaired)
         {
