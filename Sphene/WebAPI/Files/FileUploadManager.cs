@@ -59,6 +59,12 @@ public sealed class FileUploadManager : DisposableMediatorSubscriberBase
 
     private const long MaxUploadSizeBytes = 1024L * 1024L * 1024L;
 
+    private static string NormalizeTransferHash(string hash)
+        => (hash ?? string.Empty).Trim();
+
+    private static bool HashEquals(string left, string right)
+        => string.Equals(NormalizeTransferHash(left), NormalizeTransferHash(right), StringComparison.OrdinalIgnoreCase);
+
     public bool IsPenumbraModUpload(string hash)
     {
         return _modUploadHashes.Contains(hash);
@@ -198,7 +204,7 @@ public sealed class FileUploadManager : DisposableMediatorSubscriberBase
         var addedUploadItem = false;
         try
         {
-            if (CurrentUploads.All(u => !string.Equals(u.Hash, fileToUpload.Hash, StringComparison.Ordinal)))
+            if (CurrentUploads.All(u => !HashEquals(u.Hash, fileToUpload.Hash)))
             {
                 CurrentUploads.Add(new UploadFileTransfer(fileToUpload)
                 {
@@ -212,7 +218,7 @@ public sealed class FileUploadManager : DisposableMediatorSubscriberBase
             Logger.LogDebug("[{hash}] Compressing for reshare", fileToUpload.Hash);
             var data = await _fileDbManager.GetCompressedFileData(fileToUpload.Hash, ct).ConfigureAwait(false);
 
-            var uploadItem = CurrentUploads.FirstOrDefault(e => string.Equals(e.Hash, data.Item1, StringComparison.Ordinal));
+            var uploadItem = CurrentUploads.FirstOrDefault(e => HashEquals(e.Hash, data.Item1));
             if (uploadItem != null)
             {
                 uploadItem.Total = data.Item2.Length;
@@ -238,7 +244,7 @@ public sealed class FileUploadManager : DisposableMediatorSubscriberBase
             _modUploadHashes.Remove(fileToUpload.Hash);
             if (addedUploadItem)
             {
-                CurrentUploads.RemoveAll(u => string.Equals(u.Hash, fileToUpload.Hash, StringComparison.Ordinal));
+                CurrentUploads.RemoveAll(u => HashEquals(u.Hash, fileToUpload.Hash));
             }
         }
     }
@@ -257,7 +263,8 @@ public sealed class FileUploadManager : DisposableMediatorSubscriberBase
         progress.Report($"Starting upload for {filesPresentLocally.Count} files");
 
         var uids = (recipients ?? []).Select(r => r.UID).Where(u => !string.IsNullOrWhiteSpace(u)).Distinct(StringComparer.Ordinal).ToList();
-        var filesToUpload = await FilesSend([.. filesPresentLocally], uids, ct, modFolderNames, modInfo).ConfigureAwait(false);
+            var filesToUpload = await FilesSend([.. filesPresentLocally], uids, ct, modFolderNames, modInfo).ConfigureAwait(false);
+            Logger.LogDebug("FilesSend requested {requested} hashes for {recipientCount} recipients, server requested upload for {uploadCount} entries", filesPresentLocally.Count, uids.Count, filesToUpload.Count);
 
         if (filesToUpload.Exists(f => f.IsForbidden))
         {
@@ -265,7 +272,7 @@ public sealed class FileUploadManager : DisposableMediatorSubscriberBase
         }
 
         var uniqueFilesToUpload = new List<UploadFileDto>(filesToUpload.Count);
-        var seenUploadHashes = new HashSet<string>(StringComparer.Ordinal);
+        var seenUploadHashes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var file in filesToUpload)
         {
             if (file.IsForbidden)
@@ -273,7 +280,7 @@ public sealed class FileUploadManager : DisposableMediatorSubscriberBase
                 continue;
             }
 
-            var hash = file.Hash ?? string.Empty;
+            var hash = NormalizeTransferHash(file.Hash);
             if (string.IsNullOrWhiteSpace(hash) || !seenUploadHashes.Add(hash))
             {
                 continue;
@@ -282,128 +289,138 @@ public sealed class FileUploadManager : DisposableMediatorSubscriberBase
             uniqueFilesToUpload.Add(file);
         }
 
-        foreach (var file in uniqueFilesToUpload)
+        try
         {
-            try
+            foreach (var file in uniqueFilesToUpload)
             {
-                if (CurrentUploads.All(u => !string.Equals(u.Hash, file.Hash, StringComparison.Ordinal)))
+                try
                 {
-                    CurrentUploads.Add(new UploadFileTransfer(file)
+                    if (CurrentUploads.All(u => !HashEquals(u.Hash, file.Hash)))
                     {
-                        Total = new FileInfo(_fileDbManager.GetFileCacheByHash(file.Hash)!.ResolvedFilepath).Length,
-                    });
-                }
-
-                if (modFolderNames != null && modFolderNames.ContainsKey(file.Hash))
-                {
-                    _modUploadHashes.Add(file.Hash);
-                }
-            }
-            catch (Exception ex)
-            {
-                Logger.LogWarning(ex, "Tried to request file {hash} but file was not present", file.Hash);
-            }
-        }
-
-        var skippedTooLarge = new List<string>();
-        var failed = new List<string>();
-
-        Task<UploadSingleFileResult>? uploadTask = null;
-        string? uploadTaskHash = null;
-        int i = 1;
-        foreach (var file in uniqueFilesToUpload)
-        {
-            progress.Report($"Uploading file {i++}/{uniqueFilesToUpload.Count}. Please wait until the upload is completed.");
-            var cacheEntry = _fileDbManager.GetFileCacheByHash(file.Hash);
-            var localPath = cacheEntry?.ResolvedFilepath ?? string.Empty;
-            if (!string.IsNullOrWhiteSpace(localPath) && File.Exists(localPath))
-            {
-                var fileSizeBytes = new FileInfo(localPath).Length;
-                if (fileSizeBytes >= MaxUploadSizeBytes)
-                {
-                    if (uploadTask != null && uploadTaskHash != null)
-                    {
-                        var result = await uploadTask.ConfigureAwait(false);
-                        AddUploadResult(uploadTaskHash, result, skippedTooLarge, failed);
-                        uploadTask = null;
-                        uploadTaskHash = null;
+                        CurrentUploads.Add(new UploadFileTransfer(file)
+                        {
+                            Total = new FileInfo(_fileDbManager.GetFileCacheByHash(file.Hash)!.ResolvedFilepath).Length,
+                        });
                     }
 
-                    skippedTooLarge.Add(file.Hash);
-                    Logger.LogWarning("[{hash}] Skipping upload: file is {size} and exceeds 1GB", file.Hash, UiSharedService.ByteToString(fileSizeBytes));
-                    continue;
+                    if (modFolderNames != null && modFolderNames.ContainsKey(file.Hash))
+                    {
+                        _modUploadHashes.Add(file.Hash);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogWarning(ex, "Tried to request file {hash} but file was not present", file.Hash);
                 }
             }
 
-            Logger.LogDebug("[{hash}] Compressing", file.Hash);
-            var data = await _fileDbManager.GetCompressedFileData(file.Hash, ct).ConfigureAwait(false);
-            Logger.LogDebug("[{hash}] Starting upload for {filePath}", data.Item1, _fileDbManager.GetFileCacheByHash(data.Item1)!.ResolvedFilepath);
+            var skippedTooLarge = new List<string>();
+            var failed = new List<string>();
+
+            Task<UploadSingleFileResult>? uploadTask = null;
+            string? uploadTaskHash = null;
+            int i = 1;
+            foreach (var file in uniqueFilesToUpload)
+            {
+                progress.Report($"Uploading file {i++}/{uniqueFilesToUpload.Count}. Please wait until the upload is completed.");
+                var cacheEntry = _fileDbManager.GetFileCacheByHash(file.Hash);
+                var localPath = cacheEntry?.ResolvedFilepath ?? string.Empty;
+                if (!string.IsNullOrWhiteSpace(localPath) && File.Exists(localPath))
+                {
+                    var fileSizeBytes = new FileInfo(localPath).Length;
+                    if (fileSizeBytes >= MaxUploadSizeBytes)
+                    {
+                        if (uploadTask != null && uploadTaskHash != null)
+                        {
+                            var result = await uploadTask.ConfigureAwait(false);
+                            AddUploadResult(uploadTaskHash, result, skippedTooLarge, failed);
+                            uploadTask = null;
+                            uploadTaskHash = null;
+                        }
+
+                        skippedTooLarge.Add(file.Hash);
+                        Logger.LogWarning("[{hash}] Skipping upload: file is {size} and exceeds 1GB", file.Hash, UiSharedService.ByteToString(fileSizeBytes));
+                        continue;
+                    }
+                }
+
+                Logger.LogDebug("[{hash}] Compressing", file.Hash);
+                var data = await _fileDbManager.GetCompressedFileData(file.Hash, ct).ConfigureAwait(false);
+                Logger.LogDebug("[{hash}] Starting upload for {filePath}", data.Item1, _fileDbManager.GetFileCacheByHash(data.Item1)!.ResolvedFilepath);
+
+                if (uploadTask != null && uploadTaskHash != null)
+                {
+                    var previousResult = await uploadTask.ConfigureAwait(false);
+                    AddUploadResult(uploadTaskHash, previousResult, skippedTooLarge, failed);
+                }
+
+                var uploadItem = CurrentUploads.FirstOrDefault(e => HashEquals(e.Hash, data.Item1));
+                if (uploadItem != null) uploadItem.Total = data.Item2.Length;
+                uploadTaskHash = file.Hash;
+                uploadTask = UploadFileForUsersAsync(data.Item2, file.Hash, postProgress: true, ct);
+                ct.ThrowIfCancellationRequested();
+            }
 
             if (uploadTask != null && uploadTaskHash != null)
             {
-                var previousResult = await uploadTask.ConfigureAwait(false);
-                AddUploadResult(uploadTaskHash, previousResult, skippedTooLarge, failed);
+                var lastResult = await uploadTask.ConfigureAwait(false);
+                AddUploadResult(uploadTaskHash, lastResult, skippedTooLarge, failed);
             }
 
-            var uploadItem = CurrentUploads.FirstOrDefault(e => string.Equals(e.Hash, data.Item1, StringComparison.Ordinal));
-            if (uploadItem != null) uploadItem.Total = data.Item2.Length;
-            uploadTaskHash = file.Hash;
-            uploadTask = UploadFileForUsersAsync(data.Item2, file.Hash, postProgress: true, ct);
-            ct.ThrowIfCancellationRequested();
-        }
-
-        if (uploadTask != null && uploadTaskHash != null)
-        {
-            var lastResult = await uploadTask.ConfigureAwait(false);
-            AddUploadResult(uploadTaskHash, lastResult, skippedTooLarge, failed);
-        }
-
-        var failedSet = new HashSet<string>(failed, StringComparer.Ordinal);
-        var skippedTooLargeSet = new HashSet<string>(skippedTooLarge, StringComparer.Ordinal);
-        var successfulHashes = new List<string>(uniqueFilesToUpload.Count);
-        foreach (var file in uniqueFilesToUpload)
-        {
-            if (failedSet.Contains(file.Hash) || skippedTooLargeSet.Contains(file.Hash))
+            var failedSet = new HashSet<string>(failed, StringComparer.Ordinal);
+            var skippedTooLargeSet = new HashSet<string>(skippedTooLarge, StringComparer.Ordinal);
+            var successfulHashes = new List<string>(uniqueFilesToUpload.Count);
+            foreach (var file in uniqueFilesToUpload)
             {
-                continue;
-            }
-
-            successfulHashes.Add(file.Hash);
-        }
-
-        if (successfulHashes.Count > 0 && uids.Count > 0)
-        {
-            var remaining = await FilesSend(successfulHashes, uids, ct, modFolderNames, modInfo).ConfigureAwait(false);
-            foreach (var file in remaining)
-            {
-                if (file.IsForbidden)
+                if (failedSet.Contains(file.Hash) || skippedTooLargeSet.Contains(file.Hash))
                 {
                     continue;
                 }
 
-                if (!failedSet.Contains(file.Hash))
+                successfulHashes.Add(file.Hash);
+            }
+
+            CurrentUploads.Clear();
+            _modUploadHashes.Clear();
+
+            if (successfulHashes.Count > 0 && uids.Count > 0)
+            {
+                var remaining = await FilesSend(successfulHashes, uids, ct, modFolderNames, modInfo).ConfigureAwait(false);
+                foreach (var file in remaining)
                 {
-                    failed.Add(file.Hash);
-                    failedSet.Add(file.Hash);
+                    if (file.IsForbidden)
+                    {
+                        continue;
+                    }
+
+                    if (!failedSet.Contains(file.Hash))
+                    {
+                        failed.Add(file.Hash);
+                        failedSet.Add(file.Hash);
+                    }
                 }
             }
+
+            return new UploadFilesForUsersResult([], [], skippedTooLarge, failed);
         }
-
-        CurrentUploads.Clear();
-        _modUploadHashes.Clear();
-
-        return new UploadFilesForUsersResult([], [], skippedTooLarge, failed);
+        finally
+        {
+            CurrentUploads.Clear();
+            _modUploadHashes.Clear();
+        }
     }
 
-    private static void AddUploadResult(string hash, UploadSingleFileResult result, List<string> skippedTooLarge, List<string> failed)
+    private void AddUploadResult(string hash, UploadSingleFileResult result, List<string> skippedTooLarge, List<string> failed)
     {
         switch (result)
         {
             case UploadSingleFileResult.SkippedTooLarge:
                 skippedTooLarge.Add(hash);
+                MarkUploadCompleted(hash);
                 break;
             case UploadSingleFileResult.Failed:
                 failed.Add(hash);
+                MarkUploadCompleted(hash);
                 break;
         }
     }
@@ -463,8 +480,7 @@ public sealed class FileUploadManager : DisposableMediatorSubscriberBase
             {
                 try
                 {
-                    var uploadItem = CurrentUploads.FirstOrDefault(f => string.Equals(f.Hash, fileHash, StringComparison.Ordinal));
-                    if (uploadItem != null) uploadItem.Transferred = prog.Uploaded;
+                    UpdateUploadProgress(fileHash, prog.Uploaded);
                 }
                 catch (Exception ex)
                 {
@@ -489,6 +505,7 @@ public sealed class FileUploadManager : DisposableMediatorSubscriberBase
 
             if (response.IsSuccessStatusCode)
             {
+                MarkUploadCompleted(fileHash);
                 _verifiedUploadedHashes[fileHash] = DateTime.UtcNow;
                 return UploadSingleFileResult.Success;
             }
@@ -684,8 +701,7 @@ public sealed class FileUploadManager : DisposableMediatorSubscriberBase
         {
             try
             {
-                var uploadItem = CurrentUploads.FirstOrDefault(f => string.Equals(f.Hash, fileHash, StringComparison.Ordinal));
-                if (uploadItem != null) uploadItem.Transferred = prog.Uploaded;
+                UpdateUploadProgress(fileHash, prog.Uploaded);
             }
             catch (Exception ex)
             {
@@ -701,6 +717,10 @@ public sealed class FileUploadManager : DisposableMediatorSubscriberBase
         else
             response = await _orchestrator.SendRequestStreamAsync(HttpMethod.Post, SpheneFiles.ServerFilesUploadMunged(_orchestrator.FilesCdnUri!, fileHash), streamContent, uploadToken).ConfigureAwait(false);
         Logger.LogDebug("[{hash}] Upload Status: {status}", fileHash, response.StatusCode);
+        if (response.IsSuccessStatusCode)
+        {
+            MarkUploadCompleted(fileHash);
+        }
     }
 
     private async Task UploadUnverifiedFiles(HashSet<string> unverifiedUploadHashes, List<UserData> visiblePlayers, CancellationToken uploadToken)
@@ -710,14 +730,17 @@ public sealed class FileUploadManager : DisposableMediatorSubscriberBase
         Logger.LogDebug("Verifying {count} files", unverifiedUploadHashes.Count);
         var filesToUpload = await FilesSend([.. unverifiedUploadHashes], visiblePlayers.Select(p => p.UID).ToList(), uploadToken).ConfigureAwait(false);
 
-        foreach (var file in filesToUpload.Where(f => !f.IsForbidden).DistinctBy(f => f.Hash))
+        foreach (var file in filesToUpload.Where(f => !f.IsForbidden).DistinctBy(f => NormalizeTransferHash(f.Hash), StringComparer.OrdinalIgnoreCase))
         {
             try
             {
-                CurrentUploads.Add(new UploadFileTransfer(file)
+                if (CurrentUploads.All(u => !HashEquals(u.Hash, file.Hash)))
                 {
-                    Total = new FileInfo(_fileDbManager.GetFileCacheByHash(file.Hash)!.ResolvedFilepath).Length,
-                });
+                    CurrentUploads.Add(new UploadFileTransfer(file)
+                    {
+                        Total = new FileInfo(_fileDbManager.GetFileCacheByHash(file.Hash)!.ResolvedFilepath).Length,
+                    });
+                }
             }
             catch (Exception ex)
             {
@@ -727,7 +750,7 @@ public sealed class FileUploadManager : DisposableMediatorSubscriberBase
 
         foreach (var file in filesToUpload.Where(c => c.IsForbidden))
         {
-            if (_orchestrator.ForbiddenTransfers.TrueForAll(f => !string.Equals(f.Hash, file.Hash, StringComparison.Ordinal)))
+            if (_orchestrator.ForbiddenTransfers.TrueForAll(f => !HashEquals(f.Hash, file.Hash)))
             {
                 _orchestrator.ForbiddenTransfers.Add(new UploadFileTransfer(file)
                 {
@@ -738,49 +761,96 @@ public sealed class FileUploadManager : DisposableMediatorSubscriberBase
             _verifiedUploadedHashes[file.Hash] = DateTime.UtcNow;
         }
 
-        var totalSize = CurrentUploads.Sum(c => c.Total);
-        Logger.LogDebug("Compressing and uploading files");
-        var uploadTasks = new List<Task>();
-        var maxParallelUploads = _SpheneConfigService.Current.ParallelDownloads; // Reuse the parallel downloads setting
-        using var semaphore = new SemaphoreSlim(maxParallelUploads, maxParallelUploads);
-        
-        foreach (var file in CurrentUploads.Where(f => f.CanBeTransferred && !f.IsTransferred).ToList())
+        try
         {
-            var uploadTask = Task.Run(async () =>
+            var totalSize = CurrentUploads.Sum(c => c.Total);
+            Logger.LogDebug("Compressing and uploading files");
+            var uploadTasks = new List<Task>();
+            var maxParallelUploads = Math.Max(1, _SpheneConfigService.Current.ParallelDownloads);
+            using var semaphore = new SemaphoreSlim(maxParallelUploads, maxParallelUploads);
+
+            foreach (var file in CurrentUploads.Where(f => f.CanBeTransferred && !f.IsTransferred).ToList())
             {
-                await semaphore.WaitAsync(uploadToken).ConfigureAwait(false);
-                try
+                var uploadTask = Task.Run(async () =>
                 {
-                    Logger.LogDebug("[{hash}] Compressing", file);
-                    var data = await _fileDbManager.GetCompressedFileData(file.Hash, uploadToken).ConfigureAwait(false);
-                    var uploadItem = CurrentUploads.FirstOrDefault(e => string.Equals(e.Hash, data.Item1, StringComparison.Ordinal));
-                    if (uploadItem != null) uploadItem.Total = data.Item2.Length;
-                    Logger.LogDebug("[{hash}] Starting upload for {filePath}", data.Item1, _fileDbManager.GetFileCacheByHash(data.Item1)!.ResolvedFilepath);
-                    await UploadFile(data.Item2, file.Hash, true, uploadToken).ConfigureAwait(false);
-                    uploadToken.ThrowIfCancellationRequested();
-                }
-                finally
-                {
-                    semaphore.Release();
-                }
-            }, uploadToken);
-            
-            uploadTasks.Add(uploadTask);
-        }
+                    await semaphore.WaitAsync(uploadToken).ConfigureAwait(false);
+                    try
+                    {
+                        Logger.LogDebug("[{hash}] Compressing", file);
+                        var data = await _fileDbManager.GetCompressedFileData(file.Hash, uploadToken).ConfigureAwait(false);
+                        var uploadItem = CurrentUploads.FirstOrDefault(e => HashEquals(e.Hash, data.Item1));
+                        if (uploadItem != null)
+                        {
+                            uploadItem.Total = data.Item2.Length;
+                        }
+                        Logger.LogDebug("[{hash}] Starting upload for {filePath}", data.Item1, _fileDbManager.GetFileCacheByHash(data.Item1)!.ResolvedFilepath);
+                        await UploadFile(data.Item2, file.Hash, true, uploadToken).ConfigureAwait(false);
+                        uploadToken.ThrowIfCancellationRequested();
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogWarning(ex, "[{hash}] Upload task failed", file.Hash);
+                    }
+                    finally
+                    {
+                        semaphore.Release();
+                    }
+                }, uploadToken);
 
-        if (uploadTasks.Any())
+                uploadTasks.Add(uploadTask);
+            }
+
+            if (uploadTasks.Any())
+            {
+                await Task.WhenAll(uploadTasks).ConfigureAwait(false);
+
+                var compressedSize = CurrentUploads.Sum(c => c.Total);
+                Logger.LogDebug("Upload complete, compressed {size} to {compressed}", UiSharedService.ByteToString(totalSize), UiSharedService.ByteToString(compressedSize));
+            }
+
+            foreach (var file in unverifiedUploadHashes.Where(c => !CurrentUploads.Exists(u => HashEquals(u.Hash, c))))
+            {
+                _verifiedUploadedHashes[file] = DateTime.UtcNow;
+            }
+        }
+        finally
         {
-            await Task.WhenAll(uploadTasks).ConfigureAwait(false);
-
-            var compressedSize = CurrentUploads.Sum(c => c.Total);
-            Logger.LogDebug("Upload complete, compressed {size} to {compressed}", UiSharedService.ByteToString(totalSize), UiSharedService.ByteToString(compressedSize));
+            CurrentUploads.Clear();
         }
+    }
 
-        foreach (var file in unverifiedUploadHashes.Where(c => !CurrentUploads.Exists(u => string.Equals(u.Hash, c, StringComparison.Ordinal))))
+    private void UpdateUploadProgress(string fileHash, long uploadedBytes)
+    {
+        var uploadItem = CurrentUploads.FirstOrDefault(f => HashEquals(f.Hash, fileHash));
+        if (uploadItem == null)
         {
-            _verifiedUploadedHashes[file] = DateTime.UtcNow;
+            return;
         }
 
-        CurrentUploads.Clear();
+        var clamped = uploadedBytes;
+        if (uploadItem.Total > 0)
+        {
+            clamped = Math.Min(uploadedBytes, uploadItem.Total);
+        }
+
+        uploadItem.Transferred = Math.Max(uploadItem.Transferred, clamped);
+    }
+
+    private void MarkUploadCompleted(string fileHash)
+    {
+        var uploadItem = CurrentUploads.FirstOrDefault(f => HashEquals(f.Hash, fileHash));
+        if (uploadItem == null)
+        {
+            return;
+        }
+
+        if (uploadItem.Total > 0)
+        {
+            uploadItem.Transferred = uploadItem.Total;
+        }
     }
 }
