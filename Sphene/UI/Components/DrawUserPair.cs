@@ -788,7 +788,10 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         var pauseIcon = _pair.UserPair!.OwnPermissions.IsPaused() ? FontAwesomeIcon.Play : FontAwesomeIcon.Pause;
         var pauseButtonSize = _uiSharedService.GetIconButtonSize(pauseIcon);
         var isOneSidedIndividualPair = _pair.IndividualPairStatus == API.Data.Enum.IndividualPairStatus.OneSided;
-        var rightmostIcon = isOneSidedIndividualPair ? FontAwesomeIcon.User : FontAwesomeIcon.EllipsisV;
+        var isOneSidedIndividualListEntry = isOneSidedIndividualPair
+            && _currentGroup == null
+            && _id.StartsWith(TagHandler.CustomUnpairedTag, StringComparison.Ordinal);
+        var rightmostIcon = isOneSidedIndividualListEntry ? FontAwesomeIcon.User : FontAwesomeIcon.EllipsisV;
         var rightmostButtonSize = _uiSharedService.GetIconButtonSize(rightmostIcon);
         var reloadButtonSize = _pair.IsVisible ? _uiSharedService.GetIconButtonSize(FontAwesomeIcon.Sync) : Vector2.Zero;
         var pairButtonSize = _uiSharedService.GetIconButtonSize(FontAwesomeIcon.Plus);
@@ -807,7 +810,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         ImGui.AlignTextToFramePadding();
         if (_uiSharedService.IconButton(rightmostIcon, null, null, null, null, ButtonStyleKeys.Pair_Menu))
         {
-            if (isOneSidedIndividualPair)
+            if (isOneSidedIndividualListEntry)
             {
                 _displayHandler.OpenProfile(_pair);
             }
@@ -816,7 +819,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
                 ImGui.OpenPopup("User Flyout Menu");
             }
         }
-        UiSharedService.AttachToolTip(isOneSidedIndividualPair
+        UiSharedService.AttachToolTip(isOneSidedIndividualListEntry
             ? "Open profile of " + _pair.UserData.AliasOrUID
             : "Open user menu");
 
@@ -832,7 +835,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
             UiSharedService.AttachToolTip("Reload last received character data");
         }
 
-        if (isOneSidedIndividualPair && !_pair.UserPair.IsOutgoingIndividualPair)
+        if (isOneSidedIndividualListEntry && !_pair.UserPair.IsOutgoingIndividualPair)
         {
             currentRightSide -= (pairButtonSize.X + spacingX);
             ImGui.SameLine(currentRightSide);
@@ -842,6 +845,10 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
             }
             UiSharedService.AttachToolTip("Pair individually with " + _pair.UserData.AliasOrUID);
 
+        }
+
+        if (isOneSidedIndividualListEntry)
+        {
             currentRightSide -= (unpairButtonSize.X + spacingX);
             ImGui.SameLine(currentRightSide);
             if (_uiSharedService.IconButton(FontAwesomeIcon.Trash) && UiSharedService.CtrlPressed())
@@ -851,7 +858,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
             UiSharedService.AttachToolTip("Hold CTRL and click to unpair permanently from " + _pair.UserData.AliasOrUID);
         }
 
-        if (!isOneSidedIndividualPair)
+        if (!isOneSidedIndividualListEntry)
         {
             // Pause/Play button (leftmost of the three)
             currentRightSide -= (pauseButtonSize.X + spacingX);
