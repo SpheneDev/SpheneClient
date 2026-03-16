@@ -8,6 +8,7 @@ namespace Sphene.Interop.Ipc;
 
 public sealed class IpcCallerHeels : IIpcCaller
 {
+    private readonly bool _enableHeelsFastPath = false;
     private readonly ILogger<IpcCallerHeels> _logger;
     private readonly SpheneMediator _spheneMediator;
     private readonly DalamudUtilService _dalamudUtil;
@@ -30,8 +31,11 @@ public sealed class IpcCallerHeels : IIpcCaller
         _heelsOffsetUpdate = pi.GetIpcSubscriber<string, object?>("SimpleHeels.LocalChanged");
         _heelsTagChanged = pi.GetIpcSubscriber<int, string, string?, object?>("SimpleHeels.TagChanged");
 
-        _heelsOffsetUpdate.Subscribe(HeelsOffsetChange);
-        _heelsTagChanged.Subscribe(HeelsTagChanged);
+        if (_enableHeelsFastPath)
+        {
+            _heelsOffsetUpdate.Subscribe(HeelsOffsetChange);
+            _heelsTagChanged.Subscribe(HeelsTagChanged);
+        }
 
         CheckAPI();
     }
@@ -98,7 +102,10 @@ public sealed class IpcCallerHeels : IIpcCaller
 
     public void Dispose()
     {
-        _heelsOffsetUpdate.Unsubscribe(HeelsOffsetChange);
-        _heelsTagChanged.Unsubscribe(HeelsTagChanged);
+        if (_enableHeelsFastPath)
+        {
+            _heelsOffsetUpdate.Unsubscribe(HeelsOffsetChange);
+            _heelsTagChanged.Unsubscribe(HeelsTagChanged);
+        }
     }
 }
