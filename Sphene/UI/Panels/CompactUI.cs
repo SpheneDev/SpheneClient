@@ -1087,7 +1087,11 @@ public class CompactUi : WindowMediatorSubscriberBase
                     ImGui.TextColored(Sphene.UI.Theme.SpheneCustomTheme.CurrentTheme.CompactUpdateHintColor, FontAwesomeIcon.InfoCircle.ToIconString());
                 }
                 ImGui.SameLine();
-                var updateText = _updateBannerInfo?.LatestVersion != null ? $"Update available: {_updateBannerInfo.LatestVersion}" : "Update available";
+                var updateText = _updateBannerInfo?.LatestVersion != null
+                    ? _updateBannerInfo.IsTestBuildUpdate
+                        ? $"Testbuild update available: {_updateBannerInfo.LatestVersion}"
+                        : $"Update available: {_updateBannerInfo.LatestVersion}"
+                    : "Update available";
                 UiSharedService.ColorTextWrapped(updateText, Sphene.UI.Theme.SpheneCustomTheme.CurrentTheme.CompactUpdateHintColor);
                 ImGui.SameLine();
                 if (_uiSharedService.IconTextButton(FontAwesomeIcon.Download, "Open Details"))

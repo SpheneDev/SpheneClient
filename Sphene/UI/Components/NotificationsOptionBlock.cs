@@ -85,6 +85,18 @@ public static class NotificationsOptionBlock
         }
     }
 
+    public static void DrawShowTestBuildUpdatesOption(SpheneConfigService configService, UiSharedService uiShared, string blockId = "ShowTestBuildUpdates")
+    {
+        var showTestBuildUpdates = configService.Current.ShowTestBuildUpdates;
+        if (ImGui.Checkbox("Show testbuild update hints##" + blockId, ref showTestBuildUpdates))
+        {
+            configService.Current.ShowTestBuildUpdates = showTestBuildUpdates;
+            configService.Save();
+        }
+
+        uiShared.DrawHelpText("When enabled, update checks include testbuild versions and show update hints for them.");
+    }
+
     public static bool DrawEnableAreaBoundSyncshellNotificationsOption(SpheneConfigService configService, UiSharedService uiShared, string blockId = "EnableAreaBoundSyncshellNotifications")
     {
         var areaBoundNotifs = configService.Current.ShowAreaBoundSyncshellNotifications;

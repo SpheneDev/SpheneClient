@@ -2336,6 +2336,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         NotificationsOptionBlock.DrawEnableOnlineNotificationsOption(_configService, "NotificationsEnableOnlineNotifications");
         NotificationsOptionBlock.DrawOnlyForIndividualPairsOption(_configService, "NotificationsOnlyForIndividualPairs");
         NotificationsOptionBlock.DrawOnlyForNamedPairsOption(_configService, "NotificationsOnlyForNamedPairs");
+        NotificationsOptionBlock.DrawShowTestBuildUpdatesOption(_configService, _uiShared, "NotificationsShowTestBuildUpdates");
 
         DrawSettingsSectionHeader("Area-bound Syncshell Notifications");
         if (NotificationsOptionBlock.DrawEnableAreaBoundSyncshellNotificationsOption(_configService, _uiShared, "NotificationsEnableAreaBoundSyncshellNotifications"))

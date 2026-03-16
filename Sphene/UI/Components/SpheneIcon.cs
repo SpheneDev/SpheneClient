@@ -611,10 +611,13 @@ public class SpheneIcon : WindowMediatorSubscriberBase
         
         if (_updateAvailable && !_updateToastShown)
         {
+            var toastText = _updateInfo!.IsTestBuildUpdate
+                ? $"Testbuild update available: {_updateInfo.LatestVersion}"
+                : $"Update available: {_updateInfo.LatestVersion}";
             // Publish a toast notification via NotificationService
             Mediator.Publish(new NotificationMessage(
                 "Sphene Update",
-                $"Update available: {_updateInfo!.LatestVersion}",
+                toastText,
                 NotificationType.Info,
                 TimeShownOnScreen: TimeSpan.FromSeconds(10)));
             _updateToastShown = true;

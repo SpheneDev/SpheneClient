@@ -9,4 +9,5 @@ public class UpdateInfo
     public string? Changelog { get; set; }
     public string? DownloadUrl { get; set; }
     public bool IsUpdateAvailable { get; set; }
+    public bool IsTestBuildUpdate { get; set; }
 }
