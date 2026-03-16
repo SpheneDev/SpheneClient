@@ -30,8 +30,10 @@ public sealed class IpcCallerHeels : IIpcCaller
         _heelsOffsetUpdate = pi.GetIpcSubscriber<string, object?>("SimpleHeels.LocalChanged");
         _heelsTagChanged = pi.GetIpcSubscriber<int, string, string?, object?>("SimpleHeels.TagChanged");
 
-        _heelsOffsetUpdate.Subscribe(HeelsOffsetChange);
-        _heelsTagChanged.Subscribe(HeelsTagChanged);
+
+            _heelsOffsetUpdate.Subscribe(HeelsOffsetChange);
+            _heelsTagChanged.Subscribe(HeelsTagChanged);
+
 
         CheckAPI();
     }
@@ -40,14 +42,14 @@ public sealed class IpcCallerHeels : IIpcCaller
 
     private void HeelsOffsetChange(string offset)
     {
-        _spheneMediator.Publish(new HeelsOffsetMessage(offset));
+        _spheneMediator.Publish(new HeelsOffsetMessage());
     }
 
     private void HeelsTagChanged(int gameObjectIndex, string tag, string? value)
     {
         _logger.LogTrace("SimpleHeels tag changed for object {index}: {tag} = {value}", gameObjectIndex, tag, value ?? "null");
         // Tag changes can affect character appearance, so trigger a heels update
-        _spheneMediator.Publish(new HeelsOffsetMessage(value));
+        _spheneMediator.Publish(new HeelsOffsetMessage());
     }
 
     public async Task<string> GetOffsetAsync()
@@ -98,7 +100,7 @@ public sealed class IpcCallerHeels : IIpcCaller
 
     public void Dispose()
     {
-        _heelsOffsetUpdate.Unsubscribe(HeelsOffsetChange);
-        _heelsTagChanged.Unsubscribe(HeelsTagChanged);
+            _heelsOffsetUpdate.Unsubscribe(HeelsOffsetChange);
+            _heelsTagChanged.Unsubscribe(HeelsTagChanged);
     }
 }
