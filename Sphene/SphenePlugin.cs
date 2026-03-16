@@ -7,6 +7,7 @@ using Sphene.Services.Mediator;
 using Sphene.Services.ServerConfiguration;
 using Sphene.UI;
 using Sphene.UI.Theme;
+using Sphene.WebAPI;
 using Sphene.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -196,8 +197,13 @@ public class SphenePlugin : MediatorSubscriberBase, IHostedService
             _runtimeServiceScope = _serviceScopeFactory.CreateScope();
             _runtimeServiceScope.ServiceProvider.GetRequiredService<UiService>();
             _runtimeServiceScope.ServiceProvider.GetRequiredService<CommandManagerService>();
+            var apiController = _runtimeServiceScope.ServiceProvider.GetRequiredService<ApiController>();
             if (!_SpheneConfigService.Current.HasValidSetup() || !_serverConfigurationManager.HasValidConfig())
             {
+                if (apiController.IsTransientDisconnectInProgress)
+                {
+                    return;
+                }
                 Mediator.Publish(new SwitchToIntroUiMessage());
                 return;
             }

@@ -61,6 +61,12 @@ public class AcknowledgmentTimeoutManager : DisposableMediatorSubscriberBase
 
     private async void CheckTimeouts(object? state)
     {
+        if (ShouldPauseTimeoutProcessing())
+        {
+            DeferTimeouts(TimeSpan.FromMilliseconds(CheckIntervalMs));
+            return;
+        }
+
         var now = DateTimeOffset.Now;
         
         // Check regular acknowledgment timeouts
@@ -116,6 +122,12 @@ public class AcknowledgmentTimeoutManager : DisposableMediatorSubscriberBase
 
         try
         {
+            if (ShouldPauseTimeoutProcessing())
+            {
+                _pendingTimeouts[entry.AcknowledgmentId] = entry with { StartTime = DateTimeOffset.Now };
+                return;
+            }
+
             // Validate the current hash with the server
             var currentUserUID = _apiController.Value.UID;
             if (string.IsNullOrEmpty(currentUserUID))
@@ -161,6 +173,12 @@ public class AcknowledgmentTimeoutManager : DisposableMediatorSubscriberBase
 
     private Task HandleExpiredInvalidHash(InvalidHashTimeoutEntry entry)
     {
+        if (ShouldPauseTimeoutProcessing())
+        {
+            _invalidHashTimeouts[entry.UserUID] = entry with { StartTime = DateTimeOffset.Now };
+            return Task.CompletedTask;
+        }
+
         Logger.LogDebug("Handling expired invalid hash for user {user} after {elapsed}ms", 
             entry.UserUID, (DateTimeOffset.Now - entry.StartTime).TotalMilliseconds);
 
@@ -218,4 +236,23 @@ public class AcknowledgmentTimeoutManager : DisposableMediatorSubscriberBase
         string UserUID,
         string DataHash,
         DateTimeOffset StartTime);
+
+    private bool ShouldPauseTimeoutProcessing()
+    {
+        var apiController = _apiController.Value;
+        return apiController.IsTransientDisconnectInProgress || !apiController.IsConnected;
+    }
+
+    private void DeferTimeouts(TimeSpan delay)
+    {
+        foreach (var entry in _pendingTimeouts.ToArray())
+        {
+            _pendingTimeouts[entry.Key] = entry.Value with { StartTime = entry.Value.StartTime.Add(delay) };
+        }
+
+        foreach (var entry in _invalidHashTimeouts.ToArray())
+        {
+            _invalidHashTimeouts[entry.Key] = entry.Value with { StartTime = entry.Value.StartTime.Add(delay) };
+        }
+    }
 }

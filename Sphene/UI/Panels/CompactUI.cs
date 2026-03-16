@@ -1036,14 +1036,14 @@ public class CompactUi : WindowMediatorSubscriberBase
         DrawHeaderCard(style);
 
         // 4. Error Text (if any) - Displayed below the header block
-        if (_apiController.ServerState != ServerState.Connected)
+        if (_apiController.DisplayServerState != ServerState.Connected)
         {
              ImGui.Spacing();
              UiSharedService.ColorTextWrapped(GetServerError(), GetServerStatusColor());
         }
 
         
-        if (_apiController.ServerState is ServerState.Connected)
+        if (_apiController.DisplayServerState is ServerState.Connected)
         {            
             // Navigation / Buttons
             _tabMenu.Draw(GetPendingModSharingCount(), false);
@@ -1444,7 +1444,7 @@ public class CompactUi : WindowMediatorSubscriberBase
             }
         }
 
-        if (_apiController.ServerState is ServerState.Connected)
+        if (_apiController.DisplayServerState is ServerState.Connected)
         {
             if (ImGui.IsItemClicked())
             {
@@ -1561,7 +1561,7 @@ public class CompactUi : WindowMediatorSubscriberBase
     private void DrawUidTextInternal(string uidText)
     {
         // Use CompactUidColor for connected state, server status colors for other states
-        var uidColor = _apiController.ServerState == ServerState.Connected 
+        var uidColor = _apiController.DisplayServerState == ServerState.Connected 
             ? SpheneCustomTheme.CurrentTheme.CompactUidColor 
             : GetServerStatusColor();
         
@@ -1755,7 +1755,7 @@ public class CompactUi : WindowMediatorSubscriberBase
 
     private string GetServerError()
     {
-        return _apiController.ServerState switch
+        return _apiController.DisplayServerState switch
         {
             ServerState.Connecting => "Attempting to connect to the server.",
             ServerState.Reconnecting => "Connection to server interrupted, attempting to reconnect to the server.",
@@ -1780,7 +1780,7 @@ public class CompactUi : WindowMediatorSubscriberBase
 
     private Vector4 GetServerStatusColor()
     {
-        return _apiController.ServerState switch
+        return _apiController.DisplayServerState switch
         {
             ServerState.Connecting => SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning,
             ServerState.Reconnecting => SpheneCustomTheme.CurrentTheme.CompactServerStatusError,
@@ -1802,7 +1802,7 @@ public class CompactUi : WindowMediatorSubscriberBase
 
     private string GetUidText()
     {
-        return _apiController.ServerState switch
+        return _apiController.DisplayServerState switch
         {
             ServerState.Reconnecting => "Reconnecting",
             ServerState.Connecting => "Connecting",
@@ -3767,7 +3767,9 @@ public class CompactUi : WindowMediatorSubscriberBase
         
         // --- Status Indicator (Left) ---
         var connectionStatus = string.Empty; 
-        UiSharedService.DrawThemedStatusIndicator(connectionStatus, _apiController.ServerState == ServerState.Connected);
+        UiSharedService.DrawThemedStatusIndicator(connectionStatus,
+            _apiController.DisplayServerState == ServerState.Connected,
+            hasWarning: _apiController.IsTransientDisconnectInProgress);
         ImGui.SameLine();
 
         // Window title - vertically centered

@@ -253,10 +253,45 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
     {
         RefreshAckStatusIfDue();
         using var id = ImRaii.PushId(GetType() + _id);
-        var color = ImRaii.PushColor(ImGuiCol.ChildBg, ImGui.GetColorU32(ImGuiCol.FrameBgHovered), _wasHovered);
+        var hasOfflineGrace = _pairManager.IsUserInOfflineGrace(_pair.UserData);
+        var color = ImRaii.PushColor(ImGuiCol.ChildBg, ImGui.GetColorU32(ImGuiCol.FrameBgHovered), _wasHovered && !hasOfflineGrace);
         var baseFolderWidth = UiSharedService.GetBaseFolderWidth() + 9.0f;
         using (ImRaii.Child(GetType() + _id, new System.Numerics.Vector2(baseFolderWidth, ImGui.GetFrameHeight()), false, ImGuiWindowFlags.NoScrollbar))
         {
+            if (hasOfflineGrace)
+            {
+                var rowStart = ImGui.GetCursorScreenPos();
+                var gradientWidth = baseFolderWidth * 0.42f;
+                var rowEnd = new Vector2(rowStart.X + gradientWidth, rowStart.Y + ImGui.GetFrameHeight());
+                var drawList = ImGui.GetWindowDrawList();
+                var startColor = new Vector4(1.0f, 0.66f, 0.26f, _wasHovered ? 0.46f : 0.36f);
+                var endColor = new Vector4(1.0f, 0.66f, 0.26f, 0.0f);
+                var width = rowEnd.X - rowStart.X;
+                var slices = Math.Clamp((int)(width / 8.0f), 8, 64);
+                var step = width / slices;
+                var rounding = ImGui.GetFrameHeight() * 0.38f;
+                for (int i = 0; i < slices; i++)
+                {
+                    var x0 = rowStart.X + step * i;
+                    var x1 = i == slices - 1 ? rowEnd.X : rowStart.X + step * (i + 1);
+                    var t = (float)i / (float)(slices - 1);
+                    var gradientColor = Vector4.Lerp(startColor, endColor, t);
+                    var flags = ImDrawFlags.None;
+                    var cornerRadius = 0.0f;
+                    if (i == 0)
+                    {
+                        flags = ImDrawFlags.RoundCornersLeft;
+                        cornerRadius = rounding;
+                    }
+                    else if (i == slices - 1)
+                    {
+                        flags = ImDrawFlags.RoundCornersRight;
+                        cornerRadius = rounding;
+                    }
+                    drawList.AddRectFilled(new Vector2(x0, rowStart.Y), new Vector2(x1, rowEnd.Y), ImGui.ColorConvertFloat4ToU32(gradientColor), cornerRadius, flags);
+                }
+            }
+
             DrawLeftSide();
             ImGui.SameLine();
             var posX = ImGui.GetCursorPosX();

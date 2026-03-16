@@ -46,6 +46,12 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
     private CensusUpdateMessage? _lastCensus;
     private readonly ConcurrentDictionary<string, FileTransferAckMessage> _pendingFileTransferAcks = new(StringComparer.Ordinal);
     private readonly SemaphoreSlim _connectionLifecycleGate = new(1, 1);
+    private readonly SemaphoreSlim _disconnectSimulationGate = new(1, 1);
+    private CancellationTokenSource? _disconnectGraceTokenSource;
+    private bool _hasPendingDisconnectGrace;
+    private bool _showConnectedDuringGrace;
+    private DateTimeOffset _suppressInfoMessagesUntil = DateTimeOffset.MinValue;
+    private readonly TimeSpan _disconnectGraceWindow = TimeSpan.FromSeconds(10);
 
     public ApiController(ILogger<ApiController> logger, HubFactory hubFactory, DalamudUtilService dalamudUtil,
         PairManager pairManager, ServerConfigurationManager serverManager, SpheneMediator mediator,
@@ -102,6 +108,11 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
 
     public ServerInfo ServerInfo => _connectionDto?.ServerInfo ?? new ServerInfo();
 
+    public ServerState DisplayServerState
+        => (_showConnectedDuringGrace || _hasPendingDisconnectGrace) ? ServerState.Connected : ServerState;
+    public bool IsTransientDisconnectInProgress => _hasPendingDisconnectGrace;
+    public bool IsDisconnectSimulationRunning { get; private set; }
+
     public ServerState ServerState
     {
         get => _serverState;
@@ -119,6 +130,67 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
     public async Task<bool> CheckClientHealth()
     {
         return await _spheneHub!.InvokeAsync<bool>(nameof(CheckClientHealth)).ConfigureAwait(false);
+    }
+
+    private bool ShouldSuppressInfoServerMessage()
+    {
+        if (_doNotNotifyOnNextInfo)
+        {
+            _doNotNotifyOnNextInfo = false;
+            return true;
+        }
+
+        if (IsTransientDisconnectInProgress)
+        {
+            return true;
+        }
+
+        return DateTimeOffset.UtcNow < _suppressInfoMessagesUntil;
+    }
+
+    private void SuppressInfoServerMessagesFor(TimeSpan duration)
+    {
+        var until = DateTimeOffset.UtcNow.Add(duration);
+        if (until > _suppressInfoMessagesUntil)
+        {
+            _suppressInfoMessagesUntil = until;
+        }
+    }
+
+    public async Task SimulateDisconnectForTestingAsync(TimeSpan disconnectDuration)
+    {
+        if (disconnectDuration < TimeSpan.FromSeconds(1))
+        {
+            disconnectDuration = TimeSpan.FromSeconds(1);
+        }
+
+        if (disconnectDuration > TimeSpan.FromMinutes(5))
+        {
+            disconnectDuration = TimeSpan.FromMinutes(5);
+        }
+
+        await _disconnectSimulationGate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            IsDisconnectSimulationRunning = true;
+            Logger.LogInformation("Starting disconnect simulation for {seconds}s", disconnectDuration.TotalSeconds);
+            await StopConnectionAsync(ServerState.Disconnected, useGrace: true).ConfigureAwait(false);
+            await Task.Delay(disconnectDuration).ConfigureAwait(false);
+
+            if (_serverManager.CurrentServer == null || _serverManager.CurrentServer.FullPause)
+            {
+                Logger.LogInformation("Disconnect simulation ended without reconnect because server is paused or unavailable");
+                return;
+            }
+
+            Logger.LogInformation("Disconnect simulation reconnecting now");
+            await CreateConnectionsAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            IsDisconnectSimulationRunning = false;
+            _disconnectSimulationGate.Release();
+        }
     }
 
     public async Task CreateConnectionsAsync()
@@ -254,9 +326,15 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
 
                     await _spheneHub.StartAsync(token).ConfigureAwait(false);
 
-                    _connectionDto = await GetConnectionDto().ConfigureAwait(false);
+                    var preserveUiDuringGraceReconnect = _hasPendingDisconnectGrace;
+                    if (preserveUiDuringGraceReconnect)
+                    {
+                        SuppressInfoServerMessagesFor(TimeSpan.FromSeconds(20));
+                    }
+                    _connectionDto = await GetConnectionDtoAsync(publishConnected: !preserveUiDuringGraceReconnect).ConfigureAwait(false);
 
                     ServerState = ServerState.Connected;
+                    CancelPendingDisconnectGrace(clearUiGraceOnly: false);
                     _healthMonitor.RecordSuccessfulConnection();
 
                     var currentClientVer = Assembly.GetExecutingAssembly().GetName().Version!;
@@ -316,8 +394,15 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
                         _naggedAboutLod = false;
                     }
 
-                    await LoadIninitialPairsAsync().ConfigureAwait(false);
-                    await LoadOnlinePairsAsync().ConfigureAwait(false);
+                    if (preserveUiDuringGraceReconnect)
+                    {
+                        Logger.LogDebug("CreateConnections completed within grace window, skipping full UI/data rebuild");
+                    }
+                    else
+                    {
+                        await LoadIninitialPairsAsync().ConfigureAwait(false);
+                        await LoadOnlinePairsAsync().ConfigureAwait(false);
+                    }
                 }
                 catch (OperationCanceledException)
                 {
@@ -622,10 +707,7 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
 
     private void SpheneHubOnClosed(Exception? arg)
     {
-        if (_healthCheckTokenSource is not null)
-            _ = _healthCheckTokenSource.CancelAsync();
-        Mediator.Publish(new DisconnectedMessage());
-        ServerState = ServerState.Offline;
+        _ = Task.Run(async () => await StopConnectionAsync(ServerState.Offline, useGrace: true).ConfigureAwait(false));
         if (arg != null)
         {
             Logger.LogWarning(arg, "Connection closed");
@@ -638,6 +720,7 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
 
     private async Task SpheneHubOnReconnectedAsync()
     {
+        var reconnectedDuringGrace = _hasPendingDisconnectGrace;
         ServerState = ServerState.Reconnecting;
         try
         {
@@ -649,10 +732,22 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
                 return;
             }
             ServerState = ServerState.Connected;
+            CancelPendingDisconnectGrace(clearUiGraceOnly: false);
+            if (reconnectedDuringGrace)
+            {
+                SuppressInfoServerMessagesFor(TimeSpan.FromSeconds(20));
+            }
             await FlushPendingFileTransferAcksAsync().ConfigureAwait(false);
-            await LoadIninitialPairsAsync().ConfigureAwait(false);
-            await LoadOnlinePairsAsync().ConfigureAwait(false);
-            Mediator.Publish(new ConnectedMessage(_connectionDto));
+            if (reconnectedDuringGrace)
+            {
+                Logger.LogDebug("Reconnect completed within grace window, skipping full UI/data rebuild");
+            }
+            else
+            {
+                await LoadIninitialPairsAsync().ConfigureAwait(false);
+                await LoadOnlinePairsAsync().ConfigureAwait(false);
+                Mediator.Publish(new ConnectedMessage(_connectionDto));
+            }
         }
         catch (Exception ex)
         {
@@ -666,10 +761,18 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
         _doNotNotifyOnNextInfo = true;
         if (_healthCheckTokenSource is not null)
             _ = _healthCheckTokenSource.CancelAsync();
+        if (_connectionDto != null)
+        {
+            _hasPendingDisconnectGrace = true;
+            _showConnectedDuringGrace = true;
+        }
         ServerState = ServerState.Reconnecting;
         Logger.LogWarning(arg, "Connection closed... Reconnecting");
-        Mediator.Publish(new EventMessage(new Services.Events.Event(nameof(ApiController), Services.Events.EventSeverity.Warning,
-            $"Connection interrupted, reconnecting to {_serverManager.CurrentServer.ServerName}")));
+        if (!_showConnectedDuringGrace)
+        {
+            Mediator.Publish(new EventMessage(new Services.Events.Event(nameof(ApiController), Services.Events.EventSeverity.Warning,
+                $"Connection interrupted, reconnecting to {_serverManager.CurrentServer.ServerName}")));
+        }
 
     }
 
@@ -705,13 +808,20 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
         return requireReconnect;
     }
 
-    private async Task StopConnectionAsync(ServerState state)
+    private async Task StopConnectionAsync(ServerState state, bool useGrace = false)
     {
+        if (useGrace && _connectionDto != null)
+        {
+            _hasPendingDisconnectGrace = true;
+            _showConnectedDuringGrace = true;
+            SuppressInfoServerMessagesFor(TimeSpan.FromSeconds(20));
+        }
         ServerState = ServerState.Disconnecting;
 
         Logger.LogDebug("Stopping existing connection");
         await _hubFactory.DisposeHubAsync().ConfigureAwait(false);
 
+        var hadHub = _spheneHub is not null;
         if (_spheneHub is not null)
         {
             Mediator.Publish(new EventMessage(new Services.Events.Event(nameof(ApiController), Services.Events.EventSeverity.Informational,
@@ -720,12 +830,74 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
             _initialized = false;
             if (_healthCheckTokenSource is not null)
                 await _healthCheckTokenSource.CancelAsync().ConfigureAwait(false);
-            Mediator.Publish(new DisconnectedMessage());
             _spheneHub = null;
+        }
+
+        if (useGrace && hadHub && state is ServerState.Disconnected or ServerState.Offline)
+        {
+            StartDisconnectGrace();
+        }
+        else
+        {
+            if (!useGrace && !hadHub && _hasPendingDisconnectGrace && state == ServerState.Disconnected)
+            {
+                Logger.LogDebug("Suppressing disconnected publish during grace reconnect");
+                ServerState = state;
+                return;
+            }
+
+            var shouldPublishDisconnected = hadHub || _hasPendingDisconnectGrace;
+            CancelPendingDisconnectGrace(clearUiGraceOnly: false);
+            if (shouldPublishDisconnected)
+            {
+                Mediator.Publish(new DisconnectedMessage());
+            }
             _connectionDto = null;
         }
 
         ServerState = state;
+    }
+
+    private void StartDisconnectGrace()
+    {
+        CancelPendingDisconnectGrace(clearUiGraceOnly: true);
+        _hasPendingDisconnectGrace = true;
+        _showConnectedDuringGrace = _connectionDto != null;
+        _disconnectGraceTokenSource = new CancellationTokenSource();
+        var token = _disconnectGraceTokenSource.Token;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(_disconnectGraceWindow, token).ConfigureAwait(false);
+                if (token.IsCancellationRequested || ServerState == ServerState.Connected)
+                {
+                    return;
+                }
+
+                _hasPendingDisconnectGrace = false;
+                _showConnectedDuringGrace = false;
+                Mediator.Publish(new DisconnectedMessage());
+                _connectionDto = null;
+            }
+            catch (OperationCanceledException)
+            {
+                Logger.LogDebug("Disconnect grace window cancelled");
+            }
+        }, token);
+    }
+
+    private void CancelPendingDisconnectGrace(bool clearUiGraceOnly)
+    {
+        _disconnectGraceTokenSource?.Cancel();
+        _disconnectGraceTokenSource?.Dispose();
+        _disconnectGraceTokenSource = null;
+        _showConnectedDuringGrace = false;
+        if (!clearUiGraceOnly)
+        {
+            _hasPendingDisconnectGrace = false;
+        }
     }
 
     public void OnAreaBoundSyncshellBroadcast(Action<AreaBoundBroadcastDto> act)

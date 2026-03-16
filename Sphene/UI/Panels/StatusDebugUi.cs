@@ -35,6 +35,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
     private bool _showAcknowledgments = true;
     private bool _showCircuitBreaker = true;
     private bool _showConnections = true;
+    private int _simulatedDisconnectSeconds = 3;
     private string? _selectedCharacterDebugUid;
     private string? _selectedCharacterStatsUid;
     private readonly Dictionary<string, CharacterStatsSnapshot> _characterStats = new(StringComparer.Ordinal);
@@ -495,20 +496,38 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         if (ImGui.Button("Force Reconnect"))
         {
             LogCommunication("[DEBUG] Force reconnect triggered");
-            // Trigger reconnection logic here if available
+            _ = _apiController.CreateConnectionsAsync();
         }
         
         ImGui.SameLine();
         if (ImGui.Button("Refresh Pairs"))
         {
             LogCommunication("[DEBUG] Pair refresh triggered");
-            // Trigger pair refresh logic here if available
+            _ = _apiController.CreateConnectionsAsync();
         }
         
         ImGui.SameLine();
         if (ImGui.Button("Clear Log"))
         {
             _communicationLog = "Communication Log:\n";
+        }
+
+        ImGui.Spacing();
+        ImGui.Text("Disconnect Simulation:");
+        _simulatedDisconnectSeconds = Math.Clamp(_simulatedDisconnectSeconds, 1, 300);
+        ImGui.SetNextItemWidth(140f * ImGuiHelpers.GlobalScale);
+        ImGui.SliderInt("Duration (seconds)##DisconnectSimulationDuration", ref _simulatedDisconnectSeconds, 1, 300);
+
+        if (ImGui.Button("Simulate Real Disconnect"))
+        {
+            LogCommunication($"[DEBUG] Simulating real disconnect for {_simulatedDisconnectSeconds}s");
+            _ = _apiController.SimulateDisconnectForTestingAsync(TimeSpan.FromSeconds(_simulatedDisconnectSeconds));
+        }
+
+        if (_apiController.IsDisconnectSimulationRunning)
+        {
+            ImGui.SameLine();
+            UiSharedService.ColorText("Simulation running...", ImGuiColors.DalamudYellow);
         }
     }
     

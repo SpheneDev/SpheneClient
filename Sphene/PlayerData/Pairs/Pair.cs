@@ -142,6 +142,10 @@ public class Pair : DisposableMediatorSubscriberBase
     {
         try
         {
+            if (_apiController.Value.IsTransientDisconnectInProgress)
+            {
+                return;
+            }
             if (isProximityVisible && _visibilityGateService.IsGateActive)
             {
                 return;

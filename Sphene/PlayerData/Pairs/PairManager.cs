@@ -37,6 +37,8 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
     private readonly Lazy<AreaBoundSyncshellService> _areaBoundSyncshellService;
     private readonly VisibilityGateService _visibilityGateService;
     private readonly Timer _ackStatusPollTimer;
+    private readonly ConcurrentDictionary<string, CancellationTokenSource> _pendingOfflineGrace = new(StringComparer.Ordinal);
+    private readonly TimeSpan _offlineGraceWindow = TimeSpan.FromSeconds(10);
     private int _ackStatusPollRunning = 0;
 
     private volatile bool _localVisibilityGateActive = false;
@@ -159,6 +161,7 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
 
     public void ClearPairs()
     {
+        CancelAllPendingOfflineGrace();
         Logger.LogDebug("Clearing all Pairs");
         DisposePairs();
         _allClientPairs.Clear();
@@ -172,33 +175,72 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
 
     public List<UserData> GetVisibleUsers() => [.. _allClientPairs.Where(p => p.Value.IsMutuallyVisible).Select(p => p.Key)];
 
+    public bool IsUserInOfflineGrace(UserData user)
+    {
+        var key = GetOfflineGraceKey(user);
+        return _pendingOfflineGrace.ContainsKey(key);
+    }
+
     public void MarkPairOffline(UserData user)
     {
-        if (_allClientPairs.TryGetValue(user, out var pair))
-        {
-            Mediator.Publish(new ClearProfileDataMessage(pair.UserData));
-            pair.MarkOffline();
-        }
+        var key = GetOfflineGraceKey(user);
+        CancelPendingOfflineGraceByKey(key);
+        var cts = new CancellationTokenSource();
+        _pendingOfflineGrace[key] = cts;
 
-        RecreateLazy();
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(_offlineGraceWindow, cts.Token).ConfigureAwait(false);
+
+                if (!_pendingOfflineGrace.TryGetValue(key, out var activeCts) || !ReferenceEquals(activeCts, cts))
+                {
+                    return;
+                }
+
+                if (_allClientPairs.TryGetValue(user, out var pair) && pair.IsOnline)
+                {
+                    Mediator.Publish(new ClearProfileDataMessage(pair.UserData));
+                    pair.MarkOffline();
+                    RecreateLazy();
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                Logger.LogDebug("{tag} Offline grace cancelled for userKey={key}", SyncProgressTag, key);
+            }
+            finally
+            {
+                if (_pendingOfflineGrace.TryGetValue(key, out var activeCts) && ReferenceEquals(activeCts, cts))
+                {
+                    _pendingOfflineGrace.TryRemove(key, out _);
+                }
+
+                cts.Dispose();
+            }
+        });
     }
 
     public void MarkPairOnline(OnlineUserIdentDto dto, bool sendNotif = true)
     {
         if (!_allClientPairs.ContainsKey(dto.User)) throw new InvalidOperationException("No user found for " + dto);
 
-        Mediator.Publish(new ClearProfileDataMessage(dto.User));
+        var key = GetOfflineGraceKey(dto.User);
+        var hadPendingOfflineGrace = CancelPendingOfflineGraceByKey(key);
 
         var pair = _allClientPairs[dto.User];
         var wasOnline = pair.IsOnline;
         pair.UserPair.RemoteClientVersion = dto.ClientVersion;
         if (wasOnline)
         {
-            RecreateLazy();
             return;
         }
 
+        Mediator.Publish(new ClearProfileDataMessage(dto.User));
+
         if (!wasOnline
+            && !hadPendingOfflineGrace
             && sendNotif && _configurationService.Current.ShowOnlineNotifications
             && (_configurationService.Current.ShowOnlineNotificationsOnlyForIndividualPairs && pair.IsDirectlyPaired && !pair.IsOneSidedPair
             || !_configurationService.Current.ShowOnlineNotificationsOnlyForIndividualPairs)
@@ -608,6 +650,7 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
     {
         base.Dispose(disposing);
 
+        CancelAllPendingOfflineGrace();
         _dalamudContextMenu.OnMenuOpened -= DalamudContextMenuOnOnOpenGameObjectContextMenu;
         _ackStatusPollTimer.Dispose();
 
@@ -637,6 +680,36 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         }
 
         RecreateLazy();
+    }
+
+    private static string GetOfflineGraceKey(UserData user)
+    {
+        if (!string.IsNullOrWhiteSpace(user.UID))
+        {
+            return user.UID;
+        }
+
+        return user.AliasOrUID;
+    }
+
+    private bool CancelPendingOfflineGraceByKey(string key)
+    {
+        if (_pendingOfflineGrace.TryRemove(key, out var cts))
+        {
+            cts.Cancel();
+            cts.Dispose();
+            return true;
+        }
+
+        return false;
+    }
+
+    private void CancelAllPendingOfflineGrace()
+    {
+        foreach (var pending in _pendingOfflineGrace.ToArray())
+        {
+            CancelPendingOfflineGraceByKey(pending.Key);
+        }
     }
 
     private Lazy<Dictionary<GroupFullInfoDto, List<Pair>>> GroupPairsLazy()

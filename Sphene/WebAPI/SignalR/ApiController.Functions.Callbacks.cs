@@ -96,9 +96,9 @@ public partial class ApiController
                 break;
 
             case MessageSeverity.Information:
-                if (_doNotNotifyOnNextInfo)
+                if (ShouldSuppressInfoServerMessage())
                 {
-                    _doNotNotifyOnNextInfo = false;
+                    Logger.LogDebug("Suppressing info server message during transient disconnect grace: {message}", message);
                     break;
                 }
                 Mediator.Publish(new NotificationMessage("Info from " + _serverManager.CurrentServer!.ServerName, message, NotificationType.Info, TimeSpan.FromSeconds(5)));
