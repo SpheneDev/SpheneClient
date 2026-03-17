@@ -10,6 +10,7 @@ using Sphene.WebAPI.Files.Models;
 using Microsoft.Extensions.Logging;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Collections.Concurrent;
 
 namespace Sphene.WebAPI.Files;
 
@@ -32,8 +33,9 @@ public sealed class FileUploadManager : DisposableMediatorSubscriberBase
     private readonly SpheneConfigService _SpheneConfigService;
     private readonly FileTransferOrchestrator _orchestrator;
     private readonly ServerConfigurationManager _serverManager;
+    private readonly SemaphoreSlim _uploadStateGate = new(1, 1);
     private readonly HashSet<string> _modUploadHashes = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, DateTime> _verifiedUploadedHashes = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, DateTime> _verifiedUploadedHashes = new(StringComparer.Ordinal);
     private CancellationTokenSource? _uploadCancellationTokenSource = new();
     private DateTime _lastHashCleanup = DateTime.UtcNow;
 
@@ -114,6 +116,9 @@ public sealed class FileUploadManager : DisposableMediatorSubscriberBase
 
     public async Task<List<string>> UploadFiles(List<string> hashesToUpload, IProgress<string> progress, CancellationToken? ct = null)
     {
+        await _uploadStateGate.WaitAsync(ct ?? CancellationToken.None).ConfigureAwait(false);
+        try
+        {
         Logger.LogDebug("Trying to upload files");
         
         // Clean up old verified hashes periodically to prevent memory growth
@@ -123,7 +128,7 @@ public sealed class FileUploadManager : DisposableMediatorSubscriberBase
             var keysToRemove = _verifiedUploadedHashes.Where(kvp => kvp.Value < cutoffTime).Select(kvp => kvp.Key).ToList();
             foreach (var key in keysToRemove)
             {
-                _verifiedUploadedHashes.Remove(key);
+                _verifiedUploadedHashes.TryRemove(key, out _);
             }
             _lastHashCleanup = DateTime.UtcNow;
             Logger.LogDebug("Cleaned up {count} old verified upload hashes", keysToRemove.Count);
@@ -183,10 +188,18 @@ public sealed class FileUploadManager : DisposableMediatorSubscriberBase
         {
             CurrentUploads.Clear();
         }
+        }
+        finally
+        {
+            _uploadStateGate.Release();
+        }
     }
 
     public async Task<CharacterData> UploadFiles(CharacterData data, List<UserData> visiblePlayers)
     {
+        await _uploadStateGate.WaitAsync().ConfigureAwait(false);
+        try
+        {
         CancelUpload();
 
         _uploadCancellationTokenSource = new CancellationTokenSource();
@@ -206,10 +219,18 @@ public sealed class FileUploadManager : DisposableMediatorSubscriberBase
         }
 
         return data;
+        }
+        finally
+        {
+            _uploadStateGate.Release();
+        }
     }
 
     public async Task<bool> ReshareFileAsync(string hash, string recipientUid, string modFolderName, ModInfoDto modInfo, IProgress<string> progress, CancellationToken ct)
     {
+        await _uploadStateGate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
         Logger.LogDebug("Resharing file {hash} to {recipient}", hash, recipientUid);
 
         // 1. Try to tell server to send it
@@ -288,10 +309,18 @@ public sealed class FileUploadManager : DisposableMediatorSubscriberBase
                 CurrentUploads.RemoveAll(u => HashEquals(u.Hash, fileToUpload.Hash));
             }
         }
+        }
+        finally
+        {
+            _uploadStateGate.Release();
+        }
     }
 
     public async Task<UploadFilesForUsersResult> UploadFilesForUsers(List<string> hashesToUpload, List<UserData> recipients, IProgress<string> progress, CancellationToken ct, Dictionary<string, string>? modFolderNames = null, List<ModInfoDto>? modInfo = null)
     {
+        await _uploadStateGate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
         Logger.LogDebug("Trying to upload files for {count} recipients", recipients?.Count ?? 0);
 
         var filesPresentLocally = hashesToUpload.Where(h => _fileDbManager.GetFileCacheByHash(h) != null).ToHashSet(StringComparer.Ordinal);
@@ -448,6 +477,11 @@ public sealed class FileUploadManager : DisposableMediatorSubscriberBase
         {
             CurrentUploads.Clear();
             _modUploadHashes.Clear();
+        }
+        }
+        finally
+        {
+            _uploadStateGate.Release();
         }
     }
 
