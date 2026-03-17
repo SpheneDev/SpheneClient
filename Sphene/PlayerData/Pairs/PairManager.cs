@@ -19,6 +19,8 @@ using System.Collections.Concurrent;
 using Dalamud.Interface.ImGuiNotification;
 using Sphene.API.Dto.Visibility;
 using System.Threading;
+using Sphene.SpheneConfiguration.Configurations;
+using Sphene.Utils;
 
 namespace Sphene.PlayerData.Pairs;
 
@@ -36,9 +38,12 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
     private readonly AcknowledgmentTimeoutManager _acknowledgmentTimeoutManager;
     private readonly Lazy<AreaBoundSyncshellService> _areaBoundSyncshellService;
     private readonly VisibilityGateService _visibilityGateService;
+    private readonly PairCharacterCacheConfigService _pairCharacterCacheConfigService;
+    private readonly DalamudUtilService _dalamudUtilService;
     private readonly Timer _ackStatusPollTimer;
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _pendingOfflineGrace = new(StringComparer.Ordinal);
     private readonly TimeSpan _offlineGraceWindow = TimeSpan.FromSeconds(10);
+    private const int MaxPairCharacterCacheEntries = 200;
     private int _ackStatusPollRunning = 0;
 
     private volatile bool _localVisibilityGateActive = false;
@@ -53,7 +58,8 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
                 Lazy<ApiController> apiController, SessionAcknowledgmentManager sessionAcknowledgmentManager,
                 MessageService messageService, AcknowledgmentTimeoutManager acknowledgmentTimeoutManager,
                 Lazy<AreaBoundSyncshellService> areaBoundSyncshellService,
-                VisibilityGateService visibilityGateService) : base(logger, mediator)
+                VisibilityGateService visibilityGateService, PairCharacterCacheConfigService pairCharacterCacheConfigService,
+                DalamudUtilService dalamudUtilService) : base(logger, mediator)
     {
         _pairFactory = pairFactory;
         _configurationService = configurationService;
@@ -64,8 +70,14 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         _acknowledgmentTimeoutManager = acknowledgmentTimeoutManager;
         _areaBoundSyncshellService = areaBoundSyncshellService;
         _visibilityGateService = visibilityGateService;
+        _pairCharacterCacheConfigService = pairCharacterCacheConfigService;
+        _dalamudUtilService = dalamudUtilService;
 
         Mediator.Subscribe<DisconnectedMessage>(this, (_) => ClearPairs());
+        Mediator.Subscribe<ConnectedMessage>(this, (_message) =>
+        {
+            _ = Task.Run(ReconcilePairCacheWithServerAsync);
+        });
         Mediator.Subscribe<CutsceneEndMessage>(this, (_) =>
         {
             ClearLocalVisibilityGate("CutsceneEnd");
@@ -122,9 +134,11 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
 
     public void AddUserPair(UserFullPairDto dto)
     {
+        var created = false;
         if (!_allClientPairs.ContainsKey(dto.User))
         {
             _allClientPairs[dto.User] = _pairFactory.Create(dto);
+            created = true;
         }
         else
         {
@@ -134,14 +148,17 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
             _allClientPairs[dto.User].ApplyLastReceivedData();
         }
 
+        RestorePairCharacterDataFromCache(_allClientPairs[dto.User], created);
         RecreateLazy();
     }
 
     public void AddUserPair(UserPairDto dto, bool addToLastAddedUser = true)
     {
+        var created = false;
         if (!_allClientPairs.ContainsKey(dto.User))
         {
             _allClientPairs[dto.User] = _pairFactory.Create(dto);
+            created = true;
         }
         else
         {
@@ -156,6 +173,7 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         if (addToLastAddedUser)
             LastAddedUser = _allClientPairs[dto.User];
         _allClientPairs[dto.User].ApplyLastReceivedData();
+        RestorePairCharacterDataFromCache(_allClientPairs[dto.User], created);
         RecreateLazy();
     }
 
@@ -294,6 +312,7 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         Mediator.Publish(new EventMessage(new Event(pair.UserData, nameof(PairManager), EventSeverity.Informational, "Received Character Data")));
         Logger.LogDebug("{tag} Apply enqueue: user={user} hash={hash}", SyncProgressTag, dto.User.AliasOrUID, dto.DataHash[..Math.Min(8, dto.DataHash.Length)]);
         pair.ApplyData(dto);
+        CachePairCharacterData(dto.User, dto.CharaData);
     }
 
 
@@ -447,6 +466,7 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
             {
                 pair.MarkOffline();
                 _allClientPairs.TryRemove(dto.User, out _);
+                RemoveCachedPairCharacterData(dto.User);
             }
         }
 
@@ -1028,5 +1048,172 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         _groupPairsInternal = GroupPairsLazy();
         _pairsWithGroupsInternal = PairsWithGroupsLazy();
         Mediator.Publish(new StructuralRefreshUiMessage());
+    }
+
+    private async Task ReconcilePairCacheWithServerAsync()
+    {
+        if (!_apiController.Value.IsConnected)
+        {
+            return;
+        }
+
+        List<UserFullPairDto> pairedClients;
+        try
+        {
+            pairedClients = await _apiController.Value.UserGetPairedClients().ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Failed to reconcile pair cache with server");
+            return;
+        }
+
+        var permissionsChanged = false;
+        foreach (var dto in pairedClients)
+        {
+            if (!_allClientPairs.TryGetValue(dto.User, out var pair))
+            {
+                continue;
+            }
+
+            var ownAckYouChanged = pair.UserPair.OwnPermissions.IsAckYou() != dto.OwnPermissions.IsAckYou();
+            var otherAckYouChanged = pair.UserPair.OtherPermissions.IsAckYou() != dto.OtherPermissions.IsAckYou();
+
+            if (ownAckYouChanged)
+            {
+                pair.UserPair.OwnPermissions = dto.OwnPermissions;
+                permissionsChanged = true;
+            }
+
+            if (otherAckYouChanged)
+            {
+                pair.UserPair.OtherPermissions = dto.OtherPermissions;
+                permissionsChanged = true;
+            }
+
+            var cachedHash = pair.LastReceivedCharacterDataHash;
+            if (string.IsNullOrEmpty(cachedHash) || string.IsNullOrEmpty(dto.User.UID))
+            {
+                continue;
+            }
+
+            SetOwnAckYouForTransfer(pair, false);
+
+            try
+            {
+                var validation = await _apiController.Value.ValidateCharaDataHash(dto.User.UID, cachedHash).ConfigureAwait(false);
+                var cacheStale = validation != null
+                    && (!validation.IsValid
+                        || (!string.IsNullOrEmpty(validation.CurrentHash)
+                            && !string.Equals(validation.CurrentHash, cachedHash, StringComparison.Ordinal)));
+
+                if (cacheStale || pair.IsVisible)
+                {
+                    pair.ReportVisibility(true);
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogDebug(ex, "Failed to validate cached hash for {user}", dto.User.AliasOrUID);
+            }
+        }
+
+        if (permissionsChanged)
+        {
+            RecreateLazy();
+        }
+    }
+
+    private void RestorePairCharacterDataFromCache(Pair pair, bool created)
+    {
+        if (!created || pair.LastReceivedCharacterData != null || string.IsNullOrEmpty(pair.UserData.UID))
+        {
+            return;
+        }
+
+        var cache = GetCurrentPairCharacterCache();
+        if (cache == null)
+        {
+            return;
+        }
+        if (!cache.TryGetValue(pair.UserData.UID, out var cachedData) || cachedData.CharacterData == null)
+        {
+            return;
+        }
+
+        pair.RestoreReceivedCharacterDataCache(cachedData.CharacterData, cachedData.LastUpdatedUtc);
+        if (!pair.IsPaused)
+        {
+            pair.ApplyLastReceivedData();
+        }
+    }
+
+    private void CachePairCharacterData(UserData user, CharacterData? characterData)
+    {
+        if (characterData == null || string.IsNullOrEmpty(user.UID))
+        {
+            return;
+        }
+
+        var cache = GetCurrentPairCharacterCache();
+        if (cache == null)
+        {
+            return;
+        }
+        cache[user.UID] = new PairCharacterCacheConfig.CachedPairCharacterData
+        {
+            CharacterData = characterData.DeepClone(),
+            DataHash = characterData.DataHash.Value,
+            LastUpdatedUtc = DateTimeOffset.UtcNow
+        };
+
+        if (cache.Count > MaxPairCharacterCacheEntries)
+        {
+            var toRemove = cache.OrderBy(kvp => kvp.Value.LastUpdatedUtc).Take(cache.Count - MaxPairCharacterCacheEntries).Select(kvp => kvp.Key).ToList();
+            foreach (var key in toRemove)
+            {
+                cache.Remove(key);
+            }
+        }
+
+        _pairCharacterCacheConfigService.Save();
+    }
+
+    private void RemoveCachedPairCharacterData(UserData user)
+    {
+        if (string.IsNullOrEmpty(user.UID))
+        {
+            return;
+        }
+
+        var cache = GetCurrentPairCharacterCache(createIfMissing: false);
+        if (cache == null)
+        {
+            return;
+        }
+
+        if (cache.Remove(user.UID))
+        {
+            _pairCharacterCacheConfigService.Save();
+        }
+    }
+
+    private Dictionary<string, PairCharacterCacheConfig.CachedPairCharacterData>? GetCurrentPairCharacterCache(bool createIfMissing = true)
+    {
+        var playerName = _dalamudUtilService.GetPlayerNameAsync().GetAwaiter().GetResult();
+        var worldId = _dalamudUtilService.GetHomeWorldIdAsync().GetAwaiter().GetResult();
+        var cacheKey = playerName + "_" + worldId.ToString(CultureInfo.InvariantCulture);
+
+        if (!_pairCharacterCacheConfigService.Current.PairCharacterDataCache.TryGetValue(cacheKey, out var cache))
+        {
+            if (!createIfMissing)
+            {
+                return null;
+            }
+
+            _pairCharacterCacheConfigService.Current.PairCharacterDataCache[cacheKey] = cache = new Dictionary<string, PairCharacterCacheConfig.CachedPairCharacterData>(StringComparer.Ordinal);
+        }
+
+        return cache;
     }
 }

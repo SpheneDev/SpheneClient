@@ -284,7 +284,8 @@ public sealed class Plugin : IDalamudPlugin
                 s.GetRequiredService<SpheneConfigService>(), s.GetRequiredService<SpheneMediator>(), contextMenu,
                 s.GetRequiredService<Lazy<ApiController>>(), s.GetRequiredService<SessionAcknowledgmentManager>(), s.GetRequiredService<MessageService>(),
                 s.GetRequiredService<AcknowledgmentTimeoutManager>(), s.GetRequiredService<Lazy<AreaBoundSyncshellService>>(),
-                s.GetRequiredService<VisibilityGateService>()));
+                s.GetRequiredService<VisibilityGateService>(), s.GetRequiredService<PairCharacterCacheConfigService>(),
+                s.GetRequiredService<DalamudUtilService>()));
             collection.AddSingleton(s => new EnhancedAcknowledgmentManager(s.GetRequiredService<ILogger<EnhancedAcknowledgmentManager>>(),
                 s.GetRequiredService<Lazy<ApiController>>().Value, s.GetRequiredService<DalamudUtilService>(), s.GetRequiredService<SpheneMediator>(),
                 new AcknowledgmentConfiguration(), s.GetRequiredService<SessionAcknowledgmentManager>()));
@@ -335,6 +336,7 @@ public sealed class Plugin : IDalamudPlugin
             collection.AddSingleton((s) => new NotesConfigService(pluginInterface.ConfigDirectory.FullName));
             collection.AddSingleton((s) => new ServerTagConfigService(pluginInterface.ConfigDirectory.FullName));
             collection.AddSingleton((s) => new TransientConfigService(pluginInterface.ConfigDirectory.FullName));
+            collection.AddSingleton((s) => new PairCharacterCacheConfigService(pluginInterface.ConfigDirectory.FullName));
             collection.AddSingleton((s) => new XivDataStorageService(pluginInterface.ConfigDirectory.FullName));
             collection.AddSingleton((s) => new PlayerPerformanceConfigService(pluginInterface.ConfigDirectory.FullName));
             collection.AddSingleton((s) => new CharaDataConfigService(pluginInterface.ConfigDirectory.FullName));
@@ -345,6 +347,7 @@ public sealed class Plugin : IDalamudPlugin
             collection.AddSingleton<IConfigService<ISpheneConfiguration>>(s => s.GetRequiredService<NotesConfigService>());
             collection.AddSingleton<IConfigService<ISpheneConfiguration>>(s => s.GetRequiredService<ServerTagConfigService>());
             collection.AddSingleton<IConfigService<ISpheneConfiguration>>(s => s.GetRequiredService<TransientConfigService>());
+            collection.AddSingleton<IConfigService<ISpheneConfiguration>>(s => s.GetRequiredService<PairCharacterCacheConfigService>());
             collection.AddSingleton<IConfigService<ISpheneConfiguration>>(s => s.GetRequiredService<XivDataStorageService>());
             collection.AddSingleton<IConfigService<ISpheneConfiguration>>(s => s.GetRequiredService<PlayerPerformanceConfigService>());
             collection.AddSingleton<IConfigService<ISpheneConfiguration>>(s => s.GetRequiredService<CharaDataConfigService>());

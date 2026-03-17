@@ -374,6 +374,28 @@ public class Pair : DisposableMediatorSubscriberBase
             !string.Equals(previousHash, newHash, StringComparison.Ordinal));
     }
 
+    public void RestoreReceivedCharacterDataCache(CharacterData data, DateTimeOffset cachedAt)
+    {
+        var previousHash = LastReceivedCharacterData?.DataHash?.Value;
+        var newHash = data.DataHash.Value;
+
+        if (!string.Equals(previousHash, newHash, StringComparison.Ordinal))
+        {
+            PreviousReceivedCharacterData = LastReceivedCharacterData;
+            PreviousReceivedCharacterDataHash = previousHash;
+            LastReceivedCharacterDataChangeTime = cachedAt;
+        }
+
+        LastReceivedCharacterData = data;
+        LastReceivedCharacterDataHash = newHash;
+        LastReceivedCharacterDataTime = cachedAt;
+        Logger.LogDebug("{tag} Cache restored: user={user} hash={hash} cachedAt={cachedAt}",
+            SyncProgressTag,
+            UserData.AliasOrUID,
+            string.IsNullOrEmpty(newHash) ? "NONE" : newHash[..Math.Min(8, newHash.Length)],
+            cachedAt);
+    }
+
     public void ApplyLastReceivedData(bool forced = false)
     {
         if (CachedPlayer == null) return;
