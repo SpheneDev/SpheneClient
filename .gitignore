@@ -360,3 +360,4 @@ Directory.Build.props
 GITHUB_ACTIONS.md
 .github/API_INTEGRATION.md
 .github/scripts/configure-api-source.ps1
+*.DS_Store

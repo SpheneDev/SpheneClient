@@ -1,11 +1,11 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project Sdk="Dalamud.NET.Sdk/14.0.1">
   <PropertyGroup>
     <Authors></Authors>
     <Company></Company>
-    <Version>1.1.12.1</Version>
-    <AssemblyVersion>1.1.12.1</AssemblyVersion>
-    <FileVersion>1.1.12.1</FileVersion>
+    <Version>1.1.12.2</Version>
+    <AssemblyVersion>1.1.12.2</AssemblyVersion>
+    <FileVersion>1.1.12.2</FileVersion>
     <Description>Through the power of Living Memory, this plugin harmonizes your Penumbra modifications and Glamourer configurations across all connected souls, ensuring endless synchronization in your shared digital realm.</Description>
     <Copyright></Copyright>
     <PackageProjectUrl>https://github.com/SpheneDev/client</PackageProjectUrl>
@@ -46,9 +46,9 @@
     <BuildDate>$([System.DateTime]::Now.ToString("ddMM"))</BuildDate>
     <BuildTime>$([System.DateTime]::Now.ToString("HHMM"))</BuildTime>
     <BuildTimestamp>$([System.DateTime]::Now.ToString("dd-MM-yy HH:mm:ss"))</BuildTimestamp>
-    <Version>0.0.16-debug$(BuildDate)$(BuildTime)</Version>
-    <AssemblyVersion>0.16.$(BuildDate).$(BuildTime)</AssemblyVersion>
-    <FileVersion>0.16.$(BuildDate).$(BuildTime)</FileVersion>
+    <Version>1.1.12.63</Version>
+    <AssemblyVersion>1.1.12.63</AssemblyVersion>
+    <FileVersion>1.1.12.63</FileVersion>
     <DefineConstants>$(DefineConstants);BUILD_TIMESTAMP</DefineConstants>
   </PropertyGroup>
   
@@ -68,13 +68,13 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Remove="PlayerData\Export\**" />
-    <EmbeddedResource Remove="PlayerData\Export\**" />
-    <None Remove="PlayerData\Export\**" />
+    <Compile Remove="PlayerData/Export/**" />
+    <EmbeddedResource Remove="PlayerData/Export/**" />
+    <None Remove="PlayerData/Export/**" />
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include="Resources\Fonts\Lato-Regular.ttf">
+    <Content Include="Resources/Fonts/Lato-Regular.ttf">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
   </ItemGroup>
@@ -86,9 +86,9 @@
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
-    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.1" />
-    <PackageReference Include="Microsoft.AspNetCore.SignalR.Protocols.MessagePack" Version="10.0.1" />
-    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.1" />
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.*" />
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Protocols.MessagePack" Version="10.0.*" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.*" />
     <PackageReference Include="Glamourer.Api" Version="2.8.0" />
     <PackageReference Include="NReco.Logging.File" Version="1.2.2" />
     <PackageReference Include="Penumbra.Api" Version="5.13.1" />
@@ -108,13 +108,13 @@
 
   <ItemGroup>
     <!-- Local development - SpheneAPI is in parent directory -->
-    <ProjectReference Include="..\..\SpheneAPI\SpheneAPI\Sphene.API.csproj" Condition="Exists('..\..\SpheneAPI\SpheneAPI\Sphene.API.csproj')" />
+    <ProjectReference Include="../../SpheneAPI/SpheneAPI/Sphene.API.csproj" Condition="Exists('../../SpheneAPI/SpheneAPI/Sphene.API.csproj')" />
     <!-- GitHub Actions - SpheneAPI is checked out to SpheneClient/SpheneAPI -->
-    <ProjectReference Include="..\SpheneAPI\SpheneAPI\Sphene.API.csproj" Condition="!Exists('..\..\SpheneAPI\SpheneAPI\Sphene.API.csproj') And Exists('..\SpheneAPI\SpheneAPI\Sphene.API.csproj')" />
+    <ProjectReference Include="../SpheneAPI/SpheneAPI/Sphene.API.csproj" Condition="!Exists('../../SpheneAPI/SpheneAPI/Sphene.API.csproj') And Exists('../SpheneAPI/SpheneAPI/Sphene.API.csproj')" />
     <!-- ShrinkU integration - reference local ShrinkU project -->
-    <ProjectReference Include="..\..\ShrinkU\ShrinkU.csproj" Condition="Exists('..\..\ShrinkU\ShrinkU.csproj')" />
+    <ProjectReference Include="../../ShrinkU/ShrinkU.csproj" Condition="Exists('../../ShrinkU/ShrinkU.csproj')" />
     <!-- GitHub Actions - ShrinkU is checked out to SpheneClient/ShrinkU -->
-    <ProjectReference Include="..\ShrinkU\ShrinkU.csproj" Condition="!Exists('..\..\ShrinkU\ShrinkU.csproj') And Exists('..\ShrinkU\ShrinkU.csproj')" />
+    <ProjectReference Include="../ShrinkU/ShrinkU.csproj" Condition="!Exists('../../ShrinkU/ShrinkU.csproj') And Exists('../ShrinkU/ShrinkU.csproj')" />
   </ItemGroup>
 
   <ItemGroup>
@@ -129,19 +129,19 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Update="images\icon.png">
+    <None Update="images/icon.png">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-    <EmbeddedResource Include="Localization\de.json" />
-    <EmbeddedResource Include="Localization\fr.json" />
+    <EmbeddedResource Include="Localization/de.json" />
+    <EmbeddedResource Include="Localization/fr.json" />
   </ItemGroup>
 
   <ItemGroup>
-    <None Include="..\.editorconfig" Link=".editorconfig" />
+    <None Include="../.editorconfig" Link=".editorconfig" />
   </ItemGroup>
 
   <ItemGroup>
-    <None Update="Resources\Fonts\Lato-Regular.ttf">
+    <None Update="Resources/Fonts/Lato-Regular.ttf">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>
