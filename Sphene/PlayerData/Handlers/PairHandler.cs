@@ -367,10 +367,9 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
 
         try
         {
-            var parts = data.Split('|');
-            var cleanData = parts[0];
-            long senderTicks = 0;
-            var hasTimestamp = parts.Length > 1 && long.TryParse(parts[1], out senderTicks);
+            var (cleanData, hasTimestamp, senderTicks) = ParseBypassEmoteEnvelope(data);
+            Logger.LogDebug("BypassEmote fast-path payload parsed. rawLen={rawLen}, cleanLen={cleanLen}, hasTimestamp={hasTimestamp}",
+                data.Length, cleanData.Length, hasTimestamp);
             
             if (hasTimestamp)
             {
@@ -404,6 +403,8 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             }
 
             await _ipcManager.BypassEmote.SetStateForCharacterAsync(_charaHandler.Address, cleanData).ConfigureAwait(false);
+            Logger.LogDebug("BypassEmote fast-path apply completed. addr={addr}, cleanLen={cleanLen}, apiAvailable={apiAvailable}",
+                _charaHandler.Address, cleanData.Length, _ipcManager.BypassEmote.APIAvailable);
             _lastAppliedBypassEmoteData = data;
             _lastAppliedBypassEmoteAddress = _charaHandler.Address;
             _lastAppliedBypassEmoteTime = DateTime.UtcNow;
@@ -721,9 +722,9 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                         if (!string.IsNullOrEmpty(charaData.BypassEmoteData))
                         {
                             var data = charaData.BypassEmoteData;
-                            var parts = data.Split('|');
-                            var cleanData = parts[0];
-                            var hasTimestamp = parts.Length > 1 && long.TryParse(parts[1], out _);
+                            var (cleanData, hasTimestamp, _) = ParseBypassEmoteEnvelope(data);
+                            Logger.LogDebug("BypassEmote slow-path payload parsed. rawLen={rawLen}, cleanLen={cleanLen}, hasTimestamp={hasTimestamp}, kind={kind}",
+                                data.Length, cleanData.Length, hasTimestamp, changes.Key);
 
                             // Prevent double application if Fast Path already applied it
                             // We compare the FULL data string (including timestamp)
@@ -745,6 +746,8 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                             }
 
                             await _ipcManager.BypassEmote.SetStateForCharacterAsync(handler.Address, cleanData).ConfigureAwait(false);
+                            Logger.LogDebug("BypassEmote slow-path apply completed. addr={addr}, cleanLen={cleanLen}, apiAvailable={apiAvailable}, kind={kind}",
+                                handler.Address, cleanData.Length, _ipcManager.BypassEmote.APIAvailable, changes.Key);
                             _lastAppliedBypassEmoteData = data;
                             _lastAppliedBypassEmoteAddress = handler.Address;
                             _lastAppliedBypassEmoteTime = DateTime.UtcNow;
@@ -1546,7 +1549,9 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         {
             if (string.IsNullOrEmpty(_cachedData?.BypassEmoteData)) return;
             Logger.LogTrace("Reapplying BypassEmote data for {this}", this);
-            var cleanData = _cachedData.BypassEmoteData.Split('|')[0];
+            var (cleanData, _, _) = ParseBypassEmoteEnvelope(_cachedData.BypassEmoteData);
+            Logger.LogDebug("BypassEmote ready reapply. addr={addr}, rawLen={rawLen}, cleanLen={cleanLen}, apiAvailable={apiAvailable}",
+                PlayerCharacter, _cachedData.BypassEmoteData.Length, cleanData.Length, _ipcManager.BypassEmote.APIAvailable);
             _ = _ipcManager.BypassEmote.SetStateForCharacterAsync(PlayerCharacter, cleanData).ConfigureAwait(false);
         });
 
@@ -1670,6 +1675,29 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                 _minionReapplyInProgress = false;
             }
         });
+    }
+
+    private static (string CleanData, bool HasTimestamp, long SenderTicks) ParseBypassEmoteEnvelope(string data)
+    {
+        if (string.IsNullOrEmpty(data))
+        {
+            return (string.Empty, false, 0);
+        }
+
+        var separatorIndex = data.LastIndexOf('|');
+        if (separatorIndex < 0 || separatorIndex >= data.Length - 1)
+        {
+            return (data, false, 0);
+        }
+
+        var suffix = data[(separatorIndex + 1)..];
+        if (!long.TryParse(suffix, out var ticks))
+        {
+            return (data, false, 0);
+        }
+
+        var payload = data[..separatorIndex];
+        return (payload, true, ticks);
     }
 
     private async Task<bool> TryApplyMinionFileReplacementsAsync(nint minionAddress, CharacterData minionData, CancellationToken token)

@@ -1010,7 +1010,7 @@ public sealed partial class CharaDataManager : DisposableMediatorSubscriberBase
             Logger.LogTrace("[{appId}] Applying BypassEmote data", applicationId);
             if (!string.IsNullOrEmpty(bypassEmoteData))
             {
-                var cleanData = bypassEmoteData.Split('|')[0];
+                var cleanData = ExtractBypassEmotePayload(bypassEmoteData);
                 await _ipcManager.BypassEmote.SetStateForCharacterAsync(tempHandler.Address, cleanData).ConfigureAwait(false);
             }
 
@@ -1056,6 +1056,23 @@ public sealed partial class CharaDataManager : DisposableMediatorSubscriberBase
             DataApplicationTask = null;
             DataApplicationProgress = string.Empty;
         }
+    }
+
+    private static string ExtractBypassEmotePayload(string data)
+    {
+        if (string.IsNullOrEmpty(data))
+        {
+            return string.Empty;
+        }
+
+        var separatorIndex = data.LastIndexOf('|');
+        if (separatorIndex < 0 || separatorIndex >= data.Length - 1)
+        {
+            return data;
+        }
+
+        var suffix = data[(separatorIndex + 1)..];
+        return long.TryParse(suffix, out _) ? data[..separatorIndex] : data;
     }
 
     private async Task CharaUpdateAsync(CharaDataExtendedUpdateDto updateDto)

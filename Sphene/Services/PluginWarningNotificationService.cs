@@ -4,6 +4,7 @@ using Sphene.Interop.Ipc;
 using Sphene.SpheneConfiguration;
 using Sphene.SpheneConfiguration.Models;
 using Sphene.Services.Mediator;
+using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
 
 namespace Sphene.PlayerData.Pairs;
@@ -14,12 +15,14 @@ public class PluginWarningNotificationService
     private readonly IpcManager _ipcManager;
     private readonly SpheneConfigService _SpheneConfigService;
     private readonly SpheneMediator _mediator;
+    private readonly ILogger<PluginWarningNotificationService> _logger;
 
-    public PluginWarningNotificationService(SpheneConfigService SpheneConfigService, IpcManager ipcManager, SpheneMediator mediator)
+    public PluginWarningNotificationService(SpheneConfigService SpheneConfigService, IpcManager ipcManager, SpheneMediator mediator, ILogger<PluginWarningNotificationService> logger)
     {
         _SpheneConfigService = SpheneConfigService;
         _ipcManager = ipcManager;
         _mediator = mediator;
+        _logger = logger;
     }
 
     public void NotifyForMissingPlugins(UserData user, string playerName, HashSet<PlayerChanges> changes)
@@ -67,8 +70,13 @@ public class PluginWarningNotificationService
             warning.ShowPetNicknamesWarning = true;
         }
 
-        if (changes.Contains(PlayerChanges.BypassEmote) && !warning.ShownBypassEmoteWarning && !_ipcManager.BypassEmote.APIAvailable)
+        if (changes.Contains(PlayerChanges.BypassEmote)
+            && !warning.ShownBypassEmoteWarning
+            && !_ipcManager.BypassEmote.APIAvailable
+            && !_ipcManager.BypassEmote.PluginDetected)
         {
+            _logger.LogDebug("BypassEmote warning triggered for {player}. APIAvailable={apiAvailable}, PluginDetected={pluginDetected}, Changes={changes}",
+                playerName, _ipcManager.BypassEmote.APIAvailable, _ipcManager.BypassEmote.PluginDetected, string.Join(",", changes));
             missingPluginsForData.Add("BypassEmote");
             warning.ShownBypassEmoteWarning = true;
         }
