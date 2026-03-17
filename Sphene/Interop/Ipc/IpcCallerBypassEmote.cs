@@ -11,6 +11,8 @@ public sealed class IpcCallerBypassEmote : IIpcCaller
 {
     private const int RequiredApiMajorVersion = 3;
     private const int RequiredApiMinorVersion = 0;
+    private const int LocalPlayerEventApiMajorVersion = 4;
+    private const int LocalPlayerEventApiMinorVersion = 1;
     private static readonly TimeSpan ImmediateDuplicateSuppressWindow = TimeSpan.FromMilliseconds(800);
 
     private readonly ILogger<IpcCallerBypassEmote> _logger;
@@ -32,6 +34,8 @@ public sealed class IpcCallerBypassEmote : IIpcCaller
     private readonly ICallGateSubscriber<string, object> _onStateChangeImmediateLegacy;
     private readonly ICallGateSubscriber<string, string?, bool, object> _onStateChangeImmediate;
     private readonly ICallGateSubscriber<string, string?, bool, object> _onStateChangeImmediateV1;
+    private readonly ICallGateSubscriber<string, string?, object> _onLocalPlayerStateChangeV1;
+    private readonly ICallGateSubscriber<string, string?, object> _onLocalPlayerStateChangeImmediateV1;
     private readonly ICallGateSubscriber<object> _onReady;
     private readonly ICallGateSubscriber<object> _onDispose;
     private string _lastApiDiagnostics = string.Empty;
@@ -39,6 +43,7 @@ public sealed class IpcCallerBypassEmote : IIpcCaller
     private string _lastCacheIpcData = string.Empty;
     private string _lastImmediateData = string.Empty;
     private DateTime _lastImmediateTime = DateTime.MinValue;
+    private bool _preferLocalPlayerStateEvents;
 
     public IpcCallerBypassEmote(
         ILogger<IpcCallerBypassEmote> logger,
@@ -65,6 +70,8 @@ public sealed class IpcCallerBypassEmote : IIpcCaller
         _onStateChangeImmediateLegacy = pi.GetIpcSubscriber<string, object>("BypassEmote.OnStateChangeImmediate");
         _onStateChangeImmediate = pi.GetIpcSubscriber<string, string?, bool, object>("BypassEmote.OnStateChangeImmediate");
         _onStateChangeImmediateV1 = pi.GetIpcSubscriber<string, string?, bool, object>("BypassEmote.OnStateChangeImmediateV1");
+        _onLocalPlayerStateChangeV1 = pi.GetIpcSubscriber<string, string?, object>("BypassEmote.OnLocalPlayerStateChangeV1");
+        _onLocalPlayerStateChangeImmediateV1 = pi.GetIpcSubscriber<string, string?, object>("BypassEmote.OnLocalPlayerStateChangeImmediateV1");
         _onReady = pi.GetIpcSubscriber<object>("BypassEmote.OnReady");
         _onDispose = pi.GetIpcSubscriber<object>("BypassEmote.OnDispose");
 
@@ -74,6 +81,8 @@ public sealed class IpcCallerBypassEmote : IIpcCaller
         TrySubscribe(() => _onStateChangeImmediateLegacy.Subscribe(OnStateChangeImmediateLegacy), "BypassEmote.OnStateChangeImmediate (legacy)");
         TrySubscribe(() => _onStateChangeImmediate.Subscribe(OnStateChangeImmediate), "BypassEmote.OnStateChangeImmediate");
         TrySubscribe(() => _onStateChangeImmediateV1.Subscribe(OnStateChangeImmediateV1), "BypassEmote.OnStateChangeImmediateV1");
+        TrySubscribe(() => _onLocalPlayerStateChangeV1.Subscribe(OnLocalPlayerStateChangeV1), "BypassEmote.OnLocalPlayerStateChangeV1");
+        TrySubscribe(() => _onLocalPlayerStateChangeImmediateV1.Subscribe(OnLocalPlayerStateChangeImmediateV1), "BypassEmote.OnLocalPlayerStateChangeImmediateV1");
         TrySubscribe(() => _onReady.Subscribe(OnReady), "BypassEmote.OnReady");
         TrySubscribe(() => _onDispose.Subscribe(OnDispose), "BypassEmote.OnDispose");
 
@@ -97,9 +106,12 @@ public sealed class IpcCallerBypassEmote : IIpcCaller
             versionText = $"{version.Item1}.{version.Item2}";
             versionCompatible = version.Item1 > RequiredApiMajorVersion
                                 || (version.Item1 == RequiredApiMajorVersion && version.Item2 >= RequiredApiMinorVersion);
+            _preferLocalPlayerStateEvents = version.Item1 > LocalPlayerEventApiMajorVersion
+                                            || (version.Item1 == LocalPlayerEventApiMajorVersion && version.Item2 >= LocalPlayerEventApiMinorVersion);
         }
         catch (Exception ex)
         {
+            _preferLocalPlayerStateEvents = false;
             if (ex is IpcNotReadyError)
             {
                 hasAnySignal = true;
@@ -296,36 +308,51 @@ public sealed class IpcCallerBypassEmote : IIpcCaller
 
     private void OnStateChangeLegacy(string data)
     {
-        HandleStateChange(data, null, false);
+        HandleStateChange(data, null, false, false);
     }
 
     private void OnStateChange(string liveData, string? cacheData, bool isLocalPlayer)
     {
-        HandleStateChange(liveData, cacheData, isLocalPlayer);
+        HandleStateChange(liveData, cacheData, isLocalPlayer, false);
     }
 
     private void OnStateChangeV1(string liveData, string? cacheData, bool isLocalPlayer)
     {
-        HandleStateChange(liveData, cacheData, isLocalPlayer);
+        HandleStateChange(liveData, cacheData, isLocalPlayer, false);
     }
 
     private void OnStateChangeImmediateLegacy(string data)
     {
-        HandleImmediateStateChange(data, null, false);
+        HandleImmediateStateChange(data, null, false, false);
     }
 
     private void OnStateChangeImmediate(string liveData, string? cacheData, bool isLocalPlayer)
     {
-        HandleImmediateStateChange(liveData, cacheData, isLocalPlayer);
+        HandleImmediateStateChange(liveData, cacheData, isLocalPlayer, false);
     }
 
     private void OnStateChangeImmediateV1(string liveData, string? cacheData, bool isLocalPlayer)
     {
-        HandleImmediateStateChange(liveData, cacheData, isLocalPlayer);
+        HandleImmediateStateChange(liveData, cacheData, isLocalPlayer, false);
     }
 
-    private void HandleStateChange(string liveData, string? cacheData, bool _)
+    private void OnLocalPlayerStateChangeV1(string liveData, string? cacheData)
     {
+        HandleStateChange(liveData, cacheData, true, true);
+    }
+
+    private void OnLocalPlayerStateChangeImmediateV1(string liveData, string? cacheData)
+    {
+        HandleImmediateStateChange(liveData, cacheData, true, true);
+    }
+
+    private void HandleStateChange(string liveData, string? cacheData, bool isLocalPlayer, bool isLocalPlayerOnlyEvent)
+    {
+        if (_preferLocalPlayerStateEvents && isLocalPlayer && !isLocalPlayerOnlyEvent)
+        {
+            return;
+        }
+
         CacheIpcPayload(liveData, cacheData);
 
         if (string.Equals(liveData, _lastImmediateData, StringComparison.Ordinal)
@@ -337,8 +364,13 @@ public sealed class IpcCallerBypassEmote : IIpcCaller
         PublishState(liveData);
     }
 
-    private void HandleImmediateStateChange(string liveData, string? cacheData, bool _)
+    private void HandleImmediateStateChange(string liveData, string? cacheData, bool isLocalPlayer, bool isLocalPlayerOnlyEvent)
     {
+        if (_preferLocalPlayerStateEvents && isLocalPlayer && !isLocalPlayerOnlyEvent)
+        {
+            return;
+        }
+
         CacheIpcPayload(liveData, cacheData);
         _lastImmediateData = liveData;
         _lastImmediateTime = DateTime.UtcNow;
@@ -432,6 +464,8 @@ public sealed class IpcCallerBypassEmote : IIpcCaller
         TryUnsubscribe(() => _onStateChangeImmediateLegacy.Unsubscribe(OnStateChangeImmediateLegacy), "BypassEmote.OnStateChangeImmediate (legacy)");
         TryUnsubscribe(() => _onStateChangeImmediate.Unsubscribe(OnStateChangeImmediate), "BypassEmote.OnStateChangeImmediate");
         TryUnsubscribe(() => _onStateChangeImmediateV1.Unsubscribe(OnStateChangeImmediateV1), "BypassEmote.OnStateChangeImmediateV1");
+        TryUnsubscribe(() => _onLocalPlayerStateChangeV1.Unsubscribe(OnLocalPlayerStateChangeV1), "BypassEmote.OnLocalPlayerStateChangeV1");
+        TryUnsubscribe(() => _onLocalPlayerStateChangeImmediateV1.Unsubscribe(OnLocalPlayerStateChangeImmediateV1), "BypassEmote.OnLocalPlayerStateChangeImmediateV1");
         TryUnsubscribe(() => _onReady.Unsubscribe(OnReady), "BypassEmote.OnReady");
         TryUnsubscribe(() => _onDispose.Unsubscribe(OnDispose), "BypassEmote.OnDispose");
     }
