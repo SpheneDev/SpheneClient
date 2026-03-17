@@ -99,6 +99,7 @@ public class SpheneConfig : ISpheneConfiguration
     public bool ShowWaitingForAcknowledgmentPopups { get; set; } = false;
     public bool EnableAcknowledgmentBatching { get; set; } = true;
     public bool EnableAcknowledgmentAutoRetry { get; set; } = true;
+    public bool DisableRedraws { get; set; } = false;
     public bool EnableDutyCombatSyncWithoutRedraw { get; set; } = false;
     public bool EnableDutyCombatOutgoingSyncBatching { get; set; } = false;
     public int DutyCombatOutgoingSyncBatchSeconds { get; set; } = 10;

@@ -6,6 +6,7 @@ public static class UpdateOptionPanel
 {
     public const string Tag_1_1_12 = "v.1.1.11.1071";
     public const string Tag_1_1_12_50 = "v.1.1.12.50";
+    public const string Tag_1_1_12_88 = "v.1.1.12.88";
 
     public sealed record ReleaseOptionGroup(string Tag, IReadOnlyList<Link> Links);
 
@@ -13,7 +14,8 @@ public static class UpdateOptionPanel
     {
         SyncIncomingWithoutRedraw,
         SyncOutgoingBatching,
-        ShowTestBuildUpdates
+        ShowTestBuildUpdates,
+        DisableRedraws
     }
 
     public static readonly Link[] Link_1_1_12 =
@@ -27,10 +29,16 @@ public static class UpdateOptionPanel
         Link.ShowTestBuildUpdates
     ];
 
+    public static readonly Link[] Link_1_1_12_88 =
+    [
+        Link.DisableRedraws
+    ];
+
     private static readonly ReleaseOptionGroup[] Releases =
     [
         new(Tag_1_1_12, Link_1_1_12),
-        new(Tag_1_1_12_50, Link_1_1_12_50)
+        new(Tag_1_1_12_50, Link_1_1_12_50),
+        new(Tag_1_1_12_88, Link_1_1_12_88)
     ];
 
     public static string GetTitle(Link link)
@@ -39,6 +47,7 @@ public static class UpdateOptionPanel
             Link.SyncIncomingWithoutRedraw => "Sync: Incoming Sync (Default: Disabled)",
             Link.SyncOutgoingBatching => "Sync: Outgoing Batching (Default: Disabled)",
             Link.ShowTestBuildUpdates => "Notifications: Testbuild Update Hints (Default: Disabled)",
+            Link.DisableRedraws => "Sync: Disable Redraws (Default: Disabled)",
             _ => "Option"
         };
 
@@ -89,6 +98,9 @@ public static class UpdateOptionPanel
                 break;
             case Link.ShowTestBuildUpdates:
                 NotificationsOptionBlock.DrawShowTestBuildUpdatesOption(configService, uiShared, "UpdateOptionShowTestBuildUpdates");
+                break;
+            case Link.DisableRedraws:
+                SyncBehaviorOptionBlock.DrawDisableRedraws(configService, uiShared, "UpdateOptionDisableRedraws");
                 break;
         }
     }
