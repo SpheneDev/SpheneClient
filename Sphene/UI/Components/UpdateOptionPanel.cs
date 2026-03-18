@@ -4,11 +4,8 @@ namespace Sphene.UI.Components;
 
 public static class UpdateOptionPanel
 {
-    public const string Tag_1_1_12 = "v.1.1.11.1071";
-    public const string Tag_1_1_12_50 = "v.1.1.12.50";
-    public const string Tag_1_1_12_88 = "v.1.1.12.88";
-
     public sealed record ReleaseOptionGroup(string Tag, IReadOnlyList<Link> Links);
+    private sealed record ReleaseDefinition(string Tag, IReadOnlyList<Link> Links);
 
     public enum Link
     {
@@ -18,90 +15,63 @@ public static class UpdateOptionPanel
         DisableRedraws
     }
 
-    public static readonly Link[] Link_1_1_12 =
+    private static readonly ReleaseDefinition[] Releases =
     [
-        Link.SyncIncomingWithoutRedraw,
-        Link.SyncOutgoingBatching
+        new("v.1.1.11.1071", [Link.SyncIncomingWithoutRedraw, Link.SyncOutgoingBatching]),
+        new("v.1.1.12.50", [Link.ShowTestBuildUpdates]),
+        new("v.1.1.12.88", [Link.DisableRedraws])
     ];
 
-    public static readonly Link[] Link_1_1_12_50 =
-    [
-        Link.ShowTestBuildUpdates
-    ];
+    private static readonly IReadOnlyDictionary<Link, string> LinkTitles = new Dictionary<Link, string>
+    {
+        [Link.SyncIncomingWithoutRedraw] = "Sync: Incoming Sync (Default: Disabled)",
+        [Link.SyncOutgoingBatching] = "Sync: Outgoing Batching (Default: Disabled)",
+        [Link.ShowTestBuildUpdates] = "Notifications: Testbuild Update Hints (Default: Disabled)",
+        [Link.DisableRedraws] = "Sync: Disable Redraws (Default: Disabled)"
+    };
 
-    public static readonly Link[] Link_1_1_12_88 =
-    [
-        Link.DisableRedraws
-    ];
-
-    private static readonly ReleaseOptionGroup[] Releases =
-    [
-        new(Tag_1_1_12, Link_1_1_12),
-        new(Tag_1_1_12_50, Link_1_1_12_50),
-        new(Tag_1_1_12_88, Link_1_1_12_88)
-    ];
+    private static readonly IReadOnlyDictionary<Link, Action<SpheneConfigService, UiSharedService, float>> LinkDrawers
+        = new Dictionary<Link, Action<SpheneConfigService, UiSharedService, float>>
+    {
+        [Link.SyncIncomingWithoutRedraw] = (configService, uiShared, _) =>
+            SyncBehaviorOptionBlock.DrawIncomingSyncWithoutRedraw(configService, uiShared, "UpdateOptionSyncIncomingWithoutRedraw"),
+        [Link.SyncOutgoingBatching] = (configService, uiShared, outgoingSliderWidth) =>
+            SyncBehaviorOptionBlock.DrawOutgoingSyncBatching(configService, uiShared, outgoingSliderWidth, "UpdateOptionSyncOutgoingBatching"),
+        [Link.ShowTestBuildUpdates] = (configService, uiShared, _) =>
+            NotificationsOptionBlock.DrawShowTestBuildUpdatesOption(configService, uiShared, "UpdateOptionShowTestBuildUpdates"),
+        [Link.DisableRedraws] = (configService, uiShared, _) =>
+            SyncBehaviorOptionBlock.DrawDisableRedraws(configService, uiShared, "UpdateOptionDisableRedraws")
+    };
 
     public static string GetTitle(Link link)
-        => link switch
-        {
-            Link.SyncIncomingWithoutRedraw => "Sync: Incoming Sync (Default: Disabled)",
-            Link.SyncOutgoingBatching => "Sync: Outgoing Batching (Default: Disabled)",
-            Link.ShowTestBuildUpdates => "Notifications: Testbuild Update Hints (Default: Disabled)",
-            Link.DisableRedraws => "Sync: Disable Redraws (Default: Disabled)",
-            _ => "Option"
-        };
+        => LinkTitles.TryGetValue(link, out var title) ? title : "Option";
 
     public static IReadOnlyList<ReleaseOptionGroup> GetPendingReleaseGroups(SpheneConfigService configService)
     {
         var seenTags = GetSeenTags(configService);
-        var pending = new List<ReleaseOptionGroup>();
-
-        foreach (var release in Releases)
-        {
-            if (!seenTags.Contains(release.Tag))
-            {
-                pending.Add(release);
-            }
-        }
-
-        return pending;
+        return
+        [
+            .. Releases
+                .Where(release => !seenTags.Contains(release.Tag))
+                .Select(release => new ReleaseOptionGroup(release.Tag, release.Links))
+        ];
     }
 
     public static IReadOnlyList<Link> GetVisibleLinks(SpheneConfigService configService)
     {
-        var visible = new List<Link>();
-        var uniqueLinks = new HashSet<Link>();
-
-        foreach (var release in GetPendingReleaseGroups(configService))
-        {
-            foreach (var link in release.Links)
-            {
-                if (uniqueLinks.Add(link))
-                {
-                    visible.Add(link);
-                }
-            }
-        }
-
-        return visible;
+        return
+        [
+            .. GetPendingReleaseGroups(configService)
+                .SelectMany(release => release.Links)
+                .Distinct()
+        ];
     }
 
     public static void DrawByLink(Link link, SpheneConfigService configService, UiSharedService uiShared, float outgoingSliderWidth)
     {
-        switch (link)
+        if (LinkDrawers.TryGetValue(link, out var drawer))
         {
-            case Link.SyncIncomingWithoutRedraw:
-                SyncBehaviorOptionBlock.DrawIncomingSyncWithoutRedraw(configService, uiShared, "UpdateOptionSyncIncomingWithoutRedraw");
-                break;
-            case Link.SyncOutgoingBatching:
-                SyncBehaviorOptionBlock.DrawOutgoingSyncBatching(configService, uiShared, outgoingSliderWidth, "UpdateOptionSyncOutgoingBatching");
-                break;
-            case Link.ShowTestBuildUpdates:
-                NotificationsOptionBlock.DrawShowTestBuildUpdatesOption(configService, uiShared, "UpdateOptionShowTestBuildUpdates");
-                break;
-            case Link.DisableRedraws:
-                SyncBehaviorOptionBlock.DrawDisableRedraws(configService, uiShared, "UpdateOptionDisableRedraws");
-                break;
+            drawer(configService, uiShared, outgoingSliderWidth);
         }
     }
 
@@ -114,13 +84,12 @@ public static class UpdateOptionPanel
     {
         var seenTags = GetSeenTags(configService);
         var latestSeenTag = configService.Current.LastSeenNewOptionsTag;
+        var pendingReleases = GetPendingReleaseGroups(configService);
 
-        foreach (var release in GetPendingReleaseGroups(configService))
+        foreach (var release in pendingReleases)
         {
-            if (seenTags.Add(release.Tag))
-            {
-                latestSeenTag = release.Tag;
-            }
+            seenTags.Add(release.Tag);
+            latestSeenTag = release.Tag;
         }
 
         configService.Current.SeenNewOptionsTags = GetOrderedSeenTags(seenTags);
@@ -150,23 +119,10 @@ public static class UpdateOptionPanel
 
     private static List<string> GetOrderedSeenTags(HashSet<string> seenTags)
     {
-        var ordered = new List<string>();
-        foreach (var release in Releases)
-        {
-            if (seenTags.Contains(release.Tag))
-            {
-                ordered.Add(release.Tag);
-            }
-        }
+        var orderedReleaseTags = Releases
+            .Select(release => release.Tag)
+            .Where(seenTags.Contains);
 
-        foreach (var tag in seenTags)
-        {
-            if (!ordered.Contains(tag, StringComparer.Ordinal))
-            {
-                ordered.Add(tag);
-            }
-        }
-
-        return ordered;
+        return [.. orderedReleaseTags, .. seenTags.Except(orderedReleaseTags, StringComparer.Ordinal)];
     }
 }
