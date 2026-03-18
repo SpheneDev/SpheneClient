@@ -1990,7 +1990,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                     if (!hasPartyMember)
                     {
                         // Store current pause state and pause the syncshell
-                        if (!group.GroupUserPermissions.IsPaused())
+                        if (group.GroupUserPermissions.IsPaused())
                         {
                             _prePausedSyncshells.Add(group.Group.GID);
                         }
