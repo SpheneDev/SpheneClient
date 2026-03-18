@@ -286,6 +286,7 @@ public sealed class Plugin : IDalamudPlugin
                 s.GetRequiredService<AcknowledgmentTimeoutManager>(), s.GetRequiredService<Lazy<AreaBoundSyncshellService>>(),
                 s.GetRequiredService<VisibilityGateService>(), s.GetRequiredService<PairCharacterCacheConfigService>(),
                 s.GetRequiredService<DalamudUtilService>()));
+            collection.AddSingleton<LocalPairEmoteForceSyncService>();
             collection.AddSingleton(s => new EnhancedAcknowledgmentManager(s.GetRequiredService<ILogger<EnhancedAcknowledgmentManager>>(),
                 s.GetRequiredService<Lazy<ApiController>>().Value, s.GetRequiredService<DalamudUtilService>(), s.GetRequiredService<SpheneMediator>(),
                 new AcknowledgmentConfiguration(), s.GetRequiredService<SessionAcknowledgmentManager>()));

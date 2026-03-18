@@ -43,6 +43,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
     private readonly CharaDataManager _charaDataManager;
     private readonly PairManager _pairManager;
     private readonly SpheneConfigService _configService;
+    private readonly LocalPairEmoteForceSyncService _localPairEmoteForceSyncService;
     private float _menuWidth = -1;
     private bool _wasHovered = false;
     private static readonly Vector4 SoftToggleEnabledColor = new(0.56f, 0.82f, 0.62f, 1f);
@@ -67,7 +68,8 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         SpheneMediator spheneMediator, SelectTagForPairUi selectTagForPairUi,
         ServerConfigurationManager serverConfigurationManager,
         UiSharedService uiSharedService, PlayerPerformanceConfigService performanceConfigService,
-        CharaDataManager charaDataManager, PairManager pairManager, SpheneConfigService configService)
+        CharaDataManager charaDataManager, PairManager pairManager, SpheneConfigService configService,
+        LocalPairEmoteForceSyncService localPairEmoteForceSyncService)
     {
         _id = id;
         _pair = entry;
@@ -83,6 +85,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         _charaDataManager = charaDataManager;
         _pairManager = pairManager;
         _configService = configService;
+        _localPairEmoteForceSyncService = localPairEmoteForceSyncService;
         
         // Subscribe to acknowledgment status changes to automatically update AckYou
         _mediator.Subscribe<PairAcknowledgmentStatusChangedMessage>(this, OnAcknowledgmentStatusChanged);
@@ -254,6 +257,8 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         RefreshAckStatusIfDue();
         using var id = ImRaii.PushId(GetType() + _id);
         var hasOfflineGrace = _pairManager.IsUserInOfflineGrace(_pair.UserData);
+        var hasTimingSyncTarget = _localPairEmoteForceSyncService.IsTargetSelected(_pair.UserData.UID);
+        var hasTimingLeader = _localPairEmoteForceSyncService.IsLeader(_pair.UserData.UID);
         var color = ImRaii.PushColor(ImGuiCol.ChildBg, ImGui.GetColorU32(ImGuiCol.FrameBgHovered), _wasHovered && !hasOfflineGrace);
         var baseFolderWidth = UiSharedService.GetBaseFolderWidth() + 9.0f;
         using (ImRaii.Child(GetType() + _id, new System.Numerics.Vector2(baseFolderWidth, ImGui.GetFrameHeight()), false, ImGuiWindowFlags.NoScrollbar))
@@ -263,33 +268,29 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
                 var rowStart = ImGui.GetCursorScreenPos();
                 var gradientWidth = baseFolderWidth * 0.42f;
                 var rowEnd = new Vector2(rowStart.X + gradientWidth, rowStart.Y + ImGui.GetFrameHeight());
-                var drawList = ImGui.GetWindowDrawList();
                 var startColor = new Vector4(1.0f, 0.66f, 0.26f, _wasHovered ? 0.46f : 0.36f);
                 var endColor = new Vector4(1.0f, 0.66f, 0.26f, 0.0f);
-                var width = rowEnd.X - rowStart.X;
-                var slices = Math.Clamp((int)(width / 8.0f), 8, 64);
-                var step = width / slices;
-                var rounding = ImGui.GetFrameHeight() * 0.38f;
-                for (int i = 0; i < slices; i++)
-                {
-                    var x0 = rowStart.X + step * i;
-                    var x1 = i == slices - 1 ? rowEnd.X : rowStart.X + step * (i + 1);
-                    var t = (float)i / (float)(slices - 1);
-                    var gradientColor = Vector4.Lerp(startColor, endColor, t);
-                    var flags = ImDrawFlags.None;
-                    var cornerRadius = 0.0f;
-                    if (i == 0)
-                    {
-                        flags = ImDrawFlags.RoundCornersLeft;
-                        cornerRadius = rounding;
-                    }
-                    else if (i == slices - 1)
-                    {
-                        flags = ImDrawFlags.RoundCornersRight;
-                        cornerRadius = rounding;
-                    }
-                    drawList.AddRectFilled(new Vector2(x0, rowStart.Y), new Vector2(x1, rowEnd.Y), ImGui.ColorConvertFloat4ToU32(gradientColor), cornerRadius, flags);
-                }
+                DrawRowGradient(rowStart, rowEnd, startColor, endColor);
+            }
+
+            if (hasTimingSyncTarget)
+            {
+                var rowStart = ImGui.GetCursorScreenPos();
+                var gradientWidth = baseFolderWidth * 0.42f;
+                var rowEnd = new Vector2(rowStart.X + gradientWidth, rowStart.Y + ImGui.GetFrameHeight());
+                var startColor = new Vector4(0.60f, 0.34f, 1.0f, _wasHovered ? 0.42f : 0.30f);
+                var endColor = new Vector4(0.60f, 0.34f, 1.0f, 0.0f);
+                DrawRowGradient(rowStart, rowEnd, startColor, endColor);
+            }
+
+            if (hasTimingLeader)
+            {
+                var rowStart = ImGui.GetCursorScreenPos();
+                var gradientWidth = baseFolderWidth * 0.50f;
+                var rowEnd = new Vector2(rowStart.X + gradientWidth, rowStart.Y + ImGui.GetFrameHeight());
+                var startColor = new Vector4(1.0f, 0.30f, 0.76f, _wasHovered ? 0.48f : 0.34f);
+                var endColor = new Vector4(1.0f, 0.30f, 0.76f, 0.0f);
+                DrawRowGradient(rowStart, rowEnd, startColor, endColor);
             }
 
             DrawLeftSide();
@@ -300,6 +301,35 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         }
         _wasHovered = ImGui.IsItemHovered();
         color.Dispose();
+    }
+
+    private static void DrawRowGradient(Vector2 rowStart, Vector2 rowEnd, Vector4 startColor, Vector4 endColor)
+    {
+        var drawList = ImGui.GetWindowDrawList();
+        var width = rowEnd.X - rowStart.X;
+        var slices = Math.Clamp((int)(width / 8.0f), 8, 64);
+        var step = width / slices;
+        var rounding = ImGui.GetFrameHeight() * 0.38f;
+        for (int i = 0; i < slices; i++)
+        {
+            var x0 = rowStart.X + step * i;
+            var x1 = i == slices - 1 ? rowEnd.X : rowStart.X + step * (i + 1);
+            var t = (float)i / (float)(slices - 1);
+            var gradientColor = Vector4.Lerp(startColor, endColor, t);
+            var flags = ImDrawFlags.None;
+            var cornerRadius = 0.0f;
+            if (i == 0)
+            {
+                flags = ImDrawFlags.RoundCornersLeft;
+                cornerRadius = rounding;
+            }
+            else if (i == slices - 1)
+            {
+                flags = ImDrawFlags.RoundCornersRight;
+                cornerRadius = rounding;
+            }
+            drawList.AddRectFilled(new Vector2(x0, rowStart.Y), new Vector2(x1, rowEnd.Y), ImGui.ColorConvertFloat4ToU32(gradientColor), cornerRadius, flags);
+        }
     }
 
     private void DrawCommonClientMenu()
@@ -358,6 +388,93 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
             _ = _apiController.CyclePauseAsync(_pair.UserData);
             ImGui.CloseCurrentPopup();
         }
+
+        ImGui.Separator();
+        ImGui.TextUnformatted("Emote Sync");
+
+        var selectedForForceSync = _localPairEmoteForceSyncService.IsTargetSelected(_pair.UserData.UID);
+        var selectionIcon = selectedForForceSync ? FontAwesomeIcon.ToggleOn : FontAwesomeIcon.ToggleOff;
+        if (DrawStateColoredToggleButton(selectionIcon, "Local timing sync target", selectedForForceSync))
+        {
+            var wasLeaderBefore = _localPairEmoteForceSyncService.IsLeader(_pair.UserData.UID);
+            var isSelectedNow = _localPairEmoteForceSyncService.ToggleTargetSelection(_pair.UserData.UID);
+            var statusText = isSelectedNow ? "added to" : "removed from";
+            var exclusivityInfo = isSelectedNow && wasLeaderBefore ? " Timing leader was cleared for this pair." : string.Empty;
+            _mediator.Publish(new NotificationMessage(
+                "Emote Sync",
+                $"{_pair.UserData.AliasOrUID} was {statusText} local timing-sync targets.{exclusivityInfo}",
+                Sphene.SpheneConfiguration.Models.NotificationType.Info,
+                TimeSpan.FromSeconds(3)));
+        }
+        UiSharedService.AttachToolTip("Marks this pair as a local timing-sync target. A pair cannot be both timing leader and target.");
+
+        var isLeader = _localPairEmoteForceSyncService.IsLeader(_pair.UserData.UID);
+        var leaderIcon = isLeader ? FontAwesomeIcon.Crown : FontAwesomeIcon.User;
+        if (DrawStateColoredToggleButton(leaderIcon, "Set as timing leader", isLeader))
+        {
+            var wasTargetBefore = _localPairEmoteForceSyncService.IsTargetSelected(_pair.UserData.UID);
+            var isLeaderNow = _localPairEmoteForceSyncService.ToggleLeader(_pair.UserData.UID);
+            _mediator.Publish(new NotificationMessage(
+                "Local Timing Sync",
+                isLeaderNow
+                    ? $"{_pair.UserData.AliasOrUID} is now your local timing leader. Auto reset on your emote was disabled.{(wasTargetBefore ? " This pair was removed from timing-sync targets." : string.Empty)}"
+                    : $"{_pair.UserData.AliasOrUID} is no longer your local timing leader.",
+                Sphene.SpheneConfiguration.Models.NotificationType.Info,
+                TimeSpan.FromSeconds(3)));
+        }
+        UiSharedService.AttachToolTip("When this leader triggers an emote update, your timing and selected target timing are reset to 0. Setting a leader disables auto reset on your emote and removes this pair from targets.");
+
+        var followLeaderEnabled = _localPairEmoteForceSyncService.FollowLeaderOnLeaderEmoteEnabled;
+        var followLeaderIcon = followLeaderEnabled ? FontAwesomeIcon.ToggleOn : FontAwesomeIcon.ToggleOff;
+        if (DrawStateColoredToggleButton(followLeaderIcon, "Follow leader emote timing", followLeaderEnabled))
+        {
+            var enabledNow = _localPairEmoteForceSyncService.ToggleFollowLeaderOnLeaderEmote();
+            _mediator.Publish(new NotificationMessage(
+                "Emote sync",
+                enabledNow ? "Leader-follow emote sync is now enabled." : "Leader-follow emote sync is now disabled.",
+                Sphene.SpheneConfiguration.Models.NotificationType.Info,
+                TimeSpan.FromSeconds(3)));
+        }
+        UiSharedService.AttachToolTip("Enables or disables automatic timing follow when your selected leader emotes.");
+
+        var autoResetEnabled = _localPairEmoteForceSyncService.AutoResetOnLocalEmoteEnabled;
+        var autoResetIcon = autoResetEnabled ? FontAwesomeIcon.ToggleOn : FontAwesomeIcon.ToggleOff;
+        if (DrawStateColoredToggleButton(autoResetIcon, "Auto reset selected on my emote", autoResetEnabled))
+        {
+            var enabledNow = _localPairEmoteForceSyncService.ToggleAutoResetOnLocalEmote();
+            _mediator.Publish(new NotificationMessage(
+                "Local Timing Sync",
+                enabledNow
+                    ? "Automatic reset on your emote is now enabled. The timing leader was cleared."
+                    : "Automatic reset on your emote is now disabled.",
+                Sphene.SpheneConfiguration.Models.NotificationType.Info,
+                TimeSpan.FromSeconds(3)));
+        }
+        UiSharedService.AttachToolTip("When enabled, selected visible targets are reset to animation time 0 whenever your emote state updates. Enabling this clears the timing leader.");
+
+        var selectedCount = _localPairEmoteForceSyncService.GetSelectedTargetCount();
+        using (ImRaii.Disabled(selectedCount <= 0))
+        {
+            if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.Sync, "Reset emote timing for selected", _menuWidth, ButtonStyleKeys.ContextMenu_Item))
+            {
+                _ = Task.Run(async () =>
+                {
+                    var result = await _localPairEmoteForceSyncService.ForceSyncToSelectedVisibleTargetsAsync().ConfigureAwait(false);
+                    var notificationType = result.Success
+                        ? Sphene.SpheneConfiguration.Models.NotificationType.Success
+                        : Sphene.SpheneConfiguration.Models.NotificationType.Warning;
+                    _mediator.Publish(new NotificationMessage(
+                        "Local Timing Sync",
+                        $"{result.Message} Skipped invisible: {result.SkippedNotVisibleCount}, missing: {result.SkippedMissingCount}.",
+                        notificationType,
+                        TimeSpan.FromSeconds(5)));
+                });
+                ImGui.CloseCurrentPopup();
+            }
+        }
+        UiSharedService.AttachToolTip(selectedCount > 0
+            ? $"Resets current animation time to 0 for you and {selectedCount} selected mutually visible target(s), without changing which emote each player is using."
+            : "Select at least one target to reset emote timing.");
         ImGui.Separator();
 
         ImGui.TextUnformatted("Pair Permission Functions");
@@ -569,6 +686,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
     private void DrawLeftSide()
     {
         string userPairText = string.Empty;
+        var showUserPairTooltip = false;
 
         ImGui.AlignTextToFramePadding();
 
@@ -578,11 +696,14 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         var latestDataApplied = _pair.IsLatestReceivedDataApplied();
         var effectiveOwnAckYou = _pair.LastReceivedCharacterData != null ? latestDataApplied : ownAckYou;
         var suppressAckUi = _pair.IsInDuty;
+        var isTimingSyncTarget = _localPairEmoteForceSyncService.IsTargetSelected(_pair.UserData.UID);
+        var isAutoResetActiveForTargets = _localPairEmoteForceSyncService.AutoResetOnLocalEmoteEnabled;
 
         if (_pair.IsPaused)
         {
             using var _ = ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.DalamudYellow);
             _uiSharedService.IconText(FontAwesomeIcon.PauseCircle);
+            showUserPairTooltip = ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled);
             userPairText = _pair.UserData.AliasOrUID + " is paused";
         }
         else if (!_pair.IsOnline)
@@ -592,6 +713,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
                 ? FontAwesomeIcon.ArrowsLeftRight
                 : (_pair.IndividualPairStatus == API.Data.Enum.IndividualPairStatus.Bidirectional
                     ? FontAwesomeIcon.User : FontAwesomeIcon.Users));
+            showUserPairTooltip = ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled);
             userPairText = _pair.UserData.AliasOrUID + " is offline";
         }
         else if (isVisibleForIcon)
@@ -606,6 +728,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
             var iconColor = suppressAckUi ? ImGuiColors.ParsedGreen : (effectiveOwnAckYou ? ImGuiColors.ParsedGreen : ImGuiColors.DalamudYellow);
             var icon = (_uiSharedService.IsInGpose || _pair.IsInGpose) ? FontAwesomeIcon.Camera : FontAwesomeIcon.Eye;
             _uiSharedService.IconText(icon, iconColor);
+            showUserPairTooltip = ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled);
             
             if (suppressAckUi)
             {
@@ -635,12 +758,14 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
             if (_pair.IsInGpose)
             {
                 _uiSharedService.IconText(FontAwesomeIcon.Camera);
+                showUserPairTooltip = ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled);
                 userPairText = _pair.UserData.AliasOrUID + " is in GPose" + Environment.NewLine + "No data is shared while in GPose";
             }
             else
             {
                 _uiSharedService.IconText(_pair.IndividualPairStatus == API.Data.Enum.IndividualPairStatus.Bidirectional
                     ? FontAwesomeIcon.User : FontAwesomeIcon.Users);
+                showUserPairTooltip = ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled);
                 userPairText = _pair.UserData.AliasOrUID + " is online";
             }
         }
@@ -675,6 +800,14 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
                     UiSharedService.AttachToolTip($"Synchronization failed{timeAgo}");
                 }
             }
+        }
+
+        if (isTimingSyncTarget && isAutoResetActiveForTargets)
+        {
+            ImGui.SameLine();
+            using var _ = ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.DalamudYellow);
+            _uiSharedService.IconText(FontAwesomeIcon.PersonCircleCheck);
+            UiSharedService.AttachToolTip("Auto reset on your emote is active for this timing-sync target. Their current emote timing resets to 0 when your emote updates.");
         }
 
         if (_pair.IndividualPairStatus == API.Data.Enum.IndividualPairStatus.OneSided)
@@ -753,7 +886,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
                 }));
         }
 
-        UiSharedService.AttachToolTip(userPairText);
+        DrawTooltipForHoveredItem(showUserPairTooltip, userPairText);
 
         if (_performanceConfigService.Current.ShowPerformanceIndicator
             && !_performanceConfigService.Current.UIDsToIgnore
@@ -786,6 +919,31 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         }
 
         ImGui.SameLine();
+    }
+
+    private static void DrawTooltipForHoveredItem(bool isHovered, string text)
+    {
+        if (!isHovered) return;
+        using (SpheneCustomTheme.ApplyTooltipTheme())
+        {
+            ImGui.BeginTooltip();
+            ImGui.PushTextWrapPos(ImGui.GetFontSize() * 35f);
+            if (text.IndexOf(UiSharedService.TooltipSeparator, StringComparison.Ordinal) >= 0)
+            {
+                var splitText = text.Split(UiSharedService.TooltipSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                for (int i = 0; i < splitText.Length; i++)
+                {
+                    ImGui.TextUnformatted(splitText[i]);
+                    if (i != splitText.Length - 1) ImGui.Separator();
+                }
+            }
+            else
+            {
+                ImGui.TextUnformatted(text);
+            }
+            ImGui.PopTextWrapPos();
+            ImGui.EndTooltip();
+        }
     }
 
     private void DrawName(float leftSide, float rightSide)

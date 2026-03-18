@@ -19,14 +19,14 @@ public static class SyncBehaviorOptionBlock
                 configService.Save();
             }
 
-            uiShared.DrawHelpText("When enabled, Sphene no longer triggers Penumbra redraw calls. Use this if redraws cause instability or temporary invisibility.");
+            uiShared.DrawHelpText("When enabled, Sphene no longer triggers Penumbra redraw calls. Use this at own risk and disable it if you get errors.");
             if (disableRedraws)
             {
-                UiSharedService.ColorTextWrapped("Warning: Redraws are disabled. Visual updates can be delayed until natural game refreshes happen.", ImGuiColors.DalamudYellow);
+                UiSharedService.ColorTextWrapped("Warning: (Experimental) Redraws are disabled. Visual updates can be delayed until natural game refreshes happen.", ImGuiColors.DalamudYellow);
             }
             else
             {
-                UiSharedService.ColorTextWrapped("Redraws are active. Sphene can immediately refresh visual changes.", ImGuiColors.DalamudGrey);
+                UiSharedService.ColorTextWrapped("Redraws are active. Sphene will trigger a redraw after visual changes.", ImGuiColors.DalamudGrey);
             }
         }
         finally

@@ -54,6 +54,7 @@ public record HonorificReadyMessage : MessageBase;
 public record BypassEmoteReadyMessage : MessageBase;
 public record BypassEmoteMessage(string BypassEmoteData) : MessageBase;
 public record BypassEmoteUpdateMessage(string BypassEmoteData, string DataHash) : MessageBase;
+public record PairBypassEmoteReceivedMessage(UserData Sender, string BypassEmoteData) : MessageBase;
 public record TransientResourceChangedMessage(IntPtr Address) : MessageBase;
 public record HaltScanMessage(string Source) : MessageBase;
 public record ResumeScanMessage(string Source) : MessageBase;

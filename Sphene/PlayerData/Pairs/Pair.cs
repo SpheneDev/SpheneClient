@@ -112,6 +112,11 @@ public class Pair : DisposableMediatorSubscriberBase
         _ = CachedPlayer.ApplyBypassEmoteDataAsync(data);
     }
 
+    public nint GetPlayerCharacterAddress()
+    {
+        return CachedPlayer?.PlayerCharacter ?? nint.Zero;
+    }
+
     public string? GetCurrentDataHash()
     {
         return LastReceivedCharacterData?.DataHash?.Value;

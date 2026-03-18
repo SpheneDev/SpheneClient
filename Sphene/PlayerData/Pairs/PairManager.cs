@@ -290,6 +290,7 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         if (_allClientPairs.TryGetValue(dto.Sender, out var pair))
         {
             pair.ApplyBypassEmote(dto.BypassEmoteData);
+            Mediator.Publish(new PairBypassEmoteReceivedMessage(dto.Sender, dto.BypassEmoteData));
         }
         else
         {

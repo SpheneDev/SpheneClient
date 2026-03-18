@@ -26,13 +26,15 @@ public class DrawEntityFactory
     private readonly IdDisplayHandler _uidDisplayHandler;
     private readonly PairManager _pairManager;
     private readonly AreaBoundSyncshellService _areaBoundSyncshellService;
+    private readonly LocalPairEmoteForceSyncService _localPairEmoteForceSyncService;
 
     public DrawEntityFactory(ApiController apiController, IdDisplayHandler uidDisplayHandler,
         SelectTagForPairUi selectTagForPairUi, SpheneMediator mediator,
         TagHandler tagHandler, SelectPairForTagUi selectPairForTagUi,
         ServerConfigurationManager serverConfigurationManager, UiSharedService uiSharedService,
         PlayerPerformanceConfigService playerPerformanceConfigService, CharaDataManager charaDataManager,
-        PairManager pairManager, SpheneConfigService configService, AreaBoundSyncshellService areaBoundSyncshellService)
+        PairManager pairManager, SpheneConfigService configService, AreaBoundSyncshellService areaBoundSyncshellService,
+        LocalPairEmoteForceSyncService localPairEmoteForceSyncService)
     {
         _apiController = apiController;
         _uidDisplayHandler = uidDisplayHandler;
@@ -47,6 +49,7 @@ public class DrawEntityFactory
         _pairManager = pairManager;
         _configService = configService;
         _areaBoundSyncshellService = areaBoundSyncshellService;
+        _localPairEmoteForceSyncService = localPairEmoteForceSyncService;
     }
 
     public DrawFolderGroup CreateDrawGroupFolder(GroupFullInfoDto groupFullInfoDto,
@@ -82,6 +85,7 @@ public class DrawEntityFactory
             _playerPerformanceConfigService,
             _charaDataManager,
             _pairManager,
-            _configService);
+            _configService,
+            _localPairEmoteForceSyncService);
     }
 }
