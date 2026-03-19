@@ -84,8 +84,16 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
             ReapplyPairData();
         });
         Mediator.Subscribe<CutsceneStartMessage>(this, (_) => ApplyLocalVisibilityGate(true, "CutsceneStart"));
-        Mediator.Subscribe<ZoneSwitchStartMessage>(this, (_) => ApplyLocalVisibilityGate(true, "ZoneSwitchStart"));
-        Mediator.Subscribe<ZoneSwitchEndMessage>(this, (_) => ClearLocalVisibilityGate("ZoneSwitchEnd"));
+        Mediator.Subscribe<ZoneSwitchStartMessage>(this, (_) =>
+        {
+            ApplyLocalVisibilityGate(true, "ZoneSwitchStart");
+            EnforceVanillaForPausedPairs("ZoneSwitchStart");
+        });
+        Mediator.Subscribe<ZoneSwitchEndMessage>(this, (_) =>
+        {
+            ClearLocalVisibilityGate("ZoneSwitchEnd");
+            EnforceVanillaForPausedPairs("ZoneSwitchEnd");
+        });
         Mediator.Subscribe<CharacterDataBuildStartedMessage>(this, (_) => SetPendingAcknowledgmentForBuildStart());
         Mediator.Subscribe<CharacterDataApplicationCompletedMessage>(this, OnCharacterDataApplicationCompleted);
         Mediator.Subscribe<GposeStartMessage>(this, (msg) => { _ = _apiController.Value.UserUpdateGposeState(true); });
@@ -376,6 +384,7 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
             }
         }
 
+        EnforceVanillaForPausedPairs("RemoveGroup");
         RecreateLazy();
     }
 
@@ -392,6 +401,7 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
             }
         }
 
+        EnforceVanillaForPausedPairs("RemoveGroupPair");
         RecreateLazy();
     }
 
@@ -542,6 +552,8 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
             pair.UserPair.OwnPermissions.IsDisableSounds(),
             pair.UserPair.OwnPermissions.IsDisableVFX());
 
+        EnforceVanillaForPausedPairs("UpdateSelfPairPermissions");
+
         if (!pair.IsPaused)
             pair.ApplyLastReceivedData();
 
@@ -639,7 +651,39 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
     internal void SetGroupPermissions(GroupPermissionDto dto)
     {
         _allGroups[dto.Group].GroupPermissions = dto.Permissions;
+        EnforceVanillaForPausedPairs("SetGroupPermissions");
         RecreateLazy();
+    }
+
+    public void EnforceVanillaForPausedPairs(string source)
+    {
+        if (!_configurationService.Current.IsIncognitoModeActive)
+        {
+            return;
+        }
+
+        var affectedPairs = 0;
+        foreach (var pair in _allClientPairs.Values)
+        {
+            if (!pair.IsPaused)
+            {
+                continue;
+            }
+
+            if (!pair.IsOnline && pair.LastReceivedCharacterData == null)
+            {
+                continue;
+            }
+
+            Mediator.Publish(new ClearProfileDataMessage(pair.UserData));
+            pair.MarkOffline();
+            affectedPairs++;
+        }
+
+        if (affectedPairs > 0)
+        {
+            Logger.LogInformation("Incognito cleanup ({source}): enforced vanilla for {count} paused pair(s)", source, affectedPairs);
+        }
     }
 
     internal void SetGroupStatusInfo(GroupPairUserInfoDto dto)
