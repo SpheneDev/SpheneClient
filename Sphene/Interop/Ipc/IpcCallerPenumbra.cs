@@ -267,9 +267,9 @@ public sealed class IpcCallerPenumbra : DisposableMediatorSubscriberBase, IIpcCa
         return _penumbraGetMetaManipulations.Invoke();
     }
 
-    public async Task RedrawAsync(ILogger logger, GameObjectHandler handler, Guid applicationId, CancellationToken token)
+    public async Task RedrawAsync(ILogger logger, GameObjectHandler handler, Guid applicationId, CancellationToken token, bool forceRedrawIfDisabled = false)
     {
-        if (!APIAvailable || _dalamudUtil.IsZoning || _configService.Current.DisableRedraws) return;
+        if (!APIAvailable || _dalamudUtil.IsZoning || (_configService.Current.DisableRedraws && !forceRedrawIfDisabled)) return;
         try
         {
             await _redrawManager.RedrawSemaphore.WaitAsync(token).ConfigureAwait(false);
@@ -302,9 +302,9 @@ public sealed class IpcCallerPenumbra : DisposableMediatorSubscriberBase, IIpcCa
         return await _penumbraResolvePaths.Invoke(forward, reverse).ConfigureAwait(false);
     }
 
-    public Task RedrawPlayerAsync(int delayMs = 600)
+    public Task RedrawPlayerAsync(int delayMs = 600, bool forceRedrawIfDisabled = false)
     {
-        if (!APIAvailable || _dalamudUtil.IsZoning || _configService.Current.DisableRedraws) return Task.CompletedTask;
+        if (!APIAvailable || _dalamudUtil.IsZoning || (_configService.Current.DisableRedraws && !forceRedrawIfDisabled)) return Task.CompletedTask;
 
         ScheduleDebouncedRedraw(delayMs);
         return Task.CompletedTask;

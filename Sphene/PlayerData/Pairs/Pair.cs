@@ -401,7 +401,7 @@ public class Pair : DisposableMediatorSubscriberBase
             cachedAt);
     }
 
-    public void ApplyLastReceivedData(bool forced = false)
+    public void ApplyLastReceivedData(bool forced = false, bool forceRedrawIfDisabled = false)
     {
         if (CachedPlayer == null) return;
         if (LastReceivedCharacterData == null) return;
@@ -442,7 +442,7 @@ public class Pair : DisposableMediatorSubscriberBase
         _lastApplyAttemptTime = DateTimeOffset.UtcNow;
         AddApplyDebug($"Apply start forced={forced} hash={applyShortHash}");
         Logger.LogDebug("{tag} Apply start: user={user} forced={forced} hash={hash}", SyncProgressTag, UserData.AliasOrUID, forced, applyShortHash);
-        CachedPlayer.ApplyCharacterData(Guid.NewGuid(), RemoveNotSyncedFiles(LastReceivedCharacterData.DeepClone())!, forced);
+        CachedPlayer.ApplyCharacterData(Guid.NewGuid(), RemoveNotSyncedFiles(LastReceivedCharacterData.DeepClone())!, forced, forceRedrawIfDisabled);
     }
 
     public void CreateCachedPlayer(OnlineUserIdentDto? dto = null)

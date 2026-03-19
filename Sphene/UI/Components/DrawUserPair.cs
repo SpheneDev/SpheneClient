@@ -377,7 +377,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         {
             if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.Sync, "Reload last data", _menuWidth, ButtonStyleKeys.ContextMenu_Item))
             {
-                _pair.ApplyLastReceivedData(forced: true);
+                _pair.ApplyLastReceivedData(forced: true, forceRedrawIfDisabled: true);
                 ImGui.CloseCurrentPopup();
             }
             UiSharedService.AttachToolTip("This reapplies the last received character data to this character");
@@ -1023,7 +1023,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
             ImGui.SameLine(currentRightSide);
             if (_uiSharedService.IconButton(FontAwesomeIcon.Sync, null, null, null, null, ButtonStyleKeys.Pair_Reload))
             {
-                _pair.ApplyLastReceivedData(forced: true);
+                _pair.ApplyLastReceivedData(forced: true, forceRedrawIfDisabled: true);
             }
             UiSharedService.AttachToolTip("Reload last received character data");
         }

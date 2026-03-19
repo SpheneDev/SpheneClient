@@ -1,6 +1,4 @@
 using Sphene.API.Data;
-using Sphene.API.Data.Enum;
-using Sphene.PlayerData.Factories;
 using Sphene.SpheneConfiguration;
 using Sphene.Services;
 using Sphene.Services.Mediator;
@@ -17,7 +15,6 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
     private readonly ApiController _apiController;
     private readonly DalamudUtilService _dalamudUtil;
     private readonly FileUploadManager _fileTransferManager;
-    private readonly GameObjectHandlerFactory _gameObjectHandlerFactory;
     private readonly PairManager _pairManager;
     private readonly SpheneConfigService _configService;
     private readonly SessionAcknowledgmentManager _sessionAcknowledgmentManager;
@@ -34,26 +31,22 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
     
     // Delayed push tracking for newly connected users
     private readonly Dictionary<UserData, DateTime> _delayedPushUsers = new();
-    private readonly Dictionary<UserData, DateTime> _delayedReloadUsers = new();
     private readonly Timer _delayedPushTimer;
-    private readonly Timer _characterReloadTimer;
     private DateTime _nextOutgoingBatchPushUtc = DateTime.MinValue;
     private bool _hasPendingOutgoingBatchPush = false;
     
     private const int DELAYED_PUSH_SECONDS = 3;
-    private const int CHARACTER_RELOAD_DELAY_SECONDS = 3;
 
 
     public VisibleUserDataDistributor(ILogger<VisibleUserDataDistributor> logger, ApiController apiController, DalamudUtilService dalamudUtil,
         PairManager pairManager, SpheneMediator mediator, FileUploadManager fileTransferManager, SessionAcknowledgmentManager sessionAcknowledgmentManager,
-        GameObjectHandlerFactory gameObjectHandlerFactory, SpheneConfigService configService) : base(logger, mediator)
+        SpheneConfigService configService) : base(logger, mediator)
     {
         _apiController = apiController;
         _dalamudUtil = dalamudUtil;
         _pairManager = pairManager;
         _fileTransferManager = fileTransferManager;
         _sessionAcknowledgmentManager = sessionAcknowledgmentManager;
-        _gameObjectHandlerFactory = gameObjectHandlerFactory;
         _configService = configService;
         
 
@@ -61,9 +54,6 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
         // Initialize delayed push timer for newly connected users
         _delayedPushTimer = new Timer(ProcessDelayedPushes, null, 
             TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
-        
-        // Initialize character reload timer - triggers every second to check for expired reload delays
-        _characterReloadTimer = new Timer(ProcessDelayedReloads, null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
         
         Mediator.Subscribe<DelayedFrameworkUpdateMessage>(this, (_) => FrameworkOnUpdate());
         Mediator.Subscribe<CharacterDataCreatedMessage>(this, (msg) =>
@@ -131,7 +121,6 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
             _runtimeCts.Cancel();
             _runtimeCts.Dispose();
             _delayedPushTimer?.Dispose();
-            _characterReloadTimer?.Dispose();
             _pushDataSemaphore?.Dispose();
         }
 
@@ -344,10 +333,6 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
             foreach (var user in usersToProcess)
             {
                 _usersToPushDataTo.Add(user);
-                // Schedule character reload after acknowledgment is sent
-                _delayedReloadUsers[user] = DateTime.UtcNow;
-                Logger.LogDebug("{tag} Reload scheduled: user={user} delaySeconds={seconds}", 
-                    SyncProgressTag, user.AliasOrUID, CHARACTER_RELOAD_DELAY_SECONDS);
             }
             
             // Only push if we have data to push
@@ -371,50 +356,6 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
             Logger.LogDebug("{tag} Outgoing batch flush: hash={hash} users={count}",
                 SyncProgressTag, _lastCreatedData?.DataHash?.Value ?? "null", _usersToPushDataTo.Count);
             PushCharacterData(forced: true, bypassBatching: true);
-        }
-    }
-    
-    /// Processes delayed character reloads after acknowledgment has been sent
-    
-    private async void ProcessDelayedReloads(object? state)
-    {
-        if (_delayedReloadUsers.Count == 0) return;
-        
-        var currentTime = DateTime.UtcNow;
-        var usersToReload = new List<UserData>();
-        
-        // Find users whose reload delay period has expired
-        foreach (var kvp in _delayedReloadUsers.ToList())
-        {
-            var user = kvp.Key;
-            var delayStartTime = kvp.Value;
-            
-            if ((currentTime - delayStartTime).TotalSeconds >= CHARACTER_RELOAD_DELAY_SECONDS)
-            {
-                usersToReload.Add(user);
-                _delayedReloadUsers.Remove(user);
-                Logger.LogDebug("{tag} Reload delay expired: user={user}", SyncProgressTag, user.AliasOrUID);
-            }
-        }
-        
-        // Trigger character reload for users
-        if (usersToReload.Count > 0)
-        {
-            Logger.LogDebug("{tag} Reload trigger: count={count} users={users}",
-                SyncProgressTag, usersToReload.Count, string.Join(", ", usersToReload.Select(u => u.AliasOrUID)));
-            
-            // Trigger character data recreation by creating a temporary handler and sending CreateCacheForObjectMessage
-            try
-            {
-                var tempHandler = await _gameObjectHandlerFactory.Create(ObjectKind.Player, () => _dalamudUtil.GetPlayerPtr(), isWatched: false).ConfigureAwait(false);
-                Mediator.Publish(new CreateCacheForObjectMessage(tempHandler));
-                tempHandler.Dispose();
-                Logger.LogDebug("{tag} Reload trigger complete", SyncProgressTag);
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError(ex, "{tag} Reload trigger failed", SyncProgressTag);
-            }
         }
     }
     
