@@ -230,7 +230,6 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
 
                                 if (!string.IsNullOrWhiteSpace(e.Description))
                                 {
-                                    ImGui.TextColored(ImGuiColors.DalamudYellow, "Description");
                                     using (ImRaii.PushIndent(ImGuiHelpers.GlobalScale * 10f))
                                     {
                                         UiSharedService.TextWrapped(NormalizeDescription(e.Description));
@@ -238,12 +237,6 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
                                 }
 
                                 ImGuiHelpers.ScaledDummy(2f);
-
-                                if (e.Changes is { Count: > 0 })
-                                {
-                                    ImGui.TextColored(ImGuiColors.ParsedBlue, "Changes");
-                                    ImGuiHelpers.ScaledDummy(1f);
-                                }
 
                                 using (ImRaii.PushIndent(10f))
                                 {
