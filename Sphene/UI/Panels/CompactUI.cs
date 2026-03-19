@@ -2013,10 +2013,11 @@ public class CompactUi : WindowMediatorSubscriberBase
                 }
                 
                 _isIncognitoModeActive = true;
+                _configService.Current.IsIncognitoModeActive = _isIncognitoModeActive;
+                _pairManager.EnforceVanillaForPausedPairs("IncognitoModeActivated");
                 _logger.LogInformation("Incognito mode activated");
                 
                 // Save configuration
-                _configService.Current.IsIncognitoModeActive = _isIncognitoModeActive;
                 _configService.Current.PrePausedPairs = new HashSet<string>(_prePausedPairs, StringComparer.Ordinal);
                 _configService.Save();
             }
