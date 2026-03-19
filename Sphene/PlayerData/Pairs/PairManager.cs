@@ -42,6 +42,8 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
     private readonly DalamudUtilService _dalamudUtilService;
     private readonly Timer _ackStatusPollTimer;
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _pendingOfflineGrace = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, OnlineUserIdentDto> _pendingOnlineDtos = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, OnlineUserCharaDataDto> _pendingCharaDataDtos = new(StringComparer.Ordinal);
     private readonly TimeSpan _offlineGraceWindow = TimeSpan.FromSeconds(10);
     private const int MaxPairCharacterCacheEntries = 200;
     private int _ackStatusPollRunning = 0;
@@ -126,6 +128,7 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
             _allClientPairs[dto.User] = _pairFactory.Create(new UserFullPairDto(dto.User, API.Data.Enum.IndividualPairStatus.None,
                 [dto.Group.GID], dto.SelfToOtherPermissions, dto.OtherToSelfPermissions));
         else _allClientPairs[dto.User].UserPair.Groups.Add(dto.GID);
+        ProcessPendingPairEvents(dto.User.UID);
         RecreateLazy();
     }
 
@@ -157,6 +160,7 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         }
 
         RestorePairCharacterDataFromCache(_allClientPairs[dto.User], created);
+        ProcessPendingPairEvents(dto.User.UID);
         RecreateLazy();
     }
 
@@ -182,6 +186,7 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
             LastAddedUser = _allClientPairs[dto.User];
         _allClientPairs[dto.User].ApplyLastReceivedData();
         RestorePairCharacterDataFromCache(_allClientPairs[dto.User], created);
+        ProcessPendingPairEvents(dto.User.UID);
         RecreateLazy();
     }
 
@@ -192,6 +197,8 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         DisposePairs();
         _allClientPairs.Clear();
         _allGroups.Clear();
+        _pendingOnlineDtos.Clear();
+        _pendingCharaDataDtos.Clear();
         RecreateLazy();
     }
 
@@ -250,7 +257,19 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
 
     public void MarkPairOnline(OnlineUserIdentDto dto, bool sendNotif = true)
     {
-        if (!_allClientPairs.ContainsKey(dto.User)) throw new InvalidOperationException("No user found for " + dto);
+        if (!_allClientPairs.ContainsKey(dto.User))
+        {
+            if (!string.IsNullOrEmpty(dto.User.UID))
+            {
+                _pendingOnlineDtos[dto.User.UID] = dto;
+                Logger.LogDebug("{tag} Online deferred: pair missing user={user}", SyncProgressTag, dto.User.AliasOrUID);
+            }
+            else
+            {
+                Logger.LogWarning("{tag} Online dropped: pair missing and uid empty user={user}", SyncProgressTag, dto.User.AliasOrUID);
+            }
+            return;
+        }
 
         var key = GetOfflineGraceKey(dto.User);
         var hadPendingOfflineGrace = CancelPendingOfflineGraceByKey(key);
@@ -314,7 +333,16 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         
         if (!_allClientPairs.TryGetValue(dto.User, out var pair))
         {
-            Logger.LogWarning("{tag} Receive dropped: user not paired user={user}", SyncProgressTag, dto.User.AliasOrUID);
+            if (!string.IsNullOrEmpty(dto.User.UID))
+            {
+                _pendingCharaDataDtos[dto.User.UID] = dto;
+                Logger.LogDebug("{tag} Receive deferred: pair missing user={user} hash={hash}",
+                    SyncProgressTag, dto.User.AliasOrUID, dto.DataHash[..Math.Min(8, dto.DataHash.Length)]);
+            }
+            else
+            {
+                Logger.LogWarning("{tag} Receive dropped: user not paired and uid empty user={user}", SyncProgressTag, dto.User.AliasOrUID);
+            }
             return;
         }
 
@@ -479,6 +507,12 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
                 _allClientPairs.TryRemove(dto.User, out _);
                 RemoveCachedPairCharacterData(dto.User);
             }
+        }
+
+        if (!string.IsNullOrEmpty(dto.User.UID))
+        {
+            _pendingOnlineDtos.TryRemove(dto.User.UID, out _);
+            _pendingCharaDataDtos.TryRemove(dto.User.UID, out _);
         }
 
         RecreateLazy();
@@ -1166,6 +1200,34 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         if (permissionsChanged)
         {
             RecreateLazy();
+        }
+    }
+
+    private void ProcessPendingPairEvents(string? uid)
+    {
+        if (string.IsNullOrEmpty(uid))
+        {
+            return;
+        }
+
+        var pair = GetPairByUID(uid);
+        if (pair == null)
+        {
+            return;
+        }
+
+        if (_pendingOnlineDtos.TryRemove(uid, out var pendingOnlineDto))
+        {
+            Logger.LogDebug("{tag} Online replay: user={user}", SyncProgressTag, pendingOnlineDto.User.AliasOrUID);
+            MarkPairOnline(pendingOnlineDto, sendNotif: false);
+        }
+
+        if (_pendingCharaDataDtos.TryRemove(uid, out var pendingCharaDataDto))
+        {
+            Logger.LogDebug("{tag} Data replay: user={user} hash={hash}", SyncProgressTag,
+                pendingCharaDataDto.User.AliasOrUID, pendingCharaDataDto.DataHash[..Math.Min(8, pendingCharaDataDto.DataHash.Length)]);
+            pair.ApplyData(pendingCharaDataDto);
+            CachePairCharacterData(pendingCharaDataDto.User, pendingCharaDataDto.CharaData);
         }
     }
 

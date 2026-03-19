@@ -496,17 +496,41 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
                 }
             });
             
-            // Refresh pair manager data to reflect the new syncshell membership
-            // This ensures the UI shows the user as a syncshell member rather than just a visible user
-            _ = Task.Run(async () =>
-            {
-                await Task.Delay(500).ConfigureAwait(false);
-                await _apiController.UserGetOnlinePairs(null).ConfigureAwait(false);
-            });
+            _ = Task.Run(async () => await RefreshPairsAfterAreaBoundJoin().ConfigureAwait(false));
         }
         else
         {
             _logger.LogWarning("Failed to join area-bound syncshell {SyncshellId}: {ErrorMessage}", message.JoinResponse.Group.GID, message.JoinResponse.Reason);
+        }
+    }
+
+    private async Task RefreshPairsAfterAreaBoundJoin()
+    {
+        try
+        {
+            await Task.Delay(500).ConfigureAwait(false);
+
+            var groups = await _apiController.GroupsGetAll().ConfigureAwait(false);
+            foreach (var group in groups)
+            {
+                _pairManager.AddGroup(group);
+            }
+
+            var pairedUsers = await _apiController.UserGetPairedClients().ConfigureAwait(false);
+            foreach (var pair in pairedUsers)
+            {
+                _pairManager.AddUserPair(pair);
+            }
+
+            var onlineUsers = await _apiController.UserGetOnlinePairs(null).ConfigureAwait(false);
+            foreach (var online in onlineUsers)
+            {
+                _pairManager.MarkPairOnline(online, sendNotif: false);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to refresh pair state after area-bound join");
         }
     }
 
