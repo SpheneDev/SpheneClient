@@ -35,6 +35,8 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
     private readonly HashSet<string> _notifiedSyncshells = new(StringComparer.Ordinal); // Track which syncshells we've already notified about
     private readonly Timer _locationCheckTimer;
     private bool _isEnabled = true;
+    private volatile bool _hasRefreshedAreaSyncshells = false;
+    private string _lastConnectedShard = string.Empty;
 
     public AreaBoundSyncshellService(ILogger<AreaBoundSyncshellService> logger, 
         SpheneMediator mediator, 
@@ -536,7 +538,15 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
 
     private void OnConnected(ConnectedMessage message)
     {
+        var shard = message.Connection.ServerInfo.ShardName ?? string.Empty;
+        if (!string.IsNullOrWhiteSpace(_lastConnectedShard) && !string.Equals(_lastConnectedShard, shard, StringComparison.Ordinal))
+        {
+            _logger.LogInformation("Area-bound syncshell state reset due to server switch: {oldShard} -> {newShard}", _lastConnectedShard, shard);
+            ClearRuntimeState(clearLastLocation: true);
+        }
+        _lastConnectedShard = shard;
         _logger.LogDebug("Connected to server, refreshing area-bound syncshells");
+        _hasRefreshedAreaSyncshells = false;
         // Add a small delay to ensure the connection is fully established
         _ = Task.Run(async () =>
         {
@@ -548,8 +558,17 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
     private void OnDisconnected(DisconnectedMessage message)
     {
         _logger.LogDebug("Disconnected from server, clearing area-bound syncshells");
+        ClearRuntimeState(clearLastLocation: true);
+    }
+
+    private void ClearRuntimeState(bool clearLastLocation)
+    {
+        _hasRefreshedAreaSyncshells = false;
         _areaBoundSyncshells.Clear();
         _currentlyJoinedAreaSyncshells.Clear();
+        _notifiedSyncshells.Clear();
+        if (clearLastLocation)
+            _lastLocation = null;
     }
 
     private void OnAreaBoundSyncshellConfigurationUpdate(AreaBoundSyncshellConfigurationUpdateMessage message)
@@ -591,6 +610,7 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
             }
             
             _logger.LogDebug("Refreshed {Count} area-bound syncshells", syncshells.Count);
+            _hasRefreshedAreaSyncshells = true;
             
             // After reconnection, check if we're still members of area-bound syncshells that are no longer valid for our location
             await ValidateCurrentAreaBoundMemberships().ConfigureAwait(false);
@@ -693,11 +713,8 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
 
     public bool HasAvailableAreaSyncshells()
     {
-        if (_lastLocation == null)
-        {
-            _logger.LogDebug("HasAvailableAreaSyncshells: No location available");
+        if (!_hasRefreshedAreaSyncshells || _lastLocation == null)
             return false;
-        }
 
         // Check if there are any area syncshells available in the current location
         // that are not already joined
@@ -723,6 +740,11 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
         if (_lastLocation == null)
         {
             _logger.LogDebug("Cannot trigger area syncshell selection - no location available");
+            return;
+        }
+        if (!_hasRefreshedAreaSyncshells)
+        {
+            _logger.LogDebug("Cannot trigger area syncshell selection - area syncshells not refreshed yet");
             return;
         }
 
