@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 using Dalamud.Interface.Windowing;
@@ -121,6 +122,8 @@ public sealed class ShrinkUHostService : IHostedService, IDisposable
             TryConfigureShrinkUBackupPath();
 
             var enable = _configService.Current.EnableShrinkUIntegration;
+            var uiOpenAtStartup = IsConversionUiOpen;
+            var shouldRunHeavyStartup = uiOpenAtStartup;
             _logger.LogDebug("ShrinkUHostService StartAsync: integration enabled={enabled}", enable);
             if (enable)
             {
@@ -159,8 +162,8 @@ public sealed class ShrinkUHostService : IHostedService, IDisposable
                     _refreshCts?.Cancel();
                     _refreshCts = new CancellationTokenSource();
                     var token = _refreshCts.Token;
-                    var showStartupUi = true;
-                    try { showStartupUi = !_backupService.IsBackupFolderFingerprintUnchanged(); }
+                    var showStartupUi = shouldRunHeavyStartup;
+                    try { showStartupUi = shouldRunHeavyStartup && !_backupService.IsBackupFolderFingerprintUnchanged(); }
                     catch (Exception ex) { _logger.LogDebug(ex, "Failed to determine ShrinkU backup fingerprint state"); }
                     _logger.LogDebug("ShrinkU startup UI decision: show={show}", showStartupUi);
                     if (showStartupUi)
@@ -175,14 +178,37 @@ public sealed class ShrinkUHostService : IHostedService, IDisposable
                     }
                     _ = Task.Run(async () =>
                     {
+                        var startupSw = Stopwatch.StartNew();
+                        var startupStartedUtc = DateTime.UtcNow;
+                        _logger.LogInformation("ShrinkU startup initialization started (utc={utc:O})", startupStartedUtc);
                         try
                         {
                             _logger.LogDebug("ShrinkU startup via Sphene: skipping Penumbra wait");
+                            var waitSw = Stopwatch.StartNew();
                             var penumbraReady = await WaitForPenumbraReadinessAsync(token).ConfigureAwait(false);
+                            waitSw.Stop();
+                            _logger.LogInformation("ShrinkU startup timing: step=penumbra-readiness elapsedMs={elapsed}", waitSw.ElapsedMilliseconds);
                             if (!penumbraReady)
                             {
                                 _logger.LogWarning("Penumbra API did not become ready within timeout. Continuing ShrinkU startup with best effort.");
                             }
+                            try
+                            {
+                                var pathSyncSw = Stopwatch.StartNew();
+                                var pathSyncTask = _shrinkuConversionService.ForcePathAndCategorySyncAsync("startup-host-force-sync");
+                                var pathSyncDone = await Task.WhenAny(pathSyncTask, Task.Delay(TimeSpan.FromSeconds(8), token)).ConfigureAwait(false);
+                                if (pathSyncDone != pathSyncTask)
+                                {
+                                    _logger.LogWarning("Startup path/category sync timed out; continuing");
+                                }
+                                else
+                                {
+                                    try { await pathSyncTask.ConfigureAwait(false); } catch (Exception ex) { _logger.LogDebug(ex, "Startup path/category sync completed with error"); }
+                                }
+                                pathSyncSw.Stop();
+                                _logger.LogInformation("ShrinkU startup timing: step=path-category-sync elapsedMs={elapsed}", pathSyncSw.ElapsedMilliseconds);
+                            }
+                            catch (Exception ex) { _logger.LogDebug(ex, "Failed startup path/category sync"); }
                             try { _backupService.SetSavingEnabled(false); }
                             catch (Exception ex) { _logger.LogDebug(ex, "Failed to disable backup saving at startup"); }
                             await Task.Delay(TimeSpan.FromSeconds(1), token).ConfigureAwait(false);
@@ -194,6 +220,7 @@ public sealed class ShrinkUHostService : IHostedService, IDisposable
                             catch (Exception ex) { _logger.LogDebug(ex, "Failed to evaluate backup fingerprint state"); }
                             if (!backupUnchanged)
                             {
+                                var backupRefreshSw = Stopwatch.StartNew();
                                 var maxBackupSeconds = 5;
                                 var refreshTask = _backupService.RefreshAllBackupStateAsync();
                                 var completed = await Task.WhenAny(refreshTask, Task.Delay(TimeSpan.FromSeconds(maxBackupSeconds), token)).ConfigureAwait(false);
@@ -206,6 +233,8 @@ public sealed class ShrinkUHostService : IHostedService, IDisposable
                                     try { await refreshTask.ConfigureAwait(false); }
                                     catch (Exception ex) { _logger.LogDebug(ex, "RefreshAllBackupStateAsync completed with error"); }
                                 }
+                                backupRefreshSw.Stop();
+                                _logger.LogInformation("ShrinkU startup timing: step=refresh-backup-state elapsedMs={elapsed}", backupRefreshSw.ElapsedMilliseconds);
                             }
                             else
                             {
@@ -217,14 +246,29 @@ public sealed class ShrinkUHostService : IHostedService, IDisposable
                             try
                             {
                                 var folderTimeoutSeconds = Math.Max(3, Math.Min(120, _shrinkuConfigService.Current.StartupFolderTimeoutSeconds));
-                                await _penumbraFolderWatcher.WaitForInitialScanAsync(TimeSpan.FromSeconds(folderTimeoutSeconds), token).ConfigureAwait(false);
-                                skipHeavy = _penumbraFolderWatcher.IsStartupSnapshotUnchanged();
+                                var watcherReady = await _penumbraFolderWatcher.WaitForInitialScanAsync(TimeSpan.FromSeconds(folderTimeoutSeconds), token).ConfigureAwait(false);
+                                if (watcherReady)
+                                {
+                                    skipHeavy = _penumbraFolderWatcher.IsStartupSnapshotUnchanged();
+                                }
+                                else
+                                {
+                                    skipHeavy = true;
+                                    _logger.LogDebug("Startup fast path: watcher initial scan not ready in time; deferring heavy startup pass");
+                                }
                             }
                             catch (Exception ex) { _logger.LogDebug(ex, "Failed to evaluate startup snapshot state"); }
 
-                            if (!skipHeavy)
+                            if (!skipHeavy && shouldRunHeavyStartup)
                             {
+                                var missingBytesSw = Stopwatch.StartNew();
                                 await _backupService.PopulateMissingOriginalBytesAsync(token).ConfigureAwait(false);
+                                missingBytesSw.Stop();
+                                _logger.LogInformation("ShrinkU startup timing: step=populate-missing-original-bytes elapsedMs={elapsed}", missingBytesSw.ElapsedMilliseconds);
+                            }
+                            else if (!skipHeavy)
+                            {
+                                _logger.LogDebug("Startup deferred heavy pass: UI closed");
                             }
                             else
                             {
@@ -232,8 +276,18 @@ public sealed class ShrinkUHostService : IHostedService, IDisposable
                             }
                             try { _startupProgressUi.SetStep(4); }
                             catch (Exception ex) { _logger.LogDebug(ex, "Failed to set StartupProgressUI step 4"); }
-                            try { await _shrinkuConversionService.UpdateAllModUsedTextureFilesAsync().ConfigureAwait(false); }
-                            catch (Exception ex) { _logger.LogDebug(ex, "Failed to update used texture files"); }
+                            if (uiOpenAtStartup)
+                            {
+                                var usedSw = Stopwatch.StartNew();
+                                try { await _shrinkuConversionService.UpdateAllModUsedTextureFilesAsync().ConfigureAwait(false); }
+                                catch (Exception ex) { _logger.LogDebug(ex, "Failed to update used texture files"); }
+                                usedSw.Stop();
+                                _logger.LogInformation("ShrinkU startup timing: step=update-used-textures elapsedMs={elapsed}", usedSw.ElapsedMilliseconds);
+                            }
+                            else
+                            {
+                                _logger.LogDebug("Startup fast path: skipping used texture update (UI closed)");
+                            }
                             try { _startupProgressUi.MarkUsedDone(); _startupProgressUi.SetStep(5); }
                             catch (Exception ex) { _logger.LogDebug(ex, "Failed to mark used done / set step 5"); }
                             try { _backupService.SetSavingEnabled(true); }
@@ -242,12 +296,18 @@ public sealed class ShrinkUHostService : IHostedService, IDisposable
                             catch (Exception ex) { _logger.LogDebug(ex, "Failed to save mod state"); }
                             try { _startupProgressUi.MarkSaveDone(); }
                             catch (Exception ex) { _logger.LogDebug(ex, "Failed to mark save done"); }
-                            if (!skipHeavy)
+                            if (!skipHeavy && shouldRunHeavyStartup)
                             {
-                                try { _conversionUi.TriggerStartupRescan(); }
-                                catch (Exception ex) { _logger.LogDebug(ex, "Failed to trigger startup rescan"); }
+                                if (uiOpenAtStartup)
+                                {
+                                    try { _conversionUi.TriggerStartupRescan(); }
+                                    catch (Exception ex) { _logger.LogDebug(ex, "Failed to trigger startup rescan"); }
+                                }
                                 var threads = Math.Max(1, _shrinkuConfigService.Current.MaxStartupThreads);
+                                var initialUpdateSw = Stopwatch.StartNew();
                                 await _shrinkuConversionService.RunInitialParallelUpdateAsync(threads, token).ConfigureAwait(false);
+                                initialUpdateSw.Stop();
+                                _logger.LogInformation("ShrinkU startup timing: step=initial-parallel-update elapsedMs={elapsed}", initialUpdateSw.ElapsedMilliseconds);
                                 _logger.LogDebug("Initial ShrinkU startup update completed");
                             }
                             else
@@ -261,6 +321,8 @@ public sealed class ShrinkUHostService : IHostedService, IDisposable
                         }
                         finally
                         {
+                            startupSw.Stop();
+                            _logger.LogInformation("ShrinkU startup initialization finished (utc={utc:O}, elapsedMs={elapsed})", DateTime.UtcNow, startupSw.ElapsedMilliseconds);
                             try { _conversionUi.SetStartupRefreshInProgress(false); }
                             catch (Exception ex) { _logger.LogDebug(ex, "Failed to clear startup refresh flag"); }
                             try { _startupProgressUi.IsOpen = false; }
