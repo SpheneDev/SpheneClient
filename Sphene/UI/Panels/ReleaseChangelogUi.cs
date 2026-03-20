@@ -232,7 +232,8 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
                                 {
                                     using (ImRaii.PushIndent(ImGuiHelpers.GlobalScale * 10f))
                                     {
-                                        UiSharedService.TextWrapped(NormalizeDescription(e.Description));
+                                        var normalizedDescription = NormalizeDescription(e.Description);
+                                        UiSharedService.TextWrapped(normalizedDescription);
                                     }
                                 }
 
@@ -247,6 +248,7 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
                                             continue;
 
                                         var trimmedMain = TrimBulletPrefix((change.Text ?? string.Empty).Trim());
+                                        DrawDescriptionGradientBackground(trimmedMain);
 
                                         if (change.Sub is { Count: > 0 })
                                         {
@@ -444,6 +446,28 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
         }
 
         return sb.ToString();
+    }
+
+    private static void DrawDescriptionGradientBackground(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return;
+
+        var wrapWidth = Math.Max(1f, ImGui.GetContentRegionAvail().X);
+        var textSize = ImGui.CalcTextSize(text, false, wrapWidth);
+        if (textSize.X <= 0f || textSize.Y <= 0f)
+            return;
+
+        var start = ImGui.GetCursorScreenPos();
+        var padX = ImGuiHelpers.GlobalScale * 8f;
+        var padY = ImGuiHelpers.GlobalScale * 4f;
+        var rectMin = new Vector2(start.X - padX, start.Y - padY);
+        var rectMax = new Vector2(start.X + wrapWidth, start.Y + textSize.Y + padY);
+
+        var baseColor = ImGuiColors.ParsedBlue;
+        var left = ImGui.GetColorU32(new Vector4(baseColor.X, baseColor.Y, baseColor.Z, 0.18f));
+        var right = ImGui.GetColorU32(new Vector4(baseColor.X, baseColor.Y, baseColor.Z, 0.00f));
+        ImGui.GetWindowDrawList().AddRectFilledMultiColor(rectMin, rectMax, left, right, right, left);
     }
 
     private static string TrimBulletPrefix(string value)
