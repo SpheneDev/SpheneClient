@@ -186,6 +186,7 @@ public sealed class Plugin : IDalamudPlugin
                 s.GetRequiredService<ShrinkUConfigService>(),
                 s.GetRequiredService<ShrinkU.Services.TextureConversionService>(),
                 s.GetRequiredService<ShrinkU.Services.TextureBackupService>(),
+                s.GetRequiredService<ShrinkU.Services.ModStateService>(),
                 () => s.GetRequiredService<ShrinkU.UI.ReleaseChangelogUI>().IsOpen = true,
                 s.GetRequiredService<ShrinkU.Services.DebugTraceService>(),
                 () => s.GetRequiredService<ShrinkU.UI.DebugUI>().IsOpen = true));

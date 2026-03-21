@@ -212,6 +212,24 @@
           "Microsoft.AspNetCore.SignalR.Common": "10.0.5"
         }
       },
+      "Microsoft.Data.Sqlite": {
+        "type": "Transitive",
+        "resolved": "9.0.8",
+        "contentHash": "wzA4Lukgc0avl5UMnnJFHMdG1Pn5FUnq+fjDgdUqHgzv3z1+bs4wvuFRxet0atl4N6kfrUM/FhmkyUb4cy0g8g==",
+        "dependencies": {
+          "Microsoft.Data.Sqlite.Core": "9.0.8",
+          "SQLitePCLRaw.bundle_e_sqlite3": "2.1.10",
+          "SQLitePCLRaw.core": "2.1.10"
+        }
+      },
+      "Microsoft.Data.Sqlite.Core": {
+        "type": "Transitive",
+        "resolved": "9.0.8",
+        "contentHash": "AQr1nLGi1riN7XA2c8uAKAr2fo7bvZ++VRnvKyh/rhsj2f4x0Nmgk2j8+Rw9RaJrzZMcv0Mu4nYNpAdSui/FHw==",
+        "dependencies": {
+          "SQLitePCLRaw.core": "2.1.10"
+        }
+      },
       "Microsoft.Extensions.Configuration": {
         "type": "Transitive",
         "resolved": "10.0.5",
@@ -502,6 +520,33 @@
         "resolved": "17.6.3",
         "contentHash": "N0ZIanl1QCgvUumEL1laasU0a7sOE5ZwLZVTn0pAePnfhq8P7SvTjF8Axq+CnavuQkmdQpGNXQ1efZtu5kDFbA=="
       },
+      "SQLitePCLRaw.bundle_e_sqlite3": {
+        "type": "Transitive",
+        "resolved": "2.1.10",
+        "contentHash": "UxWuisvZ3uVcVOLJQv7urM/JiQH+v3TmaJc1BLKl5Dxfm/nTzTUrqswCqg/INiYLi61AXnHo1M1JPmPqqLnAdg==",
+        "dependencies": {
+          "SQLitePCLRaw.lib.e_sqlite3": "2.1.10",
+          "SQLitePCLRaw.provider.e_sqlite3": "2.1.10"
+        }
+      },
+      "SQLitePCLRaw.core": {
+        "type": "Transitive",
+        "resolved": "2.1.10",
+        "contentHash": "Ii8JCbC7oiVclaE/mbDEK000EFIJ+ShRPwAvvV89GOZhQ+ZLtlnSWl6ksCNMKu/VGXA4Nfi2B7LhN/QFN9oBcw=="
+      },
+      "SQLitePCLRaw.lib.e_sqlite3": {
+        "type": "Transitive",
+        "resolved": "2.1.10",
+        "contentHash": "mAr69tDbnf3QJpRy2nJz8Qdpebdil00fvycyByR58Cn9eARvR+UiG2Vzsp+4q1tV3ikwiYIjlXCQFc12GfebbA=="
+      },
+      "SQLitePCLRaw.provider.e_sqlite3": {
+        "type": "Transitive",
+        "resolved": "2.1.10",
+        "contentHash": "uZVTi02C1SxqzgT0HqTWatIbWGb40iIkfc3FpFCpE/r7g6K0PqzDUeefL6P6HPhDtc6BacN3yQysfzP7ks+wSQ==",
+        "dependencies": {
+          "SQLitePCLRaw.core": "2.1.10"
+        }
+      },
       "System.Diagnostics.EventLog": {
         "type": "Transitive",
         "resolved": "10.0.5",
@@ -511,6 +556,7 @@
         "type": "Project",
         "dependencies": {
           "DalamudPackager": "[14.0.1, )",
+          "Microsoft.Data.Sqlite": "[9.0.8, )",
           "Microsoft.Extensions.Hosting": "[8.0.0, )",
           "Microsoft.Extensions.Logging": "[8.0.0, )",
           "Penumbra.Api": "[5.12.0, )"
