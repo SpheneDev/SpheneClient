@@ -388,7 +388,17 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
             _ = _apiController.CyclePauseAsync(_pair.UserData);
             ImGui.CloseCurrentPopup();
         }
+        
+        var emoteSyncEnabled =
+#if IS_TEST_BUILD
+            true;
+#else
+            false;
+#endif
 
+
+        if (emoteSyncEnabled)
+        {
         ImGui.Separator();
         ImGui.TextUnformatted("Emote Sync");
 
@@ -472,10 +482,12 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
                 ImGui.CloseCurrentPopup();
             }
         }
+        
         UiSharedService.AttachToolTip(selectedCount > 0
             ? $"Resets current animation time to 0 for you and {selectedCount} selected mutually visible target(s), without changing which emote each player is using."
             : "Select at least one target to reset emote timing.");
         ImGui.Separator();
+        }
 
         ImGui.TextUnformatted("Pair Permission Functions");
         if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.WindowMaximize, "Open Permissions Window", _menuWidth, ButtonStyleKeys.ContextMenu_Item))
