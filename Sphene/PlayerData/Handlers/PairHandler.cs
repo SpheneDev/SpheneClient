@@ -91,6 +91,34 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
     private const int MinionCollectionBindRetryDelayMs = 1500;
     private const int MinionTempModsCooldownMs = 2000;
 
+    private bool ShouldDestroyTemporaryCollectionOnInvisible()
+        => !Pair.IsDirectlyPaired || Pair.IsOneSidedPair;
+
+    private void TryDestroyTemporaryCollectionOnInvisible(string reason)
+    {
+        if (!ShouldDestroyTemporaryCollectionOnInvisible())
+            return;
+
+        if (_penumbraCollection == Guid.Empty)
+            return;
+
+        var collectionToRemove = _penumbraCollection;
+        _penumbraCollection = Guid.Empty;
+        var applicationId = Guid.NewGuid();
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                Logger.LogDebug("[{applicationId}] Destroying temp collection for {user} after invisible state ({reason})", applicationId, Pair.UserData.AliasOrUID, reason);
+                await _ipcManager.Penumbra.RemoveTemporaryCollectionAsync(Logger, applicationId, collectionToRemove).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "[{applicationId}] Failed destroying temp collection for {user} ({reason})", applicationId, Pair.UserData.AliasOrUID, reason);
+            }
+        });
+    }
+
     public PairHandler(ILogger<PairHandler> logger, Pair pair,
         GameObjectHandlerFactory gameObjectHandlerFactory,
         IpcManager ipcManager, FileDownloadManager transferManager,
@@ -1404,6 +1432,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                     CancelApplicationTokenSource(true);
                     Pair.ReportVisibility(false);
                     _proximityReportedVisible = false;
+                    TryDestroyTemporaryCollectionOnInvisible("visibility-not-mutual");
                     Logger.LogDebug("{this} visibility changed (not mutual), now: {visi}", this, IsVisible);
                 }
 
@@ -1469,6 +1498,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                 CancelApplicationTokenSource(true);
                 Pair.ReportVisibility(false);
                 _proximityReportedVisible = false;
+                TryDestroyTemporaryCollectionOnInvisible("character-address-zero");
                 Logger.LogTrace("{this} visibility changed, now: {visi}", this, IsVisible);
             }
         }
