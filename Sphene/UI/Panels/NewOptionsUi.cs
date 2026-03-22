@@ -124,7 +124,7 @@ public class NewOptionsUi : WindowMediatorSubscriberBase
                 foreach (var link in releaseGroup.Links)
                 {
                     UiSharedService.ColorText(UpdateOptionPanel.GetTitle(link), ImGuiColors.ParsedBlue);
-                    UpdateOptionPanel.DrawByLink(link, _configService, _uiShared, 240f);
+                    UpdateOptionPanel.DrawByLink(link, _configService, _uiShared, Mediator, 240f);
                     ImGuiHelpers.ScaledDummy(0, 6);
                     ImGui.Separator();
                     ImGuiHelpers.ScaledDummy(0, 4);

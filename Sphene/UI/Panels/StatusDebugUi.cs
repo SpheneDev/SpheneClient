@@ -12,6 +12,7 @@ using Sphene.PlayerData.Pairs;
 using Sphene.API.Data;
 using Sphene.WebAPI;
 using Sphene.WebAPI.SignalR.Utils;
+using Sphene.SpheneConfiguration;
 using System.Numerics;
 using System.Text.Json;
 using Sphene.PlayerData.Data;
@@ -26,6 +27,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
     private readonly ApiController _apiController;
     private readonly ConnectionHealthMonitor _healthMonitor;
     private readonly CircuitBreakerService _circuitBreaker;
+    private readonly SpheneConfigService _configService;
     private readonly EnhancedAcknowledgmentManager? _acknowledgmentManager;
     private readonly SessionAcknowledgmentManager? _sessionAcknowledgmentManager;
     
@@ -43,6 +45,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
     public StatusDebugUi(ILogger<StatusDebugUi> logger, SpheneMediator mediator,
         UiSharedService uiSharedService, PairManager pairManager, ApiController apiController,
         ConnectionHealthMonitor healthMonitor, CircuitBreakerService circuitBreaker,
+        SpheneConfigService configService,
         PerformanceCollectorService performanceCollectorService,
         EnhancedAcknowledgmentManager? acknowledgmentManager = null,
         SessionAcknowledgmentManager? sessionAcknowledgmentManager = null)
@@ -53,6 +56,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         _apiController = apiController;
         _healthMonitor = healthMonitor;
         _circuitBreaker = circuitBreaker;
+        _configService = configService;
         _acknowledgmentManager = acknowledgmentManager;
         _sessionAcknowledgmentManager = sessionAcknowledgmentManager;
         
@@ -1250,7 +1254,16 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
 
                     if (found)
                     {
-                        ImGui.TextColored(ImGuiColors.DalamudRed, "FOUND");
+                        var filterEnabled = _configService.Current.FilterCharacterLegacyShpkInOutgoingCharacterData;
+                        if (filterEnabled)
+                        {
+                            ImGui.TextColored(ImGuiColors.DalamudYellow, "FOUND (Filtered)");
+                            details.Insert(0, "Inbound filter active: characterlegacy.shpk entries were blocked for apply/download.");
+                        }
+                        else
+                        {
+                            ImGui.TextColored(ImGuiColors.DalamudRed, "FOUND");
+                        }
                         ImGui.TableNextColumn();
                         ImGui.TextWrapped(string.Join("\n", details));
                     }

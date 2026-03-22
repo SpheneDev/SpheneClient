@@ -104,7 +104,7 @@ public class CharaDataGposeTogetherManager : DisposableMediatorSubscriberBase
 
     public async Task PushCharacterDownloadDto()
     {
-        var playerData = await _charaDataFileHandler.CreatePlayerData().ConfigureAwait(false);
+        var playerData = await _charaDataFileHandler.CreatePlayerData(applyOutgoingSyncFilters: true).ConfigureAwait(false);
         if (playerData == null) return;
         if (!string.Equals(playerData.DataHash.Value, _lastCreatedCharaData?.ApiData.DataHash.Value, StringComparison.Ordinal))
         {

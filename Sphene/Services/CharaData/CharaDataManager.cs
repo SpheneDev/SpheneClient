@@ -80,7 +80,8 @@ public sealed partial class CharaDataManager : DisposableMediatorSubscriberBase
             MaxCreatableCharaData = string.IsNullOrEmpty(msg.Connection.User.Alias)
                 ? msg.Connection.ServerInfo.MaxCharaData
                 : msg.Connection.ServerInfo.MaxCharaDataVanity;
-            if (_configService.Current.DownloadMcdDataOnConnection)
+            var shouldReloadCharacterData = msg.ForceCharacterDataReload;
+            if (shouldReloadCharacterData)
             {
                 var token = _connectCts.Token;
                 _ = GetAllData(token);

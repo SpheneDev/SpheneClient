@@ -2391,6 +2391,9 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
         DrawSettingsSectionHeader("Outgoing Sync Batching");
         SyncBehaviorOptionBlock.DrawOutgoingSyncBatching(_configService, _uiShared, ClampSettingsItemWidth(240f, 160f), "SettingsOutgoingSyncBatching");
+
+        DrawSettingsSectionHeader("Filter");
+        SyncBehaviorOptionBlock.DrawFilterCharacterLegacyShpkInOutgoingCharacterData(_configService, _uiShared, Mediator, "SettingsFilterCharacterLegacyShpk");
     }
 
     private void UiSharedService_GposeEnd()

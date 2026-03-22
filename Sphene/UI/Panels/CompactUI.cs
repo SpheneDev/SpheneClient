@@ -3843,7 +3843,7 @@ public class CompactUi : WindowMediatorSubscriberBase
             if (_uiSharedService.IconButton(FontAwesomeIcon.Redo, null, null, null, null, ButtonStyleKeys.Compact_Reconnect))
             {
                 _lastReconnectButtonClick = reconnectCurrentTime;
-                _ = Task.Run(() => _apiController.CreateConnectionsAsync());
+                _ = Task.Run(() => _apiController.CreateConnectionsAsync(forceCharacterDataReload: true));
             }
         }
         UiSharedService.AttachToolTip(isReconnectButtonDisabled 

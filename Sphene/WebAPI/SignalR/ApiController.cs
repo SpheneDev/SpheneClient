@@ -193,7 +193,7 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
         }
     }
 
-    public async Task CreateConnectionsAsync()
+    public async Task CreateConnectionsAsync(bool forceCharacterDataReload = false)
     {
         await _connectionLifecycleGate.WaitAsync().ConfigureAwait(false);
         try
@@ -331,7 +331,9 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
                     {
                         SuppressInfoServerMessagesFor(TimeSpan.FromSeconds(20));
                     }
-                    _connectionDto = await GetConnectionDtoAsync(publishConnected: !preserveUiDuringGraceReconnect).ConfigureAwait(false);
+                    _connectionDto = await GetConnectionDtoAsync(
+                        publishConnected: !preserveUiDuringGraceReconnect,
+                        forceCharacterDataReload: forceCharacterDataReload).ConfigureAwait(false);
 
                     ServerState = ServerState.Connected;
                     CancelPendingDisconnectGrace(clearUiGraceOnly: false);
@@ -486,7 +488,7 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
 
     public Task<ConnectionDto> GetConnectionDto() => GetConnectionDtoAsync(true);
 
-    public async Task<ConnectionDto> GetConnectionDtoAsync(bool publishConnected)
+    public async Task<ConnectionDto> GetConnectionDtoAsync(bool publishConnected, bool forceCharacterDataReload = false)
     {
         var dto = await _spheneHub!.InvokeAsync<ConnectionDto>(nameof(GetConnectionDto)).ConfigureAwait(false);
         Logger.LogDebug("ConnectionDto received - FileServerAddress: {fileServerAddress}, ServerVersion: {serverVersion}, User: {user}", 
@@ -494,7 +496,7 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
         if (publishConnected) 
         {
             Logger.LogDebug("Publishing ConnectedMessage with FileServerAddress: {fileServerAddress}", dto.ServerInfo.FileServerAddress);
-            Mediator.Publish(new ConnectedMessage(dto));
+            Mediator.Publish(new ConnectedMessage(dto, forceCharacterDataReload));
         }
         return dto;
     }
@@ -552,7 +554,7 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
         if (auth?.AutoLogin ?? false)
         {
             Logger.LogDebug("Logging into {chara}", charaName);
-            _ = Task.Run(CreateConnectionsAsync);
+            _ = Task.Run(() => CreateConnectionsAsync());
         }
         else
         {
@@ -746,7 +748,7 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
             {
                 await LoadIninitialPairsAsync().ConfigureAwait(false);
                 await LoadOnlinePairsAsync().ConfigureAwait(false);
-                Mediator.Publish(new ConnectedMessage(_connectionDto));
+                Mediator.Publish(new ConnectedMessage(_connectionDto, false));
             }
         }
         catch (Exception ex)

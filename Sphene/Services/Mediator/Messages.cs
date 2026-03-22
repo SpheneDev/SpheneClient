@@ -36,7 +36,7 @@ public record GposeStartMessage : SameThreadMessage;
 public record GposeEndMessage : MessageBase;
 public record CutsceneEndMessage : MessageBase;
 public record CutsceneFrameworkUpdateMessage : SameThreadMessage;
-public record ConnectedMessage(ConnectionDto Connection) : MessageBase;
+public record ConnectedMessage(ConnectionDto Connection, bool ForceCharacterDataReload = false) : MessageBase;
 public record DisconnectedMessage : SameThreadMessage;
 public record PenumbraModSettingChangedMessage : MessageBase;
 public record PenumbraInitializedMessage : MessageBase;

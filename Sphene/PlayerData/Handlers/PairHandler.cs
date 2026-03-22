@@ -25,6 +25,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
     private sealed record CombatData(Guid ApplicationId, CharacterData CharacterData, bool Forced);
 
     private const string SyncProgressTag = "[SyncProgress]";
+    private const string CharacterLegacyShpkToken = "characterlegacy.shpk";
     private readonly DalamudUtilService _dalamudUtil;
     private readonly FileDownloadManager _downloadManager;
     private readonly FileCacheManager _fileDbManager;
@@ -2141,6 +2142,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         ConcurrentDictionary<(string GamePath, string? Hash), string> outputDict = new();
         bool hasMigrationChanges = false;
         bool cancellationRequested = false;
+        var filteredInboundEntries = 0;
 
         // Check for cancellation at the start
         if (token.IsCancellationRequested)
@@ -2158,7 +2160,27 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                 return [.. missingFiles];
             }
 
-            var replacementList = charaData.FileReplacements.SelectMany(k => k.Value.Where(v => string.IsNullOrEmpty(v.FileSwapPath))).ToList();
+            var filterCharacterLegacyShpk = _configService.Current.FilterCharacterLegacyShpkInOutgoingCharacterData;
+            var replacementList = charaData.FileReplacements
+                .SelectMany(k => k.Value.Where(v => string.IsNullOrEmpty(v.FileSwapPath)))
+                .Select(item =>
+                {
+                    if (!filterCharacterLegacyShpk || item?.GamePaths == null)
+                        return item;
+
+                    var allowedPaths = item.GamePaths.Where(p => !IsCharacterLegacyShpkPath(p)).ToArray();
+                    filteredInboundEntries += item.GamePaths.Length - allowedPaths.Length;
+                    if (allowedPaths.Length == 0)
+                        return null;
+
+                    return new FileReplacementData
+                    {
+                        Hash = item.Hash,
+                        GamePaths = allowedPaths
+                    };
+                })
+                .Where(item => item != null)
+                .ToList();
             
             if (replacementList.Count == 0)
             {
@@ -2292,6 +2314,12 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                 {
                     foreach (var gamePath in item.GamePaths)
                     {
+                        if (filterCharacterLegacyShpk && (IsCharacterLegacyShpkPath(gamePath) || IsCharacterLegacyShpkPath(item.FileSwapPath)))
+                        {
+                            filteredInboundEntries++;
+                            continue;
+                        }
+
                         if (!string.IsNullOrEmpty(gamePath))
                         {
                             Logger.LogTrace("[BASE-{appBase}] Adding file swap for {path}: {fileSwap}", applicationBase, gamePath, item.FileSwapPath);
@@ -2332,7 +2360,17 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         }
         
         st.Stop();
+        if (filteredInboundEntries > 0)
+        {
+            Logger.LogDebug("[BASE-{appBase}] Filtered {count} inbound characterlegacy.shpk entries before apply", applicationBase, filteredInboundEntries);
+        }
         Logger.LogDebug("[BASE-{appBase}] ModdedPaths calculated in {time}ms, missing files: {count}, total files: {total}", applicationBase, st.ElapsedMilliseconds, missingFiles.Count, moddedDictionary.Keys.Count);
         return [.. missingFiles];
+    }
+
+    private static bool IsCharacterLegacyShpkPath(string? value)
+    {
+        return !string.IsNullOrWhiteSpace(value)
+            && value.Contains(CharacterLegacyShpkToken, StringComparison.OrdinalIgnoreCase);
     }
 }

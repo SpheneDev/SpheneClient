@@ -1,4 +1,5 @@
 using Sphene.SpheneConfiguration;
+using Sphene.Services.Mediator;
 
 namespace Sphene.UI.Components;
 
@@ -12,14 +13,16 @@ public static class UpdateOptionPanel
         SyncIncomingWithoutRedraw,
         SyncOutgoingBatching,
         ShowTestBuildUpdates,
-        DisableRedraws
+        DisableRedraws,
+        FilterCharacterLegacyShpkOutgoing
     }
 
     private static readonly ReleaseDefinition[] Releases =
     [
         new("v.1.1.11.1071", [Link.SyncIncomingWithoutRedraw, Link.SyncOutgoingBatching]),
         new("v.1.1.12.50", [Link.ShowTestBuildUpdates]),
-        new("v.1.1.12.88", [Link.DisableRedraws])
+        new("v.1.1.12.88", [Link.DisableRedraws]),
+        new("v.1.1.12.217", [Link.FilterCharacterLegacyShpkOutgoing])
     ];
 
     private static readonly IReadOnlyDictionary<Link, string> LinkTitles = new Dictionary<Link, string>
@@ -27,20 +30,23 @@ public static class UpdateOptionPanel
         [Link.SyncIncomingWithoutRedraw] = "Sync: Incoming Sync (Default: Disabled)",
         [Link.SyncOutgoingBatching] = "Sync: Outgoing Batching (Default: Disabled)",
         [Link.ShowTestBuildUpdates] = "Notifications: Testbuild Update Hints (Default: Disabled)",
-        [Link.DisableRedraws] = "Sync: Disable Redraws (Default: Disabled)"
+        [Link.DisableRedraws] = "Sync: Disable Redraws (Default: Disabled)",
+        [Link.FilterCharacterLegacyShpkOutgoing] = "Sync: Filter characterlegacy.shpk in Sync Data (Experimental, Default: Disabled)"
     };
 
-    private static readonly IReadOnlyDictionary<Link, Action<SpheneConfigService, UiSharedService, float>> LinkDrawers
-        = new Dictionary<Link, Action<SpheneConfigService, UiSharedService, float>>
+    private static readonly IReadOnlyDictionary<Link, Action<SpheneConfigService, UiSharedService, SpheneMediator, float>> LinkDrawers
+        = new Dictionary<Link, Action<SpheneConfigService, UiSharedService, SpheneMediator, float>>
     {
-        [Link.SyncIncomingWithoutRedraw] = (configService, uiShared, _) =>
+        [Link.SyncIncomingWithoutRedraw] = (configService, uiShared, _, _) =>
             SyncBehaviorOptionBlock.DrawIncomingSyncWithoutRedraw(configService, uiShared, "UpdateOptionSyncIncomingWithoutRedraw"),
-        [Link.SyncOutgoingBatching] = (configService, uiShared, outgoingSliderWidth) =>
+        [Link.SyncOutgoingBatching] = (configService, uiShared, _, outgoingSliderWidth) =>
             SyncBehaviorOptionBlock.DrawOutgoingSyncBatching(configService, uiShared, outgoingSliderWidth, "UpdateOptionSyncOutgoingBatching"),
-        [Link.ShowTestBuildUpdates] = (configService, uiShared, _) =>
+        [Link.ShowTestBuildUpdates] = (configService, uiShared, _, _) =>
             NotificationsOptionBlock.DrawShowTestBuildUpdatesOption(configService, uiShared, "UpdateOptionShowTestBuildUpdates"),
-        [Link.DisableRedraws] = (configService, uiShared, _) =>
-            SyncBehaviorOptionBlock.DrawDisableRedraws(configService, uiShared, "UpdateOptionDisableRedraws")
+        [Link.DisableRedraws] = (configService, uiShared, _, _) =>
+            SyncBehaviorOptionBlock.DrawDisableRedraws(configService, uiShared, "UpdateOptionDisableRedraws"),
+        [Link.FilterCharacterLegacyShpkOutgoing] = (configService, uiShared, mediator, _) =>
+            SyncBehaviorOptionBlock.DrawFilterCharacterLegacyShpkInOutgoingCharacterData(configService, uiShared, mediator, "UpdateOptionFilterCharacterLegacyShpk")
     };
 
     public static string GetTitle(Link link)
@@ -67,11 +73,11 @@ public static class UpdateOptionPanel
         ];
     }
 
-    public static void DrawByLink(Link link, SpheneConfigService configService, UiSharedService uiShared, float outgoingSliderWidth)
+    public static void DrawByLink(Link link, SpheneConfigService configService, UiSharedService uiShared, SpheneMediator mediator, float outgoingSliderWidth)
     {
         if (LinkDrawers.TryGetValue(link, out var drawer))
         {
-            drawer(configService, uiShared, outgoingSliderWidth);
+            drawer(configService, uiShared, mediator, outgoingSliderWidth);
         }
     }
 
