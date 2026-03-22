@@ -175,7 +175,8 @@ public sealed class Plugin : IDalamudPlugin
                 s.GetRequiredService<ShrinkU.Services.DebugTraceService>(),
                 s.GetRequiredService<ShrinkU.Services.PenumbraFolderWatcherService>(),
                 s.GetRequiredService<ShrinkU.Services.BackupFolderWatcherService>(),
-                s.GetRequiredService<ShrinkU.Services.TextureConversionService>()));
+                s.GetRequiredService<ShrinkU.Services.TextureConversionService>(),
+                s.GetRequiredService<ShrinkU.Services.ModStateService>()));
             collection.AddSingleton<ShrinkU.UI.StartupProgressUI>(s => new ShrinkU.UI.StartupProgressUI(
                 s.GetRequiredService<Microsoft.Extensions.Logging.ILogger>(),
                 s.GetRequiredService<ShrinkUConfigService>(),
