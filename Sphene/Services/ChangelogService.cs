@@ -102,16 +102,9 @@ public async Task<string?> GetChangelogTextForVersionAsync(string version, Cance
 
                             if (change.TryGetProperty("sub", out var subProp) && subProp.ValueKind == JsonValueKind.Array)
                             {
-                                foreach (var sub in subProp.EnumerateArray())
+                                foreach (var subLine in ParseSubLines(subProp))
                                 {
-                                    string stext = string.Empty;
-                                    if (sub.ValueKind == JsonValueKind.String)
-                                        stext = sub.GetString() ?? string.Empty;
-                                    else if (sub.ValueKind == JsonValueKind.Object && sub.TryGetProperty("description", out var sdProp) && sdProp.ValueKind == JsonValueKind.String)
-                                        stext = sdProp.GetString() ?? string.Empty;
-
-                                    if (!string.IsNullOrWhiteSpace(stext))
-                                        builder.AppendLine($"  • {stext}");
+                                    builder.AppendLine($"  • {subLine}");
                                 }
                             }
                         }
@@ -159,6 +152,9 @@ public async Task<List<ReleaseChangelogViewEntry>> GetChangelogEntriesAsync(Canc
                 entry.Title = item.TryGetProperty("title", out var tProp) && tProp.ValueKind == JsonValueKind.String
                     ? (tProp.GetString() ?? string.Empty).Trim()
                     : string.Empty;
+                entry.Date = item.TryGetProperty("date", out var dateProp) && dateProp.ValueKind == JsonValueKind.String
+                    ? (dateProp.GetString() ?? string.Empty).Trim()
+                    : string.Empty;
                 entry.Description = item.TryGetProperty("description", out var dProp) && dProp.ValueKind == JsonValueKind.String
                     ? (dProp.GetString() ?? string.Empty).Trim()
                     : string.Empty;
@@ -190,19 +186,9 @@ public async Task<List<ReleaseChangelogViewEntry>> GetChangelogEntriesAsync(Canc
 
                                 if (change.TryGetProperty("sub", out var subProp) && subProp.ValueKind == JsonValueKind.Array)
                                 {
-                                    foreach (var sub in subProp.EnumerateArray())
+                                    foreach (var subLine in ParseSubLines(subProp))
                                     {
-                                        if (sub.ValueKind == JsonValueKind.String)
-                                        {
-                                            var s = sub.GetString();
-                                            if (!string.IsNullOrWhiteSpace(s)) view.Sub.Add(s!.Trim());
-                                        }
-                                        else if (sub.ValueKind == JsonValueKind.Object &&
-                                                 sub.TryGetProperty("description", out var sdProp) && sdProp.ValueKind == JsonValueKind.String)
-                                        {
-                                            var s = sdProp.GetString();
-                                            if (!string.IsNullOrWhiteSpace(s)) view.Sub.Add(s!.Trim());
-                                        }
+                                        view.Sub.Add(subLine);
                                     }
                                 }
 
@@ -226,6 +212,59 @@ public async Task<List<ReleaseChangelogViewEntry>> GetChangelogEntriesAsync(Canc
         return result;
     }
 
+    private static List<string> ParseSubLines(JsonElement subProp)
+    {
+        var lines = new List<string>();
+        foreach (var sub in subProp.EnumerateArray())
+        {
+            if (sub.ValueKind == JsonValueKind.String)
+            {
+                var line = sub.GetString();
+                if (!string.IsNullOrWhiteSpace(line))
+                    lines.Add(line.Trim());
+                continue;
+            }
+
+            if (sub.ValueKind != JsonValueKind.Object)
+                continue;
+
+            if (sub.TryGetProperty("subcategory", out var subcategoryProp) && subcategoryProp.ValueKind == JsonValueKind.String &&
+                sub.TryGetProperty("items", out var itemsProp) && itemsProp.ValueKind == JsonValueKind.Array)
+            {
+                var subcategory = (subcategoryProp.GetString() ?? string.Empty).Trim();
+                var addedSubcategoryHeading = false;
+                foreach (var item in itemsProp.EnumerateArray())
+                {
+                    if (item.ValueKind != JsonValueKind.String)
+                        continue;
+
+                    var itemText = (item.GetString() ?? string.Empty).Trim();
+                    if (string.IsNullOrWhiteSpace(itemText))
+                        continue;
+
+                    if (!string.IsNullOrWhiteSpace(subcategory) && !addedSubcategoryHeading)
+                    {
+                        lines.Add($"{subcategory}:");
+                        addedSubcategoryHeading = true;
+                    }
+
+                    lines.Add(itemText);
+                }
+
+                continue;
+            }
+
+            if (sub.TryGetProperty("description", out var descriptionProp) && descriptionProp.ValueKind == JsonValueKind.String)
+            {
+                var line = descriptionProp.GetString();
+                if (!string.IsNullOrWhiteSpace(line))
+                    lines.Add(line.Trim());
+            }
+        }
+
+        return lines;
+    }
+
     private static Version ParseVersionSafe(string? v)
     {
         if (string.IsNullOrWhiteSpace(v)) return new Version(0,0,0,0);
@@ -246,4 +285,3 @@ public async Task<List<ReleaseChangelogViewEntry>> GetChangelogEntriesAsync(Canc
         }
     }
 }
-

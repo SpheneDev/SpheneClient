@@ -209,7 +209,10 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
                                 flags |= ImGuiTreeNodeFlags.DefaultOpen;
                             }
 
-                            var headerLabel = $"{e.Version} - {e.Title}###ch_{e.Version}";
+                            var headerTitle = BuildHeaderTitle(e);
+                            var headerLabel = string.IsNullOrWhiteSpace(headerTitle)
+                                ? $"{e.Version}###ch_{e.Version}"
+                                : $"{e.Version} - {headerTitle}###ch_{e.Version}";
                             if (e.IsPrerelease)
                             {
                                 var baseColor = ImGuiColors.DalamudYellow;
@@ -534,6 +537,17 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
         heading = parsedHeading;
         content = value[(separatorIndex + 1)..].Trim();
         return true;
+    }
+
+    private static string BuildHeaderTitle(ReleaseChangelogViewEntry entry)
+    {
+        if (!string.IsNullOrWhiteSpace(entry.Title))
+            return entry.Title.Trim();
+
+        if (!string.IsNullOrWhiteSpace(entry.Date))
+            return $"[{entry.Date.Trim()}]";
+
+        return string.Empty;
     }
 
     private sealed class SubItemSection
