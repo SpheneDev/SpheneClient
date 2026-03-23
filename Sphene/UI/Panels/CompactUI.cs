@@ -158,6 +158,7 @@ public class CompactUi : WindowMediatorSubscriberBase
     private CancellationTokenSource? _backupScanDebounceCts;
     private string _pendingBackupScanReason = string.Empty;
     private readonly SemaphoreSlim _shrinkUDetectionSemaphore = new(1, 1);
+    private volatile bool _isDisposed;
 
     // Stable UI text caching to avoid flicker in backup sections
     private string _allBackupsKey = string.Empty;
@@ -686,6 +687,7 @@ public class CompactUi : WindowMediatorSubscriberBase
 
     protected override void Dispose(bool disposing)
     {
+        _isDisposed = true;
         if (disposing)
         {
             // Dispose all draw folders to clean up event subscriptions
@@ -3204,10 +3206,14 @@ public class CompactUi : WindowMediatorSubscriberBase
 
     private async Task DetectShrinkUModBackupsAsync()
     {
-        if (!await _shrinkUDetectionSemaphore.WaitAsync(0).ConfigureAwait(false))
+        if (_isDisposed)
             return;
+        var lockTaken = false;
         try
         {
+            lockTaken = await _shrinkUDetectionSemaphore.WaitAsync(0).ConfigureAwait(false);
+            if (!lockTaken || _isDisposed)
+                return;
             var usedPaths = await _shrinkuConversionService.GetUsedModTexturePathsAsync().ConfigureAwait(false);
             var penumbraRoot = _ipcManager.Penumbra.ModDirectory ?? string.Empty;
             penumbraRoot = penumbraRoot.Replace('/', '\\');
@@ -3262,13 +3268,21 @@ public class CompactUi : WindowMediatorSubscriberBase
             _lastShrinkUDetectionUpdate = DateTime.UtcNow;
             _logger.LogDebug("ShrinkU backup detection completed: {count} mods with available backups", shrinkuBackupCount);
         }
+        catch (ObjectDisposedException ex)
+        {
+            _logger.LogDebug(ex, "ShrinkU backup detection skipped because CompactUI was disposed");
+        }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to detect ShrinkU mod backups asynchronously");
         }
         finally
         {
-            _shrinkUDetectionSemaphore.Release();
+            if (lockTaken)
+            {
+                try { _shrinkUDetectionSemaphore.Release(); }
+                catch (ObjectDisposedException ex) { _logger.LogDebug(ex, "ShrinkU backup detection semaphore already disposed on release"); }
+            }
         }
     }
     
