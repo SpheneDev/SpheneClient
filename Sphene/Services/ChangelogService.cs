@@ -96,16 +96,20 @@ public async Task<string?> GetChangelogTextForVersionAsync(string version, Cance
                         if (change.TryGetProperty("description", out var dProp) && dProp.ValueKind == JsonValueKind.String)
                             text = dProp.GetString() ?? string.Empty;
 
+                        var subLines = new List<string>();
+                        var hasSubArray = change.TryGetProperty("sub", out var subProp) && subProp.ValueKind == JsonValueKind.Array;
+                        if (hasSubArray)
+                            subLines = ParseSubLines(subProp);
+
+                        if (hasSubArray && subLines.Count == 0)
+                            continue;
+
                         if (!string.IsNullOrWhiteSpace(text))
                         {
                             builder.AppendLine($"• {text}");
-
-                            if (change.TryGetProperty("sub", out var subProp) && subProp.ValueKind == JsonValueKind.Array)
+                            foreach (var subLine in subLines)
                             {
-                                foreach (var subLine in ParseSubLines(subProp))
-                                {
-                                    builder.AppendLine($"  • {subLine}");
-                                }
+                                builder.AppendLine($"  • {subLine}");
                             }
                         }
                     }
@@ -180,16 +184,20 @@ public async Task<List<ReleaseChangelogViewEntry>> GetChangelogEntriesAsync(Canc
                             if (change.TryGetProperty("description", out var cdProp) && cdProp.ValueKind == JsonValueKind.String)
                                 text = cdProp.GetString() ?? string.Empty;
 
+                            var subLines = new List<string>();
+                            var hasSubArray = change.TryGetProperty("sub", out var subProp) && subProp.ValueKind == JsonValueKind.Array;
+                            if (hasSubArray)
+                                subLines = ParseSubLines(subProp);
+
+                            if (hasSubArray && subLines.Count == 0)
+                                continue;
+
                             if (!string.IsNullOrWhiteSpace(text))
                             {
                                 view.Text = text.Trim();
-
-                                if (change.TryGetProperty("sub", out var subProp) && subProp.ValueKind == JsonValueKind.Array)
+                                foreach (var subLine in subLines)
                                 {
-                                    foreach (var subLine in ParseSubLines(subProp))
-                                    {
-                                        view.Sub.Add(subLine);
-                                    }
+                                    view.Sub.Add(subLine);
                                 }
 
                                 entry.Changes.Add(view);
