@@ -84,6 +84,10 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
             _previouslyVisiblePlayers.Clear();
             _lastSentHashPerUser.Clear();
         });
+        Mediator.Subscribe<CharacterDataRefreshRequestedMessage>(this, msg =>
+        {
+            RequestImmediatePushToUser(msg.Requester);
+        });
     }
 
     private bool IsDutyCombatOutgoingBatchingActive()
@@ -299,6 +303,26 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
                 }
             }
         });
+    }
+
+    private void RequestImmediatePushToUser(UserData user)
+    {
+        if (!_apiController.IsConnected)
+        {
+            return;
+        }
+
+        if (_lastCreatedData == null)
+        {
+            Logger.LogDebug("{tag} Refresh push ignored: no character data for requester={user}", SyncProgressTag, user.AliasOrUID);
+            return;
+        }
+
+        _delayedPushUsers.Remove(user);
+        _usersToPushDataTo.Add(user);
+        Logger.LogDebug("{tag} Refresh push requested: requester={user} hash={hash}", SyncProgressTag, user.AliasOrUID, _lastCreatedData.DataHash?.Value ?? "null");
+        EnsureServerWarmUpload();
+        PushCharacterData(forced: true, bypassBatching: true);
     }
     
     

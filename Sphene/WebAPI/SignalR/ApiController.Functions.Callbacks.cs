@@ -268,6 +268,12 @@ public partial class ApiController
         return Task.CompletedTask;
     }
 
+    public Task Client_UserCharacterDataRefreshRequested(UserData requester)
+    {
+        ExecuteSafely(() => Mediator.Publish(new CharacterDataRefreshRequestedMessage(requester)));
+        return Task.CompletedTask;
+    }
+
     // Client_UserAckOtherUpdate method removed - AckOther is controlled by other player's AckYou
 
     public Task Client_GposeLobbyJoin(UserData userData)
@@ -476,6 +482,12 @@ public partial class ApiController
     {
         if (_initialized) return;
         _spheneHub!.On(nameof(Client_UserReceiveFileNotification), act);
+    }
+
+    public void OnUserCharacterDataRefreshRequested(Action<UserData> act)
+    {
+        if (_initialized) return;
+        _spheneHub!.On(nameof(Client_UserCharacterDataRefreshRequested), act);
     }
 
     // OnUserAckOtherUpdate method removed - AckOther is controlled by other player's AckYou

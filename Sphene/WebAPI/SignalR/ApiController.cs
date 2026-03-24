@@ -599,6 +599,7 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
         OnUserReceiveBypassEmote(dto => _ = Client_UserReceiveBypassEmote(dto));
         OnUserReceiveCharacterDataAcknowledgment(dto => _ = Client_UserReceiveCharacterDataAcknowledgment(dto));
         OnUserReceiveCharacterDataAcknowledgmentV2(dto => _ = Client_UserReceiveCharacterDataAcknowledgmentV2(dto));
+        OnUserCharacterDataRefreshRequested(dto => _ = Client_UserCharacterDataRefreshRequested(dto));
 
         OnGroupChangePermissions((dto) => _ = Client_GroupChangePermissions(dto));
         OnGroupDelete((dto) => _ = Client_GroupDelete(dto));
@@ -656,6 +657,7 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
         _spheneHub.Remove(nameof(Client_UserReceiveBypassEmote));
         _spheneHub.Remove(nameof(Client_UserReceiveCharacterDataAcknowledgment));
         _spheneHub.Remove(nameof(Client_UserReceiveCharacterDataAcknowledgmentV2));
+        _spheneHub.Remove(nameof(Client_UserCharacterDataRefreshRequested));
         _spheneHub.Remove(nameof(Client_GroupChangePermissions));
         _spheneHub.Remove(nameof(Client_GroupDelete));
         _spheneHub.Remove(nameof(Client_GroupPairChangeUserInfo));

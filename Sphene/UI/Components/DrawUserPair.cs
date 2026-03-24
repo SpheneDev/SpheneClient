@@ -377,10 +377,13 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         {
             if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.Sync, "Reload last data", _menuWidth, ButtonStyleKeys.ContextMenu_Item))
             {
-                _pair.ApplyLastReceivedData(forced: true, forceRedrawIfDisabled: true);
+                var requestToken = _pair.RequestForcedRedrawOnNextCharacterReload();
+                _ = _apiController.UserRequestCharacterDataRefresh(new(_pair.UserData));
+                _ = _pair.ApplyLastKnownDataIfReloadPendingAsync(requestToken);
+                _mediator.Publish(new NotificationMessage("Character data refresh", $"Requested a fresh sync from {_pair.UserData.AliasOrUID}", Sphene.SpheneConfiguration.Models.NotificationType.Info, TimeSpan.FromSeconds(2)));
                 ImGui.CloseCurrentPopup();
             }
-            UiSharedService.AttachToolTip("This reapplies the last received character data to this character");
+            UiSharedService.AttachToolTip("Requests a fresh character data sync from this user.");
         }
 
         if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.PlayCircle, "Cycle pause state", _menuWidth, ButtonStyleKeys.ContextMenu_Item))
@@ -1035,9 +1038,12 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
             ImGui.SameLine(currentRightSide);
             if (_uiSharedService.IconButton(FontAwesomeIcon.Sync, null, null, null, null, ButtonStyleKeys.Pair_Reload))
             {
-                _pair.ApplyLastReceivedData(forced: true, forceRedrawIfDisabled: true);
+                var requestToken = _pair.RequestForcedRedrawOnNextCharacterReload();
+                _ = _apiController.UserRequestCharacterDataRefresh(new(_pair.UserData));
+                _ = _pair.ApplyLastKnownDataIfReloadPendingAsync(requestToken);
+                _mediator.Publish(new NotificationMessage("Character data refresh", $"Requested a fresh sync from {_pair.UserData.AliasOrUID}", Sphene.SpheneConfiguration.Models.NotificationType.Info, TimeSpan.FromSeconds(2)));
             }
-            UiSharedService.AttachToolTip("Reload last received character data");
+            UiSharedService.AttachToolTip("Request fresh character data from server");
         }
 
         if (isOneSidedIndividualListEntry && !_pair.UserPair.IsOutgoingIndividualPair)

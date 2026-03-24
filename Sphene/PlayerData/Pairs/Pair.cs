@@ -44,6 +44,9 @@ public class Pair : DisposableMediatorSubscriberBase
     private readonly ConcurrentQueue<string> _applyDebugLog = new();
     private string? _lastApplyAttemptHash;
     private DateTimeOffset _lastApplyAttemptTime = DateTimeOffset.MinValue;
+    private int _forceRedrawOnNextData = 0;
+    private DateTimeOffset _forceRedrawRequestAt = DateTimeOffset.MinValue;
+    private int _forceRedrawRequestToken = 0;
 
     public Pair(ILogger<Pair> logger, UserFullPairDto userPair, PairHandlerFactory cachedPlayerFactory,
         SpheneMediator mediator, ServerConfigurationManager serverConfigurationManager,
@@ -270,15 +273,17 @@ public class Pair : DisposableMediatorSubscriberBase
         _applicationCts = _applicationCts.CancelRecreate();
         UpdateReceivedCharacterDataCache(data);
         ResetApplyRetry();
-        bool shouldApply = CachedPlayer == null
+        var forceRedrawFromReload = ConsumeForcedRedrawRequest();
+        bool shouldApply = forceRedrawFromReload
+            || CachedPlayer == null
             || LastReceivedCharacterData == null
             || !CachedPlayer.IsCharacterDataAppliedForCurrentCharacter(LastReceivedCharacterData);
 
         var hash = data.DataHash;
         var shortHash = string.IsNullOrEmpty(hash) ? "NONE" : hash[..Math.Min(8, hash.Length)];
-        AddApplyDebug($"Data received hash={shortHash} requiresAck={data.RequiresAcknowledgment}");
-        Logger.LogDebug("{tag} Receive: user={user} hash={hash} requiresAck={requiresAck} shouldApply={shouldApply}",
-            SyncProgressTag, data.User.AliasOrUID, shortHash, data.RequiresAcknowledgment, shouldApply);
+        AddApplyDebug($"Data received hash={shortHash} requiresAck={data.RequiresAcknowledgment} forceRedraw={forceRedrawFromReload}");
+        Logger.LogDebug("{tag} Receive: user={user} hash={hash} requiresAck={requiresAck} shouldApply={shouldApply} forceRedraw={forceRedraw}",
+            SyncProgressTag, data.User.AliasOrUID, shortHash, data.RequiresAcknowledgment, shouldApply, forceRedrawFromReload);
 
         if (!shouldApply)
         {
@@ -313,7 +318,7 @@ public class Pair : DisposableMediatorSubscriberBase
                     Logger.LogDebug("{tag} Apply delayed data: uid={uid} hash={hash}", SyncProgressTag, data.User.UID, shortHash);
                     if (shouldApply)
                     {
-                        ApplyLastReceivedData();
+                        ApplyLastReceivedData(forceRedrawFromReload, forceRedrawFromReload);
                     }
                     
                     // Enqueue acknowledgment data for delayed sending after application completes
@@ -339,7 +344,7 @@ public class Pair : DisposableMediatorSubscriberBase
 
         if (shouldApply)
         {
-            ApplyLastReceivedData();
+            ApplyLastReceivedData(forceRedrawFromReload, forceRedrawFromReload);
         }
         
         // Enqueue acknowledgment data for delayed sending after application completes
@@ -353,6 +358,42 @@ public class Pair : DisposableMediatorSubscriberBase
                 SyncProgressTag,
                 data.DataHash[..Math.Min(8, data.DataHash.Length)], currentSequence, _pendingAcknowledgmentQueue.Count);
         }
+    }
+
+    public int RequestForcedRedrawOnNextCharacterReload()
+    {
+        _forceRedrawRequestAt = DateTimeOffset.UtcNow;
+        var requestToken = Interlocked.Increment(ref _forceRedrawRequestToken);
+        Interlocked.Exchange(ref _forceRedrawOnNextData, 1);
+        return requestToken;
+    }
+
+    public async Task ApplyLastKnownDataIfReloadPendingAsync(int requestToken, TimeSpan? waitTime = null)
+    {
+        await Task.Delay(waitTime ?? TimeSpan.FromSeconds(4)).ConfigureAwait(false);
+
+        if (requestToken != Volatile.Read(ref _forceRedrawRequestToken))
+        {
+            return;
+        }
+
+        if (Interlocked.CompareExchange(ref _forceRedrawOnNextData, 0, 1) != 1)
+        {
+            return;
+        }
+
+        Logger.LogDebug("{tag} Reload fallback apply triggered: user={user}", SyncProgressTag, UserData.AliasOrUID);
+        await _dalamudUtilService.RunOnFrameworkThread(() => ApplyLastReceivedData(forced: true, forceRedrawIfDisabled: true)).ConfigureAwait(false);
+    }
+
+    private bool ConsumeForcedRedrawRequest()
+    {
+        if (Interlocked.Exchange(ref _forceRedrawOnNextData, 0) == 0)
+        {
+            return false;
+        }
+
+        return (DateTimeOffset.UtcNow - _forceRedrawRequestAt) <= TimeSpan.FromSeconds(30);
     }
 
     private void UpdateReceivedCharacterDataCache(OnlineUserCharaDataDto data)
@@ -442,7 +483,11 @@ public class Pair : DisposableMediatorSubscriberBase
         _lastApplyAttemptTime = DateTimeOffset.UtcNow;
         AddApplyDebug($"Apply start forced={forced} hash={applyShortHash}");
         Logger.LogDebug("{tag} Apply start: user={user} forced={forced} hash={hash}", SyncProgressTag, UserData.AliasOrUID, forced, applyShortHash);
-        CachedPlayer.ApplyCharacterData(Guid.NewGuid(), RemoveNotSyncedFiles(LastReceivedCharacterData.DeepClone())!, forced, forceRedrawIfDisabled);
+        CachedPlayer.ApplyCharacterData(Guid.NewGuid(),
+            RemoveNotSyncedFiles(LastReceivedCharacterData.DeepClone())!,
+            forced,
+            forceRedrawIfDisabled,
+            forceRedrawApplication: forceRedrawIfDisabled);
     }
 
     public void CreateCachedPlayer(OnlineUserIdentDto? dto = null)
@@ -932,6 +977,10 @@ public class Pair : DisposableMediatorSubscriberBase
                         {
                             verificationSuccess = VerifyDataHashIntegrity(matchingAcknowledgment, appliedHash);
                         }
+                        if (verificationSuccess && message.Success)
+                        {
+                            verificationSuccess = await VerifyServerHashIntegrityAsync(matchingAcknowledgment, appliedHash).ConfigureAwait(false);
+                        }
                         
                         Logger.LogDebug("{tag} Ack sending: appSuccess={appSuccess} hashVerified={hashSuccess} hash={hash}", 
                             SyncProgressTag,
@@ -1081,6 +1130,51 @@ public class Pair : DisposableMediatorSubscriberBase
              return false;
          }
      }
+
+    private async Task<bool> VerifyServerHashIntegrityAsync(OnlineUserCharaDataDto acknowledgmentData, string? appliedHash)
+    {
+        try
+        {
+            var senderUid = acknowledgmentData.User.UID;
+            var expectedHash = appliedHash;
+            if (string.IsNullOrEmpty(expectedHash) && LastReceivedCharacterData != null)
+            {
+                expectedHash = LastReceivedCharacterData.DataHash.Value;
+            }
+
+            if (string.IsNullOrWhiteSpace(senderUid) || string.IsNullOrWhiteSpace(expectedHash))
+            {
+                Logger.LogWarning("{tag} Server hash verify skipped: sender/hash missing", SyncProgressTag);
+                return false;
+            }
+
+            var response = await _apiController.Value.ValidateCharaDataHash(senderUid, expectedHash).ConfigureAwait(false);
+            if (response == null)
+            {
+                Logger.LogWarning("{tag} Server hash verify failed: null response sender={sender}", SyncProgressTag, acknowledgmentData.User.AliasOrUID);
+                return false;
+            }
+
+            var remoteMatches = response.IsValid
+                && (string.IsNullOrEmpty(response.CurrentHash)
+                    || string.Equals(response.CurrentHash, expectedHash, StringComparison.Ordinal));
+
+            Logger.LogDebug("{tag} Server hash verify: sender={sender} expected={expected} valid={valid} current={current} match={match}",
+                SyncProgressTag,
+                acknowledgmentData.User.AliasOrUID,
+                expectedHash[..Math.Min(8, expectedHash.Length)],
+                response.IsValid,
+                string.IsNullOrEmpty(response.CurrentHash) ? "NONE" : response.CurrentHash[..Math.Min(8, response.CurrentHash.Length)],
+                remoteMatches);
+
+            return remoteMatches;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "{tag} Server hash verify failed with exception", SyncProgressTag);
+            return false;
+        }
+    }
 
     protected override void Dispose(bool disposing)
     {

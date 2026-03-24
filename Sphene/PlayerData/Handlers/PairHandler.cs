@@ -458,8 +458,10 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         => _configService.Current.EnableDutyCombatSyncWithoutRedraw
            && (_dalamudUtil.IsInCombatOrPerforming || _dalamudUtil.IsInDuty);
 
-    public void ApplyCharacterData(Guid applicationBase, CharacterData characterData, bool forceApplyCustomization = false, bool forceRedrawIfDisabled = false)
+    public void ApplyCharacterData(Guid applicationBase, CharacterData characterData, bool forceApplyCustomization = false, bool forceRedrawIfDisabled = false, bool forceRedrawApplication = false)
     {
+        _redrawOnNextApplication |= forceRedrawApplication;
+
         if (_dalamudUtil.IsInCombatOrPerforming && !IsDutyCombatNoRedrawModeActive())
         {
             Mediator.Publish(new EventMessage(new Event(PlayerName, Pair.UserData, nameof(PairHandler), EventSeverity.Warning,
@@ -487,7 +489,8 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
 
         SetUploading(isUploading: false);
 
-        Logger.LogDebug("[BASE-{appbase}] Applying data for {player}, forceApplyCustomization: {forced}, forceApplyMods: {forceMods}", applicationBase, this, forceApplyCustomization, _forceApplyMods);
+        Logger.LogDebug("[BASE-{appbase}] Applying data for {player}, forceApplyCustomization: {forced}, forceApplyMods: {forceMods}, forceRedrawApplication: {forceRedraw}",
+            applicationBase, this, forceApplyCustomization, _forceApplyMods, forceRedrawApplication);
         Logger.LogDebug("[BASE-{appbase}] Hash for data is {newHash}, current cache hash is {oldHash}", applicationBase, characterData.DataHash.Value, _cachedData?.DataHash.Value ?? "NODATA");
 
         if (_applyPipelineTask != null
@@ -560,6 +563,24 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         _inProgressPipelineDataHash = characterData.DataHash?.Value;
 
         var charaDataToUpdate = characterData.CheckUpdatedData(applicationBase, _cachedData?.DeepClone() ?? new(), Logger, this, forceApplyCustomization, _forceApplyMods);
+        if (_configService.Current.DisableRedraws
+            && !forceRedrawIfDisabled
+            && charaDataToUpdate.TryGetValue(ObjectKind.Player, out var playerReapplyChanges)
+            && playerReapplyChanges.Contains(PlayerChanges.ModFiles))
+        {
+            if (characterData.GlamourerData.TryGetValue(ObjectKind.Player, out var glamourerData) && !string.IsNullOrEmpty(glamourerData))
+            {
+                playerReapplyChanges.Add(PlayerChanges.Glamourer);
+            }
+
+            if (characterData.CustomizePlusData.TryGetValue(ObjectKind.Player, out var customizeData) && !string.IsNullOrEmpty(customizeData))
+            {
+                playerReapplyChanges.Add(PlayerChanges.Customize);
+            }
+
+            Logger.LogDebug("{tag} Incoming mod-file change detected with global redraw disabled: forcing non-redraw reapply user={user} hash={hash}",
+                SyncProgressTag, Pair.UserData.AliasOrUID, characterData.DataHash?.Value ?? "null");
+        }
 
         if (_charaHandler != null && _forceApplyMods)
         {

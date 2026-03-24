@@ -90,6 +90,20 @@ public partial class ApiController
         }
     }
 
+    public async Task UserRequestCharacterDataRefresh(UserDto userDto)
+    {
+        if (!IsConnected) return;
+
+        try
+        {
+            await _spheneHub!.InvokeAsync(nameof(UserRequestCharacterDataRefresh), userDto).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Failed to request character data refresh for {user}", userDto.User.AliasOrUID);
+        }
+    }
+
     public async Task SetBulkPermissions(BulkPermissionsDto dto)
     {
         CheckConnection();
