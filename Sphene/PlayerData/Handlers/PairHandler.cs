@@ -456,7 +456,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             
             // Check if we already applied this data
             // We compare the FULL data string (including timestamp) to distinguish repeated emotes from duplicate packets
-            if (string.Equals(data, _lastAppliedBypassEmoteData, StringComparison.Ordinal) && _charaHandler.Address == _lastAppliedBypassEmoteAddress)
+            if (string.Equals(data, _lastAppliedBypassEmoteData, StringComparison.Ordinal))
             {
                 // If it has a timestamp, it's a unique event ID, so strict equality means it's a duplicate packet -> Skip
                 if (hasTimestamp)
@@ -466,7 +466,8 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                 }
                 
                 // If no timestamp, we use a timeout to allow re-application after 2 seconds
-                if ((DateTime.UtcNow - _lastAppliedBypassEmoteTime).TotalSeconds < 2.0)
+                if (_charaHandler.Address == _lastAppliedBypassEmoteAddress
+                    && (DateTime.UtcNow - _lastAppliedBypassEmoteTime).TotalSeconds < 2.0)
                 {
                     Logger.LogDebug("Skipping BypassEmote fast path application (duplicate within cooldown): {data}", data);
                     return;
@@ -841,7 +842,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
 
                             // Prevent double application if Fast Path already applied it
                             // We compare the FULL data string (including timestamp)
-                            if (string.Equals(data, _lastAppliedBypassEmoteData, StringComparison.Ordinal) && handler.Address == _lastAppliedBypassEmoteAddress)
+                            if (string.Equals(data, _lastAppliedBypassEmoteData, StringComparison.Ordinal))
                             {
                                  // If it has a timestamp, it's a unique event ID -> strict equality means it's a duplicate packet -> Skip
                                  if (hasTimestamp)
@@ -851,7 +852,8 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                                  }
                                  
                                  // If no timestamp, use timeout
-                                 if ((DateTime.UtcNow - _lastAppliedBypassEmoteTime).TotalSeconds < 2.0)
+                                 if (handler.Address == _lastAppliedBypassEmoteAddress
+                                     && (DateTime.UtcNow - _lastAppliedBypassEmoteTime).TotalSeconds < 2.0)
                                  {
                                      Logger.LogDebug("Skipping BypassEmote application (already applied via Fast Path - cooldown): {data}", data);
                                      break;
