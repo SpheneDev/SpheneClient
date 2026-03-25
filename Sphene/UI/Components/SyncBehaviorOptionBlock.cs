@@ -20,10 +20,10 @@ public static class SyncBehaviorOptionBlock
                 configService.Save();
             }
 
-            uiShared.DrawHelpText("When enabled, Sphene no longer triggers Penumbra redraw calls. Use this at own risk and disable it if you get errors.");
+            uiShared.DrawHelpText("When enabled, Sphene suppresses most Penumbra redraw calls. Exceptions: minions and pets are still redrawn, and each character is force-redrawn once when you first encounter them after plugin start.");
             if (disableRedraws)
             {
-                UiSharedService.ColorTextWrapped("Warning: (Experimental) Redraws are disabled. Visual updates can be delayed until natural game refreshes happen.", ImGuiColors.DalamudYellow);
+                UiSharedService.ColorTextWrapped("Warning: (Experimental) Most redraws are disabled. Visual updates can be delayed until natural game refreshes happen, except minion/pet redraws and first-encounter redraw.", ImGuiColors.DalamudYellow);
             }
             else
             {

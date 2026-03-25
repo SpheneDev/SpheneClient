@@ -70,6 +70,9 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
     private nint _lastSuccessfullyAppliedCharacterAddress = nint.Zero;
     private nint _lastBoundMinionAddress = nint.Zero;
     private nint _lastAppliedMinionAddress = nint.Zero;
+    private nint _lastRedrawnMinionAddress = nint.Zero;
+    private string? _lastRedrawnMinionDataHash;
+    private bool _hasCompletedInitialCharacterRedraw = false;
     private bool _minionReapplyInProgress = false;
     private bool _initIdentMissingLogged = false;
     private bool _proximityReportedVisible = false;
@@ -493,6 +496,16 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             applicationBase, this, forceApplyCustomization, _forceApplyMods, forceRedrawApplication);
         Logger.LogDebug("[BASE-{appbase}] Hash for data is {newHash}, current cache hash is {oldHash}", applicationBase, characterData.DataHash.Value, _cachedData?.DataHash.Value ?? "NODATA");
 
+        if (_configService.Current.DisableRedraws
+            && !forceRedrawIfDisabled
+            && HasUnknownOrChangedPapPath(characterData, _cachedData)
+            && IsRemotePairEmoting(characterData))
+        {
+            forceRedrawIfDisabled = true;
+            Logger.LogDebug("{tag} Forcing redraw despite global disable due to unknown/changed PAP while remote emote is active: user={user} hash={hash}",
+                SyncProgressTag, Pair.UserData.AliasOrUID, characterData.DataHash?.Value ?? "null");
+        }
+
         if (_applyPipelineTask != null
             && !_applyPipelineTask.IsCompleted
             && (AreComponentHashesEqual(characterData, _inProgressPenumbraHash, _inProgressGlamourerHash, _inProgressRestHash)
@@ -563,6 +576,17 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         _inProgressPipelineDataHash = characterData.DataHash?.Value;
 
         var charaDataToUpdate = characterData.CheckUpdatedData(applicationBase, _cachedData?.DeepClone() ?? new(), Logger, this, forceApplyCustomization, _forceApplyMods);
+
+        if (!_hasCompletedInitialCharacterRedraw)
+        {
+            if (!charaDataToUpdate.TryGetValue(ObjectKind.Player, out var initialPlayerChanges))
+            {
+                charaDataToUpdate[ObjectKind.Player] = initialPlayerChanges = [];
+            }
+
+            initialPlayerChanges.Add(PlayerChanges.ForcedRedraw);
+        }
+
         if (_configService.Current.DisableRedraws
             && !forceRedrawIfDisabled
             && charaDataToUpdate.TryGetValue(ObjectKind.Player, out var playerReapplyChanges)
@@ -805,15 +829,46 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                         break;
 
                     case PlayerChanges.ForcedRedraw:
+                        var minionDataHash = charaData.DataHash?.Value ?? string.Empty;
+                        var shouldRedraw = true;
+                        var forceRedrawForDisabledGlobalSetting = forceRedrawIfDisabled
+                            || changes.Key == ObjectKind.MinionOrMount
+                            || changes.Key == ObjectKind.Pet
+                            || (changes.Key == ObjectKind.Player && !_hasCompletedInitialCharacterRedraw);
+
                         if (changes.Key == ObjectKind.MinionOrMount
                             && _penumbraCollection != Guid.Empty
                             && charaData.FileReplacements.TryGetValue(ObjectKind.MinionOrMount, out var minionReplacements)
                             && minionReplacements.Count > 0)
                         {
+                            if (handler.Address == _lastRedrawnMinionAddress
+                                && string.Equals(_lastRedrawnMinionDataHash, minionDataHash, StringComparison.Ordinal))
+                            {
+                                Logger.LogDebug("Skipping duplicate minion redraw for {this} address {address:X} dataHash {hash}",
+                                    this, handler.Address, minionDataHash);
+                                shouldRedraw = false;
+                            }
+
                             await EnsureMinionCollectionBindingsAsync(handler.Address).ConfigureAwait(false);
                         }
-                        if (!IsDutyCombatNoRedrawModeActive())
-                            await _ipcManager.Penumbra.RedrawAsync(Logger, handler, applicationId, token, forceRedrawIfDisabled).ConfigureAwait(false);
+
+                        var bypassDutyCombatNoRedrawMode = forceRedrawForDisabledGlobalSetting;
+                        if (shouldRedraw && (!IsDutyCombatNoRedrawModeActive() || bypassDutyCombatNoRedrawMode))
+                        {
+                            await _ipcManager.Penumbra.RedrawAsync(Logger, handler, applicationId, token, forceRedrawForDisabledGlobalSetting).ConfigureAwait(false);
+
+                            if (changes.Key == ObjectKind.MinionOrMount)
+                            {
+                                _lastRedrawnMinionAddress = handler.Address;
+                                _lastRedrawnMinionDataHash = minionDataHash;
+                            }
+
+                            if (changes.Key == ObjectKind.Player && !_hasCompletedInitialCharacterRedraw)
+                            {
+                                _hasCompletedInitialCharacterRedraw = true;
+                                Logger.LogDebug("Initial character redraw completed for {this}", this);
+                            }
+                        }
                         break;
 
                     default:
@@ -876,6 +931,74 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         }
 
         return string.Equals(newHash, dataHash, StringComparison.Ordinal);
+    }
+
+    private static bool IsRemotePairEmoting(CharacterData incomingData)
+        => !string.IsNullOrWhiteSpace(incomingData.BypassEmoteData);
+
+    private static bool HasUnknownOrChangedPapPath(CharacterData incomingData, CharacterData? previousData)
+    {
+        if (!incomingData.FileReplacements.TryGetValue(ObjectKind.Player, out var incomingPlayerReplacements)
+            || incomingPlayerReplacements.Count == 0)
+        {
+            return false;
+        }
+
+        var knownPapHashes = new HashSet<string>(StringComparer.Ordinal);
+        var knownPapPathToHash = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        if (previousData != null
+            && previousData.FileReplacements.TryGetValue(ObjectKind.Player, out var previousPlayerReplacements)
+            && previousPlayerReplacements.Count > 0)
+        {
+            for (var replacementIndex = 0; replacementIndex < previousPlayerReplacements.Count; replacementIndex++)
+            {
+                var previousReplacement = previousPlayerReplacements[replacementIndex];
+                if (!string.IsNullOrEmpty(previousReplacement.Hash))
+                {
+                    knownPapHashes.Add(previousReplacement.Hash);
+                }
+
+                for (var pathIndex = 0; pathIndex < previousReplacement.GamePaths.Length; pathIndex++)
+                {
+                    var gamePath = previousReplacement.GamePaths[pathIndex];
+                    if (!gamePath.EndsWith(".pap", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    var normalizedPath = gamePath.Replace('\\', '/').ToLowerInvariant();
+                    knownPapPathToHash[normalizedPath] = previousReplacement.Hash;
+                }
+            }
+        }
+
+        for (var replacementIndex = 0; replacementIndex < incomingPlayerReplacements.Count; replacementIndex++)
+        {
+            var incomingReplacement = incomingPlayerReplacements[replacementIndex];
+            var incomingHash = incomingReplacement.Hash;
+            var hashIsKnown = !string.IsNullOrEmpty(incomingHash) && knownPapHashes.Contains(incomingHash);
+
+            for (var pathIndex = 0; pathIndex < incomingReplacement.GamePaths.Length; pathIndex++)
+            {
+                var gamePath = incomingReplacement.GamePaths[pathIndex];
+                if (!gamePath.EndsWith(".pap", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var normalizedPath = gamePath.Replace('\\', '/').ToLowerInvariant();
+                var pathIsKnown = knownPapPathToHash.TryGetValue(normalizedPath, out var knownHashForPath);
+                var pathChanged = pathIsKnown && !string.Equals(knownHashForPath, incomingHash, StringComparison.Ordinal);
+
+                if ((!pathIsKnown || pathChanged) && !hashIsKnown)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     private static bool HasMinionData(CharacterData data)
@@ -1627,6 +1750,8 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         {
             _lastAppliedMinionAddress = nint.Zero;
             _lastBoundMinionAddress = nint.Zero;
+            _lastRedrawnMinionAddress = nint.Zero;
+            _lastRedrawnMinionDataHash = null;
             return;
         }
 
