@@ -120,6 +120,27 @@ public class Pair : DisposableMediatorSubscriberBase
         return CachedPlayer?.PlayerCharacter ?? nint.Zero;
     }
 
+    public Guid GetPenumbraCollectionId()
+    {
+        return CachedPlayer?.GetPenumbraCollectionId() ?? Guid.Empty;
+    }
+
+    public IReadOnlyDictionary<string, string> GetLoadedCollectionPathsSnapshot()
+    {
+        return CachedPlayer?.GetLastLoadedCollectionPathsSnapshot()
+            ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+    }
+
+    public async Task<IReadOnlyDictionary<string, string>> GetCurrentPenumbraActivePathsByGamePathAsync()
+    {
+        if (CachedPlayer == null)
+        {
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        return await CachedPlayer.GetCurrentPenumbraActivePathsByGamePathAsync().ConfigureAwait(false);
+    }
+
     public string? GetCurrentDataHash()
     {
         return LastReceivedCharacterData?.DataHash?.Value;

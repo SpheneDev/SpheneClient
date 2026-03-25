@@ -45,6 +45,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
     private CharacterData? _lastKnownMinionData = null;
     private readonly ConcurrentDictionary<string, string> _lastKnownMinionFileOverrides = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, string> _lastKnownMinionScdOverrides = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, string> _lastLoadedCollectionPaths = new(StringComparer.OrdinalIgnoreCase);
     private string? _lastKnownMinionOverrideHash;
     private GameObjectHandler? _charaHandler;
     private readonly Dictionary<ObjectKind, Guid?> _customizeIds = [];
@@ -120,6 +121,44 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                 Logger.LogWarning(ex, "[{applicationId}] Failed destroying temp collection for {user} ({reason})", applicationId, Pair.UserData.AliasOrUID, reason);
             }
         });
+    }
+
+    internal Guid GetPenumbraCollectionId()
+    {
+        return _penumbraCollection;
+    }
+
+    internal IReadOnlyDictionary<string, string> GetLastLoadedCollectionPathsSnapshot()
+    {
+        return _lastLoadedCollectionPaths.ToDictionary(k => k.Key, k => k.Value, StringComparer.OrdinalIgnoreCase);
+    }
+
+    internal async Task<IReadOnlyDictionary<string, string>> GetCurrentPenumbraActivePathsByGamePathAsync()
+    {
+        if (_charaHandler == null || _charaHandler.Address == nint.Zero || !IsVisible)
+        {
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        var resolvedPaths = await _ipcManager.Penumbra.GetCharacterData(Logger, _charaHandler).ConfigureAwait(false);
+        if (resolvedPaths == null || resolvedPaths.Count == 0)
+        {
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        Dictionary<string, string> activeByGamePath = new(StringComparer.OrdinalIgnoreCase);
+        foreach (var resolvedPath in resolvedPaths)
+        {
+            foreach (var gamePath in resolvedPath.Value)
+            {
+                if (!string.IsNullOrEmpty(gamePath))
+                {
+                    activeByGamePath[gamePath] = resolvedPath.Key;
+                }
+            }
+        }
+
+        return activeByGamePath;
     }
 
     public PairHandler(ILogger<PairHandler> logger, Pair pair,
@@ -1376,8 +1415,13 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                 var objIndex = await _dalamudUtil.RunOnFrameworkThread(() => _charaHandler!.GetGameObject()!.ObjectIndex).ConfigureAwait(false);
                 await _ipcManager.Penumbra.AssignTemporaryCollectionAsync(Logger, _penumbraCollection, objIndex).ConfigureAwait(false);
 
-                await _ipcManager.Penumbra.SetTemporaryModsAsync(Logger, _applicationId, _penumbraCollection,
-                    moddedPaths.ToDictionary(k => k.Key.GamePath, k => k.Value, StringComparer.Ordinal)).ConfigureAwait(false);
+                var collectionPaths = moddedPaths.ToDictionary(k => k.Key.GamePath, k => k.Value, StringComparer.Ordinal);
+                await _ipcManager.Penumbra.SetTemporaryModsAsync(Logger, _applicationId, _penumbraCollection, collectionPaths).ConfigureAwait(false);
+                _lastLoadedCollectionPaths.Clear();
+                foreach (var item in collectionPaths)
+                {
+                    _lastLoadedCollectionPaths[item.Key] = item.Value;
+                }
                 LastAppliedDataBytes = -1;
                 foreach (var path in moddedPaths.Values.Distinct(StringComparer.OrdinalIgnoreCase).Select(v => new FileInfo(v)).Where(p => p.Exists))
                 {

@@ -278,8 +278,8 @@ public sealed class CharaDataFileHandler : IDisposable
             }
             else
             {
-                updateDto.FileGamePaths = [.. fileReplacements!.Where(u => string.IsNullOrEmpty(u.FileSwapPath)).SelectMany(u => u.GamePaths, (file, path) => new GamePathEntry(file.Hash, path))];
-                updateDto.FileSwaps = [.. fileReplacements!.Where(u => !string.IsNullOrEmpty(u.FileSwapPath)).SelectMany(u => u.GamePaths, (file, path) => new GamePathEntry(file.FileSwapPath, path))];
+                updateDto.FileGamePaths = [.. fileReplacements!.Where(u => string.IsNullOrEmpty(u.FileSwapPath)).SelectMany(u => u.GamePaths, (file, path) => new GamePathEntry(file.Hash, path, file.IsActive))];
+                updateDto.FileSwaps = [.. fileReplacements!.Where(u => !string.IsNullOrEmpty(u.FileSwapPath)).SelectMany(u => u.GamePaths, (file, path) => new GamePathEntry(file.FileSwapPath, path, file.IsActive))];
             }
         }
     }
