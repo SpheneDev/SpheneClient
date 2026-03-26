@@ -36,6 +36,7 @@ public class Pair : DisposableMediatorSubscriberBase
     private const int BaseApplyRetryDelaySeconds = 2;
     private const int MaxApplyRetryDelaySeconds = 30;
     private const int MaxApplyRetryBackoffSteps = 5;
+    private const int MaxAcknowledgmentValidationRetries = 4;
     private const int ApplyAttemptCooldownMs = 1500;
     private CancellationTokenSource _applyRetryCts = new();
     private int _applyRetryCount = 0;
@@ -101,6 +102,7 @@ public class Pair : DisposableMediatorSubscriberBase
     
     // Queue for pending acknowledgment data to handle multiple rapid requests
     private readonly ConcurrentQueue<OnlineUserCharaDataDto> _pendingAcknowledgmentQueue = new();
+    private readonly ConcurrentDictionary<string, int> _acknowledgmentValidationRetries = new(StringComparer.Ordinal);
     private volatile int _acknowledgmentSequence = 0;
 
     public UserData UserData => UserPair.User;
@@ -893,7 +895,7 @@ public class Pair : DisposableMediatorSubscriberBase
             else if (!hashVerificationPassed)
             {
                 errorCode = Sphene.API.Dto.User.AcknowledgmentErrorCode.HashVerificationFailed;
-                errorMessage = "Data hash verification failed - data integrity compromised";
+                errorMessage = "Post-apply verification failed - collection state mismatch";
             }
             
             var acknowledgmentDto = new CharacterDataAcknowledgmentDto(UserData, data.DataHash)
@@ -993,15 +995,35 @@ public class Pair : DisposableMediatorSubscriberBase
                 {
                     try
                     {
-                        var verificationSuccess = true;
-                        if (!_dalamudUtilService.IsInDuty && !_dalamudUtilService.IsInCombatOrPerforming)
+                        var appliedOrExpectedHash = string.IsNullOrEmpty(appliedHash) ? matchingAcknowledgment.DataHash : appliedHash;
+                        var verificationSuccess = message.Success
+                            && await VerifyAcknowledgmentPostApplyStateAsync(matchingAcknowledgment, appliedHash).ConfigureAwait(false);
+
+                        if (!verificationSuccess)
                         {
-                            verificationSuccess = VerifyDataHashIntegrity(matchingAcknowledgment, appliedHash);
+                            var validationAttempt = IncrementAcknowledgmentValidationRetry(appliedOrExpectedHash);
+                            var hasRetryBudget = validationAttempt < MaxAcknowledgmentValidationRetries;
+                            if (hasRetryBudget)
+                            {
+                                _pendingAcknowledgmentQueue.Enqueue(matchingAcknowledgment);
+                                if (message.Success)
+                                {
+                                    ScheduleApplyRetry(increment: true);
+                                }
+
+                                Logger.LogDebug("{tag} Ack deferred: user={user} hash={hash} appSuccess={appSuccess} verification={verification} attempt={attempt}/{maxAttempts}",
+                                    SyncProgressTag,
+                                    UserData.AliasOrUID,
+                                    string.IsNullOrEmpty(appliedOrExpectedHash) ? "NONE" : appliedOrExpectedHash[..Math.Min(8, appliedOrExpectedHash.Length)],
+                                    message.Success,
+                                    verificationSuccess,
+                                    validationAttempt,
+                                    MaxAcknowledgmentValidationRetries);
+                                return;
+                            }
                         }
-                        if (verificationSuccess && message.Success)
-                        {
-                            verificationSuccess = await VerifyServerHashIntegrityAsync(matchingAcknowledgment, appliedHash).ConfigureAwait(false);
-                        }
+
+                        ResetAcknowledgmentValidationRetry(appliedOrExpectedHash);
                         
                         Logger.LogDebug("{tag} Ack sending: appSuccess={appSuccess} hashVerified={hashSuccess} hash={hash}", 
                             SyncProgressTag,
@@ -1113,6 +1135,151 @@ public class Pair : DisposableMediatorSubscriberBase
                 break;
             }
         }
+    }
+
+    private int IncrementAcknowledgmentValidationRetry(string? hash)
+    {
+        if (string.IsNullOrEmpty(hash))
+        {
+            return MaxAcknowledgmentValidationRetries;
+        }
+
+        return _acknowledgmentValidationRetries.AddOrUpdate(hash, 1, (_, current) => current + 1);
+    }
+
+    private void ResetAcknowledgmentValidationRetry(string? hash)
+    {
+        if (string.IsNullOrEmpty(hash))
+        {
+            return;
+        }
+
+        _acknowledgmentValidationRetries.TryRemove(hash, out _);
+    }
+
+    private async Task<bool> VerifyAcknowledgmentPostApplyStateAsync(OnlineUserCharaDataDto acknowledgmentData, string? appliedHash)
+    {
+        if (!VerifyDataHashIntegrity(acknowledgmentData, appliedHash))
+        {
+            return false;
+        }
+
+        if (!await VerifyServerHashIntegrityAsync(acknowledgmentData, appliedHash).ConfigureAwait(false))
+        {
+            return false;
+        }
+
+        return await VerifyPenumbraCollectionComparisonMatchAsync(acknowledgmentData.CharaData).ConfigureAwait(false);
+    }
+
+    private async Task<bool> VerifyPenumbraCollectionComparisonMatchAsync(CharacterData? characterData)
+    {
+        if (characterData == null)
+        {
+            Logger.LogWarning("{tag} Collection verify failed: character data missing", SyncProgressTag);
+            return false;
+        }
+
+        var deliveredActiveByPath = BuildDeliveredActiveByPath(characterData);
+        var loadedPaths = NormalizePathMap(GetLoadedCollectionPathsSnapshot());
+        var activePaths = NormalizePathMap(await GetCurrentPenumbraActivePathsByGamePathAsync().ConfigureAwait(false));
+
+        HashSet<string> allPaths = new(StringComparer.OrdinalIgnoreCase);
+        foreach (var path in deliveredActiveByPath.Keys) allPaths.Add(path);
+        foreach (var path in loadedPaths.Keys) allPaths.Add(path);
+        foreach (var path in activePaths.Keys) allPaths.Add(path);
+
+        foreach (var path in allPaths)
+        {
+            var hasDelivered = deliveredActiveByPath.TryGetValue(path, out var isDataFlagActive);
+            activePaths.TryGetValue(path, out var activeSource);
+            var isPenumbraActive = !string.IsNullOrEmpty(activeSource);
+            var isLikelyDefaultGamePath = isPenumbraActive && !hasDelivered;
+            if (isLikelyDefaultGamePath)
+            {
+                continue;
+            }
+
+            if (isPenumbraActive != isDataFlagActive)
+            {
+                Logger.LogDebug("{tag} Collection verify mismatch: path={path} penActive={penActive} dataFlag={dataFlag}",
+                    SyncProgressTag,
+                    path,
+                    isPenumbraActive,
+                    isDataFlagActive);
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static Dictionary<string, bool> BuildDeliveredActiveByPath(CharacterData characterData)
+    {
+        Dictionary<string, bool> delivered = new(StringComparer.OrdinalIgnoreCase);
+        if (!characterData.FileReplacements.TryGetValue(ObjectKind.Player, out var replacements) || replacements == null)
+        {
+            return delivered;
+        }
+
+        foreach (var replacement in replacements)
+        {
+            foreach (var gamePath in replacement.GamePaths)
+            {
+                var normalizedPath = NormalizeGamePath(gamePath);
+                if (string.IsNullOrEmpty(normalizedPath))
+                {
+                    continue;
+                }
+
+                if (delivered.TryGetValue(normalizedPath, out var existing))
+                {
+                    delivered[normalizedPath] = existing || replacement.IsActive;
+                }
+                else
+                {
+                    delivered[normalizedPath] = replacement.IsActive;
+                }
+            }
+        }
+
+        return delivered;
+    }
+
+    private static Dictionary<string, string> NormalizePathMap(IReadOnlyDictionary<string, string> paths)
+    {
+        Dictionary<string, string> normalized = new(StringComparer.OrdinalIgnoreCase);
+        foreach (var path in paths)
+        {
+            var normalizedKey = NormalizeGamePath(path.Key);
+            if (string.IsNullOrEmpty(normalizedKey))
+            {
+                continue;
+            }
+
+            if (!normalized.TryGetValue(normalizedKey, out var existingValue) || string.IsNullOrEmpty(existingValue))
+            {
+                normalized[normalizedKey] = path.Value;
+            }
+        }
+
+        return normalized;
+    }
+
+    private static string NormalizeGamePath(string? gamePath)
+    {
+        if (string.IsNullOrWhiteSpace(gamePath))
+        {
+            return string.Empty;
+        }
+
+        var normalized = gamePath.Trim().Replace('\\', '/');
+        while (normalized.Contains("//", StringComparison.Ordinal))
+        {
+            normalized = normalized.Replace("//", "/", StringComparison.Ordinal);
+        }
+
+        return normalized.Trim('/');
     }
 
     private bool VerifyDataHashIntegrity(OnlineUserCharaDataDto acknowledgmentData, string? appliedHash)
