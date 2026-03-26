@@ -112,21 +112,21 @@ public static class SyncBehaviorOptionBlock
         try
         {
             var enabled = configService.Current.FilterCharacterLegacyShpkInOutgoingCharacterData;
-            if (ImGui.Checkbox("Filter characterlegacy.shpk in sync data (experimental)", ref enabled))
+            if (ImGui.Checkbox("Filter characterlegacy.shpk in sync data", ref enabled))
             {
                 configService.Current.FilterCharacterLegacyShpkInOutgoingCharacterData = enabled;
                 configService.Save();
                 mediator.Publish(new PenumbraModSettingChangedMessage());
             }
 
-            uiShared.DrawHelpText("When enabled, incoming and outgoing character sync filters paths that reference characterlegacy.shpk. This file may be related to shadow bugs. If you notice rendering issues while testing this experimental behavior, disable this option.");
+            uiShared.DrawHelpText("When enabled, incoming and outgoing character sync filters paths that reference characterlegacy.shpk. This file may be related to shadow bugs. If you notice rendering issues while using this option, disable it.");
             if (enabled)
             {
-                UiSharedService.ColorTextWrapped("Experimental filter is active. characterlegacy.shpk entries are excluded from outgoing push and incoming apply/download paths.", ImGuiColors.ParsedGreen);
+                UiSharedService.ColorTextWrapped("filter is active. characterlegacy.shpk entries are excluded from outgoing push and incoming apply/download paths.", ImGuiColors.ParsedGreen);
             }
             else
             {
-                UiSharedService.ColorTextWrapped("Experimental filter is disabled. characterlegacy.shpk entries are no longer filtered.", ImGuiColors.DalamudGrey);
+                UiSharedService.ColorTextWrapped("filter is disabled. characterlegacy.shpk entries are no longer filtered.", ImGuiColors.DalamudGrey);
             }
         }
         finally

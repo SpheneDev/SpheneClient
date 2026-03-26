@@ -31,7 +31,7 @@ public static class UpdateOptionPanel
         [Link.SyncOutgoingBatching] = "Sync: Outgoing Batching (Default: Disabled)",
         [Link.ShowTestBuildUpdates] = "Notifications: Testbuild Update Hints (Default: Disabled)",
         [Link.DisableRedraws] = "Sync: Disable Redraws (Default: Disabled)",
-        [Link.FilterCharacterLegacyShpkOutgoing] = "Sync: Filter characterlegacy.shpk in Sync Data (Experimental, Default: Disabled)"
+        [Link.FilterCharacterLegacyShpkOutgoing] = "Sync: Filter characterlegacy.shpk in Sync Data (Default: Enabled"
     };
 
     private static readonly IReadOnlyDictionary<Link, Action<SpheneConfigService, UiSharedService, SpheneMediator, float>> LinkDrawers

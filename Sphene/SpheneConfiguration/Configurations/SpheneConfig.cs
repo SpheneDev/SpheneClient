@@ -88,6 +88,7 @@ public class SpheneConfig : ISpheneConfiguration
     public float PenumbraReceivePopupPosX { get; set; } = 0f;
     public float PenumbraReceivePopupPosY { get; set; } = 0f;
     public bool PenumbraReceivePopupUseCustomPosition { get; set; } = false;
+    
     // Enable or disable integration of ShrinkU UI inside Sphene
     public bool EnableShrinkUIntegration { get; set; } = true;
     public string PenumbraModDownloadFolder { get; set; } = string.Empty;
@@ -103,7 +104,7 @@ public class SpheneConfig : ISpheneConfiguration
     public bool EnableDutyCombatSyncWithoutRedraw { get; set; } = false;
     public bool EnableDutyCombatOutgoingSyncBatching { get; set; } = false;
     public int DutyCombatOutgoingSyncBatchSeconds { get; set; } = 10;
-    public bool FilterCharacterLegacyShpkInOutgoingCharacterData { get; set; } = false;
+    public bool FilterCharacterLegacyShpkInOutgoingCharacterData { get; set; } = true;
 
     public int AcknowledgmentTimeoutSeconds { get; set; } = 30;
     public NotificationLocation AcknowledgmentNotification { get; set; } = NotificationLocation.Toast;
