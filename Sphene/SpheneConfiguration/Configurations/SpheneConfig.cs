@@ -88,6 +88,7 @@ public class SpheneConfig : ISpheneConfiguration
     public float PenumbraReceivePopupPosX { get; set; } = 0f;
     public float PenumbraReceivePopupPosY { get; set; } = 0f;
     public bool PenumbraReceivePopupUseCustomPosition { get; set; } = false;
+    
     // Enable or disable integration of ShrinkU UI inside Sphene
     public bool EnableShrinkUIntegration { get; set; } = true;
     public string PenumbraModDownloadFolder { get; set; } = string.Empty;
@@ -99,9 +100,11 @@ public class SpheneConfig : ISpheneConfiguration
     public bool ShowWaitingForAcknowledgmentPopups { get; set; } = false;
     public bool EnableAcknowledgmentBatching { get; set; } = true;
     public bool EnableAcknowledgmentAutoRetry { get; set; } = true;
+    public bool DisableRedraws { get; set; } = false;
     public bool EnableDutyCombatSyncWithoutRedraw { get; set; } = false;
     public bool EnableDutyCombatOutgoingSyncBatching { get; set; } = false;
     public int DutyCombatOutgoingSyncBatchSeconds { get; set; } = 10;
+    public bool FilterCharacterLegacyShpkInOutgoingCharacterData { get; set; } = true;
 
     public int AcknowledgmentTimeoutSeconds { get; set; } = 30;
     public NotificationLocation AcknowledgmentNotification { get; set; } = NotificationLocation.Toast;
@@ -123,8 +126,10 @@ public class SpheneConfig : ISpheneConfiguration
     // Release Changelog
     public string LastSeenVersionChangelog { get; set; } = string.Empty;
     public string LastSeenNewOptionsTag { get; set; } = string.Empty;
+    public List<string> SeenNewOptionsTags { get; set; } = new();
     public string ReleaseChangelogUrl { get; set; } = string.Empty;
     public bool ShowTestBuildChangelogs { get; set; } = false;
+    public bool ShowTestBuildUpdates { get; set; } = false;
 
     public bool UseTestServerOverride { get; set; } = false;
     public string TestServerApiUrl { get; set; } = string.Empty;

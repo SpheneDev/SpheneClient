@@ -473,7 +473,7 @@ public class SpheneIcon : WindowMediatorSubscriberBase
 
     private void RefreshTooltipCache(bool iconLocked)
     {
-        var currentState = _apiController.ServerState;
+        var currentState = _apiController.DisplayServerState;
         var currentFromVersion = _updateInfo?.CurrentVersion;
         var currentToVersion = _updateInfo?.LatestVersion;
 
@@ -566,7 +566,9 @@ public class SpheneIcon : WindowMediatorSubscriberBase
             iconPos.Y + indicatorRadius + 2f
         );
         
-        var statusColor = GetStatusColor(_apiController.ServerState);
+        var statusColor = _apiController.IsTransientDisconnectInProgress
+            ? Sphene.UI.Theme.SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning
+            : GetStatusColor(_apiController.DisplayServerState);
         var indicatorColor = ImGui.ColorConvertFloat4ToU32(statusColor);
         
         // Draw status indicator circle
@@ -609,10 +611,13 @@ public class SpheneIcon : WindowMediatorSubscriberBase
         
         if (_updateAvailable && !_updateToastShown)
         {
+            var toastText = _updateInfo!.IsTestBuildUpdate
+                ? $"Testbuild update available: {_updateInfo.LatestVersion}"
+                : $"Update available: {_updateInfo.LatestVersion}";
             // Publish a toast notification via NotificationService
             Mediator.Publish(new NotificationMessage(
                 "Sphene Update",
-                $"Update available: {_updateInfo!.LatestVersion}",
+                toastText,
                 NotificationType.Info,
                 TimeShownOnScreen: TimeSpan.FromSeconds(10)));
             _updateToastShown = true;

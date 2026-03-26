@@ -52,13 +52,18 @@ public class UpdateNotificationUi : WindowMediatorSubscriberBase
         }
         
         if (_uiShared.IsInGpose) return;
+
+        var updateKind = _updateInfo.IsTestBuildUpdate ? "Testbuild Update" : "Update";
+        var latestVersionLabel = _updateInfo.IsTestBuildUpdate ? "Latest Testbuild Version:" : "Latest Version:";
         
         // Header
-        _uiShared.BigText("Update Available!");
+        _uiShared.BigText($"{updateKind} Available!");
         ImGui.Separator();
         
         // Version info
-        UiSharedService.TextWrapped($"A new version of Sphene is available for download.");
+        UiSharedService.TextWrapped(_updateInfo.IsTestBuildUpdate
+            ? "A newer testbuild version of Sphene is available for download."
+            : "A new version of Sphene is available for download.");
         ImGui.Spacing();
         
         using (var table = ImRaii.Table("VersionTable", 2, ImGuiTableFlags.None))
@@ -76,7 +81,7 @@ public class UpdateNotificationUi : WindowMediatorSubscriberBase
                 
                 ImGui.TableNextRow();
                 ImGui.TableNextColumn();
-                ImGui.Text("Latest Version:");
+                ImGui.Text(latestVersionLabel);
                 ImGui.TableNextColumn();
                 ImGui.TextColored(ImGuiColors.HealerGreen, _updateInfo.LatestVersion.ToString());
             }

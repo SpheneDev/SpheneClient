@@ -104,16 +104,16 @@ public class CharaDataGposeTogetherManager : DisposableMediatorSubscriberBase
 
     public async Task PushCharacterDownloadDto()
     {
-        var playerData = await _charaDataFileHandler.CreatePlayerData().ConfigureAwait(false);
+        var playerData = await _charaDataFileHandler.CreatePlayerData(applyOutgoingSyncFilters: true).ConfigureAwait(false);
         if (playerData == null) return;
         if (!string.Equals(playerData.DataHash.Value, _lastCreatedCharaData?.ApiData.DataHash.Value, StringComparison.Ordinal))
         {
             List<GamePathEntry> filegamePaths = [.. playerData.FileReplacements[API.Data.Enum.ObjectKind.Player]
-            .Where(u => string.IsNullOrEmpty(u.FileSwapPath)).SelectMany(u => u.GamePaths, (file, path) => new GamePathEntry(file.Hash, path))];
+            .Where(u => string.IsNullOrEmpty(u.FileSwapPath)).SelectMany(u => u.GamePaths, (file, path) => new GamePathEntry(file.Hash, path, file.IsActive))];
             List<GamePathEntry> fileSwapPaths = [.. playerData.FileReplacements[API.Data.Enum.ObjectKind.Player]
-            .Where(u => !string.IsNullOrEmpty(u.FileSwapPath)).SelectMany(u => u.GamePaths, (file, path) => new GamePathEntry(file.FileSwapPath, path))];
+            .Where(u => !string.IsNullOrEmpty(u.FileSwapPath)).SelectMany(u => u.GamePaths, (file, path) => new GamePathEntry(file.FileSwapPath, path, file.IsActive))];
             await _charaDataManager.UploadFiles([.. playerData.FileReplacements[API.Data.Enum.ObjectKind.Player]
-            .Where(u => string.IsNullOrEmpty(u.FileSwapPath)).SelectMany(u => u.GamePaths, (file, path) => new GamePathEntry(file.Hash, path))])
+            .Where(u => string.IsNullOrEmpty(u.FileSwapPath)).SelectMany(u => u.GamePaths, (file, path) => new GamePathEntry(file.Hash, path, file.IsActive))])
                 .ConfigureAwait(false);
 
             CharaDataDownloadDto charaDataDownloadDto = new($"GPOSELOBBY:{CurrentGPoseLobbyId}", new(_apiController.UID))

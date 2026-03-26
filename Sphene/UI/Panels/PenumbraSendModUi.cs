@@ -53,6 +53,9 @@ public class PenumbraSendModUi : WindowMediatorSubscriberBase
     private readonly HashSet<string> _currentUploadHashes = new(StringComparer.OrdinalIgnoreCase);
     private readonly Lock _uploadStateLock = new();
     private bool _sendCurrentModState;
+    private int _reloadPenumbraModsRequested = 1;
+    private DateTime _nextPenumbraModListValidationUtc = DateTime.MinValue;
+    private readonly Dictionary<string, string> _lastKnownPenumbraModMap = new(StringComparer.OrdinalIgnoreCase);
 
     public PenumbraSendModUi(
         ILogger<PenumbraSendModUi> logger,
@@ -84,6 +87,10 @@ public class PenumbraSendModUi : WindowMediatorSubscriberBase
         IsOpen = false;
 
         Mediator.Subscribe<OpenSendPenumbraModWindow>(this, OnOpenMessage);
+        _shrinkuPenumbraIpc.ModAdded += OnPenumbraModAdded;
+        _shrinkuPenumbraIpc.ModDeleted += OnPenumbraModDeleted;
+        _shrinkuPenumbraIpc.ModMoved += OnPenumbraModMoved;
+        _shrinkuPenumbraIpc.ModPathChanged += OnPenumbraModPathChanged;
     }
 
     private void OnOpenMessage(OpenSendPenumbraModWindow message)
@@ -119,6 +126,7 @@ public class PenumbraSendModUi : WindowMediatorSubscriberBase
         try { _sendPenumbraModCts?.Dispose(); }
         catch (Exception ex) { _logger.LogDebug(ex, "Failed to dispose SendPenumbraModCTS on open"); }
         _sendPenumbraModCts = null;
+        RequestPenumbraModReload();
     }
 
     protected override void DrawInternal()
@@ -152,7 +160,9 @@ public class PenumbraSendModUi : WindowMediatorSubscriberBase
                 return;
             }
 
-            if (_penumbraMods.Count == 0)
+            ValidatePenumbraModListSnapshot();
+
+            if (ShouldReloadPenumbraMods() || _penumbraMods.Count == 0)
             {
                 LoadPenumbraMods();
             }
@@ -467,13 +477,8 @@ public class PenumbraSendModUi : WindowMediatorSubscriberBase
     {
         try
         {
-            var dict = _shrinkuPenumbraIpc.GetModList();
-            _penumbraMods.Clear();
-            _penumbraMods.AddRange(dict
-                .Select(kvp => (kvp.Key ?? string.Empty, kvp.Value ?? string.Empty))
-                .Where(m => !string.IsNullOrWhiteSpace(m.Item1))
-                .Select(m => (ModFolderName: m.Item1, DisplayName: string.IsNullOrWhiteSpace(m.Item2) ? m.Item1 : m.Item2))
-                .OrderBy(m => m.DisplayName, StringComparer.OrdinalIgnoreCase));
+            var dict = QueryNormalizedPenumbraModMap();
+            ApplyPenumbraModMap(dict);
         }
         catch (Exception ex)
         {
@@ -482,6 +487,116 @@ public class PenumbraSendModUi : WindowMediatorSubscriberBase
             _sendPenumbraModStatusText = "Failed to query Penumbra mod list.";
             _logger.LogWarning(ex, "Failed to query Penumbra mod list");
         }
+    }
+
+    private void OnPenumbraModAdded(string _)
+    {
+        RequestPenumbraModReload();
+    }
+
+    private void OnPenumbraModDeleted(string _)
+    {
+        RequestPenumbraModReload();
+    }
+
+    private void OnPenumbraModMoved(string _, string __)
+    {
+        RequestPenumbraModReload();
+    }
+
+    private void OnPenumbraModPathChanged(string _, string __)
+    {
+        RequestPenumbraModReload();
+    }
+
+    private void ValidatePenumbraModListSnapshot()
+    {
+        if (DateTime.UtcNow < _nextPenumbraModListValidationUtc)
+        {
+            return;
+        }
+
+        _nextPenumbraModListValidationUtc = DateTime.UtcNow.AddSeconds(2);
+
+        try
+        {
+            var current = QueryNormalizedPenumbraModMap();
+            if (IsSamePenumbraModMap(current))
+            {
+                return;
+            }
+
+            ApplyPenumbraModMap(current);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to validate Penumbra mod list snapshot");
+        }
+    }
+
+    private Dictionary<string, string> QueryNormalizedPenumbraModMap()
+    {
+        var raw = _shrinkuPenumbraIpc.GetModList();
+        var normalized = new Dictionary<string, string>(raw.Count, StringComparer.OrdinalIgnoreCase);
+        foreach (var kvp in raw)
+        {
+            var key = kvp.Key ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                continue;
+            }
+
+            normalized[key] = string.IsNullOrWhiteSpace(kvp.Value) ? key : kvp.Value!;
+        }
+
+        return normalized;
+    }
+
+    private bool IsSamePenumbraModMap(IReadOnlyDictionary<string, string> current)
+    {
+        if (current.Count != _lastKnownPenumbraModMap.Count)
+        {
+            return false;
+        }
+
+        foreach (var kvp in current)
+        {
+            if (!_lastKnownPenumbraModMap.TryGetValue(kvp.Key, out var existing))
+            {
+                return false;
+            }
+
+            if (!string.Equals(existing, kvp.Value, StringComparison.Ordinal))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private void ApplyPenumbraModMap(Dictionary<string, string> dict)
+    {
+        _lastKnownPenumbraModMap.Clear();
+        foreach (var kvp in dict)
+        {
+            _lastKnownPenumbraModMap[kvp.Key] = kvp.Value;
+        }
+
+        _penumbraMods.Clear();
+        _penumbraMods.AddRange(dict
+            .Select(kvp => (ModFolderName: kvp.Key, DisplayName: kvp.Value))
+            .OrderBy(m => m.DisplayName, StringComparer.OrdinalIgnoreCase));
+    }
+
+    private void RequestPenumbraModReload()
+    {
+        Interlocked.Exchange(ref _reloadPenumbraModsRequested, 1);
+    }
+
+    private bool ShouldReloadPenumbraMods()
+    {
+        return Interlocked.Exchange(ref _reloadPenumbraModsRequested, 0) == 1;
     }
 
     private List<(string ModFolderName, string DisplayName)> GetFilteredPenumbraMods()
@@ -986,5 +1101,18 @@ public class PenumbraSendModUi : WindowMediatorSubscriberBase
 
         sha1.TransformFinalBlock(Array.Empty<byte>(), 0, 0);
         return Convert.ToHexString(sha1.Hash ?? Array.Empty<byte>());
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _shrinkuPenumbraIpc.ModAdded -= OnPenumbraModAdded;
+            _shrinkuPenumbraIpc.ModDeleted -= OnPenumbraModDeleted;
+            _shrinkuPenumbraIpc.ModMoved -= OnPenumbraModMoved;
+            _shrinkuPenumbraIpc.ModPathChanged -= OnPenumbraModPathChanged;
+        }
+
+        base.Dispose(disposing);
     }
 }

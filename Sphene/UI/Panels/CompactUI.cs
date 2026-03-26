@@ -158,6 +158,7 @@ public class CompactUi : WindowMediatorSubscriberBase
     private CancellationTokenSource? _backupScanDebounceCts;
     private string _pendingBackupScanReason = string.Empty;
     private readonly SemaphoreSlim _shrinkUDetectionSemaphore = new(1, 1);
+    private volatile bool _isDisposed;
 
     // Stable UI text caching to avoid flicker in backup sections
     private string _allBackupsKey = string.Empty;
@@ -686,6 +687,7 @@ public class CompactUi : WindowMediatorSubscriberBase
 
     protected override void Dispose(bool disposing)
     {
+        _isDisposed = true;
         if (disposing)
         {
             // Dispose all draw folders to clean up event subscriptions
@@ -1036,14 +1038,14 @@ public class CompactUi : WindowMediatorSubscriberBase
         DrawHeaderCard(style);
 
         // 4. Error Text (if any) - Displayed below the header block
-        if (_apiController.ServerState != ServerState.Connected)
+        if (_apiController.DisplayServerState != ServerState.Connected)
         {
              ImGui.Spacing();
              UiSharedService.ColorTextWrapped(GetServerError(), GetServerStatusColor());
         }
 
         
-        if (_apiController.ServerState is ServerState.Connected)
+        if (_apiController.DisplayServerState is ServerState.Connected)
         {            
             // Navigation / Buttons
             _tabMenu.Draw(GetPendingModSharingCount(), false);
@@ -1087,7 +1089,11 @@ public class CompactUi : WindowMediatorSubscriberBase
                     ImGui.TextColored(Sphene.UI.Theme.SpheneCustomTheme.CurrentTheme.CompactUpdateHintColor, FontAwesomeIcon.InfoCircle.ToIconString());
                 }
                 ImGui.SameLine();
-                var updateText = _updateBannerInfo?.LatestVersion != null ? $"Update available: {_updateBannerInfo.LatestVersion}" : "Update available";
+                var updateText = _updateBannerInfo?.LatestVersion != null
+                    ? _updateBannerInfo.IsTestBuildUpdate
+                        ? $"Testbuild update available: {_updateBannerInfo.LatestVersion}"
+                        : $"Update available: {_updateBannerInfo.LatestVersion}"
+                    : "Update available";
                 UiSharedService.ColorTextWrapped(updateText, Sphene.UI.Theme.SpheneCustomTheme.CurrentTheme.CompactUpdateHintColor);
                 ImGui.SameLine();
                 if (_uiSharedService.IconTextButton(FontAwesomeIcon.Download, "Open Details"))
@@ -1444,7 +1450,7 @@ public class CompactUi : WindowMediatorSubscriberBase
             }
         }
 
-        if (_apiController.ServerState is ServerState.Connected)
+        if (_apiController.DisplayServerState is ServerState.Connected)
         {
             if (ImGui.IsItemClicked())
             {
@@ -1561,7 +1567,7 @@ public class CompactUi : WindowMediatorSubscriberBase
     private void DrawUidTextInternal(string uidText)
     {
         // Use CompactUidColor for connected state, server status colors for other states
-        var uidColor = _apiController.ServerState == ServerState.Connected 
+        var uidColor = _apiController.DisplayServerState == ServerState.Connected 
             ? SpheneCustomTheme.CurrentTheme.CompactUidColor 
             : GetServerStatusColor();
         
@@ -1755,7 +1761,7 @@ public class CompactUi : WindowMediatorSubscriberBase
 
     private string GetServerError()
     {
-        return _apiController.ServerState switch
+        return _apiController.DisplayServerState switch
         {
             ServerState.Connecting => "Attempting to connect to the server.",
             ServerState.Reconnecting => "Connection to server interrupted, attempting to reconnect to the server.",
@@ -1780,7 +1786,7 @@ public class CompactUi : WindowMediatorSubscriberBase
 
     private Vector4 GetServerStatusColor()
     {
-        return _apiController.ServerState switch
+        return _apiController.DisplayServerState switch
         {
             ServerState.Connecting => SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning,
             ServerState.Reconnecting => SpheneCustomTheme.CurrentTheme.CompactServerStatusError,
@@ -1802,7 +1808,7 @@ public class CompactUi : WindowMediatorSubscriberBase
 
     private string GetUidText()
     {
-        return _apiController.ServerState switch
+        return _apiController.DisplayServerState switch
         {
             ServerState.Reconnecting => "Reconnecting",
             ServerState.Connecting => "Connecting",
@@ -1986,7 +1992,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                     if (!hasPartyMember)
                     {
                         // Store current pause state and pause the syncshell
-                        if (!group.GroupUserPermissions.IsPaused())
+                        if (group.GroupUserPermissions.IsPaused())
                         {
                             _prePausedSyncshells.Add(group.Group.GID);
                         }
@@ -2009,10 +2015,11 @@ public class CompactUi : WindowMediatorSubscriberBase
                 }
                 
                 _isIncognitoModeActive = true;
+                _configService.Current.IsIncognitoModeActive = _isIncognitoModeActive;
+                _pairManager.EnforceVanillaForPausedPairs("IncognitoModeActivated");
                 _logger.LogInformation("Incognito mode activated");
                 
                 // Save configuration
-                _configService.Current.IsIncognitoModeActive = _isIncognitoModeActive;
                 _configService.Current.PrePausedPairs = new HashSet<string>(_prePausedPairs, StringComparer.Ordinal);
                 _configService.Save();
             }
@@ -3199,10 +3206,14 @@ public class CompactUi : WindowMediatorSubscriberBase
 
     private async Task DetectShrinkUModBackupsAsync()
     {
-        if (!await _shrinkUDetectionSemaphore.WaitAsync(0).ConfigureAwait(false))
+        if (_isDisposed)
             return;
+        var lockTaken = false;
         try
         {
+            lockTaken = await _shrinkUDetectionSemaphore.WaitAsync(0).ConfigureAwait(false);
+            if (!lockTaken || _isDisposed)
+                return;
             var usedPaths = await _shrinkuConversionService.GetUsedModTexturePathsAsync().ConfigureAwait(false);
             var penumbraRoot = _ipcManager.Penumbra.ModDirectory ?? string.Empty;
             penumbraRoot = penumbraRoot.Replace('/', '\\');
@@ -3257,13 +3268,21 @@ public class CompactUi : WindowMediatorSubscriberBase
             _lastShrinkUDetectionUpdate = DateTime.UtcNow;
             _logger.LogDebug("ShrinkU backup detection completed: {count} mods with available backups", shrinkuBackupCount);
         }
+        catch (ObjectDisposedException ex)
+        {
+            _logger.LogDebug(ex, "ShrinkU backup detection skipped because CompactUI was disposed");
+        }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to detect ShrinkU mod backups asynchronously");
         }
         finally
         {
-            _shrinkUDetectionSemaphore.Release();
+            if (lockTaken)
+            {
+                try { _shrinkUDetectionSemaphore.Release(); }
+                catch (ObjectDisposedException ex) { _logger.LogDebug(ex, "ShrinkU backup detection semaphore already disposed on release"); }
+            }
         }
     }
     
@@ -3767,7 +3786,9 @@ public class CompactUi : WindowMediatorSubscriberBase
         
         // --- Status Indicator (Left) ---
         var connectionStatus = string.Empty; 
-        UiSharedService.DrawThemedStatusIndicator(connectionStatus, _apiController.ServerState == ServerState.Connected);
+        UiSharedService.DrawThemedStatusIndicator(connectionStatus,
+            _apiController.DisplayServerState == ServerState.Connected,
+            hasWarning: _apiController.IsTransientDisconnectInProgress);
         ImGui.SameLine();
 
         // Window title - vertically centered
@@ -3836,7 +3857,7 @@ public class CompactUi : WindowMediatorSubscriberBase
             if (_uiSharedService.IconButton(FontAwesomeIcon.Redo, null, null, null, null, ButtonStyleKeys.Compact_Reconnect))
             {
                 _lastReconnectButtonClick = reconnectCurrentTime;
-                _ = Task.Run(() => _apiController.CreateConnectionsAsync());
+                _ = Task.Run(() => _apiController.CreateConnectionsAsync(forceCharacterDataReload: true));
             }
         }
         UiSharedService.AttachToolTip(isReconnectButtonDisabled 

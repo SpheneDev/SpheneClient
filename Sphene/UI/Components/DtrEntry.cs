@@ -7,6 +7,7 @@ using Sphene.SpheneConfiguration.Configurations;
 using Sphene.PlayerData.Pairs;
 using Sphene.Services.Mediator;
 using Sphene.WebAPI;
+using Sphene.WebAPI.SignalR.Utils;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using System.Runtime.InteropServices;
@@ -127,7 +128,7 @@ public sealed class DtrEntry : IDisposable, IHostedService
         string text;
         string tooltip;
         Colors colors;
-        if (_apiController.IsConnected)
+        if (_apiController.DisplayServerState == ServerState.Connected)
         {
             var pairCount = _pairManager.GetVisibleUserCount();
             text = $"\uE044 {pairCount}";

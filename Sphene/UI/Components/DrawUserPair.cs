@@ -43,10 +43,12 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
     private readonly CharaDataManager _charaDataManager;
     private readonly PairManager _pairManager;
     private readonly SpheneConfigService _configService;
+    private readonly LocalPairEmoteForceSyncService _localPairEmoteForceSyncService;
     private float _menuWidth = -1;
     private bool _wasHovered = false;
     private static readonly Vector4 SoftToggleEnabledColor = new(0.56f, 0.82f, 0.62f, 1f);
     private static readonly Vector4 SoftToggleDisabledColor = new(0.86f, 0.58f, 0.58f, 1f);
+    private static readonly TimeSpan CompactReloadBusyTimeout = TimeSpan.FromSeconds(8);
     
     // Static dictionary to track reload timers for each user
     private static readonly Dictionary<string, System.Threading.Timer> _reloadTimers = new(StringComparer.Ordinal);
@@ -60,6 +62,8 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
     
     private bool _cachedHasPendingAck = false;
     private DateTime _lastAckStatusPoll = DateTime.MinValue;
+    private bool _isCompactReloadInProgress = false;
+    private DateTimeOffset _compactReloadStartedAt = DateTimeOffset.MinValue;
     private readonly List<FileTransferNotificationDto> _pendingModNotifications = new();
     public DrawUserPair(string id, Pair entry, List<GroupFullInfoDto> syncedGroups,
         GroupFullInfoDto? currentGroup,
@@ -67,7 +71,8 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         SpheneMediator spheneMediator, SelectTagForPairUi selectTagForPairUi,
         ServerConfigurationManager serverConfigurationManager,
         UiSharedService uiSharedService, PlayerPerformanceConfigService performanceConfigService,
-        CharaDataManager charaDataManager, PairManager pairManager, SpheneConfigService configService)
+        CharaDataManager charaDataManager, PairManager pairManager, SpheneConfigService configService,
+        LocalPairEmoteForceSyncService localPairEmoteForceSyncService)
     {
         _id = id;
         _pair = entry;
@@ -83,11 +88,13 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         _charaDataManager = charaDataManager;
         _pairManager = pairManager;
         _configService = configService;
+        _localPairEmoteForceSyncService = localPairEmoteForceSyncService;
         
         // Subscribe to acknowledgment status changes to automatically update AckYou
         _mediator.Subscribe<PairAcknowledgmentStatusChangedMessage>(this, OnAcknowledgmentStatusChanged);
         _mediator.Subscribe<AcknowledgmentPendingMessage>(this, OnAcknowledgmentPending);
         _mediator.Subscribe<AcknowledgmentUiRefreshMessage>(this, OnAcknowledgmentUiRefresh);
+        _mediator.Subscribe<CharacterDataApplicationCompletedMessage>(this, OnCharacterDataApplicationCompleted);
         
         
         
@@ -116,6 +123,16 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         {
             _globalAckYouLock.Exit();
         }
+    }
+
+    private void OnCharacterDataApplicationCompleted(CharacterDataApplicationCompletedMessage message)
+    {
+        if (!string.Equals(message.UserUID, _pair.UserData.UID, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _isCompactReloadInProgress = false;
     }
     
     public SpheneMediator Mediator => _mediator;
@@ -253,10 +270,43 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
     {
         RefreshAckStatusIfDue();
         using var id = ImRaii.PushId(GetType() + _id);
-        var color = ImRaii.PushColor(ImGuiCol.ChildBg, ImGui.GetColorU32(ImGuiCol.FrameBgHovered), _wasHovered);
+        var hasOfflineGrace = _pairManager.IsUserInOfflineGrace(_pair.UserData);
+        var hasTimingSyncTarget = _localPairEmoteForceSyncService.IsTargetSelected(_pair.UserData.UID);
+        var hasTimingLeader = _localPairEmoteForceSyncService.IsLeader(_pair.UserData.UID);
+        var color = ImRaii.PushColor(ImGuiCol.ChildBg, ImGui.GetColorU32(ImGuiCol.FrameBgHovered), _wasHovered && !hasOfflineGrace);
         var baseFolderWidth = UiSharedService.GetBaseFolderWidth() + 9.0f;
         using (ImRaii.Child(GetType() + _id, new System.Numerics.Vector2(baseFolderWidth, ImGui.GetFrameHeight()), false, ImGuiWindowFlags.NoScrollbar))
         {
+            if (hasOfflineGrace)
+            {
+                var rowStart = ImGui.GetCursorScreenPos();
+                var gradientWidth = baseFolderWidth * 0.42f;
+                var rowEnd = new Vector2(rowStart.X + gradientWidth, rowStart.Y + ImGui.GetFrameHeight());
+                var startColor = new Vector4(1.0f, 0.66f, 0.26f, _wasHovered ? 0.46f : 0.36f);
+                var endColor = new Vector4(1.0f, 0.66f, 0.26f, 0.0f);
+                DrawRowGradient(rowStart, rowEnd, startColor, endColor);
+            }
+
+            if (hasTimingSyncTarget)
+            {
+                var rowStart = ImGui.GetCursorScreenPos();
+                var gradientWidth = baseFolderWidth * 0.42f;
+                var rowEnd = new Vector2(rowStart.X + gradientWidth, rowStart.Y + ImGui.GetFrameHeight());
+                var startColor = new Vector4(0.60f, 0.34f, 1.0f, _wasHovered ? 0.42f : 0.30f);
+                var endColor = new Vector4(0.60f, 0.34f, 1.0f, 0.0f);
+                DrawRowGradient(rowStart, rowEnd, startColor, endColor);
+            }
+
+            if (hasTimingLeader)
+            {
+                var rowStart = ImGui.GetCursorScreenPos();
+                var gradientWidth = baseFolderWidth * 0.50f;
+                var rowEnd = new Vector2(rowStart.X + gradientWidth, rowStart.Y + ImGui.GetFrameHeight());
+                var startColor = new Vector4(1.0f, 0.30f, 0.76f, _wasHovered ? 0.48f : 0.34f);
+                var endColor = new Vector4(1.0f, 0.30f, 0.76f, 0.0f);
+                DrawRowGradient(rowStart, rowEnd, startColor, endColor);
+            }
+
             DrawLeftSide();
             ImGui.SameLine();
             var posX = ImGui.GetCursorPosX();
@@ -265,6 +315,35 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         }
         _wasHovered = ImGui.IsItemHovered();
         color.Dispose();
+    }
+
+    private static void DrawRowGradient(Vector2 rowStart, Vector2 rowEnd, Vector4 startColor, Vector4 endColor)
+    {
+        var drawList = ImGui.GetWindowDrawList();
+        var width = rowEnd.X - rowStart.X;
+        var slices = Math.Clamp((int)(width / 8.0f), 8, 64);
+        var step = width / slices;
+        var rounding = ImGui.GetFrameHeight() * 0.38f;
+        for (int i = 0; i < slices; i++)
+        {
+            var x0 = rowStart.X + step * i;
+            var x1 = i == slices - 1 ? rowEnd.X : rowStart.X + step * (i + 1);
+            var t = (float)i / (float)(slices - 1);
+            var gradientColor = Vector4.Lerp(startColor, endColor, t);
+            var flags = ImDrawFlags.None;
+            var cornerRadius = 0.0f;
+            if (i == 0)
+            {
+                flags = ImDrawFlags.RoundCornersLeft;
+                cornerRadius = rounding;
+            }
+            else if (i == slices - 1)
+            {
+                flags = ImDrawFlags.RoundCornersRight;
+                cornerRadius = rounding;
+            }
+            drawList.AddRectFilled(new Vector2(x0, rowStart.Y), new Vector2(x1, rowEnd.Y), ImGui.ColorConvertFloat4ToU32(gradientColor), cornerRadius, flags);
+        }
     }
 
     private void DrawCommonClientMenu()
@@ -310,12 +389,26 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
 
         if (_pair.IsVisible)
         {
-            if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.Sync, "Reload last data", _menuWidth, ButtonStyleKeys.ContextMenu_Item))
+            var isCompactReloadBusy = IsCompactReloadBusy();
+            var isReloadPreviewActive = ButtonStyleManagerUI.IsPreviewActiveFor(ButtonStyleKeys.Pair_Reload);
+            float? reloadRotation = (isCompactReloadBusy || isReloadPreviewActive) ? GetCompactReloadIconRotation() : null;
+            using (ImRaii.Disabled(isCompactReloadBusy))
             {
-                _pair.ApplyLastReceivedData(forced: true);
-                ImGui.CloseCurrentPopup();
+                if (_uiSharedService.IconTextActionButton(
+                        FontAwesomeIcon.Sync,
+                        "Reload last data",
+                        _menuWidth,
+                        ButtonStyleKeys.ContextMenu_Item,
+                        reloadRotation))
+                {
+                    TriggerCharacterReloadFromCompactButton();
+                    ImGui.CloseCurrentPopup();
+                }
             }
-            UiSharedService.AttachToolTip("This reapplies the last received character data to this character");
+
+            UiSharedService.AttachToolTip(isCompactReloadBusy
+                ? "Character reload in progress..."
+                : "Requests a fresh character data sync from this user.");
         }
 
         if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.PlayCircle, "Cycle pause state", _menuWidth, ButtonStyleKeys.ContextMenu_Item))
@@ -323,7 +416,106 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
             _ = _apiController.CyclePauseAsync(_pair.UserData);
             ImGui.CloseCurrentPopup();
         }
+        
+        var emoteSyncEnabled =
+#if IS_TEST_BUILD
+            true;
+#else
+            false;
+#endif
+
+
+        if (emoteSyncEnabled)
+        {
         ImGui.Separator();
+        ImGui.TextUnformatted("Emote Sync");
+
+        var selectedForForceSync = _localPairEmoteForceSyncService.IsTargetSelected(_pair.UserData.UID);
+        var selectionIcon = selectedForForceSync ? FontAwesomeIcon.ToggleOn : FontAwesomeIcon.ToggleOff;
+        if (DrawStateColoredToggleButton(selectionIcon, "Local timing sync target", selectedForForceSync))
+        {
+            var wasLeaderBefore = _localPairEmoteForceSyncService.IsLeader(_pair.UserData.UID);
+            var isSelectedNow = _localPairEmoteForceSyncService.ToggleTargetSelection(_pair.UserData.UID);
+            var statusText = isSelectedNow ? "added to" : "removed from";
+            var exclusivityInfo = isSelectedNow && wasLeaderBefore ? " Timing leader was cleared for this pair." : string.Empty;
+            _mediator.Publish(new NotificationMessage(
+                "Emote Sync",
+                $"{_pair.UserData.AliasOrUID} was {statusText} local timing-sync targets.{exclusivityInfo}",
+                Sphene.SpheneConfiguration.Models.NotificationType.Info,
+                TimeSpan.FromSeconds(3)));
+        }
+        UiSharedService.AttachToolTip("Marks this pair as a local timing-sync target. A pair cannot be both timing leader and target.");
+
+        var isLeader = _localPairEmoteForceSyncService.IsLeader(_pair.UserData.UID);
+        var leaderIcon = isLeader ? FontAwesomeIcon.Crown : FontAwesomeIcon.User;
+        if (DrawStateColoredToggleButton(leaderIcon, "Set as timing leader", isLeader))
+        {
+            var wasTargetBefore = _localPairEmoteForceSyncService.IsTargetSelected(_pair.UserData.UID);
+            var isLeaderNow = _localPairEmoteForceSyncService.ToggleLeader(_pair.UserData.UID);
+            _mediator.Publish(new NotificationMessage(
+                "Local Timing Sync",
+                isLeaderNow
+                    ? $"{_pair.UserData.AliasOrUID} is now your local timing leader. Auto reset on your emote was disabled.{(wasTargetBefore ? " This pair was removed from timing-sync targets." : string.Empty)}"
+                    : $"{_pair.UserData.AliasOrUID} is no longer your local timing leader.",
+                Sphene.SpheneConfiguration.Models.NotificationType.Info,
+                TimeSpan.FromSeconds(3)));
+        }
+        UiSharedService.AttachToolTip("When this leader triggers an emote update, your timing and selected target timing are reset to 0. Setting a leader disables auto reset on your emote and removes this pair from targets.");
+
+        var followLeaderEnabled = _localPairEmoteForceSyncService.FollowLeaderOnLeaderEmoteEnabled;
+        var followLeaderIcon = followLeaderEnabled ? FontAwesomeIcon.ToggleOn : FontAwesomeIcon.ToggleOff;
+        if (DrawStateColoredToggleButton(followLeaderIcon, "Follow leader emote timing", followLeaderEnabled))
+        {
+            var enabledNow = _localPairEmoteForceSyncService.ToggleFollowLeaderOnLeaderEmote();
+            _mediator.Publish(new NotificationMessage(
+                "Emote sync",
+                enabledNow ? "Leader-follow emote sync is now enabled." : "Leader-follow emote sync is now disabled.",
+                Sphene.SpheneConfiguration.Models.NotificationType.Info,
+                TimeSpan.FromSeconds(3)));
+        }
+        UiSharedService.AttachToolTip("Enables or disables automatic timing follow when your selected leader emotes.");
+
+        var autoResetEnabled = _localPairEmoteForceSyncService.AutoResetOnLocalEmoteEnabled;
+        var autoResetIcon = autoResetEnabled ? FontAwesomeIcon.ToggleOn : FontAwesomeIcon.ToggleOff;
+        if (DrawStateColoredToggleButton(autoResetIcon, "Auto reset selected on my emote", autoResetEnabled))
+        {
+            var enabledNow = _localPairEmoteForceSyncService.ToggleAutoResetOnLocalEmote();
+            _mediator.Publish(new NotificationMessage(
+                "Local Timing Sync",
+                enabledNow
+                    ? "Automatic reset on your emote is now enabled. The timing leader was cleared."
+                    : "Automatic reset on your emote is now disabled.",
+                Sphene.SpheneConfiguration.Models.NotificationType.Info,
+                TimeSpan.FromSeconds(3)));
+        }
+        UiSharedService.AttachToolTip("When enabled, selected visible targets are reset to animation time 0 whenever your emote state updates. Enabling this clears the timing leader.");
+
+        var selectedCount = _localPairEmoteForceSyncService.GetSelectedTargetCount();
+        using (ImRaii.Disabled(selectedCount <= 0))
+        {
+            if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.Sync, "Reset emote timing for selected", _menuWidth, ButtonStyleKeys.ContextMenu_Item))
+            {
+                _ = Task.Run(async () =>
+                {
+                    var result = await _localPairEmoteForceSyncService.ForceSyncToSelectedVisibleTargetsAsync().ConfigureAwait(false);
+                    var notificationType = result.Success
+                        ? Sphene.SpheneConfiguration.Models.NotificationType.Success
+                        : Sphene.SpheneConfiguration.Models.NotificationType.Warning;
+                    _mediator.Publish(new NotificationMessage(
+                        "Local Timing Sync",
+                        $"{result.Message} Skipped invisible: {result.SkippedNotVisibleCount}, missing: {result.SkippedMissingCount}.",
+                        notificationType,
+                        TimeSpan.FromSeconds(5)));
+                });
+                ImGui.CloseCurrentPopup();
+            }
+        }
+        
+        UiSharedService.AttachToolTip(selectedCount > 0
+            ? $"Resets current animation time to 0 for you and {selectedCount} selected mutually visible target(s), without changing which emote each player is using."
+            : "Select at least one target to reset emote timing.");
+        ImGui.Separator();
+        }
 
         ImGui.TextUnformatted("Pair Permission Functions");
         if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.WindowMaximize, "Open Permissions Window", _menuWidth, ButtonStyleKeys.ContextMenu_Item))
@@ -453,6 +645,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
             _mediator.Unsubscribe<PairAcknowledgmentStatusChangedMessage>(this);
             _mediator.Unsubscribe<AcknowledgmentPendingMessage>(this);
             _mediator.Unsubscribe<AcknowledgmentUiRefreshMessage>(this);
+            _mediator.Unsubscribe<CharacterDataApplicationCompletedMessage>(this);
             _timerLock.Enter();
             try
             {
@@ -534,6 +727,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
     private void DrawLeftSide()
     {
         string userPairText = string.Empty;
+        var showUserPairTooltip = false;
 
         ImGui.AlignTextToFramePadding();
 
@@ -543,11 +737,14 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         var latestDataApplied = _pair.IsLatestReceivedDataApplied();
         var effectiveOwnAckYou = _pair.LastReceivedCharacterData != null ? latestDataApplied : ownAckYou;
         var suppressAckUi = _pair.IsInDuty;
+        var isTimingSyncTarget = _localPairEmoteForceSyncService.IsTargetSelected(_pair.UserData.UID);
+        var isAutoResetActiveForTargets = _localPairEmoteForceSyncService.AutoResetOnLocalEmoteEnabled;
 
         if (_pair.IsPaused)
         {
             using var _ = ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.DalamudYellow);
             _uiSharedService.IconText(FontAwesomeIcon.PauseCircle);
+            showUserPairTooltip = ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled);
             userPairText = _pair.UserData.AliasOrUID + " is paused";
         }
         else if (!_pair.IsOnline)
@@ -557,6 +754,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
                 ? FontAwesomeIcon.ArrowsLeftRight
                 : (_pair.IndividualPairStatus == API.Data.Enum.IndividualPairStatus.Bidirectional
                     ? FontAwesomeIcon.User : FontAwesomeIcon.Users));
+            showUserPairTooltip = ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled);
             userPairText = _pair.UserData.AliasOrUID + " is offline";
         }
         else if (isVisibleForIcon)
@@ -571,6 +769,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
             var iconColor = suppressAckUi ? ImGuiColors.ParsedGreen : (effectiveOwnAckYou ? ImGuiColors.ParsedGreen : ImGuiColors.DalamudYellow);
             var icon = (_uiSharedService.IsInGpose || _pair.IsInGpose) ? FontAwesomeIcon.Camera : FontAwesomeIcon.Eye;
             _uiSharedService.IconText(icon, iconColor);
+            showUserPairTooltip = ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled);
             
             if (suppressAckUi)
             {
@@ -600,12 +799,14 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
             if (_pair.IsInGpose)
             {
                 _uiSharedService.IconText(FontAwesomeIcon.Camera);
+                showUserPairTooltip = ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled);
                 userPairText = _pair.UserData.AliasOrUID + " is in GPose" + Environment.NewLine + "No data is shared while in GPose";
             }
             else
             {
                 _uiSharedService.IconText(_pair.IndividualPairStatus == API.Data.Enum.IndividualPairStatus.Bidirectional
                     ? FontAwesomeIcon.User : FontAwesomeIcon.Users);
+                showUserPairTooltip = ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled);
                 userPairText = _pair.UserData.AliasOrUID + " is online";
             }
         }
@@ -642,6 +843,14 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
             }
         }
 
+        if (isTimingSyncTarget && isAutoResetActiveForTargets)
+        {
+            ImGui.SameLine();
+            using var _ = ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.DalamudYellow);
+            _uiSharedService.IconText(FontAwesomeIcon.PersonCircleCheck);
+            UiSharedService.AttachToolTip("Auto reset on your emote is active for this timing-sync target. Their current emote timing resets to 0 when your emote updates.");
+        }
+
         if (_pair.IndividualPairStatus == API.Data.Enum.IndividualPairStatus.OneSided)
         {
             userPairText += UiSharedService.TooltipSeparator + "One-sided individual pair";
@@ -660,7 +869,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
                     ? $"{parsedRemoteClientVersion.Major}.{parsedRemoteClientVersion.Minor}.{parsedRemoteClientVersion.Build}"
                     : $"{parsedRemoteClientVersion.Major}.{parsedRemoteClientVersion.Minor}";
                 if (parsedRemoteClientVersion.Revision >= 0)
-                    remoteClientVersion = $"{normalizedVersion} rev.{parsedRemoteClientVersion.Revision}";
+                    remoteClientVersion = $"{normalizedVersion}.{parsedRemoteClientVersion.Revision}";
                 else
                     remoteClientVersion = normalizedVersion;
             }
@@ -718,7 +927,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
                 }));
         }
 
-        UiSharedService.AttachToolTip(userPairText);
+        DrawTooltipForHoveredItem(showUserPairTooltip, userPairText);
 
         if (_performanceConfigService.Current.ShowPerformanceIndicator
             && !_performanceConfigService.Current.UIDsToIgnore
@@ -751,6 +960,31 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         }
 
         ImGui.SameLine();
+    }
+
+    private static void DrawTooltipForHoveredItem(bool isHovered, string text)
+    {
+        if (!isHovered) return;
+        using (SpheneCustomTheme.ApplyTooltipTheme())
+        {
+            ImGui.BeginTooltip();
+            ImGui.PushTextWrapPos(ImGui.GetFontSize() * 35f);
+            if (text.IndexOf(UiSharedService.TooltipSeparator, StringComparison.Ordinal) >= 0)
+            {
+                var splitText = text.Split(UiSharedService.TooltipSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                for (int i = 0; i < splitText.Length; i++)
+                {
+                    ImGui.TextUnformatted(splitText[i]);
+                    if (i != splitText.Length - 1) ImGui.Separator();
+                }
+            }
+            else
+            {
+                ImGui.TextUnformatted(text);
+            }
+            ImGui.PopTextWrapPos();
+            ImGui.EndTooltip();
+        }
     }
 
     private void DrawName(float leftSide, float rightSide)
@@ -828,11 +1062,27 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         {
             currentRightSide -= (reloadButtonSize.X + spacingX);
             ImGui.SameLine(currentRightSide);
-            if (_uiSharedService.IconButton(FontAwesomeIcon.Sync, null, null, null, null, ButtonStyleKeys.Pair_Reload))
+            var isCompactReloadBusy = IsCompactReloadBusy();
+            var isReloadPreviewActive = ButtonStyleManagerUI.IsPreviewActiveFor(ButtonStyleKeys.Pair_Reload);
+            float? reloadRotation = (isCompactReloadBusy || isReloadPreviewActive) ? GetCompactReloadIconRotation() : null;
+            using (ImRaii.Disabled(isCompactReloadBusy))
             {
-                _pair.ApplyLastReceivedData(forced: true);
+                if (_uiSharedService.IconButton(
+                        FontAwesomeIcon.Sync,
+                        null,
+                        null,
+                        null,
+                        null,
+                        ButtonStyleKeys.Pair_Reload,
+                        null,
+                        reloadRotation))
+                {
+                    TriggerCharacterReloadFromCompactButton();
+                }
             }
-            UiSharedService.AttachToolTip("Reload last received character data");
+            UiSharedService.AttachToolTip(isCompactReloadBusy
+                ? "Character reload in progress..."
+                : "Request fresh character data from server");
         }
 
         if (isOneSidedIndividualListEntry && !_pair.UserPair.IsOutgoingIndividualPair)
@@ -1147,5 +1397,36 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
     {
         _cachedHasPendingAck = _pairManager.HasPendingAcknowledgmentForUser(_pair.UserData);
         _lastAckStatusPoll = DateTime.UtcNow;
+    }
+
+    private void TriggerCharacterReloadFromCompactButton()
+    {
+        _isCompactReloadInProgress = true;
+        _compactReloadStartedAt = DateTimeOffset.UtcNow;
+        var requestToken = _pair.RequestForcedRedrawOnNextCharacterReload();
+        _ = _apiController.UserRequestCharacterDataRefresh(new(_pair.UserData));
+        _ = _pair.ApplyLastKnownDataIfReloadPendingAsync(requestToken);
+        _mediator.Publish(new NotificationMessage("Character data refresh", $"Requested a fresh sync from {_pair.UserData.AliasOrUID}", Sphene.SpheneConfiguration.Models.NotificationType.Info, TimeSpan.FromSeconds(2)));
+    }
+
+    private bool IsCompactReloadBusy()
+    {
+        if (!_isCompactReloadInProgress)
+        {
+            return false;
+        }
+
+        if (DateTimeOffset.UtcNow - _compactReloadStartedAt <= CompactReloadBusyTimeout)
+        {
+            return true;
+        }
+
+        _isCompactReloadInProgress = false;
+        return false;
+    }
+
+    private static float GetCompactReloadIconRotation()
+    {
+        return (float)(ImGui.GetTime() * 8.5f);
     }
 }

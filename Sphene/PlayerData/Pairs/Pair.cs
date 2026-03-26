@@ -36,6 +36,7 @@ public class Pair : DisposableMediatorSubscriberBase
     private const int BaseApplyRetryDelaySeconds = 2;
     private const int MaxApplyRetryDelaySeconds = 30;
     private const int MaxApplyRetryBackoffSteps = 5;
+    private const int MaxAcknowledgmentValidationRetries = 4;
     private const int ApplyAttemptCooldownMs = 1500;
     private CancellationTokenSource _applyRetryCts = new();
     private int _applyRetryCount = 0;
@@ -44,6 +45,9 @@ public class Pair : DisposableMediatorSubscriberBase
     private readonly ConcurrentQueue<string> _applyDebugLog = new();
     private string? _lastApplyAttemptHash;
     private DateTimeOffset _lastApplyAttemptTime = DateTimeOffset.MinValue;
+    private int _forceRedrawOnNextData = 0;
+    private DateTimeOffset _forceRedrawRequestAt = DateTimeOffset.MinValue;
+    private int _forceRedrawRequestToken = 0;
 
     public Pair(ILogger<Pair> logger, UserFullPairDto userPair, PairHandlerFactory cachedPlayerFactory,
         SpheneMediator mediator, ServerConfigurationManager serverConfigurationManager,
@@ -98,6 +102,7 @@ public class Pair : DisposableMediatorSubscriberBase
     
     // Queue for pending acknowledgment data to handle multiple rapid requests
     private readonly ConcurrentQueue<OnlineUserCharaDataDto> _pendingAcknowledgmentQueue = new();
+    private readonly ConcurrentDictionary<string, int> _acknowledgmentValidationRetries = new(StringComparer.Ordinal);
     private volatile int _acknowledgmentSequence = 0;
 
     public UserData UserData => UserPair.User;
@@ -110,6 +115,32 @@ public class Pair : DisposableMediatorSubscriberBase
     {
         if (CachedPlayer == null) return;
         _ = CachedPlayer.ApplyBypassEmoteDataAsync(data);
+    }
+
+    public nint GetPlayerCharacterAddress()
+    {
+        return CachedPlayer?.PlayerCharacter ?? nint.Zero;
+    }
+
+    public Guid GetPenumbraCollectionId()
+    {
+        return CachedPlayer?.GetPenumbraCollectionId() ?? Guid.Empty;
+    }
+
+    public IReadOnlyDictionary<string, string> GetLoadedCollectionPathsSnapshot()
+    {
+        return CachedPlayer?.GetLastLoadedCollectionPathsSnapshot()
+            ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+    }
+
+    public async Task<IReadOnlyDictionary<string, string>> GetCurrentPenumbraActivePathsByGamePathAsync()
+    {
+        if (CachedPlayer == null)
+        {
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        return await CachedPlayer.GetCurrentPenumbraActivePathsByGamePathAsync().ConfigureAwait(false);
     }
 
     public string? GetCurrentDataHash()
@@ -142,6 +173,10 @@ public class Pair : DisposableMediatorSubscriberBase
     {
         try
         {
+            if (_apiController.Value.IsTransientDisconnectInProgress)
+            {
+                return;
+            }
             if (isProximityVisible && _visibilityGateService.IsGateActive)
             {
                 return;
@@ -261,15 +296,17 @@ public class Pair : DisposableMediatorSubscriberBase
         _applicationCts = _applicationCts.CancelRecreate();
         UpdateReceivedCharacterDataCache(data);
         ResetApplyRetry();
-        bool shouldApply = CachedPlayer == null
+        var forceRedrawFromReload = ConsumeForcedRedrawRequest();
+        bool shouldApply = forceRedrawFromReload
+            || CachedPlayer == null
             || LastReceivedCharacterData == null
             || !CachedPlayer.IsCharacterDataAppliedForCurrentCharacter(LastReceivedCharacterData);
 
         var hash = data.DataHash;
         var shortHash = string.IsNullOrEmpty(hash) ? "NONE" : hash[..Math.Min(8, hash.Length)];
-        AddApplyDebug($"Data received hash={shortHash} requiresAck={data.RequiresAcknowledgment}");
-        Logger.LogDebug("{tag} Receive: user={user} hash={hash} requiresAck={requiresAck} shouldApply={shouldApply}",
-            SyncProgressTag, data.User.AliasOrUID, shortHash, data.RequiresAcknowledgment, shouldApply);
+        AddApplyDebug($"Data received hash={shortHash} requiresAck={data.RequiresAcknowledgment} forceRedraw={forceRedrawFromReload}");
+        Logger.LogDebug("{tag} Receive: user={user} hash={hash} requiresAck={requiresAck} shouldApply={shouldApply} forceRedraw={forceRedraw}",
+            SyncProgressTag, data.User.AliasOrUID, shortHash, data.RequiresAcknowledgment, shouldApply, forceRedrawFromReload);
 
         if (!shouldApply)
         {
@@ -304,7 +341,7 @@ public class Pair : DisposableMediatorSubscriberBase
                     Logger.LogDebug("{tag} Apply delayed data: uid={uid} hash={hash}", SyncProgressTag, data.User.UID, shortHash);
                     if (shouldApply)
                     {
-                        ApplyLastReceivedData();
+                        ApplyLastReceivedData(forceRedrawFromReload, forceRedrawFromReload);
                     }
                     
                     // Enqueue acknowledgment data for delayed sending after application completes
@@ -330,7 +367,7 @@ public class Pair : DisposableMediatorSubscriberBase
 
         if (shouldApply)
         {
-            ApplyLastReceivedData();
+            ApplyLastReceivedData(forceRedrawFromReload, forceRedrawFromReload);
         }
         
         // Enqueue acknowledgment data for delayed sending after application completes
@@ -344,6 +381,42 @@ public class Pair : DisposableMediatorSubscriberBase
                 SyncProgressTag,
                 data.DataHash[..Math.Min(8, data.DataHash.Length)], currentSequence, _pendingAcknowledgmentQueue.Count);
         }
+    }
+
+    public int RequestForcedRedrawOnNextCharacterReload()
+    {
+        _forceRedrawRequestAt = DateTimeOffset.UtcNow;
+        var requestToken = Interlocked.Increment(ref _forceRedrawRequestToken);
+        Interlocked.Exchange(ref _forceRedrawOnNextData, 1);
+        return requestToken;
+    }
+
+    public async Task ApplyLastKnownDataIfReloadPendingAsync(int requestToken, TimeSpan? waitTime = null)
+    {
+        await Task.Delay(waitTime ?? TimeSpan.FromSeconds(4)).ConfigureAwait(false);
+
+        if (requestToken != Volatile.Read(ref _forceRedrawRequestToken))
+        {
+            return;
+        }
+
+        if (Interlocked.CompareExchange(ref _forceRedrawOnNextData, 0, 1) != 1)
+        {
+            return;
+        }
+
+        Logger.LogDebug("{tag} Reload fallback apply triggered: user={user}", SyncProgressTag, UserData.AliasOrUID);
+        await _dalamudUtilService.RunOnFrameworkThread(() => ApplyLastReceivedData(forced: true, forceRedrawIfDisabled: true)).ConfigureAwait(false);
+    }
+
+    private bool ConsumeForcedRedrawRequest()
+    {
+        if (Interlocked.Exchange(ref _forceRedrawOnNextData, 0) == 0)
+        {
+            return false;
+        }
+
+        return (DateTimeOffset.UtcNow - _forceRedrawRequestAt) <= TimeSpan.FromSeconds(30);
     }
 
     private void UpdateReceivedCharacterDataCache(OnlineUserCharaDataDto data)
@@ -370,7 +443,29 @@ public class Pair : DisposableMediatorSubscriberBase
             !string.Equals(previousHash, newHash, StringComparison.Ordinal));
     }
 
-    public void ApplyLastReceivedData(bool forced = false)
+    public void RestoreReceivedCharacterDataCache(CharacterData data, DateTimeOffset cachedAt)
+    {
+        var previousHash = LastReceivedCharacterData?.DataHash?.Value;
+        var newHash = data.DataHash.Value;
+
+        if (!string.Equals(previousHash, newHash, StringComparison.Ordinal))
+        {
+            PreviousReceivedCharacterData = LastReceivedCharacterData;
+            PreviousReceivedCharacterDataHash = previousHash;
+            LastReceivedCharacterDataChangeTime = cachedAt;
+        }
+
+        LastReceivedCharacterData = data;
+        LastReceivedCharacterDataHash = newHash;
+        LastReceivedCharacterDataTime = cachedAt;
+        Logger.LogDebug("{tag} Cache restored: user={user} hash={hash} cachedAt={cachedAt}",
+            SyncProgressTag,
+            UserData.AliasOrUID,
+            string.IsNullOrEmpty(newHash) ? "NONE" : newHash[..Math.Min(8, newHash.Length)],
+            cachedAt);
+    }
+
+    public void ApplyLastReceivedData(bool forced = false, bool forceRedrawIfDisabled = false)
     {
         if (CachedPlayer == null) return;
         if (LastReceivedCharacterData == null) return;
@@ -411,7 +506,11 @@ public class Pair : DisposableMediatorSubscriberBase
         _lastApplyAttemptTime = DateTimeOffset.UtcNow;
         AddApplyDebug($"Apply start forced={forced} hash={applyShortHash}");
         Logger.LogDebug("{tag} Apply start: user={user} forced={forced} hash={hash}", SyncProgressTag, UserData.AliasOrUID, forced, applyShortHash);
-        CachedPlayer.ApplyCharacterData(Guid.NewGuid(), RemoveNotSyncedFiles(LastReceivedCharacterData.DeepClone())!, forced);
+        CachedPlayer.ApplyCharacterData(Guid.NewGuid(),
+            RemoveNotSyncedFiles(LastReceivedCharacterData.DeepClone())!,
+            forced,
+            forceRedrawIfDisabled,
+            forceRedrawApplication: forceRedrawIfDisabled);
     }
 
     public void CreateCachedPlayer(OnlineUserIdentDto? dto = null)
@@ -796,7 +895,7 @@ public class Pair : DisposableMediatorSubscriberBase
             else if (!hashVerificationPassed)
             {
                 errorCode = Sphene.API.Dto.User.AcknowledgmentErrorCode.HashVerificationFailed;
-                errorMessage = "Data hash verification failed - data integrity compromised";
+                errorMessage = "Post-apply verification failed - collection state mismatch";
             }
             
             var acknowledgmentDto = new CharacterDataAcknowledgmentDto(UserData, data.DataHash)
@@ -896,11 +995,35 @@ public class Pair : DisposableMediatorSubscriberBase
                 {
                     try
                     {
-                        var verificationSuccess = true;
-                        if (!_dalamudUtilService.IsInDuty && !_dalamudUtilService.IsInCombatOrPerforming)
+                        var appliedOrExpectedHash = string.IsNullOrEmpty(appliedHash) ? matchingAcknowledgment.DataHash : appliedHash;
+                        var verificationSuccess = message.Success
+                            && await VerifyAcknowledgmentPostApplyStateAsync(matchingAcknowledgment, appliedHash).ConfigureAwait(false);
+
+                        if (!verificationSuccess)
                         {
-                            verificationSuccess = VerifyDataHashIntegrity(matchingAcknowledgment, appliedHash);
+                            var validationAttempt = IncrementAcknowledgmentValidationRetry(appliedOrExpectedHash);
+                            var hasRetryBudget = validationAttempt < MaxAcknowledgmentValidationRetries;
+                            if (hasRetryBudget)
+                            {
+                                _pendingAcknowledgmentQueue.Enqueue(matchingAcknowledgment);
+                                if (message.Success)
+                                {
+                                    ScheduleApplyRetry(increment: true);
+                                }
+
+                                Logger.LogDebug("{tag} Ack deferred: user={user} hash={hash} appSuccess={appSuccess} verification={verification} attempt={attempt}/{maxAttempts}",
+                                    SyncProgressTag,
+                                    UserData.AliasOrUID,
+                                    string.IsNullOrEmpty(appliedOrExpectedHash) ? "NONE" : appliedOrExpectedHash[..Math.Min(8, appliedOrExpectedHash.Length)],
+                                    message.Success,
+                                    verificationSuccess,
+                                    validationAttempt,
+                                    MaxAcknowledgmentValidationRetries);
+                                return;
+                            }
                         }
+
+                        ResetAcknowledgmentValidationRetry(appliedOrExpectedHash);
                         
                         Logger.LogDebug("{tag} Ack sending: appSuccess={appSuccess} hashVerified={hashSuccess} hash={hash}", 
                             SyncProgressTag,
@@ -1014,6 +1137,151 @@ public class Pair : DisposableMediatorSubscriberBase
         }
     }
 
+    private int IncrementAcknowledgmentValidationRetry(string? hash)
+    {
+        if (string.IsNullOrEmpty(hash))
+        {
+            return MaxAcknowledgmentValidationRetries;
+        }
+
+        return _acknowledgmentValidationRetries.AddOrUpdate(hash, 1, (_, current) => current + 1);
+    }
+
+    private void ResetAcknowledgmentValidationRetry(string? hash)
+    {
+        if (string.IsNullOrEmpty(hash))
+        {
+            return;
+        }
+
+        _acknowledgmentValidationRetries.TryRemove(hash, out _);
+    }
+
+    private async Task<bool> VerifyAcknowledgmentPostApplyStateAsync(OnlineUserCharaDataDto acknowledgmentData, string? appliedHash)
+    {
+        if (!VerifyDataHashIntegrity(acknowledgmentData, appliedHash))
+        {
+            return false;
+        }
+
+        if (!await VerifyServerHashIntegrityAsync(acknowledgmentData, appliedHash).ConfigureAwait(false))
+        {
+            return false;
+        }
+
+        return await VerifyPenumbraCollectionComparisonMatchAsync(acknowledgmentData.CharaData).ConfigureAwait(false);
+    }
+
+    private async Task<bool> VerifyPenumbraCollectionComparisonMatchAsync(CharacterData? characterData)
+    {
+        if (characterData == null)
+        {
+            Logger.LogWarning("{tag} Collection verify failed: character data missing", SyncProgressTag);
+            return false;
+        }
+
+        var deliveredActiveByPath = BuildDeliveredActiveByPath(characterData);
+        var loadedPaths = NormalizePathMap(GetLoadedCollectionPathsSnapshot());
+        var activePaths = NormalizePathMap(await GetCurrentPenumbraActivePathsByGamePathAsync().ConfigureAwait(false));
+
+        HashSet<string> allPaths = new(StringComparer.OrdinalIgnoreCase);
+        foreach (var path in deliveredActiveByPath.Keys) allPaths.Add(path);
+        foreach (var path in loadedPaths.Keys) allPaths.Add(path);
+        foreach (var path in activePaths.Keys) allPaths.Add(path);
+
+        foreach (var path in allPaths)
+        {
+            var hasDelivered = deliveredActiveByPath.TryGetValue(path, out var isDataFlagActive);
+            activePaths.TryGetValue(path, out var activeSource);
+            var isPenumbraActive = !string.IsNullOrEmpty(activeSource);
+            var isLikelyDefaultGamePath = isPenumbraActive && !hasDelivered;
+            if (isLikelyDefaultGamePath)
+            {
+                continue;
+            }
+
+            if (isPenumbraActive != isDataFlagActive)
+            {
+                Logger.LogDebug("{tag} Collection verify mismatch: path={path} penActive={penActive} dataFlag={dataFlag}",
+                    SyncProgressTag,
+                    path,
+                    isPenumbraActive,
+                    isDataFlagActive);
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static Dictionary<string, bool> BuildDeliveredActiveByPath(CharacterData characterData)
+    {
+        Dictionary<string, bool> delivered = new(StringComparer.OrdinalIgnoreCase);
+        if (!characterData.FileReplacements.TryGetValue(ObjectKind.Player, out var replacements) || replacements == null)
+        {
+            return delivered;
+        }
+
+        foreach (var replacement in replacements)
+        {
+            foreach (var gamePath in replacement.GamePaths)
+            {
+                var normalizedPath = NormalizeGamePath(gamePath);
+                if (string.IsNullOrEmpty(normalizedPath))
+                {
+                    continue;
+                }
+
+                if (delivered.TryGetValue(normalizedPath, out var existing))
+                {
+                    delivered[normalizedPath] = existing || replacement.IsActive;
+                }
+                else
+                {
+                    delivered[normalizedPath] = replacement.IsActive;
+                }
+            }
+        }
+
+        return delivered;
+    }
+
+    private static Dictionary<string, string> NormalizePathMap(IReadOnlyDictionary<string, string> paths)
+    {
+        Dictionary<string, string> normalized = new(StringComparer.OrdinalIgnoreCase);
+        foreach (var path in paths)
+        {
+            var normalizedKey = NormalizeGamePath(path.Key);
+            if (string.IsNullOrEmpty(normalizedKey))
+            {
+                continue;
+            }
+
+            if (!normalized.TryGetValue(normalizedKey, out var existingValue) || string.IsNullOrEmpty(existingValue))
+            {
+                normalized[normalizedKey] = path.Value;
+            }
+        }
+
+        return normalized;
+    }
+
+    private static string NormalizeGamePath(string? gamePath)
+    {
+        if (string.IsNullOrWhiteSpace(gamePath))
+        {
+            return string.Empty;
+        }
+
+        var normalized = gamePath.Trim().Replace('\\', '/');
+        while (normalized.Contains("//", StringComparison.Ordinal))
+        {
+            normalized = normalized.Replace("//", "/", StringComparison.Ordinal);
+        }
+
+        return normalized.Trim('/');
+    }
+
     private bool VerifyDataHashIntegrity(OnlineUserCharaDataDto acknowledgmentData, string? appliedHash)
      {
          try
@@ -1050,6 +1318,51 @@ public class Pair : DisposableMediatorSubscriberBase
              return false;
          }
      }
+
+    private async Task<bool> VerifyServerHashIntegrityAsync(OnlineUserCharaDataDto acknowledgmentData, string? appliedHash)
+    {
+        try
+        {
+            var senderUid = acknowledgmentData.User.UID;
+            var expectedHash = appliedHash;
+            if (string.IsNullOrEmpty(expectedHash) && LastReceivedCharacterData != null)
+            {
+                expectedHash = LastReceivedCharacterData.DataHash.Value;
+            }
+
+            if (string.IsNullOrWhiteSpace(senderUid) || string.IsNullOrWhiteSpace(expectedHash))
+            {
+                Logger.LogWarning("{tag} Server hash verify skipped: sender/hash missing", SyncProgressTag);
+                return false;
+            }
+
+            var response = await _apiController.Value.ValidateCharaDataHash(senderUid, expectedHash).ConfigureAwait(false);
+            if (response == null)
+            {
+                Logger.LogWarning("{tag} Server hash verify failed: null response sender={sender}", SyncProgressTag, acknowledgmentData.User.AliasOrUID);
+                return false;
+            }
+
+            var remoteMatches = response.IsValid
+                && (string.IsNullOrEmpty(response.CurrentHash)
+                    || string.Equals(response.CurrentHash, expectedHash, StringComparison.Ordinal));
+
+            Logger.LogDebug("{tag} Server hash verify: sender={sender} expected={expected} valid={valid} current={current} match={match}",
+                SyncProgressTag,
+                acknowledgmentData.User.AliasOrUID,
+                expectedHash[..Math.Min(8, expectedHash.Length)],
+                response.IsValid,
+                string.IsNullOrEmpty(response.CurrentHash) ? "NONE" : response.CurrentHash[..Math.Min(8, response.CurrentHash.Length)],
+                remoteMatches);
+
+            return remoteMatches;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "{tag} Server hash verify failed with exception", SyncProgressTag);
+            return false;
+        }
+    }
 
     protected override void Dispose(bool disposing)
     {

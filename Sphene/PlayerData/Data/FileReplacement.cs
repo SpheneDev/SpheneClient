@@ -18,6 +18,7 @@ public partial class FileReplacement
 
     public string Hash { get; set; } = string.Empty;
     public bool IsFileSwap => !IsLocalPath(ResolvedPath) && GamePaths.All(p => !IsLocalPath(p));
+    public bool IsActive { get; set; } = false;
     public string ResolvedPath { get; init; }
 
     public FileReplacementData ToFileReplacementDto()
@@ -27,6 +28,7 @@ public partial class FileReplacement
             GamePaths = [.. GamePaths],
             Hash = Hash,
             FileSwapPath = IsFileSwap ? ResolvedPath : string.Empty,
+            IsActive = IsActive,
         };
     }
 

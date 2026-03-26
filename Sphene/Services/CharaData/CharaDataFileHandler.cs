@@ -8,6 +8,7 @@ using Sphene.PlayerData.Factories;
 using Sphene.PlayerData.Handlers;
 using Sphene.Services.CharaData;
 using Sphene.Services.CharaData.Models;
+using Sphene.SpheneConfiguration;
 using Sphene.Utils;
 using Sphene.WebAPI.Files;
 using Microsoft.Extensions.Logging;
@@ -16,6 +17,7 @@ namespace Sphene.Services;
 
 public sealed class CharaDataFileHandler : IDisposable
 {
+    private const string CharacterLegacyShpkToken = "characterlegacy.shpk";
     private readonly DalamudUtilService _dalamudUtilService;
     private readonly FileCacheManager _fileCacheManager;
     private readonly FileDownloadManager _fileDownloadManager;
@@ -24,10 +26,11 @@ public sealed class CharaDataFileHandler : IDisposable
     private readonly ILogger<CharaDataFileHandler> _logger;
     private readonly SpheneCharaFileDataFactory _spheneCharaFileDataFactory;
     private readonly PlayerDataFactory _playerDataFactory;
+    private readonly SpheneConfigService _spheneConfigService;
     private int _globalFileCounter = 0;
 
     public CharaDataFileHandler(ILogger<CharaDataFileHandler> logger, FileDownloadManagerFactory fileDownloadManagerFactory, FileUploadManager fileUploadManager, FileCacheManager fileCacheManager,
-            DalamudUtilService dalamudUtilService, GameObjectHandlerFactory gameObjectHandlerFactory, PlayerDataFactory playerDataFactory)
+            DalamudUtilService dalamudUtilService, GameObjectHandlerFactory gameObjectHandlerFactory, PlayerDataFactory playerDataFactory, SpheneConfigService spheneConfigService)
     {
         _fileDownloadManager = fileDownloadManagerFactory.Create();
         _logger = logger;
@@ -36,6 +39,7 @@ public sealed class CharaDataFileHandler : IDisposable
         _dalamudUtilService = dalamudUtilService;
         _gameObjectHandlerFactory = gameObjectHandlerFactory;
         _playerDataFactory = playerDataFactory;
+        _spheneConfigService = spheneConfigService;
         _spheneCharaFileDataFactory = new(fileCacheManager);
     }
 
@@ -43,8 +47,16 @@ public sealed class CharaDataFileHandler : IDisposable
     {
         modPaths = [];
         missingFiles = [];
+        var filterCharacterLegacyShpk = _spheneConfigService.Current.FilterCharacterLegacyShpkInOutgoingCharacterData;
+        var filteredInboundEntries = 0;
         foreach (var file in charaDataDownloadDto.FileGamePaths)
         {
+            if (filterCharacterLegacyShpk && IsCharacterLegacyShpkPath(file.GamePath))
+            {
+                filteredInboundEntries++;
+                continue;
+            }
+
             var localCacheFile = _fileCacheManager.GetFileCacheByHash(file.HashOrFileSwap);
             if (localCacheFile == null)
             {
@@ -70,11 +82,22 @@ public sealed class CharaDataFileHandler : IDisposable
 
         foreach (var swap in charaDataDownloadDto.FileSwaps)
         {
+            if (filterCharacterLegacyShpk && (IsCharacterLegacyShpkPath(swap.GamePath) || IsCharacterLegacyShpkPath(swap.HashOrFileSwap)))
+            {
+                filteredInboundEntries++;
+                continue;
+            }
+
             modPaths[swap.GamePath] = swap.HashOrFileSwap;
+        }
+
+        if (filteredInboundEntries > 0)
+        {
+            _logger.LogDebug("Filtered {count} inbound characterlegacy.shpk entries from downloaded character data", filteredInboundEntries);
         }
     }
 
-    public async Task<CharacterData?> CreatePlayerData()
+    public async Task<CharacterData?> CreatePlayerData(bool applyOutgoingSyncFilters = false)
     {
         var chara = await _dalamudUtilService.GetPlayerCharacterAsync().ConfigureAwait(false);
         if (_dalamudUtilService.IsInGpose)
@@ -92,6 +115,7 @@ public sealed class CharaDataFileHandler : IDisposable
         newCdata.SetFragment(ObjectKind.Player, fragment);
         if (newCdata.FileReplacements.TryGetValue(ObjectKind.Player, out var playerData) && playerData != null)
         {
+            var filterCharacterLegacyShpk = applyOutgoingSyncFilters && _spheneConfigService.Current.FilterCharacterLegacyShpkInOutgoingCharacterData;
             foreach (var data in playerData.Select(g => g.GamePaths))
             {
                 data.RemoveWhere(g => g.EndsWith(".pap", StringComparison.OrdinalIgnoreCase)
@@ -102,7 +126,9 @@ public sealed class CharaDataFileHandler : IDisposable
                         && !g.Contains("/equipment/", StringComparison.OrdinalIgnoreCase))
                     || (g.EndsWith(".atex", StringComparison.OrdinalIgnoreCase)
                         && !g.Contains("/weapon/", StringComparison.OrdinalIgnoreCase)
-                        && !g.Contains("/equipment/", StringComparison.OrdinalIgnoreCase)));
+                        && !g.Contains("/equipment/", StringComparison.OrdinalIgnoreCase))
+                    || (filterCharacterLegacyShpk
+                        && g.Contains("characterlegacy.shpk", StringComparison.OrdinalIgnoreCase)));
             }
 
             playerData.RemoveWhere(g => g.GamePaths.Count == 0);
@@ -114,6 +140,12 @@ public sealed class CharaDataFileHandler : IDisposable
     public void Dispose()
     {
         _fileDownloadManager.Dispose();
+    }
+
+    private static bool IsCharacterLegacyShpkPath(string? value)
+    {
+        return !string.IsNullOrWhiteSpace(value)
+            && value.Contains(CharacterLegacyShpkToken, StringComparison.OrdinalIgnoreCase);
     }
 
     public async Task DownloadFilesAsync(GameObjectHandler tempHandler, List<FileReplacementData> missingFiles, Dictionary<string, string> modPaths, CancellationToken token)
@@ -219,7 +251,7 @@ public sealed class CharaDataFileHandler : IDisposable
 
     public async Task UpdateCharaDataAsync(CharaDataExtendedUpdateDto updateDto)
     {
-        var data = await CreatePlayerData().ConfigureAwait(false);
+        var data = await CreatePlayerData(applyOutgoingSyncFilters: true).ConfigureAwait(false);
 
         if (data != null)
         {
@@ -246,8 +278,8 @@ public sealed class CharaDataFileHandler : IDisposable
             }
             else
             {
-                updateDto.FileGamePaths = [.. fileReplacements!.Where(u => string.IsNullOrEmpty(u.FileSwapPath)).SelectMany(u => u.GamePaths, (file, path) => new GamePathEntry(file.Hash, path))];
-                updateDto.FileSwaps = [.. fileReplacements!.Where(u => !string.IsNullOrEmpty(u.FileSwapPath)).SelectMany(u => u.GamePaths, (file, path) => new GamePathEntry(file.FileSwapPath, path))];
+                updateDto.FileGamePaths = [.. fileReplacements!.Where(u => string.IsNullOrEmpty(u.FileSwapPath)).SelectMany(u => u.GamePaths, (file, path) => new GamePathEntry(file.Hash, path, file.IsActive))];
+                updateDto.FileSwaps = [.. fileReplacements!.Where(u => !string.IsNullOrEmpty(u.FileSwapPath)).SelectMany(u => u.GamePaths, (file, path) => new GamePathEntry(file.FileSwapPath, path, file.IsActive))];
             }
         }
     }

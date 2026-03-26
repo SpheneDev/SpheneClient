@@ -12,6 +12,7 @@ using Sphene.PlayerData.Pairs;
 using Sphene.API.Data;
 using Sphene.WebAPI;
 using Sphene.WebAPI.SignalR.Utils;
+using Sphene.SpheneConfiguration;
 using System.Numerics;
 using System.Text.Json;
 using Sphene.PlayerData.Data;
@@ -26,6 +27,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
     private readonly ApiController _apiController;
     private readonly ConnectionHealthMonitor _healthMonitor;
     private readonly CircuitBreakerService _circuitBreaker;
+    private readonly SpheneConfigService _configService;
     private readonly EnhancedAcknowledgmentManager? _acknowledgmentManager;
     private readonly SessionAcknowledgmentManager? _sessionAcknowledgmentManager;
     
@@ -35,13 +37,20 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
     private bool _showAcknowledgments = true;
     private bool _showCircuitBreaker = true;
     private bool _showConnections = true;
+    private int _simulatedDisconnectSeconds = 3;
     private string? _selectedCharacterDebugUid;
     private string? _selectedCharacterStatsUid;
     private readonly Dictionary<string, CharacterStatsSnapshot> _characterStats = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, IReadOnlyDictionary<string, string>> _activePenumbraPathsByUid = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, DateTimeOffset> _activePenumbraPathsUpdatedAt = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> _activePenumbraPathsErrors = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _activePenumbraRefreshInProgress = new(StringComparer.Ordinal);
+    private bool _hideLikelyDefaultGamePaths = true;
     
     public StatusDebugUi(ILogger<StatusDebugUi> logger, SpheneMediator mediator,
         UiSharedService uiSharedService, PairManager pairManager, ApiController apiController,
         ConnectionHealthMonitor healthMonitor, CircuitBreakerService circuitBreaker,
+        SpheneConfigService configService,
         PerformanceCollectorService performanceCollectorService,
         EnhancedAcknowledgmentManager? acknowledgmentManager = null,
         SessionAcknowledgmentManager? sessionAcknowledgmentManager = null)
@@ -52,6 +61,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         _apiController = apiController;
         _healthMonitor = healthMonitor;
         _circuitBreaker = circuitBreaker;
+        _configService = configService;
         _acknowledgmentManager = acknowledgmentManager;
         _sessionAcknowledgmentManager = sessionAcknowledgmentManager;
         
@@ -82,6 +92,448 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         _healthStatusTimer = new Timer(CheckHealthStatus, null, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
         
         LogCommunication("Status Debug UI initialized", "INFO");
+    }
+
+    private void DrawPenumbraCollectionDebugComparison(Pair selectedPair)
+    {
+        ImGui.Text("Penumbra Collection Comparison");
+
+        var uid = selectedPair.UserData.UID;
+        var collectionId = selectedPair.GetPenumbraCollectionId();
+        ImGui.TextUnformatted($"Collection ID: {(collectionId == Guid.Empty ? "(none)" : collectionId.ToString())}");
+
+        var isRefreshing = _activePenumbraRefreshInProgress.Contains(uid);
+        if (ImGui.Button($"Refresh Active Paths##refresh_active_paths_{uid}") && !isRefreshing)
+        {
+            _ = RefreshPenumbraActivePathsAsync(selectedPair);
+        }
+
+        ImGui.SameLine();
+        if (isRefreshing)
+        {
+            UiSharedService.ColorText("Refreshing active paths...", ImGuiColors.DalamudYellow);
+        }
+        else if (_activePenumbraPathsUpdatedAt.TryGetValue(uid, out var updatedAt))
+        {
+            ImGui.TextUnformatted($"Last refresh: {updatedAt.ToLocalTime():HH:mm:ss}");
+        }
+        else
+        {
+            ImGui.TextUnformatted("Active paths not refreshed yet.");
+        }
+
+        if (_activePenumbraPathsErrors.TryGetValue(uid, out var error) && !string.IsNullOrEmpty(error))
+        {
+            UiSharedService.ColorTextWrapped($"Refresh error: {error}", ImGuiColors.DalamudRed);
+        }
+
+        var deliveredGroups = BuildDeliveredHashGroupState(selectedPair.LastReceivedCharacterData);
+        var loadedPaths = NormalizePathMap(selectedPair.GetLoadedCollectionPathsSnapshot());
+        _activePenumbraPathsByUid.TryGetValue(uid, out var activePathsRaw);
+        activePathsRaw ??= new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var activePaths = NormalizePathMap(activePathsRaw);
+
+        HashSet<string> deliveredGamePaths = new(StringComparer.OrdinalIgnoreCase);
+        foreach (var deliveredGroup in deliveredGroups)
+        {
+            foreach (var gamePath in deliveredGroup.GamePaths)
+            {
+                deliveredGamePaths.Add(gamePath);
+            }
+        }
+
+        HashSet<string> nonDeliveredPaths = new(StringComparer.OrdinalIgnoreCase);
+        foreach (var item in loadedPaths.Keys)
+        {
+            if (!deliveredGamePaths.Contains(item))
+            {
+                nonDeliveredPaths.Add(item);
+            }
+        }
+
+        foreach (var item in activePaths.Keys)
+        {
+            if (!deliveredGamePaths.Contains(item))
+            {
+                nonDeliveredPaths.Add(item);
+            }
+        }
+
+        if (deliveredGroups.Count == 0 && nonDeliveredPaths.Count == 0)
+        {
+            ImGui.TextUnformatted("No paths available for comparison.");
+            return;
+        }
+
+        UiSharedService.ColorTextWrapped(
+            "Hint: If a path is active in Penumbra but was not delivered (no IsActive from remote character data), this is most likely the standard game path and is treated as OK.",
+            ImGuiColors.DalamudGrey);
+
+        ImGui.Checkbox("Hide likely standard game paths", ref _hideLikelyDefaultGamePaths);
+
+        var sortedNonDeliveredPaths = nonDeliveredPaths.OrderBy(p => p, StringComparer.OrdinalIgnoreCase).ToList();
+        var likelyDefaultCount = 0;
+        foreach (var gamePath in sortedNonDeliveredPaths)
+        {
+            activePaths.TryGetValue(gamePath, out var activeSource);
+            var isPenumbraActive = !string.IsNullOrEmpty(activeSource);
+            var isLikelyDefaultGamePath = isPenumbraActive;
+            if (isLikelyDefaultGamePath)
+            {
+                likelyDefaultCount++;
+            }
+        }
+
+        var visibleNonDeliveredPaths = _hideLikelyDefaultGamePaths
+            ? sortedNonDeliveredPaths.Where(gamePath =>
+            {
+                activePaths.TryGetValue(gamePath, out var activeSource);
+                var isPenumbraActive = !string.IsNullOrEmpty(activeSource);
+                return !isPenumbraActive;
+            }).ToList()
+            : sortedNonDeliveredPaths;
+
+        var totalVisibleRows = deliveredGroups.Count + visibleNonDeliveredPaths.Count;
+        ImGui.TextUnformatted($"Rows: {totalVisibleRows} | Delivered Hash Groups: {deliveredGroups.Count} | Loaded: {loadedPaths.Count} | Active: {activePaths.Count}");
+        ImGui.TextUnformatted($"Likely standard game paths: {likelyDefaultCount} | Visible non-delivered rows: {visibleNonDeliveredPaths.Count}");
+        UiSharedService.ColorTextWrapped("Delivered entries that share the same hash are merged, even if they target different game paths.", ImGuiColors.DalamudGrey);
+
+        if (!ImGui.BeginTable("PenumbraPathCompareTable", 7, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable | ImGuiTableFlags.ScrollY, new Vector2(-1, 320)))
+        {
+            return;
+        }
+
+        ImGui.TableSetupColumn("Game Path", ImGuiTableColumnFlags.WidthStretch, 2.2f);
+        ImGui.TableSetupColumn("Delivered", ImGuiTableColumnFlags.WidthStretch, 1.4f);
+        ImGui.TableSetupColumn("Loaded", ImGuiTableColumnFlags.WidthStretch, 1.4f);
+        ImGui.TableSetupColumn("Active", ImGuiTableColumnFlags.WidthStretch, 1.4f);
+        ImGui.TableSetupColumn("Pen Active", ImGuiTableColumnFlags.WidthFixed, 80f);
+        ImGui.TableSetupColumn("Data Flag", ImGuiTableColumnFlags.WidthFixed, 80f);
+        ImGui.TableSetupColumn("Match", ImGuiTableColumnFlags.WidthFixed, 120f);
+        ImGui.TableHeadersRow();
+
+        foreach (var deliveredGroup in deliveredGroups)
+        {
+            var loadedSources = CollectPathValues(loadedPaths, deliveredGroup.GamePaths);
+            var activeSources = CollectPathValues(activePaths, deliveredGroup.GamePaths);
+
+            var isPenumbraActive = activeSources.Count > 0;
+            var isDataFlagActive = deliveredGroup.IsActive;
+            var activeMatchesFlag = isPenumbraActive == isDataFlagActive;
+
+            ImGui.TableNextRow();
+
+            ImGui.TableSetColumnIndex(0);
+            DrawStackedValues(deliveredGroup.GamePaths, 58);
+
+            ImGui.TableSetColumnIndex(1);
+            DrawDeliveredSourcesStacked(deliveredGroup.SourcePaths, 42);
+
+            ImGui.TableSetColumnIndex(2);
+            DrawStackedValues(loadedSources, 42);
+
+            ImGui.TableSetColumnIndex(3);
+            DrawStackedValues(activeSources, 42);
+
+            ImGui.TableSetColumnIndex(4);
+            UiSharedService.ColorText(isPenumbraActive ? "Yes" : "No", isPenumbraActive ? ImGuiColors.HealerGreen : ImGuiColors.DalamudRed);
+
+            ImGui.TableSetColumnIndex(5);
+            UiSharedService.ColorText(isDataFlagActive ? "Yes" : "No", isDataFlagActive ? ImGuiColors.HealerGreen : ImGuiColors.DalamudRed);
+
+            ImGui.TableSetColumnIndex(6);
+            UiSharedService.ColorText(activeMatchesFlag ? "OK" : "Diff", activeMatchesFlag ? ImGuiColors.HealerGreen : ImGuiColors.DalamudYellow);
+        }
+
+        foreach (var gamePath in visibleNonDeliveredPaths)
+        {
+            loadedPaths.TryGetValue(gamePath, out var loadedSource);
+            activePaths.TryGetValue(gamePath, out var activeSource);
+
+            var isPenumbraActive = !string.IsNullOrEmpty(activeSource);
+            var isLikelyDefaultGamePath = isPenumbraActive;
+
+            ImGui.TableNextRow();
+
+            ImGui.TableSetColumnIndex(0);
+            DrawTrimmedPathWithTooltip(gamePath, 58);
+
+            ImGui.TableSetColumnIndex(1);
+            ImGui.TextUnformatted("-");
+
+            ImGui.TableSetColumnIndex(2);
+            DrawTrimmedPathWithTooltip(string.IsNullOrEmpty(loadedSource) ? "-" : loadedSource, 42);
+
+            ImGui.TableSetColumnIndex(3);
+            DrawTrimmedPathWithTooltip(string.IsNullOrEmpty(activeSource) ? "-" : activeSource, 42);
+
+            ImGui.TableSetColumnIndex(4);
+            UiSharedService.ColorText(isPenumbraActive ? "Yes" : "No", isPenumbraActive ? ImGuiColors.HealerGreen : ImGuiColors.DalamudRed);
+
+            ImGui.TableSetColumnIndex(5);
+            UiSharedService.ColorText("No", ImGuiColors.DalamudRed);
+
+            ImGui.TableSetColumnIndex(6);
+            UiSharedService.ColorText(isLikelyDefaultGamePath ? "Likely Default" : "-", ImGuiColors.DalamudGrey);
+        }
+
+        ImGui.EndTable();
+    }
+
+    private static List<DeliveredHashGroupState> BuildDeliveredHashGroupState(Sphene.API.Data.CharacterData? characterData)
+    {
+        Dictionary<string, DeliveredHashGroupState> delivered = new(StringComparer.OrdinalIgnoreCase);
+        if (characterData == null)
+        {
+            return [];
+        }
+
+        if (!characterData.FileReplacements.TryGetValue(API.Data.Enum.ObjectKind.Player, out var replacements) || replacements == null)
+        {
+            return [];
+        }
+
+        foreach (var replacement in replacements)
+        {
+            var groupKey = GetDeliveredSourceKey(replacement);
+            if (!delivered.TryGetValue(groupKey, out var group))
+            {
+                group = new DeliveredHashGroupState(groupKey);
+                delivered[groupKey] = group;
+            }
+
+            if (!group.SourcePaths.Contains(groupKey, StringComparer.OrdinalIgnoreCase))
+            {
+                group.SourcePaths.Add(groupKey);
+            }
+
+            group.IsActive |= replacement.IsActive;
+
+            foreach (var gamePath in replacement.GamePaths)
+            {
+                var normalizedGamePath = NormalizeGamePath(gamePath);
+                if (string.IsNullOrEmpty(normalizedGamePath))
+                {
+                    continue;
+                }
+
+                if (!group.GamePaths.Contains(normalizedGamePath, StringComparer.OrdinalIgnoreCase))
+                {
+                    group.GamePaths.Add(normalizedGamePath);
+                }
+            }
+        }
+
+        return delivered.Values
+            .OrderBy(g => g.GamePaths.Count > 0 ? g.GamePaths[0] : g.GroupKey, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static List<string> CollectPathValues(IReadOnlyDictionary<string, string> valuesByPath, IReadOnlyList<string> gamePaths)
+    {
+        List<string> values = [];
+        foreach (var gamePath in gamePaths)
+        {
+            if (!valuesByPath.TryGetValue(gamePath, out var value) || string.IsNullOrEmpty(value))
+            {
+                continue;
+            }
+
+            if (!values.Contains(value, StringComparer.OrdinalIgnoreCase))
+            {
+                values.Add(value);
+            }
+        }
+
+        return values;
+    }
+
+    private static Dictionary<string, string> NormalizePathMap(IReadOnlyDictionary<string, string> paths)
+    {
+        Dictionary<string, string> normalized = new(StringComparer.OrdinalIgnoreCase);
+        foreach (var path in paths)
+        {
+            var normalizedKey = NormalizeGamePath(path.Key);
+            if (string.IsNullOrEmpty(normalizedKey))
+            {
+                continue;
+            }
+
+            if (!normalized.TryGetValue(normalizedKey, out var existingValue) || string.IsNullOrEmpty(existingValue))
+            {
+                normalized[normalizedKey] = path.Value;
+            }
+        }
+
+        return normalized;
+    }
+
+    private static string NormalizeGamePath(string gamePath)
+    {
+        if (string.IsNullOrWhiteSpace(gamePath))
+        {
+            return string.Empty;
+        }
+
+        var normalized = gamePath.Trim().Replace('\\', '/');
+        while (normalized.Contains("//", StringComparison.Ordinal))
+        {
+            normalized = normalized.Replace("//", "/", StringComparison.Ordinal);
+        }
+
+        normalized = normalized.Trim('/');
+        return normalized;
+    }
+
+    private static string GetDeliveredSourceKey(FileReplacementData replacement)
+    {
+        var hash = NormalizeHash(replacement.Hash);
+        if (!string.IsNullOrEmpty(hash))
+        {
+            return hash;
+        }
+
+        var fileSwapPath = replacement.FileSwapPath?.Trim();
+        if (!string.IsNullOrEmpty(fileSwapPath))
+        {
+            return fileSwapPath;
+        }
+
+        return "-";
+    }
+
+    private static string NormalizeHash(string? hash)
+    {
+        if (string.IsNullOrWhiteSpace(hash))
+        {
+            return string.Empty;
+        }
+
+        var normalized = hash.Trim();
+        if (normalized.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+        {
+            normalized = normalized[2..];
+        }
+
+        normalized = normalized.Replace("-", string.Empty, StringComparison.Ordinal)
+            .Replace(" ", string.Empty, StringComparison.Ordinal);
+
+        return normalized.ToUpperInvariant();
+    }
+
+    private static void DrawDeliveredSourcesStacked(IReadOnlyList<string> sourcePaths, int maxLength)
+    {
+        if (sourcePaths.Count == 0)
+        {
+            ImGui.TextUnformatted("-");
+            return;
+        }
+
+        for (var index = 0; index < sourcePaths.Count; index++)
+        {
+            var sourcePath = sourcePaths[index];
+            var trimmed = TrimPath(sourcePath, maxLength);
+
+            if (sourcePaths.Count > 1)
+            {
+                var color = GetDeliveredSourceColor(index);
+                UiSharedService.ColorText($"[{index + 1}] {trimmed}", color);
+            }
+            else
+            {
+                ImGui.TextUnformatted(trimmed);
+            }
+
+            if (ImGui.IsItemHovered())
+            {
+                UiSharedService.AttachToolTip(sourcePath);
+            }
+        }
+    }
+
+    private static void DrawStackedValues(IReadOnlyList<string> values, int maxLength)
+    {
+        if (values.Count == 0)
+        {
+            ImGui.TextUnformatted("-");
+            return;
+        }
+
+        for (var index = 0; index < values.Count; index++)
+        {
+            var value = values[index];
+            var trimmed = TrimPath(value, maxLength);
+            ImGui.TextUnformatted(trimmed);
+            if (ImGui.IsItemHovered())
+            {
+                UiSharedService.AttachToolTip(value);
+            }
+        }
+    }
+
+    private static string TrimPath(string path, int maxLength)
+    {
+        if (string.IsNullOrEmpty(path))
+        {
+            return "-";
+        }
+
+        return path.Length > maxLength ? "..." + path[^Math.Max(1, maxLength - 3)..] : path;
+    }
+
+    private static Vector4 GetDeliveredSourceColor(int index)
+    {
+        return (index % 6) switch
+        {
+            0 => new Vector4(0.52f, 0.85f, 1.00f, 1.00f),
+            1 => new Vector4(0.65f, 1.00f, 0.68f, 1.00f),
+            2 => new Vector4(1.00f, 0.85f, 0.55f, 1.00f),
+            3 => new Vector4(1.00f, 0.64f, 0.78f, 1.00f),
+            4 => new Vector4(0.90f, 0.76f, 1.00f, 1.00f),
+            _ => new Vector4(0.75f, 0.90f, 0.90f, 1.00f),
+        };
+    }
+
+    private static void DrawTrimmedPathWithTooltip(string path, int maxLength)
+    {
+        if (string.IsNullOrEmpty(path))
+        {
+            ImGui.TextUnformatted("-");
+            return;
+        }
+
+        var trimmed = TrimPath(path, maxLength);
+        ImGui.TextUnformatted(trimmed);
+        if (ImGui.IsItemHovered())
+        {
+            UiSharedService.AttachToolTip(path);
+        }
+    }
+
+    private async Task RefreshPenumbraActivePathsAsync(Pair pair)
+    {
+        var uid = pair.UserData.UID;
+        if (!_activePenumbraRefreshInProgress.Add(uid))
+        {
+            return;
+        }
+
+        try
+        {
+            _activePenumbraPathsErrors.Remove(uid);
+            var activePaths = await pair.GetCurrentPenumbraActivePathsByGamePathAsync().ConfigureAwait(false);
+            _activePenumbraPathsByUid[uid] = activePaths;
+            _activePenumbraPathsUpdatedAt[uid] = DateTimeOffset.UtcNow;
+        }
+        catch (Exception ex)
+        {
+            _activePenumbraPathsErrors[uid] = ex.Message;
+            _logger.LogWarning(ex, "Failed to refresh active Penumbra paths for {uid}", uid);
+        }
+        finally
+        {
+            _activePenumbraRefreshInProgress.Remove(uid);
+        }
     }
     
     private readonly Timer _healthStatusTimer;
@@ -495,20 +947,38 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         if (ImGui.Button("Force Reconnect"))
         {
             LogCommunication("[DEBUG] Force reconnect triggered");
-            // Trigger reconnection logic here if available
+            _ = _apiController.CreateConnectionsAsync();
         }
         
         ImGui.SameLine();
         if (ImGui.Button("Refresh Pairs"))
         {
             LogCommunication("[DEBUG] Pair refresh triggered");
-            // Trigger pair refresh logic here if available
+            _ = _apiController.CreateConnectionsAsync();
         }
         
         ImGui.SameLine();
         if (ImGui.Button("Clear Log"))
         {
             _communicationLog = "Communication Log:\n";
+        }
+
+        ImGui.Spacing();
+        ImGui.Text("Disconnect Simulation:");
+        _simulatedDisconnectSeconds = Math.Clamp(_simulatedDisconnectSeconds, 1, 300);
+        ImGui.SetNextItemWidth(140f * ImGuiHelpers.GlobalScale);
+        ImGui.SliderInt("Duration (seconds)##DisconnectSimulationDuration", ref _simulatedDisconnectSeconds, 1, 300);
+
+        if (ImGui.Button("Simulate Real Disconnect"))
+        {
+            LogCommunication($"[DEBUG] Simulating real disconnect for {_simulatedDisconnectSeconds}s");
+            _ = _apiController.SimulateDisconnectForTestingAsync(TimeSpan.FromSeconds(_simulatedDisconnectSeconds));
+        }
+
+        if (_apiController.IsDisconnectSimulationRunning)
+        {
+            ImGui.SameLine();
+            UiSharedService.ColorText("Simulation running...", ImGuiColors.DalamudYellow);
         }
     }
     
@@ -777,6 +1247,8 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         }
 
         ImGui.Separator();
+        DrawPenumbraCollectionDebugComparison(selectedPair);
+        ImGui.Separator();
         ImGui.Text("Received Created Character Data");
 
         foreach (var pair in pairs)
@@ -965,6 +1437,19 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         public int ApplyRetryCount { get; }
         public DateTimeOffset SnapshotTime { get; }
         public string LastAction { get; }
+    }
+
+    private sealed class DeliveredHashGroupState
+    {
+        public DeliveredHashGroupState(string groupKey)
+        {
+            GroupKey = groupKey;
+        }
+
+        public string GroupKey { get; }
+        public List<string> GamePaths { get; } = [];
+        public List<string> SourcePaths { get; } = [];
+        public bool IsActive { get; set; }
     }
     
     private bool _showLogPopup = false;
@@ -1231,7 +1716,16 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
 
                     if (found)
                     {
-                        ImGui.TextColored(ImGuiColors.DalamudRed, "FOUND");
+                        var filterEnabled = _configService.Current.FilterCharacterLegacyShpkInOutgoingCharacterData;
+                        if (filterEnabled)
+                        {
+                            ImGui.TextColored(ImGuiColors.DalamudYellow, "FOUND (Filtered)");
+                            details.Insert(0, "Inbound filter active: characterlegacy.shpk entries were blocked for apply/download.");
+                        }
+                        else
+                        {
+                            ImGui.TextColored(ImGuiColors.DalamudRed, "FOUND");
+                        }
                         ImGui.TableNextColumn();
                         ImGui.TextWrapped(string.Join("\n", details));
                     }

@@ -101,7 +101,7 @@ public class NewOptionsUi : WindowMediatorSubscriberBase
         }
 
         UiSharedService.ColorText("New Options", ImGuiColors.ParsedBlue);
-        UiSharedService.ColorTextWrapped("These settings were added in the latest update. Review them here and adjust what you need.", ImGuiColors.DalamudGrey);
+        UiSharedService.ColorTextWrapped("These settings were added in recent updates. Review them here and adjust what you need.", ImGuiColors.DalamudGrey);
         ImGuiHelpers.ScaledDummy(0, 6);
         ImGui.Separator();
         ImGuiHelpers.ScaledDummy(0, 4);
@@ -114,13 +114,28 @@ public class NewOptionsUi : WindowMediatorSubscriberBase
         var optionsPaneHeight = Math.Max(0f, ImGui.GetContentRegionAvail().Y - footerHeight);
         if (ImGui.BeginChild("NewOptionsPane", new Vector2(-1, optionsPaneHeight), true, ImGuiWindowFlags.NoNav))
         {
-            foreach (var link in UpdateOptionPanel.DefaultLinks)
+            var pendingReleaseGroups = UpdateOptionPanel.GetPendingReleaseGroups(_configService);
+            for (var i = 0; i < pendingReleaseGroups.Count; i++)
             {
-                UiSharedService.ColorText(UpdateOptionPanel.GetTitle(link), ImGuiColors.ParsedBlue);
-                UpdateOptionPanel.DrawByLink(link, _configService, _uiShared, 240f);
-                ImGuiHelpers.ScaledDummy(0, 6);
-                ImGui.Separator();
+                var releaseGroup = pendingReleaseGroups[i];
+                UiSharedService.ColorText($"Added in {releaseGroup.Tag}", ImGuiColors.ParsedBlue);
                 ImGuiHelpers.ScaledDummy(0, 4);
+
+                foreach (var link in releaseGroup.Links)
+                {
+                    UiSharedService.ColorText(UpdateOptionPanel.GetTitle(link), ImGuiColors.ParsedBlue);
+                    UpdateOptionPanel.DrawByLink(link, _configService, _uiShared, Mediator, 240f);
+                    ImGuiHelpers.ScaledDummy(0, 6);
+                    ImGui.Separator();
+                    ImGuiHelpers.ScaledDummy(0, 4);
+                }
+
+                if (i < pendingReleaseGroups.Count - 1)
+                {
+                    ImGuiHelpers.ScaledDummy(0, 4);
+                    ImGui.Separator();
+                    ImGuiHelpers.ScaledDummy(0, 4);
+                }
             }
         }
         ImGui.EndChild();

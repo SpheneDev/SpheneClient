@@ -1,12 +1,41 @@
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Colors;
 using Dalamud.Interface.Utility.Raii;
+using Sphene.Services.Mediator;
 using Sphene.SpheneConfiguration;
 
 namespace Sphene.UI.Components;
 
 public static class SyncBehaviorOptionBlock
 {
+    public static void DrawDisableRedraws(SpheneConfigService configService, UiSharedService uiShared, string blockId = "DisableRedraws")
+    {
+        ImGui.PushID(blockId);
+        try
+        {
+            var disableRedraws = configService.Current.DisableRedraws;
+            if (ImGui.Checkbox("Disable redraws globally", ref disableRedraws))
+            {
+                configService.Current.DisableRedraws = disableRedraws;
+                configService.Save();
+            }
+
+            uiShared.DrawHelpText("When enabled, Sphene suppresses most Penumbra redraw calls. Exceptions: minions and pets are still redrawn, and each character is force-redrawn once when you first encounter them after plugin start.");
+            if (disableRedraws)
+            {
+                UiSharedService.ColorTextWrapped("Warning: (Experimental) Most redraws are disabled. Visual updates can be delayed until natural game refreshes happen, except minion/pet redraws and first-encounter redraw.", ImGuiColors.DalamudYellow);
+            }
+            else
+            {
+                UiSharedService.ColorTextWrapped("Redraws are active. Sphene will trigger a redraw after visual changes.", ImGuiColors.DalamudGrey);
+            }
+        }
+        finally
+        {
+            ImGui.PopID();
+        }
+    }
+
     public static void DrawIncomingSyncWithoutRedraw(SpheneConfigService configService, UiSharedService uiShared, string blockId = "IncomingSyncWithoutRedraw")
     {
         ImGui.PushID(blockId);
@@ -69,6 +98,35 @@ public static class SyncBehaviorOptionBlock
             else
             {
                 UiSharedService.ColorTextWrapped("Tip: Outgoing batching is currently disabled. Enable it if you want fewer sync sends during combat to reduce performance impact.", ImGuiColors.DalamudGrey);
+            }
+        }
+        finally
+        {
+            ImGui.PopID();
+        }
+    }
+
+    public static void DrawFilterCharacterLegacyShpkInOutgoingCharacterData(SpheneConfigService configService, UiSharedService uiShared, SpheneMediator mediator, string blockId = "FilterCharacterLegacyShpk")
+    {
+        ImGui.PushID(blockId);
+        try
+        {
+            var enabled = configService.Current.FilterCharacterLegacyShpkInOutgoingCharacterData;
+            if (ImGui.Checkbox("Filter characterlegacy.shpk in sync data", ref enabled))
+            {
+                configService.Current.FilterCharacterLegacyShpkInOutgoingCharacterData = enabled;
+                configService.Save();
+                mediator.Publish(new PenumbraModSettingChangedMessage());
+            }
+
+            uiShared.DrawHelpText("When enabled, incoming and outgoing character sync filters paths that reference characterlegacy.shpk. This file may be related to shadow bugs. If you notice rendering issues while using this option, disable it.");
+            if (enabled)
+            {
+                UiSharedService.ColorTextWrapped("filter is active. characterlegacy.shpk entries are excluded from outgoing push and incoming apply/download paths.", ImGuiColors.ParsedGreen);
+            }
+            else
+            {
+                UiSharedService.ColorTextWrapped("filter is disabled. characterlegacy.shpk entries are no longer filtered.", ImGuiColors.DalamudGrey);
             }
         }
         finally

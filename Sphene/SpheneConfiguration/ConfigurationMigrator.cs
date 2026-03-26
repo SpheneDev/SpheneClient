@@ -1,16 +1,20 @@
 using Sphene.WebAPI;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Sphene.SpheneConfiguration.Configurations;
+using System.Text.Json;
 
 namespace Sphene.SpheneConfiguration;
 
 public class ConfigurationMigrator(ILogger<ConfigurationMigrator> logger, TransientConfigService transientConfigService,
-    ServerConfigService serverConfigService) : IHostedService
+    ServerConfigService serverConfigService, PairCharacterCacheConfigService pairCharacterCacheConfigService) : IHostedService
 {
     private readonly ILogger<ConfigurationMigrator> _logger = logger;
 
     public void Migrate()
     {
+        MigratePairCharacterCache();
+
         if (transientConfigService.Current.Version == 0)
         {
             _logger.LogInformation("Migrating Transient Config V0 => V1");
@@ -46,6 +50,42 @@ public class ConfigurationMigrator(ILogger<ConfigurationMigrator> logger, Transi
             CleanupDuplicateServers();
             serverConfigService.Current.Version = 4;
             serverConfigService.Save();
+        }
+    }
+
+    private void MigratePairCharacterCache()
+    {
+        if (pairCharacterCacheConfigService.Current.PairCharacterDataCache.Count > 0)
+        {
+            return;
+        }
+
+        if (!File.Exists(transientConfigService.ConfigurationPath))
+        {
+            return;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(transientConfigService.ConfigurationPath));
+            if (!document.RootElement.TryGetProperty("PairCharacterDataCache", out var cacheProperty))
+            {
+                return;
+            }
+
+            var migrated = JsonSerializer.Deserialize<Dictionary<string, Dictionary<string, PairCharacterCacheConfig.CachedPairCharacterData>>>(cacheProperty.GetRawText());
+            if (migrated == null || migrated.Count == 0)
+            {
+                return;
+            }
+
+            pairCharacterCacheConfigService.Current.PairCharacterDataCache = migrated;
+            pairCharacterCacheConfigService.Save();
+            _logger.LogInformation("Migrated pair character cache to dedicated config");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to migrate pair character cache");
         }
     }
 

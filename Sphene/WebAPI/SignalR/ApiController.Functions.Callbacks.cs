@@ -96,9 +96,9 @@ public partial class ApiController
                 break;
 
             case MessageSeverity.Information:
-                if (_doNotNotifyOnNextInfo)
+                if (ShouldSuppressInfoServerMessage())
                 {
-                    _doNotNotifyOnNextInfo = false;
+                    Logger.LogDebug("Suppressing info server message during transient disconnect grace: {message}", message);
                     break;
                 }
                 Mediator.Publish(new NotificationMessage("Info from " + _serverManager.CurrentServer!.ServerName, message, NotificationType.Info, TimeSpan.FromSeconds(5)));
@@ -265,6 +265,12 @@ public partial class ApiController
         {
             Mediator.Publish(new FileTransferNotificationMessage(notification));
         });
+        return Task.CompletedTask;
+    }
+
+    public Task Client_UserCharacterDataRefreshRequested(UserData requester)
+    {
+        ExecuteSafely(() => Mediator.Publish(new CharacterDataRefreshRequestedMessage(requester)));
         return Task.CompletedTask;
     }
 
@@ -476,6 +482,12 @@ public partial class ApiController
     {
         if (_initialized) return;
         _spheneHub!.On(nameof(Client_UserReceiveFileNotification), act);
+    }
+
+    public void OnUserCharacterDataRefreshRequested(Action<UserData> act)
+    {
+        if (_initialized) return;
+        _spheneHub!.On(nameof(Client_UserCharacterDataRefreshRequested), act);
     }
 
     // OnUserAckOtherUpdate method removed - AckOther is controlled by other player's AckYou

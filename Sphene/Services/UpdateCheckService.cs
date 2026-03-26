@@ -6,6 +6,7 @@ using Sphene.Services.Mediator;
 using Sphene.UI;
 using Microsoft.Extensions.Hosting;
 using Dalamud.Plugin;
+using Sphene.SpheneConfiguration;
 
 namespace Sphene.Services;
 
@@ -15,16 +16,20 @@ public class UpdateCheckService : IHostedService, IDisposable
     private readonly HttpClient _httpClient;
     private readonly SpheneMediator _mediator;
     private readonly DalamudUtilService _dalamudUtilService;
+    private readonly SpheneConfigService _configService;
+    private readonly bool _isTestBuildClient;
     private Timer? _updateCheckTimer;
     private const string UPDATE_CHECK_URL = "https://raw.githubusercontent.com/SpheneDev/repo/refs/heads/main/plogonmaster.json";
     private const int UPDATE_CHECK_INTERVAL_MINUTES = 5;
-    
-    public UpdateCheckService(ILogger<UpdateCheckService> logger, HttpClient httpClient, SpheneMediator mediator, DalamudUtilService dalamudUtilService, IDalamudPluginInterface pluginInterface)
+
+    public UpdateCheckService(ILogger<UpdateCheckService> logger, HttpClient httpClient, SpheneMediator mediator, DalamudUtilService dalamudUtilService, SpheneConfigService configService, IDalamudPluginInterface pluginInterface)
     {
         _logger = logger;
         _httpClient = httpClient;
         _mediator = mediator;
         _dalamudUtilService = dalamudUtilService;
+        _configService = configService;
+        _isTestBuildClient = IsTestBuildClient();
         _ = pluginInterface;
     }
     
@@ -58,33 +63,47 @@ public class UpdateCheckService : IHostedService, IDisposable
             }
             
             var currentVersion = GetCurrentVersion();
-            var remoteVersion = Version.Parse(spheneData.AssemblyVersion);
+            var stableVersion = Version.Parse(spheneData.AssemblyVersion);
+            var shouldCheckTestBuilds = ShouldCheckTestBuildUpdates();
+
+            var latestVersion = stableVersion;
+            var isTestBuildUpdate = false;
+            var downloadUrl = spheneData.DownloadLinkUpdate;
+            var changelog = spheneData.Changelog;
+
+            if (shouldCheckTestBuilds && Version.TryParse(spheneData.TestingAssemblyVersion, out var testingVersion) && testingVersion > latestVersion)
+            {
+                latestVersion = testingVersion;
+                isTestBuildUpdate = true;
+                downloadUrl = string.IsNullOrWhiteSpace(spheneData.DownloadLinkTesting) ? spheneData.DownloadLinkUpdate : spheneData.DownloadLinkTesting;
+            }
+
+            _logger.LogDebug("Current version: {current}, Latest version considered: {latest}, IsTestBuildUpdate: {isTestBuildUpdate}", currentVersion, latestVersion, isTestBuildUpdate);
             
-            _logger.LogDebug("Current version: {current}, Remote version: {remote}", currentVersion, remoteVersion);
-            
-            if (remoteVersion > currentVersion)
+            if (latestVersion > currentVersion)
             {
                 // Check if Dalamud has the update available before showing notification
-                var dalamudHasUpdate = CheckDalamudHasUpdate(remoteVersion);
+                var dalamudHasUpdate = CheckDalamudHasUpdate(latestVersion);
                 if (!dalamudHasUpdate)
                 {
-                    _logger.LogDebug("Update {version} available but not yet available in Dalamud, skipping notification", remoteVersion);
+                    _logger.LogDebug("Update {version} available but not yet available in Dalamud, skipping notification", latestVersion);
                     return new UpdateInfo
                     {
                         CurrentVersion = currentVersion,
-                        LatestVersion = remoteVersion,
+                        LatestVersion = latestVersion,
                         IsUpdateAvailable = false
                     };
                 }
                 
-                _logger.LogInformation("Update available: {version}", remoteVersion);
+                _logger.LogInformation("Update available: {version}, TestBuildUpdate: {isTestBuildUpdate}", latestVersion, isTestBuildUpdate);
                 var updateInfo = new UpdateInfo
                 {
                     CurrentVersion = currentVersion,
-                    LatestVersion = remoteVersion,
-                    Changelog = spheneData.Changelog,
-                    DownloadUrl = spheneData.DownloadLinkUpdate,
-                    IsUpdateAvailable = true
+                    LatestVersion = latestVersion,
+                    Changelog = changelog,
+                    DownloadUrl = downloadUrl,
+                    IsUpdateAvailable = true,
+                    IsTestBuildUpdate = isTestBuildUpdate
                 };
                 
                 // Publish update info; UI will show a banner and provide a button to open the popup
@@ -97,7 +116,7 @@ public class UpdateCheckService : IHostedService, IDisposable
             return new UpdateInfo
             {
                 CurrentVersion = currentVersion,
-                LatestVersion = remoteVersion,
+                LatestVersion = latestVersion,
                 IsUpdateAvailable = false
             };
         }
@@ -114,6 +133,25 @@ public class UpdateCheckService : IHostedService, IDisposable
         var assembly = Assembly.GetExecutingAssembly();
         var version = assembly.GetName().Version;
         return version ?? new Version(0, 0, 0, 0);
+    }
+
+    private static bool IsTestBuildClient()
+    {
+        foreach (var metadata in Assembly.GetExecutingAssembly().GetCustomAttributes<AssemblyMetadataAttribute>())
+        {
+            if (string.Equals(metadata.Key, "IsTestBuild", StringComparison.Ordinal) &&
+                string.Equals(metadata.Value, "true", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool ShouldCheckTestBuildUpdates()
+    {
+        return _isTestBuildClient || _configService.Current.ShowTestBuildUpdates;
     }
     
     private bool CheckDalamudHasUpdate(Version remoteVersion)

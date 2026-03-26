@@ -2336,6 +2336,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         NotificationsOptionBlock.DrawEnableOnlineNotificationsOption(_configService, "NotificationsEnableOnlineNotifications");
         NotificationsOptionBlock.DrawOnlyForIndividualPairsOption(_configService, "NotificationsOnlyForIndividualPairs");
         NotificationsOptionBlock.DrawOnlyForNamedPairsOption(_configService, "NotificationsOnlyForNamedPairs");
+        NotificationsOptionBlock.DrawShowTestBuildUpdatesOption(_configService, _uiShared, "NotificationsShowTestBuildUpdates");
 
         DrawSettingsSectionHeader("Area-bound Syncshell Notifications");
         if (NotificationsOptionBlock.DrawEnableAreaBoundSyncshellNotificationsOption(_configService, _uiShared, "NotificationsEnableAreaBoundSyncshellNotifications"))
@@ -2382,11 +2383,17 @@ public class SettingsUi : WindowMediatorSubscriberBase
     private void DrawSyncBehaviorSettings()
     {
         DrawSettingsPageHeader("Sync Behavior", "Control how incoming and outgoing synchronization data is handled.");
+        DrawSettingsSectionHeader("Redraw");
+        SyncBehaviorOptionBlock.DrawDisableRedraws(_configService, _uiShared, "SettingsDisableRedraws");
+
         DrawSettingsSectionHeader("Incoming Sync");
         SyncBehaviorOptionBlock.DrawIncomingSyncWithoutRedraw(_configService, _uiShared, "SettingsIncomingSyncWithoutRedraw");
 
         DrawSettingsSectionHeader("Outgoing Sync Batching");
         SyncBehaviorOptionBlock.DrawOutgoingSyncBatching(_configService, _uiShared, ClampSettingsItemWidth(240f, 160f), "SettingsOutgoingSyncBatching");
+
+        DrawSettingsSectionHeader("Filter");
+        SyncBehaviorOptionBlock.DrawFilterCharacterLegacyShpkInOutgoingCharacterData(_configService, _uiShared, Mediator, "SettingsFilterCharacterLegacyShpk");
     }
 
     private void UiSharedService_GposeEnd()

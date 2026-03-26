@@ -1682,7 +1682,7 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
         return vector.X + vector2.X + ImGui.GetStyle().FramePadding.X * 2f + num;
     }
 
-    public bool IconButton(FontAwesomeIcon icon, float? height = null, float? iconScale = null, float? iconPixelSize = null, float? width = null, string? styleKey = null)
+    public bool IconButton(FontAwesomeIcon icon, float? height = null, float? iconScale = null, float? iconPixelSize = null, float? width = null, string? styleKey = null, Vector2? iconOffsetOverride = null, float? iconRotationRadians = null)
     {
         string text = icon.ToIconString();
 
@@ -1758,7 +1758,11 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
         Vector2 pos = new Vector2(iconCenterX,
             buttonPos.Y + frameHeight / 2f - (vector.Y / 2f));
 
-        if (!string.IsNullOrEmpty(styleKey))
+        if (iconOffsetOverride.HasValue)
+        {
+            pos += iconOffsetOverride.Value;
+        }
+        else if (!string.IsNullOrEmpty(styleKey))
         {
             var theme = SpheneCustomTheme.CurrentTheme;
             if (theme.ButtonStyles.TryGetValue(styleKey, out var overrideStyle))
@@ -1782,7 +1786,15 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
                     iconColorU32 = ImGui.GetColorU32(overrideStyle.Icon.Value);
                 }
             }
+            var iconStartVertex = windowDrawList.VtxBuffer.Size;
             windowDrawList.AddText(pos, iconColorU32, text);
+            var iconEndVertex = windowDrawList.VtxBuffer.Size;
+            if (iconRotationRadians.HasValue)
+            {
+                RotateDrawListVertices(windowDrawList, iconStartVertex, iconEndVertex,
+                    new Vector2(buttonPos.X + (x * 0.5f), buttonPos.Y + (frameHeight * 0.5f)),
+                    iconRotationRadians.Value);
+            }
             if (MathF.Abs(scale - 1f) > 0.0001f) ImGui.SetWindowFontScale(1f);
         }
         ImGui.PopID();
@@ -1806,19 +1818,19 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
         IconText(icon, color == null ? ImGui.GetColorU32(ImGuiCol.Text) : ImGui.GetColorU32(color.Value));
     }
 
-    public bool IconTextButton(FontAwesomeIcon icon, string text, float? width = null, bool isInPopup = false, string? styleKey = null)
+    public bool IconTextButton(FontAwesomeIcon icon, string text, float? width = null, bool isInPopup = false, string? styleKey = null, float? iconRotationRadians = null)
     {
         return IconTextButtonInternal(icon, text,
             isInPopup ? ColorHelpers.RgbaUintToVector4(ImGui.GetColorU32(ImGuiCol.PopupBg)) : null,
             width <= 0 ? null : width,
-            null, null, styleKey);
+            null, null, styleKey, iconRotationRadians);
     }
 
-    public bool IconTextActionButton(FontAwesomeIcon icon, string text, float? width = null, string? styleKey = null)
+    public bool IconTextActionButton(FontAwesomeIcon icon, string text, float? width = null, string? styleKey = null, float? iconRotationRadians = null)
     {
         var theme = SpheneCustomTheme.CurrentTheme;
         return IconTextButtonInternal(icon, text, theme.CompactActionButton, width <= 0 ? null : width,
-            theme.CompactActionButtonHovered, theme.CompactActionButtonActive, styleKey);
+            theme.CompactActionButtonHovered, theme.CompactActionButtonActive, styleKey, iconRotationRadians);
     }
 
     public IDalamudTextureWrap LoadImage(byte[] imageData)
@@ -2098,9 +2110,29 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
         ImGui.TextUnformatted(text);
     }
 
+    private static void RotateDrawListVertices(ImDrawListPtr drawList, int startVertexIndex, int endVertexIndex, Vector2 center, float angleRadians)
+    {
+        if (endVertexIndex <= startVertexIndex)
+        {
+            return;
+        }
 
-    private bool IconTextButtonInternal(FontAwesomeIcon icon, string text, Vector4? defaultColor = null, float? width = null, 
-        Vector4? hoveredColor = null, Vector4? activeColor = null, string? styleKey = null)
+        var cos = MathF.Cos(angleRadians);
+        var sin = MathF.Sin(angleRadians);
+        for (var i = startVertexIndex; i < endVertexIndex; i++)
+        {
+            var vertex = drawList.VtxBuffer[i];
+            var translated = vertex.Pos - center;
+            vertex.Pos = new Vector2(
+                (translated.X * cos) - (translated.Y * sin),
+                (translated.X * sin) + (translated.Y * cos)) + center;
+            drawList.VtxBuffer[i] = vertex;
+        }
+    }
+
+
+    private bool IconTextButtonInternal(FontAwesomeIcon icon, string text, Vector4? defaultColor = null, float? width = null,
+        Vector4? hoveredColor = null, Vector4? activeColor = null, string? styleKey = null, float? iconRotationRadians = null)
     {
         int num = 0;
         int vars = 0;
@@ -2175,7 +2207,15 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
                     iconColorU32 = ImGui.GetColorU32(overrideStyle.Icon.Value);
                 }
             }
+            var iconStartVertex = windowDrawList.VtxBuffer.Size;
             windowDrawList.AddText(pos, iconColorU32, icon.ToIconString());
+            var iconEndVertex = windowDrawList.VtxBuffer.Size;
+            if (iconRotationRadians.HasValue)
+            {
+                RotateDrawListVertices(windowDrawList, iconStartVertex, iconEndVertex,
+                    new Vector2(cursorScreenPos.X + (x * 0.5f), cursorScreenPos.Y + (frameHeight * 0.5f)),
+                    iconRotationRadians.Value);
+            }
         }
         Vector2 pos2 = new Vector2(pos.X + vector.X + num2, cursorScreenPos.Y + ImGui.GetStyle().FramePadding.Y);
         uint labelColorU32 = ImGui.GetColorU32(ImGuiCol.Text);

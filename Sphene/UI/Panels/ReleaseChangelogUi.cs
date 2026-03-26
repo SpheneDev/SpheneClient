@@ -209,7 +209,10 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
                                 flags |= ImGuiTreeNodeFlags.DefaultOpen;
                             }
 
-                            var headerLabel = $"{e.Version} - {e.Title}###ch_{e.Version}";
+                            var headerTitle = BuildHeaderTitle(e);
+                            var headerLabel = string.IsNullOrWhiteSpace(headerTitle)
+                                ? $"{e.Version}###ch_{e.Version}"
+                                : $"{e.Version} - {headerTitle}###ch_{e.Version}";
                             if (e.IsPrerelease)
                             {
                                 var baseColor = ImGuiColors.DalamudYellow;
@@ -230,20 +233,14 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
 
                                 if (!string.IsNullOrWhiteSpace(e.Description))
                                 {
-                                    ImGui.TextColored(ImGuiColors.DalamudYellow, "Description");
                                     using (ImRaii.PushIndent(ImGuiHelpers.GlobalScale * 10f))
                                     {
-                                        UiSharedService.TextWrapped(NormalizeDescription(e.Description));
+                                        var normalizedDescription = NormalizeDescription(e.Description);
+                                        UiSharedService.TextWrapped(normalizedDescription);
                                     }
                                 }
 
                                 ImGuiHelpers.ScaledDummy(2f);
-
-                                if (e.Changes is { Count: > 0 })
-                                {
-                                    ImGui.TextColored(ImGuiColors.ParsedBlue, "Changes");
-                                    ImGuiHelpers.ScaledDummy(1f);
-                                }
 
                                 using (ImRaii.PushIndent(10f))
                                 {
@@ -253,10 +250,8 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
                                         if (change == null)
                                             continue;
 
-                                        var trimmedMain = (change.Text ?? string.Empty).Trim();
-                                        if (trimmedMain.StartsWith("- ", StringComparison.Ordinal)) trimmedMain = trimmedMain.Substring(2);
-                                        if (trimmedMain.StartsWith("* ", StringComparison.Ordinal)) trimmedMain = trimmedMain.Substring(2);
-                                        if (trimmedMain.StartsWith("• ", StringComparison.Ordinal)) trimmedMain = trimmedMain.Substring(2);
+                                        var trimmedMain = TrimBulletPrefix((change.Text ?? string.Empty).Trim());
+                                        DrawDescriptionGradientBackground(trimmedMain);
 
                                         if (change.Sub is { Count: > 0 })
                                         {
@@ -273,20 +268,35 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
 
                                         if (change.Sub is { Count: > 0 })
                                         {
+                                            var groupedSubItems = GroupSubItems(change.Sub);
                                             ImGui.Indent(ImGuiHelpers.GlobalScale * 18f);
-                                            foreach (var sub in change.Sub)
+                                            var isFirstSection = true;
+                                            foreach (var section in groupedSubItems)
                                             {
-                                                if (string.IsNullOrWhiteSpace(sub))
-                                                    continue;
+                                                if (!isFirstSection)
+                                                    ImGuiHelpers.ScaledDummy(2f);
 
-                                                var trimmedSub = sub.Trim();
-                                                if (trimmedSub.StartsWith("- ", StringComparison.Ordinal)) trimmedSub = trimmedSub.Substring(2);
-                                                if (trimmedSub.StartsWith("* ", StringComparison.Ordinal)) trimmedSub = trimmedSub.Substring(2);
-                                                if (trimmedSub.StartsWith("• ", StringComparison.Ordinal)) trimmedSub = trimmedSub.Substring(2);
+                                                if (!string.IsNullOrWhiteSpace(section.Heading))
+                                                {
+                                                    ImGui.PushStyleColor(ImGuiCol.Text, ImGuiColors.DalamudYellow);
+                                                    UiSharedService.TextWrapped(section.Heading);
+                                                    ImGui.PopStyleColor();
+                                                    ImGuiHelpers.ScaledDummy(1f);
+                                                }
 
-                                                ImGui.Bullet();
-                                                ImGui.SameLine(0, bulletGap);
-                                                UiSharedService.TextWrapped(trimmedSub);
+                                                foreach (var subItem in section.Items)
+                                                {
+                                                    if (string.IsNullOrWhiteSpace(subItem))
+                                                        continue;
+
+                                                    var trimmedSub = TrimBulletPrefix(subItem.Trim());
+
+                                                    ImGui.Bullet();
+                                                    ImGui.SameLine(0, bulletGap);
+                                                    UiSharedService.TextWrapped(trimmedSub);
+                                                }
+
+                                                isFirstSection = false;
                                             }
                                             ImGui.Unindent(ImGuiHelpers.GlobalScale * 18f);
                                             // add gap only after structured entries with sub-items
@@ -439,5 +449,115 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
         }
 
         return sb.ToString();
+    }
+
+    private static void DrawDescriptionGradientBackground(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return;
+
+        var wrapWidth = Math.Max(1f, ImGui.GetContentRegionAvail().X);
+        var textSize = ImGui.CalcTextSize(text, false, wrapWidth);
+        if (textSize.X <= 0f || textSize.Y <= 0f)
+            return;
+
+        var start = ImGui.GetCursorScreenPos();
+        var padX = ImGuiHelpers.GlobalScale * 8f;
+        var padY = ImGuiHelpers.GlobalScale * 4f;
+        var rectMin = new Vector2(start.X - padX, start.Y - padY);
+        var rectMax = new Vector2(start.X + wrapWidth, start.Y + textSize.Y + padY);
+
+        var baseColor = ImGuiColors.ParsedBlue;
+        var left = ImGui.GetColorU32(new Vector4(baseColor.X, baseColor.Y, baseColor.Z, 0.18f));
+        var right = ImGui.GetColorU32(new Vector4(baseColor.X, baseColor.Y, baseColor.Z, 0.00f));
+        ImGui.GetWindowDrawList().AddRectFilledMultiColor(rectMin, rectMax, left, right, right, left);
+    }
+
+    private static string TrimBulletPrefix(string value)
+    {
+        if (value.StartsWith("- ", StringComparison.Ordinal))
+            return value[2..];
+        if (value.StartsWith("* ", StringComparison.Ordinal))
+            return value[2..];
+        if (value.StartsWith("• ", StringComparison.Ordinal))
+            return value[2..];
+        return value;
+    }
+
+    private static List<SubItemSection> GroupSubItems(List<string> subItems)
+    {
+        var sections = new List<SubItemSection>();
+        SubItemSection? activeSection = null;
+
+        foreach (var rawSub in subItems)
+        {
+            if (string.IsNullOrWhiteSpace(rawSub))
+                continue;
+
+            var normalized = TrimBulletPrefix(rawSub.Trim());
+            if (string.IsNullOrWhiteSpace(normalized))
+                continue;
+
+            if (TryExtractSectionHeader(normalized, out var heading, out var content))
+            {
+                activeSection = new SubItemSection(heading);
+                sections.Add(activeSection);
+
+                if (!string.IsNullOrWhiteSpace(content))
+                    activeSection.Items.Add(content);
+
+                continue;
+            }
+
+            if (activeSection == null)
+            {
+                activeSection = new SubItemSection(string.Empty);
+                sections.Add(activeSection);
+            }
+
+            activeSection.Items.Add(normalized);
+        }
+
+        return sections;
+    }
+
+    private static bool TryExtractSectionHeader(string value, out string heading, out string content)
+    {
+        heading = string.Empty;
+        content = string.Empty;
+
+        var separatorIndex = value.IndexOf(':', StringComparison.Ordinal);
+        if (separatorIndex <= 0)
+            return false;
+
+        var parsedHeading = value[..separatorIndex].Trim();
+        if (string.IsNullOrWhiteSpace(parsedHeading))
+            return false;
+
+        heading = parsedHeading;
+        content = value[(separatorIndex + 1)..].Trim();
+        return true;
+    }
+
+    private static string BuildHeaderTitle(ReleaseChangelogViewEntry entry)
+    {
+        if (!string.IsNullOrWhiteSpace(entry.Title))
+            return entry.Title.Trim();
+
+        if (!string.IsNullOrWhiteSpace(entry.Date))
+            return $"[{entry.Date.Trim()}]";
+
+        return string.Empty;
+    }
+
+    private sealed class SubItemSection
+    {
+        public SubItemSection(string heading)
+        {
+            Heading = heading;
+        }
+
+        public string Heading { get; }
+        public List<string> Items { get; } = new();
     }
 }

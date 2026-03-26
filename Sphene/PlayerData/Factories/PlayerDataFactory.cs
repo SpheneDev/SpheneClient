@@ -139,7 +139,10 @@ public class PlayerDataFactory
 
         // Create initial FileReplacements from resolved paths
         fragment.FileReplacements =
-                new HashSet<FileReplacement>(resolvedPaths.Select(c => new FileReplacement([.. c.Value], c.Key)), FileReplacementComparer.Instance)
+                new HashSet<FileReplacement>(resolvedPaths.Select(c => new FileReplacement([.. c.Value], c.Key)
+                {
+                    IsActive = true,
+                }), FileReplacementComparer.Instance)
                 .Where(p => p.HasFileReplacement).ToHashSet();
         fragment.FileReplacements.RemoveWhere(c => c.GamePaths.Any(g => !CacheMonitor.AllowedFileExtensions.Any(e => g.EndsWith(e, StringComparison.OrdinalIgnoreCase))));
 
