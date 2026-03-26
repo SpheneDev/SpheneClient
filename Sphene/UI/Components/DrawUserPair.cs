@@ -869,7 +869,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
                     ? $"{parsedRemoteClientVersion.Major}.{parsedRemoteClientVersion.Minor}.{parsedRemoteClientVersion.Build}"
                     : $"{parsedRemoteClientVersion.Major}.{parsedRemoteClientVersion.Minor}";
                 if (parsedRemoteClientVersion.Revision >= 0)
-                    remoteClientVersion = $"{normalizedVersion} rev.{parsedRemoteClientVersion.Revision}";
+                    remoteClientVersion = $"{normalizedVersion}.{parsedRemoteClientVersion.Revision}";
                 else
                     remoteClientVersion = normalizedVersion;
             }
