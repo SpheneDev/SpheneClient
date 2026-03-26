@@ -45,6 +45,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
     private readonly Dictionary<string, DateTimeOffset> _activePenumbraPathsUpdatedAt = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> _activePenumbraPathsErrors = new(StringComparer.Ordinal);
     private readonly HashSet<string> _activePenumbraRefreshInProgress = new(StringComparer.Ordinal);
+    private bool _hideLikelyDefaultGamePaths = true;
     
     public StatusDebugUi(ILogger<StatusDebugUi> logger, SpheneMediator mediator,
         UiSharedService uiSharedService, PairManager pairManager, ApiController apiController,
@@ -126,23 +127,76 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             UiSharedService.ColorTextWrapped($"Refresh error: {error}", ImGuiColors.DalamudRed);
         }
 
-        var deliveredPaths = BuildDeliveredPathState(selectedPair.LastReceivedCharacterData);
-        var loadedPaths = selectedPair.GetLoadedCollectionPathsSnapshot();
-        _activePenumbraPathsByUid.TryGetValue(uid, out var activePaths);
-        activePaths ??= new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var deliveredGroups = BuildDeliveredHashGroupState(selectedPair.LastReceivedCharacterData);
+        var loadedPaths = NormalizePathMap(selectedPair.GetLoadedCollectionPathsSnapshot());
+        _activePenumbraPathsByUid.TryGetValue(uid, out var activePathsRaw);
+        activePathsRaw ??= new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var activePaths = NormalizePathMap(activePathsRaw);
 
-        HashSet<string> allPaths = new(StringComparer.OrdinalIgnoreCase);
-        foreach (var item in deliveredPaths.Keys) allPaths.Add(item);
-        foreach (var item in loadedPaths.Keys) allPaths.Add(item);
-        foreach (var item in activePaths.Keys) allPaths.Add(item);
+        HashSet<string> deliveredGamePaths = new(StringComparer.OrdinalIgnoreCase);
+        foreach (var deliveredGroup in deliveredGroups)
+        {
+            foreach (var gamePath in deliveredGroup.GamePaths)
+            {
+                deliveredGamePaths.Add(gamePath);
+            }
+        }
 
-        if (allPaths.Count == 0)
+        HashSet<string> nonDeliveredPaths = new(StringComparer.OrdinalIgnoreCase);
+        foreach (var item in loadedPaths.Keys)
+        {
+            if (!deliveredGamePaths.Contains(item))
+            {
+                nonDeliveredPaths.Add(item);
+            }
+        }
+
+        foreach (var item in activePaths.Keys)
+        {
+            if (!deliveredGamePaths.Contains(item))
+            {
+                nonDeliveredPaths.Add(item);
+            }
+        }
+
+        if (deliveredGroups.Count == 0 && nonDeliveredPaths.Count == 0)
         {
             ImGui.TextUnformatted("No paths available for comparison.");
             return;
         }
 
-        ImGui.TextUnformatted($"Rows: {allPaths.Count} | Delivered: {deliveredPaths.Count} | Loaded: {loadedPaths.Count} | Active: {activePaths.Count}");
+        UiSharedService.ColorTextWrapped(
+            "Hint: If a path is active in Penumbra but was not delivered (no IsActive from remote character data), this is most likely the standard game path and is treated as OK.",
+            ImGuiColors.DalamudGrey);
+
+        ImGui.Checkbox("Hide likely standard game paths", ref _hideLikelyDefaultGamePaths);
+
+        var sortedNonDeliveredPaths = nonDeliveredPaths.OrderBy(p => p, StringComparer.OrdinalIgnoreCase).ToList();
+        var likelyDefaultCount = 0;
+        foreach (var gamePath in sortedNonDeliveredPaths)
+        {
+            activePaths.TryGetValue(gamePath, out var activeSource);
+            var isPenumbraActive = !string.IsNullOrEmpty(activeSource);
+            var isLikelyDefaultGamePath = isPenumbraActive;
+            if (isLikelyDefaultGamePath)
+            {
+                likelyDefaultCount++;
+            }
+        }
+
+        var visibleNonDeliveredPaths = _hideLikelyDefaultGamePaths
+            ? sortedNonDeliveredPaths.Where(gamePath =>
+            {
+                activePaths.TryGetValue(gamePath, out var activeSource);
+                var isPenumbraActive = !string.IsNullOrEmpty(activeSource);
+                return !isPenumbraActive;
+            }).ToList()
+            : sortedNonDeliveredPaths;
+
+        var totalVisibleRows = deliveredGroups.Count + visibleNonDeliveredPaths.Count;
+        ImGui.TextUnformatted($"Rows: {totalVisibleRows} | Delivered Hash Groups: {deliveredGroups.Count} | Loaded: {loadedPaths.Count} | Active: {activePaths.Count}");
+        ImGui.TextUnformatted($"Likely standard game paths: {likelyDefaultCount} | Visible non-delivered rows: {visibleNonDeliveredPaths.Count}");
+        UiSharedService.ColorTextWrapped("Delivered entries that share the same hash are merged, even if they target different game paths.", ImGuiColors.DalamudGrey);
 
         if (!ImGui.BeginTable("PenumbraPathCompareTable", 7, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable | ImGuiTableFlags.ScrollY, new Vector2(-1, 320)))
         {
@@ -155,32 +209,31 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         ImGui.TableSetupColumn("Active", ImGuiTableColumnFlags.WidthStretch, 1.4f);
         ImGui.TableSetupColumn("Pen Active", ImGuiTableColumnFlags.WidthFixed, 80f);
         ImGui.TableSetupColumn("Data Flag", ImGuiTableColumnFlags.WidthFixed, 80f);
-        ImGui.TableSetupColumn("Match", ImGuiTableColumnFlags.WidthFixed, 70f);
+        ImGui.TableSetupColumn("Match", ImGuiTableColumnFlags.WidthFixed, 120f);
         ImGui.TableHeadersRow();
 
-        foreach (var gamePath in allPaths.OrderBy(p => p, StringComparer.OrdinalIgnoreCase))
+        foreach (var deliveredGroup in deliveredGroups)
         {
-            deliveredPaths.TryGetValue(gamePath, out var deliveredEntry);
-            loadedPaths.TryGetValue(gamePath, out var loadedSource);
-            activePaths.TryGetValue(gamePath, out var activeSource);
+            var loadedSources = CollectPathValues(loadedPaths, deliveredGroup.GamePaths);
+            var activeSources = CollectPathValues(activePaths, deliveredGroup.GamePaths);
 
-            var isPenumbraActive = !string.IsNullOrEmpty(activeSource);
-            var isDataFlagActive = deliveredEntry?.IsActive ?? false;
+            var isPenumbraActive = activeSources.Count > 0;
+            var isDataFlagActive = deliveredGroup.IsActive;
             var activeMatchesFlag = isPenumbraActive == isDataFlagActive;
 
             ImGui.TableNextRow();
 
             ImGui.TableSetColumnIndex(0);
-            DrawTrimmedPathWithTooltip(gamePath, 58);
+            DrawStackedValues(deliveredGroup.GamePaths, 58);
 
             ImGui.TableSetColumnIndex(1);
-            DrawTrimmedPathWithTooltip(deliveredEntry?.SourcePath ?? "-", 42);
+            DrawDeliveredSourcesStacked(deliveredGroup.SourcePaths, 42);
 
             ImGui.TableSetColumnIndex(2);
-            DrawTrimmedPathWithTooltip(string.IsNullOrEmpty(loadedSource) ? "-" : loadedSource, 42);
+            DrawStackedValues(loadedSources, 42);
 
             ImGui.TableSetColumnIndex(3);
-            DrawTrimmedPathWithTooltip(string.IsNullOrEmpty(activeSource) ? "-" : activeSource, 42);
+            DrawStackedValues(activeSources, 42);
 
             ImGui.TableSetColumnIndex(4);
             UiSharedService.ColorText(isPenumbraActive ? "Yes" : "No", isPenumbraActive ? ImGuiColors.HealerGreen : ImGuiColors.DalamudRed);
@@ -192,46 +245,253 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             UiSharedService.ColorText(activeMatchesFlag ? "OK" : "Diff", activeMatchesFlag ? ImGuiColors.HealerGreen : ImGuiColors.DalamudYellow);
         }
 
+        foreach (var gamePath in visibleNonDeliveredPaths)
+        {
+            loadedPaths.TryGetValue(gamePath, out var loadedSource);
+            activePaths.TryGetValue(gamePath, out var activeSource);
+
+            var isPenumbraActive = !string.IsNullOrEmpty(activeSource);
+            var isLikelyDefaultGamePath = isPenumbraActive;
+
+            ImGui.TableNextRow();
+
+            ImGui.TableSetColumnIndex(0);
+            DrawTrimmedPathWithTooltip(gamePath, 58);
+
+            ImGui.TableSetColumnIndex(1);
+            ImGui.TextUnformatted("-");
+
+            ImGui.TableSetColumnIndex(2);
+            DrawTrimmedPathWithTooltip(string.IsNullOrEmpty(loadedSource) ? "-" : loadedSource, 42);
+
+            ImGui.TableSetColumnIndex(3);
+            DrawTrimmedPathWithTooltip(string.IsNullOrEmpty(activeSource) ? "-" : activeSource, 42);
+
+            ImGui.TableSetColumnIndex(4);
+            UiSharedService.ColorText(isPenumbraActive ? "Yes" : "No", isPenumbraActive ? ImGuiColors.HealerGreen : ImGuiColors.DalamudRed);
+
+            ImGui.TableSetColumnIndex(5);
+            UiSharedService.ColorText("No", ImGuiColors.DalamudRed);
+
+            ImGui.TableSetColumnIndex(6);
+            UiSharedService.ColorText(isLikelyDefaultGamePath ? "Likely Default" : "-", ImGuiColors.DalamudGrey);
+        }
+
         ImGui.EndTable();
     }
 
-    private static Dictionary<string, DeliveredPathState> BuildDeliveredPathState(Sphene.API.Data.CharacterData? characterData)
+    private static List<DeliveredHashGroupState> BuildDeliveredHashGroupState(Sphene.API.Data.CharacterData? characterData)
     {
-        Dictionary<string, DeliveredPathState> delivered = new(StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, DeliveredHashGroupState> delivered = new(StringComparer.OrdinalIgnoreCase);
         if (characterData == null)
         {
-            return delivered;
+            return [];
         }
 
         if (!characterData.FileReplacements.TryGetValue(API.Data.Enum.ObjectKind.Player, out var replacements) || replacements == null)
         {
-            return delivered;
+            return [];
         }
 
         foreach (var replacement in replacements)
         {
-            var sourcePath = string.IsNullOrEmpty(replacement.FileSwapPath) ? replacement.Hash : replacement.FileSwapPath;
+            var groupKey = GetDeliveredSourceKey(replacement);
+            if (!delivered.TryGetValue(groupKey, out var group))
+            {
+                group = new DeliveredHashGroupState(groupKey);
+                delivered[groupKey] = group;
+            }
+
+            if (!group.SourcePaths.Contains(groupKey, StringComparer.OrdinalIgnoreCase))
+            {
+                group.SourcePaths.Add(groupKey);
+            }
+
+            group.IsActive |= replacement.IsActive;
+
             foreach (var gamePath in replacement.GamePaths)
             {
-                if (string.IsNullOrEmpty(gamePath))
+                var normalizedGamePath = NormalizeGamePath(gamePath);
+                if (string.IsNullOrEmpty(normalizedGamePath))
                 {
                     continue;
                 }
 
-                if (delivered.TryGetValue(gamePath, out var existing))
+                if (!group.GamePaths.Contains(normalizedGamePath, StringComparer.OrdinalIgnoreCase))
                 {
-                    delivered[gamePath] = new DeliveredPathState(
-                        existing.SourcePath,
-                        existing.IsActive || replacement.IsActive);
-                }
-                else
-                {
-                    delivered[gamePath] = new DeliveredPathState(sourcePath, replacement.IsActive);
+                    group.GamePaths.Add(normalizedGamePath);
                 }
             }
         }
 
-        return delivered;
+        return delivered.Values
+            .OrderBy(g => g.GamePaths.Count > 0 ? g.GamePaths[0] : g.GroupKey, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static List<string> CollectPathValues(IReadOnlyDictionary<string, string> valuesByPath, IReadOnlyList<string> gamePaths)
+    {
+        List<string> values = [];
+        foreach (var gamePath in gamePaths)
+        {
+            if (!valuesByPath.TryGetValue(gamePath, out var value) || string.IsNullOrEmpty(value))
+            {
+                continue;
+            }
+
+            if (!values.Contains(value, StringComparer.OrdinalIgnoreCase))
+            {
+                values.Add(value);
+            }
+        }
+
+        return values;
+    }
+
+    private static Dictionary<string, string> NormalizePathMap(IReadOnlyDictionary<string, string> paths)
+    {
+        Dictionary<string, string> normalized = new(StringComparer.OrdinalIgnoreCase);
+        foreach (var path in paths)
+        {
+            var normalizedKey = NormalizeGamePath(path.Key);
+            if (string.IsNullOrEmpty(normalizedKey))
+            {
+                continue;
+            }
+
+            if (!normalized.TryGetValue(normalizedKey, out var existingValue) || string.IsNullOrEmpty(existingValue))
+            {
+                normalized[normalizedKey] = path.Value;
+            }
+        }
+
+        return normalized;
+    }
+
+    private static string NormalizeGamePath(string gamePath)
+    {
+        if (string.IsNullOrWhiteSpace(gamePath))
+        {
+            return string.Empty;
+        }
+
+        var normalized = gamePath.Trim().Replace('\\', '/');
+        while (normalized.Contains("//", StringComparison.Ordinal))
+        {
+            normalized = normalized.Replace("//", "/", StringComparison.Ordinal);
+        }
+
+        normalized = normalized.Trim('/');
+        return normalized;
+    }
+
+    private static string GetDeliveredSourceKey(FileReplacementData replacement)
+    {
+        var hash = NormalizeHash(replacement.Hash);
+        if (!string.IsNullOrEmpty(hash))
+        {
+            return hash;
+        }
+
+        var fileSwapPath = replacement.FileSwapPath?.Trim();
+        if (!string.IsNullOrEmpty(fileSwapPath))
+        {
+            return fileSwapPath;
+        }
+
+        return "-";
+    }
+
+    private static string NormalizeHash(string? hash)
+    {
+        if (string.IsNullOrWhiteSpace(hash))
+        {
+            return string.Empty;
+        }
+
+        var normalized = hash.Trim();
+        if (normalized.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+        {
+            normalized = normalized[2..];
+        }
+
+        normalized = normalized.Replace("-", string.Empty, StringComparison.Ordinal)
+            .Replace(" ", string.Empty, StringComparison.Ordinal);
+
+        return normalized.ToUpperInvariant();
+    }
+
+    private static void DrawDeliveredSourcesStacked(IReadOnlyList<string> sourcePaths, int maxLength)
+    {
+        if (sourcePaths.Count == 0)
+        {
+            ImGui.TextUnformatted("-");
+            return;
+        }
+
+        for (var index = 0; index < sourcePaths.Count; index++)
+        {
+            var sourcePath = sourcePaths[index];
+            var trimmed = TrimPath(sourcePath, maxLength);
+
+            if (sourcePaths.Count > 1)
+            {
+                var color = GetDeliveredSourceColor(index);
+                UiSharedService.ColorText($"[{index + 1}] {trimmed}", color);
+            }
+            else
+            {
+                ImGui.TextUnformatted(trimmed);
+            }
+
+            if (ImGui.IsItemHovered())
+            {
+                UiSharedService.AttachToolTip(sourcePath);
+            }
+        }
+    }
+
+    private static void DrawStackedValues(IReadOnlyList<string> values, int maxLength)
+    {
+        if (values.Count == 0)
+        {
+            ImGui.TextUnformatted("-");
+            return;
+        }
+
+        for (var index = 0; index < values.Count; index++)
+        {
+            var value = values[index];
+            var trimmed = TrimPath(value, maxLength);
+            ImGui.TextUnformatted(trimmed);
+            if (ImGui.IsItemHovered())
+            {
+                UiSharedService.AttachToolTip(value);
+            }
+        }
+    }
+
+    private static string TrimPath(string path, int maxLength)
+    {
+        if (string.IsNullOrEmpty(path))
+        {
+            return "-";
+        }
+
+        return path.Length > maxLength ? "..." + path[^Math.Max(1, maxLength - 3)..] : path;
+    }
+
+    private static Vector4 GetDeliveredSourceColor(int index)
+    {
+        return (index % 6) switch
+        {
+            0 => new Vector4(0.52f, 0.85f, 1.00f, 1.00f),
+            1 => new Vector4(0.65f, 1.00f, 0.68f, 1.00f),
+            2 => new Vector4(1.00f, 0.85f, 0.55f, 1.00f),
+            3 => new Vector4(1.00f, 0.64f, 0.78f, 1.00f),
+            4 => new Vector4(0.90f, 0.76f, 1.00f, 1.00f),
+            _ => new Vector4(0.75f, 0.90f, 0.90f, 1.00f),
+        };
     }
 
     private static void DrawTrimmedPathWithTooltip(string path, int maxLength)
@@ -242,7 +502,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             return;
         }
 
-        var trimmed = path.Length > maxLength ? "..." + path[^Math.Max(1, maxLength - 3)..] : path;
+        var trimmed = TrimPath(path, maxLength);
         ImGui.TextUnformatted(trimmed);
         if (ImGui.IsItemHovered())
         {
@@ -1179,7 +1439,18 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         public string LastAction { get; }
     }
 
-    private sealed record DeliveredPathState(string SourcePath, bool IsActive);
+    private sealed class DeliveredHashGroupState
+    {
+        public DeliveredHashGroupState(string groupKey)
+        {
+            GroupKey = groupKey;
+        }
+
+        public string GroupKey { get; }
+        public List<string> GamePaths { get; } = [];
+        public List<string> SourcePaths { get; } = [];
+        public bool IsActive { get; set; }
+    }
     
     private bool _showLogPopup = false;
     
