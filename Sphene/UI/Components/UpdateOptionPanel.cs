@@ -20,9 +20,7 @@ public static class UpdateOptionPanel
     private static readonly ReleaseDefinition[] Releases =
     [
         new("v.1.1.11.1071", [Link.SyncIncomingWithoutRedraw, Link.SyncOutgoingBatching]),
-        new("v.1.1.12.50", [Link.ShowTestBuildUpdates]),
-        new("v.1.1.12.88", [Link.DisableRedraws]),
-        new("v.1.1.12.217", [Link.FilterCharacterLegacyShpkOutgoing])
+        new("v.1.1.13", [Link.FilterCharacterLegacyShpkOutgoing, Link.ShowTestBuildUpdates, Link.DisableRedraws])
     ];
 
     private static readonly IReadOnlyDictionary<Link, string> LinkTitles = new Dictionary<Link, string>
@@ -31,7 +29,7 @@ public static class UpdateOptionPanel
         [Link.SyncOutgoingBatching] = "Sync: Outgoing Batching (Default: Disabled)",
         [Link.ShowTestBuildUpdates] = "Notifications: Testbuild Update Hints (Default: Disabled)",
         [Link.DisableRedraws] = "Sync: Disable Redraws (Default: Disabled)",
-        [Link.FilterCharacterLegacyShpkOutgoing] = "Sync: Filter characterlegacy.shpk in Sync Data (Default: Enabled"
+        [Link.FilterCharacterLegacyShpkOutgoing] = "Sync: Filter characterlegacy.shpk in Sync Data (Default: Enabled)"
     };
 
     private static readonly IReadOnlyDictionary<Link, Action<SpheneConfigService, UiSharedService, SpheneMediator, float>> LinkDrawers
