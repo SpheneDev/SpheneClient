@@ -35,6 +35,7 @@ public sealed class IpcCallerPenumbra : DisposableMediatorSubscriberBase, IIpcCa
     }
 
     private CancellationTokenSource _debouncedRedrawCts = new();
+    private readonly ConcurrentDictionary<int, Guid> _assignedTempCollectionByObjectIndex = new();
 
     private readonly EventSubscriber _penumbraDispose;
     private readonly EventSubscriber<nint, string, string> _penumbraGameObjectResourcePathResolved;
@@ -165,10 +166,16 @@ public sealed class IpcCallerPenumbra : DisposableMediatorSubscriberBase, IIpcCa
     {
         if (!APIAvailable) return;
 
+        if (_assignedTempCollectionByObjectIndex.TryGetValue(idx, out var existing) && existing == collName)
+        {
+            return;
+        }
+
         await _dalamudUtil.RunOnFrameworkThread(() =>
         {
             var retAssign = _penumbraAssignTemporaryCollection.Invoke(collName, idx, forceAssignment: true);
             logger.LogTrace("Assigning Temp Collection {collName} to index {idx}, Success: {ret}", collName, idx, retAssign);
+            _assignedTempCollectionByObjectIndex[idx] = collName;
             return collName;
         }).ConfigureAwait(false);
     }
@@ -364,12 +371,14 @@ public sealed class IpcCallerPenumbra : DisposableMediatorSubscriberBase, IIpcCa
     private void PenumbraDispose()
     {
         _redrawManager.Cancel();
+        _assignedTempCollectionByObjectIndex.Clear();
         _spheneMediator.Publish(new PenumbraDisposedMessage());
     }
 
     private void PenumbraInit()
     {
         APIAvailable = true;
+        _assignedTempCollectionByObjectIndex.Clear();
         ModDirectory = _penumbraResolveModDir.Invoke();
         _spheneMediator.Publish(new PenumbraInitializedMessage());
         if (!_configService.Current.DisableRedraws)

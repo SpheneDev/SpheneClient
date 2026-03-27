@@ -54,6 +54,9 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
     private bool _forceApplyMods = false;
     private bool _isVisible;
     private Guid _penumbraCollection;
+    private Guid _lastAssignedPenumbraCollection;
+    private int? _lastAssignedPenumbraObjectIndex;
+    private nint _lastAssignedPenumbraCharacterAddress = nint.Zero;
     private bool _redrawOnNextApplication = false;
     private bool _forceRedrawAfterCurrentApplication = false;
     private string? _inProgressPenumbraHash;
@@ -108,6 +111,9 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
 
         var collectionToRemove = _penumbraCollection;
         _penumbraCollection = Guid.Empty;
+        _lastAssignedPenumbraCollection = Guid.Empty;
+        _lastAssignedPenumbraObjectIndex = null;
+        _lastAssignedPenumbraCharacterAddress = nint.Zero;
         var applicationId = Guid.NewGuid();
         _ = Task.Run(async () =>
         {
@@ -260,16 +266,58 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             return;
         }
 
-        if (AreLoadedCollectionPathsEqual(collectionPaths))
+        var currentAddress = _charaHandler.Address;
+        var objIndex = await _dalamudUtil.RunOnFrameworkThread(() => _charaHandler!.GetGameObject()!.ObjectIndex).ConfigureAwait(false);
+        var needsAssignment = _lastAssignedPenumbraCollection != _penumbraCollection
+            || _lastAssignedPenumbraObjectIndex != objIndex
+            || _lastAssignedPenumbraCharacterAddress != currentAddress;
+        if (needsAssignment)
+        {
+            await _ipcManager.Penumbra.AssignTemporaryCollectionAsync(Logger, _penumbraCollection, objIndex).ConfigureAwait(false);
+            _lastAssignedPenumbraCollection = _penumbraCollection;
+            _lastAssignedPenumbraObjectIndex = objIndex;
+            _lastAssignedPenumbraCharacterAddress = currentAddress;
+        }
+
+        if (!AreLoadedCollectionPathsEqual(collectionPaths))
+        {
+            await _ipcManager.Penumbra.SetTemporaryModsAsync(Logger, applicationId, _penumbraCollection, collectionPaths).ConfigureAwait(false);
+            ReplaceLastLoadedCollectionPaths(collectionPaths);
+            UpdateLastAppliedDataBytes(collectionPaths);
+        }
+    }
+
+    private async Task EnsureTemporaryCollectionAssignedAsync(CancellationToken token)
+    {
+        if (token.IsCancellationRequested)
         {
             return;
         }
 
+        if (_penumbraCollection == Guid.Empty || !_ipcManager.Penumbra.APIAvailable)
+        {
+            return;
+        }
+
+        if (_charaHandler == null || _charaHandler.Address == nint.Zero || !IsVisible)
+        {
+            return;
+        }
+
+        var currentAddress = _charaHandler.Address;
         var objIndex = await _dalamudUtil.RunOnFrameworkThread(() => _charaHandler!.GetGameObject()!.ObjectIndex).ConfigureAwait(false);
+        var needsAssignment = _lastAssignedPenumbraCollection != _penumbraCollection
+            || _lastAssignedPenumbraObjectIndex != objIndex
+            || _lastAssignedPenumbraCharacterAddress != currentAddress;
+        if (!needsAssignment)
+        {
+            return;
+        }
+
         await _ipcManager.Penumbra.AssignTemporaryCollectionAsync(Logger, _penumbraCollection, objIndex).ConfigureAwait(false);
-        await _ipcManager.Penumbra.SetTemporaryModsAsync(Logger, applicationId, _penumbraCollection, collectionPaths).ConfigureAwait(false);
-        ReplaceLastLoadedCollectionPaths(collectionPaths);
-        UpdateLastAppliedDataBytes(collectionPaths);
+        _lastAssignedPenumbraCollection = _penumbraCollection;
+        _lastAssignedPenumbraObjectIndex = objIndex;
+        _lastAssignedPenumbraCharacterAddress = currentAddress;
     }
 
     public PairHandler(ILogger<PairHandler> logger, Pair pair,
@@ -1746,16 +1794,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                             try
                             {
                                 await EnsurePenumbraCollectionAsync().ConfigureAwait(false);
-                                if (_penumbraCollection == Guid.Empty || _charaHandler == null || _charaHandler.Address == nint.Zero)
-                                {
-                                    return;
-                                }
-
-                                var playerIndex = await _dalamudUtil.RunOnFrameworkThread(() => _charaHandler.GetGameObject()?.ObjectIndex).ConfigureAwait(false);
-                                if (playerIndex.HasValue)
-                                {
-                                    await _ipcManager.Penumbra.AssignTemporaryCollectionAsync(Logger, _penumbraCollection, playerIndex.Value).ConfigureAwait(false);
-                                }
+                                await EnsureTemporaryCollectionAssignedAsync(CancellationToken.None).ConfigureAwait(false);
                             }
                             catch (Exception ex)
                             {
@@ -1862,7 +1901,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
 
         Mediator.Subscribe<BypassEmoteReadyMessage>(this, msg => { });
 
-        _ipcManager.Penumbra.AssignTemporaryCollectionAsync(Logger, _penumbraCollection, _charaHandler.GetGameObject()!.ObjectIndex).GetAwaiter().GetResult();
+        EnsureTemporaryCollectionAssignedAsync(CancellationToken.None).GetAwaiter().GetResult();
     }
 
     private void TryQueueMinionReapply()
