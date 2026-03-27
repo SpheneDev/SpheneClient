@@ -161,6 +161,117 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         return activeByGamePath;
     }
 
+    private static string NormalizeGamePath(string? gamePath)
+    {
+        if (string.IsNullOrWhiteSpace(gamePath))
+        {
+            return string.Empty;
+        }
+
+        var normalized = gamePath.Trim().Replace('\\', '/');
+        while (normalized.Contains("//", StringComparison.Ordinal))
+        {
+            normalized = normalized.Replace("//", "/", StringComparison.Ordinal);
+        }
+
+        return normalized.Trim('/');
+    }
+
+    private static Dictionary<string, string> BuildCollectionPaths(Dictionary<(string GamePath, string? Hash), string> moddedPaths)
+    {
+        Dictionary<string, string> collectionPaths = new(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in moddedPaths)
+        {
+            var normalizedGamePath = NormalizeGamePath(entry.Key.GamePath);
+            if (string.IsNullOrEmpty(normalizedGamePath) || string.IsNullOrEmpty(entry.Value))
+            {
+                continue;
+            }
+
+            collectionPaths[normalizedGamePath] = entry.Value;
+        }
+
+        return collectionPaths;
+    }
+
+    private bool AreLoadedCollectionPathsEqual(IReadOnlyDictionary<string, string> desiredPaths)
+    {
+        if (_lastLoadedCollectionPaths.Count != desiredPaths.Count)
+        {
+            return false;
+        }
+
+        foreach (var desired in desiredPaths)
+        {
+            if (!_lastLoadedCollectionPaths.TryGetValue(desired.Key, out var existingValue))
+            {
+                return false;
+            }
+
+            if (!string.Equals(existingValue, desired.Value, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private void ReplaceLastLoadedCollectionPaths(IReadOnlyDictionary<string, string> collectionPaths)
+    {
+        _lastLoadedCollectionPaths.Clear();
+        foreach (var item in collectionPaths)
+        {
+            if (!string.IsNullOrEmpty(item.Key) && !string.IsNullOrEmpty(item.Value))
+            {
+                _lastLoadedCollectionPaths[item.Key] = item.Value;
+            }
+        }
+    }
+
+    private void UpdateLastAppliedDataBytes(Dictionary<string, string> collectionPaths)
+    {
+        LastAppliedDataBytes = -1;
+        foreach (var path in collectionPaths.Values.Distinct(StringComparer.OrdinalIgnoreCase).Select(v => new FileInfo(v)).Where(p => p.Exists))
+        {
+            if (LastAppliedDataBytes == -1)
+            {
+                LastAppliedDataBytes = 0;
+            }
+
+            LastAppliedDataBytes += path.Length;
+        }
+    }
+
+    private async Task EnsureTemporaryCollectionPathsAppliedAsync(Guid applicationId, Dictionary<string, string> collectionPaths, CancellationToken token)
+    {
+        if (token.IsCancellationRequested)
+        {
+            return;
+        }
+
+        if (_penumbraCollection == Guid.Empty || !_ipcManager.Penumbra.APIAvailable)
+        {
+            return;
+        }
+
+        if (_charaHandler == null || _charaHandler.Address == nint.Zero || !IsVisible)
+        {
+            return;
+        }
+
+        if (AreLoadedCollectionPathsEqual(collectionPaths))
+        {
+            return;
+        }
+
+        var objIndex = await _dalamudUtil.RunOnFrameworkThread(() => _charaHandler!.GetGameObject()!.ObjectIndex).ConfigureAwait(false);
+        await _ipcManager.Penumbra.AssignTemporaryCollectionAsync(Logger, _penumbraCollection, objIndex).ConfigureAwait(false);
+        await _ipcManager.Penumbra.SetTemporaryModsAsync(Logger, applicationId, _penumbraCollection, collectionPaths).ConfigureAwait(false);
+        ReplaceLastLoadedCollectionPaths(collectionPaths);
+        UpdateLastAppliedDataBytes(collectionPaths);
+    }
+
     public PairHandler(ILogger<PairHandler> logger, Pair pair,
         GameObjectHandlerFactory gameObjectHandlerFactory,
         IpcManager ipcManager, FileDownloadManager transferManager,
@@ -359,6 +470,17 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
 
     internal bool IsCharacterDataAppliedForCurrentCharacter(CharacterData data)
     {
+        if (_cachedData != null
+            && string.Equals(data.PenumbraHash.Value, _lastSuccessfullyAppliedPenumbraHash, StringComparison.Ordinal)
+            && string.Equals(data.GlamourerHash.Value, _lastSuccessfullyAppliedGlamourerHash, StringComparison.Ordinal)
+            && AreCustomizePlusEqual(_cachedData, data)
+            && string.Equals(_cachedData.HeelsData, data.HeelsData, StringComparison.Ordinal)
+            && string.Equals(_cachedData.HonorificData, data.HonorificData, StringComparison.Ordinal)
+            && string.Equals(_cachedData.MoodlesData, data.MoodlesData, StringComparison.Ordinal)
+            && string.Equals(_cachedData.PetNamesData, data.PetNamesData, StringComparison.Ordinal))
+        {
+            return true;
+        }
         if (_charaHandler == null || _charaHandler.Address == nint.Zero)
         {
             return false;
@@ -397,6 +519,24 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         }
 
         return string.Equals(_inProgressPipelineDataHash, dataHash, StringComparison.Ordinal);
+    }
+
+    private static bool AreCustomizePlusEqual(CharacterData a, CharacterData b)
+    {
+        if (a.CustomizePlusData.Count != b.CustomizePlusData.Count)
+        {
+            return false;
+        }
+
+        foreach (var kv in a.CustomizePlusData)
+        {
+            if (!b.CustomizePlusData.TryGetValue(kv.Key, out var other) || !string.Equals(kv.Value, other, StringComparison.Ordinal))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private void CancelApplicationTokenSource(bool dispose)
@@ -833,40 +973,6 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                         break;
 
                     case PlayerChanges.BypassEmote:
-                        if (!string.IsNullOrEmpty(charaData.BypassEmoteData))
-                        {
-                            var data = charaData.BypassEmoteData;
-                            var (cleanData, hasTimestamp, _) = ParseBypassEmoteEnvelope(data);
-                            Logger.LogDebug("BypassEmote slow-path payload parsed. rawLen={rawLen}, cleanLen={cleanLen}, hasTimestamp={hasTimestamp}, kind={kind}",
-                                data.Length, cleanData.Length, hasTimestamp, changes.Key);
-
-                            // Prevent double application if Fast Path already applied it
-                            // We compare the FULL data string (including timestamp)
-                            if (string.Equals(data, _lastAppliedBypassEmoteData, StringComparison.Ordinal))
-                            {
-                                 // If it has a timestamp, it's a unique event ID -> strict equality means it's a duplicate packet -> Skip
-                                 if (hasTimestamp)
-                                 {
-                                     Logger.LogDebug("Skipping BypassEmote application (already applied via Fast Path - unique event): {data}", data);
-                                     break;
-                                 }
-                                 
-                                 // If no timestamp, use timeout
-                                 if (handler.Address == _lastAppliedBypassEmoteAddress
-                                     && (DateTime.UtcNow - _lastAppliedBypassEmoteTime).TotalSeconds < 2.0)
-                                 {
-                                     Logger.LogDebug("Skipping BypassEmote application (already applied via Fast Path - cooldown): {data}", data);
-                                     break;
-                                 }
-                            }
-
-                            await _ipcManager.BypassEmote.SetStateForCharacterAsync(handler.Address, cleanData).ConfigureAwait(false);
-                            Logger.LogDebug("BypassEmote slow-path apply completed. addr={addr}, cleanLen={cleanLen}, apiAvailable={apiAvailable}, kind={kind}",
-                                handler.Address, cleanData.Length, _ipcManager.BypassEmote.APIAvailable, changes.Key);
-                            _lastAppliedBypassEmoteData = data;
-                            _lastAppliedBypassEmoteAddress = handler.Address;
-                            _lastAppliedBypassEmoteTime = DateTime.UtcNow;
-                        }
                         break;
 
                     case PlayerChanges.ForcedRedraw:
@@ -1245,6 +1351,8 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             Logger.LogDebug("{tag} Modded paths calculated: user={user} hash={hash} missingFiles={missing} paths={paths}",
                 SyncProgressTag, Pair.UserData.AliasOrUID, charaData.DataHash?.Value ?? "null", toDownloadReplacements.Count, moddedPaths.Count);
 
+            await EnsureTemporaryCollectionPathsAppliedAsync(applicationBase, BuildCollectionPaths(moddedPaths), downloadToken).ConfigureAwait(false);
+
             while (toDownloadReplacements.Count > 0 && attempts++ <= 10 && !downloadToken.IsCancellationRequested)
             {
                 if (_pairDownloadTask != null && !_pairDownloadTask.IsCompleted)
@@ -1280,6 +1388,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                 }
 
                 toDownloadReplacements = TryCalculateModdedDictionary(applicationBase, charaData, out moddedPaths, downloadToken);
+                await EnsureTemporaryCollectionPathsAppliedAsync(applicationBase, BuildCollectionPaths(moddedPaths), downloadToken).ConfigureAwait(false);
 
                 if (toDownloadReplacements.TrueForAll(c => _downloadManager.ForbiddenTransfers.Exists(f => string.Equals(f.Hash, c.Hash, StringComparison.Ordinal))))
                 {
@@ -1291,6 +1400,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
 
             if (toDownloadReplacements.Count > 0)
             {
+                await EnsureTemporaryCollectionPathsAppliedAsync(applicationBase, BuildCollectionPaths(moddedPaths), downloadToken).ConfigureAwait(false);
                 Logger.LogWarning("[BASE-{appBase}] Missing {count} files after download attempts for player {name}, {kind}", applicationBase, toDownloadReplacements.Count, PlayerName, updatedData);
                 Logger.LogDebug("{tag} Download failed: user={user} hash={hash} missingFiles={count}",
                     SyncProgressTag, Pair.UserData.AliasOrUID, charaData.DataHash?.Value ?? "null", toDownloadReplacements.Count);
@@ -1394,10 +1504,10 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
 
         Logger.LogDebug("{tag} Apply start: user={user} hash={hash} applicationBase={appBase}",
             SyncProgressTag, Pair.UserData.AliasOrUID, charaData.DataHash?.Value ?? "null", applicationBase);
-        _applicationTask = ApplyCharacterDataAsync(applicationBase, charaData, updatedData, updateModdedPaths, updateManip, moddedPaths, forceRedrawIfDisabled, token);
+        _applicationTask = ApplyCharacterDataAsync(applicationBase, charaData, updatedData, updateManip, moddedPaths, forceRedrawIfDisabled, token);
     }
 
-    private async Task ApplyCharacterDataAsync(Guid applicationBase, CharacterData charaData, Dictionary<ObjectKind, HashSet<PlayerChanges>> updatedData, bool updateModdedPaths, bool updateManip,
+    private async Task ApplyCharacterDataAsync(Guid applicationBase, CharacterData charaData, Dictionary<ObjectKind, HashSet<PlayerChanges>> updatedData, bool updateManip,
         Dictionary<(string GamePath, string? Hash), string> moddedPaths, bool forceRedrawIfDisabled, CancellationToken token)
     {
         try
@@ -1415,30 +1525,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             // 1. updateModdedPaths is true (new mods or changes detected)
             // 2. OR there are paths in _lastLoadedCollectionPaths that are not in moddedPaths
             //    (mods were removed and need to be cleared from collection)
-            var collectionPaths = moddedPaths.ToDictionary(k => k.Key.GamePath, k => k.Value, StringComparer.Ordinal);
-            bool hasStalePaths = _lastLoadedCollectionPaths.Any(loadedPath =>
-                !collectionPaths.ContainsKey(loadedPath.Key));
-
-            if (updateModdedPaths || hasStalePaths)
-            {
-                // ensure collection is set
-                var objIndex = await _dalamudUtil.RunOnFrameworkThread(() => _charaHandler!.GetGameObject()!.ObjectIndex).ConfigureAwait(false);
-                await _ipcManager.Penumbra.AssignTemporaryCollectionAsync(Logger, _penumbraCollection, objIndex).ConfigureAwait(false);
-
-                await _ipcManager.Penumbra.SetTemporaryModsAsync(Logger, _applicationId, _penumbraCollection, collectionPaths).ConfigureAwait(false);
-                _lastLoadedCollectionPaths.Clear();
-                foreach (var item in collectionPaths)
-                {
-                    _lastLoadedCollectionPaths[item.Key] = item.Value;
-                }
-                LastAppliedDataBytes = -1;
-                foreach (var path in moddedPaths.Values.Distinct(StringComparer.OrdinalIgnoreCase).Select(v => new FileInfo(v)).Where(p => p.Exists))
-                {
-                    if (LastAppliedDataBytes == -1) LastAppliedDataBytes = 0;
-
-                    LastAppliedDataBytes += path.Length;
-                }
-            }
+            await EnsureTemporaryCollectionPathsAppliedAsync(_applicationId, BuildCollectionPaths(moddedPaths), token).ConfigureAwait(false);
 
             if (updateManip)
             {
@@ -1773,15 +1860,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             _ = _ipcManager.PetNames.SetPlayerData(PlayerCharacter, _cachedData.PetNamesData).ConfigureAwait(false);
         });
 
-        Mediator.Subscribe<BypassEmoteReadyMessage>(this, msg =>
-        {
-            if (string.IsNullOrEmpty(_cachedData?.BypassEmoteData)) return;
-            Logger.LogTrace("Reapplying BypassEmote data for {this}", this);
-            var (cleanData, _, _) = ParseBypassEmoteEnvelope(_cachedData.BypassEmoteData);
-            Logger.LogDebug("BypassEmote ready reapply. addr={addr}, rawLen={rawLen}, cleanLen={cleanLen}, apiAvailable={apiAvailable}",
-                PlayerCharacter, _cachedData.BypassEmoteData.Length, cleanData.Length, _ipcManager.BypassEmote.APIAvailable);
-            _ = _ipcManager.BypassEmote.SetStateForCharacterAsync(PlayerCharacter, cleanData).ConfigureAwait(false);
-        });
+        Mediator.Subscribe<BypassEmoteReadyMessage>(this, msg => { });
 
         _ipcManager.Penumbra.AssignTemporaryCollectionAsync(Logger, _penumbraCollection, _charaHandler.GetGameObject()!.ObjectIndex).GetAwaiter().GetResult();
     }

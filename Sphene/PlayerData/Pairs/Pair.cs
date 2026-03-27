@@ -430,6 +430,7 @@ public class Pair : DisposableMediatorSubscriberBase
             PreviousReceivedCharacterData = LastReceivedCharacterData;
             PreviousReceivedCharacterDataHash = previousHash;
             LastReceivedCharacterDataChangeTime = now;
+            PrunePendingAcknowledgmentQueue(newHash);
         }
 
         LastReceivedCharacterData = data.CharaData;
@@ -441,6 +442,45 @@ public class Pair : DisposableMediatorSubscriberBase
             string.IsNullOrEmpty(newHash) ? "NONE" : newHash[..Math.Min(8, newHash.Length)],
             string.IsNullOrEmpty(previousHash) ? "NONE" : previousHash[..Math.Min(8, previousHash.Length)],
             !string.Equals(previousHash, newHash, StringComparison.Ordinal));
+    }
+
+    private void PrunePendingAcknowledgmentQueue(string? latestHash)
+    {
+        if (_pendingAcknowledgmentQueue.IsEmpty)
+        {
+            return;
+        }
+
+        var dropped = 0;
+        var kept = new List<OnlineUserCharaDataDto>();
+
+        while (_pendingAcknowledgmentQueue.TryDequeue(out var pending))
+        {
+            if (!string.IsNullOrEmpty(latestHash) && string.Equals(pending.DataHash, latestHash, StringComparison.Ordinal))
+            {
+                kept.Add(pending);
+            }
+            else
+            {
+                dropped++;
+                ResetAcknowledgmentValidationRetry(pending.DataHash);
+            }
+        }
+
+        foreach (var item in kept)
+        {
+            _pendingAcknowledgmentQueue.Enqueue(item);
+        }
+
+        if (dropped > 0)
+        {
+            Logger.LogDebug("{tag} Ack queue pruned: user={user} kept={keptCount} dropped={droppedCount} latestHash={hash}",
+                SyncProgressTag,
+                UserData.AliasOrUID,
+                kept.Count,
+                dropped,
+                string.IsNullOrEmpty(latestHash) ? "NONE" : latestHash[..Math.Min(8, latestHash.Length)]);
+        }
     }
 
     public void RestoreReceivedCharacterDataCache(CharacterData data, DateTimeOffset cachedAt)
@@ -978,6 +1018,14 @@ public class Pair : DisposableMediatorSubscriberBase
                     }
                     else
                     {
+                        var latestHash = LastReceivedCharacterDataHash;
+                        if (!string.IsNullOrEmpty(latestHash)
+                            && !string.Equals(acknowledgmentData.DataHash, latestHash, StringComparison.Ordinal))
+                        {
+                            ResetAcknowledgmentValidationRetry(acknowledgmentData.DataHash);
+                            continue;
+                        }
+
                         remaining.Add(acknowledgmentData);
                     }
                 }

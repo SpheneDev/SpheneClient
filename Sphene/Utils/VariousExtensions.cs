@@ -208,12 +208,7 @@ public static class VariousExtensions
                 charaDataToUpdate[objectKind].Add(PlayerChanges.PetNames);
             }
 
-            bool bypassEmoteDataDifferent = !string.Equals(oldData.BypassEmoteData, newData.BypassEmoteData, StringComparison.Ordinal);
-            if (bypassEmoteDataDifferent || (forceApplyCustomization && !string.IsNullOrEmpty(newData.BypassEmoteData)))
-            {
-                logger.LogDebug("[BASE-{appBase}] Updating {object}/{kind} (Diff BypassEmote data) => {change}", applicationBase, cachedPlayer, objectKind, PlayerChanges.BypassEmote);
-                charaDataToUpdate[objectKind].Add(PlayerChanges.BypassEmote);
-            }
+            _ = 0;
         }
 
         foreach (KeyValuePair<ObjectKind, HashSet<PlayerChanges>> data in charaDataToUpdate.ToList())
