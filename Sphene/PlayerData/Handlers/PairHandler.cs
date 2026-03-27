@@ -1411,13 +1411,20 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
 
             token.ThrowIfCancellationRequested();
 
-            if (updateModdedPaths)
+            // Check if we need to update the collection:
+            // 1. updateModdedPaths is true (new mods or changes detected)
+            // 2. OR there are paths in _lastLoadedCollectionPaths that are not in moddedPaths
+            //    (mods were removed and need to be cleared from collection)
+            var collectionPaths = moddedPaths.ToDictionary(k => k.Key.GamePath, k => k.Value, StringComparer.Ordinal);
+            bool hasStalePaths = _lastLoadedCollectionPaths.Any(loadedPath =>
+                !collectionPaths.ContainsKey(loadedPath.Key));
+
+            if (updateModdedPaths || hasStalePaths)
             {
                 // ensure collection is set
                 var objIndex = await _dalamudUtil.RunOnFrameworkThread(() => _charaHandler!.GetGameObject()!.ObjectIndex).ConfigureAwait(false);
                 await _ipcManager.Penumbra.AssignTemporaryCollectionAsync(Logger, _penumbraCollection, objIndex).ConfigureAwait(false);
 
-                var collectionPaths = moddedPaths.ToDictionary(k => k.Key.GamePath, k => k.Value, StringComparer.Ordinal);
                 await _ipcManager.Penumbra.SetTemporaryModsAsync(Logger, _applicationId, _penumbraCollection, collectionPaths).ConfigureAwait(false);
                 _lastLoadedCollectionPaths.Clear();
                 foreach (var item in collectionPaths)
