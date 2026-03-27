@@ -7,6 +7,7 @@ using Sphene.PlayerData.Handlers;
 using Sphene.Services;
 using Sphene.Services.Mediator;
 using Microsoft.Extensions.Logging;
+using System.Diagnostics;
 
 namespace Sphene.Interop.Ipc;
 
@@ -107,27 +108,38 @@ public sealed class IpcCallerGlamourer : DisposableMediatorSubscriberBase, IIpcC
     {
         if (!APIAvailable || string.IsNullOrEmpty(customization) || _dalamudUtil.IsZoning) return;
 
+        var semaphoreWaitStart = Stopwatch.GetTimestamp();
         await _redrawManager.RedrawSemaphore.WaitAsync(token).ConfigureAwait(false);
+        var semaphoreWaitMs = (Stopwatch.GetTimestamp() - semaphoreWaitStart) * 1000.0 / Stopwatch.Frequency;
+        var applyInvokeMs = 0d;
+        var totalStart = Stopwatch.GetTimestamp();
 
         try
         {
-
             await _redrawManager.PenumbraRedrawInternalAsync(logger, handler, applicationId, (chara) =>
             {
                 try
                 {
                     logger.LogDebug("[{appid}] Calling on IPC: GlamourerApplyAll", applicationId);
+                    var applyStart = Stopwatch.GetTimestamp();
                     _glamourerApplyAll!.Invoke(customization, chara.ObjectIndex, LockCode);
+                    applyInvokeMs = (Stopwatch.GetTimestamp() - applyStart) * 1000.0 / Stopwatch.Frequency;
                 }
                 catch (Exception ex)
                 {
                     logger.LogWarning(ex, "[{appid}] Failed to apply Glamourer data", applicationId);
                 }
-            }, token).ConfigureAwait(false);
+            }, token, waitForRedrawEvent: false).ConfigureAwait(false);
         }
         finally
         {
             _redrawManager.RedrawSemaphore.Release();
+            var totalMs = (Stopwatch.GetTimestamp() - totalStart) * 1000.0 / Stopwatch.Frequency;
+            if (totalMs >= 500)
+            {
+                logger.LogDebug("[{appid}] Glamourer apply timing: kind={kind} addr={addr} totalMs={totalMs:F0} semaphoreWaitMs={semaphoreWaitMs:F0} ipcInvokeMs={ipcInvokeMs:F0} payloadLen={payloadLen}",
+                    applicationId, handler.ObjectKind, handler.Address, totalMs, semaphoreWaitMs, applyInvokeMs, customization.Length);
+            }
         }
     }
 

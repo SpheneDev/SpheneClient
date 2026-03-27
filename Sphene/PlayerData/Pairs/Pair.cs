@@ -1054,11 +1054,6 @@ public class Pair : DisposableMediatorSubscriberBase
                             if (hasRetryBudget)
                             {
                                 _pendingAcknowledgmentQueue.Enqueue(matchingAcknowledgment);
-                                if (message.Success)
-                                {
-                                    ScheduleApplyRetry(increment: true);
-                                }
-
                                 Logger.LogDebug("{tag} Ack deferred: user={user} hash={hash} appSuccess={appSuccess} verification={verification} attempt={attempt}/{maxAttempts}",
                                     SyncProgressTag,
                                     UserData.AliasOrUID,
@@ -1232,13 +1227,49 @@ public class Pair : DisposableMediatorSubscriberBase
         var loadedPaths = NormalizePathMap(GetLoadedCollectionPathsSnapshot());
         var activePaths = NormalizePathMap(await GetCurrentPenumbraActivePathsByGamePathAsync().ConfigureAwait(false));
 
+        static bool ShouldIgnoreForVerification(string path)
+        {
+            if (string.IsNullOrEmpty(path))
+            {
+                return true;
+            }
+            if (path.EndsWith(".phyb", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+            return false;
+        }
+
         HashSet<string> allPaths = new(StringComparer.OrdinalIgnoreCase);
         foreach (var path in deliveredActiveByPath.Keys) allPaths.Add(path);
         foreach (var path in loadedPaths.Keys) allPaths.Add(path);
         foreach (var path in activePaths.Keys) allPaths.Add(path);
 
+        var ignoredPhybActiveNotReported = 0;
+        List<string> ignoredPhybExamples = new(3);
+
         foreach (var path in allPaths)
         {
+            if (ShouldIgnoreForVerification(path))
+            {
+                if (path.EndsWith(".phyb", StringComparison.OrdinalIgnoreCase))
+                {
+                    deliveredActiveByPath.TryGetValue(path, out var ignoredDataFlagActive);
+                    activePaths.TryGetValue(path, out var ignoredActiveSource);
+                    loadedPaths.TryGetValue(path, out var ignoredLoadedSource);
+                    var ignoredPenumbraActive = !string.IsNullOrEmpty(ignoredActiveSource);
+                    var ignoredLoadedInTemp = !string.IsNullOrEmpty(ignoredLoadedSource);
+                    if (ignoredDataFlagActive && !ignoredPenumbraActive)
+                    {
+                        ignoredPhybActiveNotReported++;
+                        if (ignoredPhybExamples.Count < 3)
+                        {
+                            ignoredPhybExamples.Add($"path={path} loadedInTemp={ignoredLoadedInTemp}");
+                        }
+                    }
+                }
+                continue;
+            }
             var hasDelivered = deliveredActiveByPath.TryGetValue(path, out var isDataFlagActive);
             activePaths.TryGetValue(path, out var activeSource);
             var isPenumbraActive = !string.IsNullOrEmpty(activeSource);
@@ -1257,6 +1288,12 @@ public class Pair : DisposableMediatorSubscriberBase
                     isDataFlagActive);
                 return false;
             }
+        }
+
+        if (ignoredPhybActiveNotReported > 0)
+        {
+            Logger.LogDebug("{tag} Collection verify ignored .phyb active-not-reported: user={user} count={count} examples={examples}",
+                SyncProgressTag, UserData.AliasOrUID, ignoredPhybActiveNotReported, string.Join(" | ", ignoredPhybExamples));
         }
 
         return true;

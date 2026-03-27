@@ -968,7 +968,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             }
 
             Logger.LogDebug("[{applicationId}] Applying Customization Data for {handler}", applicationId, handler);
-            if (handler.ObjectKind != ObjectKind.MinionOrMount)
+            if (handler.ObjectKind != ObjectKind.MinionOrMount && handler != _charaHandler)
             {
                 await _dalamudUtil.WaitWhileCharacterIsDrawing(Logger, handler, applicationId, 30000, token).ConfigureAwait(false);
             }
@@ -1077,6 +1077,162 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         {
             if (handler != _charaHandler) handler.Dispose();
         }
+    }
+
+    private async Task ApplyCustomizationDataAsync(Guid applicationId, KeyValuePair<ObjectKind, HashSet<PlayerChanges>> changes, CharacterData charaData, bool forceRedrawIfDisabled, CancellationToken token, Dictionary<string, double> breakdown)
+    {
+        if (PlayerCharacter == nint.Zero) return;
+        var ptr = PlayerCharacter;
+
+        var handler = changes.Key switch
+        {
+            ObjectKind.Player => _charaHandler!,
+            ObjectKind.Companion => await _gameObjectHandlerFactory.Create(changes.Key, () => _dalamudUtil.GetCompanionPtr(ptr), isWatched: false).ConfigureAwait(false),
+            ObjectKind.MinionOrMount => await _gameObjectHandlerFactory.Create(changes.Key, () => _dalamudUtil.GetMinionOrMountPtr(ptr), isWatched: false).ConfigureAwait(false),
+            ObjectKind.Pet => await _gameObjectHandlerFactory.Create(changes.Key, () => _dalamudUtil.GetPetPtr(ptr), isWatched: false).ConfigureAwait(false),
+            _ => throw new NotSupportedException("ObjectKind not supported: " + changes.Key)
+        };
+
+        try
+        {
+            if (handler.Address == nint.Zero)
+            {
+                return;
+            }
+
+            Logger.LogDebug("[{applicationId}] Applying Customization Data for {handler}", applicationId, handler);
+            if (handler.ObjectKind != ObjectKind.MinionOrMount && handler != _charaHandler)
+            {
+                var waitStart = Stopwatch.GetTimestamp();
+                await _dalamudUtil.WaitWhileCharacterIsDrawing(Logger, handler, applicationId, 30000, token).ConfigureAwait(false);
+                var waitMs = (Stopwatch.GetTimestamp() - waitStart) * 1000.0 / Stopwatch.Frequency;
+                AddBreakdownMs(breakdown, $"{changes.Key}:WaitDraw", waitMs);
+            }
+
+            token.ThrowIfCancellationRequested();
+            foreach (var change in changes.Value.OrderBy(p => (int)p))
+            {
+                Logger.LogDebug("[{applicationId}] Processing {change} for {handler}", applicationId, change, handler);
+                var changeStart = Stopwatch.GetTimestamp();
+                switch (change)
+                {
+                    case PlayerChanges.Customize:
+                        if (charaData.CustomizePlusData.TryGetValue(changes.Key, out var customizePlusData))
+                        {
+                            _customizeIds[changes.Key] = await _ipcManager.CustomizePlus.SetBodyScaleAsync(handler.Address, customizePlusData).ConfigureAwait(false);
+                        }
+                        else if (_customizeIds.TryGetValue(changes.Key, out var customizeId))
+                        {
+                            await _ipcManager.CustomizePlus.RevertByIdAsync(customizeId).ConfigureAwait(false);
+                            _customizeIds.Remove(changes.Key);
+                        }
+                        break;
+
+                    case PlayerChanges.Heels:
+                        await _ipcManager.Heels.SetOffsetForPlayerAsync(handler.Address, charaData.HeelsData).ConfigureAwait(false);
+                        break;
+
+                    case PlayerChanges.Honorific:
+                        await _ipcManager.Honorific.SetTitleAsync(handler.Address, charaData.HonorificData).ConfigureAwait(false);
+                        break;
+
+                    case PlayerChanges.Glamourer:
+                        if (charaData.GlamourerData.TryGetValue(changes.Key, out var glamourerData))
+                        {
+                            if (changes.Key == ObjectKind.MinionOrMount
+                                && _penumbraCollection != Guid.Empty
+                                && charaData.FileReplacements.TryGetValue(ObjectKind.MinionOrMount, out var minionFileReplacements)
+                                && minionFileReplacements.Count > 0)
+                            {
+                                await EnsureMinionCollectionBindingsAsync(handler.Address).ConfigureAwait(false);
+                            }
+                            await _ipcManager.Glamourer.ApplyAllAsync(Logger, handler, glamourerData, applicationId, token).ConfigureAwait(false);
+                        }
+                        break;
+
+                    case PlayerChanges.Moodles:
+                        await _ipcManager.Moodles.SetStatusAsync(handler.Address, charaData.MoodlesData).ConfigureAwait(false);
+                        break;
+
+                    case PlayerChanges.PetNames:
+                        await _ipcManager.PetNames.SetPlayerData(handler.Address, charaData.PetNamesData).ConfigureAwait(false);
+                        break;
+
+                    case PlayerChanges.BypassEmote:
+                        break;
+
+                    case PlayerChanges.ForcedRedraw:
+                        var minionDataHash = charaData.DataHash?.Value ?? string.Empty;
+                        var shouldRedraw = true;
+                        var forceRedrawForDisabledGlobalSetting = forceRedrawIfDisabled
+                            || changes.Key == ObjectKind.MinionOrMount
+                            || changes.Key == ObjectKind.Pet
+                            || (changes.Key == ObjectKind.Player && !_hasCompletedInitialCharacterRedraw);
+
+                        if (changes.Key == ObjectKind.MinionOrMount
+                            && _penumbraCollection != Guid.Empty
+                            && charaData.FileReplacements.TryGetValue(ObjectKind.MinionOrMount, out var minionReplacements)
+                            && minionReplacements.Count > 0)
+                        {
+                            if (handler.Address == _lastRedrawnMinionAddress
+                                && string.Equals(_lastRedrawnMinionDataHash, minionDataHash, StringComparison.Ordinal))
+                            {
+                                Logger.LogDebug("Skipping duplicate minion redraw for {this} address {address:X} dataHash {hash}",
+                                    this, handler.Address, minionDataHash);
+                                shouldRedraw = false;
+                            }
+
+                            await EnsureMinionCollectionBindingsAsync(handler.Address).ConfigureAwait(false);
+                        }
+
+                        var bypassDutyCombatNoRedrawMode = forceRedrawForDisabledGlobalSetting;
+                        if (shouldRedraw && (!IsDutyCombatNoRedrawModeActive() || bypassDutyCombatNoRedrawMode))
+                        {
+                            await _ipcManager.Penumbra.RedrawAsync(Logger, handler, applicationId, token, forceRedrawForDisabledGlobalSetting).ConfigureAwait(false);
+
+                            if (changes.Key == ObjectKind.MinionOrMount)
+                            {
+                                _lastRedrawnMinionAddress = handler.Address;
+                                _lastRedrawnMinionDataHash = minionDataHash;
+                            }
+
+                            if (changes.Key == ObjectKind.Player && !_hasCompletedInitialCharacterRedraw)
+                            {
+                                _hasCompletedInitialCharacterRedraw = true;
+                                Logger.LogDebug("Initial character redraw completed for {this}", this);
+                            }
+                        }
+                        break;
+
+                    default:
+                        break;
+                }
+
+                var changeMs = (Stopwatch.GetTimestamp() - changeStart) * 1000.0 / Stopwatch.Frequency;
+                AddBreakdownMs(breakdown, $"{changes.Key}:{change}", changeMs);
+                token.ThrowIfCancellationRequested();
+            }
+        }
+        finally
+        {
+            if (handler != _charaHandler) handler.Dispose();
+        }
+    }
+
+    private static void AddBreakdownMs(Dictionary<string, double> breakdown, string key, double ms)
+    {
+        if (ms <= 0)
+        {
+            return;
+        }
+
+        if (breakdown.TryGetValue(key, out var existing))
+        {
+            breakdown[key] = existing + ms;
+            return;
+        }
+
+        breakdown[key] = ms;
     }
 
     private static bool AreComponentHashesEqual(CharacterData newData, CharacterData? cachedData)
@@ -1492,22 +1648,45 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                 SyncProgressTag, Pair.UserData.AliasOrUID, charaData.DataHash?.Value ?? "null");
             return;
         }
+        var waitStart = DateTime.UtcNow;
+        var lastWaitLog = DateTime.MinValue;
+        var waitLogged = false;
         while ((!_applicationTask?.IsCompleted ?? false)
                && !downloadToken.IsCancellationRequested
                && !appToken.IsCancellationRequested)
         {
-            // block until current application is done
-            Logger.LogDebug("[BASE-{appBase}] Waiting for current data application (Id: {id}) for player ({handler}) to finish", applicationBase, _applicationId, PlayerName);
-            Logger.LogDebug("{tag} Apply waiting: user={user} hash={hash} appId={appId}",
-                SyncProgressTag, Pair.UserData.AliasOrUID, charaData.DataHash?.Value ?? "null", _applicationId);
+            var now = DateTime.UtcNow;
+            if (!waitLogged)
+            {
+                waitLogged = true;
+                lastWaitLog = now;
+                Logger.LogDebug("{tag} Apply waiting start: user={user} hash={hash} waitingForAppId={appId} reason=priorApplicationRunning",
+                    SyncProgressTag, Pair.UserData.AliasOrUID, charaData.DataHash?.Value ?? "null", _applicationId);
+            }
+            else if ((now - lastWaitLog) >= TimeSpan.FromSeconds(5))
+            {
+                lastWaitLog = now;
+                var waitedMs = (now - waitStart).TotalMilliseconds;
+                Logger.LogDebug("{tag} Apply waiting: user={user} hash={hash} waitingForAppId={appId} waitedMs={waitedMs:F0}",
+                    SyncProgressTag, Pair.UserData.AliasOrUID, charaData.DataHash?.Value ?? "null", _applicationId, waitedMs);
+            }
+
             await Task.Delay(250).ConfigureAwait(false);
         }
 
         if (downloadToken.IsCancellationRequested || appToken.IsCancellationRequested)
         {
-            Logger.LogDebug("{tag} Apply aborted: user={user} hash={hash} reason=cancellation",
-                SyncProgressTag, Pair.UserData.AliasOrUID, charaData.DataHash?.Value ?? "null");
+            var waitedMs = (DateTime.UtcNow - waitStart).TotalMilliseconds;
+            var cancelReason = downloadToken.IsCancellationRequested ? "downloadCancelled" : "applicationCancelled";
+            Logger.LogDebug("{tag} Apply aborted: user={user} hash={hash} reason={reason} waitedMs={waitedMs:F0}",
+                SyncProgressTag, Pair.UserData.AliasOrUID, charaData.DataHash?.Value ?? "null", cancelReason, waitedMs);
             return;
+        }
+        if (waitLogged)
+        {
+            var waitedMs = (DateTime.UtcNow - waitStart).TotalMilliseconds;
+            Logger.LogDebug("{tag} Apply waiting done: user={user} hash={hash} waitedMs={waitedMs:F0}",
+                SyncProgressTag, Pair.UserData.AliasOrUID, charaData.DataHash?.Value ?? "null", waitedMs);
         }
 
         if (updateModdedPaths && moddedPaths.Count > 0 && charaData.FileReplacements.TryGetValue(ObjectKind.MinionOrMount, out var minionRepls) && minionRepls.Count > 0)
@@ -1558,35 +1737,56 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
     private async Task ApplyCharacterDataAsync(Guid applicationBase, CharacterData charaData, Dictionary<ObjectKind, HashSet<PlayerChanges>> updatedData, bool updateManip,
         Dictionary<(string GamePath, string? Hash), string> moddedPaths, bool forceRedrawIfDisabled, CancellationToken token)
     {
+        var user = Pair.UserData.AliasOrUID;
+        var hash = charaData.DataHash?.Value ?? "null";
+        var currentCharacterAddress = _charaHandler?.Address ?? nint.Zero;
+        var totalSw = Stopwatch.StartNew();
+        var stage = "init";
+        var waitDrawMs = 0d;
+        var collectionMs = 0d;
+        var manipMs = 0d;
+        var customizationMs = 0d;
+        var customizationSteps = 0;
+        var redrawMs = 0d;
+        Dictionary<string, double> customizationBreakdown = new(StringComparer.Ordinal);
         try
         {
             _applicationId = Guid.NewGuid();
             Logger.LogDebug("[BASE-{applicationId}] Starting application task for {this}: {appId}", applicationBase, this, _applicationId);
 
+            stage = "waitDraw";
             Logger.LogDebug("{tag} Apply wait draw start: appId={appId} handler={handler}", SyncProgressTag, _applicationId, _charaHandler?.Address ?? nint.Zero);
+            var waitDrawSw = Stopwatch.StartNew();
             await _dalamudUtil.WaitWhileCharacterIsDrawing(Logger, _charaHandler!, _applicationId, 30000, token).ConfigureAwait(false);
+            waitDrawMs = waitDrawSw.Elapsed.TotalMilliseconds;
             Logger.LogDebug("{tag} Apply wait draw done: appId={appId}", SyncProgressTag, _applicationId);
 
             token.ThrowIfCancellationRequested();
 
-            // Check if we need to update the collection:
-            // 1. updateModdedPaths is true (new mods or changes detected)
-            // 2. OR there are paths in _lastLoadedCollectionPaths that are not in moddedPaths
-            //    (mods were removed and need to be cleared from collection)
+            stage = "collection";
+            var collectionSw = Stopwatch.StartNew();
             await EnsureTemporaryCollectionPathsAppliedAsync(_applicationId, BuildCollectionPaths(moddedPaths), token).ConfigureAwait(false);
+            collectionMs = collectionSw.Elapsed.TotalMilliseconds;
 
             if (updateManip)
             {
+                stage = "manip";
+                var manipSw = Stopwatch.StartNew();
                 await _ipcManager.Penumbra.SetManipulationDataAsync(Logger, _applicationId, _penumbraCollection, charaData.ManipulationData).ConfigureAwait(false);
+                manipMs = manipSw.Elapsed.TotalMilliseconds;
             }
 
             token.ThrowIfCancellationRequested();
 
+            stage = "customization";
+            var customizationSw = Stopwatch.StartNew();
             foreach (var kind in updatedData)
             {
-                await ApplyCustomizationDataAsync(_applicationId, kind, charaData, forceRedrawIfDisabled, token).ConfigureAwait(false);
+                customizationSteps++;
+                await ApplyCustomizationDataAsync(_applicationId, kind, charaData, forceRedrawIfDisabled, token, customizationBreakdown).ConfigureAwait(false);
                 token.ThrowIfCancellationRequested();
             }
+            customizationMs = customizationSw.Elapsed.TotalMilliseconds;
 
             if (_charaHandler != null
                 && updatedData.TryGetValue(ObjectKind.Player, out var playerChanges)
@@ -1594,7 +1794,10 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                 && !playerChanges.Contains(PlayerChanges.ForcedRedraw)
                 && !IsDutyCombatNoRedrawModeActive())
             {
+                stage = "redraw";
+                var redrawSw = Stopwatch.StartNew();
                 await _ipcManager.Penumbra.RedrawAsync(Logger, _charaHandler, _applicationId, token, forceRedrawIfDisabled).ConfigureAwait(false);
+                redrawMs += redrawSw.Elapsed.TotalMilliseconds;
             }
 
             if (_forceRedrawAfterCurrentApplication
@@ -1604,7 +1807,12 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             {
                 _forceRedrawAfterCurrentApplication = false;
                 if (!IsDutyCombatNoRedrawModeActive())
+                {
+                    stage = "redraw";
+                    var redrawSw = Stopwatch.StartNew();
                     await _ipcManager.Penumbra.RedrawAsync(Logger, _charaHandler, _applicationId, token, forceRedrawIfDisabled).ConfigureAwait(false);
+                    redrawMs += redrawSw.Elapsed.TotalMilliseconds;
+                }
             }
             else
             {
@@ -1620,17 +1828,44 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             _lastSuccessfullyAppliedCharacterAddress = _charaHandler?.Address ?? nint.Zero;
 
             Logger.LogDebug("[{applicationId}] Application finished", _applicationId);
+            Logger.LogDebug("{tag} Apply summary: user={user} hash={hash} appId={appId} totalMs={totalMs:F0} waitDrawMs={waitDrawMs:F0} collectionMs={collectionMs:F0} manipMs={manipMs:F0} customizationMs={customizationMs:F0} customizationSteps={customizationSteps} redrawMs={redrawMs:F0}",
+                SyncProgressTag, user, hash, _applicationId, totalSw.Elapsed.TotalMilliseconds, waitDrawMs, collectionMs, manipMs, customizationMs, customizationSteps, redrawMs);
+            Logger.LogDebug("{tag} Apply address: user={user} appId={appId} addr={addr} lastAppliedAddr={lastAppliedAddr}",
+                SyncProgressTag, user, _applicationId, currentCharacterAddress, _lastSuccessfullyAppliedCharacterAddress);
+            if (customizationMs >= 500 && customizationBreakdown.Count > 0)
+            {
+                Logger.LogDebug("{tag} Apply customization breakdown: user={user} hash={hash} appId={appId} details={details}",
+                    SyncProgressTag, user, hash, _applicationId, FormatBreakdownTop(customizationBreakdown));
+            }
             
             // Publish message that character data application is completed
             Mediator.Publish(new CharacterDataApplicationCompletedMessage(PlayerName ?? string.Empty, Pair.UserData.UID, _applicationId, true, charaData.DataHash?.Value));
         }
         catch (OperationCanceledException ex)
         {
+            Logger.LogDebug("{tag} Apply summary: user={user} hash={hash} appId={appId} stage={stage} totalMs={totalMs:F0} waitDrawMs={waitDrawMs:F0} collectionMs={collectionMs:F0} manipMs={manipMs:F0} customizationMs={customizationMs:F0} customizationSteps={customizationSteps} redrawMs={redrawMs:F0}",
+                SyncProgressTag, user, hash, _applicationId, stage, totalSw.Elapsed.TotalMilliseconds, waitDrawMs, collectionMs, manipMs, customizationMs, customizationSteps, redrawMs);
+            Logger.LogDebug("{tag} Apply address: user={user} appId={appId} addr={addr} lastAppliedAddr={lastAppliedAddr}",
+                SyncProgressTag, user, _applicationId, currentCharacterAddress, _lastSuccessfullyAppliedCharacterAddress);
+            if (customizationMs >= 500 && customizationBreakdown.Count > 0)
+            {
+                Logger.LogDebug("{tag} Apply customization breakdown: user={user} hash={hash} appId={appId} details={details}",
+                    SyncProgressTag, user, hash, _applicationId, FormatBreakdownTop(customizationBreakdown));
+            }
             Logger.LogDebug("{tag} Apply cancelled: appId={appId} message={message}", SyncProgressTag, _applicationId, ex.Message);
             Mediator.Publish(new CharacterDataApplicationCompletedMessage(PlayerName ?? string.Empty, Pair.UserData.UID, _applicationId, false, charaData.DataHash?.Value));
         }
         catch (Exception ex)
         {
+            Logger.LogDebug("{tag} Apply summary: user={user} hash={hash} appId={appId} stage={stage} totalMs={totalMs:F0} waitDrawMs={waitDrawMs:F0} collectionMs={collectionMs:F0} manipMs={manipMs:F0} customizationMs={customizationMs:F0} customizationSteps={customizationSteps} redrawMs={redrawMs:F0}",
+                SyncProgressTag, user, hash, _applicationId, stage, totalSw.Elapsed.TotalMilliseconds, waitDrawMs, collectionMs, manipMs, customizationMs, customizationSteps, redrawMs);
+            Logger.LogDebug("{tag} Apply address: user={user} appId={appId} addr={addr} lastAppliedAddr={lastAppliedAddr}",
+                SyncProgressTag, user, _applicationId, currentCharacterAddress, _lastSuccessfullyAppliedCharacterAddress);
+            if (customizationMs >= 500 && customizationBreakdown.Count > 0)
+            {
+                Logger.LogDebug("{tag} Apply customization breakdown: user={user} hash={hash} appId={appId} details={details}",
+                    SyncProgressTag, user, hash, _applicationId, FormatBreakdownTop(customizationBreakdown));
+            }
             if (ex is AggregateException aggr && aggr.InnerExceptions.Any(e => e is ArgumentNullException))
             {
                 IsVisible = false;
@@ -1656,6 +1891,55 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             _inProgressRestHash = null;
             _inProgressDataHash = null;
         }
+    }
+
+    private static string FormatBreakdownTop(Dictionary<string, double> breakdown)
+    {
+        var top1Key = string.Empty;
+        var top2Key = string.Empty;
+        var top3Key = string.Empty;
+        var top4Key = string.Empty;
+        var top1 = 0d;
+        var top2 = 0d;
+        var top3 = 0d;
+        var top4 = 0d;
+
+        foreach (var item in breakdown)
+        {
+            var ms = item.Value;
+            if (ms <= 0) continue;
+
+            if (ms > top1)
+            {
+                top4 = top3; top4Key = top3Key;
+                top3 = top2; top3Key = top2Key;
+                top2 = top1; top2Key = top1Key;
+                top1 = ms; top1Key = item.Key;
+            }
+            else if (ms > top2)
+            {
+                top4 = top3; top4Key = top3Key;
+                top3 = top2; top3Key = top2Key;
+                top2 = ms; top2Key = item.Key;
+            }
+            else if (ms > top3)
+            {
+                top4 = top3; top4Key = top3Key;
+                top3 = ms; top3Key = item.Key;
+            }
+            else if (ms > top4)
+            {
+                top4 = ms; top4Key = item.Key;
+            }
+        }
+
+        List<string> parts = new(4);
+        if (top1 > 0) parts.Add($"{top1Key}={top1:F0}ms");
+        if (top2 > 0) parts.Add($"{top2Key}={top2:F0}ms");
+        if (top3 > 0) parts.Add($"{top3Key}={top3:F0}ms");
+        if (top4 > 0) parts.Add($"{top4Key}={top4:F0}ms");
+
+        return string.Join(", ", parts);
     }
 
     private void FrameworkUpdate()
