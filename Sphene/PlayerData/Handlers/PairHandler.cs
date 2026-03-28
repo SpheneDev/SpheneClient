@@ -63,6 +63,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
     private string? _lastAppliedBypassEmoteData;
     private nint _lastAppliedBypassEmoteAddress = nint.Zero;
     private DateTime _lastAppliedBypassEmoteTime = DateTime.MinValue;
+    private bool _ignoreCharacterDataBypassEmote = false;
     private string? _lastSuccessfullyAppliedPenumbraHash;
     private string? _lastSuccessfullyAppliedGlamourerHash;
     private string? _lastSuccessfullyAppliedRestHash;
@@ -437,6 +438,11 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             _lastAppliedBypassEmoteData = data;
             _lastAppliedBypassEmoteAddress = _charaHandler.Address;
             _lastAppliedBypassEmoteTime = DateTime.UtcNow;
+            _ignoreCharacterDataBypassEmote = true;
+            if (_cachedData != null && !string.IsNullOrEmpty(_cachedData.BypassEmoteData))
+            {
+                _cachedData.BypassEmoteData = string.Empty;
+            }
 
             var applyDuration = (DateTime.UtcNow - startApply).TotalMilliseconds;
             if (applyDuration > 100)
@@ -461,6 +467,10 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
     public void ApplyCharacterData(Guid applicationBase, CharacterData characterData, bool forceApplyCustomization = false, bool forceRedrawIfDisabled = false, bool forceRedrawApplication = false)
     {
         _redrawOnNextApplication |= forceRedrawApplication;
+        if (_ignoreCharacterDataBypassEmote && _cachedData != null && !string.IsNullOrEmpty(_cachedData.BypassEmoteData))
+        {
+            _cachedData.BypassEmoteData = string.Empty;
+        }
 
         if (_dalamudUtil.IsInCombatOrPerforming && !IsDutyCombatNoRedrawModeActive())
         {
@@ -482,13 +492,14 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                 this, forceApplyCustomization, forceApplyMods: false)
                 .Any(p => p.Value.Contains(PlayerChanges.ModManip) || p.Value.Contains(PlayerChanges.ModFiles));
             _forceApplyMods = hasDiffMods || _forceApplyMods || (PlayerCharacter == IntPtr.Zero && _cachedData == null);
-            _cachedData = characterData;
+            _cachedData = GetEffectiveCharacterData(characterData);
             Logger.LogDebug("[BASE-{appBase}] Setting data: {hash}, forceApplyMods: {force}", applicationBase, _cachedData.DataHash.Value, _forceApplyMods);
             return;
         }
 
         SetUploading(isUploading: false);
 
+        characterData = GetEffectiveCharacterData(characterData);
         Logger.LogDebug("[BASE-{appbase}] Applying data for {player}, forceApplyCustomization: {forced}, forceApplyMods: {forceMods}, forceRedrawApplication: {forceRedraw}",
             applicationBase, this, forceApplyCustomization, _forceApplyMods, forceRedrawApplication);
         Logger.LogDebug("[BASE-{appbase}] Hash for data is {newHash}, current cache hash is {oldHash}", applicationBase, characterData.DataHash.Value, _cachedData?.DataHash.Value ?? "NODATA");
@@ -563,6 +574,13 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         _inProgressPipelineDataHash = characterData.DataHash?.Value;
 
         var charaDataToUpdate = characterData.CheckUpdatedData(applicationBase, _cachedData?.DeepClone() ?? new(), Logger, this, forceApplyCustomization, _forceApplyMods);
+        if (_ignoreCharacterDataBypassEmote)
+        {
+            foreach (var entry in charaDataToUpdate.Values)
+            {
+                entry.Remove(PlayerChanges.BypassEmote);
+            }
+        }
         if (_configService.Current.DisableRedraws
             && !forceRedrawIfDisabled
             && charaDataToUpdate.TryGetValue(ObjectKind.Player, out var playerReapplyChanges)
@@ -769,6 +787,10 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                         break;
 
                     case PlayerChanges.BypassEmote:
+                        if (_ignoreCharacterDataBypassEmote)
+                        {
+                            break;
+                        }
                         if (!string.IsNullOrEmpty(charaData.BypassEmoteData))
                         {
                             var data = charaData.BypassEmoteData;
@@ -1751,6 +1773,15 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
 
         var payload = data[..separatorIndex];
         return (payload, true, ticks);
+    }
+
+    private CharacterData GetEffectiveCharacterData(CharacterData data)
+    {
+        if (!_ignoreCharacterDataBypassEmote) return data;
+        if (string.IsNullOrEmpty(data.BypassEmoteData)) return data;
+        var clone = data.DeepClone();
+        clone.BypassEmoteData = string.Empty;
+        return clone;
     }
 
     private async Task<bool> TryApplyMinionFileReplacementsAsync(nint minionAddress, CharacterData minionData, CancellationToken token)
