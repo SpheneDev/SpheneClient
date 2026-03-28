@@ -16,7 +16,7 @@ public sealed class ChangelogService
         _httpClient = httpClient;
     }
 
-public async Task<string?> GetChangelogTextForVersionAsync(string version, CancellationToken ct = default)
+    public async Task<string?> GetChangelogTextForVersionAsync(string version, CancellationToken ct = default, bool requireExactVersion = false)
     {
         var url = DefaultUrl;
 
@@ -36,28 +36,49 @@ public async Task<string?> GetChangelogTextForVersionAsync(string version, Cance
             }
 
             JsonElement? selected = null;
-            var requestedVersion = ParseVersionSafe(version);
-            Version bestVersion = new Version(0, 0, 0, 0);
-            foreach (var item in changelogs.EnumerateArray())
+            if (requireExactVersion)
             {
-                if (item.ValueKind != JsonValueKind.Object)
-                    continue;
-
-                string v = item.TryGetProperty("version", out var vProp) && vProp.ValueKind == JsonValueKind.String
-                    ? vProp.GetString() ?? string.Empty
-                    : string.Empty;
-
-                if (!string.IsNullOrEmpty(v) && string.Equals(v, version, StringComparison.OrdinalIgnoreCase))
+                foreach (var item in changelogs.EnumerateArray())
                 {
-                    selected = item;
-                    break;
+                    if (item.ValueKind != JsonValueKind.Object)
+                        continue;
+
+                    string v = item.TryGetProperty("version", out var vProp) && vProp.ValueKind == JsonValueKind.String
+                        ? vProp.GetString() ?? string.Empty
+                        : string.Empty;
+
+                    if (!string.IsNullOrEmpty(v) && string.Equals(v, version, StringComparison.OrdinalIgnoreCase))
+                    {
+                        selected = item;
+                        break;
+                    }
                 }
-
-                var parsed = ParseVersionSafe(v);
-                if (parsed <= requestedVersion && parsed > bestVersion)
+            }
+            else
+            {
+                var requestedVersion = ParseVersionSafe(version);
+                Version bestVersion = new Version(0, 0, 0, 0);
+                foreach (var item in changelogs.EnumerateArray())
                 {
-                    bestVersion = parsed;
-                    selected = item;
+                    if (item.ValueKind != JsonValueKind.Object)
+                        continue;
+
+                    string v = item.TryGetProperty("version", out var vProp) && vProp.ValueKind == JsonValueKind.String
+                        ? vProp.GetString() ?? string.Empty
+                        : string.Empty;
+
+                    if (!string.IsNullOrEmpty(v) && string.Equals(v, version, StringComparison.OrdinalIgnoreCase))
+                    {
+                        selected = item;
+                        break;
+                    }
+
+                    var parsed = ParseVersionSafe(v);
+                    if (parsed <= requestedVersion && parsed > bestVersion)
+                    {
+                        bestVersion = parsed;
+                        selected = item;
+                    }
                 }
             }
 

@@ -93,12 +93,19 @@ public sealed class ReleaseChangelogStartupService : IHostedService, IMediatorSu
             string? text = null;
             try
             {
-                text = await _changelogService.GetChangelogTextForVersionAsync(versionString, _cts?.Token ?? CancellationToken.None)
+                text = await _changelogService.GetChangelogTextForVersionAsync(versionString, _cts?.Token ?? CancellationToken.None, requireExactVersion: true)
                     .ConfigureAwait(false);
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Failed to fetch release changelog text");
+            }
+
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                _logger.LogDebug("No changelog found for version {version}; skipping release notes popup", versionString);
+                _pendingVersionString = string.Empty;
+                return;
             }
 
             _logger.LogInformation("Publishing ShowReleaseChangelogMessage for version {version}", versionString);
