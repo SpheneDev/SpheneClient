@@ -162,11 +162,11 @@ public sealed class IpcCallerPenumbra : DisposableMediatorSubscriberBase, IIpcCa
         _penumbraObjectIsRedrawn.Dispose();
     }
 
-    public async Task AssignTemporaryCollectionAsync(ILogger logger, Guid collName, int idx)
+    public async Task AssignTemporaryCollectionAsync(ILogger logger, Guid collName, int idx, bool force = false)
     {
         if (!APIAvailable) return;
 
-        if (_assignedTempCollectionByObjectIndex.TryGetValue(idx, out var existing) && existing == collName)
+        if (!force && _assignedTempCollectionByObjectIndex.TryGetValue(idx, out var existing) && existing == collName)
         {
             return;
         }

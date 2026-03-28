@@ -2070,7 +2070,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                     if (!_dalamudUtil.IsInCutscene
                         && !_dalamudUtil.IsInGpose
                         && _ipcManager.Penumbra.APIAvailable
-                        && DateTime.UtcNow - _lastPlayerCollectionBindAttempt > TimeSpan.FromMilliseconds(MinionCollectionBindRetryDelayMs))
+                        && DateTime.UtcNow - _lastPlayerCollectionBindAttempt > TimeSpan.FromSeconds(5))
                     {
                         _lastPlayerCollectionBindAttempt = DateTime.UtcNow;
                         _ = Task.Run(async () =>
@@ -2078,7 +2078,16 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                             try
                             {
                                 await EnsurePenumbraCollectionAsync().ConfigureAwait(false);
-                                await EnsureTemporaryCollectionAssignedAsync(CancellationToken.None).ConfigureAwait(false);
+                                if (_penumbraCollection == Guid.Empty || _charaHandler == null || _charaHandler.Address == nint.Zero)
+                                {
+                                    return;
+                                }
+
+                                var playerIndex = await _dalamudUtil.RunOnFrameworkThread(() => _charaHandler.GetGameObject()?.ObjectIndex).ConfigureAwait(false);
+                                if (playerIndex.HasValue)
+                                {
+                                    await _ipcManager.Penumbra.AssignTemporaryCollectionAsync(Logger, _penumbraCollection, playerIndex.Value, force: true).ConfigureAwait(false);
+                                }
                             }
                             catch (Exception ex)
                             {

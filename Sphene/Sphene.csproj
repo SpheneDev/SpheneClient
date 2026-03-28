@@ -4,9 +4,9 @@
     <Authors></Authors>
     <Company></Company>
 
-    <Version>1.1.12.421</Version>
-    <AssemblyVersion>1.1.12.421</AssemblyVersion>
-    <FileVersion>1.1.12.421</FileVersion>
+    <Version>1.1.12.422</Version>
+    <AssemblyVersion>1.1.12.422</AssemblyVersion>
+    <FileVersion>1.1.12.422</FileVersion>
     
     <Description>Through the power of Living Memory, this plugin harmonizes your Penumbra modifications and Glamourer configurations across all connected souls, ensuring endless synchronization in your shared digital realm.</Description>
     <Copyright></Copyright>
@@ -49,9 +49,9 @@
     <BuildTime>$([System.DateTime]::Now.ToString("HHMM"))</BuildTime>
     <BuildTimestamp>$([System.DateTime]::Now.ToString("dd-MM-yy HH:mm:ss"))</BuildTimestamp>
 
-    <Version>1.1.12.421</Version>
-    <AssemblyVersion>1.1.12.421</AssemblyVersion>
-    <FileVersion>1.1.12.421</FileVersion>
+    <Version>1.1.12.422</Version>
+    <AssemblyVersion>1.1.12.422</AssemblyVersion>
+    <FileVersion>1.1.12.422</FileVersion>
 
     <DefineConstants>$(DefineConstants);BUILD_TIMESTAMP</DefineConstants>
   </PropertyGroup>
