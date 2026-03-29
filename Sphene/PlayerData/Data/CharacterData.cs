@@ -54,6 +54,7 @@ public class CharacterData
             {
                 GamePaths = g.SelectMany(f => f.GamePaths).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
                 Hash = g.First().Hash,
+                IsActive = g.Any(f => f.IsActive),
             };
         }).ToList());
 

@@ -6,10 +6,11 @@ namespace Sphene.PlayerData.Data;
 
 public partial class FileReplacement
 {
-    public FileReplacement(string[] gamePaths, string filePath)
+    public FileReplacement(string[] gamePaths, string filePath, bool isActive = true)
     {
         GamePaths = gamePaths.Select(g => g.Replace('\\', '/').ToLowerInvariant()).ToHashSet(StringComparer.Ordinal);
         ResolvedPath = filePath.Replace('\\', '/');
+        IsActive = isActive;
     }
 
     public HashSet<string> GamePaths { get; init; }
@@ -17,6 +18,7 @@ public partial class FileReplacement
     public bool HasFileReplacement => GamePaths.Count >= 1 && GamePaths.Any(p => !string.Equals(p, ResolvedPath, StringComparison.Ordinal));
 
     public string Hash { get; set; } = string.Empty;
+    public bool IsActive { get; set; }
     public bool IsFileSwap => !IsLocalPath(ResolvedPath) && GamePaths.All(p => !IsLocalPath(p));
     public string ResolvedPath { get; init; }
 
@@ -26,6 +28,7 @@ public partial class FileReplacement
         {
             GamePaths = [.. GamePaths],
             Hash = Hash,
+            IsActive = IsActive,
             FileSwapPath = IsFileSwap ? ResolvedPath : string.Empty,
         };
     }

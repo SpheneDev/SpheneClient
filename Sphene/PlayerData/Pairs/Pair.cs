@@ -132,6 +132,31 @@ public class Pair : DisposableMediatorSubscriberBase
             && CachedPlayer.IsCharacterDataAppliedForCurrentCharacter(LastReceivedCharacterData);
     }
 
+    public Guid GetPenumbraCollectionId()
+    {
+        return CachedPlayer?.GetPenumbraCollectionId() ?? Guid.Empty;
+    }
+
+    public IReadOnlyDictionary<string, string> GetLoadedCollectionPathsSnapshot()
+    {
+        if (CachedPlayer == null)
+        {
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        return CachedPlayer.GetLastLoadedCollectionPathsSnapshot();
+    }
+
+    public async Task<IReadOnlyDictionary<string, string>> GetCurrentPenumbraActivePathsByGamePathAsync()
+    {
+        if (CachedPlayer == null)
+        {
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        return await CachedPlayer.GetCurrentPenumbraActivePathsByGamePathAsync().ConfigureAwait(false);
+    }
+
     internal void SetMutualVisibility(bool isMutual)
     {
         if (IsMutuallyVisible == isMutual) return;
