@@ -13,7 +13,6 @@ public static class UpdateOptionPanel
         SyncIncomingWithoutRedraw,
         SyncOutgoingBatching,
         ShowTestBuildUpdates,
-        DisableRedraws,
         FilterCharacterLegacyShpkOutgoing
     }
 
@@ -21,7 +20,6 @@ public static class UpdateOptionPanel
     [
         new("v.1.1.11.1071", [Link.SyncIncomingWithoutRedraw, Link.SyncOutgoingBatching]),
         new("v.1.1.12.50", [Link.ShowTestBuildUpdates]),
-        new("v.1.1.12.88", [Link.DisableRedraws]),
         new("v.1.1.12.217", [Link.FilterCharacterLegacyShpkOutgoing])
     ];
 
@@ -30,7 +28,6 @@ public static class UpdateOptionPanel
         [Link.SyncIncomingWithoutRedraw] = "Sync: Incoming Sync (Default: Disabled)",
         [Link.SyncOutgoingBatching] = "Sync: Outgoing Batching (Default: Disabled)",
         [Link.ShowTestBuildUpdates] = "Notifications: Testbuild Update Hints (Default: Disabled)",
-        [Link.DisableRedraws] = "Sync: Disable Redraws (Default: Disabled)",
         [Link.FilterCharacterLegacyShpkOutgoing] = "Sync: Filter characterlegacy.shpk in Sync Data (Experimental, Default: Disabled)"
     };
 
@@ -43,8 +40,6 @@ public static class UpdateOptionPanel
             SyncBehaviorOptionBlock.DrawOutgoingSyncBatching(configService, uiShared, outgoingSliderWidth, "UpdateOptionSyncOutgoingBatching"),
         [Link.ShowTestBuildUpdates] = (configService, uiShared, _, _) =>
             NotificationsOptionBlock.DrawShowTestBuildUpdatesOption(configService, uiShared, "UpdateOptionShowTestBuildUpdates"),
-        [Link.DisableRedraws] = (configService, uiShared, _, _) =>
-            SyncBehaviorOptionBlock.DrawDisableRedraws(configService, uiShared, "UpdateOptionDisableRedraws"),
         [Link.FilterCharacterLegacyShpkOutgoing] = (configService, uiShared, mediator, _) =>
             SyncBehaviorOptionBlock.DrawFilterCharacterLegacyShpkInOutgoingCharacterData(configService, uiShared, mediator, "UpdateOptionFilterCharacterLegacyShpk")
     };

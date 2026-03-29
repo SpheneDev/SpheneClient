@@ -581,24 +581,6 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                 entry.Remove(PlayerChanges.BypassEmote);
             }
         }
-        if (_configService.Current.DisableRedraws
-            && !forceRedrawIfDisabled
-            && charaDataToUpdate.TryGetValue(ObjectKind.Player, out var playerReapplyChanges)
-            && playerReapplyChanges.Contains(PlayerChanges.ModFiles))
-        {
-            if (characterData.GlamourerData.TryGetValue(ObjectKind.Player, out var glamourerData) && !string.IsNullOrEmpty(glamourerData))
-            {
-                playerReapplyChanges.Add(PlayerChanges.Glamourer);
-            }
-
-            if (characterData.CustomizePlusData.TryGetValue(ObjectKind.Player, out var customizeData) && !string.IsNullOrEmpty(customizeData))
-            {
-                playerReapplyChanges.Add(PlayerChanges.Customize);
-            }
-
-            Logger.LogDebug("{tag} Incoming mod-file change detected with global redraw disabled: forcing non-redraw reapply user={user} hash={hash}",
-                SyncProgressTag, Pair.UserData.AliasOrUID, characterData.DataHash?.Value ?? "null");
-        }
 
         if (_charaHandler != null && _forceApplyMods)
         {

@@ -2383,9 +2383,6 @@ public class SettingsUi : WindowMediatorSubscriberBase
     private void DrawSyncBehaviorSettings()
     {
         DrawSettingsPageHeader("Sync Behavior", "Control how incoming and outgoing synchronization data is handled.");
-        DrawSettingsSectionHeader("Redraw");
-        SyncBehaviorOptionBlock.DrawDisableRedraws(_configService, _uiShared, "SettingsDisableRedraws");
-
         DrawSettingsSectionHeader("Incoming Sync");
         SyncBehaviorOptionBlock.DrawIncomingSyncWithoutRedraw(_configService, _uiShared, "SettingsIncomingSyncWithoutRedraw");
 

@@ -1,5 +1,4 @@
 using Dalamud.Plugin;
-using Sphene.SpheneConfiguration;
 using Sphene.SpheneConfiguration.Models;
 using Sphene.PlayerData.Handlers;
 using Sphene.Services;
@@ -17,7 +16,6 @@ public sealed class IpcCallerPenumbra : DisposableMediatorSubscriberBase, IIpcCa
     private readonly IDalamudPluginInterface _pi;
     private readonly DalamudUtilService _dalamudUtil;
     private readonly SpheneMediator _spheneMediator;
-    private readonly SpheneConfigService _configService;
     private readonly RedrawManager _redrawManager;
     private bool _shownPenumbraUnavailable = false;
     private string? _penumbraModDirectory;
@@ -56,12 +54,11 @@ public sealed class IpcCallerPenumbra : DisposableMediatorSubscriberBase, IIpcCa
     private readonly GetGameObjectResourcePaths _penumbraResourcePaths;
 
     public IpcCallerPenumbra(ILogger<IpcCallerPenumbra> logger, IDalamudPluginInterface pi, DalamudUtilService dalamudUtil,
-        SpheneMediator spheneMediator, RedrawManager redrawManager, SpheneConfigService configService) : base(logger, spheneMediator)
+        SpheneMediator spheneMediator, RedrawManager redrawManager) : base(logger, spheneMediator)
     {
         _pi = pi;
         _dalamudUtil = dalamudUtil;
         _spheneMediator = spheneMediator;
-        _configService = configService;
         _redrawManager = redrawManager;
         _penumbraInit = Initialized.Subscriber(pi, PenumbraInit);
         _penumbraDispose = Disposed.Subscriber(pi, PenumbraDispose);
@@ -91,7 +88,6 @@ public sealed class IpcCallerPenumbra : DisposableMediatorSubscriberBase, IIpcCa
 
         Mediator.Subscribe<PenumbraRedrawCharacterMessage>(this, (msg) =>
         {
-            if (_configService.Current.DisableRedraws) return;
             _penumbraRedraw.Invoke(msg.Character.ObjectIndex, RedrawType.AfterGPose);
         });
 
@@ -269,7 +265,7 @@ public sealed class IpcCallerPenumbra : DisposableMediatorSubscriberBase, IIpcCa
 
     public async Task RedrawAsync(ILogger logger, GameObjectHandler handler, Guid applicationId, CancellationToken token, bool forceRedrawIfDisabled = false)
     {
-        if (!APIAvailable || _dalamudUtil.IsZoning || (_configService.Current.DisableRedraws && !forceRedrawIfDisabled)) return;
+        if (!APIAvailable || _dalamudUtil.IsZoning) return;
         try
         {
             await _redrawManager.RedrawSemaphore.WaitAsync(token).ConfigureAwait(false);
@@ -304,7 +300,7 @@ public sealed class IpcCallerPenumbra : DisposableMediatorSubscriberBase, IIpcCa
 
     public Task RedrawPlayerAsync(int delayMs = 600, bool forceRedrawIfDisabled = false)
     {
-        if (!APIAvailable || _dalamudUtil.IsZoning || (_configService.Current.DisableRedraws && !forceRedrawIfDisabled)) return Task.CompletedTask;
+        if (!APIAvailable || _dalamudUtil.IsZoning) return Task.CompletedTask;
 
         ScheduleDebouncedRedraw(delayMs);
         return Task.CompletedTask;
@@ -372,9 +368,6 @@ public sealed class IpcCallerPenumbra : DisposableMediatorSubscriberBase, IIpcCa
         APIAvailable = true;
         ModDirectory = _penumbraResolveModDir.Invoke();
         _spheneMediator.Publish(new PenumbraInitializedMessage());
-        if (!_configService.Current.DisableRedraws)
-        {
-            _penumbraRedraw!.Invoke(0, setting: RedrawType.Redraw);
-        }
+        _penumbraRedraw!.Invoke(0, setting: RedrawType.Redraw);
     }
 }

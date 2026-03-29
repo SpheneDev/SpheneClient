@@ -8,34 +8,6 @@ namespace Sphene.UI.Components;
 
 public static class SyncBehaviorOptionBlock
 {
-    public static void DrawDisableRedraws(SpheneConfigService configService, UiSharedService uiShared, string blockId = "DisableRedraws")
-    {
-        ImGui.PushID(blockId);
-        try
-        {
-            var disableRedraws = configService.Current.DisableRedraws;
-            if (ImGui.Checkbox("Disable redraws globally", ref disableRedraws))
-            {
-                configService.Current.DisableRedraws = disableRedraws;
-                configService.Save();
-            }
-
-            uiShared.DrawHelpText("When enabled, Sphene no longer triggers Penumbra redraw calls. Use this at own risk and disable it if you get errors.");
-            if (disableRedraws)
-            {
-                UiSharedService.ColorTextWrapped("Warning: (Experimental) Redraws are disabled. Visual updates can be delayed until natural game refreshes happen.", ImGuiColors.DalamudYellow);
-            }
-            else
-            {
-                UiSharedService.ColorTextWrapped("Redraws are active. Sphene will trigger a redraw after visual changes.", ImGuiColors.DalamudGrey);
-            }
-        }
-        finally
-        {
-            ImGui.PopID();
-        }
-    }
-
     public static void DrawIncomingSyncWithoutRedraw(SpheneConfigService configService, UiSharedService uiShared, string blockId = "IncomingSyncWithoutRedraw")
     {
         ImGui.PushID(blockId);
