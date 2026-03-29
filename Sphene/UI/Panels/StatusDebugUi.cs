@@ -43,15 +43,19 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
     private string? _selectedCollectionOverviewUid;
     private readonly Dictionary<string, CharacterStatsSnapshot> _characterStats = new(StringComparer.Ordinal);
     private readonly Dictionary<string, IReadOnlyDictionary<string, string>> _activePenumbraPathsByUid = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, IReadOnlyDictionary<string, string>> _activeMinionPathsByUid = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, IReadOnlyDictionary<string, string>> _activePetPathsByUid = new(StringComparer.Ordinal);
     private readonly Dictionary<string, DateTimeOffset> _activePenumbraPathsUpdatedAt = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> _activePenumbraPathsErrors = new(StringComparer.Ordinal);
     private readonly HashSet<string> _activePenumbraRefreshInProgress = new(StringComparer.Ordinal);
+    private readonly ActiveMismatchTrackerService _mismatchTracker;
     
     public StatusDebugUi(ILogger<StatusDebugUi> logger, SpheneMediator mediator,
         UiSharedService uiSharedService, PairManager pairManager, ApiController apiController,
         ConnectionHealthMonitor healthMonitor, CircuitBreakerService circuitBreaker,
         SpheneConfigService configService,
         PerformanceCollectorService performanceCollectorService,
+        ActiveMismatchTrackerService mismatchTracker,
         EnhancedAcknowledgmentManager? acknowledgmentManager = null,
         SessionAcknowledgmentManager? sessionAcknowledgmentManager = null)
         : base(logger, mediator, "Sphene Status Debug###SpheneStatusDebug", performanceCollectorService)
@@ -62,6 +66,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         _healthMonitor = healthMonitor;
         _circuitBreaker = circuitBreaker;
         _configService = configService;
+        _mismatchTracker = mismatchTracker;
         _acknowledgmentManager = acknowledgmentManager;
         _sessionAcknowledgmentManager = sessionAcknowledgmentManager;
         
@@ -213,6 +218,14 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             if (collectionOverviewTab)
             {
                 DrawPenumbraCollectionOverview();
+            }
+        }
+
+        using (var mismatchTrackerTab = ImRaii.TabItem("Active Mismatch Tracker"))
+        {
+            if (mismatchTrackerTab)
+            {
+                DrawActiveMismatchTracker();
             }
         }
 
@@ -975,22 +988,31 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         var deliveredByPath = BuildDeliveredPathState(selectedPair.LastReceivedCharacterData);
         var loadedByPath = NormalizePathMap(selectedPair.GetLoadedCollectionPathsSnapshot());
 
-        _activePenumbraPathsByUid.TryGetValue(selectedUid, out var activeByPathRaw);
-        activeByPathRaw ??= new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        var activeByPath = NormalizePathMap(activeByPathRaw);
+        _activePenumbraPathsByUid.TryGetValue(selectedUid, out var playerActiveByPathRaw);
+        playerActiveByPathRaw ??= new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var playerActiveByPath = NormalizePathMap(playerActiveByPathRaw);
+        
+        _activeMinionPathsByUid.TryGetValue(selectedUid, out var minionActiveByPathRaw);
+        minionActiveByPathRaw ??= new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var minionActiveByPath = NormalizePathMap(minionActiveByPathRaw);
+        
+        _activePetPathsByUid.TryGetValue(selectedUid, out var petActiveByPathRaw);
+        petActiveByPathRaw ??= new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var petActiveByPath = NormalizePathMap(petActiveByPathRaw);
 
-        HashSet<string> allPaths = new(StringComparer.OrdinalIgnoreCase);
-        foreach (var path in deliveredByPath.Keys) allPaths.Add(path);
-        foreach (var path in loadedByPath.Keys) allPaths.Add(path);
-        foreach (var path in activeByPath.Keys) allPaths.Add(path);
+        // Only show paths that were delivered as active
+        var activeDeliveredPaths = deliveredByPath
+            .Where(kvp => kvp.Value.IsActive)
+            .Select(kvp => kvp.Key)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        if (allPaths.Count == 0)
+        if (activeDeliveredPaths.Count == 0)
         {
-            ImGui.TextUnformatted("No paths available.");
+            ImGui.TextUnformatted("No active paths delivered.");
             return;
         }
 
-        ImGui.TextUnformatted($"Total paths: {allPaths.Count} | Delivered: {deliveredByPath.Count} | Loaded: {loadedByPath.Count} | Active: {activeByPath.Count}");
+        ImGui.TextUnformatted($"Active delivered paths: {activeDeliveredPaths.Count} | Loaded: {loadedByPath.Count} | Player Active: {playerActiveByPath.Count} | Minion Active: {minionActiveByPath.Count} | Pet Active: {petActiveByPath.Count}");
 
         if (!ImGui.BeginTable("PenumbraCollectionOverviewTable", 9,
                 ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable | ImGuiTableFlags.ScrollY,
@@ -1010,10 +1032,17 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         ImGui.TableSetupColumn("Match", ImGuiTableColumnFlags.WidthFixed, 90f);
         ImGui.TableHeadersRow();
 
-        foreach (var path in allPaths.OrderBy(p => p, StringComparer.OrdinalIgnoreCase))
+        foreach (var path in activeDeliveredPaths.OrderBy(p => p, StringComparer.OrdinalIgnoreCase))
         {
             deliveredByPath.TryGetValue(path, out var deliveredState);
             loadedByPath.TryGetValue(path, out var loadedSource);
+            
+            // Check correct active paths based on ObjectKind
+            var isMinionOrMountPath = deliveredState?.ObjectKinds.Contains("MinionOrMount") ?? false;
+            var isPetPath = deliveredState?.ObjectKinds.Contains("Pet") ?? false;
+            var activeByPath = isMinionOrMountPath ? minionActiveByPath 
+                : isPetPath ? petActiveByPath 
+                : playerActiveByPath;
             activeByPath.TryGetValue(path, out var activeSource);
 
             var hasDelivered = deliveredState != null;
@@ -1168,9 +1197,23 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         try
         {
             _activePenumbraPathsErrors.Remove(uid);
+            
+            // Get Player active paths
             var activePaths = await pair.GetCurrentPenumbraActivePathsByGamePathAsync().ConfigureAwait(false);
             _activePenumbraPathsByUid[uid] = NormalizePathMap(activePaths);
+            
+            // Get Minion/Mount active paths
+            var minionPaths = await pair.GetMinionOrMountActivePathsByGamePathAsync().ConfigureAwait(false);
+            _activeMinionPathsByUid[uid] = NormalizePathMap(minionPaths);
+            
+            // Get Pet active paths
+            var petPaths = await pair.GetPetActivePathsByGamePathAsync().ConfigureAwait(false);
+            _activePetPathsByUid[uid] = NormalizePathMap(petPaths);
+            
             _activePenumbraPathsUpdatedAt[uid] = DateTimeOffset.UtcNow;
+            
+            // Track mismatches: delivered as active but not active in Penumbra
+            TrackActiveMismatches(uid, pair.LastReceivedCharacterData, activePaths, minionPaths, petPaths);
         }
         catch (Exception ex)
         {
@@ -1181,6 +1224,174 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         {
             _activePenumbraRefreshInProgress.Remove(uid);
         }
+    }
+
+    private void TrackActiveMismatches(string uid, Sphene.API.Data.CharacterData? characterData, IReadOnlyDictionary<string, string> playerActivePaths, IReadOnlyDictionary<string, string> minionActivePaths, IReadOnlyDictionary<string, string> petActivePaths)
+    {
+        if (characterData == null) return;
+
+        var deliveredByPath = BuildDeliveredPathState(characterData);
+        var playerActiveByPath = NormalizePathMap(playerActivePaths);
+        var minionActiveByPath = NormalizePathMap(minionActivePaths);
+        var petActiveByPath = NormalizePathMap(petActivePaths);
+
+        foreach (var kvp in deliveredByPath)
+        {
+            var gamePath = kvp.Key;
+            var state = kvp.Value;
+
+            if (!state.IsActive) continue; // Only track paths flagged as active
+
+            // Check correct active paths based on ObjectKind
+            var isMinionOrMountPath = state.ObjectKinds.Contains("MinionOrMount");
+            var isPetPath = state.ObjectKinds.Contains("Pet");
+            var activeByPath = isMinionOrMountPath ? minionActiveByPath 
+                : isPetPath ? petActiveByPath 
+                : playerActiveByPath;
+            
+            var isPenumbraActive = activeByPath.TryGetValue(gamePath, out var activeSource) && !string.IsNullOrEmpty(activeSource);
+            if (!isPenumbraActive)
+            {
+                // Mismatch: delivered as active but not active in Penumbra
+                _mismatchTracker.RecordMismatch(uid, gamePath, state.Sources, state.ObjectKinds);
+            }
+        }
+    }
+
+    private void DrawActiveMismatchTracker()
+    {
+        ImGui.Text("Active Mismatch Tracker");
+        ImGui.TextWrapped("Tracks paths flagged as IsActive=true in delivered data but not active in Penumbra collection. Auto-refreshes every 10 seconds.");
+        ImGui.Separator();
+
+        if (ImGui.Button("Clear All Records"))
+        {
+            _mismatchTracker.Clear();
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("Reset Counters"))
+        {
+            _mismatchTracker.ResetGlobalCounters();
+        }
+        if (ImGui.IsItemHovered())
+        {
+            ImGui.SetTooltip("Reset total check counters without clearing mismatch records");
+        }
+
+        var records = _mismatchTracker.GetRecords().Where(r => r.MismatchCount > 0).ToList();
+        var (globalChecks, globalMismatches) = _mismatchTracker.GetGlobalStats();
+        ImGui.SameLine();
+        ImGui.Text($"| Mismatches: {records.Count} | Total Checks: {globalChecks} | Auto-refresh every 10s");
+
+        if (records.Count == 0)
+        {
+            ImGui.Text("No mismatches recorded yet.");
+            return;
+        }
+
+        ImGui.Separator();
+
+        if (!ImGui.BeginTable("ActiveMismatchTable", 8,
+                ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable | ImGuiTableFlags.ScrollY,
+                new Vector2(-1, 400)))
+        {
+            return;
+        }
+
+        ImGui.TableSetupColumn("User", ImGuiTableColumnFlags.WidthFixed, 100f);
+        ImGui.TableSetupColumn("Game Path", ImGuiTableColumnFlags.WidthStretch, 2.0f);
+        ImGui.TableSetupColumn("Global %", ImGuiTableColumnFlags.WidthFixed, 75f);
+        ImGui.TableSetupColumn("Local %", ImGuiTableColumnFlags.WidthFixed, 75f);
+        ImGui.TableSetupColumn("Checks", ImGuiTableColumnFlags.WidthFixed, 70f);
+        ImGui.TableSetupColumn("Last Mismatch", ImGuiTableColumnFlags.WidthFixed, 100f);
+        ImGui.TableSetupColumn("Sources", ImGuiTableColumnFlags.WidthStretch, 1.0f);
+        ImGui.TableSetupColumn("Object Kinds", ImGuiTableColumnFlags.WidthStretch, 0.8f);
+        ImGui.TableHeadersRow();
+
+        // Sort by global mismatch percentage (based on total checks across all paths)
+        // A path with 500 mismatches out of 1000 global checks = 50%
+        // A path with 1 mismatch out of 1000 global checks = 0.1%
+        foreach (var record in records
+            .OrderByDescending(r => r.GlobalMismatchPercentage)
+            .ThenByDescending(r => r.MismatchCount)
+            .ThenBy(r => r.Uid, StringComparer.Ordinal))
+        {
+            ImGui.TableNextRow();
+
+            ImGui.TableSetColumnIndex(0);
+            var displayName = GetDisplayName(record.Uid);
+            ImGui.TextUnformatted(displayName);
+
+            ImGui.TableSetColumnIndex(1);
+            DrawTrimmedTextWithTooltip(record.GamePath, 100);
+
+            ImGui.TableSetColumnIndex(2);
+            // Global % - mismatch count / total global checks
+            var globalPercentage = record.GlobalMismatchPercentage;
+            var globalColor = globalPercentage >= 10 ? ImGuiColors.DalamudRed 
+                : globalPercentage >= 5 ? ImGuiColors.DalamudOrange 
+                : globalPercentage >= 1 ? ImGuiColors.DalamudYellow 
+                : ImGuiColors.HealerGreen;
+            UiSharedService.ColorText($"{globalPercentage:F2}%", globalColor);
+
+            ImGui.TableSetColumnIndex(3);
+            // Local % - mismatch count / this path's own check count
+            var localPercentage = record.MismatchPercentage;
+            var localColor = localPercentage >= 50 ? ImGuiColors.DalamudRed 
+                : localPercentage >= 25 ? ImGuiColors.DalamudOrange 
+                : localPercentage >= 10 ? ImGuiColors.DalamudYellow 
+                : ImGuiColors.HealerGreen;
+            UiSharedService.ColorText($"{localPercentage:F1}%", localColor);
+
+            ImGui.TableSetColumnIndex(4);
+            ImGui.TextUnformatted($"{record.MismatchCount}/{record.TotalCheckCount}");
+
+            ImGui.TableSetColumnIndex(5);
+            if (record.LastSeen != DateTimeOffset.MinValue)
+            {
+                ImGui.TextUnformatted(record.LastSeen.ToLocalTime().ToString("HH:mm:ss"));
+            }
+            else
+            {
+                ImGui.TextUnformatted("-");
+            }
+
+            ImGui.TableSetColumnIndex(6);
+            var sourcesText = string.Join(", ", record.Sources.OrderBy(s => s, StringComparer.OrdinalIgnoreCase));
+            DrawTrimmedTextWithTooltip(sourcesText, 60);
+
+            ImGui.TableSetColumnIndex(7);
+            var kindsText = string.Join(", ", record.ObjectKinds.OrderBy(k => k, StringComparer.OrdinalIgnoreCase));
+            DrawTrimmedTextWithTooltip(kindsText, 50);
+        }
+
+        ImGui.EndTable();
+    }
+
+    private string GetDisplayName(string uid)
+    {
+        // Try to find the pair and get its alias
+        foreach (var pair in _pairManager.DirectPairs)
+        {
+            if (string.Equals(pair.UserData.UID, uid, StringComparison.Ordinal))
+            {
+                return pair.UserData.AliasOrUID;
+            }
+        }
+
+        foreach (var groupPairs in _pairManager.GroupPairs.Values)
+        {
+            foreach (var pair in groupPairs)
+            {
+                if (string.Equals(pair.UserData.UID, uid, StringComparison.Ordinal))
+                {
+                    return pair.UserData.AliasOrUID;
+                }
+            }
+        }
+
+        return uid;
     }
 
     private CharacterStatsSnapshot GetCharacterStatsSnapshot(Pair pair)

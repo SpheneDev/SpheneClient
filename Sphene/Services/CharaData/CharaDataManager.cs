@@ -1008,12 +1008,9 @@ public sealed partial class CharaDataManager : DisposableMediatorSubscriberBase
             }
 
             DataApplicationProgress = "Applying BypassEmote data";
-            Logger.LogTrace("[{appId}] Applying BypassEmote data", applicationId);
-            if (!string.IsNullOrEmpty(bypassEmoteData))
-            {
-                var cleanData = ExtractBypassEmotePayload(bypassEmoteData);
-                await _ipcManager.BypassEmote.SetStateForCharacterAsync(tempHandler.Address, cleanData).ConfigureAwait(false);
-            }
+            Logger.LogTrace("[{appId}] Skipping BypassEmote data - only applied via fast-path", applicationId);
+            // BypassEmote is NOT applied when loading stored character data
+            // It should only be applied via fast-path real-time updates from BypassEmoteUpdateMessage
 
             if (autoRevert)
             {

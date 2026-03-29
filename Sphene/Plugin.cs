@@ -344,6 +344,17 @@ public sealed class Plugin : IDalamudPlugin
             collection.AddSingleton((s) => new XivDataStorageService(pluginInterface.ConfigDirectory.FullName));
             collection.AddSingleton((s) => new PlayerPerformanceConfigService(pluginInterface.ConfigDirectory.FullName));
             collection.AddSingleton((s) => new CharaDataConfigService(pluginInterface.ConfigDirectory.FullName));
+            collection.AddSingleton((s) => new ActiveMismatchTrackerService(
+                s.GetRequiredService<ILogger<ActiveMismatchTrackerService>>(),
+                pluginInterface.ConfigDirectory.FullName));
+            collection.AddHostedService(s => s.GetRequiredService<ActiveMismatchTrackingHandler>());
+            collection.AddSingleton(s => new ActiveMismatchTrackingHandler(
+                s.GetRequiredService<ILogger<ActiveMismatchTrackingHandler>>(),
+                s.GetRequiredService<ActiveMismatchTrackerService>(),
+                s.GetRequiredService<PairManager>(),
+                s.GetRequiredService<IpcManager>(),
+                s.GetRequiredService<GameObjectHandlerFactory>(),
+                s.GetRequiredService<SpheneMediator>()));
             collection.AddSingleton<AreaBoundSyncshellService>();
             collection.AddSingleton<CitySyncshellService>();
             collection.AddSingleton<IConfigService<ISpheneConfiguration>>(s => s.GetRequiredService<SpheneConfigService>());

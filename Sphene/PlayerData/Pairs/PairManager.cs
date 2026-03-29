@@ -350,6 +350,7 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         Logger.LogDebug("{tag} Apply enqueue: user={user} hash={hash}", SyncProgressTag, dto.User.AliasOrUID, dto.DataHash[..Math.Min(8, dto.DataHash.Length)]);
         pair.ApplyData(dto);
         CachePairCharacterData(dto.User, dto.CharaData);
+        Mediator.Publish(new CharacterDataReceivedForPairMessage(pair, dto.CharaData));
     }
 
 

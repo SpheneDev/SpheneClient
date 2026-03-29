@@ -157,6 +157,26 @@ public class Pair : DisposableMediatorSubscriberBase
         return await CachedPlayer.GetCurrentPenumbraActivePathsByGamePathAsync().ConfigureAwait(false);
     }
 
+    public async Task<IReadOnlyDictionary<string, string>> GetMinionOrMountActivePathsByGamePathAsync()
+    {
+        if (CachedPlayer == null)
+        {
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        return await CachedPlayer.GetMinionOrMountActivePathsByGamePathAsync().ConfigureAwait(false);
+    }
+
+    public async Task<IReadOnlyDictionary<string, string>> GetPetActivePathsByGamePathAsync()
+    {
+        if (CachedPlayer == null)
+        {
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        return await CachedPlayer.GetPetActivePathsByGamePathAsync().ConfigureAwait(false);
+    }
+
     internal void SetMutualVisibility(bool isMutual)
     {
         if (IsMutuallyVisible == isMutual) return;

@@ -331,6 +331,86 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         return activeByGamePath;
     }
 
+    internal async Task<IReadOnlyDictionary<string, string>> GetMinionOrMountActivePathsByGamePathAsync()
+    {
+        if (_charaHandler == null || _charaHandler.Address == nint.Zero || !IsVisible)
+        {
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        var minionAddress = _dalamudUtil.GetMinionOrMountPtr(PlayerCharacter);
+        if (minionAddress == nint.Zero)
+        {
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        using var minionHandler = await _gameObjectHandlerFactory.Create(ObjectKind.MinionOrMount, () => minionAddress, isWatched: false).ConfigureAwait(false);
+        if (minionHandler.Address == nint.Zero)
+        {
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        var resolvedPaths = await _ipcManager.Penumbra.GetCharacterData(Logger, minionHandler).ConfigureAwait(false);
+        if (resolvedPaths == null || resolvedPaths.Count == 0)
+        {
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        Dictionary<string, string> activeByGamePath = new(StringComparer.OrdinalIgnoreCase);
+        foreach (var resolvedPath in resolvedPaths)
+        {
+            foreach (var gamePath in resolvedPath.Value)
+            {
+                if (!string.IsNullOrEmpty(gamePath))
+                {
+                    activeByGamePath[gamePath] = resolvedPath.Key;
+                }
+            }
+        }
+
+        return activeByGamePath;
+    }
+
+    internal async Task<IReadOnlyDictionary<string, string>> GetPetActivePathsByGamePathAsync()
+    {
+        if (_charaHandler == null || _charaHandler.Address == nint.Zero || !IsVisible)
+        {
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        var petAddress = _dalamudUtil.GetPetPtr(PlayerCharacter);
+        if (petAddress == nint.Zero)
+        {
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        using var petHandler = await _gameObjectHandlerFactory.Create(ObjectKind.Pet, () => petAddress, isWatched: false).ConfigureAwait(false);
+        if (petHandler.Address == nint.Zero)
+        {
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        var resolvedPaths = await _ipcManager.Penumbra.GetCharacterData(Logger, petHandler).ConfigureAwait(false);
+        if (resolvedPaths == null || resolvedPaths.Count == 0)
+        {
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        Dictionary<string, string> activeByGamePath = new(StringComparer.OrdinalIgnoreCase);
+        foreach (var resolvedPath in resolvedPaths)
+        {
+            foreach (var gamePath in resolvedPath.Value)
+            {
+                if (!string.IsNullOrEmpty(gamePath))
+                {
+                    activeByGamePath[gamePath] = resolvedPath.Key;
+                }
+            }
+        }
+
+        return activeByGamePath;
+    }
+
     public bool IsVisible
     {
         get => _isVisible;
@@ -809,43 +889,9 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                         break;
 
                     case PlayerChanges.BypassEmote:
-                        if (_ignoreCharacterDataBypassEmote)
-                        {
-                            break;
-                        }
-                        if (!string.IsNullOrEmpty(charaData.BypassEmoteData))
-                        {
-                            var data = charaData.BypassEmoteData;
-                            var (cleanData, hasTimestamp, _) = ParseBypassEmoteEnvelope(data);
-                            Logger.LogDebug("BypassEmote slow-path payload parsed. rawLen={rawLen}, cleanLen={cleanLen}, hasTimestamp={hasTimestamp}, kind={kind}",
-                                data.Length, cleanData.Length, hasTimestamp, changes.Key);
-
-                            // Prevent double application if Fast Path already applied it
-                            // We compare the FULL data string (including timestamp)
-                            if (string.Equals(data, _lastAppliedBypassEmoteData, StringComparison.Ordinal) && handler.Address == _lastAppliedBypassEmoteAddress)
-                            {
-                                 // If it has a timestamp, it's a unique event ID -> strict equality means it's a duplicate packet -> Skip
-                                 if (hasTimestamp)
-                                 {
-                                     Logger.LogDebug("Skipping BypassEmote application (already applied via Fast Path - unique event): {data}", data);
-                                     break;
-                                 }
-                                 
-                                 // If no timestamp, use timeout
-                                 if ((DateTime.UtcNow - _lastAppliedBypassEmoteTime).TotalSeconds < 2.0)
-                                 {
-                                     Logger.LogDebug("Skipping BypassEmote application (already applied via Fast Path - cooldown): {data}", data);
-                                     break;
-                                 }
-                            }
-
-                            await _ipcManager.BypassEmote.SetStateForCharacterAsync(handler.Address, cleanData).ConfigureAwait(false);
-                            Logger.LogDebug("BypassEmote slow-path apply completed. addr={addr}, cleanLen={cleanLen}, apiAvailable={apiAvailable}, kind={kind}",
-                                handler.Address, cleanData.Length, _ipcManager.BypassEmote.APIAvailable, changes.Key);
-                            _lastAppliedBypassEmoteData = data;
-                            _lastAppliedBypassEmoteAddress = handler.Address;
-                            _lastAppliedBypassEmoteTime = DateTime.UtcNow;
-                        }
+                        // BypassEmote is ONLY applied via fast-path (BypassEmoteUpdateMessage)
+                        // Never apply from stored character data to prevent re-execution on reload
+                        Logger.LogDebug("Skipping BypassEmote slow-path apply - only fast-path is allowed");
                         break;
 
                     case PlayerChanges.ForcedRedraw:
@@ -1646,15 +1692,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             _ = _ipcManager.PetNames.SetPlayerData(PlayerCharacter, _cachedData.PetNamesData).ConfigureAwait(false);
         });
 
-        Mediator.Subscribe<BypassEmoteReadyMessage>(this, msg =>
-        {
-            if (string.IsNullOrEmpty(_cachedData?.BypassEmoteData)) return;
-            Logger.LogTrace("Reapplying BypassEmote data for {this}", this);
-            var (cleanData, _, _) = ParseBypassEmoteEnvelope(_cachedData.BypassEmoteData);
-            Logger.LogDebug("BypassEmote ready reapply. addr={addr}, rawLen={rawLen}, cleanLen={cleanLen}, apiAvailable={apiAvailable}",
-                PlayerCharacter, _cachedData.BypassEmoteData.Length, cleanData.Length, _ipcManager.BypassEmote.APIAvailable);
-            _ = _ipcManager.BypassEmote.SetStateForCharacterAsync(PlayerCharacter, cleanData).ConfigureAwait(false);
-        });
+        // BypassEmote is NOT reapplied on ready - only applied via fast-path (BypassEmoteUpdateMessage)
 
         _ipcManager.Penumbra.AssignTemporaryCollectionAsync(Logger, _penumbraCollection, _charaHandler.GetGameObject()!.ObjectIndex).GetAwaiter().GetResult();
     }

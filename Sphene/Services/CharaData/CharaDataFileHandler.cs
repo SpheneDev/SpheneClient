@@ -268,7 +268,7 @@ public sealed class CharaDataFileHandler : IDisposable
             updateDto.HonorificData = data.HonorificData;
             updateDto.MoodlesData = data.MoodlesData;
             updateDto.PetNamesData = data.PetNamesData;
-            updateDto.BypassEmoteData = data.BypassEmoteData;
+            // BypassEmoteData is NOT saved - only applied via fast-path real-time updates
 
             var hasFiles = data.FileReplacements.TryGetValue(ObjectKind.Player, out var fileReplacements);
             if (!hasFiles)
