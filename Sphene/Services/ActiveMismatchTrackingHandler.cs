@@ -6,6 +6,7 @@ using Sphene.API.Data;
 using Sphene.API.Data.Enum;
 using Sphene.Interop.Ipc;
 using Sphene.PlayerData.Factories;
+using Sphene.SpheneConfiguration;
 
 namespace Sphene.Services;
 
@@ -16,6 +17,7 @@ public sealed class ActiveMismatchTrackingHandler : IMediatorSubscriber, IHosted
     private readonly PairManager _pairManager;
     private readonly IpcManager _ipcManager;
     private readonly GameObjectHandlerFactory _gameObjectHandlerFactory;
+    private readonly SpheneConfigService _configService;
     private DateTimeOffset _lastRefreshTime;
     private const int RefreshIntervalSeconds = 10;
     
@@ -26,6 +28,14 @@ public sealed class ActiveMismatchTrackingHandler : IMediatorSubscriber, IHosted
         "chara/xls/bonedeformer/human.pdb" // common typo variant
     };
     
+    // Equipment path prefixes to filter
+    private static readonly string[] EquipmentPathPrefixes =
+    {
+        "chara/weapon/",
+        "chara/equipment/",
+        "chara/accessory/"
+    };
+    
     public SpheneMediator Mediator { get; }
 
     public ActiveMismatchTrackingHandler(
@@ -34,6 +44,7 @@ public sealed class ActiveMismatchTrackingHandler : IMediatorSubscriber, IHosted
         PairManager pairManager,
         IpcManager ipcManager,
         GameObjectHandlerFactory gameObjectHandlerFactory,
+        SpheneConfigService configService,
         SpheneMediator mediator)
     {
         _logger = logger;
@@ -41,6 +52,7 @@ public sealed class ActiveMismatchTrackingHandler : IMediatorSubscriber, IHosted
         _pairManager = pairManager;
         _ipcManager = ipcManager;
         _gameObjectHandlerFactory = gameObjectHandlerFactory;
+        _configService = configService;
         Mediator = mediator;
         _lastRefreshTime = DateTimeOffset.UtcNow;
     }
@@ -109,12 +121,14 @@ public sealed class ActiveMismatchTrackingHandler : IMediatorSubscriber, IHosted
             
             // Get active paths for Player
             var playerActivePaths = pair.GetCurrentPenumbraActivePathsByGamePathAsync().GetAwaiter().GetResult();
-            
-            // Get active paths for Minion/Mount
-            var minionActivePaths = pair.GetMinionOrMountActivePathsByGamePathAsync().GetAwaiter().GetResult();
-            
-            // Get active paths for Pet
-            var petActivePaths = pair.GetPetActivePathsByGamePathAsync().GetAwaiter().GetResult();
+
+            var trackCompanions = _configService.Current.MismatchTrackerTrackMinionMountAndPetPaths;
+            var minionActivePaths = trackCompanions
+                ? pair.GetMinionOrMountActivePathsByGamePathAsync().GetAwaiter().GetResult()
+                : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var petActivePaths = trackCompanions
+                ? pair.GetPetActivePathsByGamePathAsync().GetAwaiter().GetResult()
+                : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
             var activeDeliveredCount = deliveredByPath.Count(kvp => kvp.Value.IsActive);
             var mismatchCount = 0;
@@ -128,9 +142,16 @@ public sealed class ActiveMismatchTrackingHandler : IMediatorSubscriber, IHosted
 
                 if (!state.IsActive) continue;
 
+                // Apply path filtering based on config
+                if (!ShouldTrackPath(gamePath)) continue;
+
                 // Determine which active paths to check based on ObjectKind
                 var isMinionOrMountPath = state.ObjectKinds.Contains("MinionOrMount");
                 var isPetPath = state.ObjectKinds.Contains("Pet");
+                if ((isMinionOrMountPath || isPetPath) && !trackCompanions)
+                {
+                    continue;
+                }
                 var activePaths = isMinionOrMountPath ? minionActivePaths 
                     : isPetPath ? petActivePaths 
                     : playerActivePaths;
@@ -239,6 +260,41 @@ public sealed class ActiveMismatchTrackingHandler : IMediatorSubscriber, IHosted
         }
 
         return result;
+    }
+
+    private bool ShouldTrackPath(string gamePath)
+    {
+        var config = _configService.Current;
+        
+        // Check equipment paths (weapon, equipment, accessory)
+        var isEquipmentPath = EquipmentPathPrefixes.Any(prefix => gamePath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+        if (isEquipmentPath && !config.MismatchTrackerTrackEquipmentPaths)
+        {
+            return false;
+        }
+        
+        // Check file extension filters
+        var extension = System.IO.Path.GetExtension(gamePath).ToLowerInvariant();
+        
+        // .phyb files
+        if (string.Equals(extension, ".phyb", StringComparison.Ordinal) && !config.MismatchTrackerTrackPhybFiles)
+        {
+            return false;
+        }
+        
+        // .skp files
+        if (string.Equals(extension, ".skp", StringComparison.Ordinal) && !config.MismatchTrackerTrackSkpFiles)
+        {
+            return false;
+        }
+        
+        // .pbd files
+        if (string.Equals(extension, ".pbd", StringComparison.Ordinal) && !config.MismatchTrackerTrackPbdFiles)
+        {
+            return false;
+        }
+        
+        return true;
     }
 
     public void Dispose()

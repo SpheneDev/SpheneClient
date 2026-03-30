@@ -133,4 +133,11 @@ public class SpheneConfig : ISpheneConfiguration
     public string TestServerApiUrl { get; set; } = string.Empty;
     public bool HasAcceptedTestServerDisclaimer { get; set; } = false;
 
+    // Active Mismatch Tracker Filter Settings
+    public bool MismatchTrackerTrackEquipmentPaths { get; set; } = false; // chara/weapon, chara/equipment, chara/accessory
+    public bool MismatchTrackerTrackMinionMountAndPetPaths { get; set; } = false;
+    public bool MismatchTrackerTrackPhybFiles { get; set; } = true;
+    public bool MismatchTrackerTrackSkpFiles { get; set; } = true;
+    public bool MismatchTrackerTrackPbdFiles { get; set; } = true;
+
 }

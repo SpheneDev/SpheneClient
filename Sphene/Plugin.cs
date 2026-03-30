@@ -354,6 +354,7 @@ public sealed class Plugin : IDalamudPlugin
                 s.GetRequiredService<PairManager>(),
                 s.GetRequiredService<IpcManager>(),
                 s.GetRequiredService<GameObjectHandlerFactory>(),
+                s.GetRequiredService<SpheneConfigService>(),
                 s.GetRequiredService<SpheneMediator>()));
             collection.AddSingleton<AreaBoundSyncshellService>();
             collection.AddSingleton<CitySyncshellService>();

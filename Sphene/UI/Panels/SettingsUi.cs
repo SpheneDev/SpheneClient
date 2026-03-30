@@ -644,6 +644,9 @@ public class SettingsUi : WindowMediatorSubscriberBase
         
         DebugOptionBlock.DrawOpenAcknowledgmentMonitorAction(_uiShared, Mediator, "DebugOpenAcknowledgmentMonitor");
         DebugOptionBlock.DrawOpenStatusDebugAction(_uiShared, Mediator, "DebugOpenStatusDebug");
+
+        DrawSettingsSectionHeader("Active Mismatch Tracker", "Control which paths and file types are recorded and shown.");
+        DebugOptionBlock.DrawActiveMismatchTrackerFilterOptions(_configService, _uiShared, "DebugMismatchTrackerFilters");
         
 
     }

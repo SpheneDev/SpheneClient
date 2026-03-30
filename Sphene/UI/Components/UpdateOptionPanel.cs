@@ -13,14 +13,16 @@ public static class UpdateOptionPanel
         SyncIncomingWithoutRedraw,
         SyncOutgoingBatching,
         ShowTestBuildUpdates,
-        FilterCharacterLegacyShpkOutgoing
+        FilterCharacterLegacyShpkOutgoing,
+        MismatchTrackerFilters
     }
 
     private static readonly ReleaseDefinition[] Releases =
     [
         new("v.1.1.11.1071", [Link.SyncIncomingWithoutRedraw, Link.SyncOutgoingBatching]),
         new("v.1.1.12.50", [Link.ShowTestBuildUpdates]),
-        new("v.1.1.12.217", [Link.FilterCharacterLegacyShpkOutgoing])
+        new("v.1.1.12.217", [Link.FilterCharacterLegacyShpkOutgoing]),
+        new("v.1.1.12.504", [Link.MismatchTrackerFilters])
     ];
 
     private static readonly IReadOnlyDictionary<Link, string> LinkTitles = new Dictionary<Link, string>
@@ -28,7 +30,8 @@ public static class UpdateOptionPanel
         [Link.SyncIncomingWithoutRedraw] = "Sync: Incoming Sync (Default: Disabled)",
         [Link.SyncOutgoingBatching] = "Sync: Outgoing Batching (Default: Disabled)",
         [Link.ShowTestBuildUpdates] = "Notifications: Testbuild Update Hints (Default: Disabled)",
-        [Link.FilterCharacterLegacyShpkOutgoing] = "Sync: Filter characterlegacy.shpk in Sync Data (Experimental, Default: Disabled)"
+        [Link.FilterCharacterLegacyShpkOutgoing] = "Sync: Filter characterlegacy.shpk in Sync Data (Experimental, Default: Disabled)",
+        [Link.MismatchTrackerFilters] = "Diagnostics: Active Mismatch Tracker Filters (Defaults: Equipment Off, Companions Off)"
     };
 
     private static readonly IReadOnlyDictionary<Link, Action<SpheneConfigService, UiSharedService, SpheneMediator, float>> LinkDrawers
@@ -41,7 +44,9 @@ public static class UpdateOptionPanel
         [Link.ShowTestBuildUpdates] = (configService, uiShared, _, _) =>
             NotificationsOptionBlock.DrawShowTestBuildUpdatesOption(configService, uiShared, "UpdateOptionShowTestBuildUpdates"),
         [Link.FilterCharacterLegacyShpkOutgoing] = (configService, uiShared, mediator, _) =>
-            SyncBehaviorOptionBlock.DrawFilterCharacterLegacyShpkInOutgoingCharacterData(configService, uiShared, mediator, "UpdateOptionFilterCharacterLegacyShpk")
+            SyncBehaviorOptionBlock.DrawFilterCharacterLegacyShpkInOutgoingCharacterData(configService, uiShared, mediator, "UpdateOptionFilterCharacterLegacyShpk"),
+        [Link.MismatchTrackerFilters] = (configService, uiShared, _, _) =>
+            DebugOptionBlock.DrawActiveMismatchTrackerFilterOptions(configService, uiShared, "UpdateOptionMismatchTrackerFilters")
     };
 
     public static string GetTitle(Link link)

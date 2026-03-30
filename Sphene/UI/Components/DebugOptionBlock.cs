@@ -59,6 +59,54 @@ public static class DebugOptionBlock
             + "Keeping LOD enabled can lead to more crashes. Use at your own risk.");
     }
 
+    public static void DrawActiveMismatchTrackerFilterOptions(SpheneConfigService configService, UiSharedService uiShared, string blockId = "MismatchTrackerFilters")
+    {
+        ImGui.PushID(blockId);
+        try
+        {
+            var trackEquipmentPaths = configService.Current.MismatchTrackerTrackEquipmentPaths;
+            if (ImGui.Checkbox("Track equipment paths (chara/weapon, chara/equipment, chara/accessory)", ref trackEquipmentPaths))
+            {
+                configService.Current.MismatchTrackerTrackEquipmentPaths = trackEquipmentPaths;
+                configService.Save();
+            }
+
+            var trackCompanions = configService.Current.MismatchTrackerTrackMinionMountAndPetPaths;
+            if (ImGui.Checkbox("Track minion/mount and pet paths", ref trackCompanions))
+            {
+                configService.Current.MismatchTrackerTrackMinionMountAndPetPaths = trackCompanions;
+                configService.Save();
+            }
+
+            var trackPhyb = configService.Current.MismatchTrackerTrackPhybFiles;
+            if (ImGui.Checkbox("Track .phyb files", ref trackPhyb))
+            {
+                configService.Current.MismatchTrackerTrackPhybFiles = trackPhyb;
+                configService.Save();
+            }
+
+            var trackSkp = configService.Current.MismatchTrackerTrackSkpFiles;
+            if (ImGui.Checkbox("Track .skp files", ref trackSkp))
+            {
+                configService.Current.MismatchTrackerTrackSkpFiles = trackSkp;
+                configService.Save();
+            }
+
+            var trackPbd = configService.Current.MismatchTrackerTrackPbdFiles;
+            if (ImGui.Checkbox("Track .pbd files", ref trackPbd))
+            {
+                configService.Current.MismatchTrackerTrackPbdFiles = trackPbd;
+                configService.Save();
+            }
+
+            uiShared.DrawHelpText("These filters affect what is recorded and displayed in the Active Mismatch Tracker.");
+        }
+        finally
+        {
+            ImGui.PopID();
+        }
+    }
+
     public static void DrawOpenAcknowledgmentMonitorAction(UiSharedService uiShared, SpheneMediator mediator, string blockId = "OpenAcknowledgmentMonitor")
     {
         if (uiShared.IconTextButton(FontAwesomeIcon.Desktop, "Open Acknowledgment Monitor"))

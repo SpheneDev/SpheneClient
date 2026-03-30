@@ -1202,12 +1202,20 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             var activePaths = await pair.GetCurrentPenumbraActivePathsByGamePathAsync().ConfigureAwait(false);
             _activePenumbraPathsByUid[uid] = NormalizePathMap(activePaths);
             
-            // Get Minion/Mount active paths
-            var minionPaths = await pair.GetMinionOrMountActivePathsByGamePathAsync().ConfigureAwait(false);
+            IReadOnlyDictionary<string, string> minionPaths;
+            IReadOnlyDictionary<string, string> petPaths;
+            if (_configService.Current.MismatchTrackerTrackMinionMountAndPetPaths)
+            {
+                minionPaths = await pair.GetMinionOrMountActivePathsByGamePathAsync().ConfigureAwait(false);
+                petPaths = await pair.GetPetActivePathsByGamePathAsync().ConfigureAwait(false);
+            }
+            else
+            {
+                minionPaths = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                petPaths = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            }
+
             _activeMinionPathsByUid[uid] = NormalizePathMap(minionPaths);
-            
-            // Get Pet active paths
-            var petPaths = await pair.GetPetActivePathsByGamePathAsync().ConfigureAwait(false);
             _activePetPathsByUid[uid] = NormalizePathMap(petPaths);
             
             _activePenumbraPathsUpdatedAt[uid] = DateTimeOffset.UtcNow;
@@ -1234,6 +1242,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         var playerActiveByPath = NormalizePathMap(playerActivePaths);
         var minionActiveByPath = NormalizePathMap(minionActivePaths);
         var petActiveByPath = NormalizePathMap(petActivePaths);
+        var trackCompanions = _configService.Current.MismatchTrackerTrackMinionMountAndPetPaths;
 
         foreach (var kvp in deliveredByPath)
         {
@@ -1241,10 +1250,12 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             var state = kvp.Value;
 
             if (!state.IsActive) continue; // Only track paths flagged as active
+            if (!ShouldTrackMismatchTrackerPath(gamePath, state.ObjectKinds)) continue;
 
             // Check correct active paths based on ObjectKind
             var isMinionOrMountPath = state.ObjectKinds.Contains("MinionOrMount");
             var isPetPath = state.ObjectKinds.Contains("Pet");
+            if ((isMinionOrMountPath || isPetPath) && !trackCompanions) continue;
             var activeByPath = isMinionOrMountPath ? minionActiveByPath 
                 : isPetPath ? petActiveByPath 
                 : playerActiveByPath;
@@ -1258,10 +1269,78 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         }
     }
 
+    private bool ShouldTrackMismatchTrackerPath(string gamePath, IReadOnlySet<string> objectKinds)
+    {
+        if (!_configService.Current.MismatchTrackerTrackEquipmentPaths
+            && (gamePath.StartsWith("chara/weapon", StringComparison.OrdinalIgnoreCase)
+                || gamePath.StartsWith("chara/equipment", StringComparison.OrdinalIgnoreCase)
+                || gamePath.StartsWith("chara/accessory", StringComparison.OrdinalIgnoreCase)))
+        {
+            return false;
+        }
+
+        var isMinionOrMountPath = objectKinds.Contains("MinionOrMount");
+        var isPetPath = objectKinds.Contains("Pet");
+        if ((isMinionOrMountPath || isPetPath) && !_configService.Current.MismatchTrackerTrackMinionMountAndPetPaths)
+        {
+            return false;
+        }
+
+        if (!_configService.Current.MismatchTrackerTrackPhybFiles && gamePath.EndsWith(".phyb", StringComparison.OrdinalIgnoreCase)) return false;
+        if (!_configService.Current.MismatchTrackerTrackSkpFiles && gamePath.EndsWith(".skp", StringComparison.OrdinalIgnoreCase)) return false;
+        if (!_configService.Current.MismatchTrackerTrackPbdFiles && gamePath.EndsWith(".pbd", StringComparison.OrdinalIgnoreCase)) return false;
+
+        return true;
+    }
+
     private void DrawActiveMismatchTracker()
     {
         ImGui.Text("Active Mismatch Tracker");
         ImGui.TextWrapped("Tracks paths flagged as IsActive=true in delivered data but not active in Penumbra collection. Auto-refreshes every 10 seconds.");
+        ImGui.Separator();
+
+        // Filter settings
+        ImGui.Text("Filter Settings:");
+        
+        var trackEquipment = _configService.Current.MismatchTrackerTrackEquipmentPaths;
+        if (ImGui.Checkbox("Track Equipment (weapon/equipment/accessory)", ref trackEquipment))
+        {
+            _configService.Current.MismatchTrackerTrackEquipmentPaths = trackEquipment;
+            _configService.Save();
+        }
+
+        ImGui.SameLine();
+        var trackCompanions = _configService.Current.MismatchTrackerTrackMinionMountAndPetPaths;
+        if (ImGui.Checkbox("Minion/Mount/Pet", ref trackCompanions))
+        {
+            _configService.Current.MismatchTrackerTrackMinionMountAndPetPaths = trackCompanions;
+            _configService.Save();
+        }
+        
+        ImGui.SameLine();
+        var trackPhyb = _configService.Current.MismatchTrackerTrackPhybFiles;
+        if (ImGui.Checkbox(".phyb", ref trackPhyb))
+        {
+            _configService.Current.MismatchTrackerTrackPhybFiles = trackPhyb;
+            _configService.Save();
+        }
+        
+        ImGui.SameLine();
+        var trackSkp = _configService.Current.MismatchTrackerTrackSkpFiles;
+        if (ImGui.Checkbox(".skp", ref trackSkp))
+        {
+            _configService.Current.MismatchTrackerTrackSkpFiles = trackSkp;
+            _configService.Save();
+        }
+        
+        ImGui.SameLine();
+        var trackPbd = _configService.Current.MismatchTrackerTrackPbdFiles;
+        if (ImGui.Checkbox(".pbd", ref trackPbd))
+        {
+            _configService.Current.MismatchTrackerTrackPbdFiles = trackPbd;
+            _configService.Save();
+        }
+        
         ImGui.Separator();
 
         if (ImGui.Button("Clear All Records"))
@@ -1279,8 +1358,10 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             ImGui.SetTooltip("Reset total check counters without clearing mismatch records");
         }
 
-        var records = _mismatchTracker.GetRecords().Where(r => r.MismatchCount > 0).ToList();
-        var (globalChecks, globalMismatches) = _mismatchTracker.GetGlobalStats();
+        var records = _mismatchTracker.GetRecords()
+            .Where(r => r.MismatchCount > 0 && ShouldTrackMismatchTrackerPath(r.GamePath, r.ObjectKinds))
+            .ToList();
+        var (globalChecks, _) = _mismatchTracker.GetGlobalStats();
         ImGui.SameLine();
         ImGui.Text($"| Mismatches: {records.Count} | Total Checks: {globalChecks} | Auto-refresh every 10s");
 
