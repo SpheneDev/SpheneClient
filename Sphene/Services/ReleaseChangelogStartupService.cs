@@ -104,6 +104,9 @@ public sealed class ReleaseChangelogStartupService : IHostedService, IMediatorSu
             if (string.IsNullOrWhiteSpace(text))
             {
                 _logger.LogDebug("No changelog found for version {version}; skipping release notes popup", versionString);
+                _configService.Current.LastSeenVersionChangelog = versionString;
+                _configService.Save();
+                _mediator.Publish(new ReleaseChangelogClosedMessage());
                 _pendingVersionString = string.Empty;
                 return;
             }
