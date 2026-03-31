@@ -124,10 +124,19 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
 
     public void AddGroupPair(GroupPairFullInfoDto dto)
     {
+        var created = false;
         if (!_allClientPairs.ContainsKey(dto.User))
+        {
             _allClientPairs[dto.User] = _pairFactory.Create(new UserFullPairDto(dto.User, API.Data.Enum.IndividualPairStatus.None,
                 [dto.Group.GID], dto.SelfToOtherPermissions, dto.OtherToSelfPermissions));
-        else _allClientPairs[dto.User].UserPair.Groups.Add(dto.GID);
+            created = true;
+        }
+        else
+        {
+            _allClientPairs[dto.User].UserPair.Groups.Add(dto.GID);
+        }
+
+        RestorePairCharacterDataFromCache(_allClientPairs[dto.User], created);
         ProcessPendingPairEvents(dto.User.UID);
         RecreateLazy();
     }
