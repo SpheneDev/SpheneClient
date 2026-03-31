@@ -5,6 +5,7 @@ using Sphene.API.Dto.Files;
 using Sphene.API.Routes;
 using Sphene.FileCache;
 using Sphene.PlayerData.Handlers;
+using Sphene.SpheneConfiguration;
 using Sphene.Services.Mediator;
 using Sphene.WebAPI.Files.Models;
 using Microsoft.Extensions.Logging;
@@ -23,15 +24,17 @@ public partial class FileDownloadManager : DisposableMediatorSubscriberBase
     private readonly FileTransferOrchestrator _orchestrator;
     private readonly List<ThrottledStream> _activeDownloadStreams;
     private readonly HttpClient _directDownloadHttpClient;
+    private readonly SpheneConfigService _configService;
 
     public FileDownloadManager(ILogger<FileDownloadManager> logger, SpheneMediator mediator,
         FileTransferOrchestrator orchestrator,
-        FileCacheManager fileCacheManager, FileCompactor fileCompactor) : base(logger, mediator)
+        FileCacheManager fileCacheManager, FileCompactor fileCompactor, SpheneConfigService configService) : base(logger, mediator)
     {
         _downloadStatus = new Dictionary<string, FileDownloadStatus>(StringComparer.Ordinal);
         _orchestrator = orchestrator;
         _fileDbManager = fileCacheManager;
         _fileCompactor = fileCompactor;
+        _configService = configService;
         _activeDownloadStreams = [];
         _directDownloadHttpClient = new HttpClient();
         var ver = Assembly.GetExecutingAssembly().GetName().Version;
@@ -78,7 +81,7 @@ public partial class FileDownloadManager : DisposableMediatorSubscriberBase
         }
 
         var transfer = new DownloadFileTransfer(dto);
-        if (transfer.DirectDownloadUri != null)
+        if (_configService.Current.UseSpheneCdnDirectDownloads && transfer.DirectDownloadUri != null)
         {
             try
             {
@@ -469,12 +472,13 @@ public partial class FileDownloadManager : DisposableMediatorSubscriberBase
     {
         long downloadedViaObjectStorage = 0;
         long downloadedViaFileServer = 0;
+        var useSpheneCdnDirectDownloads = _configService.Current.UseSpheneCdnDirectDownloads;
 
         var downloadGroups = CurrentDownloads.GroupBy(f =>
         {
-            var uri = f.DirectDownloadUri ?? f.DownloadUri;
+            var uri = (useSpheneCdnDirectDownloads ? f.DirectDownloadUri : null) ?? f.DownloadUri;
             var hostKey = uri.Host + ":" + uri.Port;
-            if (f.DirectDownloadUri != null && !string.IsNullOrWhiteSpace(f.Hash))
+            if (useSpheneCdnDirectDownloads && f.DirectDownloadUri != null && !string.IsNullOrWhiteSpace(f.Hash))
             {
                 var prefix = char.ToUpperInvariant(f.Hash[0]);
                 return hostKey + ":r2:" + prefix;
@@ -703,6 +707,11 @@ public partial class FileDownloadManager : DisposableMediatorSubscriberBase
 
     private async Task<bool> TryDownloadGroupDirectAsync(string downloadGroupKey, List<DownloadFileTransfer> fileTransfers, List<FileReplacementData> fileReplacement, CancellationToken ct)
     {
+        if (!_configService.Current.UseSpheneCdnDirectDownloads)
+        {
+            return false;
+        }
+
         if (fileTransfers.Count == 0)
         {
             return true;

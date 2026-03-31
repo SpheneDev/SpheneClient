@@ -67,6 +67,7 @@ public class SpheneConfig : ISpheneConfiguration
     public bool ShowUploadingBigText { get; set; } = true;
     public bool ShowVisibleUsersSeparately { get; set; } = true;
     public bool AllowReceivingPenumbraMods { get; set; } = true;
+    public bool UseSpheneCdnDirectDownloads { get; set; } = true;
     public int TimeSpanBetweenScansInSeconds { get; set; } = 30;
     public int TransferBarsHeight { get; set; } = 12;
     public bool TransferBarsShowText { get; set; } = true;

@@ -345,6 +345,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         ImGui.TextUnformatted("0 = No limit/infinite");
 
         TransfersOptionBlock.DrawMaximumParallelDataStreamsOption(_configService, "TransfersMaximumParallelDataStreams");
+        TransfersOptionBlock.DrawUseSpheneCdnDirectDownloadsOption(_configService, _uiShared, "TransfersUseSpheneCdnDirectDownloads");
         TransfersOptionBlock.DrawAllowReceivingPenumbraModPackagesOption(_configService, _uiShared, ApiController, "TransfersAllowReceivingPenumbraModPackages");
         TransfersOptionBlock.DrawUseAlternativeTransmissionMethodOption(_configService, _uiShared, "TransfersUseAlternativeTransmissionMethod");
 

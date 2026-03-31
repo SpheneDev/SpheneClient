@@ -70,6 +70,30 @@ public static class TransfersOptionBlock
         }
     }
 
+    public static void DrawUseSpheneCdnDirectDownloadsOption(SpheneConfigService configService, UiSharedService uiShared, string blockId = "UseSpheneCdnDirectDownloads")
+    {
+        ImGui.PushID(blockId);
+        try
+        {
+            var useSpheneCdn = configService.Current.UseSpheneCdnDirectDownloads;
+            if (ImGui.Checkbox("Use CDN direct downloads", ref useSpheneCdn))
+            {
+                configService.Current.UseSpheneCdnDirectDownloads = useSpheneCdn;
+                configService.Save();
+            }
+
+            uiShared.DrawHelpText("When enabled, Sphene downloads files directly from the CDN https://sphene.cloud when possible and falls back to the file server if needed."
+                                  + UiSharedService.TooltipSeparator
+                                  + "This is usually faster because Global Receive Limit / Download Speed Limit does not apply to CDN direct downloads."
+                                  + UiSharedService.TooltipSeparator
+                                  + "When disabled, Sphene always uses the legacy file server download flow.");
+        }
+        finally
+        {
+            ImGui.PopID();
+        }
+    }
+
     public static void DrawAllowReceivingPenumbraModPackagesOption(SpheneConfigService configService, UiSharedService uiShared, Sphene.WebAPI.ApiController apiController, string blockId = "AllowReceivingPenumbraModPackages")
     {
         ImGui.PushID(blockId);
