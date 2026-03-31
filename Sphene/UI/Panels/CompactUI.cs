@@ -76,10 +76,12 @@ public class CompactUi : WindowMediatorSubscriberBase
  private Vector2 _lastSize = Vector2.One;
  // One-time check to correct persisted width below minimum
  private bool _widthCorrectionChecked = false;
-    private const string TestServerDisclaimerPopupName = "Test Server Disclaimer";
     private const string ControlPanelTitle = "Sphene Control Panel";
+#if IS_TEST_BUILD
+    private const string TestServerDisclaimerPopupName = "Test Server Disclaimer";
     private bool _showTestServerDisclaimerPopup;
     private DateTime _testServerDisclaimerOpenedAt = DateTime.MinValue;
+#endif
     
     private bool _showModalForUserAddition;
     private float _transferPartHeight;

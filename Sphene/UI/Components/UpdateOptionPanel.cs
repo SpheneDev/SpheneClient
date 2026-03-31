@@ -21,7 +21,7 @@ public static class UpdateOptionPanel
     private static readonly ReleaseDefinition[] Releases =
     [
         new("v.1.1.11.1071", [Link.SyncIncomingWithoutRedraw, Link.SyncOutgoingBatching]),
-        new("v.1.1.13.0", [Link.ShowTestBuildUpdates],[Link.FilterCharacterLegacyShpkOutgoing],[Link.MismatchTrackerFilters],[Link.TransfersUseSpheneCdnDirectDownloads]),
+        new("v.1.1.13.0", [Link.ShowTestBuildUpdates, Link.FilterCharacterLegacyShpkOutgoing, Link.MismatchTrackerFilters, Link.TransfersUseSpheneCdnDirectDownloads]),
     ];
 
     private static readonly IReadOnlyDictionary<Link, string> LinkTitles = new Dictionary<Link, string>
