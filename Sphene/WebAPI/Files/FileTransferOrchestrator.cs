@@ -38,6 +38,7 @@ public class FileTransferOrchestrator : DisposableMediatorSubscriberBase
             Logger.LogDebug("ConnectedMessage received with FileServerAddress: {fileServerAddress}", msg.Connection.ServerInfo.FileServerAddress);
             Logger.LogDebug("Raw FileServerAddress value: '{rawValue}'", msg.Connection.ServerInfo.FileServerAddress?.ToString() ?? "NULL");
             FilesCdnUri = msg.Connection.ServerInfo.FileServerAddress;
+            FilesCdnFallbackUri = msg.Connection.ServerInfo.FileServerFallbackAddress;
             Logger.LogDebug("FileTransferOrchestrator initialized: {isInitialized}, FilesCdnUri: {filesCdnUri}", IsInitialized, FilesCdnUri);
         });
 
@@ -45,6 +46,7 @@ public class FileTransferOrchestrator : DisposableMediatorSubscriberBase
         {
             Logger.LogDebug("DisconnectedMessage received, resetting FilesCdnUri to null");
             FilesCdnUri = null;
+            FilesCdnFallbackUri = null;
             Logger.LogDebug("FileTransferOrchestrator reset: {isInitialized}, FilesCdnUri: {filesCdnUri}", IsInitialized, FilesCdnUri);
         });
         Mediator.Subscribe<DownloadReadyMessage>(this, (msg) =>
@@ -54,6 +56,7 @@ public class FileTransferOrchestrator : DisposableMediatorSubscriberBase
     }
 
     public Uri? FilesCdnUri { private set; get; }
+    public Uri? FilesCdnFallbackUri { private set; get; }
     public List<FileTransfer> ForbiddenTransfers { get; } = [];
     public bool IsInitialized => FilesCdnUri != null;
 
