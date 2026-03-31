@@ -519,7 +519,7 @@ public partial class FileDownloadManager : DisposableMediatorSubscriberBase
             Uri? selectedBaseUri = null;
             HttpResponseMessage? requestIdResponse = null;
             Exception? lastException = null;
-            foreach (var baseUri in GetFileServerCandidateBaseUris(fileGroupList.First()))
+            foreach (var baseUri in GetFileServerCandidateBaseUris(fileGroupList[0]))
             {
                 try
                 {
@@ -690,19 +690,26 @@ public partial class FileDownloadManager : DisposableMediatorSubscriberBase
             throw new HttpRequestException($"Direct download failed: {directUri}", null, response.StatusCode);
         }
 
-        await using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
-        using var ms = new MemoryStream();
-        var buffer = new byte[65536];
-        long totalRead = 0;
-        int read;
-        while ((read = await stream.ReadAsync(buffer, ct).ConfigureAwait(false)) > 0)
+        var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+        try
         {
-            ms.Write(buffer, 0, read);
-            totalRead += read;
-            progress?.Invoke(totalRead);
-        }
+            using var ms = new MemoryStream();
+            var buffer = new byte[65536];
+            long totalRead = 0;
+            int read;
+            while ((read = await stream.ReadAsync(buffer, ct).ConfigureAwait(false)) > 0)
+            {
+                await ms.WriteAsync(buffer.AsMemory(0, read), ct).ConfigureAwait(false);
+                totalRead += read;
+                progress?.Invoke(totalRead);
+            }
 
-        return ms.ToArray();
+            return ms.ToArray();
+        }
+        finally
+        {
+            await stream.DisposeAsync().ConfigureAwait(false);
+        }
     }
 
     private async Task<bool> TryDownloadGroupDirectAsync(string downloadGroupKey, List<DownloadFileTransfer> fileTransfers, List<FileReplacementData> fileReplacement, CancellationToken ct)
