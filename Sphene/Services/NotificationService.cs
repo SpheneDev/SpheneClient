@@ -561,7 +561,9 @@ public class NotificationService : DisposableMediatorSubscriberBase, IHostedServ
         }
 
         Logger.LogDebug("Showing area-bound notification via ShowNotificationLocationBased");
-        // Use the specific location setting for area-bound syncshell notifications
-        ShowNotificationLocationBased(new NotificationMessage(msg.Title, msg.Message, NotificationType.Info), msg.Location);
+        _ = _dalamudUtilService.RunOnFrameworkThread(() =>
+        {
+            ShowNotificationLocationBased(new NotificationMessage(msg.Title, msg.Message, NotificationType.Info), msg.Location);
+        });
     }
 }
