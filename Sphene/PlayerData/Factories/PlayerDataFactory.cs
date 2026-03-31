@@ -139,10 +139,7 @@ public class PlayerDataFactory
 
         // Create initial FileReplacements from resolved paths
         fragment.FileReplacements =
-                new HashSet<FileReplacement>(resolvedPaths.Select(c => new FileReplacement([.. c.Value], c.Key)
-                {
-                    IsActive = true,
-                }), FileReplacementComparer.Instance)
+                new HashSet<FileReplacement>(resolvedPaths.Select(c => new FileReplacement([.. c.Value], c.Key, isActive: true)), FileReplacementComparer.Instance)
                 .Where(p => p.HasFileReplacement).ToHashSet();
         fragment.FileReplacements.RemoveWhere(c => c.GamePaths.Any(g => !CacheMonitor.AllowedFileExtensions.Any(e => g.EndsWith(e, StringComparison.OrdinalIgnoreCase))));
 
@@ -185,7 +182,7 @@ public class PlayerDataFactory
         var resolvedTransientPaths = await GetFileReplacementsFromPaths(transientPaths, new HashSet<string>(StringComparer.Ordinal)).ConfigureAwait(false);
 
         _logger.LogDebug("== Transient Replacements ==");
-        foreach (var replacement in resolvedTransientPaths.Select(c => new FileReplacement([.. c.Value], c.Key)).OrderBy(f => f.ResolvedPath, StringComparer.Ordinal))
+        foreach (var replacement in resolvedTransientPaths.Select(c => new FileReplacement([.. c.Value], c.Key, isActive: false)).OrderBy(f => f.ResolvedPath, StringComparer.Ordinal))
         {
             _logger.LogDebug("=> {repl}", replacement);
             fragment.FileReplacements.Add(replacement);

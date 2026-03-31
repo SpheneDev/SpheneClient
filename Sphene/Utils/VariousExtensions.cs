@@ -63,15 +63,10 @@ public static class VariousExtensions
         foreach (ObjectKind objectKind in Enum.GetValues<ObjectKind>())
         {
             charaDataToUpdate[objectKind] = [];
-            oldData.FileReplacements.TryGetValue(objectKind, out var existingFileReplacementsRaw);
-            newData.FileReplacements.TryGetValue(objectKind, out var newFileReplacementsRaw);
-            oldData.GlamourerData.TryGetValue(objectKind, out var existingGlamourerDataRaw);
-            newData.GlamourerData.TryGetValue(objectKind, out var newGlamourerDataRaw);
-
-            var existingFileReplacements = existingFileReplacementsRaw is { Count: > 0 } ? existingFileReplacementsRaw : null;
-            var newFileReplacements = newFileReplacementsRaw is { Count: > 0 } ? newFileReplacementsRaw : null;
-            var existingGlamourerData = !string.IsNullOrEmpty(existingGlamourerDataRaw) ? existingGlamourerDataRaw : null;
-            var newGlamourerData = !string.IsNullOrEmpty(newGlamourerDataRaw) ? newGlamourerDataRaw : null;
+            oldData.FileReplacements.TryGetValue(objectKind, out var existingFileReplacements);
+            newData.FileReplacements.TryGetValue(objectKind, out var newFileReplacements);
+            oldData.GlamourerData.TryGetValue(objectKind, out var existingGlamourerData);
+            newData.GlamourerData.TryGetValue(objectKind, out var newGlamourerData);
 
             bool hasNewButNotOldFileReplacements = newFileReplacements != null && existingFileReplacements == null;
             bool hasOldButNotNewFileReplacements = existingFileReplacements != null && newFileReplacements == null;

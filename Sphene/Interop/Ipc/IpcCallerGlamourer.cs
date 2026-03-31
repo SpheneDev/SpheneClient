@@ -123,7 +123,7 @@ public sealed class IpcCallerGlamourer : DisposableMediatorSubscriberBase, IIpcC
                 {
                     logger.LogWarning(ex, "[{appid}] Failed to apply Glamourer data", applicationId);
                 }
-            }, token).ConfigureAwait(false);
+            }, token, waitForRedrawEvent: false).ConfigureAwait(false);
         }
         finally
         {

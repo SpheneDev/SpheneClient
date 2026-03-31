@@ -268,7 +268,7 @@ public sealed class CharaDataFileHandler : IDisposable
             updateDto.HonorificData = data.HonorificData;
             updateDto.MoodlesData = data.MoodlesData;
             updateDto.PetNamesData = data.PetNamesData;
-            updateDto.BypassEmoteData = data.BypassEmoteData;
+            // BypassEmoteData is NOT saved - only applied via fast-path real-time updates
 
             var hasFiles = data.FileReplacements.TryGetValue(ObjectKind.Player, out var fileReplacements);
             if (!hasFiles)
@@ -278,8 +278,8 @@ public sealed class CharaDataFileHandler : IDisposable
             }
             else
             {
-                updateDto.FileGamePaths = [.. fileReplacements!.Where(u => string.IsNullOrEmpty(u.FileSwapPath)).SelectMany(u => u.GamePaths, (file, path) => new GamePathEntry(file.Hash, path, file.IsActive))];
-                updateDto.FileSwaps = [.. fileReplacements!.Where(u => !string.IsNullOrEmpty(u.FileSwapPath)).SelectMany(u => u.GamePaths, (file, path) => new GamePathEntry(file.FileSwapPath, path, file.IsActive))];
+                updateDto.FileGamePaths = [.. fileReplacements!.Where(u => string.IsNullOrEmpty(u.FileSwapPath)).SelectMany(u => u.GamePaths, (file, path) => new GamePathEntry(file.Hash, path))];
+                updateDto.FileSwaps = [.. fileReplacements!.Where(u => !string.IsNullOrEmpty(u.FileSwapPath)).SelectMany(u => u.GamePaths, (file, path) => new GamePathEntry(file.FileSwapPath, path))];
             }
         }
     }

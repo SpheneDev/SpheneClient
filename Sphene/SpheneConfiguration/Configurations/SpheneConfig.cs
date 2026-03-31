@@ -67,6 +67,7 @@ public class SpheneConfig : ISpheneConfiguration
     public bool ShowUploadingBigText { get; set; } = true;
     public bool ShowVisibleUsersSeparately { get; set; } = true;
     public bool AllowReceivingPenumbraMods { get; set; } = true;
+    public bool UseSpheneCdnDirectDownloads { get; set; } = true;
     public int TimeSpanBetweenScansInSeconds { get; set; } = 30;
     public int TransferBarsHeight { get; set; } = 12;
     public bool TransferBarsShowText { get; set; } = true;
@@ -88,7 +89,6 @@ public class SpheneConfig : ISpheneConfiguration
     public float PenumbraReceivePopupPosX { get; set; } = 0f;
     public float PenumbraReceivePopupPosY { get; set; } = 0f;
     public bool PenumbraReceivePopupUseCustomPosition { get; set; } = false;
-    
     // Enable or disable integration of ShrinkU UI inside Sphene
     public bool EnableShrinkUIntegration { get; set; } = true;
     public string PenumbraModDownloadFolder { get; set; } = string.Empty;
@@ -100,11 +100,10 @@ public class SpheneConfig : ISpheneConfiguration
     public bool ShowWaitingForAcknowledgmentPopups { get; set; } = false;
     public bool EnableAcknowledgmentBatching { get; set; } = true;
     public bool EnableAcknowledgmentAutoRetry { get; set; } = true;
-    public bool DisableRedraws { get; set; } = false;
     public bool EnableDutyCombatSyncWithoutRedraw { get; set; } = false;
     public bool EnableDutyCombatOutgoingSyncBatching { get; set; } = false;
     public int DutyCombatOutgoingSyncBatchSeconds { get; set; } = 10;
-    public bool FilterCharacterLegacyShpkInOutgoingCharacterData { get; set; } = true;
+    public bool FilterCharacterLegacyShpkInOutgoingCharacterData { get; set; } = false;
 
     public int AcknowledgmentTimeoutSeconds { get; set; } = 30;
     public NotificationLocation AcknowledgmentNotification { get; set; } = NotificationLocation.Toast;
@@ -134,5 +133,12 @@ public class SpheneConfig : ISpheneConfiguration
     public bool UseTestServerOverride { get; set; } = false;
     public string TestServerApiUrl { get; set; } = string.Empty;
     public bool HasAcceptedTestServerDisclaimer { get; set; } = false;
+
+    // Active Mismatch Tracker Filter Settings
+    public bool MismatchTrackerTrackEquipmentPaths { get; set; } = false; // chara/weapon, chara/equipment, chara/accessory
+    public bool MismatchTrackerTrackMinionMountAndPetPaths { get; set; } = false;
+    public bool MismatchTrackerTrackPhybFiles { get; set; } = true;
+    public bool MismatchTrackerTrackSkpFiles { get; set; } = true;
+    public bool MismatchTrackerTrackPbdFiles { get; set; } = true;
 
 }

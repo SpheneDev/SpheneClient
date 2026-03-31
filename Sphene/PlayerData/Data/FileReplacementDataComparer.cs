@@ -14,19 +14,12 @@ public class FileReplacementDataComparer : IEqualityComparer<FileReplacementData
     public bool Equals(FileReplacementData? x, FileReplacementData? y)
     {
         if (x == null || y == null) return false;
-        return x.Hash.Equals(y.Hash)
-            && CompareHashSets(x.GamePaths.ToHashSet(StringComparer.Ordinal), y.GamePaths.ToHashSet(StringComparer.Ordinal))
-            && string.Equals(x.FileSwapPath, y.FileSwapPath, StringComparison.Ordinal)
-            && x.IsActive == y.IsActive;
+        return x.Hash.Equals(y.Hash) && CompareHashSets(x.GamePaths.ToHashSet(StringComparer.Ordinal), y.GamePaths.ToHashSet(StringComparer.Ordinal)) && string.Equals(x.FileSwapPath, y.FileSwapPath, StringComparison.Ordinal);
     }
 
     public int GetHashCode(FileReplacementData obj)
     {
-        return HashCode.Combine(
-            obj.Hash.GetHashCode(StringComparison.OrdinalIgnoreCase),
-            GetOrderIndependentHashCode(obj.GamePaths),
-            StringComparer.Ordinal.GetHashCode(obj.FileSwapPath),
-            obj.IsActive);
+        return HashCode.Combine(obj.Hash.GetHashCode(StringComparison.OrdinalIgnoreCase), GetOrderIndependentHashCode(obj.GamePaths), StringComparer.Ordinal.GetHashCode(obj.FileSwapPath));
     }
 
     private static bool CompareHashSets(HashSet<string> list1, HashSet<string> list2)

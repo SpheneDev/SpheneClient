@@ -84,10 +84,13 @@ public class CompactUi : WindowMediatorSubscriberBase
     private bool _showModalForUserAddition;
     private float _transferPartHeight;
     private bool _wasOpen;
+    private bool _aprilFoolsHyperSyncEnabled;
+    private DateTime _aprilFoolsHyperSyncActivatedAt = DateTime.MinValue;
     
     
     // Halloween background texture
     private readonly IDalamudTextureWrap? _halloweenBackgroundTexture = null;
+    
     
     // Texture conversion fields
     
@@ -1457,6 +1460,27 @@ public class CompactUi : WindowMediatorSubscriberBase
                 ImGui.SetClipboardText(_apiController.DisplayName);
             }
             UiSharedService.AttachToolTip("Click to copy");
+        }
+
+        var nowLocal = DateTime.Now;
+        var isAprilFoolsSeason = (nowLocal.Month == 4 && nowLocal.Day == 1);
+        if (isAprilFoolsSeason)
+        {
+            ImGui.SameLine();
+            var t = (float)ImGui.GetTime();
+            var pulse = 0.65f + 0.35f * MathF.Sin(t * 3.0f);
+            using (ImRaii.PushColor(ImGuiCol.Text, new Vector4(0.55f, 0.85f, 1.0f, pulse)))
+            {
+                var buttonText = _aprilFoolsHyperSyncEnabled ? "Disable HyperSync™" : "Enable HyperSync™";
+                if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.Rocket, buttonText))
+                {
+                    var wasEnabled = _aprilFoolsHyperSyncEnabled;
+                    _aprilFoolsHyperSyncEnabled = !_aprilFoolsHyperSyncEnabled;
+                    _aprilFoolsHyperSyncActivatedAt = DateTime.Now;
+                    ImGui.OpenPopup(wasEnabled ? "HyperSyncDisabled" : "HyperSync");
+                }
+            }
+            UiSharedService.AttachToolTip(_aprilFoolsHyperSyncEnabled ? "Click to disable HyperSync™ (Beta)" : "Click to enable HyperSync™ (Beta)");
         }
     }
 
@@ -3779,6 +3803,72 @@ public class CompactUi : WindowMediatorSubscriberBase
         // Draw the rounded background rectangle
         var drawList = ImGui.GetWindowDrawList();
         drawList.AddRectFilled(headerStart, headerEnd, SpheneColors.ToImGuiColor(headerBgColor), SpheneCustomTheme.CurrentTheme.CompactHeaderRounding);
+
+        var nowLocal = DateTime.Now;
+        var isAprilFoolsSeason = (nowLocal.Month == 4 && nowLocal.Day == 1) || (nowLocal.Month == 3 && nowLocal.Day == 31);
+        if (_aprilFoolsHyperSyncEnabled && isAprilFoolsSeason)
+        {
+            var elapsed = (float)(nowLocal - _aprilFoolsHyperSyncActivatedAt).TotalSeconds;
+            var t = (float)ImGui.GetTime();
+            var winPos = ImGui.GetWindowPos();
+            var winSize = ImGui.GetWindowSize();
+            var alpha = Math.Clamp(1.0f - (elapsed / 20.0f), 0.10f, 0.25f);
+            var rounding = ImGui.GetStyle().WindowRounding;
+            var overlayColor = new Vector4(
+                0.55f + 0.35f * MathF.Sin(t * 1.9f),
+                0.55f + 0.35f * MathF.Sin(t * 2.3f + 1.3f),
+                0.55f + 0.35f * MathF.Sin(t * 2.7f + 2.1f),
+                alpha);
+            drawList.AddRectFilled(winPos, new Vector2(winPos.X + winSize.X, winPos.Y + winSize.Y),
+                ImGui.ColorConvertFloat4ToU32(overlayColor), rounding);
+
+            bool IsInsideRoundedRect(float x, float y)
+            {
+                var min = winPos;
+                var max = new Vector2(winPos.X + winSize.X, winPos.Y + winSize.Y);
+                if (x < min.X || x > max.X || y < min.Y || y > max.Y) return false;
+                if (rounding <= 0.0f) return true;
+
+                var left = min.X + rounding;
+                var right = max.X - rounding;
+                var top = min.Y + rounding;
+                var bottom = max.Y - rounding;
+                if (x >= left && x <= right) return true;
+                if (y >= top && y <= bottom) return true;
+
+                float cx;
+                float cy;
+                if (x < left)
+                    cx = left;
+                else
+                    cx = right;
+                if (y < top)
+                    cy = top;
+                else
+                    cy = bottom;
+
+                var dx = x - cx;
+                var dy = y - cy;
+                return (dx * dx + dy * dy) <= (rounding * rounding);
+            }
+
+            var sparkleCount = 60;
+            for (int i = 0; i < sparkleCount; i++)
+            {
+                var fx = 0.5f + 0.5f * MathF.Sin(t * 1.1f + i * 2.17f);
+                var fy = 0.5f + 0.5f * MathF.Sin(t * 1.7f + i * 1.31f);
+                var x = winPos.X + fx * winSize.X;
+                var y = winPos.Y + fy * winSize.Y;
+                if (!IsInsideRoundedRect(x, y)) continue;
+                var r = 1.5f + 2.5f * (0.5f + 0.5f * MathF.Sin(t * 3.4f + i));
+                var color = new Vector4(
+                    0.5f + 0.5f * MathF.Sin(t * 2.3f + i * 0.7f),
+                    0.5f + 0.5f * MathF.Sin(t * 2.9f + i * 1.1f),
+                    0.5f + 0.5f * MathF.Sin(t * 3.1f + i * 1.4f),
+                    0.55f);
+                drawList.AddCircleFilled(new Vector2(x, y), r, ImGui.ColorConvertFloat4ToU32(color));
+            }
+        }
         
         // Position content vertically centered within the header
         var contentY = contentStart.Y + (headerHeight - textHeight) / 2.0f;
@@ -3793,6 +3883,32 @@ public class CompactUi : WindowMediatorSubscriberBase
 
         // Window title - vertically centered
         SpheneCustomTheme.DrawStyledText(ControlPanelTitle, SpheneCustomTheme.CurrentTheme.CompactPanelTitleText);
+
+        if (ImGui.BeginPopupModal("HyperSync", ImGuiWindowFlags.AlwaysAutoResize))
+        {
+            ImGui.TextUnformatted("HyperSync™ activated.");
+            ImGui.Spacing();
+            ImGui.TextWrapped("Sphene is now synchronizing packets, pixels, and vibes across all shards. This is completely normal.");
+            ImGui.Spacing();
+            if (_uiSharedService.IconTextButton(FontAwesomeIcon.Check, "Understood"))
+            {
+                ImGui.CloseCurrentPopup();
+            }
+            ImGui.EndPopup();
+        }
+
+        if (ImGui.BeginPopupModal("HyperSyncDisabled", ImGuiWindowFlags.AlwaysAutoResize))
+        {
+            ImGui.TextUnformatted("HyperSync™ disabled.");
+            ImGui.Spacing();
+            ImGui.TextWrapped("April Fools. There was never a HyperSync. It was just Sphene doing Sphene things.");
+            ImGui.Spacing();
+            if (_uiSharedService.IconTextButton(FontAwesomeIcon.Check, "Okay"))
+            {
+                ImGui.CloseCurrentPopup();
+            }
+            ImGui.EndPopup();
+        }
         
         // Header buttons on the same line, positioned from the right with padding
         var buttonSpacing = 8.0f; // Reduced spacing between buttons (was 16.0f)

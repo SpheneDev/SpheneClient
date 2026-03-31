@@ -96,13 +96,6 @@ public static class ButtonStyleManagerUI
     private static int _selectedIndex = 0;
 
     public static bool IsPickerEnabled => _pickerEnabled;
-    public static string SelectedButtonKey => _keys[_selectedIndex].Key;
-
-    public static bool IsPreviewActiveFor(string key)
-    {
-        return _pickerEnabled && string.Equals(SelectedButtonKey, key, StringComparison.Ordinal);
-    }
-
     public static void DisablePicker()
     {
         _pickerEnabled = false;
@@ -274,7 +267,7 @@ public static class ButtonStyleManagerUI
             ov.HeightDelta = heightDelta;
             theme.NotifyThemeChanged();
         }
-        if (ImGui.DragFloat2("Icon Offset", ref iconOffset, 0.01f, -50f, 50f))
+        if (ImGui.DragFloat2("Icon Offset", ref iconOffset, 0.1f, -50f, 50f))
         {
             ov.IconOffset = iconOffset;
             theme.NotifyThemeChanged();

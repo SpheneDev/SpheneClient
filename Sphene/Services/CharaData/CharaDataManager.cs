@@ -598,13 +598,13 @@ public sealed partial class CharaDataManager : DisposableMediatorSubscriberBase
 
                 DataApplicationProgress = "Applying MCDF data";
 
-                var extended = await CharaDataMetaInfoExtendedDto.Create(new(charaFile.FilePath, new UserData(string.Empty)), _dalamudUtilService)
+        var extended = await CharaDataMetaInfoExtendedDto.Create(new(charaFile.FilePath, new UserData(string.Empty)), _dalamudUtilService)
                     .ConfigureAwait(false);
                 await ApplyDataAsync(applicationId, tempHandler, isSelf, autoRevert: false, extended,
                     extractedFiles, charaFile.CharaFileData.ManipulationData, charaFile.CharaFileData.GlamourerData,
                     charaFile.CharaFileData.CustomizePlusData, charaFile.CharaFileData.HeelsData, 
                     charaFile.CharaFileData.HonorificData, charaFile.CharaFileData.MoodlesData, 
-                    charaFile.CharaFileData.PetNamesData, charaFile.CharaFileData.BypassEmoteData, CancellationToken.None).ConfigureAwait(false);
+                    charaFile.CharaFileData.PetNamesData, CancellationToken.None).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -936,7 +936,7 @@ public sealed partial class CharaDataManager : DisposableMediatorSubscriberBase
 
     private async Task ApplyDataAsync(Guid applicationId, GameObjectHandler tempHandler, bool isSelf, bool autoRevert,
         CharaDataMetaInfoExtendedDto metaInfo, Dictionary<string, string> modPaths, string? manipData, string? glamourerData, string? customizeData, 
-        string? heelsData, string? honorificData, string? moodlesData, string? petNamesData, string? bypassEmoteData, CancellationToken token)
+        string? heelsData, string? honorificData, string? moodlesData, string? petNamesData, CancellationToken token)
     {
         Guid? cPlusId = null;
         Guid penumbraCollection;
@@ -1008,12 +1008,9 @@ public sealed partial class CharaDataManager : DisposableMediatorSubscriberBase
             }
 
             DataApplicationProgress = "Applying BypassEmote data";
-            Logger.LogTrace("[{appId}] Applying BypassEmote data", applicationId);
-            if (!string.IsNullOrEmpty(bypassEmoteData))
-            {
-                var cleanData = ExtractBypassEmotePayload(bypassEmoteData);
-                await _ipcManager.BypassEmote.SetStateForCharacterAsync(tempHandler.Address, cleanData).ConfigureAwait(false);
-            }
+            Logger.LogTrace("[{appId}] Skipping BypassEmote data - only applied via fast-path", applicationId);
+            // BypassEmote is NOT applied when loading stored character data
+            // It should only be applied via fast-path real-time updates from BypassEmoteUpdateMessage
 
             if (autoRevert)
             {
@@ -1059,22 +1056,7 @@ public sealed partial class CharaDataManager : DisposableMediatorSubscriberBase
         }
     }
 
-    private static string ExtractBypassEmotePayload(string data)
-    {
-        if (string.IsNullOrEmpty(data))
-        {
-            return string.Empty;
-        }
-
-        var separatorIndex = data.LastIndexOf('|');
-        if (separatorIndex < 0 || separatorIndex >= data.Length - 1)
-        {
-            return data;
-        }
-
-        var suffix = data[(separatorIndex + 1)..];
-        return long.TryParse(suffix, out _) ? data[..separatorIndex] : data;
-    }
+    // removed unused ExtractBypassEmotePayload
 
     private async Task CharaUpdateAsync(CharaDataExtendedUpdateDto updateDto)
     {
@@ -1291,7 +1273,7 @@ public sealed partial class CharaDataManager : DisposableMediatorSubscriberBase
         var extendedMetaInfo = await CacheData(metaInfo).ConfigureAwait(false);
 
         await ApplyDataAsync(applicationId, tempHandler, isSelf, autoRevert, extendedMetaInfo, modPaths, charaDataDownloadDto.ManipulationData, charaDataDownloadDto.GlamourerData,
-            charaDataDownloadDto.CustomizeData, charaDataDownloadDto.HeelsData, charaDataDownloadDto.HonorificData, charaDataDownloadDto.MoodlesData, charaDataDownloadDto.PetNamesData, charaDataDownloadDto.BypassEmoteData, token).ConfigureAwait(false);
+            charaDataDownloadDto.CustomizeData, charaDataDownloadDto.HeelsData, charaDataDownloadDto.HonorificData, charaDataDownloadDto.MoodlesData, charaDataDownloadDto.PetNamesData, token).ConfigureAwait(false);
     }
 
     public async Task<(string Result, bool Success)> UploadFiles(List<GamePathEntry> missingFileList, Func<Task>? postUpload = null)

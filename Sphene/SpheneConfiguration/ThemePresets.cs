@@ -353,12 +353,6 @@ public static class ThemePresets
                     HeightDelta = 0.0f,
                     IconOffset = new Vector2(0.5f, 0.0f)
                 },
-                [ButtonStyleKeys.Pair_Reload] = new ButtonStyleOverride
-                {
-                    WidthDelta = 0.0f,
-                    HeightDelta = 0.0f,
-                    IconOffset = new Vector2(0.97f, 0.48f)
-                },
                 ["GroupPair.Pause"] = new ButtonStyleOverride
                 {
                     WidthDelta = 0.6f,

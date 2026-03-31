@@ -345,6 +345,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         ImGui.TextUnformatted("0 = No limit/infinite");
 
         TransfersOptionBlock.DrawMaximumParallelDataStreamsOption(_configService, "TransfersMaximumParallelDataStreams");
+        TransfersOptionBlock.DrawUseSpheneCdnDirectDownloadsOption(_configService, _uiShared, "TransfersUseSpheneCdnDirectDownloads");
         TransfersOptionBlock.DrawAllowReceivingPenumbraModPackagesOption(_configService, _uiShared, ApiController, "TransfersAllowReceivingPenumbraModPackages");
         TransfersOptionBlock.DrawUseAlternativeTransmissionMethodOption(_configService, _uiShared, "TransfersUseAlternativeTransmissionMethod");
 
@@ -644,6 +645,9 @@ public class SettingsUi : WindowMediatorSubscriberBase
         
         DebugOptionBlock.DrawOpenAcknowledgmentMonitorAction(_uiShared, Mediator, "DebugOpenAcknowledgmentMonitor");
         DebugOptionBlock.DrawOpenStatusDebugAction(_uiShared, Mediator, "DebugOpenStatusDebug");
+
+        DrawSettingsSectionHeader("Active Mismatch Tracker", "Control which paths and file types are recorded and shown.");
+        DebugOptionBlock.DrawActiveMismatchTrackerFilterOptions(_configService, _uiShared, "DebugMismatchTrackerFilters");
         
 
     }
@@ -2383,9 +2387,6 @@ public class SettingsUi : WindowMediatorSubscriberBase
     private void DrawSyncBehaviorSettings()
     {
         DrawSettingsPageHeader("Sync Behavior", "Control how incoming and outgoing synchronization data is handled.");
-        DrawSettingsSectionHeader("Redraw");
-        SyncBehaviorOptionBlock.DrawDisableRedraws(_configService, _uiShared, "SettingsDisableRedraws");
-
         DrawSettingsSectionHeader("Incoming Sync");
         SyncBehaviorOptionBlock.DrawIncomingSyncWithoutRedraw(_configService, _uiShared, "SettingsIncomingSyncWithoutRedraw");
 

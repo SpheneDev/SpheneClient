@@ -13,14 +13,18 @@ public static class UpdateOptionPanel
         SyncIncomingWithoutRedraw,
         SyncOutgoingBatching,
         ShowTestBuildUpdates,
-        DisableRedraws,
-        FilterCharacterLegacyShpkOutgoing
+        FilterCharacterLegacyShpkOutgoing,
+        MismatchTrackerFilters,
+        TransfersUseSpheneCdnDirectDownloads
     }
 
     private static readonly ReleaseDefinition[] Releases =
     [
         new("v.1.1.11.1071", [Link.SyncIncomingWithoutRedraw, Link.SyncOutgoingBatching]),
-        new("v.1.1.13", [Link.FilterCharacterLegacyShpkOutgoing, Link.ShowTestBuildUpdates, Link.DisableRedraws])
+        new("v.1.1.12.50", [Link.ShowTestBuildUpdates]),
+        new("v.1.1.12.217", [Link.FilterCharacterLegacyShpkOutgoing]),
+        new("v.1.1.12.504", [Link.MismatchTrackerFilters]),
+        new("v.1.1.12.690", [Link.TransfersUseSpheneCdnDirectDownloads])
     ];
 
     private static readonly IReadOnlyDictionary<Link, string> LinkTitles = new Dictionary<Link, string>
@@ -28,8 +32,9 @@ public static class UpdateOptionPanel
         [Link.SyncIncomingWithoutRedraw] = "Sync: Incoming Sync (Default: Disabled)",
         [Link.SyncOutgoingBatching] = "Sync: Outgoing Batching (Default: Disabled)",
         [Link.ShowTestBuildUpdates] = "Notifications: Testbuild Update Hints (Default: Disabled)",
-        [Link.DisableRedraws] = "Sync: Disable Redraws (Default: Disabled)",
-        [Link.FilterCharacterLegacyShpkOutgoing] = "Sync: Filter characterlegacy.shpk in Sync Data (Default: Enabled)"
+        [Link.FilterCharacterLegacyShpkOutgoing] = "Sync: Filter characterlegacy.shpk in Sync Data (Experimental, Default: Disabled)",
+        [Link.MismatchTrackerFilters] = "Diagnostics: Active Mismatch Tracker Filters (Defaults: Equipment Off, Companions Off)",
+        [Link.TransfersUseSpheneCdnDirectDownloads] = "Transfers: Use CDN direct downloads (Default: Enabled)"
     };
 
     private static readonly IReadOnlyDictionary<Link, Action<SpheneConfigService, UiSharedService, SpheneMediator, float>> LinkDrawers
@@ -41,10 +46,12 @@ public static class UpdateOptionPanel
             SyncBehaviorOptionBlock.DrawOutgoingSyncBatching(configService, uiShared, outgoingSliderWidth, "UpdateOptionSyncOutgoingBatching"),
         [Link.ShowTestBuildUpdates] = (configService, uiShared, _, _) =>
             NotificationsOptionBlock.DrawShowTestBuildUpdatesOption(configService, uiShared, "UpdateOptionShowTestBuildUpdates"),
-        [Link.DisableRedraws] = (configService, uiShared, _, _) =>
-            SyncBehaviorOptionBlock.DrawDisableRedraws(configService, uiShared, "UpdateOptionDisableRedraws"),
         [Link.FilterCharacterLegacyShpkOutgoing] = (configService, uiShared, mediator, _) =>
-            SyncBehaviorOptionBlock.DrawFilterCharacterLegacyShpkInOutgoingCharacterData(configService, uiShared, mediator, "UpdateOptionFilterCharacterLegacyShpk")
+            SyncBehaviorOptionBlock.DrawFilterCharacterLegacyShpkInOutgoingCharacterData(configService, uiShared, mediator, "UpdateOptionFilterCharacterLegacyShpk"),
+        [Link.MismatchTrackerFilters] = (configService, uiShared, _, _) =>
+            DebugOptionBlock.DrawActiveMismatchTrackerFilterOptions(configService, uiShared, "UpdateOptionMismatchTrackerFilters"),
+        [Link.TransfersUseSpheneCdnDirectDownloads] = (configService, uiShared, _, _) =>
+            TransfersOptionBlock.DrawUseSpheneCdnDirectDownloadsOption(configService, uiShared, "UpdateOptionTransfersUseSpheneCdnDirectDownloads")
     };
 
     public static string GetTitle(Link link)

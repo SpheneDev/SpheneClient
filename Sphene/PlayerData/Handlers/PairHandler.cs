@@ -64,6 +64,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
     private string? _lastAppliedBypassEmoteData;
     private nint _lastAppliedBypassEmoteAddress = nint.Zero;
     private DateTime _lastAppliedBypassEmoteTime = DateTime.MinValue;
+    private bool _ignoreCharacterDataBypassEmote = false;
     private string? _lastSuccessfullyAppliedPenumbraHash;
     private string? _lastSuccessfullyAppliedGlamourerHash;
     private string? _lastSuccessfullyAppliedRestHash;
@@ -71,9 +72,6 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
     private nint _lastSuccessfullyAppliedCharacterAddress = nint.Zero;
     private nint _lastBoundMinionAddress = nint.Zero;
     private nint _lastAppliedMinionAddress = nint.Zero;
-    private nint _lastRedrawnMinionAddress = nint.Zero;
-    private string? _lastRedrawnMinionDataHash;
-    private bool _hasCompletedInitialCharacterRedraw = false;
     private bool _minionReapplyInProgress = false;
     private bool _initIdentMissingLogged = false;
     private bool _proximityReportedVisible = false;
@@ -121,44 +119,6 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                 Logger.LogWarning(ex, "[{applicationId}] Failed destroying temp collection for {user} ({reason})", applicationId, Pair.UserData.AliasOrUID, reason);
             }
         });
-    }
-
-    internal Guid GetPenumbraCollectionId()
-    {
-        return _penumbraCollection;
-    }
-
-    internal IReadOnlyDictionary<string, string> GetLastLoadedCollectionPathsSnapshot()
-    {
-        return _lastLoadedCollectionPaths.ToDictionary(k => k.Key, k => k.Value, StringComparer.OrdinalIgnoreCase);
-    }
-
-    internal async Task<IReadOnlyDictionary<string, string>> GetCurrentPenumbraActivePathsByGamePathAsync()
-    {
-        if (_charaHandler == null || _charaHandler.Address == nint.Zero || !IsVisible)
-        {
-            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        }
-
-        var resolvedPaths = await _ipcManager.Penumbra.GetCharacterData(Logger, _charaHandler).ConfigureAwait(false);
-        if (resolvedPaths == null || resolvedPaths.Count == 0)
-        {
-            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        }
-
-        Dictionary<string, string> activeByGamePath = new(StringComparer.OrdinalIgnoreCase);
-        foreach (var resolvedPath in resolvedPaths)
-        {
-            foreach (var gamePath in resolvedPath.Value)
-            {
-                if (!string.IsNullOrEmpty(gamePath))
-                {
-                    activeByGamePath[gamePath] = resolvedPath.Key;
-                }
-            }
-        }
-
-        return activeByGamePath;
     }
 
     public PairHandler(ILogger<PairHandler> logger, Pair pair,
@@ -299,6 +259,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         Mediator.Subscribe<PenumbraDisposedMessage>(this, _ =>
         {
             _pendingPenumbraReapply = true;
+            _penumbraCollection = Guid.Empty;
         });
         Mediator.Subscribe<ClassJobChangedMessage>(this, (msg) =>
         {
@@ -330,6 +291,124 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         });
 
         LastAppliedDataBytes = -1;
+    }
+
+    internal Guid GetPenumbraCollectionId()
+    {
+        return _penumbraCollection;
+    }
+
+    internal IReadOnlyDictionary<string, string> GetLastLoadedCollectionPathsSnapshot()
+    {
+        return _lastLoadedCollectionPaths.ToDictionary(k => k.Key, k => k.Value, StringComparer.OrdinalIgnoreCase);
+    }
+
+    internal async Task<IReadOnlyDictionary<string, string>> GetCurrentPenumbraActivePathsByGamePathAsync()
+    {
+        if (_charaHandler == null || _charaHandler.Address == nint.Zero || !IsVisible)
+        {
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        var resolvedPaths = await _ipcManager.Penumbra.GetCharacterData(Logger, _charaHandler).ConfigureAwait(false);
+        if (resolvedPaths == null || resolvedPaths.Count == 0)
+        {
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        Dictionary<string, string> activeByGamePath = new(StringComparer.OrdinalIgnoreCase);
+        foreach (var resolvedPath in resolvedPaths)
+        {
+            foreach (var gamePath in resolvedPath.Value)
+            {
+                if (!string.IsNullOrEmpty(gamePath))
+                {
+                    activeByGamePath[gamePath] = resolvedPath.Key;
+                }
+            }
+        }
+
+        return activeByGamePath;
+    }
+
+    internal async Task<IReadOnlyDictionary<string, string>> GetMinionOrMountActivePathsByGamePathAsync()
+    {
+        if (_charaHandler == null || _charaHandler.Address == nint.Zero || !IsVisible)
+        {
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        var minionAddress = _dalamudUtil.GetMinionOrMountPtr(PlayerCharacter);
+        if (minionAddress == nint.Zero)
+        {
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        using var minionHandler = await _gameObjectHandlerFactory.Create(ObjectKind.MinionOrMount, () => minionAddress, isWatched: false).ConfigureAwait(false);
+        if (minionHandler.Address == nint.Zero)
+        {
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        var resolvedPaths = await _ipcManager.Penumbra.GetCharacterData(Logger, minionHandler).ConfigureAwait(false);
+        if (resolvedPaths == null || resolvedPaths.Count == 0)
+        {
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        Dictionary<string, string> activeByGamePath = new(StringComparer.OrdinalIgnoreCase);
+        foreach (var resolvedPath in resolvedPaths)
+        {
+            foreach (var gamePath in resolvedPath.Value)
+            {
+                if (!string.IsNullOrEmpty(gamePath))
+                {
+                    activeByGamePath[gamePath] = resolvedPath.Key;
+                }
+            }
+        }
+
+        return activeByGamePath;
+    }
+
+    internal async Task<IReadOnlyDictionary<string, string>> GetPetActivePathsByGamePathAsync()
+    {
+        if (_charaHandler == null || _charaHandler.Address == nint.Zero || !IsVisible)
+        {
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        var petAddress = _dalamudUtil.GetPetPtr(PlayerCharacter);
+        if (petAddress == nint.Zero)
+        {
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        using var petHandler = await _gameObjectHandlerFactory.Create(ObjectKind.Pet, () => petAddress, isWatched: false).ConfigureAwait(false);
+        if (petHandler.Address == nint.Zero)
+        {
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        var resolvedPaths = await _ipcManager.Penumbra.GetCharacterData(Logger, petHandler).ConfigureAwait(false);
+        if (resolvedPaths == null || resolvedPaths.Count == 0)
+        {
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        Dictionary<string, string> activeByGamePath = new(StringComparer.OrdinalIgnoreCase);
+        foreach (var resolvedPath in resolvedPaths)
+        {
+            foreach (var gamePath in resolvedPath.Value)
+            {
+                if (!string.IsNullOrEmpty(gamePath))
+                {
+                    activeByGamePath[gamePath] = resolvedPath.Key;
+                }
+            }
+        }
+
+        return activeByGamePath;
     }
 
     public bool IsVisible
@@ -456,7 +535,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             
             // Check if we already applied this data
             // We compare the FULL data string (including timestamp) to distinguish repeated emotes from duplicate packets
-            if (string.Equals(data, _lastAppliedBypassEmoteData, StringComparison.Ordinal))
+            if (string.Equals(data, _lastAppliedBypassEmoteData, StringComparison.Ordinal) && _charaHandler.Address == _lastAppliedBypassEmoteAddress)
             {
                 // If it has a timestamp, it's a unique event ID, so strict equality means it's a duplicate packet -> Skip
                 if (hasTimestamp)
@@ -466,8 +545,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                 }
                 
                 // If no timestamp, we use a timeout to allow re-application after 2 seconds
-                if (_charaHandler.Address == _lastAppliedBypassEmoteAddress
-                    && (DateTime.UtcNow - _lastAppliedBypassEmoteTime).TotalSeconds < 2.0)
+                if ((DateTime.UtcNow - _lastAppliedBypassEmoteTime).TotalSeconds < 2.0)
                 {
                     Logger.LogDebug("Skipping BypassEmote fast path application (duplicate within cooldown): {data}", data);
                     return;
@@ -480,6 +558,11 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             _lastAppliedBypassEmoteData = data;
             _lastAppliedBypassEmoteAddress = _charaHandler.Address;
             _lastAppliedBypassEmoteTime = DateTime.UtcNow;
+            _ignoreCharacterDataBypassEmote = true;
+            if (_cachedData != null && !string.IsNullOrEmpty(_cachedData.BypassEmoteData))
+            {
+                _cachedData.BypassEmoteData = string.Empty;
+            }
 
             var applyDuration = (DateTime.UtcNow - startApply).TotalMilliseconds;
             if (applyDuration > 100)
@@ -504,6 +587,10 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
     public void ApplyCharacterData(Guid applicationBase, CharacterData characterData, bool forceApplyCustomization = false, bool forceRedrawIfDisabled = false, bool forceRedrawApplication = false)
     {
         _redrawOnNextApplication |= forceRedrawApplication;
+        if (_ignoreCharacterDataBypassEmote && _cachedData != null && !string.IsNullOrEmpty(_cachedData.BypassEmoteData))
+        {
+            _cachedData.BypassEmoteData = string.Empty;
+        }
 
         if (_dalamudUtil.IsInCombatOrPerforming && !IsDutyCombatNoRedrawModeActive())
         {
@@ -525,26 +612,17 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                 this, forceApplyCustomization, forceApplyMods: false)
                 .Any(p => p.Value.Contains(PlayerChanges.ModManip) || p.Value.Contains(PlayerChanges.ModFiles));
             _forceApplyMods = hasDiffMods || _forceApplyMods || (PlayerCharacter == IntPtr.Zero && _cachedData == null);
-            _cachedData = characterData;
+            _cachedData = GetEffectiveCharacterData(characterData);
             Logger.LogDebug("[BASE-{appBase}] Setting data: {hash}, forceApplyMods: {force}", applicationBase, _cachedData.DataHash.Value, _forceApplyMods);
             return;
         }
 
         SetUploading(isUploading: false);
 
+        characterData = GetEffectiveCharacterData(characterData);
         Logger.LogDebug("[BASE-{appbase}] Applying data for {player}, forceApplyCustomization: {forced}, forceApplyMods: {forceMods}, forceRedrawApplication: {forceRedraw}",
             applicationBase, this, forceApplyCustomization, _forceApplyMods, forceRedrawApplication);
         Logger.LogDebug("[BASE-{appbase}] Hash for data is {newHash}, current cache hash is {oldHash}", applicationBase, characterData.DataHash.Value, _cachedData?.DataHash.Value ?? "NODATA");
-
-        if (_configService.Current.DisableRedraws
-            && !forceRedrawIfDisabled
-            && HasUnknownOrChangedPapPath(characterData, _cachedData)
-            && IsRemotePairEmoting(characterData))
-        {
-            forceRedrawIfDisabled = true;
-            Logger.LogDebug("{tag} Forcing redraw despite global disable due to unknown/changed PAP while remote emote is active: user={user} hash={hash}",
-                SyncProgressTag, Pair.UserData.AliasOrUID, characterData.DataHash?.Value ?? "null");
-        }
 
         if (_applyPipelineTask != null
             && !_applyPipelineTask.IsCompleted
@@ -616,34 +694,12 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         _inProgressPipelineDataHash = characterData.DataHash?.Value;
 
         var charaDataToUpdate = characterData.CheckUpdatedData(applicationBase, _cachedData?.DeepClone() ?? new(), Logger, this, forceApplyCustomization, _forceApplyMods);
-
-        if (!_hasCompletedInitialCharacterRedraw)
+        if (_ignoreCharacterDataBypassEmote)
         {
-            if (!charaDataToUpdate.TryGetValue(ObjectKind.Player, out var initialPlayerChanges))
+            foreach (var entry in charaDataToUpdate.Values)
             {
-                charaDataToUpdate[ObjectKind.Player] = initialPlayerChanges = [];
+                entry.Remove(PlayerChanges.BypassEmote);
             }
-
-            initialPlayerChanges.Add(PlayerChanges.ForcedRedraw);
-        }
-
-        if (_configService.Current.DisableRedraws
-            && !forceRedrawIfDisabled
-            && charaDataToUpdate.TryGetValue(ObjectKind.Player, out var playerReapplyChanges)
-            && playerReapplyChanges.Contains(PlayerChanges.ModFiles))
-        {
-            if (characterData.GlamourerData.TryGetValue(ObjectKind.Player, out var glamourerData) && !string.IsNullOrEmpty(glamourerData))
-            {
-                playerReapplyChanges.Add(PlayerChanges.Glamourer);
-            }
-
-            if (characterData.CustomizePlusData.TryGetValue(ObjectKind.Player, out var customizeData) && !string.IsNullOrEmpty(customizeData))
-            {
-                playerReapplyChanges.Add(PlayerChanges.Customize);
-            }
-
-            Logger.LogDebug("{tag} Incoming mod-file change detected with global redraw disabled: forcing non-redraw reapply user={user} hash={hash}",
-                SyncProgressTag, Pair.UserData.AliasOrUID, characterData.DataHash?.Value ?? "null");
         }
 
         if (_charaHandler != null && _forceApplyMods)
@@ -833,83 +889,21 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                         break;
 
                     case PlayerChanges.BypassEmote:
-                        if (!string.IsNullOrEmpty(charaData.BypassEmoteData))
-                        {
-                            var data = charaData.BypassEmoteData;
-                            var (cleanData, hasTimestamp, _) = ParseBypassEmoteEnvelope(data);
-                            Logger.LogDebug("BypassEmote slow-path payload parsed. rawLen={rawLen}, cleanLen={cleanLen}, hasTimestamp={hasTimestamp}, kind={kind}",
-                                data.Length, cleanData.Length, hasTimestamp, changes.Key);
-
-                            // Prevent double application if Fast Path already applied it
-                            // We compare the FULL data string (including timestamp)
-                            if (string.Equals(data, _lastAppliedBypassEmoteData, StringComparison.Ordinal))
-                            {
-                                 // If it has a timestamp, it's a unique event ID -> strict equality means it's a duplicate packet -> Skip
-                                 if (hasTimestamp)
-                                 {
-                                     Logger.LogDebug("Skipping BypassEmote application (already applied via Fast Path - unique event): {data}", data);
-                                     break;
-                                 }
-                                 
-                                 // If no timestamp, use timeout
-                                 if (handler.Address == _lastAppliedBypassEmoteAddress
-                                     && (DateTime.UtcNow - _lastAppliedBypassEmoteTime).TotalSeconds < 2.0)
-                                 {
-                                     Logger.LogDebug("Skipping BypassEmote application (already applied via Fast Path - cooldown): {data}", data);
-                                     break;
-                                 }
-                            }
-
-                            await _ipcManager.BypassEmote.SetStateForCharacterAsync(handler.Address, cleanData).ConfigureAwait(false);
-                            Logger.LogDebug("BypassEmote slow-path apply completed. addr={addr}, cleanLen={cleanLen}, apiAvailable={apiAvailable}, kind={kind}",
-                                handler.Address, cleanData.Length, _ipcManager.BypassEmote.APIAvailable, changes.Key);
-                            _lastAppliedBypassEmoteData = data;
-                            _lastAppliedBypassEmoteAddress = handler.Address;
-                            _lastAppliedBypassEmoteTime = DateTime.UtcNow;
-                        }
+                        // BypassEmote is ONLY applied via fast-path (BypassEmoteUpdateMessage)
+                        // Never apply from stored character data to prevent re-execution on reload
+                        Logger.LogDebug("Skipping BypassEmote slow-path apply - only fast-path is allowed");
                         break;
 
                     case PlayerChanges.ForcedRedraw:
-                        var minionDataHash = charaData.DataHash?.Value ?? string.Empty;
-                        var shouldRedraw = true;
-                        var forceRedrawForDisabledGlobalSetting = forceRedrawIfDisabled
-                            || changes.Key == ObjectKind.MinionOrMount
-                            || changes.Key == ObjectKind.Pet
-                            || (changes.Key == ObjectKind.Player && !_hasCompletedInitialCharacterRedraw);
-
                         if (changes.Key == ObjectKind.MinionOrMount
                             && _penumbraCollection != Guid.Empty
                             && charaData.FileReplacements.TryGetValue(ObjectKind.MinionOrMount, out var minionReplacements)
                             && minionReplacements.Count > 0)
                         {
-                            if (handler.Address == _lastRedrawnMinionAddress
-                                && string.Equals(_lastRedrawnMinionDataHash, minionDataHash, StringComparison.Ordinal))
-                            {
-                                Logger.LogDebug("Skipping duplicate minion redraw for {this} address {address:X} dataHash {hash}",
-                                    this, handler.Address, minionDataHash);
-                                shouldRedraw = false;
-                            }
-
                             await EnsureMinionCollectionBindingsAsync(handler.Address).ConfigureAwait(false);
                         }
-
-                        var bypassDutyCombatNoRedrawMode = forceRedrawForDisabledGlobalSetting;
-                        if (shouldRedraw && (!IsDutyCombatNoRedrawModeActive() || bypassDutyCombatNoRedrawMode))
-                        {
-                            await _ipcManager.Penumbra.RedrawAsync(Logger, handler, applicationId, token, forceRedrawForDisabledGlobalSetting).ConfigureAwait(false);
-
-                            if (changes.Key == ObjectKind.MinionOrMount)
-                            {
-                                _lastRedrawnMinionAddress = handler.Address;
-                                _lastRedrawnMinionDataHash = minionDataHash;
-                            }
-
-                            if (changes.Key == ObjectKind.Player && !_hasCompletedInitialCharacterRedraw)
-                            {
-                                _hasCompletedInitialCharacterRedraw = true;
-                                Logger.LogDebug("Initial character redraw completed for {this}", this);
-                            }
-                        }
+                        if (!IsDutyCombatNoRedrawModeActive())
+                            await _ipcManager.Penumbra.RedrawAsync(Logger, handler, applicationId, token, forceRedrawIfDisabled).ConfigureAwait(false);
                         break;
 
                     default:
@@ -972,74 +966,6 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         }
 
         return string.Equals(newHash, dataHash, StringComparison.Ordinal);
-    }
-
-    private static bool IsRemotePairEmoting(CharacterData incomingData)
-        => !string.IsNullOrWhiteSpace(incomingData.BypassEmoteData);
-
-    private static bool HasUnknownOrChangedPapPath(CharacterData incomingData, CharacterData? previousData)
-    {
-        if (!incomingData.FileReplacements.TryGetValue(ObjectKind.Player, out var incomingPlayerReplacements)
-            || incomingPlayerReplacements.Count == 0)
-        {
-            return false;
-        }
-
-        var knownPapHashes = new HashSet<string>(StringComparer.Ordinal);
-        var knownPapPathToHash = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-
-        if (previousData != null
-            && previousData.FileReplacements.TryGetValue(ObjectKind.Player, out var previousPlayerReplacements)
-            && previousPlayerReplacements.Count > 0)
-        {
-            for (var replacementIndex = 0; replacementIndex < previousPlayerReplacements.Count; replacementIndex++)
-            {
-                var previousReplacement = previousPlayerReplacements[replacementIndex];
-                if (!string.IsNullOrEmpty(previousReplacement.Hash))
-                {
-                    knownPapHashes.Add(previousReplacement.Hash);
-                }
-
-                for (var pathIndex = 0; pathIndex < previousReplacement.GamePaths.Length; pathIndex++)
-                {
-                    var gamePath = previousReplacement.GamePaths[pathIndex];
-                    if (!gamePath.EndsWith(".pap", StringComparison.OrdinalIgnoreCase))
-                    {
-                        continue;
-                    }
-
-                    var normalizedPath = gamePath.Replace('\\', '/').ToLowerInvariant();
-                    knownPapPathToHash[normalizedPath] = previousReplacement.Hash;
-                }
-            }
-        }
-
-        for (var replacementIndex = 0; replacementIndex < incomingPlayerReplacements.Count; replacementIndex++)
-        {
-            var incomingReplacement = incomingPlayerReplacements[replacementIndex];
-            var incomingHash = incomingReplacement.Hash;
-            var hashIsKnown = !string.IsNullOrEmpty(incomingHash) && knownPapHashes.Contains(incomingHash);
-
-            for (var pathIndex = 0; pathIndex < incomingReplacement.GamePaths.Length; pathIndex++)
-            {
-                var gamePath = incomingReplacement.GamePaths[pathIndex];
-                if (!gamePath.EndsWith(".pap", StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                var normalizedPath = gamePath.Replace('\\', '/').ToLowerInvariant();
-                var pathIsKnown = knownPapPathToHash.TryGetValue(normalizedPath, out var knownHashForPath);
-                var pathChanged = pathIsKnown && !string.Equals(knownHashForPath, incomingHash, StringComparison.Ordinal);
-
-                if ((!pathIsKnown || pathChanged) && !hashIsKnown)
-                {
-                    return true;
-                }
-            }
-        }
-
-        return false;
     }
 
     private static bool HasMinionData(CharacterData data)
@@ -1425,7 +1351,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                     _lastLoadedCollectionPaths[item.Key] = item.Value;
                 }
                 LastAppliedDataBytes = -1;
-                foreach (var path in moddedPaths.Values.Distinct(StringComparer.OrdinalIgnoreCase).Select(v => new FileInfo(v)).Where(p => p.Exists))
+                foreach (var path in collectionPaths.Values.Distinct(StringComparer.OrdinalIgnoreCase).Select(v => new FileInfo(v)).Where(p => p.Exists))
                 {
                     if (LastAppliedDataBytes == -1) LastAppliedDataBytes = 0;
 
@@ -1766,15 +1692,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             _ = _ipcManager.PetNames.SetPlayerData(PlayerCharacter, _cachedData.PetNamesData).ConfigureAwait(false);
         });
 
-        Mediator.Subscribe<BypassEmoteReadyMessage>(this, msg =>
-        {
-            if (string.IsNullOrEmpty(_cachedData?.BypassEmoteData)) return;
-            Logger.LogTrace("Reapplying BypassEmote data for {this}", this);
-            var (cleanData, _, _) = ParseBypassEmoteEnvelope(_cachedData.BypassEmoteData);
-            Logger.LogDebug("BypassEmote ready reapply. addr={addr}, rawLen={rawLen}, cleanLen={cleanLen}, apiAvailable={apiAvailable}",
-                PlayerCharacter, _cachedData.BypassEmoteData.Length, cleanData.Length, _ipcManager.BypassEmote.APIAvailable);
-            _ = _ipcManager.BypassEmote.SetStateForCharacterAsync(PlayerCharacter, cleanData).ConfigureAwait(false);
-        });
+        // BypassEmote is NOT reapplied on ready - only applied via fast-path (BypassEmoteUpdateMessage)
 
         _ipcManager.Penumbra.AssignTemporaryCollectionAsync(Logger, _penumbraCollection, _charaHandler.GetGameObject()!.ObjectIndex).GetAwaiter().GetResult();
     }
@@ -1796,8 +1714,6 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         {
             _lastAppliedMinionAddress = nint.Zero;
             _lastBoundMinionAddress = nint.Zero;
-            _lastRedrawnMinionAddress = nint.Zero;
-            _lastRedrawnMinionDataHash = null;
             return;
         }
 
@@ -1922,6 +1838,15 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
 
         var payload = data[..separatorIndex];
         return (payload, true, ticks);
+    }
+
+    private CharacterData GetEffectiveCharacterData(CharacterData data)
+    {
+        if (!_ignoreCharacterDataBypassEmote) return data;
+        if (string.IsNullOrEmpty(data.BypassEmoteData)) return data;
+        var clone = data.DeepClone();
+        clone.BypassEmoteData = string.Empty;
+        return clone;
     }
 
     private async Task<bool> TryApplyMinionFileReplacementsAsync(nint minionAddress, CharacterData minionData, CancellationToken token)

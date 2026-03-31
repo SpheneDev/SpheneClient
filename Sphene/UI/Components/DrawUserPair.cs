@@ -48,7 +48,6 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
     private bool _wasHovered = false;
     private static readonly Vector4 SoftToggleEnabledColor = new(0.56f, 0.82f, 0.62f, 1f);
     private static readonly Vector4 SoftToggleDisabledColor = new(0.86f, 0.58f, 0.58f, 1f);
-    private static readonly TimeSpan CompactReloadBusyTimeout = TimeSpan.FromSeconds(8);
     
     // Static dictionary to track reload timers for each user
     private static readonly Dictionary<string, System.Threading.Timer> _reloadTimers = new(StringComparer.Ordinal);
@@ -62,8 +61,6 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
     
     private bool _cachedHasPendingAck = false;
     private DateTime _lastAckStatusPoll = DateTime.MinValue;
-    private bool _isCompactReloadInProgress = false;
-    private DateTimeOffset _compactReloadStartedAt = DateTimeOffset.MinValue;
     private readonly List<FileTransferNotificationDto> _pendingModNotifications = new();
     public DrawUserPair(string id, Pair entry, List<GroupFullInfoDto> syncedGroups,
         GroupFullInfoDto? currentGroup,
@@ -94,7 +91,6 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         _mediator.Subscribe<PairAcknowledgmentStatusChangedMessage>(this, OnAcknowledgmentStatusChanged);
         _mediator.Subscribe<AcknowledgmentPendingMessage>(this, OnAcknowledgmentPending);
         _mediator.Subscribe<AcknowledgmentUiRefreshMessage>(this, OnAcknowledgmentUiRefresh);
-        _mediator.Subscribe<CharacterDataApplicationCompletedMessage>(this, OnCharacterDataApplicationCompleted);
         
         
         
@@ -123,16 +119,6 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         {
             _globalAckYouLock.Exit();
         }
-    }
-
-    private void OnCharacterDataApplicationCompleted(CharacterDataApplicationCompletedMessage message)
-    {
-        if (!string.Equals(message.UserUID, _pair.UserData.UID, StringComparison.Ordinal))
-        {
-            return;
-        }
-
-        _isCompactReloadInProgress = false;
     }
     
     public SpheneMediator Mediator => _mediator;
@@ -389,26 +375,15 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
 
         if (_pair.IsVisible)
         {
-            var isCompactReloadBusy = IsCompactReloadBusy();
-            var isReloadPreviewActive = ButtonStyleManagerUI.IsPreviewActiveFor(ButtonStyleKeys.Pair_Reload);
-            float? reloadRotation = (isCompactReloadBusy || isReloadPreviewActive) ? GetCompactReloadIconRotation() : null;
-            using (ImRaii.Disabled(isCompactReloadBusy))
+            if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.Sync, "Reload last data", _menuWidth, ButtonStyleKeys.ContextMenu_Item))
             {
-                if (_uiSharedService.IconTextActionButton(
-                        FontAwesomeIcon.Sync,
-                        "Reload last data",
-                        _menuWidth,
-                        ButtonStyleKeys.ContextMenu_Item,
-                        reloadRotation))
-                {
-                    TriggerCharacterReloadFromCompactButton();
-                    ImGui.CloseCurrentPopup();
-                }
+                var requestToken = _pair.RequestForcedRedrawOnNextCharacterReload();
+                _ = _apiController.UserRequestCharacterDataRefresh(new(_pair.UserData));
+                _ = _pair.ApplyLastKnownDataIfReloadPendingAsync(requestToken);
+                _mediator.Publish(new NotificationMessage("Character data refresh", $"Requested a fresh sync from {_pair.UserData.AliasOrUID}", Sphene.SpheneConfiguration.Models.NotificationType.Info, TimeSpan.FromSeconds(2)));
+                ImGui.CloseCurrentPopup();
             }
-
-            UiSharedService.AttachToolTip(isCompactReloadBusy
-                ? "Character reload in progress..."
-                : "Requests a fresh character data sync from this user.");
+            UiSharedService.AttachToolTip("Requests a fresh character data sync from this user.");
         }
 
         if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.PlayCircle, "Cycle pause state", _menuWidth, ButtonStyleKeys.ContextMenu_Item))
@@ -645,7 +620,6 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
             _mediator.Unsubscribe<PairAcknowledgmentStatusChangedMessage>(this);
             _mediator.Unsubscribe<AcknowledgmentPendingMessage>(this);
             _mediator.Unsubscribe<AcknowledgmentUiRefreshMessage>(this);
-            _mediator.Unsubscribe<CharacterDataApplicationCompletedMessage>(this);
             _timerLock.Enter();
             try
             {
@@ -869,7 +843,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
                     ? $"{parsedRemoteClientVersion.Major}.{parsedRemoteClientVersion.Minor}.{parsedRemoteClientVersion.Build}"
                     : $"{parsedRemoteClientVersion.Major}.{parsedRemoteClientVersion.Minor}";
                 if (parsedRemoteClientVersion.Revision >= 0)
-                    remoteClientVersion = $"{normalizedVersion}.{parsedRemoteClientVersion.Revision}";
+                    remoteClientVersion = $"{normalizedVersion} rev.{parsedRemoteClientVersion.Revision}";
                 else
                     remoteClientVersion = normalizedVersion;
             }
@@ -1062,27 +1036,14 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         {
             currentRightSide -= (reloadButtonSize.X + spacingX);
             ImGui.SameLine(currentRightSide);
-            var isCompactReloadBusy = IsCompactReloadBusy();
-            var isReloadPreviewActive = ButtonStyleManagerUI.IsPreviewActiveFor(ButtonStyleKeys.Pair_Reload);
-            float? reloadRotation = (isCompactReloadBusy || isReloadPreviewActive) ? GetCompactReloadIconRotation() : null;
-            using (ImRaii.Disabled(isCompactReloadBusy))
+            if (_uiSharedService.IconButton(FontAwesomeIcon.Sync, null, null, null, null, ButtonStyleKeys.Pair_Reload))
             {
-                if (_uiSharedService.IconButton(
-                        FontAwesomeIcon.Sync,
-                        null,
-                        null,
-                        null,
-                        null,
-                        ButtonStyleKeys.Pair_Reload,
-                        null,
-                        reloadRotation))
-                {
-                    TriggerCharacterReloadFromCompactButton();
-                }
+                var requestToken = _pair.RequestForcedRedrawOnNextCharacterReload();
+                _ = _apiController.UserRequestCharacterDataRefresh(new(_pair.UserData));
+                _ = _pair.ApplyLastKnownDataIfReloadPendingAsync(requestToken);
+                _mediator.Publish(new NotificationMessage("Character data refresh", $"Requested a fresh sync from {_pair.UserData.AliasOrUID}", Sphene.SpheneConfiguration.Models.NotificationType.Info, TimeSpan.FromSeconds(2)));
             }
-            UiSharedService.AttachToolTip(isCompactReloadBusy
-                ? "Character reload in progress..."
-                : "Request fresh character data from server");
+            UiSharedService.AttachToolTip("Request fresh character data from server");
         }
 
         if (isOneSidedIndividualListEntry && !_pair.UserPair.IsOutgoingIndividualPair)
@@ -1397,36 +1358,5 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
     {
         _cachedHasPendingAck = _pairManager.HasPendingAcknowledgmentForUser(_pair.UserData);
         _lastAckStatusPoll = DateTime.UtcNow;
-    }
-
-    private void TriggerCharacterReloadFromCompactButton()
-    {
-        _isCompactReloadInProgress = true;
-        _compactReloadStartedAt = DateTimeOffset.UtcNow;
-        var requestToken = _pair.RequestForcedRedrawOnNextCharacterReload();
-        _ = _apiController.UserRequestCharacterDataRefresh(new(_pair.UserData));
-        _ = _pair.ApplyLastKnownDataIfReloadPendingAsync(requestToken);
-        _mediator.Publish(new NotificationMessage("Character data refresh", $"Requested a fresh sync from {_pair.UserData.AliasOrUID}", Sphene.SpheneConfiguration.Models.NotificationType.Info, TimeSpan.FromSeconds(2)));
-    }
-
-    private bool IsCompactReloadBusy()
-    {
-        if (!_isCompactReloadInProgress)
-        {
-            return false;
-        }
-
-        if (DateTimeOffset.UtcNow - _compactReloadStartedAt <= CompactReloadBusyTimeout)
-        {
-            return true;
-        }
-
-        _isCompactReloadInProgress = false;
-        return false;
-    }
-
-    private static float GetCompactReloadIconRotation()
-    {
-        return (float)(ImGui.GetTime() * 8.5f);
     }
 }

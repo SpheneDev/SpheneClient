@@ -25,11 +25,15 @@ public class RedrawManager : IDisposable
         _dalamudUtil = dalamudUtil;
     }
 
-    public async Task PenumbraRedrawInternalAsync(ILogger logger, GameObjectHandler handler, Guid applicationId, Action<ICharacter> action, CancellationToken token)
+    public async Task PenumbraRedrawInternalAsync(ILogger logger, GameObjectHandler handler, Guid applicationId, Action<ICharacter> action, CancellationToken token, bool waitForRedrawEvent = true)
     {
         _spheneMediator.Publish(new PenumbraStartRedrawMessage(handler.Address));
 
         var requestState = new RedrawRequestState();
+        if (!waitForRedrawEvent)
+        {
+            Volatile.Write(ref requestState.PendingRequest, 0);
+        }
         _penumbraRedrawRequests[handler.Address] = requestState;
 
         try

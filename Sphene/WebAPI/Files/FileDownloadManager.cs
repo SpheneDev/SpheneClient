@@ -5,11 +5,14 @@ using Sphene.API.Dto.Files;
 using Sphene.API.Routes;
 using Sphene.FileCache;
 using Sphene.PlayerData.Handlers;
+using Sphene.SpheneConfiguration;
 using Sphene.Services.Mediator;
 using Sphene.WebAPI.Files.Models;
 using Microsoft.Extensions.Logging;
 using System.Net;
 using System.Net.Http.Json;
+using System.Net.Http.Headers;
+using System.Reflection;
 
 namespace Sphene.WebAPI.Files;
 
@@ -20,16 +23,23 @@ public partial class FileDownloadManager : DisposableMediatorSubscriberBase
     private readonly FileCacheManager _fileDbManager;
     private readonly FileTransferOrchestrator _orchestrator;
     private readonly List<ThrottledStream> _activeDownloadStreams;
+    private readonly HttpClient _directDownloadHttpClient;
+    private readonly SpheneConfigService _configService;
 
     public FileDownloadManager(ILogger<FileDownloadManager> logger, SpheneMediator mediator,
         FileTransferOrchestrator orchestrator,
-        FileCacheManager fileCacheManager, FileCompactor fileCompactor) : base(logger, mediator)
+        FileCacheManager fileCacheManager, FileCompactor fileCompactor, SpheneConfigService configService) : base(logger, mediator)
     {
         _downloadStatus = new Dictionary<string, FileDownloadStatus>(StringComparer.Ordinal);
         _orchestrator = orchestrator;
         _fileDbManager = fileCacheManager;
         _fileCompactor = fileCompactor;
+        _configService = configService;
         _activeDownloadStreams = [];
+        _directDownloadHttpClient = new HttpClient();
+        var ver = Assembly.GetExecutingAssembly().GetName().Version;
+        _directDownloadHttpClient.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("Sphene", ver!.Major + "." + ver!.Minor + "." + ver!.Build));
+        _directDownloadHttpClient.Timeout = TimeSpan.FromSeconds(300);
 
         Mediator.Subscribe<DownloadLimitChangedMessage>(this, (msg) =>
         {
@@ -71,6 +81,43 @@ public partial class FileDownloadManager : DisposableMediatorSubscriberBase
         }
 
         var transfer = new DownloadFileTransfer(dto);
+        if (_configService.Current.UseSpheneCdnDirectDownloads && transfer.DirectDownloadUri != null)
+        {
+            try
+            {
+                Logger.LogDebug("Downloading {hash} via SpheneCDN direct url: {url}", hash, transfer.DirectDownloadUri);
+                var compressedBytes = await DownloadCompressedDirectAsync(transfer.DirectDownloadUri, ct, bytes => progress?.Report((bytes, transfer.Total))).ConfigureAwait(false);
+                var decompressedFile = LZ4Wrapper.Unwrap(compressedBytes);
+                var filePath = !string.IsNullOrWhiteSpace(destinationPath)
+                    ? destinationPath
+                    : _fileDbManager.GetCacheFilePath(hash, "pmp");
+                var dir = Path.GetDirectoryName(filePath);
+                if (!string.IsNullOrWhiteSpace(dir))
+                {
+                    Directory.CreateDirectory(dir);
+                }
+
+                await _fileCompactor.WriteAllBytesAsync(filePath, decompressedFile, CancellationToken.None).ConfigureAwait(false);
+                if (string.IsNullOrWhiteSpace(destinationPath))
+                {
+                    PersistFileToStorage(hash, filePath);
+                }
+
+                Logger.LogInformation("Download sources summary: objectStorage={objectStorageFiles} fileServer={fileServerFiles}", 1, 0);
+                return filePath;
+            }
+            catch (Exception ex)
+            {
+                if (ex is HttpRequestException { StatusCode: HttpStatusCode.NotFound or HttpStatusCode.Forbidden })
+                {
+                    Logger.LogDebug(ex, "SpheneCDN direct download not available for {hash}, falling back to file server", hash);
+                }
+                else
+                {
+                    Logger.LogInformation(ex, "SpheneCDN direct download failed for {hash}, falling back to file server", hash);
+                }
+            }
+        }
         var downloadGroup = transfer.DownloadUri.Host + ":" + transfer.DownloadUri.Port;
 
         _downloadStatus[downloadGroup] = new FileDownloadStatus
@@ -87,9 +134,36 @@ public partial class FileDownloadManager : DisposableMediatorSubscriberBase
 
         try
         {
-            var requestIdResponse = await _orchestrator.SendRequestAsync(HttpMethod.Post, SpheneFiles.RequestEnqueueFullPath(transfer.DownloadUri), new List<string> { hash }, ct).ConfigureAwait(false);
+            Uri? selectedBaseUri = null;
+            HttpResponseMessage? requestIdResponse = null;
+            Exception? lastException = null;
+            foreach (var baseUri in GetFileServerCandidateBaseUris(transfer))
+            {
+                try
+                {
+                    requestIdResponse = await _orchestrator.SendRequestAsync(HttpMethod.Post, SpheneFiles.RequestEnqueueFullPath(baseUri), new List<string> { hash }, ct).ConfigureAwait(false);
+                    requestIdResponse.EnsureSuccessStatusCode();
+                    selectedBaseUri = baseUri;
+                    break;
+                }
+                catch (HttpRequestException ex) when (ex.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.Unauthorized)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    lastException = ex;
+                }
+            }
+
+            if (selectedBaseUri == null || requestIdResponse == null)
+            {
+                throw new HttpRequestException("Failed to enqueue download request on all file server endpoints", lastException);
+            }
+
             var requestContent = await requestIdResponse.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
             requestId = Guid.Parse(requestContent.Trim('"'));
+            Logger.LogDebug("Downloading {hash} via file server enqueue base url: {baseUrl} (requestId={requestId})", hash, selectedBaseUri, requestId);
 
             blockFile = _fileDbManager.GetCacheFilePath(requestId.ToString("N"), "blk");
 
@@ -109,7 +183,7 @@ public partial class FileDownloadManager : DisposableMediatorSubscriberBase
                 }
             });
 
-            await DownloadAndMungeFileHttpClient(downloadGroup, requestId, [transfer], blockFile, internalProgress, ct).ConfigureAwait(false);
+            await DownloadAndMungeFileHttpClient(downloadGroup, requestId, [transfer], selectedBaseUri, blockFile, internalProgress, ct).ConfigureAwait(false);
 
             if (_downloadStatus.TryGetValue(downloadGroup, out var statusAfterDownload))
             {
@@ -155,6 +229,7 @@ public partial class FileDownloadManager : DisposableMediatorSubscriberBase
                 PersistFileToStorage(hash, filePath);
             }
 
+            Logger.LogInformation("Download sources summary: objectStorage={objectStorageFiles} fileServer={fileServerFiles}", 0, 1);
             return filePath;
         }
         catch (OperationCanceledException)
@@ -274,16 +349,16 @@ public partial class FileDownloadManager : DisposableMediatorSubscriberBase
         return (string.Join("", hashName), long.Parse(string.Join("", fileLength)));
     }
 
-    private async Task DownloadAndMungeFileHttpClient(string downloadGroup, Guid requestId, List<DownloadFileTransfer> fileTransfer, string tempPath, IProgress<long> progress, CancellationToken ct)
+    private async Task DownloadAndMungeFileHttpClient(string downloadGroup, Guid requestId, List<DownloadFileTransfer> fileTransfer, Uri baseUri, string tempPath, IProgress<long> progress, CancellationToken ct)
     {
-        Logger.LogDebug("GUID {requestId} on server {uri} for files {files}", requestId, fileTransfer[0].DownloadUri, string.Join(", ", fileTransfer.Select(c => c.Hash).ToList()));
+        Logger.LogDebug("GUID {requestId} on server {uri} for files {files}", requestId, baseUri, string.Join(", ", fileTransfer.Select(c => c.Hash).ToList()));
 
         await WaitForDownloadReady(fileTransfer, requestId, ct).ConfigureAwait(false);
 
         _downloadStatus[downloadGroup].DownloadStatus = DownloadStatus.Downloading;
 
         HttpResponseMessage response = null!;
-        var requestUrl = SpheneFiles.CacheGetFullPath(fileTransfer[0].DownloadUri, requestId);
+        var requestUrl = SpheneFiles.CacheGetFullPath(baseUri, requestId);
 
         Logger.LogDebug("Downloading {requestUrl} for request {id}", requestUrl, requestId);
         try
@@ -297,6 +372,19 @@ public partial class FileDownloadManager : DisposableMediatorSubscriberBase
             if (ex.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.Unauthorized)
             {
                 throw new InvalidDataException($"Http error {ex.StatusCode} (cancelled: {ct.IsCancellationRequested}): {requestUrl}", ex);
+            }
+
+            var fallbackBaseUri = fileTransfer[0].FallbackDownloadUri ?? _orchestrator.FilesCdnFallbackUri;
+            if (fallbackBaseUri != null && fallbackBaseUri != baseUri)
+            {
+                var fallbackRequestUrl = SpheneFiles.CacheGetFullPath(fallbackBaseUri, requestId);
+                Logger.LogWarning("Retrying download via fallback file server: {fallbackRequestUrl}", fallbackRequestUrl);
+                response = await _orchestrator.SendRequestAsync(HttpMethod.Get, fallbackRequestUrl, ct, HttpCompletionOption.ResponseHeadersRead).ConfigureAwait(false);
+                response.EnsureSuccessStatusCode();
+            }
+            else
+            {
+                throw;
             }
         }
 
@@ -382,7 +470,22 @@ public partial class FileDownloadManager : DisposableMediatorSubscriberBase
 
     private async Task DownloadFilesInternal(GameObjectHandler gameObjectHandler, List<FileReplacementData> fileReplacement, CancellationToken ct)
     {
-        var downloadGroups = CurrentDownloads.GroupBy(f => f.DownloadUri.Host + ":" + f.DownloadUri.Port, StringComparer.Ordinal);
+        long downloadedViaObjectStorage = 0;
+        long downloadedViaFileServer = 0;
+        var useSpheneCdnDirectDownloads = _configService.Current.UseSpheneCdnDirectDownloads;
+
+        var downloadGroups = CurrentDownloads.GroupBy(f =>
+        {
+            var uri = (useSpheneCdnDirectDownloads ? f.DirectDownloadUri : null) ?? f.DownloadUri;
+            var hostKey = uri.Host + ":" + uri.Port;
+            if (useSpheneCdnDirectDownloads && f.DirectDownloadUri != null && !string.IsNullOrWhiteSpace(f.Hash))
+            {
+                var prefix = char.ToUpperInvariant(f.Hash[0]);
+                return hostKey + ":r2:" + prefix;
+            }
+
+            return hostKey;
+        }, StringComparer.Ordinal);
 
         foreach (var downloadGroup in downloadGroups)
         {
@@ -405,15 +508,48 @@ public partial class FileDownloadManager : DisposableMediatorSubscriberBase
         },
         async (fileGroup, token) =>
         {
+            var fileGroupList = fileGroup.ToList();
+            if (await TryDownloadGroupDirectAsync(fileGroup.Key, fileGroupList, fileReplacement, token).ConfigureAwait(false))
+            {
+                Interlocked.Add(ref downloadedViaObjectStorage, fileGroupList.Count);
+                return;
+            }
+
             // let server predownload files
-            var requestIdResponse = await _orchestrator.SendRequestAsync(HttpMethod.Post, SpheneFiles.RequestEnqueueFullPath(fileGroup.First().DownloadUri),
-                fileGroup.Select(c => c.Hash), token).ConfigureAwait(false);
-            Logger.LogDebug("Sent request for {n} files on server {uri} with result {result}", fileGroup.Count(), fileGroup.First().DownloadUri,
-                await requestIdResponse.Content.ReadAsStringAsync(token).ConfigureAwait(false));
+            Uri? selectedBaseUri = null;
+            HttpResponseMessage? requestIdResponse = null;
+            Exception? lastException = null;
+            foreach (var baseUri in GetFileServerCandidateBaseUris(fileGroupList[0]))
+            {
+                try
+                {
+                    requestIdResponse = await _orchestrator.SendRequestAsync(HttpMethod.Post, SpheneFiles.RequestEnqueueFullPath(baseUri),
+                        fileGroupList.Select(c => c.Hash), token).ConfigureAwait(false);
+                    requestIdResponse.EnsureSuccessStatusCode();
+                    selectedBaseUri = baseUri;
+                    break;
+                }
+                catch (HttpRequestException ex) when (ex.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.Unauthorized)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    lastException = ex;
+                }
+            }
 
-            Guid requestId = Guid.Parse((await requestIdResponse.Content.ReadAsStringAsync().ConfigureAwait(false)).Trim('"'));
+            if (selectedBaseUri == null || requestIdResponse == null)
+            {
+                throw new HttpRequestException("Failed to enqueue download request on all file server endpoints", lastException);
+            }
 
-            Logger.LogDebug("GUID {requestId} for {n} files on server {uri}", requestId, fileGroup.Count(), fileGroup.First().DownloadUri);
+            var requestContent = await requestIdResponse.Content.ReadAsStringAsync(token).ConfigureAwait(false);
+            Logger.LogDebug("Sent request for {n} files on server {uri} with result {result}", fileGroupList.Count, selectedBaseUri, requestContent);
+
+            Guid requestId = Guid.Parse(requestContent.Trim('"'));
+
+            Logger.LogDebug("GUID {requestId} for {n} files on server {uri}", requestId, fileGroupList.Count, selectedBaseUri);
 
             var blockFile = _fileDbManager.GetCacheFilePath(requestId.ToString("N"), "blk");
             FileInfo fi = new(blockFile);
@@ -434,7 +570,8 @@ public partial class FileDownloadManager : DisposableMediatorSubscriberBase
                         Logger.LogWarning(ex, "Could not set download progress");
                     }
                 });
-                await DownloadAndMungeFileHttpClient(fileGroup.Key, requestId, [.. fileGroup], blockFile, progress, token).ConfigureAwait(false);
+                await DownloadAndMungeFileHttpClient(fileGroup.Key, requestId, fileGroupList, selectedBaseUri, blockFile, progress, token).ConfigureAwait(false);
+                Interlocked.Add(ref downloadedViaFileServer, fileGroupList.Count);
             }
             catch (OperationCanceledException)
             {
@@ -508,6 +645,7 @@ public partial class FileDownloadManager : DisposableMediatorSubscriberBase
             }
         }).ConfigureAwait(false);
 
+        Logger.LogInformation("Download sources summary: objectStorage={objectStorageFiles} fileServer={fileServerFiles}", downloadedViaObjectStorage, downloadedViaFileServer);
         Logger.LogDebug("Download end: {id}", gameObjectHandler);
 
         ClearDownload();
@@ -516,8 +654,168 @@ public partial class FileDownloadManager : DisposableMediatorSubscriberBase
     private async Task<List<DownloadFileDto>> FilesGetSizes(List<string> hashes, CancellationToken ct)
     {
         if (!_orchestrator.IsInitialized) throw new InvalidOperationException("FileTransferManager is not initialized");
-        var response = await _orchestrator.SendRequestAsync(HttpMethod.Get, SpheneFiles.ServerFilesGetSizesFullPath(_orchestrator.FilesCdnUri!), hashes, ct).ConfigureAwait(false);
+        HttpResponseMessage response;
+        try
+        {
+            response = await _orchestrator.SendRequestAsync(HttpMethod.Get, SpheneFiles.ServerFilesGetSizesFullPath(_orchestrator.FilesCdnUri!), hashes, ct).ConfigureAwait(false);
+        }
+        catch (HttpRequestException ex) when (_orchestrator.FilesCdnFallbackUri != null)
+        {
+            Logger.LogWarning(ex, "FilesGetSizes failed against primary file server, retrying fallback: {fallback}", _orchestrator.FilesCdnFallbackUri);
+            response = await _orchestrator.SendRequestAsync(HttpMethod.Get, SpheneFiles.ServerFilesGetSizesFullPath(_orchestrator.FilesCdnFallbackUri), hashes, ct).ConfigureAwait(false);
+        }
+
+        if (_orchestrator.FilesCdnFallbackUri != null)
+        {
+            Logger.LogDebug("FilesGetSizes completed. primary={primary}, fallback={fallback}", _orchestrator.FilesCdnUri, _orchestrator.FilesCdnFallbackUri);
+        }
+
         return await response.Content.ReadFromJsonAsync<List<DownloadFileDto>>(cancellationToken: ct).ConfigureAwait(false) ?? [];
+    }
+
+    private async Task<byte[]> DownloadCompressedDirectAsync(Uri directUri, CancellationToken ct, Action<long>? progress)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, directUri);
+        using var response = await _directDownloadHttpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+        {
+            if (response.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.Forbidden)
+            {
+                Logger.LogDebug("Direct download not available for {url}, status={status}", directUri, response.StatusCode);
+            }
+            else
+            {
+                Logger.LogInformation("Direct download failed for {url}, status={status}", directUri, response.StatusCode);
+            }
+            throw new HttpRequestException($"Direct download failed: {directUri}", null, response.StatusCode);
+        }
+
+        var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+        try
+        {
+            using var ms = new MemoryStream();
+            var buffer = new byte[65536];
+            long totalRead = 0;
+            int read;
+            while ((read = await stream.ReadAsync(buffer, ct).ConfigureAwait(false)) > 0)
+            {
+                await ms.WriteAsync(buffer.AsMemory(0, read), ct).ConfigureAwait(false);
+                totalRead += read;
+                progress?.Invoke(totalRead);
+            }
+
+            return ms.ToArray();
+        }
+        finally
+        {
+            await stream.DisposeAsync().ConfigureAwait(false);
+        }
+    }
+
+    private async Task<bool> TryDownloadGroupDirectAsync(string downloadGroupKey, List<DownloadFileTransfer> fileTransfers, List<FileReplacementData> fileReplacement, CancellationToken ct)
+    {
+        if (!_configService.Current.UseSpheneCdnDirectDownloads)
+        {
+            return false;
+        }
+
+        if (fileTransfers.Count == 0)
+        {
+            return true;
+        }
+
+        if (fileTransfers.Any(t => t.DirectDownloadUri == null))
+        {
+            return false;
+        }
+
+        if (!_downloadStatus.TryGetValue(downloadGroupKey, out var status))
+        {
+            return false;
+        }
+
+        var slotAcquired = false;
+        try
+        {
+            status.DownloadStatus = DownloadStatus.WaitingForSlot;
+            await _orchestrator.WaitForDownloadSlotAsync(ct).ConfigureAwait(false);
+            slotAcquired = true;
+            status.DownloadStatus = DownloadStatus.Downloading;
+
+            foreach (var transfer in fileTransfers)
+            {
+                ct.ThrowIfCancellationRequested();
+                var directUri = transfer.DirectDownloadUri!;
+                Logger.LogDebug("Downloading {hash} via SpheneCDN direct url: {url}", transfer.Hash, directUri);
+                long lastProgress = 0;
+                var compressed = await DownloadCompressedDirectAsync(directUri, ct, total =>
+                {
+                    var delta = total - lastProgress;
+                    if (delta <= 0) return;
+                    lastProgress = total;
+                    status.TransferredBytes += delta;
+                }).ConfigureAwait(false);
+
+                status.DownloadStatus = DownloadStatus.Decompressing;
+
+                var replacement = fileReplacement.FirstOrDefault(f => string.Equals(f.Hash, transfer.Hash, StringComparison.OrdinalIgnoreCase));
+                if (replacement == null || replacement.GamePaths == null || replacement.GamePaths.Length == 0)
+                {
+                    Logger.LogWarning("Direct download: no game path mapping found for {hash}, skipping", transfer.Hash);
+                    continue;
+                }
+
+                var fileExtension = replacement.GamePaths[0].Split(".")[^1];
+                var filePath = _fileDbManager.GetCacheFilePath(transfer.Hash, fileExtension);
+                var decompressed = LZ4Wrapper.Unwrap(compressed);
+                await _fileCompactor.WriteAllBytesAsync(filePath, decompressed, CancellationToken.None).ConfigureAwait(false);
+                PersistFileToStorage(transfer.Hash, filePath);
+            }
+
+            status.TransferredFiles = 1;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            if (ex is HttpRequestException { StatusCode: HttpStatusCode.NotFound or HttpStatusCode.Forbidden })
+            {
+                Logger.LogDebug(ex, "Direct download not available for group {group}, falling back to server flow", downloadGroupKey);
+            }
+            else
+            {
+                Logger.LogInformation(ex, "Direct download failed for group {group}, falling back to server flow", downloadGroupKey);
+            }
+            return false;
+        }
+        finally
+        {
+            if (slotAcquired)
+            {
+                _orchestrator.ReleaseDownloadSlot();
+            }
+        }
+    }
+
+    private List<Uri> GetFileServerCandidateBaseUris(DownloadFileTransfer transfer)
+    {
+        var candidates = new List<Uri>(3);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        void Add(Uri? uri)
+        {
+            if (uri == null) return;
+            var key = uri.ToString();
+            if (seen.Add(key))
+            {
+                candidates.Add(uri);
+            }
+        }
+
+        Add(transfer.DownloadUri);
+        Add(transfer.FallbackDownloadUri);
+        Add(_orchestrator.FilesCdnFallbackUri);
+
+        return candidates;
     }
 
     private void PersistFileToStorage(string fileHash, string filePath)
