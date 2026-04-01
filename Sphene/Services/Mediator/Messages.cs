@@ -83,7 +83,7 @@ public record ClearProfileDataMessage(UserData? UserData = null) : MessageBase;
 public record CyclePauseMessage(UserData UserData) : MessageBase;
 public record PauseMessage(UserData UserData) : MessageBase;
 public record ProfilePopoutToggle(Pair? Pair) : MessageBase;
-public record CompactUiChange(Vector2 Size, Vector2 Position) : MessageBase;
+public record CompactUiChange(Vector2 Size, Vector2 Position) : SameThreadMessage;
 public record ProfileOpenStandaloneMessage(Pair Pair) : MessageBase;
 public record RemoveWindowMessage(WindowMediatorSubscriberBase Window) : MessageBase;
 public record RefreshUiMessage : MessageBase;
@@ -138,6 +138,8 @@ public record ThemePickerModeToggleMessage(bool IsEnabled) : MessageBase;
 public record ThemeNavigateToButtonSettingsMessage(string ButtonStyleKey) : MessageBase;
 
 public record CompactUiStickToSettingsMessage(bool Enabled, Vector2 SettingsPos, Vector2 SettingsSize) : SameThreadMessage;
+
+public record OpenPairRequestsUiMessage : SameThreadMessage;
 
 // Area-bound syncshell messages
 public record AreaBoundJoinRequestMessage(AreaBoundJoinRequestDto JoinRequest) : MessageBase;

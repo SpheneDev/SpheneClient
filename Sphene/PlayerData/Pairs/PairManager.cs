@@ -49,6 +49,10 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
     private int _ackStatusPollRunning = 0;
 
     private volatile bool _localVisibilityGateActive = false;
+    private readonly Lock _individualPairRequestLock = new();
+    private readonly HashSet<string> _inboundIndividualPairRequestUids = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _unseenInboundIndividualPairRequestUids = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _ignoredInboundIndividualPairRequestUids = new(StringComparer.Ordinal);
 
     private Lazy<List<Pair>> _directPairsInternal;
     private Lazy<Dictionary<GroupFullInfoDto, List<Pair>>> _groupPairsInternal;
@@ -115,6 +119,158 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
     public Dictionary<GroupData, GroupFullInfoDto> Groups => _allGroups.ToDictionary(k => k.Key, k => k.Value);
     public Pair? LastAddedUser { get; internal set; }
     public Dictionary<Pair, List<GroupFullInfoDto>> PairsWithGroups => _pairsWithGroupsInternal.Value;
+    public int UnseenInboundIndividualPairRequestCount
+    {
+        get
+        {
+            _individualPairRequestLock.Enter();
+            try
+            {
+                return _unseenInboundIndividualPairRequestUids.Count;
+            }
+            finally
+            {
+                _individualPairRequestLock.Exit();
+            }
+        }
+    }
+
+    public IReadOnlyList<Pair> GetInboundIndividualPairRequestsSnapshot()
+    {
+        List<Pair> result = [];
+        _individualPairRequestLock.Enter();
+        try
+        {
+            if (_inboundIndividualPairRequestUids.Count == 0)
+            {
+                return result;
+            }
+
+            foreach (var kvp in _allClientPairs)
+            {
+                var uid = kvp.Key.UID;
+                if (string.IsNullOrWhiteSpace(uid))
+                {
+                    continue;
+                }
+
+                if (_inboundIndividualPairRequestUids.Contains(uid))
+                {
+                    result.Add(kvp.Value);
+                }
+            }
+        }
+        finally
+        {
+            _individualPairRequestLock.Exit();
+        }
+
+        result.Sort((a, b) => string.Compare(a.UserData.AliasOrUID, b.UserData.AliasOrUID, StringComparison.OrdinalIgnoreCase));
+        return result;
+    }
+
+    public IReadOnlyList<Pair> GetOutboundIndividualPairRequestsSnapshot()
+    {
+        var list = new List<Pair>();
+        foreach (var kvp in _allClientPairs)
+        {
+            var p = kvp.Value;
+            if (p.IsOneSidedPair && p.UserPair.IsOutgoingIndividualPair)
+            {
+                list.Add(p);
+            }
+        }
+        list.Sort((a, b) => string.Compare(a.UserData.AliasOrUID, b.UserData.AliasOrUID, StringComparison.OrdinalIgnoreCase));
+        return list;
+    }
+
+    public bool IsInboundIndividualPairRequestUnseen(string uid)
+    {
+        if (string.IsNullOrWhiteSpace(uid))
+        {
+            return false;
+        }
+
+        _individualPairRequestLock.Enter();
+        try
+        {
+            return _unseenInboundIndividualPairRequestUids.Contains(uid);
+        }
+        finally
+        {
+            _individualPairRequestLock.Exit();
+        }
+    }
+
+    public void MarkInboundIndividualPairRequestSeen(string uid)
+    {
+        if (string.IsNullOrWhiteSpace(uid))
+        {
+            return;
+        }
+
+        var changed = false;
+        _individualPairRequestLock.Enter();
+        try
+        {
+            changed = _unseenInboundIndividualPairRequestUids.Remove(uid);
+        }
+        finally
+        {
+            _individualPairRequestLock.Exit();
+        }
+
+        if (changed)
+        {
+            Mediator.Publish(new RefreshUiMessage());
+        }
+    }
+
+    public void MarkAllInboundIndividualPairRequestsSeen()
+    {
+        var changed = false;
+        _individualPairRequestLock.Enter();
+        try
+        {
+            changed = _unseenInboundIndividualPairRequestUids.Count > 0;
+            _unseenInboundIndividualPairRequestUids.Clear();
+        }
+        finally
+        {
+            _individualPairRequestLock.Exit();
+        }
+
+        if (changed)
+        {
+            Mediator.Publish(new RefreshUiMessage());
+        }
+    }
+
+    public void DeclineInboundIndividualPairRequest(string uid)
+    {
+        if (string.IsNullOrWhiteSpace(uid))
+        {
+            return;
+        }
+
+        var changed = false;
+        _individualPairRequestLock.Enter();
+        try
+        {
+            _ignoredInboundIndividualPairRequestUids.Add(uid);
+            changed |= _inboundIndividualPairRequestUids.Remove(uid);
+            changed |= _unseenInboundIndividualPairRequestUids.Remove(uid);
+        }
+        finally
+        {
+            _individualPairRequestLock.Exit();
+        }
+
+        if (changed)
+        {
+            Mediator.Publish(new RefreshUiMessage());
+        }
+    }
 
     public void AddGroup(GroupFullInfoDto dto)
     {
@@ -170,6 +326,7 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
 
         RestorePairCharacterDataFromCache(_allClientPairs[dto.User], created);
         ProcessPendingPairEvents(dto.User.UID);
+        UpdateIndividualPairRequestState(dto.User, dto.IndividualPairStatus, dto.IsOutgoingIndividualPair);
         RecreateLazy();
     }
 
@@ -196,6 +353,7 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         _allClientPairs[dto.User].ApplyLastReceivedData();
         RestorePairCharacterDataFromCache(_allClientPairs[dto.User], created);
         ProcessPendingPairEvents(dto.User.UID);
+        UpdateIndividualPairRequestState(dto.User, dto.IndividualPairStatus, dto.IsOutgoingIndividualPair);
         RecreateLazy();
     }
 
@@ -208,6 +366,16 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         _allGroups.Clear();
         _pendingOnlineDtos.Clear();
         _pendingCharaDataDtos.Clear();
+        _individualPairRequestLock.Enter();
+        try
+        {
+            _inboundIndividualPairRequestUids.Clear();
+            _unseenInboundIndividualPairRequestUids.Clear();
+        }
+        finally
+        {
+            _individualPairRequestLock.Exit();
+        }
         RecreateLazy();
     }
 
@@ -519,6 +687,8 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
             }
         }
 
+        UpdateIndividualPairRequestState(dto.User, API.Data.Enum.IndividualPairStatus.None, isOutgoingIndividualPair: false);
+
         if (!string.IsNullOrEmpty(dto.User.UID))
         {
             _pendingOnlineDtos.TryRemove(dto.User.UID, out _);
@@ -526,6 +696,49 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         }
 
         RecreateLazy();
+    }
+
+    private void UpdateIndividualPairRequestState(UserData user, API.Data.Enum.IndividualPairStatus status, bool isOutgoingIndividualPair)
+    {
+        var uid = user.UID;
+        if (string.IsNullOrWhiteSpace(uid))
+        {
+            return;
+        }
+
+        var shouldTrackInboundRequest = status == API.Data.Enum.IndividualPairStatus.OneSided && !isOutgoingIndividualPair;
+        var addedNewInboundRequest = false;
+        _individualPairRequestLock.Enter();
+        try
+        {
+            if (shouldTrackInboundRequest)
+            {
+                if (_ignoredInboundIndividualPairRequestUids.Contains(uid))
+                {
+                    return;
+                }
+                if (_inboundIndividualPairRequestUids.Add(uid))
+                {
+                    _unseenInboundIndividualPairRequestUids.Add(uid);
+                    addedNewInboundRequest = true;
+                }
+            }
+            else
+            {
+                _inboundIndividualPairRequestUids.Remove(uid);
+                _unseenInboundIndividualPairRequestUids.Remove(uid);
+                _ignoredInboundIndividualPairRequestUids.Remove(uid);
+            }
+        }
+        finally
+        {
+            _individualPairRequestLock.Exit();
+        }
+
+        if (addedNewInboundRequest)
+        {
+            Mediator.Publish(new RefreshUiMessage());
+        }
     }
 
     public void SetGroupInfo(GroupInfoDto dto)

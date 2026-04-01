@@ -80,6 +80,7 @@ public class TopTabMenu
 
     public void Draw(int pendingModSharingCount, bool drawSeparator = true)
     {
+        var pendingPairRequestCount = _pairManager.UnseenInboundIndividualPairRequestCount;
         var availableWidth = ImGui.GetWindowContentRegionMax().X - ImGui.GetWindowContentRegionMin().X;
         var spacing = ImGui.GetStyle().ItemSpacing;
         var buttonX = (availableWidth - (spacing.X * 4)) / 5f;
@@ -92,7 +93,7 @@ public class TopTabMenu
         ImGuiHelpers.ScaledDummy(spacing.Y / 2f);
 
         using (ImRaii.PushFont(UiBuilder.IconFont))
-        DrawTabButton(FontAwesomeIcon.User, SelectedTab.Individual, ButtonStyleKeys.TopTab_User, buttonSize, spacing, underlineColor, drawList);
+        DrawIndividualTabButton(buttonSize, spacing, underlineColor, drawList, pendingPairRequestCount);
         UiSharedService.AttachToolTip("Individual Pair Menu");
 
         DrawTabButton(FontAwesomeIcon.Users, SelectedTab.Syncshell, ButtonStyleKeys.TopTab_Users, buttonSize, spacing, underlineColor, drawList);
@@ -117,6 +118,7 @@ public class TopTabMenu
         if (TabSelection == SelectedTab.Individual)
         {
             DrawAddPair(availableWidth, spacing.X);
+            DrawPairRequestsButton(availableWidth, drawList);
             DrawGlobalIndividualButtons(availableWidth, spacing.X);
         }
         else if (TabSelection == SelectedTab.Syncshell)
@@ -135,6 +137,60 @@ public class TopTabMenu
 
         if (TabSelection != SelectedTab.None) ImGuiHelpers.ScaledDummy(3f);
         if (drawSeparator) ImGui.Separator();
+    }
+
+    private void DrawIndividualTabButton(Vector2 buttonSize, Vector2 spacing, uint underlineColor, ImDrawListPtr drawList, int pendingPairRequestCount)
+    {
+        var buttonStart = ImGui.GetCursorScreenPos();
+        if (_uiSharedService.IconButton(FontAwesomeIcon.User, buttonSize.Y, null, null, buttonSize.X, ButtonStyleKeys.TopTab_User))
+        {
+            TabSelection = TabSelection == SelectedTab.Individual ? SelectedTab.None : SelectedTab.Individual;
+        }
+        ImGui.SameLine();
+        var xAfter = ImGui.GetCursorScreenPos();
+        if (TabSelection == SelectedTab.Individual)
+        {
+            drawList.AddLine(buttonStart with { Y = buttonStart.Y + buttonSize.Y + spacing.Y },
+                xAfter with { Y = xAfter.Y + buttonSize.Y + spacing.Y, X = xAfter.X - spacing.X },
+                underlineColor, 2);
+        }
+
+        if (pendingPairRequestCount > 0)
+        {
+            DrawBadge(drawList, buttonStart, buttonSize, pendingPairRequestCount);
+        }
+    }
+
+    private void DrawPairRequestsButton(float availableWidth, ImDrawListPtr drawList)
+    {
+        var incoming = _pairManager.GetInboundIndividualPairRequestsSnapshot();
+        var outgoing = _pairManager.GetOutboundIndividualPairRequestsSnapshot();
+        var totalRequests = incoming.Count + outgoing.Count;
+        var unseen = _pairManager.UnseenInboundIndividualPairRequestCount;
+
+        ImGuiHelpers.ScaledDummy(3f);
+
+        var buttonStart = ImGui.GetCursorScreenPos();
+        var buttonHeight = ImGui.GetFrameHeight();
+        var buttonSize = new Vector2(availableWidth, buttonHeight);
+        var label = "Pair Requests";
+
+        using (ImRaii.Disabled(totalRequests == 0))
+        {
+            if (_uiSharedService.IconTextButton(FontAwesomeIcon.Inbox, label, width: availableWidth))
+            {
+                _spheneMediator.Publish(new OpenPairRequestsUiMessage());
+            }
+        }
+
+        UiSharedService.AttachToolTip(totalRequests == 0
+            ? "No pending pair requests"
+            : "Open Pair Requests");
+
+        if (unseen > 0)
+        {
+            DrawBadge(drawList, buttonStart, buttonSize, unseen);
+        }
     }
 
     private void DrawTabButton(FontAwesomeIcon icon, SelectedTab tab, string styleKey, Vector2 buttonSize, Vector2 spacing, uint underlineColor, ImDrawListPtr drawList)
@@ -171,16 +227,20 @@ public class TopTabMenu
 
     private static void DrawBadge(ImDrawListPtr drawList, Vector2 buttonStart, Vector2 buttonSize, int count)
     {
-        var scale = ImGuiHelpers.GlobalScale;
+        var scale = ImGuiHelpers.GlobalScale * 0.82f;
         var badgeText = count > 99 ? "99+" : count.ToString();
-        var padX = 5f * scale;
-        var padY = 2f * scale;
-        var textSize = ImGui.CalcTextSize(badgeText);
+        var padX = 4f * scale;
+        var padY = 1f * scale;
+        Vector2 textSize;
+        using (ImRaii.PushFont(UiBuilder.DefaultFont))
+        {
+            textSize = ImGui.CalcTextSize(badgeText);
+        }
         var height = textSize.Y + padY * 2f;
         var width = MathF.Max(height, textSize.X + padX * 2f);
         var rounding = height / 2f;
 
-        var margin = 3f * scale;
+        var margin = 2f * scale;
         var min = new Vector2(buttonStart.X + buttonSize.X - width - margin, buttonStart.Y + margin);
         var max = new Vector2(min.X + width, min.Y + height);
 
@@ -192,7 +252,10 @@ public class TopTabMenu
             min.X + (width - textSize.X) / 2f,
             min.Y + (height - textSize.Y) / 2f
         );
-        drawList.AddText(textPos, foreground, badgeText);
+        using (ImRaii.PushFont(UiBuilder.DefaultFont))
+        {
+            drawList.AddText(textPos, foreground, badgeText);
+        }
     }
 
     private void DrawAddPair(float availableXWidth, float spacingX)

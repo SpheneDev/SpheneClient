@@ -733,7 +733,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         }
         else if (isVisibleForIcon)
         {
-            if (_syncedGroups.Any() && _pair.IndividualPairStatus == API.Data.Enum.IndividualPairStatus.None)
+            if (_pair.UserPair.Groups.Any() && _pair.IndividualPairStatus != API.Data.Enum.IndividualPairStatus.Bidirectional)
             {
                 using var _ = ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.ParsedGreen);
                 _uiSharedService.IconText(FontAwesomeIcon.Link);

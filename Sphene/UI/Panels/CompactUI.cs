@@ -1710,7 +1710,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         bool FilterNotTaggedUsers(KeyValuePair<Pair, List<GroupFullInfoDto>> u)
             => u.Key.IsDirectlyPaired && !u.Key.IsOneSidedPair && !_tagHandler.HasAnyTag(u.Key.UserData.UID) && (!u.Key.IsMutuallyVisible || !_configService.Current.ShowVisibleUsersSeparately);
         bool FilterOfflineUsers(KeyValuePair<Pair, List<GroupFullInfoDto>> u)
-            => u.Key.IsDirectlyPaired && (!u.Key.IsOneSidedPair || u.Value.Any()) && !u.Key.IsOnline && !u.Key.UserPair.OwnPermissions.IsPaused() && (!u.Key.IsMutuallyVisible || !_configService.Current.ShowVisibleUsersSeparately);
+            => u.Key.IsDirectlyPaired && !u.Key.IsOneSidedPair && !u.Key.IsOnline && !u.Key.UserPair.OwnPermissions.IsPaused() && (!u.Key.IsMutuallyVisible || !_configService.Current.ShowVisibleUsersSeparately);
         bool FilterOfflineSyncshellUsers(KeyValuePair<Pair, List<GroupFullInfoDto>> u)
             => (!u.Key.IsDirectlyPaired && !u.Key.IsOnline && !u.Key.UserPair.OwnPermissions.IsPaused());
 
@@ -1803,9 +1803,7 @@ public class CompactUi : WindowMediatorSubscriberBase
             }
         }
 
-        drawFolders.Add(_drawEntityFactory.CreateDrawTagFolder(TagHandler.CustomUnpairedTag,
-            BasicSortedDictionary(filteredPairs.Where(u => u.Key.IsOneSidedPair)),
-            ImmutablePairList(allPairs.Where(u => u.Key.IsOneSidedPair))));
+        // Removed one-sided individual pairs from main list; they're handled via Pair Requests panel
 
         return drawFolders;
     }

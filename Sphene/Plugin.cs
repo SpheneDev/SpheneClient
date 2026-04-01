@@ -403,6 +403,8 @@ public sealed class Plugin : IDalamudPlugin
             collection.AddScoped<ModSharingUi>();
             collection.AddScoped<WindowMediatorSubscriberBase>(s => s.GetRequiredService<ModSharingUi>());
 
+            collection.AddScoped<WindowMediatorSubscriberBase, PairRequestsUi>();
+
             collection.AddScoped<WindowMediatorSubscriberBase, AreaBoundSyncshellConsentUI>();
             collection.AddScoped<WindowMediatorSubscriberBase, AreaBoundSyncshellSelectionUI>();
             collection.AddSingleton<CitySyncshellExplanationUI>((s) =>
