@@ -32,6 +32,7 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
     private LocationInfo? _lastLocation;
     private readonly Dictionary<string, AreaBoundSyncshellDto> _areaBoundSyncshells = new(StringComparer.Ordinal);
     private readonly HashSet<string> _currentlyJoinedAreaSyncshells = new(StringComparer.Ordinal);
+    private readonly Lock _joinedSyncshellsLock = new();
     private readonly HashSet<string> _notifiedSyncshells = new(StringComparer.Ordinal); // Track which syncshells we've already notified about
     private readonly Timer _locationCheckTimer;
     private bool _isEnabled = true;
@@ -65,6 +66,22 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
         Mediator.Subscribe<UiServiceInitializedMessage>(this, OnUiServiceInitialized);
         
         _logger.LogDebug("AreaBoundSyncshellService initialized");
+    }
+
+    public int JoinedAreaSyncshellCount
+    {
+        get
+        {
+            _joinedSyncshellsLock.Enter();
+            try
+            {
+                return _currentlyJoinedAreaSyncshells.Count;
+            }
+            finally
+            {
+                _joinedSyncshellsLock.Exit();
+            }
+        }
     }
 
     public bool IsEnabled
@@ -328,13 +345,42 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
     {
         try
         {
+            string joinedBefore;
+            _joinedSyncshellsLock.Enter();
+            try
+            {
+                joinedBefore = string.Join(", ", _currentlyJoinedAreaSyncshells);
+            }
+            finally
+            {
+                _joinedSyncshellsLock.Exit();
+            }
             _logger.LogDebug("Leaving area-bound syncshell {SyncshellId}. Currently joined before removal: [{Joined}]", 
-                syncshellId, string.Join(", ", _currentlyJoinedAreaSyncshells));
+                syncshellId, joinedBefore);
             await _apiController.GroupLeave(new GroupDto(new GroupData(syncshellId))).ConfigureAwait(false);
-            
-            bool removed = _currentlyJoinedAreaSyncshells.Remove(syncshellId);
+
+            bool removed;
+            _joinedSyncshellsLock.Enter();
+            try
+            {
+                removed = _currentlyJoinedAreaSyncshells.Remove(syncshellId);
+            }
+            finally
+            {
+                _joinedSyncshellsLock.Exit();
+            }
+            string joinedAfter;
+            _joinedSyncshellsLock.Enter();
+            try
+            {
+                joinedAfter = string.Join(", ", _currentlyJoinedAreaSyncshells);
+            }
+            finally
+            {
+                _joinedSyncshellsLock.Exit();
+            }
             _logger.LogDebug("Removed {SyncshellId} from joined list: {Removed}. Currently joined after removal: [{Joined}]", 
-                syncshellId, removed, string.Join(", ", _currentlyJoinedAreaSyncshells));
+                syncshellId, removed, joinedAfter);
             
             // Publish leave event to notify UI components
             _mediator.Publish(new AreaBoundSyncshellLeftMessage(syncshellId));
@@ -447,7 +493,15 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
     {
         if (message.JoinResponse.Accepted)
         {
-            _currentlyJoinedAreaSyncshells.Add(message.JoinResponse.Group.GID);
+            _joinedSyncshellsLock.Enter();
+            try
+            {
+                _currentlyJoinedAreaSyncshells.Add(message.JoinResponse.Group.GID);
+            }
+            finally
+            {
+                _joinedSyncshellsLock.Exit();
+            }
             _logger.LogDebug("Successfully joined area-bound syncshell {SyncshellId}", message.JoinResponse.Group.GID);
             
             // Check if there's a welcome page for this group that should be shown on area-bound join
@@ -690,9 +744,17 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
             }
 
             // Update our local tracking with the validated memberships
-            _currentlyJoinedAreaSyncshells.Clear();
-            var remainingMemberships = currentAreaBoundMemberships.Select(g => g.Group.GID).Except(syncshellsToLeave, StringComparer.Ordinal);
-            _currentlyJoinedAreaSyncshells.UnionWith(remainingMemberships);
+            _joinedSyncshellsLock.Enter();
+            try
+            {
+                _currentlyJoinedAreaSyncshells.Clear();
+                var remainingMemberships = currentAreaBoundMemberships.Select(g => g.Group.GID).Except(syncshellsToLeave, StringComparer.Ordinal);
+                _currentlyJoinedAreaSyncshells.UnionWith(remainingMemberships);
+            }
+            finally
+            {
+                _joinedSyncshellsLock.Exit();
+            }
         }
         catch (Exception ex)
         {

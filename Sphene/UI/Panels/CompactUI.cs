@@ -69,7 +69,6 @@ public class CompactUi : WindowMediatorSubscriberBase
     private DateTime _lastIncognitoButtonClick = DateTime.MinValue;
     private bool _hadAvailableAreaSyncshells = false;
     private DateTime _areaSyncshellAttentionUntilUtc = DateTime.MinValue;
-    private int _joinedAreaSyncshellCount = 0;
     private readonly HashSet<string> _prePausedPairs;
     private readonly HashSet<string> _prePausedSyncshells;
     private readonly System.Threading.Lock _pendingModSharingLock = new();
@@ -500,21 +499,6 @@ public class CompactUi : WindowMediatorSubscriberBase
             _logger.LogDebug(ex, "Failed to subscribe to ShrinkU conversion events");
         }
         Mediator.Subscribe<ShowUpdateNotificationMessage>(this, (msg) => _updateBannerInfo = msg.UpdateInfo);
-        Mediator.Subscribe<AreaBoundJoinResponseMessage>(this, (msg) =>
-        {
-            if (!msg.JoinResponse.Accepted)
-                return;
-
-            Interlocked.Increment(ref _joinedAreaSyncshellCount);
-        });
-        Mediator.Subscribe<AreaBoundSyncshellLeftMessage>(this, (msg) => { 
-            var newCount = Interlocked.Decrement(ref _joinedAreaSyncshellCount);
-            if (newCount < 0)
-                Interlocked.Exchange(ref _joinedAreaSyncshellCount, 0);
-            // Force UI refresh when syncshell is left so button visibility updates
-            _logger.LogDebug("Area syncshell left: {SyncshellId}, checking if area syncshells are available: {HasAvailable}", 
-                msg.SyncshellId, _areaBoundSyncshellService.HasAvailableAreaSyncshells());
-        });
 
         // Configure base window flags
         Flags |= ImGuiWindowFlags.NoDocking | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse;
@@ -1341,7 +1325,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         {
             _areaBoundSyncshellService.TriggerAreaSyncshellSelection();
         }
-        var joinedCount = Interlocked.CompareExchange(ref _joinedAreaSyncshellCount, 0, 0);
+        var joinedCount = _areaBoundSyncshellService.JoinedAreaSyncshellCount;
         UiSharedService.AttachToolTip(hasAreaSyncshells
             ? "Open Area Syncshell Selection"
             : joinedCount > 0
