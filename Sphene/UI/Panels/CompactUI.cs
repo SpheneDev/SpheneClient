@@ -67,6 +67,9 @@ public class CompactUi : WindowMediatorSubscriberBase
     private Vector2 _lastPosition = Vector2.One;
     private bool _isIncognitoModeActive = false;
     private DateTime _lastIncognitoButtonClick = DateTime.MinValue;
+    private bool _hadAvailableAreaSyncshells = false;
+    private DateTime _areaSyncshellAttentionUntilUtc = DateTime.MinValue;
+    private int _joinedAreaSyncshellCount = 0;
     private readonly HashSet<string> _prePausedPairs;
     private readonly HashSet<string> _prePausedSyncshells;
     private readonly System.Threading.Lock _pendingModSharingLock = new();
@@ -497,7 +500,17 @@ public class CompactUi : WindowMediatorSubscriberBase
             _logger.LogDebug(ex, "Failed to subscribe to ShrinkU conversion events");
         }
         Mediator.Subscribe<ShowUpdateNotificationMessage>(this, (msg) => _updateBannerInfo = msg.UpdateInfo);
+        Mediator.Subscribe<AreaBoundJoinResponseMessage>(this, (msg) =>
+        {
+            if (!msg.JoinResponse.Accepted)
+                return;
+
+            Interlocked.Increment(ref _joinedAreaSyncshellCount);
+        });
         Mediator.Subscribe<AreaBoundSyncshellLeftMessage>(this, (msg) => { 
+            var newCount = Interlocked.Decrement(ref _joinedAreaSyncshellCount);
+            if (newCount < 0)
+                Interlocked.Exchange(ref _joinedAreaSyncshellCount, 0);
             // Force UI refresh when syncshell is left so button visibility updates
             _logger.LogDebug("Area syncshell left: {SyncshellId}, checking if area syncshells are available: {HasAvailable}", 
                 msg.SyncshellId, _areaBoundSyncshellService.HasAvailableAreaSyncshells());
@@ -1284,17 +1297,56 @@ public class CompactUi : WindowMediatorSubscriberBase
             ImGui.TextColored(SpheneCustomTheme.CurrentTheme.TextPrimary, "Normal");
         }
         bool hasAreaSyncshells = _areaBoundSyncshellService.HasAvailableAreaSyncshells();
-        if (hasAreaSyncshells)
+        if (hasAreaSyncshells && !_hadAvailableAreaSyncshells)
         {
-            ImGui.SameLine();
-            ImGui.Dummy(new Vector2(10, 0));
-            ImGui.SameLine();
-            if (_uiSharedService.IconButton(FontAwesomeIcon.MapMarkerAlt, null, null, null, null, ButtonStyleKeys.Compact_AreaSelect))
-            {
-                _areaBoundSyncshellService.TriggerAreaSyncshellSelection();
-            }
-            UiSharedService.AttachToolTip("Open Area Syncshell Selection");
+            _areaSyncshellAttentionUntilUtc = DateTime.UtcNow.AddSeconds(20);
         }
+        _hadAvailableAreaSyncshells = hasAreaSyncshells;
+        ImGui.SameLine();
+        ImGui.Dummy(new Vector2(10, 0));
+        ImGui.SameLine();
+        var now = DateTime.UtcNow;
+        var drawAttention = hasAreaSyncshells && now < _areaSyncshellAttentionUntilUtc;
+        var iconButtonSize = _uiSharedService.GetIconButtonSize(FontAwesomeIcon.MapMarkerAlt);
+        var wideButtonWidth = iconButtonSize.X + 18f * ImGuiHelpers.GlobalScale;
+        if (drawAttention)
+        {
+            var time = (float)now.TimeOfDay.TotalSeconds;
+            var pulse = 0.5f + 0.5f * MathF.Sin(time * 6.0f);
+            var highlight = Vector4.Lerp(SpheneCustomTheme.Colors.AccentCyan, SpheneCustomTheme.Colors.Warning, pulse * 0.65f);
+            var button = new Vector4(highlight.X, highlight.Y, highlight.Z, 0.55f);
+            var hovered = new Vector4(highlight.X, highlight.Y, highlight.Z, 0.75f);
+            var active = new Vector4(highlight.X, highlight.Y, highlight.Z, 0.9f);
+            ImGui.PushStyleColor(ImGuiCol.Button, button);
+            ImGui.PushStyleColor(ImGuiCol.ButtonHovered, hovered);
+            ImGui.PushStyleColor(ImGuiCol.ButtonActive, active);
+            ImGui.PushStyleColor(ImGuiCol.Text, SpheneColors.CrystalWhite);
+        }
+        bool clicked;
+        using (ImRaii.Disabled(!hasAreaSyncshells))
+        {
+            clicked = _uiSharedService.IconButton(FontAwesomeIcon.MapMarkerAlt, width: wideButtonWidth, styleKey: ButtonStyleKeys.Compact_AreaSelect);
+        }
+        if (drawAttention)
+        {
+            ImGui.PopStyleColor(4);
+            var drawList = ImGui.GetWindowDrawList();
+            var min = ImGui.GetItemRectMin();
+            var max = ImGui.GetItemRectMax();
+            var badgeCenter = new Vector2(max.X - 7f, min.Y + 7f);
+            drawList.AddCircleFilled(badgeCenter, 5.5f, ImGui.ColorConvertFloat4ToU32(SpheneCustomTheme.Colors.Warning));
+            drawList.AddCircle(badgeCenter, 5.5f, ImGui.ColorConvertFloat4ToU32(SpheneCustomTheme.CurrentTheme.Border), 12, 1.5f);
+        }
+        if (clicked)
+        {
+            _areaBoundSyncshellService.TriggerAreaSyncshellSelection();
+        }
+        var joinedCount = Interlocked.CompareExchange(ref _joinedAreaSyncshellCount, 0, 0);
+        UiSharedService.AttachToolTip(hasAreaSyncshells
+            ? "Open Area Syncshell Selection"
+            : joinedCount > 0
+                ? "No other Area Syncshells found"
+                : "No Area Syncshells available in this area");
         ImGui.EndGroup();
     }
 
@@ -1658,7 +1710,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         bool FilterNotTaggedUsers(KeyValuePair<Pair, List<GroupFullInfoDto>> u)
             => u.Key.IsDirectlyPaired && !u.Key.IsOneSidedPair && !_tagHandler.HasAnyTag(u.Key.UserData.UID) && (!u.Key.IsMutuallyVisible || !_configService.Current.ShowVisibleUsersSeparately);
         bool FilterOfflineUsers(KeyValuePair<Pair, List<GroupFullInfoDto>> u)
-            => u.Key.IsDirectlyPaired && (!u.Key.IsOneSidedPair || u.Value.Any()) && !u.Key.IsOnline && !u.Key.UserPair.OwnPermissions.IsPaused() && (!u.Key.IsMutuallyVisible || !_configService.Current.ShowVisibleUsersSeparately);
+            => u.Key.IsDirectlyPaired && !u.Key.IsOneSidedPair && !u.Key.IsOnline && !u.Key.UserPair.OwnPermissions.IsPaused() && (!u.Key.IsMutuallyVisible || !_configService.Current.ShowVisibleUsersSeparately);
         bool FilterOfflineSyncshellUsers(KeyValuePair<Pair, List<GroupFullInfoDto>> u)
             => (!u.Key.IsDirectlyPaired && !u.Key.IsOnline && !u.Key.UserPair.OwnPermissions.IsPaused());
 
@@ -1751,9 +1803,7 @@ public class CompactUi : WindowMediatorSubscriberBase
             }
         }
 
-        drawFolders.Add(_drawEntityFactory.CreateDrawTagFolder(TagHandler.CustomUnpairedTag,
-            BasicSortedDictionary(filteredPairs.Where(u => u.Key.IsOneSidedPair)),
-            ImmutablePairList(allPairs.Where(u => u.Key.IsOneSidedPair))));
+        // Removed one-sided individual pairs from main list; they're handled via Pair Requests panel
 
         return drawFolders;
     }

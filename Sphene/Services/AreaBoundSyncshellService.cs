@@ -37,6 +37,8 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
     private bool _isEnabled = true;
     private volatile bool _hasRefreshedAreaSyncshells = false;
     private string _lastConnectedShard = string.Empty;
+    private int _locationCheckInProgress = 0;
+    private volatile bool _uiServiceInitialized = false;
 
     public AreaBoundSyncshellService(ILogger<AreaBoundSyncshellService> logger, 
         SpheneMediator mediator, 
@@ -60,6 +62,7 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
         Mediator.Subscribe<ConnectedMessage>(this, OnConnected);
         Mediator.Subscribe<DisconnectedMessage>(this, OnDisconnected);
         Mediator.Subscribe<AreaBoundSyncshellConfigurationUpdateMessage>(this, OnAreaBoundSyncshellConfigurationUpdate);
+        Mediator.Subscribe<UiServiceInitializedMessage>(this, OnUiServiceInitialized);
         
         _logger.LogDebug("AreaBoundSyncshellService initialized");
     }
@@ -77,6 +80,9 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
     private async void CheckLocationChange(object? state)
     {
         if (!_isEnabled || !_apiController.IsConnected)
+            return;
+
+        if (Interlocked.Exchange(ref _locationCheckInProgress, 1) == 1)
             return;
 
         try
@@ -97,6 +103,10 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error checking location change");
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _locationCheckInProgress, 0);
         }
     }
 
@@ -136,13 +146,6 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
             }
         }
         
-        // If user hasn't seen the city syncshell explanation yet, don't show any area-bound syncshell UI
-        if (!_configService.Current.HasSeenCitySyncshellExplanation)
-        {
-            _logger.LogDebug("User hasn't seen city syncshell explanation yet, skipping area-bound syncshell join processing");
-            return;
-        }
-
         // Join syncshells that are now applicable
         var syncshellsToJoin = _areaBoundSyncshells.Values
             .Where(syncshell => !_currentlyJoinedAreaSyncshells.Contains(syncshell.GID) && 
@@ -152,6 +155,20 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
         if (syncshellsToJoin.Count == 0)
         {
             return; // No syncshells to join
+        }
+
+        if (!_uiServiceInitialized && _configService.Current.AutoShowAreaBoundSyncshellConsent)
+        {
+            _logger.LogDebug("UI service not initialized yet, deferring area-bound consent UI");
+            foreach (var syncshell in syncshellsToJoin)
+            {
+                if (!_notifiedSyncshells.Contains(syncshell.GID))
+                {
+                    _notifiedSyncshells.Add(syncshell.GID);
+                    SendAreaBoundNotification(syncshell);
+                }
+            }
+            return;
         }
 
         // First, automatically join syncshells where user already has consent
@@ -222,7 +239,7 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
             // Show selection UI for multiple syncshells (only those without consent)
             _logger.LogDebug("Multiple area syncshells without consent available ({count}), showing selection UI", syncshellsWithoutConsent.Count);
             var selectionMessage = new AreaBoundSyncshellSelectionRequestMessage(syncshellsWithoutConsent);
-            _mediator.Publish(selectionMessage);
+            await _dalamudUtilService.RunOnFrameworkThread(() => _mediator.Publish(selectionMessage)).ConfigureAwait(false);
             
             // Notify about available area-bound syncshells if not already notified
             foreach (var syncshell in syncshellsWithoutConsent)
@@ -245,7 +262,7 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
         
         // Send consent request for new consent
         var consentMessage = new AreaBoundSyncshellConsentRequestMessage(singleSyncshell, requiresRulesAcceptance);
-        _mediator.Publish(consentMessage);
+        await _dalamudUtilService.RunOnFrameworkThread(() => _mediator.Publish(consentMessage)).ConfigureAwait(false);
         
         // Notify about available area-bound syncshell if not already notified
         if (!_notifiedSyncshells.Contains(singleSyncshell.GID))
@@ -798,9 +815,43 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
 
         // Create a custom notification message for area-bound syncshells
         var notificationMessage = new AreaBoundSyncshellNotificationMessage(title, message, notificationLocation);
-        _mediator.Publish(notificationMessage);
+        _ = _dalamudUtilService.RunOnFrameworkThread(() => _mediator.Publish(notificationMessage));
         
         _logger.LogDebug("Area-bound notification published successfully");
+    }
+
+    private void OnUiServiceInitialized(UiServiceInitializedMessage message)
+    {
+        if (_uiServiceInitialized)
+            return;
+
+        _uiServiceInitialized = true;
+
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(500).ConfigureAwait(false);
+
+            if (!_apiController.IsConnected)
+                return;
+
+            if (!_hasRefreshedAreaSyncshells)
+            {
+                await RefreshAreaBoundSyncshells().ConfigureAwait(false);
+                return;
+            }
+
+            try
+            {
+                var currentLocation = await _dalamudUtilService.GetMapDataAsync().ConfigureAwait(false);
+                var oldLocation = _lastLocation;
+                _lastLocation = currentLocation;
+                await HandleLocationChange(oldLocation, currentLocation).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error evaluating area-bound syncshell state after UI initialization");
+            }
+        });
     }
 
     public Task StartAsync(CancellationToken cancellationToken)
