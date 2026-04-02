@@ -3,9 +3,9 @@
   <PropertyGroup>
     <Authors></Authors>
     <Company></Company>
-    <Version>1.1.13.22</Version>
-    <AssemblyVersion>1.1.13.22</AssemblyVersion>
-    <FileVersion>1.1.13.22</FileVersion>
+    <Version>1.1.13.27</Version>
+    <AssemblyVersion>1.1.13.27</AssemblyVersion>
+    <FileVersion>1.1.13.27</FileVersion>
     <Description>Through the power of Living Memory, this plugin harmonizes your Penumbra modifications and Glamourer configurations across all connected souls, ensuring endless synchronization in your shared digital realm.</Description>
     <Copyright></Copyright>
     <PackageProjectUrl>https://github.com/SpheneDev/client</PackageProjectUrl>
@@ -46,9 +46,9 @@
     <BuildDate>$([System.DateTime]::Now.ToString("ddMM"))</BuildDate>
     <BuildTime>$([System.DateTime]::Now.ToString("HHMM"))</BuildTime>
     <BuildTimestamp>$([System.DateTime]::Now.ToString("dd-MM-yy HH:mm:ss"))</BuildTimestamp>
-    <Version>1.1.13.22</Version>
-    <AssemblyVersion>1.1.13.22</AssemblyVersion>
-    <FileVersion>1.1.13.22</FileVersion>
+    <Version>1.1.13.27</Version>
+    <AssemblyVersion>1.1.13.27</AssemblyVersion>
+    <FileVersion>1.1.13.27</FileVersion>
     <DefineConstants>$(DefineConstants);BUILD_TIMESTAMP</DefineConstants>
   </PropertyGroup>
   

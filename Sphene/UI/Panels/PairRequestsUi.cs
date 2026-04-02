@@ -18,8 +18,6 @@ public sealed class PairRequestsUi : WindowMediatorSubscriberBase
     private readonly PairManager _pairManager;
     private readonly ApiController _apiController;
     private readonly UiSharedService _uiSharedService;
-    private Vector2 _lastMainPos = Vector2.Zero;
-    private Vector2 _lastMainSize = Vector2.Zero;
     private IDisposable? _themeScope;
 
     public PairRequestsUi(ILogger<PairRequestsUi> logger,
@@ -45,8 +43,6 @@ public sealed class PairRequestsUi : WindowMediatorSubscriberBase
             _pairManager.MarkAllInboundIndividualPairRequestsSeen();
             IsOpen = true;
         });
-
-        Mediator.Subscribe<CompactUiChange>(this, OnCompactUiChange);
     }
 
     public override void PreDraw()
@@ -214,17 +210,4 @@ public sealed class PairRequestsUi : WindowMediatorSubscriberBase
         UiSharedService.AttachToolTip("Cancel Request");
     }
 
-    private void OnCompactUiChange(CompactUiChange msg)
-    {
-        if (msg.Size != Vector2.Zero)
-        {
-            _lastMainSize = msg.Size;
-        }
-
-        if (msg.Position != Vector2.Zero)
-        {
-            _lastMainPos = msg.Position;
-        }
-
-    }
 }
