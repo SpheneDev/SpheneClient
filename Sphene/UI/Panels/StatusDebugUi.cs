@@ -83,11 +83,11 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         IsOpen = false;
         SizeConstraints = new()
         {
-            MinimumSize = new Vector2(600, 400),
-            MaximumSize = new Vector2(1200, 800)
+            MinimumSize = new Vector2(1050, 540),
+            MaximumSize = new Vector2(1050, 800)
         };
         
-        Flags = ImGuiWindowFlags.NoCollapse;
+        Flags = ImGuiWindowFlags.None;
         
         // Subscribe to communication events for logging
         Mediator.Subscribe<ConnectedMessage>(this, OnConnected);
