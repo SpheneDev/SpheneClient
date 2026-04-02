@@ -43,12 +43,39 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
     private readonly EnhancedAcknowledgmentManager? _acknowledgmentManager;
     private readonly SessionAcknowledgmentManager? _sessionAcknowledgmentManager;
     
-    private string _communicationLog = "Communication Log:\n";
+    private enum DebugLogLevel
+    {
+        Trace = 0,
+        Debug = 1,
+        Info = 2,
+        Warn = 3,
+        Error = 4,
+    }
+
+    private sealed record DebugLogEntry(DateTimeOffset Timestamp, DebugLogLevel Level, string Category, string? Uid, string Message, string? Details);
+
+    private readonly Lock _debugLogLock = new();
+    private readonly List<DebugLogEntry> _debugLogEntries = new();
+    private const int MaxDebugLogEntries = 2500;
+    private const long MaxDebugLogBytes = 50L * 1024L * 1024L;
+    private long _debugLogBytes = 0;
+    private string _lastReportPath = string.Empty;
+
     private bool _autoScroll = true;
+    private DebugLogLevel _debugLogMinLevel = DebugLogLevel.Info;
+    private string _debugLogSearch = string.Empty;
+    private bool _debugLogSelectedCharacterOnly = false;
+    private string _debugLogSpecificUid = string.Empty;
     private bool _showHealthChecks = true;
     private bool _showAcknowledgments = true;
     private bool _showCircuitBreaker = true;
     private bool _showConnections = true;
+    private bool _showApplies = true;
+    private bool _showHub = true;
+    private bool _showNotifications = true;
+    private bool _showDownloads = true;
+    private bool _showMismatches = true;
+    private bool _showIpc = true;
     private int _simulatedDisconnectSeconds = 3;
     private string? _selectedCharacterUid;
     private readonly Dictionary<string, CharacterStatsSnapshot> _characterStats = new(StringComparer.Ordinal);
@@ -101,6 +128,14 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         
         // Subscribe to notification events
         Mediator.Subscribe<NotificationMessage>(this, OnNotification);
+        Mediator.Subscribe<CharacterDataApplicationCompletedMessage>(this, OnCharacterDataApplicationCompleted);
+        Mediator.Subscribe<HubReconnectingMessage>(this, OnHubReconnecting);
+        Mediator.Subscribe<HubReconnectedMessage>(this, OnHubReconnected);
+        Mediator.Subscribe<HubClosedMessage>(this, OnHubClosed);
+        Mediator.Subscribe<DebugLogEventMessage>(this, OnDebugLogEvent);
+        Mediator.Subscribe<DownloadStartedMessage>(this, OnDownloadStarted);
+        Mediator.Subscribe<DownloadFinishedMessage>(this, OnDownloadFinished);
+        Mediator.Subscribe<DownloadReadyMessage>(this, OnDownloadReady);
         
         // Subscribe to health monitor events by monitoring the health status changes
         // We'll use a timer to periodically check and log health status changes
@@ -214,11 +249,6 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                     DrawCommunicationLog();
                     break;
             }
-        }
-
-        if (_showLogPopup)
-        {
-            DrawLogPopup();
         }
     }
 
@@ -881,7 +911,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         ImGui.SameLine();
         if (ImGui.Button("Clear Log"))
         {
-            _communicationLog = "Communication Log:\n";
+            ClearDebugLog();
         }
 
         ImGui.Spacing();
@@ -1454,6 +1484,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         {
             _activePenumbraPathsErrors[uid] = ex.Message;
             _logger.LogWarning(ex, "Failed to refresh active Penumbra paths for {uid}", uid);
+            AddDebugLog(DebugLogLevel.Warn, "PEN", "Failed to refresh active Penumbra paths", uid: uid, details: ex.ToString());
         }
         finally
         {
@@ -1491,7 +1522,14 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             if (!isPenumbraActive)
             {
                 // Mismatch: delivered as active but not active in Penumbra
-                _mismatchTracker.RecordMismatch(uid, gamePath, state.Sources, state.ObjectKinds);
+                var mismatchCount = _mismatchTracker.RecordMismatchAndGetMismatchCount(uid, gamePath, state.Sources, state.ObjectKinds);
+                if (mismatchCount == 1 || mismatchCount % 25 == 0)
+                {
+                    var sourcesText = string.Join(", ", state.Sources.OrderBy(s => s, StringComparer.OrdinalIgnoreCase));
+                    var kindsText = string.Join(", ", state.ObjectKinds.OrderBy(k => k, StringComparer.OrdinalIgnoreCase));
+                    AddDebugLog(DebugLogLevel.Warn, "MM", $"Mismatch: delivered active but not active in Penumbra ({mismatchCount})", uid: uid,
+                        details: $"path={gamePath} sources={sourcesText} kinds={kindsText}");
+                }
             }
         }
     }
@@ -1830,169 +1868,489 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         public HashSet<string> ObjectKinds { get; } = new(StringComparer.OrdinalIgnoreCase);
     }
     
-    private bool _showLogPopup = false;
-    
     private void DrawCommunicationLog()
     {
-        ImGui.Text("Communication Log");
-        
-        // Filter options
-        ImGui.SameLine();
-        if (ImGui.Button("Clear Log"))
+        DrawLogsPanel(showPopupButton: true);
+    }
+    
+    internal void DrawLogsPanel(bool showPopupButton)
+    {
+        if (ImGui.Button("Clear"))
         {
-            _communicationLog = "Communication Log:\n";
+            ClearDebugLog();
         }
-        
+
         ImGui.SameLine();
-        if (ImGui.Button("Open in Popup"))
+        if (ImGui.Button("Copy Visible"))
         {
-            _showLogPopup = true;
+            ImGui.SetClipboardText(BuildLogText(GetFilteredDebugLogSnapshot(maxEntries: 1200)));
         }
-        
+
+        ImGui.SameLine();
+        if (ImGui.Button("Copy Report"))
+        {
+            ImGui.SetClipboardText(BuildDebugReportJson(GetFilteredDebugLogSnapshot(maxEntries: 1200)));
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("Write Report File"))
+        {
+            var path = WriteDebugReportFile(GetFilteredDebugLogSnapshot(maxEntries: 2500));
+            if (!string.IsNullOrWhiteSpace(path))
+            {
+                _lastReportPath = path;
+            }
+        }
+
+        if (showPopupButton)
+        {
+            ImGui.SameLine();
+            if (ImGui.Button("Open Popup"))
+            {
+                Mediator.Publish(new UiToggleMessage(typeof(StatusDebugLogPopupUi)));
+            }
+        }
+
         ImGui.SameLine();
         ImGui.Checkbox("Auto-scroll", ref _autoScroll);
-        
-        // Event type filters
-        ImGui.Text("Show:");
-        ImGui.SameLine();
-        ImGui.Checkbox("Connections", ref _showConnections);
-        ImGui.SameLine();
-        ImGui.Checkbox("Health Checks", ref _showHealthChecks);
-        ImGui.SameLine();
-        ImGui.Checkbox("Acknowledgments", ref _showAcknowledgments);
-        ImGui.SameLine();
-        ImGui.Checkbox("Circuit Breaker", ref _showCircuitBreaker);
-        
-        // Draw the log content
-        DrawLogContent();
-    }
-    
-    private void DrawLogContent()
-    {
-        var availableSize = ImGui.GetContentRegionAvail();
-        availableSize.Y -= ImGui.GetStyle().ItemSpacing.Y;
-        
-        using var child = ImRaii.Child("CommunicationLog", availableSize, true);
-        if (child)
+
+        if (!string.IsNullOrWhiteSpace(_lastReportPath))
         {
-            DrawLogLines();
-        }
-    }
-    
-    private void DrawLogPopup()
-    {
-        ImGui.SetNextWindowSize(new Vector2(800, 600), ImGuiCond.FirstUseEver);
-        
-        if (ImGui.Begin("Communication Log###CommunicationLogPopup", ref _showLogPopup))
-        {
-            // Filter controls in popup
-            ImGui.Text("Show:");
             ImGui.SameLine();
-            ImGui.Checkbox("Connections##popup", ref _showConnections);
-            ImGui.SameLine();
-            ImGui.Checkbox("Health Checks##popup", ref _showHealthChecks);
-            ImGui.SameLine();
-            ImGui.Checkbox("Acknowledgments##popup", ref _showAcknowledgments);
-            ImGui.SameLine();
-            ImGui.Checkbox("Circuit Breaker##popup", ref _showCircuitBreaker);
-            
-            ImGui.SameLine();
-            ImGui.Checkbox("Auto-scroll##popup", ref _autoScroll);
-            
-            ImGui.SameLine();
-            if (ImGui.Button("Clear Log##popup"))
+            if (ImGui.Button("Copy Report Path"))
             {
-                _communicationLog = "Communication Log:\n";
+                ImGui.SetClipboardText(_lastReportPath);
             }
-            
-            ImGui.Separator();
-            
-            // Log content in popup
-            var availableSize = ImGui.GetContentRegionAvail();
-            using var child = ImRaii.Child("CommunicationLogPopupContent", availableSize, true);
-            if (child)
-            {
-                DrawLogLines();
-            }
+            UiSharedService.AttachToolTip(_lastReportPath);
         }
-        ImGui.End();
-    }
-    
-    private void DrawLogLines()
-    {
-        // Parse and display log with colors
-        var lines = _communicationLog.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-        foreach (var line in lines)
+
+        ImGui.Spacing();
+
+        ImGui.SetNextItemWidth(150f * ImGuiHelpers.GlobalScale);
+        if (ImGui.BeginCombo("Min Level", _debugLogMinLevel.ToString()))
         {
-            if (string.IsNullOrWhiteSpace(line)) continue;
-            
-            // Extract timestamp, type, and message
-            var parts = line.Split("] ", 3);
-            if (parts.Length >= 3)
+            foreach (var level in Enum.GetValues<DebugLogLevel>())
             {
-                var timestamp = parts[0].TrimStart('[');
-                var type = parts[1].TrimStart('[');
-                var message = parts[2];
-                
-                // Color based on type
-                var color = type switch
+                var selected = level == _debugLogMinLevel;
+                if (ImGui.Selectable(level.ToString(), selected))
                 {
-                    "CONN" => ImGuiColors.ParsedBlue,
-                    "HEALTH" => ImGuiColors.ParsedGreen,
-                    "ACK" => ImGuiColors.ParsedPurple,
-                    "CIRCUIT" => ImGuiColors.DalamudOrange,
-                    "INFO" => ImGuiColors.DalamudWhite,
-                    "WARN" => ImGuiColors.DalamudYellow,
-                    "ERROR" => ImGuiColors.DalamudRed,
-                    _ => ImGuiColors.DalamudGrey
-                };
-                
-                // Display with formatting
-                ImGui.TextColored(ImGuiColors.DalamudGrey, $"[{timestamp}]");
-                ImGui.SameLine();
-                ImGui.TextColored(color, $"[{type}]");
-                ImGui.SameLine();
-                ImGui.TextUnformatted(message);
+                    _debugLogMinLevel = level;
+                }
+                if (selected) ImGui.SetItemDefaultFocus();
             }
-            else
-            {
-                // Fallback for malformed lines
-                ImGui.TextUnformatted(line);
-            }
+            ImGui.EndCombo();
         }
-        
+
+        ImGui.SameLine();
+        ImGui.Checkbox("Selected character only", ref _debugLogSelectedCharacterOnly);
+
+        ImGui.SameLine();
+        ImGui.SetNextItemWidth(220f * ImGuiHelpers.GlobalScale);
+        ImGui.InputTextWithHint("##LogSearch", "Search...", ref _debugLogSearch, 128);
+
+        ImGui.Spacing();
+        ImGui.TextUnformatted("Show:");
+        ImGui.SameLine();
+        ImGui.Checkbox("Conn", ref _showConnections);
+        ImGui.SameLine();
+        ImGui.Checkbox("Health", ref _showHealthChecks);
+        ImGui.SameLine();
+        ImGui.Checkbox("Ack", ref _showAcknowledgments);
+        ImGui.SameLine();
+        ImGui.Checkbox("Circuit", ref _showCircuitBreaker);
+        ImGui.SameLine();
+        ImGui.Checkbox("Apply", ref _showApplies);
+        ImGui.SameLine();
+        ImGui.Checkbox("Hub", ref _showHub);
+        ImGui.SameLine();
+        ImGui.Checkbox("Notif", ref _showNotifications);
+        ImGui.SameLine();
+        ImGui.Checkbox("DL", ref _showDownloads);
+        ImGui.SameLine();
+        ImGui.Checkbox("MM", ref _showMismatches);
+        ImGui.SameLine();
+        ImGui.Checkbox("IPC", ref _showIpc);
+
+        var pairs = BuildCharacterDataPairsSnapshot();
+        var selectedPair = EnsureSelectedCharacterPair(pairs);
+        var uidLabel = _debugLogSelectedCharacterOnly
+            ? selectedPair != null ? selectedPair.UserData.AliasOrUID : "Selected"
+            : string.IsNullOrWhiteSpace(_debugLogSpecificUid) ? "All" : _debugLogSpecificUid;
+
+        ImGui.SetNextItemWidth(260f * ImGuiHelpers.GlobalScale);
+        if (ImGui.BeginCombo("Character Filter", uidLabel))
+        {
+            var anySelected = string.IsNullOrWhiteSpace(_debugLogSpecificUid) && !_debugLogSelectedCharacterOnly;
+            if (ImGui.Selectable("All", anySelected))
+            {
+                _debugLogSpecificUid = string.Empty;
+                _debugLogSelectedCharacterOnly = false;
+            }
+
+            if (_selectedCharacterUid != null)
+            {
+                var selected = _debugLogSelectedCharacterOnly;
+                if (ImGui.Selectable("Selected Character", selected))
+                {
+                    _debugLogSelectedCharacterOnly = true;
+                    _debugLogSpecificUid = string.Empty;
+                }
+            }
+
+            ImGui.Separator();
+            foreach (var pair in pairs)
+            {
+                var key = GetPairKey(pair);
+                var selected = string.Equals(_debugLogSpecificUid, key, StringComparison.Ordinal) && !_debugLogSelectedCharacterOnly;
+                if (ImGui.Selectable(pair.UserData.AliasOrUID, selected))
+                {
+                    _debugLogSpecificUid = key;
+                    _debugLogSelectedCharacterOnly = false;
+                }
+            }
+            ImGui.EndCombo();
+        }
+
+        ImGui.Separator();
+
+        var entries = GetFilteredDebugLogSnapshot(maxEntries: 2500);
+        var avail = ImGui.GetContentRegionAvail();
+        if (!ImGui.BeginTable("##DebugLogTable", 6,
+                ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable | ImGuiTableFlags.ScrollY,
+                new Vector2(-1, avail.Y)))
+        {
+            return;
+        }
+
+        ImGui.TableSetupScrollFreeze(0, 1);
+        ImGui.TableSetupColumn("Time", ImGuiTableColumnFlags.WidthFixed, 95f);
+        ImGui.TableSetupColumn("Lvl", ImGuiTableColumnFlags.WidthFixed, 45f);
+        ImGui.TableSetupColumn("Cat", ImGuiTableColumnFlags.WidthFixed, 70f);
+        ImGui.TableSetupColumn("User", ImGuiTableColumnFlags.WidthFixed, 160f);
+        ImGui.TableSetupColumn("Message", ImGuiTableColumnFlags.WidthStretch);
+        ImGui.TableSetupColumn("", ImGuiTableColumnFlags.WidthFixed, 34f);
+        ImGui.TableHeadersRow();
+
+        for (var i = 0; i < entries.Count; i++)
+        {
+            var entry = entries[i];
+            ImGui.TableNextRow();
+            ImGui.PushID(i);
+
+            ImGui.TableSetColumnIndex(0);
+            ImGui.TextUnformatted(entry.Timestamp.ToLocalTime().ToString("HH:mm:ss.fff"));
+
+            ImGui.TableSetColumnIndex(1);
+            DrawLevelIcon(entry.Level);
+
+            ImGui.TableSetColumnIndex(2);
+            ImGui.TextUnformatted(entry.Category);
+
+            ImGui.TableSetColumnIndex(3);
+            ImGui.TextUnformatted(string.IsNullOrEmpty(entry.Uid) ? "-" : GetDisplayName(entry.Uid));
+
+            ImGui.TableSetColumnIndex(4);
+            ImGui.TextUnformatted(entry.Message);
+            if (!string.IsNullOrEmpty(entry.Details) && ImGui.IsItemHovered())
+            {
+                UiSharedService.AttachToolTip(entry.Details);
+            }
+
+            if (ImGui.BeginPopupContextItem("##log_ctx"))
+            {
+                if (ImGui.MenuItem("Copy message"))
+                {
+                    ImGui.SetClipboardText(entry.Message);
+                }
+                if (!string.IsNullOrEmpty(entry.Details) && ImGui.MenuItem("Copy details/stacktrace"))
+                {
+                    ImGui.SetClipboardText(entry.Details);
+                }
+                ImGui.EndPopup();
+            }
+
+            ImGui.TableSetColumnIndex(5);
+            if (!string.IsNullOrEmpty(entry.Details))
+            {
+                var size = ImGui.GetFrameHeight();
+                using (ImRaii.PushFont(UiBuilder.IconFont))
+                {
+                    if (ImGui.Button($"{FontAwesomeIcon.Copy.ToIconString()}##copy_details", new Vector2(size, size)))
+                    {
+                        ImGui.SetClipboardText(entry.Details);
+                    }
+                }
+                UiSharedService.AttachToolTip("Copy details / stacktrace");
+            }
+
+            ImGui.PopID();
+        }
+
         if (_autoScroll && ImGui.GetScrollY() >= ImGui.GetScrollMaxY())
         {
             ImGui.SetScrollHereY(1.0f);
         }
+
+        ImGui.EndTable();
     }
     
-    private void LogCommunication(string message, string type = "INFO")
+    private void ClearDebugLog()
     {
-        var timestamp = DateTime.Now.ToString("HH:mm:ss.fff");
-        var logEntry = $"[{timestamp}] [{type}] {message}\n";
-        
-        // Apply filtering based on type
-        bool shouldLog = type switch
+        _debugLogLock.Enter();
+        try
+        {
+            _debugLogEntries.Clear();
+            _debugLogBytes = 0;
+        }
+        finally
+        {
+            _debugLogLock.Exit();
+        }
+    }
+
+    private void AddDebugLog(DebugLogLevel level, string category, string message, string? uid = null, string? details = null)
+    {
+        var entry = new DebugLogEntry(DateTimeOffset.Now, level, category, uid, message, details);
+        var entryBytes = EstimateEntryBytes(entry);
+        _debugLogLock.Enter();
+        try
+        {
+            _debugLogEntries.Add(entry);
+            _debugLogBytes += entryBytes;
+            if (_debugLogEntries.Count > MaxDebugLogEntries)
+            {
+                _debugLogEntries.RemoveRange(0, Math.Max(1, _debugLogEntries.Count - (MaxDebugLogEntries - 200)));
+                _debugLogBytes = _debugLogEntries.Sum(EstimateEntryBytes);
+            }
+            while (_debugLogBytes > MaxDebugLogBytes && _debugLogEntries.Count > 0)
+            {
+                var removed = _debugLogEntries[0];
+                _debugLogEntries.RemoveAt(0);
+                _debugLogBytes -= EstimateEntryBytes(removed);
+            }
+        }
+        finally
+        {
+            _debugLogLock.Exit();
+        }
+    }
+
+    private static long EstimateEntryBytes(DebugLogEntry entry)
+    {
+        try
+        {
+            var message = entry.Message ?? string.Empty;
+            var details = entry.Details ?? string.Empty;
+            var category = entry.Category ?? string.Empty;
+            var uid = entry.Uid ?? string.Empty;
+            return System.Text.Encoding.UTF8.GetByteCount(message)
+                + System.Text.Encoding.UTF8.GetByteCount(details)
+                + System.Text.Encoding.UTF8.GetByteCount(category)
+                + System.Text.Encoding.UTF8.GetByteCount(uid)
+                + 64;
+        }
+        catch
+        {
+            return 512;
+        }
+    }
+
+    private static void DrawLevelIcon(DebugLogLevel level)
+    {
+        var icon = level switch
+        {
+            DebugLogLevel.Trace => FontAwesomeIcon.DotCircle,
+            DebugLogLevel.Debug => FontAwesomeIcon.Bug,
+            DebugLogLevel.Info => FontAwesomeIcon.InfoCircle,
+            DebugLogLevel.Warn => FontAwesomeIcon.ExclamationTriangle,
+            DebugLogLevel.Error => FontAwesomeIcon.TimesCircle,
+            _ => FontAwesomeIcon.InfoCircle
+        };
+
+        var color = level switch
+        {
+            DebugLogLevel.Trace => ImGuiColors.DalamudGrey,
+            DebugLogLevel.Debug => ImGuiColors.ParsedBlue,
+            DebugLogLevel.Info => ImGuiColors.DalamudWhite,
+            DebugLogLevel.Warn => ImGuiColors.DalamudYellow,
+            DebugLogLevel.Error => ImGuiColors.DalamudRed,
+            _ => ImGuiColors.DalamudWhite
+        };
+
+        using (ImRaii.PushFont(UiBuilder.IconFont))
+        using (ImRaii.PushColor(ImGuiCol.Text, color))
+        {
+            ImGui.TextUnformatted(icon.ToIconString());
+        }
+    }
+
+    private List<DebugLogEntry> GetFilteredDebugLogSnapshot(int maxEntries)
+    {
+        List<DebugLogEntry> snapshot;
+        _debugLogLock.Enter();
+        try
+        {
+            snapshot = _debugLogEntries.ToList();
+        }
+        finally
+        {
+            _debugLogLock.Exit();
+        }
+
+        var selectedUid = _selectedCharacterUid;
+        var uidFilter = _debugLogSelectedCharacterOnly ? selectedUid : (string.IsNullOrWhiteSpace(_debugLogSpecificUid) ? null : _debugLogSpecificUid);
+        var search = _debugLogSearch;
+
+        bool CategoryEnabled(string category) => category switch
         {
             "CONN" => _showConnections,
             "HEALTH" => _showHealthChecks,
             "ACK" => _showAcknowledgments,
             "CIRCUIT" => _showCircuitBreaker,
-            _ => true // Always show INFO, WARN, ERROR
+            "APPLY" => _showApplies,
+            "HUB" => _showHub,
+            "NOTIF" => _showNotifications,
+            "DL" => _showDownloads,
+            "MM" => _showMismatches,
+            "IPC" => _showIpc,
+            "PEN" => _showIpc,
+            _ => true
         };
-        
-        if (shouldLog)
+
+        IEnumerable<DebugLogEntry> filtered = snapshot
+            .Where(e => e.Level >= _debugLogMinLevel)
+            .Where(e => CategoryEnabled(e.Category))
+            .Where(e => uidFilter == null || string.Equals(e.Uid, uidFilter, StringComparison.Ordinal))
+            .Where(e => string.IsNullOrWhiteSpace(search)
+                || e.Message.Contains(search, StringComparison.OrdinalIgnoreCase)
+                || (e.Details?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false)
+                || (e.Uid?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false));
+
+        var list = filtered.ToList();
+        if (list.Count > maxEntries)
         {
-            _communicationLog += logEntry;
-            
-            // Limit log size to prevent memory issues
-            var lines = _communicationLog.Split('\n');
-            if (lines.Length > 1000)
-            {
-                _communicationLog = string.Join('\n', lines.Skip(lines.Length - 800));
-            }
+            list = list.Skip(list.Count - maxEntries).ToList();
         }
+
+        return list;
+    }
+
+    private static string BuildLogText(List<DebugLogEntry> entries)
+    {
+        var sb = new System.Text.StringBuilder(entries.Count * 80);
+        foreach (var e in entries)
+        {
+            sb.Append('[').Append(e.Timestamp.ToLocalTime().ToString("HH:mm:ss.fff")).Append("] ");
+            sb.Append('[').Append(e.Level.ToString().ToUpperInvariant()).Append("] ");
+            sb.Append('[').Append(e.Category).Append("] ");
+            if (!string.IsNullOrWhiteSpace(e.Uid))
+            {
+                sb.Append('[').Append(e.Uid).Append("] ");
+            }
+            sb.Append(e.Message);
+            if (!string.IsNullOrWhiteSpace(e.Details))
+            {
+                sb.Append(" | ").Append(e.Details);
+            }
+            sb.Append('\n');
+        }
+        return sb.ToString();
+    }
+
+    private string BuildDebugReportJson(List<DebugLogEntry> entries)
+    {
+        var payload = new
+        {
+            GeneratedAt = DateTimeOffset.UtcNow,
+            Server = _apiController.ServerInfo.ShardName,
+            Connected = _apiController.IsConnected,
+            SelfUid = _apiController.UID,
+            Filters = new
+            {
+                MinLevel = _debugLogMinLevel.ToString(),
+                SelectedCharacterOnly = _debugLogSelectedCharacterOnly,
+                SpecificUid = _debugLogSpecificUid,
+                Search = _debugLogSearch,
+                Categories = new
+                {
+                    Conn = _showConnections,
+                    Health = _showHealthChecks,
+                    Ack = _showAcknowledgments,
+                    Circuit = _showCircuitBreaker,
+                    Apply = _showApplies,
+                    Hub = _showHub,
+                    Notif = _showNotifications,
+                    Downloads = _showDownloads,
+                    Mismatches = _showMismatches,
+                    Ipc = _showIpc
+                }
+            },
+            Entries = entries.Select(e => new
+            {
+                e.Timestamp,
+                Level = e.Level.ToString(),
+                e.Category,
+                e.Uid,
+                e.Message,
+                e.Details
+            }).ToList()
+        };
+
+        return JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true });
+    }
+
+    private string WriteDebugReportFile(List<DebugLogEntry> entries)
+    {
+        try
+        {
+            var json = BuildDebugReportJson(entries);
+            var bytes = System.Text.Encoding.UTF8.GetByteCount(json);
+            if (bytes > MaxDebugLogBytes)
+            {
+                var trimmed = entries.ToList();
+                while (trimmed.Count > 0 && System.Text.Encoding.UTF8.GetByteCount(BuildDebugReportJson(trimmed)) > MaxDebugLogBytes)
+                {
+                    trimmed.RemoveAt(0);
+                }
+                json = BuildDebugReportJson(trimmed);
+            }
+
+            var folder = Path.Combine(_configService.ConfigurationDirectory, "DebugReports");
+            Directory.CreateDirectory(folder);
+            var fileName = $"sphene_debug_report_{DateTime.UtcNow:yyyyMMdd_HHmmss}.json";
+            var filePath = Path.Combine(folder, fileName);
+            File.WriteAllText(filePath, json);
+            AddDebugLog(DebugLogLevel.Info, "INFO", $"Wrote debug report file: {fileName}");
+            return filePath;
+        }
+        catch (Exception ex)
+        {
+            AddDebugLog(DebugLogLevel.Error, "ERROR", "Failed to write debug report file", details: ex.ToString());
+            return string.Empty;
+        }
+    }
+
+    private void LogCommunication(string message, string type = "INFO")
+    {
+        var category = type switch
+        {
+            "CONN" => "CONN",
+            "HEALTH" => "HEALTH",
+            "ACK" => "ACK",
+            "CIRCUIT" => "CIRCUIT",
+            _ => "INFO"
+        };
+
+        var level = type switch
+        {
+            "WARN" => DebugLogLevel.Warn,
+            "ERROR" => DebugLogLevel.Error,
+            _ => message.StartsWith("[DEBUG]", StringComparison.Ordinal) ? DebugLogLevel.Debug
+                : message.StartsWith("Health check OK", StringComparison.Ordinal) ? DebugLogLevel.Trace
+                : DebugLogLevel.Info
+        };
+
+        AddDebugLog(level, category, message);
     }
     
     private void OnConnected(ConnectedMessage message)
@@ -2029,7 +2387,81 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
     private void OnNotification(NotificationMessage message)
     {
         var typeStr = message.Type.ToString().ToUpper();
-        LogCommunication($"Notification [{typeStr}]: {message.Title} - {message.Message}", "INFO");
+        var level = message.Type switch
+        {
+            Sphene.SpheneConfiguration.Models.NotificationType.Error => DebugLogLevel.Error,
+            Sphene.SpheneConfiguration.Models.NotificationType.Warning => DebugLogLevel.Warn,
+            _ => DebugLogLevel.Info
+        };
+        AddDebugLog(level, "NOTIF", $"[{typeStr}] {message.Title}", details: message.Message);
+    }
+
+    private void OnCharacterDataApplicationCompleted(CharacterDataApplicationCompletedMessage message)
+    {
+        var level = message.Success ? DebugLogLevel.Info : DebugLogLevel.Warn;
+        var shortHash = string.IsNullOrEmpty(message.DataHash) ? "-" : (message.DataHash.Length > 10 ? message.DataHash[..10] : message.DataHash);
+        AddDebugLog(level, "APPLY",
+            $"{(message.Success ? "Applied" : "Apply failed")}: {message.PlayerName} hash={shortHash}",
+            uid: message.UserUID,
+            details: $"ApplicationId={message.ApplicationId}");
+    }
+
+    private void OnHubReconnecting(HubReconnectingMessage message)
+    {
+        AddDebugLog(DebugLogLevel.Warn, "HUB", "Hub reconnecting", details: message.Exception?.ToString());
+    }
+
+    private void OnHubReconnected(HubReconnectedMessage message)
+    {
+        AddDebugLog(DebugLogLevel.Info, "HUB", "Hub reconnected", details: message.Arg);
+    }
+
+    private void OnHubClosed(HubClosedMessage message)
+    {
+        AddDebugLog(DebugLogLevel.Error, "HUB", "Hub closed", details: message.Exception?.ToString());
+    }
+
+    private void OnDebugLogEvent(DebugLogEventMessage message)
+    {
+        var level = message.Level switch
+        {
+            LogLevel.Trace => DebugLogLevel.Trace,
+            LogLevel.Debug => DebugLogLevel.Debug,
+            LogLevel.Information => DebugLogLevel.Info,
+            LogLevel.Warning => DebugLogLevel.Warn,
+            LogLevel.Error => DebugLogLevel.Error,
+            LogLevel.Critical => DebugLogLevel.Error,
+            _ => DebugLogLevel.Info
+        };
+
+        AddDebugLog(level, message.Category, message.Message, uid: message.Uid, details: message.Details);
+    }
+
+    private void OnDownloadStarted(DownloadStartedMessage message)
+    {
+        try
+        {
+            var totalBytes = message.DownloadStatus.Sum(k => k.Value.TotalBytes);
+            var totalFiles = message.DownloadStatus.Sum(k => k.Value.TotalFiles);
+            var name = string.IsNullOrWhiteSpace(message.DownloadId.Name) ? "(unknown)" : message.DownloadId.Name;
+            AddDebugLog(DebugLogLevel.Info, "DL", $"Download started: {name} ({message.DownloadId.ObjectKind}) files={totalFiles}",
+                details: $"bytes={totalBytes:n0} groups={message.DownloadStatus.Count}");
+        }
+        catch (Exception ex)
+        {
+            AddDebugLog(DebugLogLevel.Warn, "DL", "Download started (failed to summarize)", details: ex.ToString());
+        }
+    }
+
+    private void OnDownloadFinished(DownloadFinishedMessage message)
+    {
+        var name = string.IsNullOrWhiteSpace(message.DownloadId.Name) ? "(unknown)" : message.DownloadId.Name;
+        AddDebugLog(DebugLogLevel.Info, "DL", $"Download finished: {name} ({message.DownloadId.ObjectKind})");
+    }
+
+    private void OnDownloadReady(DownloadReadyMessage message)
+    {
+        AddDebugLog(DebugLogLevel.Debug, "DL", $"Download ready: requestId={message.RequestId}");
     }
 
     private void DrawLegacyCheck()

@@ -196,6 +196,9 @@ public sealed class IpcCallerPenumbra : DisposableMediatorSubscriberBase, IIpcCa
                     catch (Exception ex)
                     {
                         logger.LogError(ex, "Failed to copy duplicate {dup}", duplicatedTexture);
+                        _spheneMediator.Publish(new DebugLogEventMessage(LogLevel.Error, "IPC",
+                            "Penumbra texture duplicate copy failed",
+                            Details: ex.ToString()));
                     }
                 }
             }
@@ -215,7 +218,14 @@ public sealed class IpcCallerPenumbra : DisposableMediatorSubscriberBase, IIpcCa
         _ = Task.Run(async () =>
         {
             try { await Task.Delay(delayMs, token).ConfigureAwait(false); }
-            catch (Exception ex) { Logger.LogDebug(ex, "Debounced redraw delay failed or cancelled"); return; }
+            catch (Exception ex)
+            {
+                Logger.LogDebug(ex, "Debounced redraw delay failed or cancelled");
+                _spheneMediator.Publish(new DebugLogEventMessage(LogLevel.Debug, "IPC",
+                    "Penumbra debounced redraw delay failed/cancelled",
+                    Details: ex.ToString()));
+                return;
+            }
             if (token.IsCancellationRequested) return;
 
             try
@@ -226,7 +236,13 @@ public sealed class IpcCallerPenumbra : DisposableMediatorSubscriberBase, IIpcCa
                     _penumbraRedraw.Invoke(gameObject!.ObjectIndex, setting: RedrawType.Redraw);
                 }).ConfigureAwait(false);
             }
-            catch (Exception ex) { Logger.LogDebug(ex, "Debounced redraw failed"); }
+            catch (Exception ex)
+            {
+                Logger.LogDebug(ex, "Debounced redraw failed");
+                _spheneMediator.Publish(new DebugLogEventMessage(LogLevel.Warning, "IPC",
+                    "Penumbra debounced redraw failed",
+                    Details: ex.ToString()));
+            }
         }, token);
     }
 

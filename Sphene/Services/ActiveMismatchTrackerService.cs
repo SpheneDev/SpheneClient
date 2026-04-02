@@ -26,7 +26,7 @@ public sealed class ActiveMismatchTrackerService : IDisposable
         _saveTimer = new Timer(_ => SaveIfDirty(), null, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
     }
 
-    public void RecordCheck(string uid, string gamePath, bool isMismatch, HashSet<string> sources, HashSet<string> objectKinds)
+    private long RecordCheckInternal(string uid, string gamePath, bool isMismatch, HashSet<string> sources, HashSet<string> objectKinds)
     {
         lock (_lock)
         {
@@ -58,7 +58,13 @@ public sealed class ActiveMismatchTrackerService : IDisposable
             }
 
             _dirty = true;
+            return _records[key].MismatchCount;
         }
+    }
+
+    public void RecordCheck(string uid, string gamePath, bool isMismatch, HashSet<string> sources, HashSet<string> objectKinds)
+    {
+        _ = RecordCheckInternal(uid, gamePath, isMismatch, sources, objectKinds);
     }
 
     public void RecordScan(string uid, bool hasMismatch)
@@ -73,7 +79,12 @@ public sealed class ActiveMismatchTrackerService : IDisposable
 
     public void RecordMismatch(string uid, string gamePath, HashSet<string> sources, HashSet<string> objectKinds)
     {
-        RecordCheck(uid, gamePath, true, sources, objectKinds);
+        _ = RecordCheckInternal(uid, gamePath, true, sources, objectKinds);
+    }
+
+    public long RecordMismatchAndGetMismatchCount(string uid, string gamePath, HashSet<string> sources, HashSet<string> objectKinds)
+    {
+        return RecordCheckInternal(uid, gamePath, true, sources, objectKinds);
     }
 
     public List<ActiveMismatchRecord> GetRecords()

@@ -392,7 +392,10 @@ public sealed class Plugin : IDalamudPlugin
             collection.AddScoped<WindowMediatorSubscriberBase, CreateSyncshellUI>();
             collection.AddScoped<WindowMediatorSubscriberBase, EventViewerUI>();
             collection.AddScoped<WindowMediatorSubscriberBase, CharaDataHubUi>();
-            collection.AddScoped<WindowMediatorSubscriberBase, StatusDebugUi>();
+            collection.AddScoped<StatusDebugUi>();
+            collection.AddScoped<WindowMediatorSubscriberBase>(s => s.GetRequiredService<StatusDebugUi>());
+            collection.AddScoped<StatusDebugLogPopupUi>();
+            collection.AddScoped<WindowMediatorSubscriberBase>(s => s.GetRequiredService<StatusDebugLogPopupUi>());
             collection.AddScoped<WindowMediatorSubscriberBase, NewOptionsUi>();
             collection.AddScoped<PenumbraSendModUi>();
             collection.AddScoped<WindowMediatorSubscriberBase>(s => s.GetRequiredService<PenumbraSendModUi>());

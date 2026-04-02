@@ -1138,6 +1138,10 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                 Logger.LogDebug("{tag} Apply pipeline failed: user={user} hash={hash} type={type} message={message}",
                     SyncProgressTag, Pair.UserData.AliasOrUID, charaData.DataHash?.Value ?? "null", ex.GetType().Name, ex.Message);
                 Logger.LogWarning(ex, "Error in DownloadAndApplyCharacterAsync for {obj}: {message}", this, ex.Message);
+                Mediator.Publish(new DebugLogEventMessage(LogLevel.Error, "APPLY",
+                    "Apply pipeline failed",
+                    Uid: Pair.UserData.UID,
+                    Details: ex.ToString()));
                 
                 // Publish failure message to notify other components
                 Mediator.Publish(new CharacterDataApplicationCompletedMessage(PlayerName ?? string.Empty, Pair.UserData.UID, applicationBase, false, charaData.DataHash?.Value));
@@ -1183,6 +1187,10 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
 
                 Mediator.Publish(new EventMessage(new Event(PlayerName, Pair.UserData, nameof(PairHandler), EventSeverity.Informational,
                     $"Starting download for {toDownloadReplacements.Count} files")));
+                Mediator.Publish(new DebugLogEventMessage(LogLevel.Information, "DL",
+                    $"Starting download batch (files={toDownloadReplacements.Count})",
+                    Uid: Pair.UserData.UID,
+                    Details: $"applicationBase={applicationBase}"));
                 var toDownloadFiles = await _downloadManager.InitiateDownloadList(_charaHandler!, toDownloadReplacements, downloadToken).ConfigureAwait(false);
                 Logger.LogDebug("{tag} Download batch: user={user} hash={hash} missingFiles={count}",
                     SyncProgressTag, Pair.UserData.AliasOrUID, charaData.DataHash?.Value ?? "null", toDownloadFiles.Count);
@@ -1191,6 +1199,10 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                 {
                     Logger.LogDebug("{tag} Download paused: user={user} hash={hash} reason=performance",
                         SyncProgressTag, Pair.UserData.AliasOrUID, charaData.DataHash?.Value ?? "null");
+                    Mediator.Publish(new DebugLogEventMessage(LogLevel.Warning, "DL",
+                        "Download paused (performance thresholds)",
+                        Uid: Pair.UserData.UID,
+                        Details: $"applicationBase={applicationBase}"));
                     _downloadManager.ClearDownload();
                     return;
                 }
@@ -1198,6 +1210,10 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                 _pairDownloadTask = Task.Run(async () => await _downloadManager.DownloadFiles(_charaHandler!, toDownloadReplacements, downloadToken).ConfigureAwait(false));
 
                 await _pairDownloadTask.ConfigureAwait(false);
+                Mediator.Publish(new DebugLogEventMessage(LogLevel.Information, "DL",
+                    "Download batch completed",
+                    Uid: Pair.UserData.UID,
+                    Details: $"applicationBase={applicationBase}"));
 
                 if (downloadToken.IsCancellationRequested)
                 {
@@ -1220,6 +1236,10 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                 Logger.LogWarning("[BASE-{appBase}] Missing {count} files after download attempts for player {name}, {kind}", applicationBase, toDownloadReplacements.Count, PlayerName, updatedData);
                 Logger.LogDebug("{tag} Download failed: user={user} hash={hash} missingFiles={count}",
                     SyncProgressTag, Pair.UserData.AliasOrUID, charaData.DataHash?.Value ?? "null", toDownloadReplacements.Count);
+                Mediator.Publish(new DebugLogEventMessage(LogLevel.Warning, "DL",
+                    $"Download failed (missing files={toDownloadReplacements.Count})",
+                    Uid: Pair.UserData.UID,
+                    Details: $"applicationBase={applicationBase}"));
                 Mediator.Publish(new CharacterDataApplicationCompletedMessage(PlayerName ?? string.Empty, Pair.UserData.UID, applicationBase, false, charaData.DataHash?.Value));
                 return;
             }

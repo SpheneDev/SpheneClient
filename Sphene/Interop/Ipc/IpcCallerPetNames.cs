@@ -88,6 +88,7 @@ public sealed class IpcCallerPetNames : IIpcCaller
         catch (Exception e)
         {
             _logger.LogWarning(e, "Could not obtain Pet Nicknames data");
+            _mediator.Publish(new DebugLogEventMessage(LogLevel.Warning, "IPC", "PetNames GetLocalNames failed", Details: e.ToString()));
         }
 
         return string.Empty;
@@ -120,6 +121,7 @@ public sealed class IpcCallerPetNames : IIpcCaller
         catch (Exception e)
         {
             _logger.LogWarning(e, "Could not apply Pet Nicknames data");
+            _mediator.Publish(new DebugLogEventMessage(LogLevel.Warning, "IPC", "PetNames SetPlayerData failed", Details: e.ToString()));
         }
     }
 
@@ -141,6 +143,7 @@ public sealed class IpcCallerPetNames : IIpcCaller
         catch (Exception e)
         {
             _logger.LogWarning(e, "Could not clear Pet Nicknames data");
+            _mediator.Publish(new DebugLogEventMessage(LogLevel.Warning, "IPC", "PetNames ClearPlayerData failed", Details: e.ToString()));
         }
     }
 

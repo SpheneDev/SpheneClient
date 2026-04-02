@@ -110,6 +110,7 @@ public sealed class IpcCallerHonorific : IIpcCaller
         catch (Exception e)
         {
             _logger.LogWarning(e, "Could not apply Honorific data");
+            _spheneMediator.Publish(new DebugLogEventMessage(LogLevel.Warning, "IPC", "Honorific apply failed", Details: e.ToString()));
         }
     }
 
@@ -155,6 +156,7 @@ public sealed class IpcCallerHonorific : IIpcCaller
         catch (Exception e)
         {
             _logger.LogWarning(e, "Failed to fetch Honorific title");
+            _spheneMediator.Publish(new DebugLogEventMessage(LogLevel.Warning, "IPC", "Honorific get title failed", Details: e.ToString()));
             return (false, string.Empty);
         }
     }

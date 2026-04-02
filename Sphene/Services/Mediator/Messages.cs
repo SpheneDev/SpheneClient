@@ -13,6 +13,7 @@ using Sphene.Services;
 using Sphene.WebAPI.Files.Models;
 using Sphene.API.Dto.Files;
 using System.Numerics;
+using Microsoft.Extensions.Logging;
 
 namespace Sphene.Services.Mediator;
 
@@ -71,6 +72,7 @@ public record PenumbraEndRedrawMessage(IntPtr Address) : MessageBase;
 public record HubReconnectingMessage(Exception? Exception) : SameThreadMessage;
 public record HubReconnectedMessage(string? Arg) : SameThreadMessage;
 public record HubClosedMessage(Exception? Exception) : SameThreadMessage;
+public record DebugLogEventMessage(LogLevel Level, string Category, string Message, string? Uid = null, string? Details = null) : SameThreadMessage;
 public record DownloadReadyMessage(Guid RequestId) : MessageBase;
 public record DownloadStartedMessage(GameObjectHandler DownloadId, Dictionary<string, FileDownloadStatus> DownloadStatus) : MessageBase;
 public record DownloadFinishedMessage(GameObjectHandler DownloadId) : MessageBase;
