@@ -42,9 +42,11 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
     private readonly DalamudUtilService _dalamudUtilService;
     private readonly Timer _ackStatusPollTimer;
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _pendingOfflineGrace = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, CancellationTokenSource> _pendingOfflineCharacterDataPurge = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, OnlineUserIdentDto> _pendingOnlineDtos = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, OnlineUserCharaDataDto> _pendingCharaDataDtos = new(StringComparer.Ordinal);
     private readonly TimeSpan _offlineGraceWindow = TimeSpan.FromSeconds(10);
+    private readonly TimeSpan _offlineCharacterDataPurgeWindow = TimeSpan.FromMinutes(1);
     private const int MaxPairCharacterCacheEntries = 200;
     private int _ackStatusPollRunning = 0;
 
@@ -111,6 +113,8 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
 
         _dalamudContextMenu.OnMenuOpened += DalamudContextMenuOnOnOpenGameObjectContextMenu;
         _ackStatusPollTimer = new Timer(OnAckStatusPollTimer, null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
+
+        ClearAllCachedPairCharacterDataOnStartup();
     }
 
     public List<Pair> DirectPairs => _directPairsInternal.Value;
@@ -360,6 +364,7 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
     public void ClearPairs()
     {
         CancelAllPendingOfflineGrace();
+        CancelAllPendingOfflineCharacterDataPurges();
         Logger.LogDebug("Clearing all Pairs");
         DisposePairs();
         _allClientPairs.Clear();
@@ -371,6 +376,7 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         {
             _inboundIndividualPairRequestUids.Clear();
             _unseenInboundIndividualPairRequestUids.Clear();
+            _ignoredInboundIndividualPairRequestUids.Clear();
         }
         finally
         {
@@ -395,6 +401,7 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
     {
         var key = GetOfflineGraceKey(user);
         CancelPendingOfflineGraceByKey(key);
+        CancelPendingOfflineCharacterDataPurgeByKey(key);
         var cts = new CancellationTokenSource();
         _pendingOfflineGrace[key] = cts;
 
@@ -415,6 +422,7 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
                     pair.MarkOffline();
                     RecreateLazy();
                 }
+                StartOfflineCharacterDataPurge(user);
             }
             catch (OperationCanceledException)
             {
@@ -450,6 +458,7 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
 
         var key = GetOfflineGraceKey(dto.User);
         var hadPendingOfflineGrace = CancelPendingOfflineGraceByKey(key);
+        CancelPendingOfflineCharacterDataPurgeByKey(key);
 
         var pair = _allClientPairs[dto.User];
         var wasOnline = pair.IsOnline;
@@ -675,6 +684,10 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
 
     public void RemoveUserPair(UserDto dto)
     {
+        var key = GetOfflineGraceKey(dto.User);
+        CancelPendingOfflineGraceByKey(key);
+        CancelPendingOfflineCharacterDataPurgeByKey(key);
+
         if (_allClientPairs.TryGetValue(dto.User, out var pair))
         {
             pair.UserPair.IndividualPairStatus = API.Data.Enum.IndividualPairStatus.None;
@@ -973,6 +986,7 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         base.Dispose(disposing);
 
         CancelAllPendingOfflineGrace();
+        CancelAllPendingOfflineCharacterDataPurges();
         _dalamudContextMenu.OnMenuOpened -= DalamudContextMenuOnOnOpenGameObjectContextMenu;
         _ackStatusPollTimer.Dispose();
 
@@ -1024,6 +1038,84 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         }
 
         return false;
+    }
+
+    private void CancelPendingOfflineCharacterDataPurgeByKey(string key)
+    {
+        if (_pendingOfflineCharacterDataPurge.TryRemove(key, out var cts))
+        {
+            cts.Cancel();
+            cts.Dispose();
+        }
+    }
+
+    private void CancelAllPendingOfflineCharacterDataPurges()
+    {
+        foreach (var pending in _pendingOfflineCharacterDataPurge.ToArray())
+        {
+            CancelPendingOfflineCharacterDataPurgeByKey(pending.Key);
+        }
+    }
+
+    private void StartOfflineCharacterDataPurge(UserData user)
+    {
+        var key = GetOfflineGraceKey(user);
+        CancelPendingOfflineCharacterDataPurgeByKey(key);
+
+        var cts = new CancellationTokenSource();
+        _pendingOfflineCharacterDataPurge[key] = cts;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(_offlineCharacterDataPurgeWindow, cts.Token).ConfigureAwait(false);
+
+                if (!_pendingOfflineCharacterDataPurge.TryGetValue(key, out var activeCts) || !ReferenceEquals(activeCts, cts))
+                {
+                    return;
+                }
+
+                if (_allClientPairs.TryGetValue(user, out var pair) && !pair.IsOnline)
+                {
+                    RemoveCachedPairCharacterData(user);
+                    pair.MarkOffline();
+                    RecreateLazy();
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                Logger.LogDebug("{tag} Offline character data purge cancelled for userKey={key}", SyncProgressTag, key);
+            }
+            finally
+            {
+                if (_pendingOfflineCharacterDataPurge.TryGetValue(key, out var activeCts) && ReferenceEquals(activeCts, cts))
+                {
+                    _pendingOfflineCharacterDataPurge.TryRemove(key, out _);
+                }
+
+                cts.Dispose();
+            }
+        });
+    }
+
+    private void ClearAllCachedPairCharacterDataOnStartup()
+    {
+        try
+        {
+            if (_pairCharacterCacheConfigService.Current.PairCharacterDataCache.Count == 0)
+            {
+                return;
+            }
+
+            _pairCharacterCacheConfigService.Current.PairCharacterDataCache.Clear();
+            _pairCharacterCacheConfigService.Save();
+            Logger.LogInformation("Cleared cached pair character data on startup");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Failed to clear cached pair character data on startup");
+        }
     }
 
     private void CancelAllPendingOfflineGrace()
