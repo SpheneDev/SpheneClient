@@ -22,6 +22,18 @@ namespace Sphene.UI.Panels;
 public class StatusDebugUi : WindowMediatorSubscriberBase
 {
     private new readonly ILogger<StatusDebugUi> _logger;
+
+    private enum StatusDebugPage
+    {
+        Summary = 0,
+        Pairs = 1,
+        CharacterData = 2,
+        Acknowledgments = 3,
+        Diagnostics = 4,
+        Logs = 5,
+    }
+
+    private StatusDebugPage _page = StatusDebugPage.Summary;
     
     private readonly PairManager _pairManager;
     private readonly ApiController _apiController;
@@ -38,9 +50,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
     private bool _showCircuitBreaker = true;
     private bool _showConnections = true;
     private int _simulatedDisconnectSeconds = 3;
-    private string? _selectedCharacterDebugUid;
-    private string? _selectedCharacterStatsUid;
-    private string? _selectedCollectionOverviewUid;
+    private string? _selectedCharacterUid;
     private readonly Dictionary<string, CharacterStatsSnapshot> _characterStats = new(StringComparer.Ordinal);
     private readonly Dictionary<string, IReadOnlyDictionary<string, string>> _activePenumbraPathsByUid = new(StringComparer.Ordinal);
     private readonly Dictionary<string, IReadOnlyDictionary<string, string>> _activeMinionPathsByUid = new(StringComparer.Ordinal);
@@ -162,86 +172,506 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
     
     protected override void DrawInternal()
     {
-        // Tab bar for different sections
-        using var tabBar = ImRaii.TabBar("StatusDebugTabs");
-        if (!tabBar) return;
+        var directPairsCount = _pairManager.DirectPairs.Count;
+        var inboundRequests = _pairManager.GetInboundIndividualPairRequestsSnapshot();
+        var outboundRequests = _pairManager.GetOutboundIndividualPairRequestsSnapshot();
+        var totalRequestsCount = inboundRequests.Count + outboundRequests.Count;
+        var unseenInboundRequestCount = _pairManager.UnseenInboundIndividualPairRequestCount;
+        var pendingAckCount = _sessionAcknowledgmentManager?.GetPendingAcknowledgments().Count ?? 0;
 
-        // Overview Tab
-        using (var overviewTab = ImRaii.TabItem("Overview"))
+        var sidebarWidth = 210f * ImGuiHelpers.GlobalScale;
+        using (ImRaii.Child("##StatusDebugSidebar", new Vector2(sidebarWidth, 0), true))
         {
-            if (overviewTab)
+            DrawNavEntry(StatusDebugPage.Summary, FontAwesomeIcon.ChartLine, "Summary");
+            DrawNavEntry(StatusDebugPage.Pairs, FontAwesomeIcon.UserFriends, "Pairs", directPairsCount, totalRequestsCount);
+            DrawNavEntry(StatusDebugPage.CharacterData, FontAwesomeIcon.UserCog, "Character Data");
+            DrawNavEntry(StatusDebugPage.Acknowledgments, FontAwesomeIcon.ClipboardCheck, "Acknowledgments", pendingAckCount);
+            DrawNavEntry(StatusDebugPage.Diagnostics, FontAwesomeIcon.Stethoscope, "Diagnostics");
+            DrawNavEntry(StatusDebugPage.Logs, FontAwesomeIcon.Stream, "Logs");
+        }
+
+        ImGui.SameLine();
+        using (ImRaii.Child("##StatusDebugContent", new Vector2(0, 0), false))
+        {
+            switch (_page)
             {
-                DrawStatusSection();
-                ImGui.Separator();
-                DrawHealthMonitoringSection();
-                ImGui.Separator();
-                DrawControlButtons();
+                case StatusDebugPage.Summary:
+                    DrawSummaryPage(unseenInboundRequestCount);
+                    break;
+                case StatusDebugPage.Pairs:
+                    DrawPairsPage(inboundRequests, outboundRequests);
+                    break;
+                case StatusDebugPage.CharacterData:
+                    DrawCharacterDataPage();
+                    break;
+                case StatusDebugPage.Acknowledgments:
+                    DrawAcknowledgmentPage();
+                    break;
+                case StatusDebugPage.Diagnostics:
+                    DrawDiagnosticsPage();
+                    break;
+                case StatusDebugPage.Logs:
+                    DrawCommunicationLog();
+                    break;
             }
         }
 
-        // Acknowledgment System Tab
-        using (var ackTab = ImRaii.TabItem("Acknowledgments"))
-        {
-            if (ackTab)
-            {
-                DrawAcknowledgmentTable();
-            }
-        }
-
-        // Communication Log Tab
-        using (var logTab = ImRaii.TabItem("Communication Log"))
-        {
-            if (logTab)
-            {
-                DrawCommunicationLog();
-            }
-        }
-
-        using (var characterLogTab = ImRaii.TabItem("Character Debug Logs"))
-        {
-            if (characterLogTab)
-            {
-                DrawCharacterDebugLogs();
-            }
-        }
-
-        using (var characterStatsTab = ImRaii.TabItem("Character Statistics"))
-        {
-            if (characterStatsTab)
-            {
-                DrawCharacterStatistics();
-            }
-        }
-
-        using (var collectionOverviewTab = ImRaii.TabItem("Penumbra Collections"))
-        {
-            if (collectionOverviewTab)
-            {
-                DrawPenumbraCollectionOverview();
-            }
-        }
-
-        using (var mismatchTrackerTab = ImRaii.TabItem("Active Mismatch Tracker"))
-        {
-            if (mismatchTrackerTab)
-            {
-                DrawActiveMismatchTracker();
-            }
-        }
-
-        using (var legacyCheckTab = ImRaii.TabItem("Legacy Check"))
-        {
-            if (legacyCheckTab)
-            {
-                DrawLegacyCheck();
-            }
-        }
-        
-        // Draw popup outside of tabs so it persists when switching tabs
         if (_showLogPopup)
         {
             DrawLogPopup();
         }
+    }
+
+    private void DrawNavEntry(StatusDebugPage page, FontAwesomeIcon icon, string label, int badgeA = 0, int badgeB = 0)
+    {
+        var scale = ImGuiHelpers.GlobalScale;
+        var rowHeight = ImGui.GetFrameHeight() + 6f * scale;
+        var rowWidth = ImGui.GetContentRegionAvail().X;
+        var cursor = ImGui.GetCursorScreenPos();
+        var drawList = ImGui.GetWindowDrawList();
+        var selected = _page == page;
+
+        ImGui.PushID((int)page);
+        ImGui.InvisibleButton("##nav", new Vector2(rowWidth, rowHeight));
+        var hovered = ImGui.IsItemHovered();
+        if (ImGui.IsItemClicked())
+        {
+            _page = page;
+        }
+        var cursorAfter = ImGui.GetCursorPos();
+        ImGui.PopID();
+
+        var background = selected
+            ? ImGui.GetColorU32(ImGuiCol.HeaderActive)
+            : hovered
+                ? ImGui.GetColorU32(ImGuiCol.HeaderHovered)
+                : 0u;
+        if (background != 0)
+        {
+            drawList.AddRectFilled(cursor, cursor + new Vector2(rowWidth, rowHeight), background, 6f * scale);
+        }
+
+        var paddingX = 10f * scale;
+        var iconY = cursor.Y + (rowHeight - ImGui.GetFontSize()) * 0.5f;
+        ImGui.SetCursorScreenPos(new Vector2(cursor.X + paddingX, iconY));
+        using (ImRaii.PushFont(UiBuilder.IconFont))
+        {
+            ImGui.TextUnformatted(icon.ToIconString());
+        }
+
+        var textX = cursor.X + paddingX + 24f * scale;
+        ImGui.SetCursorScreenPos(new Vector2(textX, iconY));
+        ImGui.TextUnformatted(label);
+
+        var badgeCursorX = cursor.X + rowWidth - paddingX;
+        if (badgeB > 0)
+        {
+            badgeCursorX = DrawSidebarBadge(drawList, badgeCursorX, cursor.Y, rowHeight, badgeB, ImGuiColors.DalamudYellow, scale);
+        }
+        if (badgeA > 0)
+        {
+            _ = DrawSidebarBadge(drawList, badgeCursorX, cursor.Y, rowHeight, badgeA, ImGuiColors.HealerGreen, scale);
+        }
+
+        ImGui.SetCursorPos(cursorAfter);
+    }
+
+    private static float DrawSidebarBadge(ImDrawListPtr drawList, float rightEdgeX, float rowY, float rowHeight, int count, Vector4 color, float scale)
+    {
+        var text = count > 99 ? "99+" : count.ToString();
+        Vector2 size;
+        using (ImRaii.PushFont(UiBuilder.DefaultFont))
+        {
+            size = ImGui.CalcTextSize(text);
+        }
+
+        var padX = 5f * scale;
+        var padY = 2f * scale;
+        var badgeH = size.Y + padY * 2f;
+        var badgeW = MathF.Max(badgeH, size.X + padX * 2f);
+        var rounding = badgeH * 0.5f;
+        var marginX = 6f * scale;
+        var min = new Vector2(rightEdgeX - badgeW, rowY + (rowHeight - badgeH) * 0.5f);
+        var max = new Vector2(min.X + badgeW, min.Y + badgeH);
+
+        drawList.AddRectFilled(min, max, ImGui.ColorConvertFloat4ToU32(color), rounding);
+        var textPos = new Vector2(min.X + (badgeW - size.X) / 2f, min.Y + (badgeH - size.Y) / 2f);
+        using (ImRaii.PushFont(UiBuilder.DefaultFont))
+        {
+            drawList.AddText(textPos, ImGui.GetColorU32(ImGuiCol.Text), text);
+        }
+
+        return min.X - marginX;
+    }
+
+    private void DrawSummaryPage(int unseenInboundRequests)
+    {
+        if (ImGui.BeginTable("##SummaryTable", 2, ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerV))
+        {
+            ImGui.TableSetupColumn("Key", ImGuiTableColumnFlags.WidthFixed, 190f * ImGuiHelpers.GlobalScale);
+            ImGui.TableSetupColumn("Value", ImGuiTableColumnFlags.WidthStretch);
+
+            DrawSummaryRow("Connection", () =>
+            {
+                if (_apiController.IsConnected)
+                {
+                    DrawStatusIcon(FontAwesomeIcon.CheckCircle, ImGuiColors.HealerGreen);
+                    ImGui.SameLine();
+                    UiSharedService.ColorText("Connected", ImGuiColors.HealerGreen);
+                }
+                else
+                {
+                    DrawStatusIcon(FontAwesomeIcon.TimesCircle, ImGuiColors.DalamudRed);
+                    ImGui.SameLine();
+                    UiSharedService.ColorText("Disconnected", ImGuiColors.DalamudRed);
+                }
+            });
+
+            DrawSummaryRow("Server", () => ImGui.TextUnformatted(_apiController.ServerInfo.ShardName ?? "Not connected"));
+            DrawSummaryRow("User UID", () => ImGui.TextUnformatted(_apiController.UID ?? "Not logged in"));
+
+            var healthStatus = _healthMonitor.GetHealthStatus();
+            DrawSummaryRow("Health", () =>
+            {
+                if (healthStatus.IsHealthy)
+                {
+                    DrawStatusIcon(FontAwesomeIcon.Heartbeat, ImGuiColors.HealerGreen);
+                    ImGui.SameLine();
+                    UiSharedService.ColorText("Healthy", ImGuiColors.HealerGreen);
+                }
+                else
+                {
+                    DrawStatusIcon(FontAwesomeIcon.Heartbeat, ImGuiColors.DalamudRed);
+                    ImGui.SameLine();
+                    UiSharedService.ColorText("Unhealthy", ImGuiColors.DalamudRed);
+                }
+                ImGui.SameLine();
+                ImGui.TextUnformatted($"({healthStatus.ConsecutiveFailures} failures)");
+            });
+
+            var circuitStatus = _circuitBreaker.GetStatus();
+            DrawSummaryRow("Circuit Breaker", () =>
+            {
+                var stateColor = circuitStatus.State switch
+                {
+                    CircuitBreakerState.Closed => ImGuiColors.HealerGreen,
+                    CircuitBreakerState.HalfOpen => ImGuiColors.DalamudYellow,
+                    CircuitBreakerState.Open => ImGuiColors.DalamudRed,
+                    _ => ImGuiColors.DalamudWhite
+                };
+                UiSharedService.ColorText(circuitStatus.State.ToString(), stateColor);
+                ImGui.SameLine();
+                ImGui.TextUnformatted($"(failures={circuitStatus.FailureCount})");
+            });
+
+            DrawSummaryRow("Pairs", () => ImGui.TextUnformatted(_pairManager.DirectPairs.Count.ToString()));
+            DrawSummaryRow("Pair Requests", () =>
+            {
+                var incoming = _pairManager.GetInboundIndividualPairRequestsSnapshot().Count;
+                var outgoing = _pairManager.GetOutboundIndividualPairRequestsSnapshot().Count;
+                ImGui.TextUnformatted($"incoming={incoming}, outgoing={outgoing}, new={unseenInboundRequests}");
+            });
+
+            ImGui.EndTable();
+        }
+
+        ImGui.Spacing();
+
+        if (ImGui.CollapsingHeader("Actions", ImGuiTreeNodeFlags.DefaultOpen))
+        {
+            DrawControlButtons();
+        }
+
+        ImGui.Spacing();
+
+        if (ImGui.CollapsingHeader("Health Details"))
+        {
+            DrawHealthMonitoringSection();
+        }
+    }
+
+    private static void DrawSummaryRow(string key, Action drawValue)
+    {
+        ImGui.TableNextRow();
+        ImGui.TableSetColumnIndex(0);
+        ImGui.TextUnformatted(key);
+        ImGui.TableSetColumnIndex(1);
+        drawValue();
+    }
+
+    private static void DrawStatusIcon(FontAwesomeIcon icon, Vector4 color)
+    {
+        using (ImRaii.PushFont(UiBuilder.IconFont))
+        using (ImRaii.PushColor(ImGuiCol.Text, color))
+        {
+            ImGui.TextUnformatted(icon.ToIconString());
+        }
+    }
+
+    private static string GetPairKey(Pair pair)
+    {
+        return !string.IsNullOrWhiteSpace(pair.UserData.UID) ? pair.UserData.UID : pair.UserData.AliasOrUID;
+    }
+
+    private List<Pair> BuildCharacterDataPairsSnapshot()
+    {
+        var pairsToCheck = new HashSet<Pair>(_pairManager.DirectPairs);
+        foreach (var groupPairs in _pairManager.GroupPairs.Values)
+        {
+            foreach (var pair in groupPairs)
+            {
+                pairsToCheck.Add(pair);
+            }
+        }
+
+        return pairsToCheck
+            .OrderBy(p => (p.IsVisible || p.IsMutuallyVisible) ? 0 : p.IsOnline ? 1 : 2)
+            .ThenBy(p => p.UserData.AliasOrUID, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private Pair? EnsureSelectedCharacterPair(List<Pair> pairs)
+    {
+        if (pairs.Count == 0)
+        {
+            _selectedCharacterUid = null;
+            return null;
+        }
+
+        if (string.IsNullOrWhiteSpace(_selectedCharacterUid) || pairs.All(p => !string.Equals(GetPairKey(p), _selectedCharacterUid, StringComparison.Ordinal)))
+        {
+            _selectedCharacterUid = GetPairKey(pairs[0]);
+        }
+
+        return pairs.FirstOrDefault(p => string.Equals(GetPairKey(p), _selectedCharacterUid, StringComparison.Ordinal));
+    }
+
+    private static Vector4 GetPairListColor(Pair pair)
+    {
+        if (pair.IsVisible || pair.IsMutuallyVisible)
+        {
+            return ImGuiColors.ParsedGreen;
+        }
+
+        if (pair.IsOnline)
+        {
+            return ImGuiColors.HealerGreen;
+        }
+
+        return ImGuiColors.DalamudGrey;
+    }
+
+    private void DrawCharacterPairSelectionList(List<Pair> pairs)
+    {
+        var rowHeight = ImGui.GetFrameHeight();
+        foreach (var pair in pairs)
+        {
+            var key = GetPairKey(pair);
+            var selected = string.Equals(key, _selectedCharacterUid, StringComparison.Ordinal);
+            var color = GetPairListColor(pair);
+
+            using (ImRaii.PushColor(ImGuiCol.Text, color))
+            {
+                using (ImRaii.PushFont(UiBuilder.IconFont))
+                {
+                    var icon = (pair.IsVisible || pair.IsMutuallyVisible) ? FontAwesomeIcon.Eye : FontAwesomeIcon.Circle;
+                    ImGui.TextUnformatted(icon.ToIconString());
+                }
+            }
+
+            ImGui.SameLine();
+            ImGui.SetCursorPosY(ImGui.GetCursorPosY() - 1f * ImGuiHelpers.GlobalScale);
+            if (ImGui.Selectable($"{pair.UserData.AliasOrUID}##pair_select_{key}", selected, ImGuiSelectableFlags.None, new Vector2(0, rowHeight)))
+            {
+                _selectedCharacterUid = key;
+            }
+        }
+    }
+
+    private void DrawPairsPage(IReadOnlyList<Pair> inboundRequests, IReadOnlyList<Pair> outboundRequests)
+    {
+        if (ImGui.CollapsingHeader("Pair Requests", ImGuiTreeNodeFlags.DefaultOpen))
+        {
+            ImGui.TextUnformatted($"Incoming: {inboundRequests.Count}");
+            ImGui.SameLine();
+            ImGui.TextUnformatted($"Outgoing: {outboundRequests.Count}");
+            ImGui.SameLine();
+            ImGui.TextUnformatted($"New: {_pairManager.UnseenInboundIndividualPairRequestCount}");
+        }
+
+        if (ImGui.CollapsingHeader("Pairs", ImGuiTreeNodeFlags.DefaultOpen))
+        {
+            DrawPairedUsersTable();
+        }
+    }
+
+    private void DrawCharacterDataPage()
+    {
+        var pairs = BuildCharacterDataPairsSnapshot();
+        var selectedPair = EnsureSelectedCharacterPair(pairs);
+        if (pairs.Count == 0)
+        {
+            ImGui.TextUnformatted("No paired users");
+            return;
+        }
+
+        if (selectedPair == null)
+        {
+            ImGui.TextUnformatted("No character selected");
+            return;
+        }
+
+        var scale = ImGuiHelpers.GlobalScale;
+        var headerHeight = 210f * scale;
+        if (ImGui.BeginTable("##CharacterDataHeader", 2, ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.BordersInnerV))
+        {
+            ImGui.TableSetupColumn("Pairs", ImGuiTableColumnFlags.WidthFixed, 340f * scale);
+            ImGui.TableSetupColumn("Summary", ImGuiTableColumnFlags.WidthStretch);
+            ImGui.TableNextRow();
+
+            ImGui.TableSetColumnIndex(0);
+            using (ImRaii.Child("##CharacterDataPairList", new Vector2(0, headerHeight), true))
+            {
+                ImGui.AlignTextToFramePadding();
+                ImGui.TextUnformatted("Pairs");
+                ImGui.SameLine();
+                UiSharedService.ColorText($"({pairs.Count})", ImGuiColors.DalamudGrey);
+                ImGui.Separator();
+
+                using (ImRaii.Child("##CharacterDataPairListScroll", new Vector2(0, 0), false))
+                {
+                    DrawCharacterPairSelectionList(pairs);
+                }
+            }
+
+            ImGui.TableSetColumnIndex(1);
+            using (ImRaii.Child("##CharacterDataPairSummary", new Vector2(0, headerHeight), true))
+            {
+                DrawCharacterHeaderSummary(selectedPair);
+            }
+
+            ImGui.EndTable();
+        }
+
+        ImGui.Separator();
+
+        using var tabBar = ImRaii.TabBar("##CharacterDataTabs");
+        if (!tabBar)
+        {
+            return;
+        }
+
+        using (var t = ImRaii.TabItem("Debug Logs"))
+        {
+            if (t) DrawCharacterDebugLogs(selectedPair);
+        }
+
+        using (var t = ImRaii.TabItem("Statistics"))
+        {
+            if (t) DrawCharacterStatistics(selectedPair);
+        }
+
+        using (var t = ImRaii.TabItem("Penumbra Collections"))
+        {
+            if (t) DrawPenumbraCollectionOverview(selectedPair);
+        }
+    }
+
+    private void DrawAcknowledgmentPage()
+    {
+        DrawAcknowledgmentTable();
+    }
+
+    private void DrawDiagnosticsPage()
+    {
+        using var tabBar = ImRaii.TabBar("##DiagnosticsTabs");
+        if (!tabBar)
+        {
+            return;
+        }
+
+        using (var t = ImRaii.TabItem("Mismatch Tracker"))
+        {
+            if (t) DrawActiveMismatchTracker();
+        }
+
+        using (var t = ImRaii.TabItem("Legacy Check"))
+        {
+            if (t) DrawLegacyCheck();
+        }
+    }
+
+    private void DrawPairedUsersTable()
+    {
+        var pairs = _pairManager.DirectPairs.ToList();
+        if (pairs.Count == 0)
+        {
+            ImGui.TextUnformatted("No paired users");
+            return;
+        }
+
+        if (!ImGui.BeginTable("PairedUsersTable", 6, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable))
+        {
+            return;
+        }
+
+        ImGui.TableSetupColumn("User", ImGuiTableColumnFlags.WidthFixed, 180);
+        ImGui.TableSetupColumn("Status", ImGuiTableColumnFlags.WidthFixed, 110);
+        ImGui.TableSetupColumn("Online", ImGuiTableColumnFlags.WidthFixed, 70);
+        ImGui.TableSetupColumn("My AckYou", ImGuiTableColumnFlags.WidthFixed, 90);
+        ImGui.TableSetupColumn("Partner AckYou", ImGuiTableColumnFlags.WidthFixed, 110);
+        ImGui.TableSetupColumn("Actions", ImGuiTableColumnFlags.WidthStretch);
+        ImGui.TableHeadersRow();
+
+        foreach (var pair in pairs)
+        {
+            ImGui.TableNextRow();
+
+            ImGui.TableSetColumnIndex(0);
+            ImGui.TextUnformatted(pair.UserData.AliasOrUID);
+
+            ImGui.TableSetColumnIndex(1);
+            var statusColor = pair.IndividualPairStatus switch
+            {
+                API.Data.Enum.IndividualPairStatus.Bidirectional => ImGuiColors.HealerGreen,
+                API.Data.Enum.IndividualPairStatus.OneSided => ImGuiColors.DalamudYellow,
+                _ => ImGuiColors.DalamudRed
+            };
+            UiSharedService.ColorText(pair.IndividualPairStatus.ToString(), statusColor);
+
+            ImGui.TableSetColumnIndex(2);
+            if (pair.IsOnline)
+            {
+                DrawStatusIcon(FontAwesomeIcon.Circle, ImGuiColors.HealerGreen);
+            }
+            else
+            {
+                DrawStatusIcon(FontAwesomeIcon.Circle, ImGuiColors.DalamudRed);
+            }
+
+            ImGui.TableSetColumnIndex(3);
+            DrawStatusIcon(pair.UserPair.OwnPermissions.IsAckYou() ? FontAwesomeIcon.Check : FontAwesomeIcon.Times,
+                pair.UserPair.OwnPermissions.IsAckYou() ? ImGuiColors.HealerGreen : ImGuiColors.DalamudRed);
+
+            ImGui.TableSetColumnIndex(4);
+            DrawStatusIcon(pair.UserPair.OtherPermissions.IsAckYou() ? FontAwesomeIcon.Check : FontAwesomeIcon.Times,
+                pair.UserPair.OtherPermissions.IsAckYou() ? ImGuiColors.HealerGreen : ImGuiColors.DalamudRed);
+
+            ImGui.TableSetColumnIndex(5);
+            var currentAckYou = pair.UserPair.OwnPermissions.IsAckYou();
+            var ackYouButtonText = currentAckYou ? "Disable AckYou" : "Enable AckYou";
+            if (ImGui.Button($"{ackYouButtonText}##{pair.UserData.UID}"))
+            {
+                var newAckYouValue = !currentAckYou;
+                LogCommunication($"[DEBUG] Setting my AckYou to {newAckYouValue} for {pair.UserData.AliasOrUID}");
+
+                var permissions = pair.UserPair.OwnPermissions;
+                permissions.SetAckYou(newAckYouValue);
+                _ = _apiController.UserSetPairPermissions(new(pair.UserData, permissions));
+            }
+        }
+
+        ImGui.EndTable();
     }
     
     private void DrawAcknowledgmentTable()
@@ -429,94 +859,6 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                 ImGui.Columns(1);
             }
         }
-        
-        // Paired Users table
-        if (ImGui.CollapsingHeader("Paired Users"))
-        {
-            var pairs = _pairManager.DirectPairs.ToList();
-            if (pairs.Count == 0)
-            {
-                ImGui.Text("No paired users");
-            }
-            else
-            {
-                if (ImGui.BeginTable("PairedUsersTable", 5, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable))
-                {
-                    ImGui.TableSetupColumn("User", ImGuiTableColumnFlags.WidthFixed, 150);
-                    ImGui.TableSetupColumn("Status", ImGuiTableColumnFlags.WidthFixed, 100);
-                    ImGui.TableSetupColumn("My AckYou", ImGuiTableColumnFlags.WidthFixed, 80);
-                    ImGui.TableSetupColumn("Partner AckYou", ImGuiTableColumnFlags.WidthFixed, 100);
-                    ImGui.TableSetupColumn("Actions", ImGuiTableColumnFlags.WidthStretch);
-                    ImGui.TableHeadersRow();
-                    
-                    foreach (var pair in pairs)
-                    {
-                        ImGui.TableNextRow();
-                        
-                        // User column
-                        ImGui.TableSetColumnIndex(0);
-                        ImGui.Text(pair.UserData.AliasOrUID);
-                        
-                        // Status column
-                        ImGui.TableSetColumnIndex(1);
-                        var statusColor = pair.IndividualPairStatus switch
-                        {
-                            API.Data.Enum.IndividualPairStatus.Bidirectional => ImGuiColors.HealerGreen,
-                            API.Data.Enum.IndividualPairStatus.OneSided => ImGuiColors.DalamudYellow,
-                            _ => ImGuiColors.DalamudRed
-                        };
-                        UiSharedService.ColorText(pair.IndividualPairStatus.ToString(), statusColor);
-                        
-                        // My AckYou column
-                        ImGui.TableSetColumnIndex(2);
-                        var myAckYouStatus = pair.UserPair.OwnPermissions.IsAckYou() ? "✓" : "✗";
-                        var myAckYouColor = pair.UserPair.OwnPermissions.IsAckYou() ? ImGuiColors.HealerGreen : ImGuiColors.DalamudRed;
-                        UiSharedService.ColorText(myAckYouStatus, myAckYouColor);
-                        
-                        // Partner AckYou column
-                        ImGui.TableSetColumnIndex(3);
-                        var partnerAckYouStatus = pair.UserPair.OtherPermissions.IsAckYou() ? "✓" : "✗";
-                        var partnerAckYouColor = pair.UserPair.OtherPermissions.IsAckYou() ? ImGuiColors.HealerGreen : ImGuiColors.DalamudRed;
-                        UiSharedService.ColorText(partnerAckYouStatus, partnerAckYouColor);
-                        
-                        // Actions column
-                        ImGui.TableSetColumnIndex(4);
-                        var currentAckYou = pair.UserPair.OwnPermissions.IsAckYou();
-                        var ackYouButtonText = currentAckYou ? "Disable" : "Enable";
-                        if (ImGui.Button($"{ackYouButtonText}##{pair.UserData.UID}"))
-                        {
-                            var newAckYouValue = !currentAckYou;
-                            LogCommunication($"[DEBUG] Setting my AckYou to {newAckYouValue} for {pair.UserData.AliasOrUID}");
-                            
-                            var permissions = pair.UserPair.OwnPermissions;
-                            permissions.SetAckYou(newAckYouValue);
-                            _ = _apiController.UserSetPairPermissions(new(pair.UserData, permissions));
-                        }
-                    }
-                    
-                    ImGui.EndTable();
-                }
-            }
-        }
-    }
-    
-    private void DrawStatusSection()
-    {
-        ImGui.Text("Connection Status:");
-        ImGui.SameLine();
-        
-        var isConnected = _apiController.IsConnected;
-        if (isConnected)
-        {
-            UiSharedService.ColorText("Connected", ImGuiColors.HealerGreen);
-        }
-        else
-        {
-            UiSharedService.ColorText("Disconnected", ImGuiColors.DalamudRed);
-        }
-        
-        ImGui.Text($"Server: {_apiController.ServerInfo.ShardName ?? "Not connected"}");
-        ImGui.Text($"User ID: {_apiController.UID ?? "Not logged in"}");
     }
     
     private void DrawControlButtons()
@@ -619,96 +961,22 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         }
     }
 
-    private void DrawCharacterDebugLogs()
+    private static void DrawCharacterDebugLogs(Pair selectedPair)
     {
-        ImGui.Text("Character Debug Logs");
-
-        var pairs = _pairManager.DirectPairs.ToList();
-        if (pairs.Count == 0)
-        {
-            ImGui.Text("No paired users");
-            return;
-        }
-
-        if (string.IsNullOrEmpty(_selectedCharacterDebugUid) || pairs.All(p => !string.Equals(p.UserData.UID, _selectedCharacterDebugUid, StringComparison.Ordinal)))
-        {
-            _selectedCharacterDebugUid = pairs[0].UserData.UID;
-        }
-
-        if (ImGui.BeginTable("CharacterDebugLogTable", 4, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable))
-        {
-            ImGui.TableSetupColumn("User", ImGuiTableColumnFlags.WidthFixed, 180);
-            ImGui.TableSetupColumn("UID", ImGuiTableColumnFlags.WidthFixed, 180);
-            ImGui.TableSetupColumn("Visibility", ImGuiTableColumnFlags.WidthFixed, 120);
-            ImGui.TableSetupColumn("Actions", ImGuiTableColumnFlags.WidthStretch);
-            ImGui.TableHeadersRow();
-
-            foreach (var pair in pairs)
-            {
-                var uid = pair.UserData.UID;
-                ImGui.TableNextRow();
-                ImGui.TableSetColumnIndex(0);
-                ImGui.Text(pair.UserData.AliasOrUID);
-
-                ImGui.TableSetColumnIndex(1);
-                ImGui.Text(uid);
-
-                ImGui.TableSetColumnIndex(2);
-                var visibilityText = pair.IsVisible ? "Visible" : "Hidden";
-                var visibilityColor = pair.IsVisible ? ImGuiColors.HealerGreen : ImGuiColors.DalamudRed;
-                UiSharedService.ColorText(visibilityText, visibilityColor);
-
-                ImGui.TableSetColumnIndex(3);
-                var isSelected = string.Equals(uid, _selectedCharacterDebugUid, StringComparison.Ordinal);
-                var selectText = isSelected ? "Selected" : "Select";
-                if (ImGui.Button($"{selectText}##select_{uid}"))
-                {
-                    _selectedCharacterDebugUid = uid;
-                }
-
-                ImGui.SameLine();
-                if (ImGui.Button($"Copy##copy_{uid}"))
-                {
-                    ImGui.SetClipboardText(GetApplyDebugText(pair));
-                }
-
-                ImGui.SameLine();
-                if (ImGui.Button($"Clear##clear_{uid}"))
-                {
-                    pair.ClearApplyDebug();
-                }
-            }
-
-            ImGui.EndTable();
-        }
-
-        ImGui.Separator();
-
-        Pair? selectedPair = null;
-        foreach (var pair in pairs)
-        {
-            if (string.Equals(pair.UserData.UID, _selectedCharacterDebugUid, StringComparison.Ordinal))
-            {
-                selectedPair = pair;
-                break;
-            }
-        }
-
-        if (selectedPair == null)
-        {
-            ImGui.Text("No character selected");
-            return;
-        }
-
-        ImGui.Text($"Selected: {selectedPair.UserData.AliasOrUID} ({selectedPair.UserData.UID})");
-
         var logText = GetApplyDebugText(selectedPair);
+        if (ImGui.Button($"Copy##copy_apply_debug_{GetPairKey(selectedPair)}"))
+        {
+            ImGui.SetClipboardText(logText);
+        }
+        ImGui.SameLine();
+        if (ImGui.Button($"Clear##clear_apply_debug_{GetPairKey(selectedPair)}"))
+        {
+            selectedPair.ClearApplyDebug();
+        }
+
         var availableSize = ImGui.GetContentRegionAvail();
         using var child = ImRaii.Child("CharacterDebugLogContent", availableSize, true);
-        if (child)
-        {
-            ImGui.TextUnformatted(logText);
-        }
+        if (child) ImGui.TextUnformatted(logText);
     }
 
     private static string GetApplyDebugText(Pair pair)
@@ -722,86 +990,103 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         return string.Join('\n', lines);
     }
 
-    private void DrawCharacterStatistics()
+    private static void DrawCharacterHeaderSummary(Pair pair)
     {
-        ImGui.Text("Character Statistics");
+        var uid = GetPairKey(pair);
+        ImGui.TextUnformatted(pair.UserData.AliasOrUID);
+        ImGui.SameLine();
+        UiSharedService.ColorText($"({uid})", ImGuiColors.DalamudGrey);
+        ImGui.Separator();
 
-        var pairs = _pairManager.DirectPairs.ToList();
-        if (pairs.Count == 0)
+        if (ImGui.BeginTable("##CharacterHeaderSummaryTable", 2, ImGuiTableFlags.SizingStretchProp))
         {
-            ImGui.Text("No paired users");
-            return;
-        }
+            ImGui.TableSetupColumn("Key", ImGuiTableColumnFlags.WidthFixed, 165f * ImGuiHelpers.GlobalScale);
+            ImGui.TableSetupColumn("Value", ImGuiTableColumnFlags.WidthStretch);
 
-        if (string.IsNullOrEmpty(_selectedCharacterStatsUid) || pairs.All(p => !string.Equals(p.UserData.UID, _selectedCharacterStatsUid, StringComparison.Ordinal)))
-        {
-            _selectedCharacterStatsUid = pairs[0].UserData.UID;
-        }
-
-        if (ImGui.BeginTable("CharacterStatsTable", 6, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable))
-        {
-            ImGui.TableSetupColumn("User", ImGuiTableColumnFlags.WidthFixed, 180);
-            ImGui.TableSetupColumn("Current Hash", ImGuiTableColumnFlags.WidthFixed, 140);
-            ImGui.TableSetupColumn("Last Hash", ImGuiTableColumnFlags.WidthFixed, 140);
-            ImGui.TableSetupColumn("Last Change", ImGuiTableColumnFlags.WidthFixed, 140);
-            ImGui.TableSetupColumn("Last Action", ImGuiTableColumnFlags.WidthStretch);
-            ImGui.TableSetupColumn("Select", ImGuiTableColumnFlags.WidthFixed, 80);
-            ImGui.TableHeadersRow();
-
-            foreach (var pair in pairs)
+            DrawSummaryRow("State", () =>
             {
-                var snapshot = GetCharacterStatsSnapshot(pair);
-
-                ImGui.TableNextRow();
-                ImGui.TableSetColumnIndex(0);
-                ImGui.Text(pair.UserData.AliasOrUID);
-
-                ImGui.TableSetColumnIndex(1);
-                ImGui.Text(snapshot.Current.DataHash);
-
-                ImGui.TableSetColumnIndex(2);
-                ImGui.Text(snapshot.Previous?.DataHash ?? "-");
-
-                ImGui.TableSetColumnIndex(3);
-                ImGui.Text(snapshot.Previous?.SnapshotTime.ToLocalTime().ToString("HH:mm:ss") ?? "-");
-
-                ImGui.TableSetColumnIndex(4);
-                ImGui.Text(snapshot.Current.LastAction);
-
-                ImGui.TableSetColumnIndex(5);
-                var uid = pair.UserData.UID;
-                var isSelected = string.Equals(uid, _selectedCharacterStatsUid, StringComparison.Ordinal);
-                var selectText = isSelected ? "Selected" : "Select";
-                if (ImGui.Button($"{selectText}##stats_select_{uid}"))
+                if (pair.IsVisible || pair.IsMutuallyVisible)
                 {
-                    _selectedCharacterStatsUid = uid;
+                    DrawStatusIcon(FontAwesomeIcon.Eye, ImGuiColors.ParsedGreen);
+                    ImGui.SameLine();
+                    UiSharedService.ColorText("Visible", ImGuiColors.ParsedGreen);
                 }
-            }
+                else if (pair.IsOnline)
+                {
+                    DrawStatusIcon(FontAwesomeIcon.Circle, ImGuiColors.HealerGreen);
+                    ImGui.SameLine();
+                    UiSharedService.ColorText("Online", ImGuiColors.HealerGreen);
+                }
+                else
+                {
+                    DrawStatusIcon(FontAwesomeIcon.Circle, ImGuiColors.DalamudGrey);
+                    ImGui.SameLine();
+                    UiSharedService.ColorText("Offline", ImGuiColors.DalamudGrey);
+                }
+            });
+
+            DrawSummaryRow("Pair Status", () =>
+            {
+                var statusColor = pair.IndividualPairStatus switch
+                {
+                    API.Data.Enum.IndividualPairStatus.Bidirectional => ImGuiColors.HealerGreen,
+                    API.Data.Enum.IndividualPairStatus.OneSided => ImGuiColors.DalamudYellow,
+                    _ => ImGuiColors.DalamudRed
+                };
+                UiSharedService.ColorText(pair.IndividualPairStatus.ToString(), statusColor);
+            });
+
+            DrawSummaryRow("Groups", () => ImGui.TextUnformatted(pair.UserPair.Groups.Count.ToString()));
+            DrawSummaryRow("Collection", () =>
+            {
+                var collectionId = pair.GetPenumbraCollectionId();
+                ImGui.TextUnformatted(collectionId == Guid.Empty ? "(none)" : collectionId.ToString());
+            });
+
+            DrawSummaryRow("Last Received", () =>
+            {
+                var hash = pair.LastReceivedCharacterDataHash;
+                if (string.IsNullOrEmpty(hash))
+                {
+                    ImGui.TextUnformatted("-");
+                    return;
+                }
+
+                var shortHash = hash.Length > 10 ? hash[..10] : hash;
+                ImGui.TextUnformatted(shortHash);
+                UiSharedService.AttachToolTip(hash);
+            });
+
+            DrawSummaryRow("Received At", () =>
+            {
+                ImGui.TextUnformatted(pair.LastReceivedCharacterDataTime?.ToLocalTime().ToString("HH:mm:ss") ?? "-");
+            });
+
+            DrawSummaryRow("Ack", () =>
+            {
+                if (pair.HasPendingAcknowledgment)
+                {
+                    UiSharedService.ColorText("Pending", ImGuiColors.DalamudYellow);
+                    return;
+                }
+                if (!pair.LastAcknowledgmentSuccess.HasValue)
+                {
+                    ImGui.TextUnformatted("-");
+                    return;
+                }
+                UiSharedService.ColorText(pair.LastAcknowledgmentSuccess.Value ? "OK" : "Fail",
+                    pair.LastAcknowledgmentSuccess.Value ? ImGuiColors.HealerGreen : ImGuiColors.DalamudRed);
+                ImGui.SameLine();
+                ImGui.TextUnformatted(pair.LastAcknowledgmentTime?.ToLocalTime().ToString("HH:mm:ss") ?? "-");
+            });
 
             ImGui.EndTable();
         }
+    }
 
-        ImGui.Separator();
-
-        Pair? selectedPair = null;
-        foreach (var pair in pairs)
-        {
-            if (string.Equals(pair.UserData.UID, _selectedCharacterStatsUid, StringComparison.Ordinal))
-            {
-                selectedPair = pair;
-                break;
-            }
-        }
-
-        if (selectedPair == null)
-        {
-            ImGui.Text("No character selected");
-            return;
-        }
-
+    private void DrawCharacterStatistics(Pair selectedPair)
+    {
         var selectedSnapshot = GetCharacterStatsSnapshot(selectedPair);
-        ImGui.Text($"Selected: {selectedPair.UserData.AliasOrUID} ({selectedPair.UserData.UID})");
-
         if (ImGui.BeginTable("CharacterStatsDetailTable", 3, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
         {
             ImGui.TableSetupColumn("Metric", ImGuiTableColumnFlags.WidthFixed, 200);
@@ -827,47 +1112,40 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
 
         ImGui.Separator();
         ImGui.Text("Received Created Character Data");
+        DrawReceivedCharacterData(selectedPair);
+    }
 
-        foreach (var pair in pairs)
+    private void DrawReceivedCharacterData(Pair pair)
+    {
+        var receivedData = pair.LastReceivedCharacterData;
+        var lastReceivedHash = pair.LastReceivedCharacterDataHash ?? "-";
+        var previousReceivedHash = pair.PreviousReceivedCharacterDataHash ?? "-";
+        var lastReceivedTime = pair.LastReceivedCharacterDataTime?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "-";
+        var lastChangeTime = pair.LastReceivedCharacterDataChangeTime?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "-";
+
+        ImGui.TextUnformatted($"Last Received Hash: {lastReceivedHash}");
+        ImGui.TextUnformatted($"Previous Received Hash: {previousReceivedHash}");
+        ImGui.TextUnformatted($"Last Received Time: {lastReceivedTime}");
+        ImGui.TextUnformatted($"Last Change Time: {lastChangeTime}");
+        ImGui.Separator();
+
+        var receivedDataJson = receivedData != null
+            ? JsonSerializer.Serialize(receivedData, new JsonSerializerOptions() { WriteIndented = true })
+            : "No received character data.";
+
+        if (ImGui.Button($"Copy##received_character_data_copy_{GetPairKey(pair)}"))
         {
-            var uid = pair.UserData.UID;
-            var label = $"{pair.UserData.AliasOrUID} ({uid})##received_character_data_{uid}";
-            if (ImGui.TreeNode(label))
-            {
-                var receivedData = pair.LastReceivedCharacterData;
-                var receivedDataJson = receivedData != null
-                    ? JsonSerializer.Serialize(receivedData, new JsonSerializerOptions() { WriteIndented = true })
-                    : "No received character data.";
-                var lastReceivedHash = pair.LastReceivedCharacterDataHash ?? "-";
-                var previousReceivedHash = pair.PreviousReceivedCharacterDataHash ?? "-";
-                var lastReceivedTime = pair.LastReceivedCharacterDataTime?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "-";
-                var lastChangeTime = pair.LastReceivedCharacterDataChangeTime?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "-";
+            ImGui.SetClipboardText(receivedDataJson);
+        }
 
-                ImGui.TextUnformatted($"Last Received Hash: {lastReceivedHash}");
-                ImGui.TextUnformatted($"Previous Received Hash: {previousReceivedHash}");
-                ImGui.TextUnformatted($"Last Received Time: {lastReceivedTime}");
-                ImGui.TextUnformatted($"Last Change Time: {lastChangeTime}");
-                ImGui.Separator();
+        ImGui.SameLine();
+        UiSharedService.ColorText($"{receivedDataJson.Length:n0} chars", ImGuiColors.DalamudGrey);
 
-                if (ImGui.Button($"Copy##received_character_data_copy_{uid}"))
-                {
-                    if (receivedData != null)
-                    {
-                        ImGui.SetClipboardText(receivedDataJson);
-                    }
-                    else
-                    {
-                        ImGui.SetClipboardText("ERROR: No received character data, cannot copy.");
-                    }
-                }
-
-                foreach (var line in receivedDataJson.Split('\n'))
-                {
-                    ImGui.TextUnformatted(line);
-                }
-
-                ImGui.TreePop();
-            }
+        var avail = ImGui.GetContentRegionAvail();
+        using var child = ImRaii.Child($"##received_character_data_{GetPairKey(pair)}", new Vector2(0, MathF.Min(260f * ImGuiHelpers.GlobalScale, avail.Y)), true);
+        if (child)
+        {
+            ImGui.TextUnformatted(receivedDataJson);
         }
     }
 
@@ -897,62 +1175,9 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         return value.HasValue ? value.Value.ToLocalTime().ToString("HH:mm:ss") : "-";
     }
 
-    private void DrawPenumbraCollectionOverview()
+    private void DrawPenumbraCollectionOverview(Pair selectedPair)
     {
         ImGui.Text("Penumbra Collection Overview");
-
-        var pairsToCheck = new HashSet<Pair>(_pairManager.DirectPairs);
-        foreach (var groupPairs in _pairManager.GroupPairs.Values)
-        {
-            foreach (var pair in groupPairs)
-            {
-                pairsToCheck.Add(pair);
-            }
-        }
-
-        var pairs = pairsToCheck
-            .OrderBy(p => p.UserData.AliasOrUID, StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
-        if (pairs.Count == 0)
-        {
-            ImGui.Text("No paired users");
-            return;
-        }
-
-        if (string.IsNullOrEmpty(_selectedCollectionOverviewUid)
-            || pairs.All(p => !string.Equals(p.UserData.UID, _selectedCollectionOverviewUid, StringComparison.Ordinal)))
-        {
-            _selectedCollectionOverviewUid = pairs[0].UserData.UID;
-        }
-
-        var selectedLabel = pairs.FirstOrDefault(p => string.Equals(p.UserData.UID, _selectedCollectionOverviewUid, StringComparison.Ordinal))?.UserData.AliasOrUID
-            ?? "Select...";
-        if (ImGui.BeginCombo("Character##PenumbraCollectionCharacter", selectedLabel))
-        {
-            foreach (var pair in pairs)
-            {
-                var selected = string.Equals(pair.UserData.UID, _selectedCollectionOverviewUid, StringComparison.Ordinal);
-                if (ImGui.Selectable(pair.UserData.AliasOrUID, selected))
-                {
-                    _selectedCollectionOverviewUid = pair.UserData.UID;
-                }
-
-                if (selected)
-                {
-                    ImGui.SetItemDefaultFocus();
-                }
-            }
-
-            ImGui.EndCombo();
-        }
-
-        var selectedPair = pairs.FirstOrDefault(p => string.Equals(p.UserData.UID, _selectedCollectionOverviewUid, StringComparison.Ordinal));
-        if (selectedPair == null)
-        {
-            ImGui.Text("No character selected");
-            return;
-        }
 
         var selectedUid = selectedPair.UserData.UID;
         var collectionId = selectedPair.GetPenumbraCollectionId();
@@ -1014,13 +1239,15 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
 
         ImGui.TextUnformatted($"Active delivered paths: {activeDeliveredPaths.Count} | Loaded: {loadedByPath.Count} | Player Active: {playerActiveByPath.Count} | Minion Active: {minionActiveByPath.Count} | Pet Active: {petActiveByPath.Count}");
 
+        var tableAvailY = MathF.Max(200f * ImGuiHelpers.GlobalScale, ImGui.GetContentRegionAvail().Y);
         if (!ImGui.BeginTable("PenumbraCollectionOverviewTable", 9,
                 ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable | ImGuiTableFlags.ScrollY,
-                new Vector2(-1, 420)))
+                new Vector2(-1, tableAvailY)))
         {
             return;
         }
 
+        ImGui.TableSetupScrollFreeze(0, 1);
         ImGui.TableSetupColumn("Game Path", ImGuiTableColumnFlags.WidthStretch, 2.2f);
         ImGui.TableSetupColumn("Kinds", ImGuiTableColumnFlags.WidthFixed, 120f);
         ImGui.TableSetupColumn("Delivered Source", ImGuiTableColumnFlags.WidthStretch, 1.6f);
@@ -1373,13 +1600,15 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
 
         ImGui.Separator();
 
+        var mismatchAvailY = MathF.Max(220f * ImGuiHelpers.GlobalScale, ImGui.GetContentRegionAvail().Y);
         if (!ImGui.BeginTable("ActiveMismatchTable", 8,
                 ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable | ImGuiTableFlags.ScrollY,
-                new Vector2(-1, 400)))
+                new Vector2(-1, mismatchAvailY)))
         {
             return;
         }
 
+        ImGui.TableSetupScrollFreeze(0, 1);
         ImGui.TableSetupColumn("User", ImGuiTableColumnFlags.WidthFixed, 100f);
         ImGui.TableSetupColumn("Game Path", ImGuiTableColumnFlags.WidthStretch, 2.0f);
         ImGui.TableSetupColumn("Global %", ImGuiTableColumnFlags.WidthFixed, 75f);
