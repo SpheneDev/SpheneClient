@@ -76,6 +76,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
     private bool _showDownloads = true;
     private bool _showMismatches = true;
     private bool _showIpc = true;
+    private bool _includeApplyChangeDetails = false;
     private int _simulatedDisconnectSeconds = 3;
     private string? _selectedCharacterUid;
     private readonly Dictionary<string, CharacterStatsSnapshot> _characterStats = new(StringComparer.Ordinal);
@@ -1947,6 +1948,8 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         ImGui.SameLine();
         ImGui.SetNextItemWidth(220f * ImGuiHelpers.GlobalScale);
         ImGui.InputTextWithHint("##LogSearch", "Search...", ref _debugLogSearch, 128);
+        ImGui.SameLine();
+        ImGui.Checkbox("Apply details", ref _includeApplyChangeDetails);
 
         ImGui.Spacing();
         ImGui.TextUnformatted("Show:");
@@ -2051,9 +2054,9 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
 
             ImGui.TableSetColumnIndex(4);
             ImGui.TextUnformatted(entry.Message);
-            if (!string.IsNullOrEmpty(entry.Details) && ImGui.IsItemHovered())
+            if (ShouldIncludeDetails(entry) && ImGui.IsItemHovered())
             {
-                UiSharedService.AttachToolTip(entry.Details);
+                UiSharedService.AttachToolTip(entry.Details!);
             }
 
             if (ImGui.BeginPopupContextItem("##log_ctx"))
@@ -2062,22 +2065,22 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                 {
                     ImGui.SetClipboardText(entry.Message);
                 }
-                if (!string.IsNullOrEmpty(entry.Details) && ImGui.MenuItem("Copy details/stacktrace"))
+                if (ShouldIncludeDetails(entry) && ImGui.MenuItem("Copy details/stacktrace"))
                 {
-                    ImGui.SetClipboardText(entry.Details);
+                    ImGui.SetClipboardText(entry.Details!);
                 }
                 ImGui.EndPopup();
             }
 
             ImGui.TableSetColumnIndex(5);
-            if (!string.IsNullOrEmpty(entry.Details))
+            if (ShouldIncludeDetails(entry))
             {
                 var size = ImGui.GetFrameHeight();
                 using (ImRaii.PushFont(UiBuilder.IconFont))
                 {
                     if (ImGui.Button($"{FontAwesomeIcon.Copy.ToIconString()}##copy_details", new Vector2(size, size)))
                     {
-                        ImGui.SetClipboardText(entry.Details);
+                        ImGui.SetClipboardText(entry.Details!);
                     }
                 }
                 UiSharedService.AttachToolTip("Copy details / stacktrace");
@@ -2184,6 +2187,21 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         }
     }
 
+    private bool ShouldIncludeDetails(DebugLogEntry entry)
+    {
+        if (string.IsNullOrWhiteSpace(entry.Details))
+        {
+            return false;
+        }
+
+        if (string.Equals(entry.Category, "APPLY", StringComparison.Ordinal) && entry.Level < DebugLogLevel.Warn && !_includeApplyChangeDetails)
+        {
+            return false;
+        }
+
+        return true;
+    }
+
     private List<DebugLogEntry> GetFilteredDebugLogSnapshot(int maxEntries)
     {
         List<DebugLogEntry> snapshot;
@@ -2235,7 +2253,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         return list;
     }
 
-    private static string BuildLogText(List<DebugLogEntry> entries)
+    private string BuildLogText(List<DebugLogEntry> entries)
     {
         var sb = new System.Text.StringBuilder(entries.Count * 80);
         foreach (var e in entries)
@@ -2248,7 +2266,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                 sb.Append('[').Append(e.Uid).Append("] ");
             }
             sb.Append(e.Message);
-            if (!string.IsNullOrWhiteSpace(e.Details))
+            if (ShouldIncludeDetails(e))
             {
                 sb.Append(" | ").Append(e.Details);
             }
@@ -2292,7 +2310,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                 e.Category,
                 e.Uid,
                 e.Message,
-                e.Details
+                Details = ShouldIncludeDetails(e) ? e.Details : null
             }).ToList()
         };
 
@@ -2398,10 +2416,14 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
 
     private void OnCharacterDataApplicationCompleted(CharacterDataApplicationCompletedMessage message)
     {
-        var level = message.Success ? DebugLogLevel.Info : DebugLogLevel.Warn;
+        if (message.Success)
+        {
+            return;
+        }
+
         var shortHash = string.IsNullOrEmpty(message.DataHash) ? "-" : (message.DataHash.Length > 10 ? message.DataHash[..10] : message.DataHash);
-        AddDebugLog(level, "APPLY",
-            $"{(message.Success ? "Applied" : "Apply failed")}: {message.PlayerName} hash={shortHash}",
+        AddDebugLog(DebugLogLevel.Warn, "APPLY",
+            $"Apply failed: {message.PlayerName} hash={shortHash}",
             uid: message.UserUID,
             details: $"ApplicationId={message.ApplicationId}");
     }

@@ -1,4 +1,5 @@
 using Sphene.API.Data;
+using Sphene.API.Dto.User;
 using Sphene.SpheneConfiguration;
 using Sphene.Services;
 using Sphene.Services.Mediator;
@@ -6,6 +7,7 @@ using Sphene.Utils;
 using Sphene.WebAPI;
 using Sphene.WebAPI.Files;
 using Microsoft.Extensions.Logging;
+using System.Collections.Concurrent;
 
 namespace Sphene.PlayerData.Pairs;
 
@@ -27,15 +29,17 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
     private readonly CancellationTokenSource _runtimeCts = new();
     
     // Hash-based acknowledgment tracking
-    private readonly Dictionary<UserData, string> _lastSentHashPerUser = new();
+    private readonly ConcurrentDictionary<UserData, string> _lastSentHashPerUser = new();
     
     // Delayed push tracking for newly connected users
     private readonly Dictionary<UserData, DateTime> _delayedPushUsers = new();
     private readonly Timer _delayedPushTimer;
     private DateTime _nextOutgoingBatchPushUtc = DateTime.MinValue;
     private bool _hasPendingOutgoingBatchPush = false;
+    private readonly ConcurrentDictionary<string, DateTime> _refreshRequestCooldownByUid = new(StringComparer.Ordinal);
     
     private const int DELAYED_PUSH_SECONDS = 3;
+    private const int REFRESH_REQUEST_COOLDOWN_SECONDS = 15;
 
 
     public VisibleUserDataDistributor(ILogger<VisibleUserDataDistributor> logger, ApiController apiController, DalamudUtilService dalamudUtil,
@@ -83,6 +87,7 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
         {
             _previouslyVisiblePlayers.Clear();
             _lastSentHashPerUser.Clear();
+            _refreshRequestCooldownByUid.Clear();
         });
         Mediator.Subscribe<CharacterDataRefreshRequestedMessage>(this, msg =>
         {
@@ -158,9 +163,10 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
         
         foreach (var user in _pairManager.GetVisibleUsers())
         {
-            // Only add users who haven't received this hash yet or if forced
+            // Only add users who haven't received this hash yet, if forced, or if we're still waiting for an ack
             _lastSentHashPerUser.TryGetValue(user, out var lastHash);
-            if (forced || lastHash == null || !string.Equals(lastHash, currentHash, StringComparison.Ordinal))
+            var hasPendingAck = _pairManager.HasPendingAcknowledgmentForUser(user);
+            if (forced || hasPendingAck || lastHash == null || !string.Equals(lastHash, currentHash, StringComparison.Ordinal))
             {
                 _usersToPushDataTo.Add(user);
                 Logger.LogDebug("{tag} Push queue add: user={user} lastHash={lastHash} currentHash={currentHash} forced={forced}", 
@@ -204,7 +210,32 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
             _delayedPushUsers[user] = currentTime;
             Logger.LogDebug("{tag} Delayed push queued: user={user} delaySeconds={seconds}", 
                 SyncProgressTag, user.AliasOrUID, DELAYED_PUSH_SECONDS);
+            RequestRemoteCharacterDataRefreshIfNeeded(user);
         }
+    }
+
+    private void RequestRemoteCharacterDataRefreshIfNeeded(UserData user)
+    {
+        if (!_apiController.IsConnected) return;
+        if (string.IsNullOrWhiteSpace(user.UID)) return;
+
+        var now = DateTime.UtcNow;
+        if (_refreshRequestCooldownByUid.TryGetValue(user.UID, out var lastRequest)
+            && (now - lastRequest).TotalSeconds < REFRESH_REQUEST_COOLDOWN_SECONDS)
+        {
+            return;
+        }
+
+        var pair = _pairManager.GetPairByUID(user.UID);
+        if (pair?.LastReceivedCharacterDataTime != null && (now - pair.LastReceivedCharacterDataTime.Value.UtcDateTime).TotalSeconds < 10)
+        {
+            return;
+        }
+
+        _refreshRequestCooldownByUid[user.UID] = now;
+        Logger.LogDebug("{tag} Refresh request: requester=self target={user}", SyncProgressTag, user.AliasOrUID);
+        Mediator.Publish(new DebugLogEventMessage(LogLevel.Debug, "APPLY", "Requested remote character data refresh", Uid: user.UID));
+        _ = _apiController.UserRequestCharacterDataRefresh(new UserDto(user));
     }
 
     private void PushCharacterData(bool forced = false, bool bypassBatching = false)
@@ -223,84 +254,87 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
 
         _ = Task.Run(async () =>
         {
-            forced |= _uploadingCharacterData?.DataHash != _lastCreatedData.DataHash;
-
-            if (_fileUploadTask == null || (_fileUploadTask?.IsCompleted ?? false) || forced)
+            try
             {
-                _uploadingCharacterData = _lastCreatedData.DeepClone();
-                Logger.LogDebug("{tag} Upload start: hash={hash} taskNull={task} taskCompleted={taskCpl} forced={frc}",
-                    SyncProgressTag, _lastCreatedData.DataHash, _fileUploadTask == null, _fileUploadTask?.IsCompleted ?? false, forced);
-                _fileUploadTask = _fileTransferManager.UploadFiles(_uploadingCharacterData, [.. _usersToPushDataTo]);
-            }
+                forced |= _uploadingCharacterData?.DataHash != _lastCreatedData.DataHash;
 
-            if (_fileUploadTask != null)
-            {
+                if (_fileUploadTask == null || (_fileUploadTask?.IsCompleted ?? false) || forced)
+                {
+                    _uploadingCharacterData = _lastCreatedData.DeepClone();
+                    Logger.LogDebug("{tag} Upload start: hash={hash} taskNull={task} taskCompleted={taskCpl} forced={frc}",
+                        SyncProgressTag, _lastCreatedData.DataHash, _fileUploadTask == null, _fileUploadTask?.IsCompleted ?? false, forced);
+                    _fileUploadTask = _fileTransferManager.UploadFiles(_uploadingCharacterData, [.. _usersToPushDataTo]);
+                }
+
+                if (_fileUploadTask == null)
+                {
+                    return;
+                }
+
                 var dataToSend = await _fileUploadTask.ConfigureAwait(false);
                 Logger.LogDebug("{tag} Upload complete: hash={hash} users={users}", SyncProgressTag, dataToSend.DataHash.Value, string.Join(", ", _usersToPushDataTo.Select(u => u.AliasOrUID)));
                 await _pushDataSemaphore.WaitAsync(_runtimeCts.Token).ConfigureAwait(false);
                 try
                 {
                     if (_usersToPushDataTo.Count == 0) return;
-                    
-                    // Validate hashes before pushing to avoid unnecessary data transfers
-                    var usersNeedingData = new List<UserData>();
+
+                    var currentVisible = new HashSet<UserData>(_pairManager.GetVisibleUsers());
+                    var usersToSend = new List<UserData>();
                     var currentHash = dataToSend.DataHash.Value;
-                    
+
                     foreach (var user in _usersToPushDataTo.ToList())
                     {
-                        if (_lastSentHashPerUser.TryGetValue(user, out var lastSentHash) && !forced)
+                        if (!currentVisible.Contains(user))
                         {
-                            // Validate if the hash is still valid on the client side
-                            try {
-                                var validationResponse = await _apiController.ValidateCharaDataHash(user.UID, lastSentHash).ConfigureAwait(false);
-                                if (validationResponse != null && validationResponse.IsValid && string.Equals(lastSentHash, currentHash, StringComparison.Ordinal))
-                                {
-                                    Logger.LogDebug("{tag} Hash still valid: user={user} hash={hash} skip push", SyncProgressTag, user.AliasOrUID, lastSentHash);
-                                    continue;
-                                }
-                            }
-                            catch (Exception ex) {
-                                Logger.LogWarning(ex, "{tag} Hash validation failed: user={user} proceeding with push", SyncProgressTag, user.AliasOrUID);
-                            }
+                            _usersToPushDataTo.Remove(user);
+                            continue;
                         }
-                        
-                        usersNeedingData.Add(user);
+
+                        var hasPendingAck = _pairManager.HasPendingAcknowledgmentForUser(user);
+                        if (!forced && !hasPendingAck && _lastSentHashPerUser.TryGetValue(user, out var lastSentHash)
+                            && string.Equals(lastSentHash, currentHash, StringComparison.Ordinal))
+                        {
+                            _usersToPushDataTo.Remove(user);
+                            continue;
+                        }
+
+                        usersToSend.Add(user);
                     }
-                    
-                    if (usersNeedingData.Count == 0)
+
+                    if (usersToSend.Count == 0)
                     {
-                        Logger.LogDebug("{tag} Push skip: no users need data after validation", SyncProgressTag);
-                        _usersToPushDataTo.Clear();
+                        Logger.LogDebug("{tag} Push skip: no users need data", SyncProgressTag);
                         return;
                     }
-                    
-                    // Create hash key for acknowledgment tracking
-                    var hashKey = dataToSend.DataHash.Value;
 
-                    // Revoke AckYou for all users before pushing new data
-                    // This ensures partners see a yellow eye indicating that the sender has changed state
+                    var hashKey = currentHash;
                     Logger.LogDebug("{tag} Ack reset before push: hash={hash}", SyncProgressTag, hashKey);
                     _ = _apiController.UserUpdateAckYou(false);
 
-                    _pairManager.SetPendingAcknowledgmentForSender([.. usersNeedingData], hashKey);
-                    _sessionAcknowledgmentManager.SetPendingAcknowledgmentForHashVersion([.. usersNeedingData], hashKey);
-                    
-                    // Track the hash sent to each user
-                    foreach (var user in usersNeedingData)
+                    _pairManager.SetPendingAcknowledgmentForSender([.. usersToSend], hashKey);
+                    _sessionAcknowledgmentManager.SetPendingAcknowledgmentForHashVersion([.. usersToSend], hashKey);
+
+                    Logger.LogDebug("{tag} Push send: hash={hash} ackKey={hashKey} users={users}", SyncProgressTag, dataToSend.DataHash, hashKey, string.Join(", ", usersToSend.Select(k => k.AliasOrUID)));
+                    await _apiController.PushCharacterData(dataToSend, [.. usersToSend], hashKey).ConfigureAwait(false);
+                    Logger.LogDebug("{tag} Push complete: hash={hash} users={users}", SyncProgressTag, dataToSend.DataHash, string.Join(", ", usersToSend.Select(k => k.AliasOrUID)));
+
+                    foreach (var user in usersToSend)
                     {
                         _lastSentHashPerUser[user] = currentHash;
-                        Logger.LogDebug("{tag} Hash tracking update: user={user} hash={hash}", SyncProgressTag, user.AliasOrUID, currentHash);
+                        _usersToPushDataTo.Remove(user);
                     }
-                    
-                    Logger.LogDebug("{tag} Push send: hash={hash} ackKey={hashKey} users={users}", SyncProgressTag, dataToSend.DataHash, hashKey, string.Join(", ", usersNeedingData.Select(k => k.AliasOrUID)));
-                    await _apiController.PushCharacterData(dataToSend, [.. usersNeedingData], hashKey).ConfigureAwait(false);
-                    Logger.LogDebug("{tag} Push complete: hash={hash} users={users}", SyncProgressTag, dataToSend.DataHash, string.Join(", ", usersNeedingData.Select(k => k.AliasOrUID)));
-                    _usersToPushDataTo.Clear();
                 }
                 finally
                 {
                     _pushDataSemaphore.Release();
                 }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "{tag} Push failed: keeping queue for retry", SyncProgressTag);
+                Mediator.Publish(new DebugLogEventMessage(LogLevel.Warning, "APPLY", "Outgoing push failed (will retry)", Details: ex.ToString()));
+                _hasPendingOutgoingBatchPush = true;
+                _nextOutgoingBatchPushUtc = DateTime.UtcNow.AddSeconds(3);
             }
         });
     }

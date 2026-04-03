@@ -814,7 +814,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         }
     }
 
-    private async Task ApplyCustomizationDataAsync(Guid applicationId, KeyValuePair<ObjectKind, HashSet<PlayerChanges>> changes, CharacterData charaData, bool forceRedrawIfDisabled, CancellationToken token)
+    private async Task ApplyCustomizationDataAsync(Guid applicationId, KeyValuePair<ObjectKind, HashSet<PlayerChanges>> changes, CharacterData charaData, RedrawTracking redrawTracking, bool forceRedrawIfDisabled, CancellationToken token)
     {
         if (PlayerCharacter == nint.Zero) return;
         var ptr = PlayerCharacter;
@@ -902,8 +902,16 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                         {
                             await EnsureMinionCollectionBindingsAsync(handler.Address).ConfigureAwait(false);
                         }
-                        if (!IsDutyCombatNoRedrawModeActive())
+                        redrawTracking.MarkRequested();
+                        if (IsDutyCombatNoRedrawModeActive())
+                        {
+                            redrawTracking.MarkSuppressed();
+                        }
+                        else
+                        {
                             await _ipcManager.Penumbra.RedrawAsync(Logger, handler, applicationId, token, forceRedrawIfDisabled).ConfigureAwait(false);
+                            redrawTracking.MarkTriggered();
+                        }
                         break;
 
                     default:
@@ -1343,11 +1351,33 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         _applicationTask = ApplyCharacterDataAsync(applicationBase, charaData, updatedData, updateModdedPaths, updateManip, moddedPaths, forceRedrawIfDisabled, token);
     }
 
+    private sealed class RedrawTracking
+    {
+        public bool Requested { get; private set; }
+        public bool Triggered { get; private set; }
+        public bool Suppressed { get; private set; }
+
+        public void MarkRequested() => Requested = true;
+        public void MarkTriggered()
+        {
+            Requested = true;
+            Triggered = true;
+        }
+
+        public void MarkSuppressed()
+        {
+            Requested = true;
+            Suppressed = true;
+        }
+    }
+
     private async Task ApplyCharacterDataAsync(Guid applicationBase, CharacterData charaData, Dictionary<ObjectKind, HashSet<PlayerChanges>> updatedData, bool updateModdedPaths, bool updateManip,
         Dictionary<(string GamePath, string? Hash), string> moddedPaths, bool forceRedrawIfDisabled, CancellationToken token)
     {
         try
         {
+            var previousHash = _cachedData?.DataHash?.Value;
+            var redrawTracking = new RedrawTracking();
             _applicationId = Guid.NewGuid();
             Logger.LogDebug("[BASE-{applicationId}] Starting application task for {this}: {appId}", applicationBase, this, _applicationId);
 
@@ -1388,7 +1418,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
 
             foreach (var kind in updatedData)
             {
-                await ApplyCustomizationDataAsync(_applicationId, kind, charaData, forceRedrawIfDisabled, token).ConfigureAwait(false);
+                await ApplyCustomizationDataAsync(_applicationId, kind, charaData, redrawTracking, forceRedrawIfDisabled, token).ConfigureAwait(false);
                 token.ThrowIfCancellationRequested();
             }
 
@@ -1398,7 +1428,9 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                 && !playerChanges.Contains(PlayerChanges.ForcedRedraw)
                 && !IsDutyCombatNoRedrawModeActive())
             {
+                redrawTracking.MarkRequested();
                 await _ipcManager.Penumbra.RedrawAsync(Logger, _charaHandler, _applicationId, token, forceRedrawIfDisabled).ConfigureAwait(false);
+                redrawTracking.MarkTriggered();
             }
 
             if (_forceRedrawAfterCurrentApplication
@@ -1407,8 +1439,16 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                     || (!playerUpdates.Contains(PlayerChanges.ForcedRedraw) && !playerUpdates.Contains(PlayerChanges.ModFiles))))
             {
                 _forceRedrawAfterCurrentApplication = false;
-                if (!IsDutyCombatNoRedrawModeActive())
+                redrawTracking.MarkRequested();
+                if (IsDutyCombatNoRedrawModeActive())
+                {
+                    redrawTracking.MarkSuppressed();
+                }
+                else
+                {
                     await _ipcManager.Penumbra.RedrawAsync(Logger, _charaHandler, _applicationId, token, forceRedrawIfDisabled).ConfigureAwait(false);
+                    redrawTracking.MarkTriggered();
+                }
             }
             else
             {
@@ -1424,6 +1464,20 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             _lastSuccessfullyAppliedCharacterAddress = _charaHandler?.Address ?? nint.Zero;
 
             Logger.LogDebug("[{applicationId}] Application finished", _applicationId);
+
+            var newHash = charaData.DataHash?.Value;
+            var changeText = string.Join("; ",
+                updatedData
+                    .Where(k => k.Value.Count > 0)
+                    .OrderBy(k => (int)k.Key)
+                    .Select(k => $"{k.Key}=[{string.Join(",", k.Value.OrderBy(v => (int)v))}]"));
+            var redrawText = $"requested={redrawTracking.Requested} triggered={redrawTracking.Triggered} suppressed={redrawTracking.Suppressed}";
+            var flagsText = $"updateMods={updateModdedPaths} updateManip={updateManip} forceRedrawIfDisabled={forceRedrawIfDisabled}";
+            var hashText = $"prev={previousHash ?? "NONE"} new={newHash ?? "NONE"}";
+            Mediator.Publish(new DebugLogEventMessage(LogLevel.Information, "APPLY",
+                $"Applied hash={(string.IsNullOrEmpty(newHash) ? "NONE" : newHash[..Math.Min(8, newHash.Length)])}",
+                Uid: Pair.UserData.UID,
+                Details: $"{hashText} redraw({redrawText}) {flagsText} changes={changeText}"));
             
             // Publish message that character data application is completed
             Mediator.Publish(new CharacterDataApplicationCompletedMessage(PlayerName ?? string.Empty, Pair.UserData.UID, _applicationId, true, charaData.DataHash?.Value));
@@ -1813,7 +1867,8 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                 await ApplyCustomizationDataAsync(Guid.NewGuid(),
                     new KeyValuePair<ObjectKind, HashSet<PlayerChanges>>(ObjectKind.MinionOrMount, localChanges),
                     minionData,
-                    forceRedrawIfDisabled: false,
+                    new RedrawTracking(),
+                    false,
                     CancellationToken.None).ConfigureAwait(false);
 
                 if (appliedFiles)
