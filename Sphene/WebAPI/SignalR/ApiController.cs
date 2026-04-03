@@ -398,12 +398,12 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
 
                     if (preserveUiDuringGraceReconnect)
                     {
-                        Logger.LogDebug("CreateConnections completed within grace window, skipping full UI/data rebuild");
+                        await RefreshPairStateAfterReconnectAsync(forceCharacterDataReload: forceCharacterDataReload).ConfigureAwait(false);
+                        Logger.LogDebug("CreateConnections completed within grace window, refreshed online state");
                     }
                     else
                     {
-                        await LoadIninitialPairsAsync().ConfigureAwait(false);
-                        await LoadOnlinePairsAsync().ConfigureAwait(false);
+                        await RefreshPairStateAfterReconnectAsync(forceCharacterDataReload: forceCharacterDataReload).ConfigureAwait(false);
                     }
                 }
                 catch (OperationCanceledException)
@@ -709,6 +709,21 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
         }
     }
 
+    private async Task RefreshPairStateAfterReconnectAsync(bool forceCharacterDataReload)
+    {
+        var hasAnyPairs = _pairManager.DirectPairs.Count > 0 || _pairManager.GroupPairs.Count > 0;
+        if (!hasAnyPairs)
+        {
+            await LoadIninitialPairsAsync().ConfigureAwait(false);
+        }
+
+        await LoadOnlinePairsAsync().ConfigureAwait(false);
+        if (_connectionDto != null)
+        {
+            Mediator.Publish(new ConnectedMessage(_connectionDto, forceCharacterDataReload));
+        }
+    }
+
     private void SpheneHubOnClosed(Exception? arg)
     {
         _ = Task.Run(async () => await StopConnectionAsync(ServerState.Offline, useGrace: true).ConfigureAwait(false));
@@ -744,13 +759,12 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
             await FlushPendingFileTransferAcksAsync().ConfigureAwait(false);
             if (reconnectedDuringGrace)
             {
-                Logger.LogDebug("Reconnect completed within grace window, skipping full UI/data rebuild");
+                await RefreshPairStateAfterReconnectAsync(forceCharacterDataReload: false).ConfigureAwait(false);
+                Logger.LogDebug("Reconnect completed within grace window, refreshed online state");
             }
             else
             {
-                await LoadIninitialPairsAsync().ConfigureAwait(false);
-                await LoadOnlinePairsAsync().ConfigureAwait(false);
-                Mediator.Publish(new ConnectedMessage(_connectionDto, false));
+                await RefreshPairStateAfterReconnectAsync(forceCharacterDataReload: false).ConfigureAwait(false);
             }
         }
         catch (Exception ex)
