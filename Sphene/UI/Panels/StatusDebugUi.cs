@@ -66,6 +66,9 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
     private string _debugLogSearch = string.Empty;
     private bool _debugLogSelectedCharacterOnly = false;
     private string _debugLogSpecificUid = string.Empty;
+    private bool _debugLogAckContextFilterEnabled = false;
+    private string _debugLogAckContextSessionId = string.Empty;
+    private string _debugLogAckContextHashPrefix = string.Empty;
     private bool _showHealthChecks = true;
     private bool _showAcknowledgments = true;
     private bool _showCircuitBreaker = true;
@@ -634,24 +637,23 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
 
     private void DrawPairedUsersTable()
     {
-        var pairs = _pairManager.DirectPairs.ToList();
+        var pairs = BuildCharacterDataPairsSnapshot();
         if (pairs.Count == 0)
         {
             ImGui.TextUnformatted("No paired users");
             return;
         }
 
-        if (!ImGui.BeginTable("PairedUsersTable", 6, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable))
+        if (!ImGui.BeginTable("PairedUsersTable", 5, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp))
         {
             return;
         }
 
-        ImGui.TableSetupColumn("User", ImGuiTableColumnFlags.WidthFixed, 180);
-        ImGui.TableSetupColumn("Status", ImGuiTableColumnFlags.WidthFixed, 110);
-        ImGui.TableSetupColumn("Online", ImGuiTableColumnFlags.WidthFixed, 70);
-        ImGui.TableSetupColumn("My AckYou", ImGuiTableColumnFlags.WidthFixed, 90);
-        ImGui.TableSetupColumn("Partner AckYou", ImGuiTableColumnFlags.WidthFixed, 110);
-        ImGui.TableSetupColumn("Actions", ImGuiTableColumnFlags.WidthStretch);
+        ImGui.TableSetupColumn("User", ImGuiTableColumnFlags.WidthFixed, 150);
+        ImGui.TableSetupColumn("Status", ImGuiTableColumnFlags.WidthFixed, 95);
+        ImGui.TableSetupColumn("Online", ImGuiTableColumnFlags.WidthFixed, 55);
+        ImGui.TableSetupColumn("My Ack", ImGuiTableColumnFlags.WidthFixed, 65);
+        ImGui.TableSetupColumn("Partner Ack", ImGuiTableColumnFlags.WidthFixed, 85);
         ImGui.TableHeadersRow();
 
         foreach (var pair in pairs)
@@ -681,25 +683,41 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             }
 
             ImGui.TableSetColumnIndex(3);
-            DrawStatusIcon(pair.UserPair.OwnPermissions.IsAckYou() ? FontAwesomeIcon.Check : FontAwesomeIcon.Times,
-                pair.UserPair.OwnPermissions.IsAckYou() ? ImGuiColors.HealerGreen : ImGuiColors.DalamudRed);
+            var incoming = pair.GetIncomingAckV3State();
+            var incomingColor = incoming.Outcome switch
+            {
+                Pair.AckV3Outcome.Success => ImGuiColors.HealerGreen,
+                Pair.AckV3Outcome.Fail => ImGuiColors.DalamudRed,
+                Pair.AckV3Outcome.Pending => ImGuiColors.DalamudYellow,
+                _ => ImGuiColors.DalamudGrey
+            };
+            DrawStatusIcon(FontAwesomeIcon.Eye, incomingColor);
+            UiSharedService.AttachToolTip($"IN:{incoming.Outcome}"
+                                          + (incoming.Hash != null ? $" hash={incoming.Hash[..Math.Min(8, incoming.Hash.Length)]}" : string.Empty)
+                                          + (incoming.Outcome == Pair.AckV3Outcome.Fail ? $"{Environment.NewLine}{incoming.ErrorCode}{(string.IsNullOrWhiteSpace(incoming.ErrorMessage) ? string.Empty : $"{Environment.NewLine}{incoming.ErrorMessage}")}" : string.Empty));
 
             ImGui.TableSetColumnIndex(4);
-            DrawStatusIcon(pair.UserPair.OtherPermissions.IsAckYou() ? FontAwesomeIcon.Check : FontAwesomeIcon.Times,
-                pair.UserPair.OtherPermissions.IsAckYou() ? ImGuiColors.HealerGreen : ImGuiColors.DalamudRed);
-
-            ImGui.TableSetColumnIndex(5);
-            var currentAckYou = pair.UserPair.OwnPermissions.IsAckYou();
-            var ackYouButtonText = currentAckYou ? "Disable AckYou" : "Enable AckYou";
-            if (ImGui.Button($"{ackYouButtonText}##{pair.UserData.UID}"))
+            if (pair.HasPendingAcknowledgment)
             {
-                var newAckYouValue = !currentAckYou;
-                LogCommunication($"[DEBUG] Setting my AckYou to {newAckYouValue} for {pair.UserData.AliasOrUID}");
-
-                var permissions = pair.UserPair.OwnPermissions;
-                permissions.SetAckYou(newAckYouValue);
-                _ = _apiController.UserSetPairPermissions(new(pair.UserData, permissions));
+                DrawStatusIcon(FontAwesomeIcon.Clock, ImGuiColors.DalamudYellow);
+                UiSharedService.AttachToolTip("OUT:Pending");
             }
+            else if (pair.LastAcknowledgmentSuccess == true)
+            {
+                DrawStatusIcon(FontAwesomeIcon.CheckCircle, ImGuiColors.HealerGreen);
+                UiSharedService.AttachToolTip("OUT:Success");
+            }
+            else if (pair.LastAcknowledgmentSuccess == false)
+            {
+                DrawStatusIcon(FontAwesomeIcon.ExclamationTriangle, ImGuiColors.DalamudRed);
+                UiSharedService.AttachToolTip($"OUT:Fail{Environment.NewLine}{pair.LastAcknowledgmentErrorCode}{(string.IsNullOrWhiteSpace(pair.LastAcknowledgmentErrorMessage) ? string.Empty : $"{Environment.NewLine}{pair.LastAcknowledgmentErrorMessage}")}");
+            }
+            else
+            {
+                DrawStatusIcon(FontAwesomeIcon.Minus, ImGuiColors.DalamudGrey);
+                UiSharedService.AttachToolTip("OUT:Unknown");
+            }
+
         }
 
         ImGui.EndTable();
@@ -717,15 +735,17 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         ImGui.Separator();
         
         // Get metrics and configuration
-        var metrics = _acknowledgmentManager.GetMetrics();
+        var sendMetrics = _acknowledgmentManager.GetMetrics();
+        var resultMetrics = _sessionAcknowledgmentManager.GetResultMetrics();
         var config = _acknowledgmentManager.GetConfiguration();
         var pendingAcks = _sessionAcknowledgmentManager.GetPendingAcknowledgments();
+        var successRate = resultMetrics.Total > 0 ? (double)resultMetrics.Success / resultMetrics.Total * 100d : 0d;
         
         // Metrics overview
         ImGui.Text("Metrics Overview:");
         ImGui.Columns(4, "AckMetrics", true);
         
-        ImGui.Text("Total Sent");
+        ImGui.Text("Total Results");
         ImGui.NextColumn();
         ImGui.Text("Success Rate");
         ImGui.NextColumn();
@@ -736,13 +756,13 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         
         ImGui.Separator();
         
-        ImGui.Text($"{metrics.TotalSent}");
+        ImGui.Text($"{resultMetrics.Total}");
         ImGui.NextColumn();
-        UiSharedService.ColorText($"{metrics.SuccessRate:F1}%", 
-            metrics.SuccessRate > 90 ? ImGuiColors.HealerGreen : 
-            metrics.SuccessRate > 70 ? ImGuiColors.DalamudYellow : ImGuiColors.DalamudRed);
+        UiSharedService.ColorText($"{successRate:F1}%", 
+            successRate > 90 ? ImGuiColors.HealerGreen : 
+            successRate > 70 ? ImGuiColors.DalamudYellow : ImGuiColors.DalamudRed);
         ImGui.NextColumn();
-        ImGui.Text($"{metrics.AverageResponseTimeMs:F0}ms");
+        ImGui.Text($"{resultMetrics.AverageResponseTimeMs:F0}ms");
         ImGui.NextColumn();
         ImGui.Text($"{pendingAcks.Count}");
         ImGui.NextColumn();
@@ -770,11 +790,13 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             }
             else
             {
-                ImGui.Columns(3, "PendingAcks", true);
+                ImGui.Columns(4, "PendingAcks", true);
                 
                 ImGui.Text("User");
                 ImGui.NextColumn();
-                ImGui.Text("Acknowledgment ID");
+                ImGui.Text("Ack Key");
+                ImGui.NextColumn();
+                ImGui.Text("Status");
                 ImGui.NextColumn();
                 ImGui.Text("Actions");
                 ImGui.NextColumn();
@@ -785,10 +807,35 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                 {
                     var userKey = kvp.Key;
                     var ackId = kvp.Value;
+                    var displayName = GetDisplayName(userKey);
+                    var pair = _pairManager.GetPairByUID(userKey);
+                    var outgoing = pair?.GetOutgoingAckV3State();
                     
-                    ImGui.Text(userKey);
+                    ImGui.TextUnformatted(displayName);
                     ImGui.NextColumn();
-                    ImGui.Text(ackId.Length > 16 ? $"{ackId[..16]}..." : ackId);
+                    ImGui.TextUnformatted(ackId.Length > 16 ? $"{ackId[..16]}..." : ackId);
+                    ImGui.NextColumn();
+
+                    if (outgoing.HasValue)
+                    {
+                        var state = outgoing.Value;
+                        var statusColor = state.Outcome switch
+                        {
+                            Pair.AckV3Outcome.Pending => ImGuiColors.DalamudYellow,
+                            Pair.AckV3Outcome.Success => ImGuiColors.HealerGreen,
+                            Pair.AckV3Outcome.Fail => ImGuiColors.DalamudRed,
+                            _ => ImGuiColors.DalamudGrey
+                        };
+                        UiSharedService.ColorText(state.Outcome.ToString(), statusColor);
+                        if (state.Outcome == Pair.AckV3Outcome.Fail)
+                        {
+                            UiSharedService.AttachToolTip($"{state.ErrorCode}{(string.IsNullOrWhiteSpace(state.ErrorMessage) ? string.Empty : $"{Environment.NewLine}{state.ErrorMessage}")}");
+                        }
+                    }
+                    else
+                    {
+                        ImGui.TextUnformatted("-");
+                    }
                     ImGui.NextColumn();
                     
                     ImGui.PushID($"clear_{userKey}");
@@ -826,7 +873,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         // Error statistics
         if (ImGui.CollapsingHeader("Error Statistics"))
         {
-            if (metrics.ErrorCounts.Count == 0)
+            if (resultMetrics.ErrorCounts.Count == 0)
             {
                 ImGui.Text("No errors recorded");
             }
@@ -841,7 +888,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                 
                 ImGui.Separator();
                 
-                foreach (var error in metrics.ErrorCounts)
+                foreach (var error in resultMetrics.ErrorCounts.OrderByDescending(k => k.Value))
                 {
                     ImGui.Text(error.Key.ToString());
                     ImGui.NextColumn();
@@ -856,7 +903,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         // Priority statistics
         if (ImGui.CollapsingHeader("Priority Statistics"))
         {
-            if (metrics.PriorityCounts.Count == 0)
+            if (sendMetrics.PriorityCounts.Count == 0)
             {
                 ImGui.Text("No priority data available");
             }
@@ -871,7 +918,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                 
                 ImGui.Separator();
                 
-                foreach (var priority in metrics.PriorityCounts)
+                foreach (var priority in sendMetrics.PriorityCounts)
                 {
                     var color = priority.Key switch
                     {
@@ -1095,20 +1142,50 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
 
             DrawSummaryRow("Ack", () =>
             {
-                if (pair.HasPendingAcknowledgment)
+                var outgoing = pair.GetOutgoingAckV3State();
+                var incoming = pair.GetIncomingAckV3State();
+
+                var outLabel = outgoing.Outcome.ToString();
+                var outColor = outgoing.Outcome switch
                 {
-                    UiSharedService.ColorText("Pending", ImGuiColors.DalamudYellow);
-                    return;
-                }
-                if (!pair.LastAcknowledgmentSuccess.HasValue)
+                    Pair.AckV3Outcome.Pending => ImGuiColors.DalamudYellow,
+                    Pair.AckV3Outcome.Success => ImGuiColors.HealerGreen,
+                    Pair.AckV3Outcome.Fail => ImGuiColors.DalamudRed,
+                    _ => ImGuiColors.DalamudGrey
+                };
+                UiSharedService.ColorText($"OUT:{outLabel}", outColor);
+                if (outgoing.Time.HasValue)
                 {
-                    ImGui.TextUnformatted("-");
-                    return;
+                    ImGui.SameLine();
+                    ImGui.TextUnformatted(outgoing.Time.Value.ToLocalTime().ToString("HH:mm:ss"));
                 }
-                UiSharedService.ColorText(pair.LastAcknowledgmentSuccess.Value ? "OK" : "Fail",
-                    pair.LastAcknowledgmentSuccess.Value ? ImGuiColors.HealerGreen : ImGuiColors.DalamudRed);
+                if (outgoing.Outcome == Pair.AckV3Outcome.Fail)
+                {
+                    UiSharedService.AttachToolTip($"{outgoing.ErrorCode}{(string.IsNullOrWhiteSpace(outgoing.ErrorMessage) ? string.Empty : $"{Environment.NewLine}{outgoing.ErrorMessage}")}");
+                }
+
                 ImGui.SameLine();
-                ImGui.TextUnformatted(pair.LastAcknowledgmentTime?.ToLocalTime().ToString("HH:mm:ss") ?? "-");
+                ImGui.TextUnformatted(" | ");
+                ImGui.SameLine();
+
+                var inLabel = incoming.Outcome.ToString();
+                var inColor = incoming.Outcome switch
+                {
+                    Pair.AckV3Outcome.Pending => ImGuiColors.DalamudYellow,
+                    Pair.AckV3Outcome.Success => ImGuiColors.HealerGreen,
+                    Pair.AckV3Outcome.Fail => ImGuiColors.DalamudRed,
+                    _ => ImGuiColors.DalamudGrey
+                };
+                UiSharedService.ColorText($"IN:{inLabel}", inColor);
+                if (incoming.Time.HasValue)
+                {
+                    ImGui.SameLine();
+                    ImGui.TextUnformatted(incoming.Time.Value.ToLocalTime().ToString("HH:mm:ss"));
+                }
+                if (incoming.Outcome == Pair.AckV3Outcome.Fail)
+                {
+                    UiSharedService.AttachToolTip($"{incoming.ErrorCode}{(string.IsNullOrWhiteSpace(incoming.ErrorMessage) ? string.Empty : $"{Environment.NewLine}{incoming.ErrorMessage}")}");
+                }
             });
 
             ImGui.EndTable();
@@ -1788,6 +1865,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         var dataHash = pair.GetCurrentDataHash();
         var lastAction = GetLastApplyDebugLine(pair);
 
+        var outgoing = pair.GetOutgoingAckV3State();
         return new CharacterStats(
             dataHash: string.IsNullOrEmpty(dataHash) ? "-" : dataHash,
             appliedBytes: pair.LastAppliedDataBytes,
@@ -1796,9 +1874,9 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             isVisible: pair.IsVisible,
             isMutuallyVisible: pair.IsMutuallyVisible,
             isPaused: pair.IsPaused,
-            lastAckSuccess: pair.LastAcknowledgmentSuccess,
-            lastAckTime: pair.LastAcknowledgmentTime,
-            lastAckId: pair.LastAcknowledgmentId,
+            lastAckSuccess: outgoing.Outcome == Pair.AckV3Outcome.Unknown ? null : outgoing.Outcome == Pair.AckV3Outcome.Success,
+            lastAckTime: outgoing.Time,
+            lastAckId: outgoing.Hash,
             applyRetryCount: pair.ApplyRetryCount,
             snapshotTime: DateTimeOffset.Now,
             lastAction: string.IsNullOrEmpty(lastAction) ? "-" : lastAction);
@@ -2014,6 +2092,41 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             ImGui.EndCombo();
         }
 
+        ImGui.SameLine();
+        ImGui.Checkbox("Ack session filter", ref _debugLogAckContextFilterEnabled);
+        if (_debugLogAckContextFilterEnabled && selectedPair != null)
+        {
+            ImGui.SameLine();
+            if (ImGui.Button("Use OUT"))
+            {
+                _debugLogAckContextSessionId = selectedPair.LastOutgoingAcknowledgmentSessionId ?? string.Empty;
+                var hash = selectedPair.LastOutgoingAcknowledgmentHash ?? selectedPair.LastAcknowledgmentId ?? string.Empty;
+                _debugLogAckContextHashPrefix = string.IsNullOrWhiteSpace(hash) ? string.Empty : hash[..Math.Min(8, hash.Length)];
+            }
+            ImGui.SameLine();
+            if (ImGui.Button("Use IN"))
+            {
+                _debugLogAckContextSessionId = selectedPair.LastIncomingAckSessionId ?? string.Empty;
+                var hash = selectedPair.LastIncomingAckHash ?? selectedPair.LastReceivedCharacterDataHash ?? string.Empty;
+                _debugLogAckContextHashPrefix = string.IsNullOrWhiteSpace(hash) ? string.Empty : hash[..Math.Min(8, hash.Length)];
+            }
+            ImGui.SameLine();
+            if (ImGui.Button("Clear##ack_ctx"))
+            {
+                _debugLogAckContextSessionId = string.Empty;
+                _debugLogAckContextHashPrefix = string.Empty;
+            }
+
+            if (!string.IsNullOrWhiteSpace(_debugLogAckContextSessionId) || !string.IsNullOrWhiteSpace(_debugLogAckContextHashPrefix))
+            {
+                ImGui.SameLine();
+                var sessionShort = string.IsNullOrWhiteSpace(_debugLogAckContextSessionId)
+                    ? "-"
+                    : _debugLogAckContextSessionId[..Math.Min(8, _debugLogAckContextSessionId.Length)];
+                ImGui.TextUnformatted($"session={sessionShort} hash={_debugLogAckContextHashPrefix}");
+            }
+        }
+
         ImGui.Separator();
 
         var entries = GetFilteredDebugLogSnapshot(maxEntries: 2500);
@@ -2113,6 +2226,23 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
 
     private void AddDebugLog(DebugLogLevel level, string category, string message, string? uid = null, string? details = null)
     {
+        if (!string.IsNullOrWhiteSpace(uid) && (string.Equals(category, "APPLY", StringComparison.Ordinal) || string.Equals(category, "DL", StringComparison.Ordinal) || string.Equals(category, "MM", StringComparison.Ordinal)))
+        {
+            var pair = _pairManager.GetPairByUID(uid);
+            if (pair != null)
+            {
+                var sessionId = pair.LastIncomingAckSessionId;
+                var hash = pair.LastIncomingAckHash ?? pair.LastReceivedCharacterDataHash;
+                var hashShort = string.IsNullOrWhiteSpace(hash) ? string.Empty : hash[..Math.Min(8, hash.Length)];
+
+                if (!string.IsNullOrWhiteSpace(sessionId) && !(details?.Contains("session=", StringComparison.OrdinalIgnoreCase) ?? false))
+                {
+                    var prefix = $"session={sessionId} hash={hashShort}";
+                    details = string.IsNullOrWhiteSpace(details) ? prefix : $"{prefix} | {details}";
+                }
+            }
+        }
+
         var entry = new DebugLogEntry(DateTimeOffset.Now, level, category, uid, message, details);
         var entryBytes = EstimateEntryBytes(entry);
         _debugLogLock.Enter();
@@ -2243,6 +2373,28 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                 || e.Message.Contains(search, StringComparison.OrdinalIgnoreCase)
                 || (e.Details?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false)
                 || (e.Uid?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false));
+
+        if (_debugLogAckContextFilterEnabled)
+        {
+            var sessionId = _debugLogAckContextSessionId;
+            var hashPrefix = _debugLogAckContextHashPrefix;
+            if (!string.IsNullOrWhiteSpace(sessionId) || !string.IsNullOrWhiteSpace(hashPrefix))
+            {
+                filtered = filtered.Where(e =>
+                {
+                    var message = e.Message ?? string.Empty;
+                    var details = e.Details ?? string.Empty;
+                    if (!string.IsNullOrWhiteSpace(sessionId))
+                    {
+                        return message.Contains(sessionId, StringComparison.OrdinalIgnoreCase)
+                            || details.Contains(sessionId, StringComparison.OrdinalIgnoreCase);
+                    }
+
+                    return message.Contains(hashPrefix, StringComparison.OrdinalIgnoreCase)
+                        || details.Contains(hashPrefix, StringComparison.OrdinalIgnoreCase);
+                });
+            }
+        }
 
         var list = filtered.ToList();
         if (list.Count > maxEntries)
@@ -2425,7 +2577,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         AddDebugLog(DebugLogLevel.Warn, "APPLY",
             $"Apply failed: {message.PlayerName} hash={shortHash}",
             uid: message.UserUID,
-            details: $"ApplicationId={message.ApplicationId}");
+            details: $"ApplicationId={message.ApplicationId} error={message.ErrorCode} {message.ErrorMessage}");
     }
 
     private void OnHubReconnecting(HubReconnectingMessage message)

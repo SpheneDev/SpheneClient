@@ -1152,7 +1152,8 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                     Details: ex.ToString()));
                 
                 // Publish failure message to notify other components
-                Mediator.Publish(new CharacterDataApplicationCompletedMessage(PlayerName ?? string.Empty, Pair.UserData.UID, applicationBase, false, charaData.DataHash?.Value));
+                Mediator.Publish(new CharacterDataApplicationCompletedMessage(PlayerName ?? string.Empty, Pair.UserData.UID, applicationBase, false, charaData.DataHash?.Value,
+                    Sphene.API.Dto.User.AcknowledgmentErrorCode.ApplyFailed, ex.Message));
             }
             finally
             {
@@ -1248,7 +1249,8 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                     $"Download failed (missing files={toDownloadReplacements.Count})",
                     Uid: Pair.UserData.UID,
                     Details: $"applicationBase={applicationBase}"));
-                Mediator.Publish(new CharacterDataApplicationCompletedMessage(PlayerName ?? string.Empty, Pair.UserData.UID, applicationBase, false, charaData.DataHash?.Value));
+                Mediator.Publish(new CharacterDataApplicationCompletedMessage(PlayerName ?? string.Empty, Pair.UserData.UID, applicationBase, false, charaData.DataHash?.Value,
+                    Sphene.API.Dto.User.AcknowledgmentErrorCode.DownloadFailed, $"Missing files after download attempts: {toDownloadReplacements.Count}"));
                 return;
             }
 
@@ -1485,7 +1487,8 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         catch (OperationCanceledException ex)
         {
             Logger.LogDebug("{tag} Apply cancelled: appId={appId} message={message}", SyncProgressTag, _applicationId, ex.Message);
-            Mediator.Publish(new CharacterDataApplicationCompletedMessage(PlayerName ?? string.Empty, Pair.UserData.UID, _applicationId, false, charaData.DataHash?.Value));
+            Mediator.Publish(new CharacterDataApplicationCompletedMessage(PlayerName ?? string.Empty, Pair.UserData.UID, _applicationId, false, charaData.DataHash?.Value,
+                Sphene.API.Dto.User.AcknowledgmentErrorCode.Timeout, ex.Message));
         }
         catch (Exception ex)
         {
@@ -1505,7 +1508,8 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             }
             
             // Publish message that character data application failed
-            Mediator.Publish(new CharacterDataApplicationCompletedMessage(PlayerName ?? string.Empty, Pair.UserData.UID, _applicationId, false, charaData.DataHash?.Value));
+            Mediator.Publish(new CharacterDataApplicationCompletedMessage(PlayerName ?? string.Empty, Pair.UserData.UID, _applicationId, false, charaData.DataHash?.Value,
+                Sphene.API.Dto.User.AcknowledgmentErrorCode.ApplyFailed, ex.Message));
         }
         finally
         {

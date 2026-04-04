@@ -6,6 +6,7 @@ using Sphene.Services.Mediator;
 using Sphene.Utils;
 using Sphene.WebAPI;
 using Sphene.WebAPI.Files;
+using Sphene.API.Data.Comparer;
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
 
@@ -22,17 +23,17 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
     private readonly SessionAcknowledgmentManager _sessionAcknowledgmentManager;
     private CharacterData? _lastCreatedData;
     private CharacterData? _uploadingCharacterData = null;
-    private readonly List<UserData> _previouslyVisiblePlayers = [];
+    private readonly HashSet<UserData> _previouslyVisiblePlayers = new(UserDataComparer.Instance);
     private Task<CharacterData>? _fileUploadTask = null;
-    private readonly HashSet<UserData> _usersToPushDataTo = [];
+    private readonly HashSet<UserData> _usersToPushDataTo = new(UserDataComparer.Instance);
     private readonly SemaphoreSlim _pushDataSemaphore = new(1, 1);
     private readonly CancellationTokenSource _runtimeCts = new();
     
     // Hash-based acknowledgment tracking
-    private readonly ConcurrentDictionary<UserData, string> _lastSentHashPerUser = new();
+    private readonly ConcurrentDictionary<UserData, string> _lastSentHashPerUser = new(UserDataComparer.Instance);
     
     // Delayed push tracking for newly connected users
-    private readonly Dictionary<UserData, DateTime> _delayedPushUsers = new();
+    private readonly Dictionary<UserData, DateTime> _delayedPushUsers = new(UserDataComparer.Instance);
     private readonly Timer _delayedPushTimer;
     private DateTime _nextOutgoingBatchPushUtc = DateTime.MinValue;
     private bool _hasPendingOutgoingBatchPush = false;
@@ -88,6 +89,8 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
             _previouslyVisiblePlayers.Clear();
             _lastSentHashPerUser.Clear();
             _refreshRequestCooldownByUid.Clear();
+            _delayedPushUsers.Clear();
+            _usersToPushDataTo.Clear();
         });
         Mediator.Subscribe<CharacterDataRefreshRequestedMessage>(this, msg =>
         {
@@ -195,9 +198,9 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
         if (!_dalamudUtil.GetIsPlayerPresent() || !_apiController.IsConnected) return;
 
         var allVisibleUsers = _pairManager.GetVisibleUsers();
-        var newVisibleUsers = allVisibleUsers.Except(_previouslyVisiblePlayers).ToList();
+        var newVisibleUsers = allVisibleUsers.Except(_previouslyVisiblePlayers, UserDataComparer.Instance).ToList();
         _previouslyVisiblePlayers.Clear();
-        _previouslyVisiblePlayers.AddRange(allVisibleUsers);
+        foreach (var u in allVisibleUsers) _previouslyVisiblePlayers.Add(u);
         if (newVisibleUsers.Count == 0) return;
 
         Logger.LogDebug("{tag} New users visible: users={users} scheduling delayed push",
@@ -278,7 +281,7 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
                 {
                     if (_usersToPushDataTo.Count == 0) return;
 
-                    var currentVisible = new HashSet<UserData>(_pairManager.GetVisibleUsers());
+                    var currentVisible = new HashSet<UserData>(_pairManager.GetVisibleUsers(), UserDataComparer.Instance);
                     var usersToSend = new List<UserData>();
                     var currentHash = dataToSend.DataHash.Value;
 
@@ -308,14 +311,26 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
                     }
 
                     var hashKey = currentHash;
-                    Logger.LogDebug("{tag} Ack reset before push: hash={hash}", SyncProgressTag, hashKey);
-                    _ = _apiController.UserUpdateAckYou(false);
+                    var requiresAck = usersToSend.Any(u =>
+                        forced
+                        || _pairManager.HasPendingAcknowledgmentForUser(u)
+                        || !_lastSentHashPerUser.TryGetValue(u, out var lastSentHash)
+                        || !string.Equals(lastSentHash, currentHash, StringComparison.Ordinal));
 
-                    _pairManager.SetPendingAcknowledgmentForSender([.. usersToSend], hashKey);
-                    _sessionAcknowledgmentManager.SetPendingAcknowledgmentForHashVersion([.. usersToSend], hashKey);
+                    if (requiresAck)
+                    {
+                        Logger.LogDebug("{tag} Ack pending before push: hash={hash}", SyncProgressTag, hashKey);
+                        _pairManager.SetPendingAcknowledgmentForSender([.. usersToSend], hashKey);
+                        _sessionAcknowledgmentManager.SetPendingAcknowledgmentForHashVersion([.. usersToSend], hashKey);
+                    }
+                    Mediator.Publish(new DebugLogEventMessage(
+                        LogLevel.Debug,
+                        "ACK",
+                        "Ack outgoing push",
+                        Details: $"hash={hashKey[..Math.Min(8, hashKey.Length)]} requiresAck={requiresAck} recipients={usersToSend.Count}"));
 
-                    Logger.LogDebug("{tag} Push send: hash={hash} ackKey={hashKey} users={users}", SyncProgressTag, dataToSend.DataHash, hashKey, string.Join(", ", usersToSend.Select(k => k.AliasOrUID)));
-                    await _apiController.PushCharacterData(dataToSend, [.. usersToSend], hashKey).ConfigureAwait(false);
+                    Logger.LogDebug("{tag} Push send: hash={hash} ackKey={hashKey} requiresAck={requiresAck} users={users}", SyncProgressTag, dataToSend.DataHash, hashKey, requiresAck, string.Join(", ", usersToSend.Select(k => k.AliasOrUID)));
+                    await _apiController.PushCharacterData(dataToSend, [.. usersToSend], hashKey, requiresAck).ConfigureAwait(false);
                     Logger.LogDebug("{tag} Push complete: hash={hash} users={users}", SyncProgressTag, dataToSend.DataHash, string.Join(", ", usersToSend.Select(k => k.AliasOrUID)));
 
                     foreach (var user in usersToSend)

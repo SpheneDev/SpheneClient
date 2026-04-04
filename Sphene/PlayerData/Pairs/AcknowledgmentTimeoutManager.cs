@@ -1,6 +1,8 @@
 using Microsoft.Extensions.Logging;
 using Sphene.API.Data;
+using Sphene.Services;
 using Sphene.Services.Mediator;
+using Sphene.SpheneConfiguration;
 using Sphene.WebAPI;
 using System.Collections.Concurrent;
 
@@ -13,30 +15,37 @@ public class AcknowledgmentTimeoutManager : DisposableMediatorSubscriberBase
     private readonly Timer _timeoutTimer;
     private readonly Lazy<ApiController> _apiController;
     private readonly Lazy<PairManager> _pairManager;
-    private const int TimeoutIntervalMs = 5000; // 5 seconds
     private const int InvalidHashTimeoutMs = 15000; // 15 seconds for invalid hash reapply
     private const int CheckIntervalMs = 5000; // Check every 5 seconds
+    private readonly DalamudUtilService _dalamudUtilService;
+    private readonly SpheneConfigService _configService;
+    private DateTime _lastPauseLogUtc = DateTime.MinValue;
 
     public AcknowledgmentTimeoutManager(ILogger<AcknowledgmentTimeoutManager> logger, 
-        SpheneMediator mediator, Lazy<ApiController> apiController, Lazy<PairManager> pairManager) 
+        SpheneMediator mediator, Lazy<ApiController> apiController, Lazy<PairManager> pairManager,
+        DalamudUtilService dalamudUtilService, SpheneConfigService configService) 
         : base(logger, mediator)
     {
         _apiController = apiController;
         _pairManager = pairManager;
+        _dalamudUtilService = dalamudUtilService;
+        _configService = configService;
         _timeoutTimer = new Timer(CheckTimeouts, null, CheckIntervalMs, CheckIntervalMs);
     }
 
     public void StartTimeout(string acknowledgmentId, UserData userData, string dataHash)
     {
-        var entry = new AcknowledgmentTimeoutEntry(acknowledgmentId, userData, dataHash, DateTimeOffset.Now);
-        _pendingTimeouts[acknowledgmentId] = entry;
+        var key = $"{acknowledgmentId}:{userData.UID}";
+        var entry = new AcknowledgmentTimeoutEntry(key, acknowledgmentId, userData, dataHash, DateTimeOffset.Now);
+        _pendingTimeouts[key] = entry;
         Logger.LogDebug("Started timeout tracking for acknowledgment {ackId} for user {user}", 
             acknowledgmentId, userData.AliasOrUID);
     }
 
-    public void CancelTimeout(string acknowledgmentId)
+    public void CancelTimeout(string acknowledgmentId, string userUid)
     {
-        if (_pendingTimeouts.TryRemove(acknowledgmentId, out var entry))
+        var key = $"{acknowledgmentId}:{userUid}";
+        if (_pendingTimeouts.TryRemove(key, out var entry))
         {
             Logger.LogDebug("Cancelled timeout tracking for acknowledgment {ackId} for user {user}", 
                 acknowledgmentId, entry.UserData.AliasOrUID);
@@ -71,7 +80,7 @@ public class AcknowledgmentTimeoutManager : DisposableMediatorSubscriberBase
         
         // Check regular acknowledgment timeouts
         var expiredEntries = _pendingTimeouts.Values
-            .Where(entry => now - entry.StartTime >= TimeSpan.FromMilliseconds(TimeoutIntervalMs))
+            .Where(entry => now - entry.StartTime >= TimeSpan.FromSeconds(Math.Clamp(_configService.Current.AcknowledgmentTimeoutSeconds, 5, 600)))
             .ToList();
 
         foreach (var entry in expiredEntries)
@@ -116,7 +125,7 @@ public class AcknowledgmentTimeoutManager : DisposableMediatorSubscriberBase
         if (pair == null || !pair.HasPendingAcknowledgment || !string.Equals(pair.LastAcknowledgmentId, entry.AcknowledgmentId, StringComparison.Ordinal))
         {
             // Acknowledgment was already processed or pair no longer exists
-            _pendingTimeouts.TryRemove(entry.AcknowledgmentId, out _);
+            _pendingTimeouts.TryRemove(entry.Key, out _);
             return;
         }
 
@@ -124,50 +133,31 @@ public class AcknowledgmentTimeoutManager : DisposableMediatorSubscriberBase
         {
             if (ShouldPauseTimeoutProcessing())
             {
-                _pendingTimeouts[entry.AcknowledgmentId] = entry with { StartTime = DateTimeOffset.Now };
+                _pendingTimeouts[entry.Key] = entry with { StartTime = DateTimeOffset.Now };
                 return;
             }
 
-            // Validate the current hash with the server
-            var currentUserUID = _apiController.Value.UID;
-            if (string.IsNullOrEmpty(currentUserUID))
-            {
-                Logger.LogWarning("Cannot validate hash - current user UID is null");
-                _pendingTimeouts.TryRemove(entry.AcknowledgmentId, out _);
-                return;
-            }
+            Logger.LogWarning("Acknowledgment timed out: ackId={ackId} user={user}", entry.AcknowledgmentId, entry.UserData.AliasOrUID);
+            var context = $"ctx: localInDuty={_dalamudUtilService.IsInDuty} localInCombat={_dalamudUtilService.IsInCombatOrPerforming}";
+            await pair.UpdateAcknowledgmentStatus(entry.AcknowledgmentId, false, DateTimeOffset.UtcNow,
+                Sphene.API.Dto.User.AcknowledgmentErrorCode.NotArrivedTimeout,
+                $"No acknowledgment received within timeout window ({context})").ConfigureAwait(false);
+            Mediator.Publish(new DebugLogEventMessage(
+                LogLevel.Warning,
+                "ACK",
+                "Ack timeout",
+                Uid: entry.UserData.UID,
+                Details: $"ackId={entry.AcknowledgmentId[..Math.Min(8, entry.AcknowledgmentId.Length)]} {context}"));
 
-            var response = await _apiController.Value.ValidateCharaDataHash(currentUserUID, entry.DataHash).ConfigureAwait(false);
-            if (response != null && response.IsValid)
-            {
-                Logger.LogInformation("Hash validation successful for expired acknowledgment {ackId} - auto-completing acknowledgment for user {user}", 
-                    entry.AcknowledgmentId, entry.UserData.AliasOrUID);
-
-                // Hash is still valid, automatically complete the acknowledgment
-                await pair.UpdateAcknowledgmentStatus(entry.DataHash, true, DateTimeOffset.Now).ConfigureAwait(false);
-                
-                // Remove from timeout tracking
-                _pendingTimeouts.TryRemove(entry.AcknowledgmentId, out _);
-            }
-            else
-            {
-                Logger.LogDebug("Hash validation failed for expired acknowledgment {ackId} - keeping pending for user {user}", 
-                    entry.AcknowledgmentId, entry.UserData.AliasOrUID);
-                
-                // Hash is no longer valid, start invalid hash timeout for automatic reapply
-                StartInvalidHashTimeout(entry.UserData.UID, entry.DataHash);
-                
-                // Remove from timeout tracking but keep acknowledgment pending
-                _pendingTimeouts.TryRemove(entry.AcknowledgmentId, out _);
-            }
+            _pendingTimeouts.TryRemove(entry.Key, out _);
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Failed to validate hash for expired acknowledgment {ackId} for user {user}", 
+            Logger.LogError(ex, "Failed to handle expired acknowledgment {ackId} for user {user}", 
                 entry.AcknowledgmentId, entry.UserData.AliasOrUID);
             
             // Remove from timeout tracking on error
-            _pendingTimeouts.TryRemove(entry.AcknowledgmentId, out _);
+            _pendingTimeouts.TryRemove(entry.Key, out _);
         }
     }
 
@@ -227,6 +217,7 @@ public class AcknowledgmentTimeoutManager : DisposableMediatorSubscriberBase
     }
 
     private sealed record AcknowledgmentTimeoutEntry(
+        string Key,
         string AcknowledgmentId, 
         UserData UserData, 
         string DataHash, 
@@ -240,6 +231,20 @@ public class AcknowledgmentTimeoutManager : DisposableMediatorSubscriberBase
     private bool ShouldPauseTimeoutProcessing()
     {
         var apiController = _apiController.Value;
+        if (_dalamudUtilService.IsInDuty || _dalamudUtilService.IsInCombatOrPerforming)
+        {
+            if (_lastPauseLogUtc.AddSeconds(30) < DateTime.UtcNow)
+            {
+                _lastPauseLogUtc = DateTime.UtcNow;
+                Mediator.Publish(new DebugLogEventMessage(
+                    LogLevel.Debug,
+                    "ACK",
+                    "Ack timeout processing paused",
+                    Details: $"ctx: localInDuty={_dalamudUtilService.IsInDuty} localInCombat={_dalamudUtilService.IsInCombatOrPerforming}"));
+            }
+            return true;
+        }
+
         return apiController.IsTransientDisconnectInProgress || !apiController.IsConnected;
     }
 

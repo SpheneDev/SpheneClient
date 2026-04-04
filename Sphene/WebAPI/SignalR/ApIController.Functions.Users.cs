@@ -13,13 +13,13 @@ namespace Sphene.WebAPI;
 #pragma warning disable MA0040
 public partial class ApiController
 {
-    public async Task PushCharacterData(CharacterData data, List<UserData> visibleCharacters, string? acknowledgmentId = null)
+    public async Task PushCharacterData(CharacterData data, List<UserData> visibleCharacters, string? acknowledgmentId = null, bool requiresAcknowledgment = true)
     {
         if (!IsConnected) return;
 
         try
         {
-            await PushCharacterDataInternal(data, [.. visibleCharacters], acknowledgmentId).ConfigureAwait(false);
+            await PushCharacterDataInternal(data, [.. visibleCharacters], acknowledgmentId, requiresAcknowledgment).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -257,7 +257,7 @@ public partial class ApiController
         }
     }
 
-    private async Task PushCharacterDataInternal(CharacterData character, List<UserData> visibleCharacters, string? acknowledgmentId = null)
+    private async Task PushCharacterDataInternal(CharacterData character, List<UserData> visibleCharacters, string? acknowledgmentId = null, bool requiresAcknowledgment = true)
     {
         Logger.LogDebug("Pushing character data for {hash} to {charas} with acknowledgment ID {ackId}", character.DataHash.Value, string.Join(", ", visibleCharacters.Select(c => c.AliasOrUID)), acknowledgmentId);
         StringBuilder sb = new();
@@ -279,7 +279,7 @@ public partial class ApiController
             Logger.LogDebug("Attaching Census Data: {data}", censusDto);
         }
 
-        await UserPushData(new(visibleCharacters, character, censusDto)).ConfigureAwait(false);
+        await UserPushData(new(visibleCharacters, character, censusDto, requiresAcknowledgment)).ConfigureAwait(false);
     }
 
     public async Task UserAckFileTransfer(FileTransferAckMessage msg)

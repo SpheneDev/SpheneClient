@@ -13,5 +13,11 @@ public enum AcknowledgmentErrorCode
     DataCorrupted = 8,
     InsufficientPermissions = 9,
     ServiceUnavailable = 10,
-    HashVerificationFailed = 11
+    HashVerificationFailed = 11,
+    DownloadFailed = 12,
+    ApplyFailed = 13,
+    MismatchFailed = 14,
+    CreationFailed = 15,
+    PushFailed = 16,
+    NotArrivedTimeout = 17
 }

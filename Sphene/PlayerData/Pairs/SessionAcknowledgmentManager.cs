@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using Sphene.API.Data;
 using Sphene.API.Data.Comparer;
+using Sphene.API.Dto.User;
 using Sphene.Services.Mediator;
 using Sphene.Services;
 using Sphene.Services.Events;
@@ -21,6 +22,28 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
     
     // Thread-safe storage for latest acknowledgment per user pair with timestamps
     private readonly ConcurrentDictionary<string, LatestAcknowledgmentInfo> _userLatestAcknowledgments = new(StringComparer.Ordinal);
+
+    private long _resultTotal = 0;
+    private long _resultSuccess = 0;
+    private long _resultFail = 0;
+    private long _resultResponseTotalMs = 0;
+    private long _resultResponseCount = 0;
+    private readonly ConcurrentDictionary<Sphene.API.Dto.User.AcknowledgmentErrorCode, long> _resultErrorCounts = new();
+
+    public readonly record struct AckResultMetrics(long Total, long Success, long Fail, double AverageResponseTimeMs,
+        IReadOnlyDictionary<Sphene.API.Dto.User.AcknowledgmentErrorCode, long> ErrorCounts);
+
+    public AckResultMetrics GetResultMetrics()
+    {
+        var total = Interlocked.Read(ref _resultTotal);
+        var success = Interlocked.Read(ref _resultSuccess);
+        var fail = Interlocked.Read(ref _resultFail);
+        var totalMs = Interlocked.Read(ref _resultResponseTotalMs);
+        var count = Interlocked.Read(ref _resultResponseCount);
+        var avg = count > 0 ? (double)totalMs / count : 0d;
+
+        return new AckResultMetrics(total, success, fail, avg, new Dictionary<Sphene.API.Dto.User.AcknowledgmentErrorCode, long>(_resultErrorCounts));
+    }
     
     // Helper class to store latest acknowledgment info per user
     private sealed class LatestAcknowledgmentInfo
@@ -189,8 +212,11 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
     
     
     // Process received acknowledgment for hash-based system
-    public bool ProcessReceivedAcknowledgment(string hashVersionKey, UserData acknowledgingUser)
+    public bool ProcessReceivedAcknowledgment(CharacterDataAcknowledgmentDto acknowledgmentDto)
     {
+        var hashVersionKey = acknowledgmentDto.DataHash;
+        var acknowledgingUser = acknowledgmentDto.User;
+
         if (string.IsNullOrEmpty(hashVersionKey))
         {
             _logger.LogWarning("Invalid hash version key: {hashVersionKey}", hashVersionKey);
@@ -207,22 +233,49 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
             return false;
         }
         
+        var now = DateTime.UtcNow;
+        var responseMs = Math.Max(0, (long)(now - latestInfo.CreatedAt).TotalMilliseconds);
+        Interlocked.Increment(ref _resultTotal);
+        Interlocked.Add(ref _resultResponseTotalMs, responseMs);
+        Interlocked.Increment(ref _resultResponseCount);
+        if (acknowledgmentDto.Success)
+        {
+            Interlocked.Increment(ref _resultSuccess);
+        }
+        else
+        {
+            Interlocked.Increment(ref _resultFail);
+            _resultErrorCounts.AddOrUpdate(acknowledgmentDto.ErrorCode, 1, (_, old) => old + 1);
+        }
+
         // Remove the acknowledgment as it's been received
         _userLatestAcknowledgments.TryRemove(userKey, out _);
         
-        // Update the pair's acknowledgment status to show success
+        // Update the pair's acknowledgment status
         var pair = _getPairFunc(acknowledgingUser);
         if (pair != null)
         {
-            pair.UpdateAcknowledgmentStatus(hashVersionKey, true, DateTimeOffset.UtcNow).GetAwaiter().GetResult();
-            _logger.LogDebug("Updated pair acknowledgment status for user {user} - HashVersion: {hashVersionKey}", acknowledgingUser.AliasOrUID, hashVersionKey);
+            pair.UpdateAcknowledgmentStatus(hashVersionKey, acknowledgmentDto.Success, DateTimeOffset.UtcNow,
+                    acknowledgmentDto.ErrorCode, acknowledgmentDto.ErrorMessage)
+                .GetAwaiter().GetResult();
+            pair.SetOutgoingAcknowledgmentContext(hashVersionKey, acknowledgmentDto.SessionId);
+            _logger.LogDebug("Updated pair acknowledgment status for user {user} - HashVersion: {hashVersionKey} success={success} errorCode={errorCode}",
+                acknowledgingUser.AliasOrUID, hashVersionKey, acknowledgmentDto.Success, acknowledgmentDto.ErrorCode);
+            Mediator.Publish(new DebugLogEventMessage(
+                acknowledgmentDto.Success ? LogLevel.Information : LogLevel.Warning,
+                "ACK",
+                acknowledgmentDto.Success ? "Ack received" : "Ack received (fail)",
+                Uid: acknowledgingUser.UID,
+                Details: $"hash={hashVersionKey[..Math.Min(8, hashVersionKey.Length)]} code={acknowledgmentDto.ErrorCode} msg={acknowledgmentDto.ErrorMessage ?? "-"} session={acknowledgmentDto.SessionId ?? "-"}"));
             
             // Add success notification
             _messageService.AddTaggedMessage(
-                $"ack_success_{hashVersionKey}_{acknowledgingUser.UID}",
-                $"Acknowledgment received from {acknowledgingUser.AliasOrUID}",
-                NotificationType.Success,
-                "Acknowledgment Received",
+                $"ack_result_{hashVersionKey}_{acknowledgingUser.UID}",
+                acknowledgmentDto.Success
+                    ? $"Acknowledgment received from {acknowledgingUser.AliasOrUID}"
+                    : $"Acknowledgment failed from {acknowledgingUser.AliasOrUID}",
+                acknowledgmentDto.Success ? NotificationType.Success : NotificationType.Warning,
+                acknowledgmentDto.Success ? "Acknowledgment Received" : "Acknowledgment Failed",
                 TimeSpan.FromSeconds(3)
             );
             
@@ -249,9 +302,9 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
         // Add completion notification
         _messageService.AddTaggedMessage(
             $"ack_complete_{hashVersionKey}",
-            "Acknowledgment received successfully",
-            NotificationType.Success,
-            "Acknowledgment Complete",
+            acknowledgmentDto.Success ? "Acknowledgment received successfully" : "Acknowledgment failed",
+            acknowledgmentDto.Success ? NotificationType.Success : NotificationType.Warning,
+            acknowledgmentDto.Success ? "Acknowledgment Complete" : "Acknowledgment Failed",
             TimeSpan.FromSeconds(4)
         );
         
@@ -363,70 +416,11 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
         }
     }
 
-    public bool ResolvePendingAcknowledgmentFromRemoteAckYou(UserData user, string? acknowledgmentId)
-    {
-        try
-        {
-            var userKey = user.UID;
-            if (string.IsNullOrEmpty(userKey))
-            {
-                Logger.LogWarning("ResolvePendingAcknowledgmentFromRemoteAckYou called with empty user UID");
-                return false;
-            }
-
-            if (!_userLatestAcknowledgments.TryGetValue(userKey, out var latestInfo))
-            {
-                return false;
-            }
-
-            if (!string.IsNullOrEmpty(acknowledgmentId) &&
-                !string.Equals(latestInfo.AcknowledgmentId, acknowledgmentId, StringComparison.Ordinal))
-            {
-                return false;
-            }
-
-            if (!_userLatestAcknowledgments.TryRemove(userKey, out var removedInfo))
-            {
-                return false;
-            }
-
-            _messageService.CleanTaggedMessages($"ack_{removedInfo.AcknowledgmentId}");
-
-            Mediator.Publish(new AcknowledgmentUiRefreshMessage(
-                AcknowledgmentId: removedInfo.AcknowledgmentId,
-                User: user
-            ));
-
-            Mediator.Publish(new RefreshUiMessage());
-            return true;
-        }
-        catch (Exception ex)
-        {
-            Logger.LogDebug(ex, "Failed to resolve pending acknowledgment for user {user} from remote AckYou", user.AliasOrUID);
-            return false;
-        }
-    }
-    
-    // Clear pending status from pair when acknowledgment is removed
-    private async Task ClearPendingStatusFromPair(UserData user, string acknowledgmentId)
-    {
-        var pair = _getPairFunc(user);
-        if (pair != null)
-        {
-            await pair.ClearPendingAcknowledgment(acknowledgmentId, _messageService).ConfigureAwait(false);
-            _logger.LogDebug("Cleared pending acknowledgment {ackId} from pair for user {user}", acknowledgmentId, user.AliasOrUID);
-        }
-        else
-        {
-            _logger.LogWarning("Could not find pair for user {user} to clear pending acknowledgment {ackId}", user.AliasOrUID, acknowledgmentId);
-        }
-    }
-
     // Clean up old pending acknowledgments based on age
     public async Task CleanupOldPendingAcknowledgments(TimeSpan maxAge)
     {
         var cutoffTime = DateTime.UtcNow.Subtract(maxAge);
-        var toRemove = new List<(string userKey, string ackId, UserData user)>();
+        var toRemove = new List<(string userKey, string ackId, UserData user, DateTime createdAt)>();
         
         foreach (var userKvp in _userLatestAcknowledgments)
         {
@@ -440,25 +434,34 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
                 // Since we don't have direct access to all users, we'll use the acknowledgment ID to find the user
                 // This is a simplified approach - in practice you might need a different way to resolve users
                 var dummyUser = new UserData(userKey);
-                toRemove.Add((userKey, latestInfo.AcknowledgmentId, dummyUser));
+                toRemove.Add((userKey, latestInfo.AcknowledgmentId, dummyUser, latestInfo.CreatedAt));
                 _logger.LogInformation("Marking old pending acknowledgment {ackId} for user {user} for removal (age: {age}s)", 
                     latestInfo.AcknowledgmentId, userKey, (DateTime.UtcNow - latestInfo.CreatedAt).TotalSeconds);
             }
         }
         
         // Remove old acknowledgments and clear pair status
-        foreach (var (userKey, ackId, user) in toRemove)
+        foreach (var (userKey, ackId, user, createdAt) in toRemove)
         {
             if (_userLatestAcknowledgments.TryRemove(userKey, out _))
             {
+                var now = DateTime.UtcNow;
+                var responseMs = Math.Max(0, (long)(now - createdAt).TotalMilliseconds);
+                Interlocked.Increment(ref _resultTotal);
+                Interlocked.Increment(ref _resultFail);
+                Interlocked.Add(ref _resultResponseTotalMs, responseMs);
+                Interlocked.Increment(ref _resultResponseCount);
+                _resultErrorCounts.AddOrUpdate(Sphene.API.Dto.User.AcknowledgmentErrorCode.NotArrivedTimeout, 1, (_, old) => old + 1);
+
                 // Clear the pending acknowledgment from pair with timeout notification
                 var pair = _getPairFunc(user);
                 if (pair != null && string.Equals(pair.LastAcknowledgmentId, ackId, StringComparison.Ordinal))
                 {
-                    pair.ClearPendingAcknowledgmentForce(_messageService);
+                    pair.UpdateAcknowledgmentStatus(ackId, false, DateTimeOffset.UtcNow,
+                            Sphene.API.Dto.User.AcknowledgmentErrorCode.NotArrivedTimeout,
+                            "Acknowledgment timed out")
+                        .GetAwaiter().GetResult();
                 }
-                
-                await ClearPendingStatusFromPair(user, ackId).ConfigureAwait(false);
                 _logger.LogInformation("Removed old pending acknowledgment {ackId} for user {user}", ackId, userKey);
                 
                 // Clean up related notifications
@@ -548,25 +551,36 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
         }
         
         // Find and remove any pending acknowledgments with this hash+version
-        var timedOutUsers = new List<string>();
+        var timedOutUsers = new List<(string UserKey, DateTime CreatedAt)>();
         foreach (var kvp in _userLatestAcknowledgments)
         {
             if (string.Equals(kvp.Value.AcknowledgmentId, hashVersionKey, StringComparison.Ordinal))
             {
-                timedOutUsers.Add(kvp.Key);
+                timedOutUsers.Add((kvp.Key, kvp.Value.CreatedAt));
             }
         }
         
-        foreach (var userKey in timedOutUsers)
+        foreach (var (userKey, createdAt) in timedOutUsers)
         {
             if (_userLatestAcknowledgments.TryRemove(userKey, out _))
             {
+                var now = DateTime.UtcNow;
+                var responseMs = Math.Max(0, (long)(now - createdAt).TotalMilliseconds);
+                Interlocked.Increment(ref _resultTotal);
+                Interlocked.Increment(ref _resultFail);
+                Interlocked.Add(ref _resultResponseTotalMs, responseMs);
+                Interlocked.Increment(ref _resultResponseCount);
+                _resultErrorCounts.AddOrUpdate(Sphene.API.Dto.User.AcknowledgmentErrorCode.NotArrivedTimeout, 1, (_, old) => old + 1);
+
                 // Try to find the user and update pair status
                 var userData = new UserData(userKey, null);
                 var pair = _getPairFunc(userData);
                 if (pair != null)
                 {
-                    pair.UpdateAcknowledgmentStatus(hashVersionKey, false, DateTimeOffset.UtcNow).GetAwaiter().GetResult();
+                    pair.UpdateAcknowledgmentStatus(hashVersionKey, false, DateTimeOffset.UtcNow,
+                            Sphene.API.Dto.User.AcknowledgmentErrorCode.NotArrivedTimeout,
+                            "Acknowledgment timed out")
+                        .GetAwaiter().GetResult();
                     _logger.LogWarning("Updated pair acknowledgment status for timeout - User: {user}, HashVersion: {hashVersionKey}", userKey, hashVersionKey);
                     
                     // Add timeout notification

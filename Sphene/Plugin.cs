@@ -282,7 +282,8 @@ public sealed class Plugin : IDalamudPlugin
             collection.AddSingleton<Lazy<PairManager>>(s => new Lazy<PairManager>(() => s.GetRequiredService<PairManager>()));
             collection.AddSingleton<Lazy<AreaBoundSyncshellService>>(s => new Lazy<AreaBoundSyncshellService>(() => s.GetRequiredService<AreaBoundSyncshellService>()));
             collection.AddSingleton(s => new AcknowledgmentTimeoutManager(s.GetRequiredService<ILogger<AcknowledgmentTimeoutManager>>(),
-                s.GetRequiredService<SpheneMediator>(), s.GetRequiredService<Lazy<ApiController>>(), s.GetRequiredService<Lazy<PairManager>>()));
+                s.GetRequiredService<SpheneMediator>(), s.GetRequiredService<Lazy<ApiController>>(), s.GetRequiredService<Lazy<PairManager>>(),
+                s.GetRequiredService<DalamudUtilService>(), s.GetRequiredService<SpheneConfigService>()));
             collection.AddSingleton(s => new PairManager(s.GetRequiredService<ILogger<PairManager>>(), s.GetRequiredService<PairFactory>(),
                 s.GetRequiredService<SpheneConfigService>(), s.GetRequiredService<SpheneMediator>(), contextMenu,
                 s.GetRequiredService<Lazy<ApiController>>(), s.GetRequiredService<SessionAcknowledgmentManager>(), s.GetRequiredService<MessageService>(),
