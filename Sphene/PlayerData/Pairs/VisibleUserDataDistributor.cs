@@ -332,15 +332,7 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
 
                     if (legacyRecipients.Count > 0)
                     {
-                        foreach (var legacy in legacyRecipients)
-                        {
-                            if (_pairManager.GetPairForUser(legacy) is { } legacyPair)
-                            {
-                                _ = legacyPair.UpdateAcknowledgmentStatus(hashKey, true, DateTimeOffset.UtcNow,
-                                    Sphene.API.Dto.User.AcknowledgmentErrorCode.None,
-                                    "Legacy client (<= 1.1.13.1) - no acknowledgment expected");
-                            }
-                        }
+                        _pairManager.SetPendingAcknowledgmentForSender([.. legacyRecipients], hashKey);
                     }
 
                     if (requiresAck)

@@ -40,6 +40,8 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
     private readonly VisibilityGateService _visibilityGateService;
     private readonly PairCharacterCacheConfigService _pairCharacterCacheConfigService;
     private readonly DalamudUtilService _dalamudUtilService;
+    private const int LegacyAckAssumeSuccessSeconds = 6;
+    private readonly ConcurrentDictionary<string, Timer> _legacyAckAssumeSuccessTimers = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _pendingOfflineGrace = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _pendingOfflineCharacterDataPurge = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, OnlineUserIdentDto> _pendingOnlineDtos = new(StringComparer.Ordinal);
@@ -1226,9 +1228,8 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
             {
                 if (pair.IsLegacyAcknowledgmentClient)
                 {
-                    _ = pair.UpdateAcknowledgmentStatus(acknowledgmentId, true, DateTimeOffset.UtcNow,
-                        Sphene.API.Dto.User.AcknowledgmentErrorCode.None,
-                        "Legacy client (<= 1.1.13.1) - no acknowledgment expected");
+                    _ = pair.SetPendingAcknowledgment(acknowledgmentId);
+                    ScheduleLegacyAssumedSuccess(pair.UserData.UID, acknowledgmentId);
                 }
                 else
                 {
@@ -1253,6 +1254,57 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         }
 
         Mediator.Publish(new RefreshUiMessage());
+    }
+
+    private void ScheduleLegacyAssumedSuccess(string? userUid, string acknowledgmentId)
+    {
+        if (string.IsNullOrWhiteSpace(userUid) || string.IsNullOrWhiteSpace(acknowledgmentId))
+        {
+            return;
+        }
+
+        var key = userUid;
+        var newTimer = new Timer(_ =>
+        {
+            try
+            {
+                var pair = GetPairByUID(userUid);
+                if (pair == null)
+                {
+                    return;
+                }
+
+                if (!pair.IsLegacyAcknowledgmentClient)
+                {
+                    return;
+                }
+
+                if (!pair.HasPendingAcknowledgment || !string.Equals(pair.LastAcknowledgmentId, acknowledgmentId, StringComparison.Ordinal))
+                {
+                    return;
+                }
+
+                _acknowledgmentTimeoutManager.CancelTimeout(acknowledgmentId, userUid);
+                pair.UpdateAcknowledgmentStatus(acknowledgmentId, true, DateTimeOffset.UtcNow).GetAwaiter().GetResult();
+            }
+            catch (Exception ex)
+            {
+                Logger.LogDebug(ex, "Legacy ack auto-success failed for uid={uid} ackId={ackId}", userUid, acknowledgmentId);
+            }
+            finally
+            {
+                if (_legacyAckAssumeSuccessTimers.TryRemove(key, out var t))
+                {
+                    t.Dispose();
+                }
+            }
+        }, null, TimeSpan.FromSeconds(LegacyAckAssumeSuccessSeconds), Timeout.InfiniteTimeSpan);
+
+        _legacyAckAssumeSuccessTimers.AddOrUpdate(key, newTimer, (_, oldTimer) =>
+        {
+            oldTimer.Dispose();
+            return newTimer;
+        });
     }
 
     public bool HasPendingAcknowledgmentForUser(UserData userData)
