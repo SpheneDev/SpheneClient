@@ -546,7 +546,9 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
 
     private void DrawLeftSide()
     {
-        string userPairText = string.Empty;
+        var tooltipTitle = _pair.UserData.AliasOrUID;
+        string? tooltipMeta = null;
+        var tooltipLines = new List<string>(4);
         var showUserPairTooltip = false;
 
         ImGui.AlignTextToFramePadding();
@@ -561,7 +563,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
             using var _ = ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.DalamudYellow);
             _uiSharedService.IconText(FontAwesomeIcon.PauseCircle);
             showUserPairTooltip = ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled);
-            userPairText = _pair.UserData.AliasOrUID + " is paused";
+            tooltipLines.Add("Paused");
         }
         else if (!_pair.IsOnline)
         {
@@ -571,7 +573,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
                 : (_pair.IndividualPairStatus == API.Data.Enum.IndividualPairStatus.Bidirectional
                     ? FontAwesomeIcon.User : FontAwesomeIcon.Users));
             showUserPairTooltip = ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled);
-            userPairText = _pair.UserData.AliasOrUID + " is offline";
+            tooltipLines.Add("Offline");
         }
         else if (isVisibleForIcon)
         {
@@ -593,8 +595,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
             var icon = (_uiSharedService.IsInGpose || _pair.IsInGpose) ? FontAwesomeIcon.Camera : FontAwesomeIcon.Eye;
             _uiSharedService.IconText(icon, iconColor);
             showUserPairTooltip = ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled);
-            
-            userPairText = _pair.UserData.AliasOrUID + " is visible: " + _pair.PlayerName + Environment.NewLine + "Click to target this player";
+            tooltipLines.Add(string.IsNullOrWhiteSpace(_pair.PlayerName) ? "Visible" : $"Visible: {_pair.PlayerName}");
             
             if (ImGui.IsItemClicked())
             {
@@ -608,14 +609,14 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
             {
                 _uiSharedService.IconText(FontAwesomeIcon.Camera);
                 showUserPairTooltip = ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled);
-                userPairText = _pair.UserData.AliasOrUID + " is in GPose" + Environment.NewLine + "No data is shared while in GPose";
+                tooltipLines.Add("GPose (no data shared)");
             }
             else
             {
                 _uiSharedService.IconText(_pair.IndividualPairStatus == API.Data.Enum.IndividualPairStatus.Bidirectional
                     ? FontAwesomeIcon.User : FontAwesomeIcon.Users);
                 showUserPairTooltip = ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled);
-                userPairText = _pair.UserData.AliasOrUID + " is online";
+                tooltipLines.Add("Online");
             }
         }
 
@@ -660,73 +661,68 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
 
         if (_pair.IndividualPairStatus == API.Data.Enum.IndividualPairStatus.OneSided)
         {
-            userPairText += UiSharedService.TooltipSeparator + "One-sided individual pair";
+            tooltipLines.Add("One-sided individual pair");
         }
         else if (_pair.IndividualPairStatus == API.Data.Enum.IndividualPairStatus.Bidirectional)
         {
-            userPairText += UiSharedService.TooltipSeparator + "You are directly Paired";
+            tooltipLines.Add("Direct pair");
+        }
+        else if (_syncedGroups.Any())
+        {
+            if (_syncedGroups.Count == 1)
+            {
+                var entry = _syncedGroups[0];
+                var groupNote = _serverConfigurationManager.GetNoteForGid(entry.GID);
+                var groupString = string.IsNullOrEmpty(groupNote) ? entry.GroupAliasOrGID : $"{groupNote} ({entry.GroupAliasOrGID})";
+                tooltipLines.Add($"Syncshell: {groupString}");
+            }
+            else
+            {
+                tooltipLines.Add($"Syncshells: {_syncedGroups.Count}");
+            }
         }
 
-        if (_pair.IsOnline && !string.IsNullOrWhiteSpace(UserPair.RemoteClientVersion))
+        if (!string.IsNullOrWhiteSpace(UserPair.RemoteClientVersion))
         {
-            var remoteClientVersion = UserPair.RemoteClientVersion;
-            if (Version.TryParse(remoteClientVersion, out var parsedRemoteClientVersion))
-            {
-                var normalizedVersion = parsedRemoteClientVersion.Build >= 0
-                    ? $"{parsedRemoteClientVersion.Major}.{parsedRemoteClientVersion.Minor}.{parsedRemoteClientVersion.Build}"
-                    : $"{parsedRemoteClientVersion.Major}.{parsedRemoteClientVersion.Minor}";
-                if (parsedRemoteClientVersion.Revision >= 0)
-                    remoteClientVersion = $"{normalizedVersion} rev.{parsedRemoteClientVersion.Revision}";
-                else
-                    remoteClientVersion = normalizedVersion;
-            }
-
-            userPairText += UiSharedService.TooltipSeparator + $"Client Version: {remoteClientVersion}";
+            tooltipMeta = $"v{FormatRemoteClientVersion(UserPair.RemoteClientVersion)}";
         }
 
         if (_pair.LastAppliedDataBytes >= 0)
         {
-            userPairText += UiSharedService.TooltipSeparator;
-            userPairText += ((!_pair.IsPaired) ? "(Last) " : string.Empty) + "Mods Info" + Environment.NewLine;
-            userPairText += "Files Size: " + UiSharedService.ByteToString(_pair.LastAppliedDataBytes, true);
+            var labelPrefix = _pair.IsPaired ? string.Empty : "Last ";
+            tooltipLines.Add($"{labelPrefix}Mods: {UiSharedService.ByteToString(_pair.LastAppliedDataBytes, true)}");
+
             if (_pair.LastAppliedApproximateVRAMBytes >= 0)
             {
-                userPairText += Environment.NewLine + "Approx. VRAM Usage: " + UiSharedService.ByteToString(_pair.LastAppliedApproximateVRAMBytes, true);
+                tooltipLines.Add($"VRAM: {UiSharedService.ByteToString(_pair.LastAppliedApproximateVRAMBytes, true)}");
             }
+
             if (_pair.LastAppliedDataTris >= 0)
             {
-                userPairText += Environment.NewLine + "Approx. Triangle Count (excl. Vanilla): "
-                    + (_pair.LastAppliedDataTris > 1000 ? (_pair.LastAppliedDataTris / 1000d).ToString("0.0'k'") : _pair.LastAppliedDataTris);
+                tooltipLines.Add($"Tris: {FormatTriangleCountCompact(_pair.LastAppliedDataTris)}");
             }
         }
 
-        // Add synchronization status information - only show for mutually visible pairs
         if (_pair.IsOnline && _pair.IsMutuallyVisible && !suppressAckUi)
         {
             var incoming = _pair.GetIncomingAckV3State();
             var outgoing = _pair.GetOutgoingAckV3State();
-            userPairText += UiSharedService.TooltipSeparator + "Sync Status";
-            userPairText += Environment.NewLine + FormatSyncStateLine("You → Them", outgoing, isOutgoing: true);
-            userPairText += Environment.NewLine + FormatSyncStateLine("Them → You", incoming, isOutgoing: false);
+            if (incoming.Outcome != Pair.AckV3Outcome.Success || outgoing.Outcome != Pair.AckV3Outcome.Success)
+            {
+                var summary = GetCompactSyncSummary(incoming, outgoing);
+                if (!string.IsNullOrWhiteSpace(summary))
+                {
+                    tooltipLines.Add(summary);
+                }
+            }
         }
 
         if (_pair.IsInDuty)
         {
-            userPairText += UiSharedService.TooltipSeparator + "In duty: sync display is hidden.";
+            tooltipLines.Add("In duty (sync hidden)");
         }
 
-        if (_syncedGroups.Any())
-        {
-            userPairText += UiSharedService.TooltipSeparator + string.Join(Environment.NewLine,
-                _syncedGroups.Select(g =>
-                {
-                    var groupNote = _serverConfigurationManager.GetNoteForGid(g.GID);
-                    var groupString = string.IsNullOrEmpty(groupNote) ? g.GroupAliasOrGID : $"{groupNote} ({g.GroupAliasOrGID})";
-                    return "Paired through " + groupString;
-                }));
-        }
-
-        DrawTooltipForHoveredItem(showUserPairTooltip, userPairText);
+        DrawTooltipForHoveredItem(showUserPairTooltip, tooltipTitle, tooltipMeta, tooltipLines);
 
         if (_performanceConfigService.Current.ShowPerformanceIndicator
             && !_performanceConfigService.Current.UIDsToIgnore
@@ -759,17 +755,6 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         }
 
         ImGui.SameLine();
-    }
-
-    private static string FormatSyncStateLine(string label, Pair.AckV3State state, bool isOutgoing)
-    {
-        return state.Outcome switch
-        {
-            Pair.AckV3Outcome.Success => $"{label}: Up to date",
-            Pair.AckV3Outcome.Pending => isOutgoing ? $"{label}: Waiting for confirmation..." : $"{label}: Applying...",
-            Pair.AckV3Outcome.Fail => $"{label}: Failed - {GetFriendlyAckFailureReason(state.ErrorCode, state.ErrorMessage)}",
-            _ => $"{label}: Unknown"
-        };
     }
 
     private static string GetFriendlyAckFailureReason(Sphene.API.Dto.User.AcknowledgmentErrorCode code, string? message)
@@ -828,29 +813,98 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         return $"{baseReason} {cleaned}";
     }
 
-    private static void DrawTooltipForHoveredItem(bool isHovered, string text)
+    private static void DrawTooltipForHoveredItem(bool isHovered, string title, string? meta, IReadOnlyList<string> lines)
     {
         if (!isHovered) return;
         using (SpheneCustomTheme.ApplyTooltipTheme())
         {
             ImGui.BeginTooltip();
             ImGui.PushTextWrapPos(ImGui.GetFontSize() * 35f);
-            if (text.IndexOf(UiSharedService.TooltipSeparator, StringComparison.Ordinal) >= 0)
+            ImGui.TextUnformatted(title);
+
+            if (lines.Count > 0)
             {
-                var splitText = text.Split(UiSharedService.TooltipSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-                for (int i = 0; i < splitText.Length; i++)
+                ImGui.Separator();
+                for (int i = 0; i < lines.Count; i++)
                 {
-                    ImGui.TextUnformatted(splitText[i]);
-                    if (i != splitText.Length - 1) ImGui.Separator();
+                    ImGui.TextUnformatted(lines[i]);
                 }
             }
-            else
+
+            if (!string.IsNullOrWhiteSpace(meta))
             {
-                ImGui.TextUnformatted(text);
+                ImGui.PopTextWrapPos();
+                ImGui.Spacing();
+
+                var textSize = ImGui.CalcTextSize(meta);
+                var cursorStartX = ImGui.GetCursorPosX();
+                var availableWidth = ImGui.GetContentRegionAvail().X;
+                ImGui.SetCursorPosX(cursorStartX + Math.Max(0, availableWidth - textSize.X));
+                ImGui.TextColored(ImGuiColors.DalamudGrey2, meta);
+                ImGui.PushTextWrapPos(ImGui.GetFontSize() * 35f);
             }
+
             ImGui.PopTextWrapPos();
             ImGui.EndTooltip();
         }
+    }
+
+    private static string FormatRemoteClientVersion(string? remoteClientVersion)
+    {
+        if (string.IsNullOrWhiteSpace(remoteClientVersion))
+        {
+            return "Unknown";
+        }
+
+        var formatted = remoteClientVersion.Trim();
+        if (Version.TryParse(formatted, out var parsedRemoteClientVersion))
+        {
+            var normalizedVersion = parsedRemoteClientVersion.Build >= 0
+                ? $"{parsedRemoteClientVersion.Major}.{parsedRemoteClientVersion.Minor}.{parsedRemoteClientVersion.Build}"
+                : $"{parsedRemoteClientVersion.Major}.{parsedRemoteClientVersion.Minor}";
+            formatted = parsedRemoteClientVersion.Revision >= 0
+                ? $"{normalizedVersion}.{parsedRemoteClientVersion.Revision}"
+                : normalizedVersion;
+        }
+
+        return formatted;
+    }
+
+    private static string GetCompactSyncSummary(Pair.AckV3State incoming, Pair.AckV3State outgoing)
+    {
+        if (incoming.Outcome == Pair.AckV3Outcome.Fail || outgoing.Outcome == Pair.AckV3Outcome.Fail)
+        {
+            var failedState = outgoing.Outcome == Pair.AckV3Outcome.Fail ? outgoing : incoming;
+            var reason = GetFriendlyAckFailureReason(failedState.ErrorCode, failedState.ErrorMessage);
+            return TrimWithEllipsis($"Sync: Failed ({reason})", 110);
+        }
+
+        if (incoming.Outcome == Pair.AckV3Outcome.Pending || outgoing.Outcome == Pair.AckV3Outcome.Pending)
+        {
+            return "Sync: In progress";
+        }
+
+        return string.Empty;
+    }
+
+    private static string TrimWithEllipsis(string value, int maxLength)
+    {
+        if (string.IsNullOrEmpty(value) || value.Length <= maxLength)
+        {
+            return value;
+        }
+
+        return value[..Math.Max(0, maxLength - 1)] + "…";
+    }
+
+    private static string FormatTriangleCountCompact(long triangleCount)
+    {
+        if (triangleCount >= 1000)
+        {
+            return (triangleCount / 1000d).ToString("0.0'k'");
+        }
+
+        return triangleCount.ToString();
     }
 
     private void DrawName(float leftSide, float rightSide)

@@ -79,6 +79,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
     private bool _showDownloads = true;
     private bool _showMismatches = true;
     private bool _showIpc = true;
+    private bool _showMinions = true;
     private bool _includeApplyChangeDetails = false;
     private int _simulatedDisconnectSeconds = 3;
     private string? _selectedCharacterUid;
@@ -2051,6 +2052,8 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         ImGui.Checkbox("MM", ref _showMismatches);
         ImGui.SameLine();
         ImGui.Checkbox("IPC", ref _showIpc);
+        ImGui.SameLine();
+        ImGui.Checkbox("Minion", ref _showMinions);
 
         var pairs = BuildCharacterDataPairsSnapshot();
         var selectedPair = EnsureSelectedCharacterPair(pairs);
@@ -2362,6 +2365,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             "MM" => _showMismatches,
             "IPC" => _showIpc,
             "PEN" => _showIpc,
+            "MINION" => _showMinions,
             _ => true
         };
 
@@ -2452,7 +2456,8 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                     Notif = _showNotifications,
                     Downloads = _showDownloads,
                     Mismatches = _showMismatches,
-                    Ipc = _showIpc
+                    Ipc = _showIpc,
+                    Minions = _showMinions
                 }
             },
             Entries = entries.Select(e => new
