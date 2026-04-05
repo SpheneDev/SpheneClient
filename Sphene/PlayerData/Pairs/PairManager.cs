@@ -1219,21 +1219,39 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
 
     public void SetPendingAcknowledgmentForSender(List<UserData> recipients, string acknowledgmentId)
     {
-        // Use hash-based acknowledgment manager for thread-safe handling
-        _sessionAcknowledgmentManager.SetPendingAcknowledgmentForHashVersion(recipients, acknowledgmentId);
-
-        // Also set pending acknowledgment on individual pairs for UI display
+        var ackRecipients = new List<UserData>();
         foreach (var recipient in recipients)
         {
             if (_allClientPairs.TryGetValue(recipient, out var pair))
             {
-                _ = pair.SetPendingAcknowledgment(acknowledgmentId);
-                Logger.LogDebug("Set pending acknowledgment on pair for recipient {user} with ID {id}", recipient.AliasOrUID, acknowledgmentId);
-                
-                // Start timeout tracking for this acknowledgment
-                _acknowledgmentTimeoutManager.StartTimeout(acknowledgmentId, recipient, acknowledgmentId);
+                if (pair.IsLegacyAcknowledgmentClient)
+                {
+                    _ = pair.UpdateAcknowledgmentStatus(acknowledgmentId, true, DateTimeOffset.UtcNow,
+                        Sphene.API.Dto.User.AcknowledgmentErrorCode.None,
+                        "Legacy client (<= 1.1.13.1) - no acknowledgment expected");
+                }
+                else
+                {
+                    ackRecipients.Add(recipient);
+                }
             }
         }
+
+        if (ackRecipients.Count > 0)
+        {
+            _sessionAcknowledgmentManager.SetPendingAcknowledgmentForHashVersion(ackRecipients, acknowledgmentId);
+
+            foreach (var recipient in ackRecipients)
+            {
+                if (_allClientPairs.TryGetValue(recipient, out var pair))
+                {
+                    _ = pair.SetPendingAcknowledgment(acknowledgmentId);
+                    Logger.LogDebug("Set pending acknowledgment on pair for recipient {user} with ID {id}", recipient.AliasOrUID, acknowledgmentId);
+                    _acknowledgmentTimeoutManager.StartTimeout(acknowledgmentId, recipient, acknowledgmentId);
+                }
+            }
+        }
+
         Mediator.Publish(new RefreshUiMessage());
     }
 

@@ -20,7 +20,6 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
     private readonly FileUploadManager _fileTransferManager;
     private readonly PairManager _pairManager;
     private readonly SpheneConfigService _configService;
-    private readonly SessionAcknowledgmentManager _sessionAcknowledgmentManager;
     private CharacterData? _lastCreatedData;
     private CharacterData? _uploadingCharacterData = null;
     private readonly HashSet<UserData> _previouslyVisiblePlayers = new(UserDataComparer.Instance);
@@ -44,14 +43,13 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
 
 
     public VisibleUserDataDistributor(ILogger<VisibleUserDataDistributor> logger, ApiController apiController, DalamudUtilService dalamudUtil,
-        PairManager pairManager, SpheneMediator mediator, FileUploadManager fileTransferManager, SessionAcknowledgmentManager sessionAcknowledgmentManager,
+        PairManager pairManager, SpheneMediator mediator, FileUploadManager fileTransferManager,
         SpheneConfigService configService) : base(logger, mediator)
     {
         _apiController = apiController;
         _dalamudUtil = dalamudUtil;
         _pairManager = pairManager;
         _fileTransferManager = fileTransferManager;
-        _sessionAcknowledgmentManager = sessionAcknowledgmentManager;
         _configService = configService;
         
 
@@ -311,26 +309,63 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
                     }
 
                     var hashKey = currentHash;
-                    var requiresAck = usersToSend.Any(u =>
+                    var legacyRecipients = new List<UserData>();
+                    var ackCapableRecipients = new List<UserData>();
+                    foreach (var u in usersToSend)
+                    {
+                        var pair = _pairManager.GetPairForUser(u);
+                        if (pair != null && pair.IsLegacyAcknowledgmentClient)
+                        {
+                            legacyRecipients.Add(u);
+                        }
+                        else
+                        {
+                            ackCapableRecipients.Add(u);
+                        }
+                    }
+
+                    var requiresAck = ackCapableRecipients.Any(u =>
                         forced
                         || _pairManager.HasPendingAcknowledgmentForUser(u)
                         || !_lastSentHashPerUser.TryGetValue(u, out var lastSentHash)
                         || !string.Equals(lastSentHash, currentHash, StringComparison.Ordinal));
 
+                    if (legacyRecipients.Count > 0)
+                    {
+                        foreach (var legacy in legacyRecipients)
+                        {
+                            if (_pairManager.GetPairForUser(legacy) is { } legacyPair)
+                            {
+                                _ = legacyPair.UpdateAcknowledgmentStatus(hashKey, true, DateTimeOffset.UtcNow,
+                                    Sphene.API.Dto.User.AcknowledgmentErrorCode.None,
+                                    "Legacy client (<= 1.1.13.1) - no acknowledgment expected");
+                            }
+                        }
+                    }
+
                     if (requiresAck)
                     {
                         Logger.LogDebug("{tag} Ack pending before push: hash={hash}", SyncProgressTag, hashKey);
-                        _pairManager.SetPendingAcknowledgmentForSender([.. usersToSend], hashKey);
-                        _sessionAcknowledgmentManager.SetPendingAcknowledgmentForHashVersion([.. usersToSend], hashKey);
+                        _pairManager.SetPendingAcknowledgmentForSender([.. ackCapableRecipients], hashKey);
                     }
                     Mediator.Publish(new DebugLogEventMessage(
                         LogLevel.Debug,
                         "ACK",
                         "Ack outgoing push",
-                        Details: $"hash={hashKey[..Math.Min(8, hashKey.Length)]} requiresAck={requiresAck} recipients={usersToSend.Count}"));
+                        Details: $"hash={hashKey[..Math.Min(8, hashKey.Length)]} requiresAck={requiresAck} recipients={usersToSend.Count} legacy={legacyRecipients.Count}"));
 
-                    Logger.LogDebug("{tag} Push send: hash={hash} ackKey={hashKey} requiresAck={requiresAck} users={users}", SyncProgressTag, dataToSend.DataHash, hashKey, requiresAck, string.Join(", ", usersToSend.Select(k => k.AliasOrUID)));
-                    await _apiController.PushCharacterData(dataToSend, [.. usersToSend], hashKey, requiresAck).ConfigureAwait(false);
+                    if (ackCapableRecipients.Count > 0)
+                    {
+                        Logger.LogDebug("{tag} Push send: hash={hash} ackKey={hashKey} requiresAck={requiresAck} users={users}",
+                            SyncProgressTag, dataToSend.DataHash, hashKey, requiresAck, string.Join(", ", ackCapableRecipients.Select(k => k.AliasOrUID)));
+                        await _apiController.PushCharacterData(dataToSend, [.. ackCapableRecipients], hashKey, requiresAck).ConfigureAwait(false);
+                    }
+                    if (legacyRecipients.Count > 0)
+                    {
+                        Logger.LogDebug("{tag} Push send legacy: hash={hash} users={users}",
+                            SyncProgressTag, dataToSend.DataHash, string.Join(", ", legacyRecipients.Select(k => k.AliasOrUID)));
+                        await _apiController.PushCharacterData(dataToSend, [.. legacyRecipients], hashKey, requiresAcknowledgment: false).ConfigureAwait(false);
+                    }
                     Logger.LogDebug("{tag} Push complete: hash={hash} users={users}", SyncProgressTag, dataToSend.DataHash, string.Join(", ", usersToSend.Select(k => k.AliasOrUID)));
 
                     foreach (var user in usersToSend)

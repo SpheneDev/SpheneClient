@@ -32,6 +32,7 @@ public class Pair : DisposableMediatorSubscriberBase
     private readonly DalamudUtilService _dalamudUtilService;
     private CancellationTokenSource _applicationCts = new();
     private OnlineUserIdentDto? _onlineUserIdentDto = null;
+    private static readonly Version LegacyAckMaxClientVersion = new(1, 1, 13, 1);
     private readonly VisibilityGateService _visibilityGateService;
     private const int BaseApplyRetryDelaySeconds = 2;
     private const int MaxApplyRetryDelaySeconds = 30;
@@ -91,7 +92,31 @@ public class Pair : DisposableMediatorSubscriberBase
     public long LastAppliedDataTris { get; set; } = -1;
     public long LastAppliedApproximateVRAMBytes { get; set; } = -1;
     public string Ident => _onlineUserIdentDto?.Ident ?? string.Empty;
+    public string? RemoteClientVersion => UserPair.RemoteClientVersion ?? _onlineUserIdentDto?.ClientVersion;
+    public bool IsLegacyAcknowledgmentClient => TryGetNormalizedRemoteClientVersion(out var v) && v <= LegacyAckMaxClientVersion;
     internal int ApplyRetryCount => _applyRetryCount;
+
+    private bool TryGetNormalizedRemoteClientVersion(out Version version)
+    {
+        version = new Version(0, 0, 0, 0);
+        var raw = RemoteClientVersion;
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return false;
+        }
+
+        if (!Version.TryParse(raw, out var parsed))
+        {
+            return false;
+        }
+
+        var major = parsed.Major;
+        var minor = parsed.Minor;
+        var build = parsed.Build < 0 ? 0 : parsed.Build;
+        var revision = parsed.Revision < 0 ? 0 : parsed.Revision;
+        version = new Version(major, minor, build, revision);
+        return true;
+    }
     
     // Data synchronization status properties
     public bool? LastAcknowledgmentSuccess { get; private set; } = null;
@@ -148,6 +173,14 @@ public class Pair : DisposableMediatorSubscriberBase
         if (string.IsNullOrWhiteSpace(currentHash))
         {
             return new(AckV3Outcome.Unknown, null, null, Sphene.API.Dto.User.AcknowledgmentErrorCode.None, null);
+        }
+
+        var ctx = _lastIncomingAckContext;
+        if (ctx != null
+            && string.Equals(ctx.DataHash, currentHash, StringComparison.Ordinal)
+            && !ctx.RequiresAcknowledgment)
+        {
+            return new(AckV3Outcome.Success, currentHash, LastReceivedCharacterDataTime, Sphene.API.Dto.User.AcknowledgmentErrorCode.None, null);
         }
 
         if (string.Equals(LastIncomingAcknowledgmentHash, currentHash, StringComparison.Ordinal))
