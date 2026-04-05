@@ -80,6 +80,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
     private bool _showMismatches = true;
     private bool _showIpc = true;
     private bool _showMinions = true;
+    private bool _showMinionScd = true;
     private bool _includeApplyChangeDetails = false;
     private int _simulatedDisconnectSeconds = 3;
     private string? _selectedCharacterUid;
@@ -1959,18 +1960,21 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         {
             ClearDebugLog();
         }
+        UiSharedService.AttachToolTip("Clears the in-window log buffer.");
 
         ImGui.SameLine();
         if (ImGui.Button("Copy Visible"))
         {
             ImGui.SetClipboardText(BuildLogText(GetFilteredDebugLogSnapshot(maxEntries: 1200)));
         }
+        UiSharedService.AttachToolTip("Copies the currently visible (filtered) log lines to clipboard.");
 
         ImGui.SameLine();
         if (ImGui.Button("Copy Report"))
         {
             ImGui.SetClipboardText(BuildDebugReportJson(GetFilteredDebugLogSnapshot(maxEntries: 1200)));
         }
+        UiSharedService.AttachToolTip("Copies a JSON report with filters and entries (filtered) to clipboard.");
 
         ImGui.SameLine();
         if (ImGui.Button("Write Report File"))
@@ -1981,6 +1985,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                 _lastReportPath = path;
             }
         }
+        UiSharedService.AttachToolTip("Writes a JSON report file to your plugin config folder.");
 
         if (showPopupButton)
         {
@@ -1989,10 +1994,12 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             {
                 Mediator.Publish(new UiToggleMessage(typeof(StatusDebugLogPopupUi)));
             }
+            UiSharedService.AttachToolTip("Opens the log viewer in a separate popup window.");
         }
 
         ImGui.SameLine();
         ImGui.Checkbox("Auto-scroll", ref _autoScroll);
+        UiSharedService.AttachToolTip("Keeps the view pinned to the newest entries.");
 
         if (!string.IsNullOrWhiteSpace(_lastReportPath))
         {
@@ -2020,40 +2027,58 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             }
             ImGui.EndCombo();
         }
+        UiSharedService.AttachToolTip("Minimum severity to show in the log list.");
 
         ImGui.SameLine();
         ImGui.Checkbox("Selected character only", ref _debugLogSelectedCharacterOnly);
+        UiSharedService.AttachToolTip("Shows only entries for the currently selected character in this window.");
 
         ImGui.SameLine();
         ImGui.SetNextItemWidth(220f * ImGuiHelpers.GlobalScale);
         ImGui.InputTextWithHint("##LogSearch", "Search...", ref _debugLogSearch, 128);
+        UiSharedService.AttachToolTip("Filters by text across message, details, and UID.");
         ImGui.SameLine();
         ImGui.Checkbox("Apply details", ref _includeApplyChangeDetails);
+        UiSharedService.AttachToolTip("Includes APPLY details for Info/Debug entries (can add a lot of text).");
 
         ImGui.Spacing();
         ImGui.TextUnformatted("Show:");
         ImGui.SameLine();
         ImGui.Checkbox("Conn", ref _showConnections);
+        UiSharedService.AttachToolTip("Connection state changes.");
         ImGui.SameLine();
         ImGui.Checkbox("Health", ref _showHealthChecks);
+        UiSharedService.AttachToolTip("Periodic client health checks.");
         ImGui.SameLine();
         ImGui.Checkbox("Ack", ref _showAcknowledgments);
+        UiSharedService.AttachToolTip("Acknowledgment / sync confirmation events.");
         ImGui.SameLine();
         ImGui.Checkbox("Circuit", ref _showCircuitBreaker);
+        UiSharedService.AttachToolTip("Circuit breaker state changes.");
         ImGui.SameLine();
         ImGui.Checkbox("Apply", ref _showApplies);
+        UiSharedService.AttachToolTip("Character data apply pipeline events.");
         ImGui.SameLine();
         ImGui.Checkbox("Hub", ref _showHub);
+        UiSharedService.AttachToolTip("SignalR hub reconnect/close messages.");
         ImGui.SameLine();
         ImGui.Checkbox("Notif", ref _showNotifications);
+        UiSharedService.AttachToolTip("In-game notifications emitted by Sphene.");
         ImGui.SameLine();
         ImGui.Checkbox("DL", ref _showDownloads);
+        UiSharedService.AttachToolTip("File download / transfer events.");
         ImGui.SameLine();
         ImGui.Checkbox("MM", ref _showMismatches);
+        UiSharedService.AttachToolTip("Mismatch tracking events.");
         ImGui.SameLine();
         ImGui.Checkbox("IPC", ref _showIpc);
+        UiSharedService.AttachToolTip("IPC and Penumbra related events.");
         ImGui.SameLine();
         ImGui.Checkbox("Minion", ref _showMinions);
+        UiSharedService.AttachToolTip("Minion/Mount/Pet/Companion diagnostic logs (reapply, binding, redraw).");
+        ImGui.SameLine();
+        ImGui.Checkbox("SCD", ref _showMinionScd);
+        UiSharedService.AttachToolTip("Minion sound (.scd) override logs. These can be frequent for effect-heavy minions.");
 
         var pairs = BuildCharacterDataPairsSnapshot();
         var selectedPair = EnsureSelectedCharacterPair(pairs);
@@ -2094,9 +2119,11 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             }
             ImGui.EndCombo();
         }
+        UiSharedService.AttachToolTip("Limits entries to a specific user (UID).");
 
         ImGui.SameLine();
         ImGui.Checkbox("Ack session filter", ref _debugLogAckContextFilterEnabled);
+        UiSharedService.AttachToolTip("Filters to the selected character's acknowledgment session/hash context.");
         if (_debugLogAckContextFilterEnabled && selectedPair != null)
         {
             ImGui.SameLine();
@@ -2106,6 +2133,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                 var hash = selectedPair.LastOutgoingAcknowledgmentHash ?? selectedPair.LastAcknowledgmentId ?? string.Empty;
                 _debugLogAckContextHashPrefix = string.IsNullOrWhiteSpace(hash) ? string.Empty : hash[..Math.Min(8, hash.Length)];
             }
+            UiSharedService.AttachToolTip("Uses the last outgoing acknowledgment context for the selected character.");
             ImGui.SameLine();
             if (ImGui.Button("Use IN"))
             {
@@ -2113,12 +2141,14 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                 var hash = selectedPair.LastIncomingAckHash ?? selectedPair.LastReceivedCharacterDataHash ?? string.Empty;
                 _debugLogAckContextHashPrefix = string.IsNullOrWhiteSpace(hash) ? string.Empty : hash[..Math.Min(8, hash.Length)];
             }
+            UiSharedService.AttachToolTip("Uses the last incoming acknowledgment context for the selected character.");
             ImGui.SameLine();
             if (ImGui.Button("Clear##ack_ctx"))
             {
                 _debugLogAckContextSessionId = string.Empty;
                 _debugLogAckContextHashPrefix = string.Empty;
             }
+            UiSharedService.AttachToolTip("Clears the acknowledgment context filter values.");
 
             if (!string.IsNullOrWhiteSpace(_debugLogAckContextSessionId) || !string.IsNullOrWhiteSpace(_debugLogAckContextHashPrefix))
             {
@@ -2127,6 +2157,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                     ? "-"
                     : _debugLogAckContextSessionId[..Math.Min(8, _debugLogAckContextSessionId.Length)];
                 ImGui.TextUnformatted($"session={sessionShort} hash={_debugLogAckContextHashPrefix}");
+                UiSharedService.AttachToolTip("Active acknowledgment context used for filtering.");
             }
         }
 
@@ -2366,6 +2397,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             "IPC" => _showIpc,
             "PEN" => _showIpc,
             "MINION" => _showMinions,
+            "MINION_SCD" => _showMinionScd,
             _ => true
         };
 
@@ -2457,7 +2489,8 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                     Downloads = _showDownloads,
                     Mismatches = _showMismatches,
                     Ipc = _showIpc,
-                    Minions = _showMinions
+                    Minions = _showMinions,
+                    MinionScd = _showMinionScd
                 }
             },
             Entries = entries.Select(e => new

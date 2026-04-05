@@ -92,6 +92,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
     private int _minionTempModsApplyInProgress;
     private DateTime _lastMinionReapplyDebugLogUtc = DateTime.MinValue;
     private string _lastMinionReapplyDebugKey = string.Empty;
+    private readonly ConcurrentDictionary<string, long> _minionLogThrottle = new(StringComparer.Ordinal);
     private const int MinionReapplyRetryDelayMs = 500;
     private const int MinionCollectionBindRetryDelayMs = 1500;
     private const int MinionTempModsCooldownMs = 2000;
@@ -116,6 +117,24 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
     private void PublishMinionDebug(string message, string? details = null)
     {
         Mediator.Publish(new DebugLogEventMessage(LogLevel.Debug, "MINION", message, Uid: Pair.UserData.UID, Details: details));
+    }
+
+    private void PublishMinionScdDebug(string message, string? details = null)
+    {
+        Mediator.Publish(new DebugLogEventMessage(LogLevel.Debug, "MINION_SCD", message, Uid: Pair.UserData.UID, Details: details));
+    }
+
+    private bool ShouldLogMinionThrottled(string key, TimeSpan minInterval)
+    {
+        var nowTicks = DateTime.UtcNow.Ticks;
+        if (_minionLogThrottle.TryGetValue(key, out var lastTicks)
+            && nowTicks - lastTicks < minInterval.Ticks)
+        {
+            return false;
+        }
+
+        _minionLogThrottle[key] = nowTicks;
+        return true;
     }
 
     private void TryDestroyTemporaryCollectionOnInvisible(string reason)
@@ -2252,13 +2271,17 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                 {
                     Logger.LogDebug("Attempting to bind collection to {addr:X} and apply temp mods", resourceAddress);
                     await TryBindCollectionToGameObjectAsync(resourceAddress).ConfigureAwait(false);
-                    PublishMinionDebug("Minion SCD override apply", $"gamePath={gamePath} resource={resourceAddress:X} minion={minionAddress:X} entries={tempMods.Count}");
+                    if (ShouldLogMinionThrottled("minion-scd:" + gamePath, TimeSpan.FromSeconds(10)))
+                    {
+                        PublishMinionScdDebug("SCD override apply",
+                            $"gamePath={gamePath} resource={resourceAddress:X} minion={minionAddress:X} entries={tempMods.Count}");
+                    }
                     await ApplyMinionTempModsAsync(minionAddress, tempMods, CancellationToken.None).ConfigureAwait(false);
                 }
                 catch (Exception ex)
                 {
                     Logger.LogDebug(ex, "Minion SCD override retry failed for {this}", this);
-                    PublishMinionDebug("Minion SCD override apply failed", ex.ToString());
+                    PublishMinionScdDebug("SCD override apply failed", ex.ToString());
                 }
             });
         }
