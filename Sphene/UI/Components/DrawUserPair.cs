@@ -49,8 +49,6 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
     private static readonly Vector4 SoftToggleEnabledColor = new(0.56f, 0.82f, 0.62f, 1f);
     private static readonly Vector4 SoftToggleDisabledColor = new(0.86f, 0.58f, 0.58f, 1f);
 
-    private bool _cachedHasPendingAck = false;
-    private DateTime _lastAckStatusPoll = DateTime.MinValue;
     private readonly List<FileTransferNotificationDto> _pendingModNotifications = new();
     public DrawUserPair(string id, Pair entry, List<GroupFullInfoDto> syncedGroups,
         GroupFullInfoDto? currentGroup,
@@ -76,85 +74,13 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         _pairManager = pairManager;
         _configService = configService;
         _localPairEmoteForceSyncService = localPairEmoteForceSyncService;
-        _mediator.Subscribe<PairAcknowledgmentStatusChangedMessage>(this, OnAcknowledgmentStatusChanged);
-        _mediator.Subscribe<AcknowledgmentPendingMessage>(this, OnAcknowledgmentPending);
-        _mediator.Subscribe<AcknowledgmentUiRefreshMessage>(this, OnAcknowledgmentUiRefresh);
-        
-        
-        
-        // Subscribe to selective icon updates for performance optimization
-        _mediator.Subscribe<UserPairIconUpdateMessage>(this, OnIconUpdate);
         _mediator.Subscribe<PenumbraModTransferAvailableMessage>(this, OnPenumbraModTransferAvailable);
         _mediator.Subscribe<PenumbraModTransferCompletedMessage>(this, OnPenumbraModTransferCompleted);
         _mediator.Subscribe<PenumbraModTransferDiscardedMessage>(this, OnPenumbraModTransferDiscarded);
-        
-        // Initialize cache once during construction to avoid frequent PairManager calls
-        _cachedHasPendingAck = _pairManager.HasPendingAcknowledgmentForUser(_pair.UserData);
     }
     
     public SpheneMediator Mediator => _mediator;
     
-    private void OnAcknowledgmentStatusChanged(PairAcknowledgmentStatusChangedMessage message)
-    {
-        // Only handle events for this specific pair
-        if (!string.Equals(message.User.UID, _pair.UserData.UID, StringComparison.Ordinal)) return;
-        
-        _cachedHasPendingAck = message.HasPendingAcknowledgment;
-    }
-    
-    
-    
-    private void OnAcknowledgmentPending(AcknowledgmentPendingMessage message)
-    {
-        // Only handle events for this specific pair
-        if (!string.Equals(message.Event.User.UID, _pair.UserData.UID, StringComparison.Ordinal)) return;
-        
-        // Update cached acknowledgment status to pending
-        _cachedHasPendingAck = true;
-        
-    }
-    
-    private void OnAcknowledgmentUiRefresh(AcknowledgmentUiRefreshMessage message)
-    {
-        // Handle refresh for this specific pair or global refresh
-        if (message.RefreshAll || 
-            (message.User != null && string.Equals(message.User.UID, _pair.UserData.UID, StringComparison.Ordinal)))
-        {
-            // Force cache refresh by querying current status
-            _cachedHasPendingAck = _pairManager.HasPendingAcknowledgmentForUser(_pair.UserData);
-        }
-    }
-    
-    private void OnIconUpdate(UserPairIconUpdateMessage message)
-    {
-        if (!string.Equals(message.User.UID, _pair.UserData.UID, StringComparison.Ordinal)) return;
-
-        switch (message.UpdateType)
-        {
-            case IconUpdateType.AcknowledgmentStatus:
-                if (message.UpdateData is AcknowledgmentStatusData ackData)
-                {
-                    _cachedHasPendingAck = ackData.HasPending;
-                }
-                break;
-
-            case IconUpdateType.ConnectionStatus:
-                break;
-
-            case IconUpdateType.PermissionStatus:
-                break;
-
-            case IconUpdateType.IndividualPermissions:
-                break;
-
-            case IconUpdateType.GroupRole:
-                break;
-
-            case IconUpdateType.ReloadTimer:
-                break;
-        }
-    }
-
     private void OnPenumbraModTransferAvailable(PenumbraModTransferAvailableMessage message)
     {
         var senderUid = message.Notification.Sender?.UID ?? string.Empty;
@@ -202,7 +128,6 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
 
     public void DrawPairedClient()
     {
-        RefreshAckStatusIfDue();
         using var id = ImRaii.PushId(GetType() + _id);
         var hasOfflineGrace = _pairManager.IsUserInOfflineGrace(_pair.UserData);
         var hasTimingSyncTarget = _localPairEmoteForceSyncService.IsTargetSelected(_pair.UserData.UID);
@@ -561,13 +486,9 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         if (_disposed) return;
         if (disposing)
         {
-            _mediator.Unsubscribe<UserPairIconUpdateMessage>(this);
             _mediator.Unsubscribe<PenumbraModTransferAvailableMessage>(this);
             _mediator.Unsubscribe<PenumbraModTransferCompletedMessage>(this);
             _mediator.Unsubscribe<PenumbraModTransferDiscardedMessage>(this);
-            _mediator.Unsubscribe<PairAcknowledgmentStatusChangedMessage>(this);
-            _mediator.Unsubscribe<AcknowledgmentPendingMessage>(this);
-            _mediator.Unsubscribe<AcknowledgmentUiRefreshMessage>(this);
         }
         _disposed = true;
     }
@@ -673,26 +594,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
             _uiSharedService.IconText(icon, iconColor);
             showUserPairTooltip = ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled);
             
-            if (suppressAckUi)
-            {
-                userPairText = _pair.UserData.AliasOrUID + " is visible: " + _pair.PlayerName + Environment.NewLine + "Click to target this player";
-            }
-            else
-            {
-                var incoming = _pair.GetIncomingAckV3State();
-                var outgoing = _pair.GetOutgoingAckV3State();
-                var incomingLine = $"Incoming Sync: {incoming.Outcome}";
-                var outgoingLine = $"Outgoing Sync: {outgoing.Outcome}";
-                if (incoming.Outcome == Pair.AckV3Outcome.Fail)
-                {
-                    incomingLine += $"{Environment.NewLine}{incoming.ErrorCode}{(string.IsNullOrWhiteSpace(incoming.ErrorMessage) ? string.Empty : $"{Environment.NewLine}{incoming.ErrorMessage}")}";
-                }
-                if (outgoing.Outcome == Pair.AckV3Outcome.Fail)
-                {
-                    outgoingLine += $"{Environment.NewLine}{outgoing.ErrorCode}{(string.IsNullOrWhiteSpace(outgoing.ErrorMessage) ? string.Empty : $"{Environment.NewLine}{outgoing.ErrorMessage}")}";
-                }
-                userPairText = _pair.UserData.AliasOrUID + " is visible: " + _pair.PlayerName + Environment.NewLine + incomingLine + Environment.NewLine + outgoingLine + Environment.NewLine + "Click to target this player";
-            }
+            userPairText = _pair.UserData.AliasOrUID + " is visible: " + _pair.PlayerName + Environment.NewLine + "Click to target this player";
             
             if (ImGui.IsItemClicked())
             {
@@ -725,7 +627,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
             {
                 using var _ = ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.DalamudYellow);
                 _uiSharedService.IconText(FontAwesomeIcon.Clock);
-                UiSharedService.AttachToolTip("Processing character data...");
+                UiSharedService.AttachToolTip("Sync in progress...");
             }
             else if (outgoing.Outcome == Pair.AckV3Outcome.Success)
             {
@@ -734,7 +636,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
                 var timeAgo = outgoing.Time.HasValue
                     ? $" ({(DateTimeOffset.UtcNow - outgoing.Time.Value).TotalSeconds:F0}s ago)"
                     : string.Empty;
-                UiSharedService.AttachToolTip($"Data synchronized successfully{timeAgo}");
+                UiSharedService.AttachToolTip($"Synced{timeAgo}");
             }
             else if (outgoing.Outcome == Pair.AckV3Outcome.Fail)
             {
@@ -743,13 +645,8 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
                 var timeAgo = outgoing.Time.HasValue
                     ? $" ({(DateTimeOffset.UtcNow - outgoing.Time.Value).TotalSeconds:F0}s ago)"
                     : string.Empty;
-                var reason = outgoing.ErrorCode != Sphene.API.Dto.User.AcknowledgmentErrorCode.None
-                    ? outgoing.ErrorCode.ToString()
-                    : "Unknown";
-                var details = string.IsNullOrWhiteSpace(outgoing.ErrorMessage)
-                    ? string.Empty
-                    : $"{Environment.NewLine}{outgoing.ErrorMessage}";
-                UiSharedService.AttachToolTip($"Synchronization failed ({reason}){timeAgo}{details}");
+                var reason = GetFriendlyAckFailureReason(outgoing.ErrorCode, outgoing.ErrorMessage);
+                UiSharedService.AttachToolTip($"Sync failed{timeAgo}{Environment.NewLine}{reason}");
             }
         }
 
@@ -806,24 +703,16 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         // Add synchronization status information - only show for mutually visible pairs
         if (_pair.IsOnline && _pair.IsMutuallyVisible && !suppressAckUi)
         {
-            // Show sync status for any pending acknowledgment (including build start)
-            if (GetCachedHasPendingAcknowledgment())
-            {
-                userPairText += UiSharedService.TooltipSeparator + "Data Sync: Waiting for acknowledgment from this user...";
-            }
-            else if (_pair.LastAcknowledgmentSuccess.HasValue)
-            {
-                var syncStatus = _pair.LastAcknowledgmentSuccess.Value ? "Successfully synchronized" : "Synchronization failed";
-                var timeAgo = _pair.LastAcknowledgmentTime.HasValue 
-                    ? $" ({(DateTimeOffset.UtcNow - _pair.LastAcknowledgmentTime.Value).TotalSeconds:F0}s ago)"
-                    : string.Empty;
-                userPairText += UiSharedService.TooltipSeparator + $"Data Sync: {syncStatus}{timeAgo}";
-            }
+            var incoming = _pair.GetIncomingAckV3State();
+            var outgoing = _pair.GetOutgoingAckV3State();
+            userPairText += UiSharedService.TooltipSeparator + "Sync Status";
+            userPairText += Environment.NewLine + FormatSyncStateLine("You → Them", outgoing, isOutgoing: true);
+            userPairText += Environment.NewLine + FormatSyncStateLine("Them → You", incoming, isOutgoing: false);
         }
 
         if (_pair.IsInDuty)
         {
-            userPairText += UiSharedService.TooltipSeparator + "Info: In duty, acknowledgment display is hidden.";
+            userPairText += UiSharedService.TooltipSeparator + "In duty: sync display is hidden.";
         }
 
         if (_syncedGroups.Any())
@@ -870,6 +759,73 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         }
 
         ImGui.SameLine();
+    }
+
+    private static string FormatSyncStateLine(string label, Pair.AckV3State state, bool isOutgoing)
+    {
+        return state.Outcome switch
+        {
+            Pair.AckV3Outcome.Success => $"{label}: Up to date",
+            Pair.AckV3Outcome.Pending => isOutgoing ? $"{label}: Waiting for confirmation..." : $"{label}: Applying...",
+            Pair.AckV3Outcome.Fail => $"{label}: Failed - {GetFriendlyAckFailureReason(state.ErrorCode, state.ErrorMessage)}",
+            _ => $"{label}: Unknown"
+        };
+    }
+
+    private static string GetFriendlyAckFailureReason(Sphene.API.Dto.User.AcknowledgmentErrorCode code, string? message)
+    {
+        var baseReason = code switch
+        {
+            Sphene.API.Dto.User.AcknowledgmentErrorCode.DownloadFailed => "Couldn't download required files.",
+            Sphene.API.Dto.User.AcknowledgmentErrorCode.ApplyFailed => "Couldn't apply the update.",
+            Sphene.API.Dto.User.AcknowledgmentErrorCode.MismatchFailed => "Data mismatch detected. It will retry automatically.",
+            Sphene.API.Dto.User.AcknowledgmentErrorCode.HashVerificationFailed => "Data integrity check failed.",
+            Sphene.API.Dto.User.AcknowledgmentErrorCode.NotArrivedTimeout => "No response received in time.",
+            Sphene.API.Dto.User.AcknowledgmentErrorCode.Timeout => "No response received in time.",
+            _ => "Something went wrong."
+        };
+
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return baseReason;
+        }
+
+        var hasDutyContext = message.Contains("localInDuty=True", StringComparison.OrdinalIgnoreCase);
+        var hasCombatContext = message.Contains("localInCombat=True", StringComparison.OrdinalIgnoreCase);
+        if (hasDutyContext || hasCombatContext)
+        {
+            if (hasDutyContext && hasCombatContext)
+            {
+                return $"{baseReason} You're currently in duty/combat; sync may be delayed.";
+            }
+            if (hasDutyContext)
+            {
+                return $"{baseReason} You're currently in duty; sync may be delayed.";
+            }
+            return $"{baseReason} You're currently in combat; sync may be delayed.";
+        }
+
+        var cleaned = message;
+        var idx = cleaned.IndexOf("(ctx:", StringComparison.OrdinalIgnoreCase);
+        if (idx >= 0)
+        {
+            cleaned = cleaned[..idx].Trim();
+        }
+        else
+        {
+            idx = cleaned.IndexOf("ctx:", StringComparison.OrdinalIgnoreCase);
+            if (idx >= 0)
+            {
+                cleaned = cleaned[..idx].Trim();
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(cleaned))
+        {
+            return baseReason;
+        }
+
+        return $"{baseReason} {cleaned}";
     }
 
     private static void DrawTooltipForHoveredItem(bool isHovered, string text)
@@ -1273,26 +1229,9 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         }
     }
     
-    private bool GetCachedHasPendingAcknowledgment()
-    {
-        return _cachedHasPendingAck;
-    }
-
-    private void RefreshAckStatusIfDue()
-    {
-        var now = DateTime.UtcNow;
-        if (now - _lastAckStatusPoll < TimeSpan.FromMilliseconds(500))
-        {
-            return;
-        }
-
-        _lastAckStatusPoll = now;
-        _cachedHasPendingAck = _pairManager.HasPendingAcknowledgmentForUser(_pair.UserData);
-    }
-
     public void RefreshIcon()
     {
-        _cachedHasPendingAck = _pairManager.HasPendingAcknowledgmentForUser(_pair.UserData);
-        _lastAckStatusPoll = DateTime.UtcNow;
+        _ = _pair.GetOutgoingAckV3State();
+        _ = _pair.GetIncomingAckV3State();
     }
 }
