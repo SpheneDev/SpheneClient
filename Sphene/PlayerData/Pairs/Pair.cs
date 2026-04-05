@@ -149,6 +149,11 @@ public class Pair : DisposableMediatorSubscriberBase
 
     public AckV3State GetOutgoingAckV3State()
     {
+        if (!IsMutuallyVisible)
+        {
+            return new(AckV3Outcome.Unknown, null, null, Sphene.API.Dto.User.AcknowledgmentErrorCode.None, null);
+        }
+
         if (HasPendingAcknowledgment)
         {
             return new(AckV3Outcome.Pending, LastAcknowledgmentId, LastAcknowledgmentTime, Sphene.API.Dto.User.AcknowledgmentErrorCode.None, null);
@@ -169,6 +174,11 @@ public class Pair : DisposableMediatorSubscriberBase
 
     public AckV3State GetIncomingAckV3State()
     {
+        if (!IsMutuallyVisible)
+        {
+            return new(AckV3Outcome.Unknown, null, null, Sphene.API.Dto.User.AcknowledgmentErrorCode.None, null);
+        }
+
         var currentHash = LastReceivedCharacterDataHash;
         if (string.IsNullOrWhiteSpace(currentHash))
         {
@@ -291,8 +301,36 @@ public class Pair : DisposableMediatorSubscriberBase
     internal void SetMutualVisibility(bool isMutual)
     {
         if (IsMutuallyVisible == isMutual) return;
+        if (!isMutual)
+        {
+            ResetAcknowledgmentState();
+        }
         IsMutuallyVisible = isMutual;
         Mediator.Publish(new StructuralRefreshUiMessage());
+    }
+
+    private void ResetAcknowledgmentState()
+    {
+        HasPendingAcknowledgment = false;
+        LastAcknowledgmentSuccess = null;
+        LastAcknowledgmentTime = null;
+        LastAcknowledgmentId = null;
+        LastAcknowledgmentErrorCode = Sphene.API.Dto.User.AcknowledgmentErrorCode.None;
+        LastAcknowledgmentErrorMessage = null;
+
+        LastAcknowledgedIncomingDataHash = null;
+        LastAcknowledgedIncomingTime = null;
+        LastIncomingAcknowledgmentHash = null;
+        LastIncomingAcknowledgmentSuccess = null;
+        LastIncomingAcknowledgmentErrorCode = Sphene.API.Dto.User.AcknowledgmentErrorCode.None;
+        LastIncomingAcknowledgmentErrorMessage = null;
+        LastIncomingAcknowledgmentTime = null;
+        _lastIncomingAckContext = null;
+
+        LastOutgoingAcknowledgmentHash = null;
+        LastOutgoingAcknowledgmentSessionId = null;
+
+        Mediator.Publish(new AcknowledgmentUiRefreshMessage(User: UserData));
     }
 
     internal void SetGposeState(bool isInGpose)

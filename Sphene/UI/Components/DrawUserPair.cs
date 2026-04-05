@@ -590,7 +590,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
                 Pair.AckV3Outcome.Success => ImGuiColors.ParsedGreen,
                 Pair.AckV3Outcome.Fail => ImGuiColors.DalamudRed,
                 Pair.AckV3Outcome.Pending => ImGuiColors.DalamudYellow,
-                _ => ImGuiColors.DalamudGrey
+                _ => ImGuiColors.ParsedGreen
             };
             var icon = (_uiSharedService.IsInGpose || _pair.IsInGpose) ? FontAwesomeIcon.Camera : FontAwesomeIcon.Eye;
             _uiSharedService.IconText(icon, iconColor);
