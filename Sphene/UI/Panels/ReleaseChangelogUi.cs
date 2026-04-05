@@ -383,7 +383,12 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
             {
                 core = core[1..].Trim();
             }
-            return Version.Parse(core);
+            var parsed = Version.Parse(core);
+            var major = parsed.Major < 0 ? 0 : parsed.Major;
+            var minor = parsed.Minor < 0 ? 0 : parsed.Minor;
+            var build = parsed.Build < 0 ? 0 : parsed.Build;
+            var revision = parsed.Revision < 0 ? 0 : parsed.Revision;
+            return new Version(major, minor, build, revision);
         }
         catch
         {

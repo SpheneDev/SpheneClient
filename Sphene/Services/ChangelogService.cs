@@ -38,6 +38,8 @@ public sealed class ChangelogService
             JsonElement? selected = null;
             if (requireExactVersion)
             {
+                var requestedNormalized = ParseVersionSafe(version);
+                JsonElement? normalizedMatch = null;
                 foreach (var item in changelogs.EnumerateArray())
                 {
                     if (item.ValueKind != JsonValueKind.Object)
@@ -52,6 +54,16 @@ public sealed class ChangelogService
                         selected = item;
                         break;
                     }
+
+                    if (normalizedMatch == null && ParseVersionSafe(v).Equals(requestedNormalized))
+                    {
+                        normalizedMatch = item;
+                    }
+                }
+
+                if (selected == null && normalizedMatch != null)
+                {
+                    selected = normalizedMatch;
                 }
             }
             else
@@ -299,14 +311,18 @@ public async Task<List<ReleaseChangelogViewEntry>> GetChangelogEntriesAsync(Canc
         if (string.IsNullOrWhiteSpace(v)) return new Version(0,0,0,0);
         try
         {
-            // Support versions like 1.2.3
             var parts = v.Trim().Split('-', StringSplitOptions.RemoveEmptyEntries);
             var core = parts[0].Trim();
             if (core.StartsWith("v", StringComparison.OrdinalIgnoreCase))
             {
                 core = core[1..].Trim();
             }
-            return Version.Parse(core);
+            var parsed = Version.Parse(core);
+            var major = parsed.Major < 0 ? 0 : parsed.Major;
+            var minor = parsed.Minor < 0 ? 0 : parsed.Minor;
+            var build = parsed.Build < 0 ? 0 : parsed.Build;
+            var revision = parsed.Revision < 0 ? 0 : parsed.Revision;
+            return new Version(major, minor, build, revision);
         }
         catch
         {
