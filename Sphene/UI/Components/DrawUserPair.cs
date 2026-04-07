@@ -585,7 +585,9 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
             }
             
             var incomingStateForIcon = _pair.GetIncomingAckV3State();
-            var iconColor = suppressAckUi ? ImGuiColors.ParsedGreen : incomingStateForIcon.Outcome switch
+            var outgoingStateForIcon = _pair.GetOutgoingAckV3State();
+            var stateForIcon = GetMostSevereAckState(incomingStateForIcon, outgoingStateForIcon);
+            var iconColor = suppressAckUi ? ImGuiColors.ParsedGreen : stateForIcon.Outcome switch
             {
                 Pair.AckV3Outcome.Success => ImGuiColors.ParsedGreen,
                 Pair.AckV3Outcome.Fail => ImGuiColors.DalamudRed,
@@ -895,6 +897,30 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         }
 
         return value[..Math.Max(0, maxLength - 1)] + "…";
+    }
+
+    private static Pair.AckV3State GetMostSevereAckState(Pair.AckV3State incoming, Pair.AckV3State outgoing)
+    {
+        var incomingSeverity = GetAckOutcomeSeverity(incoming.Outcome);
+        var outgoingSeverity = GetAckOutcomeSeverity(outgoing.Outcome);
+        if (outgoingSeverity > incomingSeverity)
+        {
+            return outgoing;
+        }
+
+        return incoming;
+    }
+
+    private static int GetAckOutcomeSeverity(Pair.AckV3Outcome outcome)
+    {
+        return outcome switch
+        {
+            Pair.AckV3Outcome.Fail => 3,
+            Pair.AckV3Outcome.Pending => 2,
+            Pair.AckV3Outcome.Unknown => 1,
+            Pair.AckV3Outcome.Success => 0,
+            _ => 1
+        };
     }
 
     private static string FormatTriangleCountCompact(long triangleCount)

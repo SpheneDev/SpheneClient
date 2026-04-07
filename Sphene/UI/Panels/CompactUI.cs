@@ -1306,6 +1306,19 @@ public class CompactUi : WindowMediatorSubscriberBase
             ImGui.PushStyleColor(ImGuiCol.ButtonActive, active);
             ImGui.PushStyleColor(ImGuiCol.Text, SpheneColors.CrystalWhite);
         }
+        else if (!hasAreaSyncshells)
+        {
+            var baseColor = SpheneCustomTheme.CurrentTheme.CompactActionButton;
+            var textColor = SpheneCustomTheme.CurrentTheme.TextSecondary;
+            var disabledButton = new Vector4(baseColor.X, baseColor.Y, baseColor.Z, 0.18f);
+            var disabledHovered = new Vector4(baseColor.X, baseColor.Y, baseColor.Z, 0.18f);
+            var disabledActive = new Vector4(baseColor.X, baseColor.Y, baseColor.Z, 0.18f);
+            var disabledText = new Vector4(textColor.X, textColor.Y, textColor.Z, 0.55f);
+            ImGui.PushStyleColor(ImGuiCol.Button, disabledButton);
+            ImGui.PushStyleColor(ImGuiCol.ButtonHovered, disabledHovered);
+            ImGui.PushStyleColor(ImGuiCol.ButtonActive, disabledActive);
+            ImGui.PushStyleColor(ImGuiCol.Text, disabledText);
+        }
         bool clicked;
         using (ImRaii.Disabled(!hasAreaSyncshells))
         {
@@ -1321,16 +1334,23 @@ public class CompactUi : WindowMediatorSubscriberBase
             drawList.AddCircleFilled(badgeCenter, 5.5f, ImGui.ColorConvertFloat4ToU32(SpheneCustomTheme.Colors.Warning));
             drawList.AddCircle(badgeCenter, 5.5f, ImGui.ColorConvertFloat4ToU32(SpheneCustomTheme.CurrentTheme.Border), 12, 1.5f);
         }
+        else if (!hasAreaSyncshells)
+        {
+            ImGui.PopStyleColor(4);
+        }
         if (clicked)
         {
             _areaBoundSyncshellService.TriggerAreaSyncshellSelection();
         }
-        var joinedCount = _areaBoundSyncshellService.JoinedAreaSyncshellCount;
+        var hasAnyAreaSyncshellsHere = _areaBoundSyncshellService.HasAnyAreaSyncshellsInCurrentLocation();
+        var isInAreaSyncshellHere = _areaBoundSyncshellService.IsInAreaSyncshellInCurrentLocation();
         UiSharedService.AttachToolTip(hasAreaSyncshells
             ? "Open Area Syncshell Selection"
-            : joinedCount > 0
-                ? "No other Area Syncshells found"
-                : "No Area Syncshells available in this area");
+            : !hasAnyAreaSyncshellsHere
+                ? "No Area Syncshells found"
+                : isInAreaSyncshellHere
+                    ? "No other Area Syncshells found"
+                    : "No Area Syncshells available");
         ImGui.EndGroup();
     }
 

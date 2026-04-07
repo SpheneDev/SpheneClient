@@ -795,14 +795,68 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
         if (!_hasRefreshedAreaSyncshells || _lastLocation == null)
             return false;
 
+        HashSet<string> joined;
+        _joinedSyncshellsLock.Enter();
+        try
+        {
+            joined = new HashSet<string>(_currentlyJoinedAreaSyncshells, StringComparer.Ordinal);
+        }
+        finally
+        {
+            _joinedSyncshellsLock.Exit();
+        }
+
         // Check if there are any area syncshells available in the current location
         // that are not already joined
         var availableSyncshells = _areaBoundSyncshells.Values
-            .Where(syncshell => !_currentlyJoinedAreaSyncshells.Contains(syncshell.GID) && 
+            .Where(syncshell => !joined.Contains(syncshell.GID) &&
                                IsLocationInBounds(syncshell, _lastLocation.Value))
             .ToList();
 
         return availableSyncshells.Any();
+    }
+
+    public bool HasAnyAreaSyncshellsInCurrentLocation()
+    {
+        if (!_hasRefreshedAreaSyncshells || _lastLocation == null)
+            return false;
+
+        foreach (var syncshell in _areaBoundSyncshells.Values)
+        {
+            if (IsLocationInBounds(syncshell, _lastLocation.Value))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public bool IsInAreaSyncshellInCurrentLocation()
+    {
+        if (!_hasRefreshedAreaSyncshells || _lastLocation == null)
+            return false;
+
+        HashSet<string> joined;
+        _joinedSyncshellsLock.Enter();
+        try
+        {
+            joined = new HashSet<string>(_currentlyJoinedAreaSyncshells, StringComparer.Ordinal);
+        }
+        finally
+        {
+            _joinedSyncshellsLock.Exit();
+        }
+
+        foreach (var syncshell in _areaBoundSyncshells.Values)
+        {
+            if (joined.Contains(syncshell.GID) && IsLocationInBounds(syncshell, _lastLocation.Value))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public void TriggerAreaSyncshellSelection()

@@ -37,9 +37,11 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
     private DateTime _nextOutgoingBatchPushUtc = DateTime.MinValue;
     private bool _hasPendingOutgoingBatchPush = false;
     private readonly ConcurrentDictionary<string, DateTime> _refreshRequestCooldownByUid = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, DateTime> _missingFilesRefreshRequestCooldownByUid = new(StringComparer.Ordinal);
     
     private const int DELAYED_PUSH_SECONDS = 3;
     private const int REFRESH_REQUEST_COOLDOWN_SECONDS = 15;
+    private const int MISSING_FILES_REFRESH_REQUEST_COOLDOWN_SECONDS = 60;
 
 
     public VisibleUserDataDistributor(ILogger<VisibleUserDataDistributor> logger, ApiController apiController, DalamudUtilService dalamudUtil,
@@ -93,6 +95,10 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
         Mediator.Subscribe<CharacterDataRefreshRequestedMessage>(this, msg =>
         {
             RequestImmediatePushToUser(msg.Requester);
+        });
+        Mediator.Subscribe<RequestRemoteCharacterDataRefreshMessage>(this, msg =>
+        {
+            RequestRemoteCharacterDataRefreshDueToMissingFiles(msg.Target, msg.DataHash, msg.Reason);
         });
     }
 
@@ -236,6 +242,25 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
         _refreshRequestCooldownByUid[user.UID] = now;
         Logger.LogDebug("{tag} Refresh request: requester=self target={user}", SyncProgressTag, user.AliasOrUID);
         Mediator.Publish(new DebugLogEventMessage(LogLevel.Debug, "APPLY", "Requested remote character data refresh", Uid: user.UID));
+        _ = _apiController.UserRequestCharacterDataRefresh(new UserDto(user));
+    }
+
+    private void RequestRemoteCharacterDataRefreshDueToMissingFiles(UserData user, string? dataHash, string? reason)
+    {
+        if (!_apiController.IsConnected) return;
+        if (string.IsNullOrWhiteSpace(user.UID)) return;
+
+        var now = DateTime.UtcNow;
+        if (_missingFilesRefreshRequestCooldownByUid.TryGetValue(user.UID, out var lastRequest)
+            && (now - lastRequest).TotalSeconds < MISSING_FILES_REFRESH_REQUEST_COOLDOWN_SECONDS)
+        {
+            return;
+        }
+
+        _missingFilesRefreshRequestCooldownByUid[user.UID] = now;
+        var hashShort = string.IsNullOrEmpty(dataHash) ? "-" : dataHash[..Math.Min(8, dataHash.Length)];
+        var details = $"hash={hashShort} reason={reason ?? "-"}";
+        Mediator.Publish(new DebugLogEventMessage(LogLevel.Warning, "DL", "Requested remote re-upload (missing files)", Uid: user.UID, Details: details));
         _ = _apiController.UserRequestCharacterDataRefresh(new UserDto(user));
     }
 

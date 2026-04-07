@@ -40,7 +40,7 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
     private readonly VisibilityGateService _visibilityGateService;
     private readonly PairCharacterCacheConfigService _pairCharacterCacheConfigService;
     private readonly DalamudUtilService _dalamudUtilService;
-    private const int LegacyAckAssumeSuccessSeconds = 6;
+    private const int LegacyAckAssumeSuccessSeconds = 5;
     private readonly ConcurrentDictionary<string, Timer> _legacyAckAssumeSuccessTimers = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _pendingOfflineGrace = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _pendingOfflineCharacterDataPurge = new(StringComparer.Ordinal);
@@ -1226,12 +1226,9 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         {
             if (_allClientPairs.TryGetValue(recipient, out var pair))
             {
-                if (pair.IsLegacyAcknowledgmentClient)
-                {
-                    _ = pair.SetPendingAcknowledgment(acknowledgmentId);
-                    ScheduleLegacyAssumedSuccess(pair.UserData.UID, acknowledgmentId);
-                }
-                else
+                _ = pair.SetPendingAcknowledgment(acknowledgmentId);
+                ScheduleLegacyAssumedSuccess(pair.UserData.UID, acknowledgmentId);
+                if (!pair.IsLegacyAcknowledgmentClient)
                 {
                     ackRecipients.Add(recipient);
                 }

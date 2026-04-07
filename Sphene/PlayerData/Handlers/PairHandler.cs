@@ -14,6 +14,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Text;
 using System.Threading;
 using ObjectKind = Sphene.API.Data.Enum.ObjectKind;
 using System.Numerics;
@@ -1297,16 +1298,28 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
 
             if (toDownloadReplacements.Count > 0)
             {
-                Logger.LogWarning("[BASE-{appBase}] Missing {count} files after download attempts for player {name}, {kind}", applicationBase, toDownloadReplacements.Count, PlayerName, updatedData);
-                Logger.LogDebug("{tag} Download failed: user={user} hash={hash} missingFiles={count}",
-                    SyncProgressTag, Pair.UserData.AliasOrUID, charaData.DataHash?.Value ?? "null", toDownloadReplacements.Count);
+                var missingSummary = BuildMissingFilesSummary(charaData, toDownloadReplacements);
+                Mediator.Publish(new RequestRemoteCharacterDataRefreshMessage(Pair.UserData, charaData.DataHash?.Value, missingSummary.Summary));
+                if (missingSummary.HasPlayerMissing)
+                {
+                    Logger.LogWarning("[BASE-{appBase}] Missing {count} files after download attempts for player {name}, {kind}", applicationBase, toDownloadReplacements.Count, PlayerName, updatedData);
+                    Logger.LogDebug("{tag} Download failed: user={user} hash={hash} missingFiles={count}",
+                        SyncProgressTag, Pair.UserData.AliasOrUID, charaData.DataHash?.Value ?? "null", toDownloadReplacements.Count);
+                    Mediator.Publish(new DebugLogEventMessage(LogLevel.Warning, "DL",
+                        $"Download failed (missing files={toDownloadReplacements.Count})",
+                        Uid: Pair.UserData.UID,
+                        Details: $"applicationBase={applicationBase} {missingSummary.Summary}{Environment.NewLine}{missingSummary.Details}"));
+                    Mediator.Publish(new CharacterDataApplicationCompletedMessage(PlayerName ?? string.Empty, Pair.UserData.UID, applicationBase, false, charaData.DataHash?.Value,
+                        Sphene.API.Dto.User.AcknowledgmentErrorCode.DownloadFailed, $"Missing player files after download attempts: {toDownloadReplacements.Count}"));
+                    return;
+                }
+
+                Logger.LogWarning("[BASE-{appBase}] Missing {count} non-player files after download attempts for player {name}. Continuing with partial apply.", applicationBase, toDownloadReplacements.Count, PlayerName);
                 Mediator.Publish(new DebugLogEventMessage(LogLevel.Warning, "DL",
-                    $"Download failed (missing files={toDownloadReplacements.Count})",
+                    $"Download incomplete (missing non-player files={toDownloadReplacements.Count})",
                     Uid: Pair.UserData.UID,
-                    Details: $"applicationBase={applicationBase}"));
-                Mediator.Publish(new CharacterDataApplicationCompletedMessage(PlayerName ?? string.Empty, Pair.UserData.UID, applicationBase, false, charaData.DataHash?.Value,
-                    Sphene.API.Dto.User.AcknowledgmentErrorCode.DownloadFailed, $"Missing files after download attempts: {toDownloadReplacements.Count}"));
-                return;
+                    Details: $"applicationBase={applicationBase} {missingSummary.Summary}{Environment.NewLine}{missingSummary.Details}"));
+                _downloadManager.ClearDownload();
             }
 
             if (toDownloadReplacements.Count == 0)
@@ -2516,6 +2529,142 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                 await _ipcManager.Penumbra.RedrawAsync(Logger, tempHandler, applicationId, cancelToken).ConfigureAwait(false);
             }
         }
+    }
+
+    private sealed record MissingFilesSummary(bool HasPlayerMissing, string Summary, string Details);
+
+    private static MissingFilesSummary BuildMissingFilesSummary(CharacterData charaData, IReadOnlyList<FileReplacementData> missingFiles)
+    {
+        var missingHashes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < missingFiles.Count; i++)
+        {
+            var hash = missingFiles[i].Hash;
+            if (!string.IsNullOrWhiteSpace(hash))
+            {
+                missingHashes.Add(hash);
+            }
+        }
+
+        var byKind = new Dictionary<ObjectKind, List<(string Hash, string GamePath)>>();
+        var mappedHashes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        if (charaData.FileReplacements != null)
+        {
+            foreach (var (kind, replacements) in charaData.FileReplacements)
+            {
+                if (replacements == null || replacements.Count == 0)
+                {
+                    continue;
+                }
+
+                var uniqueHashes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                for (int i = 0; i < replacements.Count; i++)
+                {
+                    var replacement = replacements[i];
+                    if (replacement == null)
+                    {
+                        continue;
+                    }
+
+                    if (!string.IsNullOrEmpty(replacement.FileSwapPath))
+                    {
+                        continue;
+                    }
+
+                    var hash = replacement.Hash;
+                    if (string.IsNullOrWhiteSpace(hash) || !missingHashes.Contains(hash) || !uniqueHashes.Add(hash))
+                    {
+                        continue;
+                    }
+
+                    var gamePath = replacement.GamePaths is { Length: > 0 } ? replacement.GamePaths[0] : "-";
+                    if (!byKind.TryGetValue(kind, out var list))
+                    {
+                        list = new List<(string Hash, string GamePath)>();
+                        byKind[kind] = list;
+                    }
+
+                    list.Add((hash, gamePath));
+                    mappedHashes.Add(hash);
+                }
+            }
+        }
+
+        var unmapped = new List<string>();
+        foreach (var hash in missingHashes)
+        {
+            if (!mappedHashes.Contains(hash))
+            {
+                unmapped.Add(hash);
+            }
+        }
+
+        var kinds = byKind.Keys.ToList();
+        kinds.Sort((a, b) => ((int)a).CompareTo((int)b));
+
+        var summaryParts = new List<string>(kinds.Count + 1);
+        for (int i = 0; i < kinds.Count; i++)
+        {
+            var kind = kinds[i];
+            summaryParts.Add($"{kind}({byKind[kind].Count})");
+        }
+        if (unmapped.Count > 0)
+        {
+            summaryParts.Add($"Unmapped({unmapped.Count})");
+        }
+
+        var summary = summaryParts.Count == 0 ? "missingByKind=Unknown" : $"missingByKind={string.Join(", ", summaryParts)}";
+
+        var detailsBuilder = new StringBuilder(256);
+        for (int i = 0; i < kinds.Count; i++)
+        {
+            var kind = kinds[i];
+            var entries = byKind[kind];
+            detailsBuilder.Append(kind).Append(": ").Append(entries.Count).Append(" ");
+
+            var maxExamples = Math.Min(3, entries.Count);
+            for (int j = 0; j < maxExamples; j++)
+            {
+                var (hash, gamePath) = entries[j];
+                var shortHash = hash.Length > 10 ? hash[..10] : hash;
+                detailsBuilder.Append(shortHash).Append(' ').Append(gamePath);
+                if (j != maxExamples - 1)
+                {
+                    detailsBuilder.Append(" | ");
+                }
+            }
+
+            if (entries.Count > maxExamples)
+            {
+                detailsBuilder.Append(" (+").Append(entries.Count - maxExamples).Append(" more)");
+            }
+
+            detailsBuilder.AppendLine();
+        }
+
+        if (unmapped.Count > 0)
+        {
+            detailsBuilder.Append("Unmapped: ");
+            var maxUnmapped = Math.Min(5, unmapped.Count);
+            for (int i = 0; i < maxUnmapped; i++)
+            {
+                var hash = unmapped[i];
+                var shortHash = hash.Length > 10 ? hash[..10] : hash;
+                detailsBuilder.Append(shortHash);
+                if (i != maxUnmapped - 1)
+                {
+                    detailsBuilder.Append(", ");
+                }
+            }
+            if (unmapped.Count > maxUnmapped)
+            {
+                detailsBuilder.Append(" (+").Append(unmapped.Count - maxUnmapped).Append(" more)");
+            }
+            detailsBuilder.AppendLine();
+        }
+
+        var hasPlayerMissing = byKind.ContainsKey(ObjectKind.Player);
+        return new MissingFilesSummary(hasPlayerMissing, summary, detailsBuilder.ToString().TrimEnd());
     }
 
     private List<FileReplacementData> TryCalculateModdedDictionary(Guid applicationBase, CharacterData charaData, out Dictionary<(string GamePath, string? Hash), string> moddedDictionary, CancellationToken token)
