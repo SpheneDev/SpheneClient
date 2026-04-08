@@ -14,12 +14,15 @@ using Lumina.Excel.Sheets;
 using Sphene.API.Dto.CharaData;
 using Sphene.Interop;
 using Sphene.SpheneConfiguration;
+using Sphene.SpheneConfiguration.Models;
 using Sphene.PlayerData.Handlers;
 using Sphene.Services.Mediator;
 using Sphene.Utils;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using System.Collections;
 using System.Numerics;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Text;
 using GameObject = FFXIVClientStructs.FFXIV.Client.Game.Object.GameObject;
@@ -52,6 +55,24 @@ public class DalamudUtilService : IHostedService, IMediatorSubscriber
     private bool _wasInDuty = false;
     private Lazy<ulong> _cid;
     private const int StillRenderingFlagMask = 1 << 11;
+    private readonly Dictionary<uint, byte[]> _plotSizesByLandSetRowId = new();
+    private readonly Dictionary<uint, byte[]> _plotSizesByTerritoryIdExact = new();
+    private readonly Dictionary<uint, uint> _housingLandSetRowIdByTerritoryId = new();
+    private bool _attemptedLoadHousingLandSet = false;
+    private string? _plotSizeSourceTypeName;
+    private readonly Dictionary<uint, byte[]> _plotSizesByHousingTerritoryTypeIdFromMemory = new();
+    private uint _lastPlotSizesMemoryTerritoryId = 0;
+    private bool _loadedPlotSizesFromConfig = false;
+    private string? _lastInteriorLocationKey;
+    private uint _lastInteriorMapId;
+
+    private enum InteriorFloorKind
+    {
+        Unknown = 0,
+        Ground = 1,
+        Basement = 2,
+        Second = 3
+    }
 
     public DalamudUtilService(ILogger<DalamudUtilService> logger, IClientState clientState, IObjectTable objectTable, IFramework framework,
         IGameGui gameGui, ICondition condition, IDataManager gameData, ITargetManager targetManager, IGameConfig gameConfig, IPartyList partyList,
@@ -354,22 +375,41 @@ public class DalamudUtilService : IHostedService, IMediatorSubscriber
         uint mapId = agentMap == null ? 0 : agentMap->CurrentMapId;
         uint territoryId = agentMap == null ? 0 : agentMap->CurrentTerritoryId;
         uint divisionId = houseMan == null ? 0 : (uint)(houseMan->GetCurrentDivision());
-        uint wardId = houseMan == null ? 0 : (uint)(houseMan->GetCurrentWard() + 1);
+        uint wardId = 0;
         uint houseId = 0;
-        var tempHouseId = houseMan == null ? 0 : (houseMan->GetCurrentPlot());
-        
-        if (tempHouseId < -1)
-        {
-            divisionId = tempHouseId == -127 ? 2 : (uint)1;
-            tempHouseId = 100;
-        }
-        if (tempHouseId == -1) tempHouseId = 0;
-        houseId = tempHouseId > 0 ? (uint)(tempHouseId + 1) : 0;
-        if (houseId != 0)
-        {
-            territoryId = HousingManager.GetOriginalHouseTerritoryTypeId();
-        }
         uint roomId = houseMan == null ? 0 : (uint)(houseMan->GetCurrentRoom());
+
+        if (houseMan != null)
+        {
+            var currentHouseId = houseMan->GetCurrentHouseId();
+            if (currentHouseId.Id != 0)
+            {
+                territoryId = (uint)currentHouseId.TerritoryTypeId;
+                wardId = (uint)(currentHouseId.WardIndex + 1);
+                if (currentHouseId.IsApartment)
+                {
+                    divisionId = currentHouseId.ApartmentDivision;
+                    houseId = 100;
+                    if (!currentHouseId.IsWorkshop)
+                    {
+                        roomId = (uint)currentHouseId.RoomNumber;
+                    }
+                }
+                else
+                {
+                    houseId = (uint)(currentHouseId.PlotIndex + 1);
+                    if (!currentHouseId.IsWorkshop && currentHouseId.RoomNumber > 0)
+                    {
+                        roomId = (uint)currentHouseId.RoomNumber;
+                    }
+                }
+            }
+
+            if (wardId == 0)
+            {
+                wardId = (uint)(houseMan->GetCurrentWard() + 1);
+            }
+        }
         
         // Detect if player is inside a house
         bool isIndoor = houseMan != null && houseMan->IsInside();
@@ -622,6 +662,9 @@ public class DalamudUtilService : IHostedService, IMediatorSubscriber
 
         _performanceCollector.LogPerformance(this, $"FrameworkOnUpdateInternal+{(isNormalFrameworkUpdate ? "Regular" : "Delayed")}", () =>
         {
+            EnsurePlotSizesLoadedFromConfig();
+            UpdateHousingPlotSizesFromMemory();
+            UpdateHousingInteriorFloorMapIdsFromCurrentLocation();
             IsAnythingDrawing = false;
             _performanceCollector.LogPerformance(this, $"ObjTableToCharas",
                 () =>
@@ -798,6 +841,1005 @@ public class DalamudUtilService : IHostedService, IMediatorSubscriber
 
             _delayedFrameworkUpdateCheck = DateTime.UtcNow;
         });
+    }
+
+    public string GetHousingPlotSizeLabel(LocationInfo location)
+    {
+        if (location.HouseId == 100)
+        {
+            return location.RoomId > 0 ? "Apartment (Room)" : "Apartment";
+        }
+
+        if (location.RoomId > 0)
+        {
+            return "Interior";
+        }
+
+        if (location.HouseId is < 1 or > 60)
+        {
+            return "Unknown";
+        }
+
+        if (TryGetPlotSizeFromMemory(location, out var memSize))
+        {
+            return memSize;
+        }
+
+        if (TryGetPlotSizeFromExcel(location, out var size))
+        {
+            return size;
+        }
+
+        return "Unknown";
+    }
+
+    private bool TryGetPlotSizeFromMemory(LocationInfo location, out string size)
+    {
+        size = "Unknown";
+        var territoryId = GetNormalizedHousingTerritoryId(location);
+        if (territoryId == 0 || location.HouseId is < 1 or > 60)
+        {
+            return false;
+        }
+
+        if (!_plotSizesByHousingTerritoryTypeIdFromMemory.TryGetValue(territoryId, out var plotSizes) || plotSizes.Length <= location.HouseId)
+        {
+            return false;
+        }
+
+        var raw = plotSizes[location.HouseId];
+        size = raw switch
+        {
+            0 => "Small",
+            1 => "Medium",
+            2 => "Large",
+            _ => "Unknown"
+        };
+
+        return !string.Equals(size, "Unknown", StringComparison.Ordinal);
+    }
+
+    private bool TryGetPlotSizeFromExcel(LocationInfo location, out string size)
+    {
+        size = "Unknown";
+        if (location.TerritoryId == 0 || location.HouseId is < 1 or > 60)
+        {
+            return false;
+        }
+
+        EnsureHousingPlotSizesLoaded();
+        var normalizedTerritoryId = GetNormalizedHousingTerritoryId(location);
+        if (_plotSizesByTerritoryIdExact.TryGetValue(normalizedTerritoryId, out var exact) && exact.Length > location.HouseId)
+        {
+            var rawExact = exact[location.HouseId];
+            size = rawExact switch
+            {
+                0 => "Small",
+                1 => "Medium",
+                2 => "Large",
+                _ => "Unknown"
+            };
+            return !string.Equals(size, "Unknown", StringComparison.Ordinal);
+        }
+
+        var landSetRowId = GetHousingLandSetRowIdForTerritory(normalizedTerritoryId);
+        if (landSetRowId == 0)
+        {
+            return false;
+        }
+
+        if (!_plotSizesByLandSetRowId.TryGetValue(landSetRowId, out var plotSizes) || plotSizes.Length <= location.HouseId)
+        {
+            return false;
+        }
+
+        var raw = plotSizes[location.HouseId];
+        size = raw switch
+        {
+            0 => "Small",
+            1 => "Medium",
+            2 => "Large",
+            _ => "Unknown"
+        };
+
+        return !string.Equals(size, "Unknown", StringComparison.Ordinal);
+    }
+
+    private static uint GetNormalizedHousingTerritoryId(LocationInfo location)
+    {
+        if (location.TerritoryId != 0)
+        {
+            return location.TerritoryId;
+        }
+
+        if (location.WardId > 0)
+        {
+            var original = HousingManager.GetOriginalHouseTerritoryTypeId();
+            if (original != 0)
+            {
+                return original;
+            }
+        }
+
+        return 0;
+    }
+
+    private void EnsureHousingPlotSizesLoaded()
+    {
+        if (_attemptedLoadHousingLandSet)
+        {
+            return;
+        }
+
+        _attemptedLoadHousingLandSet = true;
+        try
+        {
+            var luminaSheetsAssembly = typeof(Lumina.Excel.Sheets.World).Assembly;
+            var sheetType = luminaSheetsAssembly.GetType("Lumina.Excel.Sheets.HousingLandSet")
+                           ?? luminaSheetsAssembly.GetType("Lumina.Excel.GeneratedSheets.HousingLandSet");
+
+            if (sheetType == null)
+            {
+                var getExcelSheetFallback = _gameData.GetType()
+                    .GetMethods()
+                    .FirstOrDefault(m => string.Equals(m.Name, "GetExcelSheet", StringComparison.Ordinal)
+                                         && m.IsGenericMethodDefinition
+                                         && m.GetParameters().Length == 1);
+                if (getExcelSheetFallback != null)
+                {
+                    ScanExcelForPlotSizesFallback(getExcelSheetFallback);
+                }
+                return;
+            }
+
+            if (sheetType == null)
+            {
+                return;
+            }
+
+            var getExcelSheet = _gameData.GetType()
+                .GetMethods()
+                .FirstOrDefault(m => string.Equals(m.Name, "GetExcelSheet", StringComparison.Ordinal)
+                                     && m.IsGenericMethodDefinition
+                                     && m.GetParameters().Length == 1);
+
+            if (getExcelSheet == null)
+            {
+                return;
+            }
+
+            var sheet = getExcelSheet.MakeGenericMethod(sheetType).Invoke(_gameData, [Dalamud.Game.ClientLanguage.English]);
+            if (sheet is not IEnumerable enumerable)
+            {
+                return;
+            }
+
+            var loadedAny = false;
+            foreach (var row in enumerable)
+            {
+                if (row == null)
+                {
+                    continue;
+                }
+
+                var territoryId = TryGetTerritoryIdFromHousingLandSetRow(row);
+                if (territoryId == 0)
+                {
+                    // HousingLandSet sometimes doesn't expose territory directly; still store by its own RowId
+                    var ownRowId = TryGetRowId(row);
+                    if (ownRowId == 0)
+                    {
+                        continue;
+                    }
+                }
+
+                var sizes = TryGetPlotSizesFromHousingLandSetRow(row);
+                if (sizes == null)
+                {
+                    continue;
+                }
+
+                var packed = new byte[61];
+                for (var i = 0; i < 60 && i < sizes.Count; i++)
+                {
+                    packed[i + 1] = sizes[i];
+                }
+
+                if (territoryId != 0)
+                {
+                    _plotSizesByTerritoryIdExact[territoryId] = packed;
+                }
+                else
+                {
+                    var ownRow = TryGetRowId(row);
+                    if (ownRow != 0)
+                    {
+                        _plotSizesByLandSetRowId[ownRow] = packed;
+                    }
+                }
+                loadedAny = true;
+            }
+            if (!loadedAny)
+            {
+                ScanExcelForPlotSizesFallback(getExcelSheet);
+            }
+            _plotSizeSourceTypeName = sheetType.FullName;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to load HousingLandSet plot sizes");
+            try
+            {
+                var getExcelSheet = _gameData.GetType()
+                    .GetMethods()
+                    .FirstOrDefault(m => string.Equals(m.Name, "GetExcelSheet", StringComparison.Ordinal)
+                                         && m.IsGenericMethodDefinition
+                                         && m.GetParameters().Length == 1);
+                if (getExcelSheet != null)
+                {
+                    ScanExcelForPlotSizesFallback(getExcelSheet);
+                }
+            }
+            catch (Exception)
+            {
+                // ignore
+            }
+        }
+    }
+
+    private void ScanExcelForPlotSizesFallback(System.Reflection.MethodInfo getExcelSheet)
+    {
+        try
+        {
+            var asm = typeof(Lumina.Excel.Sheets.World).Assembly;
+            foreach (var t in asm.GetTypes())
+            {
+                if (t.Namespace == null) continue;
+                if (!t.Namespace.Contains("Lumina.Excel", StringComparison.Ordinal)) continue;
+                object? sheetObj = null;
+                try
+                {
+                    sheetObj = getExcelSheet.MakeGenericMethod(t).Invoke(_gameData, [Dalamud.Game.ClientLanguage.English]);
+                }
+                catch
+                {
+                    continue;
+                }
+                if (sheetObj is not IEnumerable enumerable) continue;
+
+                var anyRow = false;
+                foreach (var row in enumerable)
+                {
+                    if (row == null) continue;
+                    var sizes = TryGetPlotSizesFromHousingLandSetRow(row);
+                    if (sizes == null) continue;
+                    var terr = TryGetTerritoryIdFromHousingLandSetRow(row);
+                    if (terr == 0) continue;
+
+                    var packed = new byte[61];
+                    for (var i = 0; i < 60 && i < sizes.Count; i++)
+                    {
+                        packed[i + 1] = sizes[i];
+                    }
+                    _plotSizesByTerritoryIdExact[terr] = packed;
+                    _plotSizeSourceTypeName = t.FullName;
+                    anyRow = true;
+                }
+                if (anyRow) break;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Fallback scan for plot sizes failed");
+        }
+    }
+
+    private static uint TryGetTerritoryIdFromHousingLandSetRow(object row)
+    {
+        var rowType = row.GetType();
+
+        var rowIdProp = rowType.GetProperty("RowId");
+        if (rowIdProp != null)
+        {
+            var rowIdValue = rowIdProp.GetValue(row);
+            if (rowIdValue is uint rowU32)
+            {
+                return rowU32;
+            }
+            if (rowIdValue is ushort rowU16)
+            {
+                return rowU16;
+            }
+        }
+
+        var territoryIdProp = rowType.GetProperty("TerritoryTypeId")
+                            ?? rowType.GetProperty("TerritoryType");
+
+        if (territoryIdProp != null)
+        {
+            var value = territoryIdProp.GetValue(row);
+            if (value is uint u32)
+            {
+                return u32;
+            }
+
+            if (value is ushort u16)
+            {
+                return u16;
+            }
+
+            if (value != null)
+            {
+                var valueRowIdProp = value.GetType().GetProperty("RowId");
+                var rowIdVal = valueRowIdProp?.GetValue(value);
+                if (rowIdVal is uint ru32)
+                {
+                    return ru32;
+                }
+                if (rowIdVal is ushort ru16)
+                {
+                    return ru16;
+                }
+            }
+        }
+
+        return 0;
+    }
+
+    private static uint TryGetRowId(object row)
+    {
+        var rowType = row.GetType();
+        var rowIdProp = rowType.GetProperty("RowId");
+        if (rowIdProp == null) return 0;
+        var rowIdValue = rowIdProp.GetValue(row);
+        return rowIdValue switch
+        {
+            uint u32 => u32,
+            ushort u16 => u16,
+            _ => 0
+        };
+    }
+
+    private uint GetHousingLandSetRowIdForTerritory(uint territoryId)
+    {
+        if (territoryId == 0)
+        {
+            return 0;
+        }
+
+        if (_housingLandSetRowIdByTerritoryId.TryGetValue(territoryId, out var cached))
+        {
+            return cached;
+        }
+
+        try
+        {
+            var territorySheet = _gameData.GetExcelSheet<TerritoryType>(Dalamud.Game.ClientLanguage.English);
+            if (territorySheet == null)
+            {
+                _housingLandSetRowIdByTerritoryId[territoryId] = 0;
+                return 0;
+            }
+
+            var territoryRow = territorySheet.FirstOrDefault(t => t.RowId == territoryId);
+            if (territoryRow.RowId == 0)
+            {
+                _housingLandSetRowIdByTerritoryId[territoryId] = 0;
+                return 0;
+            }
+
+            var landSetRowId = TryGetHousingLandSetRowIdFromTerritoryTypeRow(territoryRow);
+            _housingLandSetRowIdByTerritoryId[territoryId] = landSetRowId;
+            return landSetRowId;
+        }
+        catch
+        {
+            _housingLandSetRowIdByTerritoryId[territoryId] = 0;
+            return 0;
+        }
+    }
+
+    private static uint TryGetHousingLandSetRowIdFromTerritoryTypeRow(TerritoryType territoryRow)
+    {
+        var props = typeof(TerritoryType).GetProperties();
+        var landSetProp =
+            props.FirstOrDefault(p => p.PropertyType.IsGenericType
+                                      && p.PropertyType.GetGenericArguments().Length == 1
+                                      && string.Equals(p.PropertyType.GetGenericArguments()[0].Name, "HousingLandSet", StringComparison.Ordinal))
+            ?? props.FirstOrDefault(p => p.Name.Contains("HousingLandSet", StringComparison.OrdinalIgnoreCase)
+                                         || p.PropertyType.Name.Contains("HousingLandSet", StringComparison.OrdinalIgnoreCase))
+            ?? props.FirstOrDefault(p => p.Name.Contains("HousingLandSetId", StringComparison.OrdinalIgnoreCase))
+            ?? props.FirstOrDefault(p => p.Name.Contains("LandSet", StringComparison.OrdinalIgnoreCase)
+                                         || p.PropertyType.Name.Contains("LandSet", StringComparison.OrdinalIgnoreCase));
+
+        if (landSetProp == null)
+        {
+            return 0;
+        }
+
+        var value = landSetProp.GetValue(territoryRow);
+        if (value == null)
+        {
+            return 0;
+        }
+
+        if (value is uint u32)
+        {
+            return u32;
+        }
+
+        if (value is ushort u16)
+        {
+            return u16;
+        }
+
+        var rowIdProp = value.GetType().GetProperty("RowId");
+        var rowIdVal = rowIdProp?.GetValue(value);
+        if (rowIdVal is uint ru32)
+        {
+            return ru32;
+        }
+        if (rowIdVal is ushort ru16)
+        {
+            return ru16;
+        }
+
+        return 0;
+    }
+
+    private static IReadOnlyList<byte>? TryGetPlotSizesFromHousingLandSetRow(object row)
+    {
+        var rowType = row.GetType();
+        var props = rowType.GetProperties();
+
+        var plotSizeProp = rowType.GetProperty("PlotSize")
+                           ?? props.FirstOrDefault(p => p.Name.Contains("PlotSize", StringComparison.OrdinalIgnoreCase));
+
+        var plotProp = rowType.GetProperty("Plots")
+                      ?? rowType.GetProperty("Plot")
+                      ?? props.FirstOrDefault(p => p.Name.Equals("Plots", StringComparison.OrdinalIgnoreCase) || p.Name.Equals("Plot", StringComparison.OrdinalIgnoreCase));
+
+        if (plotSizeProp != null)
+        {
+            var sizesFromPlotSize = TryReadByteList(plotSizeProp.GetValue(row));
+            if (sizesFromPlotSize != null && sizesFromPlotSize.Count > 0)
+            {
+                return sizesFromPlotSize;
+            }
+        }
+
+        if (plotProp != null)
+        {
+            var plotsValue = plotProp.GetValue(row);
+            if (plotsValue is IEnumerable plotsEnumerable)
+            {
+                var list = new List<byte>(64);
+                foreach (var plot in plotsEnumerable)
+                {
+                    if (plot == null)
+                    {
+                        continue;
+                    }
+
+                    if (plot is byte pb)
+                    {
+                        list.Add(pb);
+                        continue;
+                    }
+
+                    if (plot.GetType().IsEnum)
+                    {
+                        list.Add((byte)Convert.ToInt32(plot));
+                        continue;
+                    }
+
+                    var sizeProp = plot.GetType().GetProperty("Size");
+                    var sizeValue = sizeProp?.GetValue(plot);
+                    var sizeByte = TryReadByte(sizeValue);
+                    if (sizeByte.HasValue)
+                    {
+                        list.Add(sizeByte.Value);
+                    }
+                }
+
+                if (list.Count > 0)
+                {
+                    return list;
+                }
+            }
+        }
+
+        foreach (var p in props)
+        {
+            if (!p.Name.Contains("Size", StringComparison.OrdinalIgnoreCase) && !p.Name.Contains("Plot", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var candidate = TryReadByteList(p.GetValue(row));
+            if (candidate != null && candidate.Count >= 60)
+            {
+                return candidate;
+            }
+        }
+
+        return null;
+    }
+
+    private static IReadOnlyList<byte>? TryReadByteList(object? value)
+    {
+        if (value == null)
+        {
+            return null;
+        }
+
+        if (value is IReadOnlyList<byte> roBytes)
+        {
+            return roBytes;
+        }
+
+        if (value is IEnumerable<byte> bytes)
+        {
+            return bytes.ToList();
+        }
+
+        if (value is IEnumerable anyEnum)
+        {
+            var list = new List<byte>(64);
+            foreach (var item in anyEnum)
+            {
+                var b = TryReadByte(item);
+                if (b.HasValue)
+                {
+                    list.Add(b.Value);
+                }
+            }
+
+            return list;
+        }
+
+        return null;
+    }
+
+    private static byte? TryReadByte(object? value)
+    {
+        if (value == null)
+        {
+            return null;
+        }
+
+        if (value is byte b)
+        {
+            return b;
+        }
+
+        if (value is int i)
+        {
+            return (byte)i;
+        }
+
+        if (value is uint u)
+        {
+            return (byte)u;
+        }
+
+        if (value is ushort us)
+        {
+            return (byte)us;
+        }
+
+        if (value.GetType().IsEnum)
+        {
+            return (byte)Convert.ToInt32(value);
+        }
+
+        var rowIdProp = value.GetType().GetProperty("RowId");
+        var rowIdVal = rowIdProp?.GetValue(value);
+        if (rowIdVal is byte rb)
+        {
+            return rb;
+        }
+        if (rowIdVal is int ri)
+        {
+            return (byte)ri;
+        }
+        if (rowIdVal is uint ru)
+        {
+            return (byte)ru;
+        }
+
+        var valueProp = value.GetType().GetProperty("Value");
+        var inner = valueProp?.GetValue(value);
+        if (!ReferenceEquals(inner, null))
+        {
+            return TryReadByte(inner);
+        }
+
+        return null;
+    }
+
+    public bool HasAttemptedHousingLandSetLoad()
+    {
+        return _attemptedLoadHousingLandSet;
+    }
+
+    public int GetLoadedHousingLandSetCount()
+    {
+        return _plotSizesByLandSetRowId.Count;
+    }
+
+    public int GetLoadedHousingTerritoryPlotSizeCount()
+    {
+        return _plotSizesByTerritoryIdExact.Count;
+    }
+
+    public int GetLoadedHousingPlotSizeMemoryTerritoryCount()
+    {
+        return _plotSizesByHousingTerritoryTypeIdFromMemory.Count;
+    }
+
+    public uint GetLastHousingPlotSizeMemoryTerritoryId()
+    {
+        return _lastPlotSizesMemoryTerritoryId;
+    }
+
+    public uint GetHousingLandSetIdForTerritory(uint territoryId)
+    {
+        return GetHousingLandSetRowIdForTerritory(territoryId);
+    }
+
+    public string GetPlotSizeSourceTypeName()
+    {
+        return _plotSizeSourceTypeName ?? string.Empty;
+    }
+
+    public void ResetPlotSizeCaches()
+    {
+        _attemptedLoadHousingLandSet = false;
+        _plotSizeSourceTypeName = null;
+        _plotSizesByLandSetRowId.Clear();
+        _plotSizesByTerritoryIdExact.Clear();
+        _housingLandSetRowIdByTerritoryId.Clear();
+        _plotSizesByHousingTerritoryTypeIdFromMemory.Clear();
+        _lastPlotSizesMemoryTerritoryId = 0;
+    }
+
+    private void UpdateHousingInteriorFloorMapIdsFromCurrentLocation()
+    {
+        LocationInfo location;
+        try
+        {
+            location = GetMapData();
+        }
+        catch
+        {
+            return;
+        }
+
+        if (!location.IsIndoor || location.RoomId > 0 || location.WardId <= 0 || location.HouseId is < 1 or > 60 || location.MapId == 0 || location.TerritoryId == 0)
+        {
+            return;
+        }
+
+        var key = $"{location.ServerId}_{location.TerritoryId}_{location.WardId}_{location.HouseId}";
+        if (string.Equals(_lastInteriorLocationKey, key, StringComparison.Ordinal) && _lastInteriorMapId == location.MapId)
+        {
+            return;
+        }
+
+        _lastInteriorLocationKey = key;
+        _lastInteriorMapId = location.MapId;
+
+        var sizeLabel = GetHousingPlotSizeLabel(location);
+        var sizeIndex = sizeLabel switch
+        {
+            "Small" => 0,
+            "Medium" => 1,
+            "Large" => 2,
+            _ => -1
+        };
+
+        if (sizeIndex < 0)
+        {
+            return;
+        }
+
+        var mapKey = $"{location.TerritoryId}:{sizeIndex}";
+        if (!_configService.Current.HousingInteriorFloorMapIdsByTerritoryAndSize.TryGetValue(mapKey, out var maps))
+        {
+            maps = new HousingInteriorFloorMapIds();
+            _configService.Current.HousingInteriorFloorMapIdsByTerritoryAndSize[mapKey] = maps;
+        }
+
+        if (!maps.ObservedMapIds.Contains(location.MapId))
+        {
+            maps.ObservedMapIds.Add(location.MapId);
+        }
+
+        var mapName = MapData.Value.TryGetValue(location.MapId, out var mapData) ? mapData.MapName : string.Empty;
+        var kind = GetInteriorFloorKind(mapName);
+        if (sizeIndex == 0 && kind == InteriorFloorKind.Second)
+        {
+            kind = InteriorFloorKind.Basement;
+        }
+
+        if (kind == InteriorFloorKind.Ground)
+        {
+            if (maps.GroundMapId == 0 || maps.GroundMapId != location.MapId)
+            {
+                maps.GroundMapId = location.MapId;
+                _configService.Save();
+            }
+            return;
+        }
+
+        if (kind == InteriorFloorKind.Basement)
+        {
+            if (maps.BasementMapId == 0 || maps.BasementMapId != location.MapId)
+            {
+                maps.BasementMapId = location.MapId;
+                if (maps.GroundMapId == location.MapId) maps.GroundMapId = 0;
+                if (maps.SecondFloorMapId == location.MapId) maps.SecondFloorMapId = 0;
+                _configService.Save();
+            }
+            return;
+        }
+
+        if (kind == InteriorFloorKind.Second)
+        {
+            if (maps.SecondFloorMapId == 0 || maps.SecondFloorMapId != location.MapId)
+            {
+                maps.SecondFloorMapId = location.MapId;
+                if (maps.GroundMapId == location.MapId) maps.GroundMapId = 0;
+                if (maps.BasementMapId == location.MapId) maps.BasementMapId = 0;
+                _configService.Save();
+            }
+            return;
+        }
+
+        if (maps.GroundMapId == 0)
+        {
+            maps.GroundMapId = location.MapId;
+            _configService.Save();
+            return;
+        }
+
+        if (location.MapId == maps.GroundMapId)
+        {
+            return;
+        }
+
+        if (sizeIndex == 0)
+        {
+            if (maps.BasementMapId == 0 && maps.SecondFloorMapId != 0)
+            {
+                maps.BasementMapId = maps.SecondFloorMapId;
+                maps.SecondFloorMapId = 0;
+            }
+
+            if (maps.BasementMapId == 0)
+            {
+                maps.BasementMapId = location.MapId;
+                if (maps.SecondFloorMapId == location.MapId)
+                {
+                    maps.SecondFloorMapId = 0;
+                }
+                _configService.Save();
+            }
+
+            return;
+        }
+
+        if (maps.BasementMapId == 0 && location.MapId == maps.GroundMapId - 1)
+        {
+            maps.BasementMapId = location.MapId;
+            _configService.Save();
+            return;
+        }
+
+        if (maps.SecondFloorMapId == 0 && location.MapId == maps.GroundMapId + 1)
+        {
+            maps.SecondFloorMapId = location.MapId;
+            _configService.Save();
+            return;
+        }
+
+        if (maps.BasementMapId == 0 && location.MapId < maps.GroundMapId)
+        {
+            maps.BasementMapId = location.MapId;
+            _configService.Save();
+            return;
+        }
+
+        if (maps.SecondFloorMapId == 0 && location.MapId > maps.GroundMapId)
+        {
+            maps.SecondFloorMapId = location.MapId;
+            _configService.Save();
+        }
+    }
+
+    private static InteriorFloorKind GetInteriorFloorKind(string mapName)
+    {
+        if (string.IsNullOrWhiteSpace(mapName))
+        {
+            return InteriorFloorKind.Unknown;
+        }
+
+        if (mapName.Contains("Basement", StringComparison.OrdinalIgnoreCase)
+            || mapName.Contains("Cellar", StringComparison.OrdinalIgnoreCase)
+            || mapName.Contains("Cellarage", StringComparison.OrdinalIgnoreCase))
+        {
+            return InteriorFloorKind.Basement;
+        }
+
+        if (mapName.Contains("Second", StringComparison.OrdinalIgnoreCase)
+            || mapName.Contains("Upper", StringComparison.OrdinalIgnoreCase))
+        {
+            return InteriorFloorKind.Second;
+        }
+
+        if (mapName.Contains("Ground", StringComparison.OrdinalIgnoreCase)
+            || mapName.Contains("First", StringComparison.OrdinalIgnoreCase))
+        {
+            return InteriorFloorKind.Ground;
+        }
+
+        return InteriorFloorKind.Unknown;
+    }
+
+    private unsafe void UpdateHousingPlotSizesFromMemory()
+    {
+        var manager = HousingManager.Instance();
+        if (manager == null)
+        {
+            return;
+        }
+
+        var outdoorPtr = *(nint*)((byte*)manager + 0x08);
+        if (outdoorPtr == 0)
+        {
+            return;
+        }
+
+        var houseId = *(HouseId*)((byte*)outdoorPtr + 0x96A0);
+        if (houseId.Id == 0)
+        {
+            return;
+        }
+
+        var territoryId = (uint)houseId.TerritoryTypeId;
+        if (territoryId == 0)
+        {
+            return;
+        }
+
+        if (_plotSizesByHousingTerritoryTypeIdFromMemory.ContainsKey(territoryId))
+        {
+            _lastPlotSizesMemoryTerritoryId = territoryId;
+            return;
+        }
+
+        var plotBase = (byte*)outdoorPtr + 0x96B8;
+        var packed = new byte[61];
+        for (var plotId = 1; plotId <= 60; plotId++)
+        {
+            var idx = plotId - 1;
+            var sizeByte = *(plotBase + (idx * 0x10) + 0x01);
+            if (sizeByte > 2)
+            {
+                return;
+            }
+            packed[plotId] = sizeByte;
+        }
+
+        _plotSizesByHousingTerritoryTypeIdFromMemory[territoryId] = packed;
+        _lastPlotSizesMemoryTerritoryId = territoryId;
+        SavePlotSizesForTerritoryToConfig(territoryId, packed);
+    }
+
+    public IReadOnlyDictionary<string, List<byte>> GetHousingPlotSizesByTerritoryId()
+    {
+        return _configService.Current.HousingPlotSizesByTerritoryId;
+    }
+
+    public IReadOnlyDictionary<string, HousingInteriorFloorMapIds> GetHousingInteriorFloorMapIdsByTerritoryAndSize()
+    {
+        return _configService.Current.HousingInteriorFloorMapIdsByTerritoryAndSize;
+    }
+
+    private void EnsurePlotSizesLoadedFromConfig()
+    {
+        if (_loadedPlotSizesFromConfig)
+        {
+            return;
+        }
+        _loadedPlotSizesFromConfig = true;
+        try
+        {
+            var dict = _configService.Current.HousingPlotSizesByTerritoryId;
+            foreach (var builtin in HousingPlotSizeDefaults.ByTerritoryId)
+            {
+                var key = builtin.Key.ToString();
+                if (!dict.ContainsKey(key) && builtin.Value.Length == 30)
+                {
+                    dict[key] = builtin.Value.ToList();
+                }
+            }
+
+            foreach (var kv in dict)
+            {
+                if (uint.TryParse(kv.Key, out var terr) && kv.Value is { Count: > 0 })
+                {
+                    var packed = new byte[61];
+                    if (kv.Value.Count >= 60)
+                    {
+                        for (var i = 0; i < 60; i++)
+                        {
+                            packed[i + 1] = kv.Value[i];
+                        }
+                    }
+                    else if (kv.Value.Count >= 30)
+                    {
+                        for (var i = 0; i < 30; i++)
+                        {
+                            packed[i + 1] = kv.Value[i];
+                            packed[i + 31] = kv.Value[i];
+                        }
+                    }
+                    else
+                    {
+                        continue;
+                    }
+                    _plotSizesByHousingTerritoryTypeIdFromMemory[terr] = packed;
+                }
+            }
+
+            if (dict.Count > 0)
+            {
+                _configService.Save();
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to load HousingPlotSizesByTerritoryId from config");
+        }
+    }
+
+    private void SavePlotSizesForTerritoryToConfig(uint territoryId, byte[] packed)
+    {
+        try
+        {
+            var dict = _configService.Current.HousingPlotSizesByTerritoryId;
+            var storeThirty = true;
+            for (var i = 1; i <= 30; i++)
+            {
+                if (packed[i] != packed[i + 30])
+                {
+                    storeThirty = false;
+                    break;
+                }
+            }
+
+            var newList = storeThirty ? new List<byte>(30) : new List<byte>(60);
+            if (storeThirty)
+            {
+                for (var i = 1; i <= 30; i++) newList.Add(packed[i]);
+            }
+            else
+            {
+                for (var i = 1; i <= 60; i++) newList.Add(packed[i]);
+            }
+
+            if (!dict.TryGetValue(territoryId.ToString(), out var list) || !list.SequenceEqual(newList))
+            {
+                dict[territoryId.ToString()] = newList;
+                _configService.Save();
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to save HousingPlotSizesByTerritoryId for {Territory}", territoryId);
+        }
     }
 
     /// <summary>

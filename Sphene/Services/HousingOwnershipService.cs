@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Dalamud.Plugin.Services;
 using Dalamud.Game.ClientState.Conditions;
+using FFXIVClientStructs.FFXIV.Client.Game;
 using Sphene.API.Data;
 using Sphene.API.Dto.CharaData;
 using Sphene.API.Dto.User;
@@ -150,14 +151,43 @@ public partial class HousingOwnershipService
         // 2. Check UsingHousingFunctions condition - only active when player owns or has permissions
         var housingFunctionsActive = _condition[ConditionFlag.UsingHousingFunctions];
         _logger.LogDebug("UsingHousingFunctions condition state: {IsActive}", housingFunctionsActive);
-        
+
+        var isOwnedByHouseId = await _dalamudUtilService.RunOnFrameworkThread(() => IsOwnedByLocalPlayerHouseId(location)).ConfigureAwait(false);
+        if (isOwnedByHouseId)
+        {
+            _logger.LogInformation("Ownership verified via owned HouseId match (no housing menu required)");
+            return new OwnershipVerificationResult(true, "Ownership verified via owned HouseId");
+        }
+
+        var locationMatches = true;
+        if (location.IsIndoor && location.HouseId > 0)
+        {
+            locationMatches = currentLocation.IsIndoor
+                              && currentLocation.HouseId == location.HouseId
+                              && currentLocation.WardId == location.WardId
+                              && currentLocation.RoomId == location.RoomId;
+        }
+        else if (!location.IsIndoor && location.HouseId > 0)
+        {
+            locationMatches = !currentLocation.IsIndoor
+                              && currentLocation.HouseId == location.HouseId
+                              && currentLocation.WardId == location.WardId;
+        }
+
         if (!housingFunctionsActive)
         {
-            _logger.LogDebug("UsingHousingFunctions condition not active - player needs to enter housing menu");
-            return new OwnershipVerificationResult(false, 
-                "Please enter the housing menu (right-click on your house placard or use housing functions) to verify ownership, then try again.");
+            if (!locationMatches)
+            {
+                _logger.LogDebug("UsingHousingFunctions inactive and location mismatch");
+                return new OwnershipVerificationResult(false,
+                    "You must stand at the exact property location to verify ownership without housing menu access.");
+            }
+
+            _logger.LogInformation("Ownership verified by strict location match fallback without housing menu");
+            return new OwnershipVerificationResult(true,
+                "Ownership verified by strict location match (housing menu was not required).");
         }
-        
+
         _logger.LogDebug("UsingHousingFunctions condition is active - player has housing permissions");
         
         // 3. For indoor areas, apply strict validation
@@ -191,6 +221,94 @@ public partial class HousingOwnershipService
         // 5. If UsingHousingFunctions is active and location checks pass, ownership is verified
         return new OwnershipVerificationResult(true, 
             "Ownership verified - housing functions are active and location matches");
+    }
+
+    private static bool IsOwnedByLocalPlayerHouseId(LocationInfo location)
+    {
+        if (location.WardId <= 0 || location.HouseId <= 0)
+        {
+            return false;
+        }
+
+        var ownedHouseIds = GetOwnedHouseIds();
+        foreach (var owned in ownedHouseIds)
+        {
+            if (OwnedHouseIdMatchesLocation(owned, location))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static List<HouseId> GetOwnedHouseIds()
+    {
+        var result = new List<HouseId>(8);
+
+        AddIfNonZero(result, HousingManager.GetOwnedHouseId(EstateType.FreeCompanyEstate));
+        AddIfNonZero(result, HousingManager.GetOwnedHouseId(EstateType.PersonalChambers));
+        AddIfNonZero(result, HousingManager.GetOwnedHouseId(EstateType.PersonalEstate));
+        AddIfNonZero(result, HousingManager.GetOwnedHouseId(EstateType.SharedEstate, 0));
+        AddIfNonZero(result, HousingManager.GetOwnedHouseId(EstateType.SharedEstate, 1));
+        AddIfNonZero(result, HousingManager.GetOwnedHouseId(EstateType.ApartmentRoom));
+
+        return result;
+    }
+
+    private static void AddIfNonZero(List<HouseId> list, HouseId houseId)
+    {
+        if (houseId.Id != 0)
+        {
+            list.Add(houseId);
+        }
+    }
+
+    private static bool OwnedHouseIdMatchesLocation(HouseId houseId, LocationInfo location)
+    {
+        if (houseId.Id == 0)
+        {
+            return false;
+        }
+
+        var wardId = houseId.WardIndex + 1;
+        if (location.WardId != wardId)
+        {
+            return false;
+        }
+
+        if (houseId.IsApartment)
+        {
+            if (location.HouseId != 100)
+            {
+                return false;
+            }
+
+            if (location.DivisionId != 0 && location.DivisionId != houseId.ApartmentDivision)
+            {
+                return false;
+            }
+
+            if (!houseId.IsWorkshop && location.RoomId > 0 && location.RoomId != houseId.RoomNumber)
+            {
+                return false;
+            }
+
+            return true;
+        }
+
+        var plotId = houseId.PlotIndex + 1;
+        if (location.HouseId != plotId)
+        {
+            return false;
+        }
+
+        if (!houseId.IsWorkshop && houseId.RoomNumber > 0 && location.RoomId > 0 && location.RoomId != houseId.RoomNumber)
+        {
+            return false;
+        }
+
+        return true;
     }
     
     public static bool IsHousingArea(LocationInfo location)

@@ -16,6 +16,7 @@ using Sphene.SpheneConfiguration;
 using System.Numerics;
 using System.Text.Json;
 using Sphene.PlayerData.Data;
+using Sphene.SpheneConfiguration.Models;
 
 namespace Sphene.UI.Panels;
 
