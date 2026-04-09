@@ -24,7 +24,7 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
     private CharacterData? _uploadingCharacterData = null;
     private readonly HashSet<UserData> _previouslyVisiblePlayers = new(UserDataComparer.Instance);
     private Task<CharacterData>? _fileUploadTask = null;
-    private readonly HashSet<UserData> _usersToPushDataTo = new(UserDataComparer.Instance);
+    private readonly ConcurrentDictionary<UserData, byte> _usersToPushDataTo = new(UserDataComparer.Instance);
     private readonly SemaphoreSlim _pushDataSemaphore = new(1, 1);
     private readonly CancellationTokenSource _runtimeCts = new();
     
@@ -32,7 +32,7 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
     private readonly ConcurrentDictionary<UserData, string> _lastSentHashPerUser = new(UserDataComparer.Instance);
     
     // Delayed push tracking for newly connected users
-    private readonly Dictionary<UserData, DateTime> _delayedPushUsers = new(UserDataComparer.Instance);
+    private readonly ConcurrentDictionary<UserData, DateTime> _delayedPushUsers = new(UserDataComparer.Instance);
     private readonly Timer _delayedPushTimer;
     private DateTime _nextOutgoingBatchPushUtc = DateTime.MinValue;
     private bool _hasPendingOutgoingBatchPush = false;
@@ -175,7 +175,7 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
             var hasPendingAck = _pairManager.HasPendingAcknowledgmentForUser(user);
             if (forced || hasPendingAck || lastHash == null || !string.Equals(lastHash, currentHash, StringComparison.Ordinal))
             {
-                _usersToPushDataTo.Add(user);
+                _usersToPushDataTo.TryAdd(user, 0);
                 Logger.LogDebug("{tag} Push queue add: user={user} lastHash={lastHash} currentHash={currentHash} forced={forced}", 
                     SyncProgressTag, user.AliasOrUID, lastHash ?? "NONE", currentHash, forced);
             }
@@ -199,25 +199,31 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
 
     private void FrameworkOnUpdate()
     {
-        if (!_dalamudUtil.GetIsPlayerPresent() || !_apiController.IsConnected) return;
-
-        var allVisibleUsers = _pairManager.GetVisibleUsers();
-        var newVisibleUsers = allVisibleUsers.Except(_previouslyVisiblePlayers, UserDataComparer.Instance).ToList();
-        _previouslyVisiblePlayers.Clear();
-        foreach (var u in allVisibleUsers) _previouslyVisiblePlayers.Add(u);
-        if (newVisibleUsers.Count == 0) return;
-
-        Logger.LogDebug("{tag} New users visible: users={users} scheduling delayed push",
-            SyncProgressTag, string.Join(", ", newVisibleUsers.Select(k => k.AliasOrUID)));
-        
-        // Add new users to delayed push queue to give them time to stabilize connection
-        var currentTime = DateTime.UtcNow;
-        foreach (var user in newVisibleUsers)
+        try
         {
-            _delayedPushUsers[user] = currentTime;
-            Logger.LogDebug("{tag} Delayed push queued: user={user} delaySeconds={seconds}", 
-                SyncProgressTag, user.AliasOrUID, DELAYED_PUSH_SECONDS);
-            RequestRemoteCharacterDataRefreshIfNeeded(user);
+            if (!_dalamudUtil.GetIsPlayerPresent() || !_apiController.IsConnected) return;
+
+            var allVisibleUsers = _pairManager.GetVisibleUsers();
+            var newVisibleUsers = allVisibleUsers.Except(_previouslyVisiblePlayers, UserDataComparer.Instance).ToList();
+            _previouslyVisiblePlayers.Clear();
+            foreach (var u in allVisibleUsers) _previouslyVisiblePlayers.Add(u);
+            if (newVisibleUsers.Count == 0) return;
+
+            Logger.LogDebug("{tag} New users visible: users={users} scheduling delayed push",
+                SyncProgressTag, string.Join(", ", newVisibleUsers.Select(k => k.AliasOrUID)));
+            
+            var currentTime = DateTime.UtcNow;
+            foreach (var user in newVisibleUsers)
+            {
+                _delayedPushUsers[user] = currentTime;
+                Logger.LogDebug("{tag} Delayed push queued: user={user} delaySeconds={seconds}", 
+                    SyncProgressTag, user.AliasOrUID, DELAYED_PUSH_SECONDS);
+                RequestRemoteCharacterDataRefreshIfNeeded(user);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "{tag} Framework update failed", SyncProgressTag);
         }
     }
 
@@ -266,7 +272,7 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
 
     private void PushCharacterData(bool forced = false, bool bypassBatching = false)
     {
-        if (_lastCreatedData == null || _usersToPushDataTo.Count == 0) return;
+        if (_lastCreatedData == null || _usersToPushDataTo.IsEmpty) return;
 
         if (!bypassBatching && IsDutyCombatOutgoingBatchingActive())
         {
@@ -289,7 +295,7 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
                     _uploadingCharacterData = _lastCreatedData.DeepClone();
                     Logger.LogDebug("{tag} Upload start: hash={hash} taskNull={task} taskCompleted={taskCpl} forced={frc}",
                         SyncProgressTag, _lastCreatedData.DataHash, _fileUploadTask == null, _fileUploadTask?.IsCompleted ?? false, forced);
-                    _fileUploadTask = _fileTransferManager.UploadFiles(_uploadingCharacterData, [.. _usersToPushDataTo]);
+                    _fileUploadTask = _fileTransferManager.UploadFiles(_uploadingCharacterData, [.. _usersToPushDataTo.Keys]);
                 }
 
                 if (_fileUploadTask == null)
@@ -298,21 +304,21 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
                 }
 
                 var dataToSend = await _fileUploadTask.ConfigureAwait(false);
-                Logger.LogDebug("{tag} Upload complete: hash={hash} users={users}", SyncProgressTag, dataToSend.DataHash.Value, string.Join(", ", _usersToPushDataTo.Select(u => u.AliasOrUID)));
+                Logger.LogDebug("{tag} Upload complete: hash={hash} users={users}", SyncProgressTag, dataToSend.DataHash.Value, string.Join(", ", _usersToPushDataTo.Keys.Select(u => u.AliasOrUID)));
                 await _pushDataSemaphore.WaitAsync(_runtimeCts.Token).ConfigureAwait(false);
                 try
                 {
-                    if (_usersToPushDataTo.Count == 0) return;
+                    if (_usersToPushDataTo.IsEmpty) return;
 
                     var currentVisible = new HashSet<UserData>(_pairManager.GetVisibleUsers(), UserDataComparer.Instance);
                     var usersToSend = new List<UserData>();
                     var currentHash = dataToSend.DataHash.Value;
 
-                    foreach (var user in _usersToPushDataTo.ToList())
+                    foreach (var user in _usersToPushDataTo.Keys.ToList())
                     {
                         if (!currentVisible.Contains(user))
                         {
-                            _usersToPushDataTo.Remove(user);
+                            _usersToPushDataTo.TryRemove(user, out _);
                             continue;
                         }
 
@@ -320,7 +326,7 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
                         if (!forced && !hasPendingAck && _lastSentHashPerUser.TryGetValue(user, out var lastSentHash)
                             && string.Equals(lastSentHash, currentHash, StringComparison.Ordinal))
                         {
-                            _usersToPushDataTo.Remove(user);
+                            _usersToPushDataTo.TryRemove(user, out _);
                             continue;
                         }
 
@@ -388,7 +394,7 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
                     foreach (var user in usersToSend)
                     {
                         _lastSentHashPerUser[user] = currentHash;
-                        _usersToPushDataTo.Remove(user);
+                        _usersToPushDataTo.TryRemove(user, out _);
                     }
                 }
                 finally
@@ -419,8 +425,8 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
             return;
         }
 
-        _delayedPushUsers.Remove(user);
-        _usersToPushDataTo.Add(user);
+        _delayedPushUsers.TryRemove(user, out _);
+        _usersToPushDataTo.TryAdd(user, 0);
         Logger.LogDebug("{tag} Refresh push requested: requester={user} hash={hash}", SyncProgressTag, user.AliasOrUID, _lastCreatedData.DataHash?.Value ?? "null");
         EnsureServerWarmUpload();
         PushCharacterData(forced: true, bypassBatching: true);
@@ -433,13 +439,13 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
     
     private void ProcessDelayedPushes(object? state)
     {
-        if (_delayedPushUsers.Count == 0) return;
+        if (_delayedPushUsers.IsEmpty) return;
         
         var currentTime = DateTime.UtcNow;
         var usersToProcess = new List<UserData>();
         
         // Find users whose delay period has expired
-        foreach (var kvp in _delayedPushUsers.ToList())
+        foreach (var kvp in _delayedPushUsers)
         {
             var user = kvp.Key;
             var delayStartTime = kvp.Value;
@@ -447,7 +453,7 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
             if ((currentTime - delayStartTime).TotalSeconds >= DELAYED_PUSH_SECONDS)
             {
                 usersToProcess.Add(user);
-                _delayedPushUsers.Remove(user);
+                _delayedPushUsers.TryRemove(user, out _);
                 Logger.LogDebug("{tag} Delayed push expired: user={user}", SyncProgressTag, user.AliasOrUID);
             }
         }
@@ -457,7 +463,7 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
         {
             foreach (var user in usersToProcess)
             {
-                _usersToPushDataTo.Add(user);
+                _usersToPushDataTo.TryAdd(user, 0);
             }
             
             // Only push if we have data to push

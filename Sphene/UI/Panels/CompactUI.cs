@@ -991,7 +991,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                 var uidTextSize = ImGui.CalcTextSize(unsupported);
                 ImGui.SetCursorPosX((ImGui.GetWindowContentRegionMax().X + ImGui.GetWindowContentRegionMin().X) / 2 - uidTextSize.X / 2);
                 ImGui.AlignTextToFramePadding();
-                ImGui.TextColored(SpheneCustomTheme.Colors.Error, unsupported);
+                ImGui.TextColored(SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning, unsupported);
             }
             UiSharedService.ColorTextWrapped($"Your Network client is outdated, current version is {ver.Major}.{ver.Minor}.{ver.Build}. " +
             $"Please update your client to maintain Network compatibility. Open /xlplugins and update the plugin.", SpheneCustomTheme.Colors.Error);
@@ -999,7 +999,7 @@ public class CompactUi : WindowMediatorSubscriberBase
 
         if (!_ipcManager.Initialized)
         {
-            var unsupported = "MISSING CORE COMPONENTS";
+            var unsupported = "Limited functionality";
 
             using (_uiSharedService.UidFont.Push())
             {
@@ -1011,16 +1011,16 @@ public class CompactUi : WindowMediatorSubscriberBase
             var penumAvailable = _ipcManager.Penumbra.APIAvailable;
             var glamAvailable = _ipcManager.Glamourer.APIAvailable;
 
-            UiSharedService.ColorTextWrapped($"One or more components essential for Network operation are unavailable. Enable or update the following:", SpheneCustomTheme.Colors.Error);
+            UiSharedService.ColorTextWrapped("Some features are currently unavailable. To enable full synchronization, please make sure these plugins are enabled and up to date:", SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning);
             using var indent = ImRaii.PushIndent(10f);
             if (!penumAvailable)
             {
-                UiSharedService.TextWrapped("Penumbra");
+                UiSharedService.TextWrapped("Penumbra (required)");
                 _uiSharedService.BooleanToColoredIcon(penumAvailable, true);
             }
             if (!glamAvailable)
             {
-                UiSharedService.TextWrapped("Glamourer");
+                UiSharedService.TextWrapped("Glamourer (required)");
                 _uiSharedService.BooleanToColoredIcon(glamAvailable, true);
             }
             ImGui.Separator();
