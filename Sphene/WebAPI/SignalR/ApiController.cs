@@ -52,6 +52,24 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
     private bool _showConnectedDuringGrace;
     private DateTimeOffset _suppressInfoMessagesUntil = DateTimeOffset.MinValue;
     private readonly TimeSpan _disconnectGraceWindow = TimeSpan.FromSeconds(10);
+    private DateTimeOffset _disconnectGraceStartedAtUtc = DateTimeOffset.MinValue;
+    private bool _didHardDisconnectAfterGrace;
+    private bool _pendingPostHardReconnect;
+    private bool _postGraceSecondReconnectRequested;
+    private bool _postGraceUiHoldActive;
+    private string _postGraceUiHoldReason = string.Empty;
+    private PostGraceUiHoldStage _postGraceUiHoldStage = PostGraceUiHoldStage.None;
+    private DateTimeOffset _postGraceUiHoldStartedAtUtc = DateTimeOffset.MinValue;
+    private bool _hasEverConnected;
+    private DateTimeOffset _initialConnectAttemptStartedAtUtc = DateTimeOffset.MinValue;
+
+    private enum PostGraceUiHoldStage
+    {
+        None = 0,
+        TryingToReconnect = 1,
+        ConnectedReloading = 2,
+        RefreshingConnection = 3,
+    }
 
     public ApiController(ILogger<ApiController> logger, HubFactory hubFactory, DalamudUtilService dalamudUtil,
         PairManager pairManager, ServerConfigurationManager serverManager, SpheneMediator mediator,
@@ -112,6 +130,13 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
         => (_showConnectedDuringGrace || _hasPendingDisconnectGrace) ? ServerState.Connected : ServerState;
     public bool IsTransientDisconnectInProgress => _hasPendingDisconnectGrace;
     public bool IsDisconnectSimulationRunning { get; private set; }
+    public bool IsPostHardDisconnectReconnectPending => _didHardDisconnectAfterGrace || _pendingPostHardReconnect;
+    public bool IsPostGraceUiHoldActive => _postGraceUiHoldActive || _pendingPostHardReconnect;
+    public string PostGraceUiHoldReason => _postGraceUiHoldReason;
+    public int PostGraceUiHoldStageValue => (int)_postGraceUiHoldStage;
+    public TimeSpan PostGraceUiHoldElapsed => _postGraceUiHoldStartedAtUtc == DateTimeOffset.MinValue ? TimeSpan.Zero : (DateTimeOffset.UtcNow - _postGraceUiHoldStartedAtUtc);
+    public bool HasEverConnected => _hasEverConnected;
+    public TimeSpan InitialConnectElapsed => _initialConnectAttemptStartedAtUtc == DateTimeOffset.MinValue ? TimeSpan.Zero : (DateTimeOffset.UtcNow - _initialConnectAttemptStartedAtUtc);
 
     public ServerState ServerState
     {
@@ -298,6 +323,10 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
 
                 await StopConnectionAsync(ServerState.Disconnected).ConfigureAwait(false);
                 ServerState = ServerState.Connecting;
+                if (!_hasEverConnected && _initialConnectAttemptStartedAtUtc == DateTimeOffset.MinValue)
+                {
+                    _initialConnectAttemptStartedAtUtc = DateTimeOffset.UtcNow;
+                }
 
                 try
                 {
@@ -332,12 +361,19 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
                         SuppressInfoServerMessagesFor(TimeSpan.FromSeconds(20));
                     }
                     _connectionDto = await GetConnectionDtoAsync(
-                        publishConnected: !preserveUiDuringGraceReconnect,
+                        publishConnected: false,
                         forceCharacterDataReload: forceCharacterDataReload).ConfigureAwait(false);
 
                     ServerState = ServerState.Connected;
+                    _hasEverConnected = true;
+                    _initialConnectAttemptStartedAtUtc = DateTimeOffset.MinValue;
                     CancelPendingDisconnectGrace(clearUiGraceOnly: false);
                     _healthMonitor.RecordSuccessfulConnection();
+                    if (_postGraceUiHoldActive || _postGraceSecondReconnectRequested)
+                    {
+                        _postGraceUiHoldStage = PostGraceUiHoldStage.ConnectedReloading;
+                    }
+                    SchedulePostHardDisconnectReconnectIfNeeded();
 
                     var currentClientVer = Assembly.GetExecutingAssembly().GetName().Version!;
 
@@ -718,9 +754,83 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
         }
 
         await LoadOnlinePairsAsync().ConfigureAwait(false);
+        await EnsurePairStateStabilizedAsync().ConfigureAwait(false);
         if (_connectionDto != null)
         {
             Mediator.Publish(new ConnectedMessage(_connectionDto, forceCharacterDataReload));
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await Task.Delay(2000).ConfigureAwait(false);
+                    await LoadOnlinePairsAsync().ConfigureAwait(false);
+                    Mediator.Publish(new DelayedFrameworkUpdateMessage());
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogDebug(ex, "Post-connect reconcile failed");
+                }
+            });
+        }
+    }
+
+    private async Task EnsurePairStateStabilizedAsync()
+    {
+        try
+        {
+            var lastGroupCount = _pairManager.GroupPairs.Count;
+            var lastPairCount = _pairManager.DirectPairs.Count;
+            var stableIterations = 0;
+
+            for (var i = 0; i < 6; i++)
+            {
+                try
+                {
+                    var groups = await GroupsGetAll().ConfigureAwait(false);
+                    foreach (var group in groups)
+                    {
+                        _pairManager.AddGroup(group);
+                    }
+
+                    var pairedUsers = await UserGetPairedClients().ConfigureAwait(false);
+                    foreach (var pair in pairedUsers)
+                    {
+                        _pairManager.AddUserPair(pair);
+                    }
+
+                    var onlineUsers = await UserGetOnlinePairs(null).ConfigureAwait(false);
+                    foreach (var online in onlineUsers)
+                    {
+                        _pairManager.MarkPairOnline(online, sendNotif: false);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogDebug(ex, "Pair state stabilization step failed");
+                }
+
+                var groupCount = _pairManager.GroupPairs.Count;
+                var pairCount = _pairManager.DirectPairs.Count;
+                if (groupCount >= lastGroupCount && pairCount >= lastPairCount)
+                {
+                    if (groupCount == lastGroupCount && pairCount == lastPairCount)
+                    {
+                        stableIterations++;
+                        if (stableIterations >= 2) break;
+                    }
+                    else
+                    {
+                        stableIterations = 0;
+                    }
+                }
+                lastGroupCount = groupCount;
+                lastPairCount = pairCount;
+                await Task.Delay(800).ConfigureAwait(false);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Pair state stabilization failed");
         }
     }
 
@@ -739,7 +849,10 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
 
     private async Task SpheneHubOnReconnectedAsync()
     {
-        var reconnectedDuringGrace = _hasPendingDisconnectGrace;
+        var graceStarted = _disconnectGraceStartedAtUtc;
+        var graceExceededByTime = graceStarted != DateTimeOffset.MinValue
+                                  && (DateTimeOffset.UtcNow - graceStarted) >= _disconnectGraceWindow;
+        var reconnectedDuringGrace = _hasPendingDisconnectGrace && !graceExceededByTime;
         ServerState = ServerState.Reconnecting;
         try
         {
@@ -751,10 +864,33 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
                 return;
             }
             ServerState = ServerState.Connected;
+
+            if (graceExceededByTime)
+            {
+                _didHardDisconnectAfterGrace = true;
+                _postGraceSecondReconnectRequested = true;
+                _postGraceUiHoldActive = true;
+                _postGraceUiHoldReason = "Connection issues detected. Recovering session state.";
+                if (_postGraceUiHoldStartedAtUtc == DateTimeOffset.MinValue)
+                {
+                    _postGraceUiHoldStartedAtUtc = DateTimeOffset.UtcNow;
+                }
+            }
+                if (_postGraceUiHoldActive || _postGraceSecondReconnectRequested)
+                {
+                    _postGraceUiHoldStage = PostGraceUiHoldStage.ConnectedReloading;
+                }
+
             CancelPendingDisconnectGrace(clearUiGraceOnly: false);
+            _hasEverConnected = true;
+            _initialConnectAttemptStartedAtUtc = DateTimeOffset.MinValue;
             if (reconnectedDuringGrace)
             {
                 SuppressInfoServerMessagesFor(TimeSpan.FromSeconds(20));
+            }
+            else
+            {
+                SchedulePostHardDisconnectReconnectIfNeeded();
             }
             await FlushPendingFileTransferAcksAsync().ConfigureAwait(false);
             if (reconnectedDuringGrace)
@@ -783,6 +919,11 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
         {
             _hasPendingDisconnectGrace = true;
             _showConnectedDuringGrace = true;
+            if (_disconnectGraceStartedAtUtc == DateTimeOffset.MinValue)
+            {
+                _disconnectGraceStartedAtUtc = DateTimeOffset.UtcNow;
+            }
+            StartDisconnectGrace();
         }
         ServerState = ServerState.Reconnecting;
         Logger.LogWarning(arg, "Connection closed... Reconnecting");
@@ -832,6 +973,10 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
         {
             _hasPendingDisconnectGrace = true;
             _showConnectedDuringGrace = true;
+            if (_disconnectGraceStartedAtUtc == DateTimeOffset.MinValue)
+            {
+                _disconnectGraceStartedAtUtc = DateTimeOffset.UtcNow;
+            }
             SuppressInfoServerMessagesFor(TimeSpan.FromSeconds(20));
         }
         ServerState = ServerState.Disconnecting;
@@ -865,9 +1010,24 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
             }
 
             var shouldPublishDisconnected = hadHub || _hasPendingDisconnectGrace;
+            var graceExceeded = _hasPendingDisconnectGrace
+                                && _disconnectGraceStartedAtUtc != DateTimeOffset.MinValue
+                                && (DateTimeOffset.UtcNow - _disconnectGraceStartedAtUtc) >= _disconnectGraceWindow;
             CancelPendingDisconnectGrace(clearUiGraceOnly: false);
             if (shouldPublishDisconnected)
             {
+                if (graceExceeded)
+                {
+                    _didHardDisconnectAfterGrace = true;
+                    _postGraceSecondReconnectRequested = true;
+                    _postGraceUiHoldActive = true;
+                    _postGraceUiHoldReason = "Connection issues detected. Preparing a clean reconnect.";
+                    _postGraceUiHoldStage = PostGraceUiHoldStage.TryingToReconnect;
+                    if (_postGraceUiHoldStartedAtUtc == DateTimeOffset.MinValue)
+                    {
+                        _postGraceUiHoldStartedAtUtc = DateTimeOffset.UtcNow;
+                    }
+                }
                 Mediator.Publish(new DisconnectedMessage());
             }
             _connectionDto = null;
@@ -878,9 +1038,17 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
 
     private void StartDisconnectGrace()
     {
-        CancelPendingDisconnectGrace(clearUiGraceOnly: true);
+        if (_disconnectGraceTokenSource != null)
+        {
+            return;
+        }
+
         _hasPendingDisconnectGrace = true;
         _showConnectedDuringGrace = _connectionDto != null;
+        if (_disconnectGraceStartedAtUtc == DateTimeOffset.MinValue)
+        {
+            _disconnectGraceStartedAtUtc = DateTimeOffset.UtcNow;
+        }
         _disconnectGraceTokenSource = new CancellationTokenSource();
         var token = _disconnectGraceTokenSource.Token;
 
@@ -888,14 +1056,30 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
         {
             try
             {
-                await Task.Delay(_disconnectGraceWindow, token).ConfigureAwait(false);
+                var remaining = _disconnectGraceWindow - (DateTimeOffset.UtcNow - _disconnectGraceStartedAtUtc);
+                if (remaining < TimeSpan.Zero)
+                {
+                    remaining = TimeSpan.Zero;
+                }
+                await Task.Delay(remaining, token).ConfigureAwait(false);
                 if (token.IsCancellationRequested || ServerState == ServerState.Connected)
                 {
+                    Logger.LogDebug("Disconnect grace window finished but cancelled or already connected; cancelling hard-disconnect arm");
                     return;
                 }
 
                 _hasPendingDisconnectGrace = false;
                 _showConnectedDuringGrace = false;
+                _didHardDisconnectAfterGrace = true;
+                _postGraceSecondReconnectRequested = true;
+                _postGraceUiHoldActive = true;
+                _postGraceUiHoldReason = "Connection issues detected. Preparing a clean reconnect.";
+                _postGraceUiHoldStage = PostGraceUiHoldStage.TryingToReconnect;
+                if (_postGraceUiHoldStartedAtUtc == DateTimeOffset.MinValue)
+                {
+                    _postGraceUiHoldStartedAtUtc = DateTimeOffset.UtcNow;
+                }
+                Logger.LogDebug("Grace exceeded; arming post-grace second reconnect and UI hold");
                 Mediator.Publish(new DisconnectedMessage());
                 _connectionDto = null;
             }
@@ -904,6 +1088,44 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
                 Logger.LogDebug("Disconnect grace window cancelled");
             }
         }, token);
+    }
+
+    private void SchedulePostHardDisconnectReconnectIfNeeded()
+    {
+        if (!_postGraceSecondReconnectRequested || _pendingPostHardReconnect)
+        {
+            Logger.LogDebug("Post-grace second reconnect not scheduled: requested={requested} pending={pending}", _postGraceSecondReconnectRequested, _pendingPostHardReconnect);
+            return;
+        }
+
+        _pendingPostHardReconnect = true;
+        _postGraceUiHoldStage = PostGraceUiHoldStage.ConnectedReloading;
+        Logger.LogDebug("Scheduling post-grace second reconnect");
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(3)).ConfigureAwait(false);
+                _postGraceUiHoldStage = PostGraceUiHoldStage.RefreshingConnection;
+                _doNotNotifyOnNextInfo = true;
+                await CreateConnectionsAsync(forceCharacterDataReload: false).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogDebug(ex, "Post-hard-disconnect reconnect failed");
+            }
+            finally
+            {
+                _pendingPostHardReconnect = false;
+                _didHardDisconnectAfterGrace = false;
+                _postGraceSecondReconnectRequested = false;
+                _postGraceUiHoldActive = false;
+                _postGraceUiHoldReason = string.Empty;
+                _postGraceUiHoldStage = PostGraceUiHoldStage.None;
+                _postGraceUiHoldStartedAtUtc = DateTimeOffset.MinValue;
+                Logger.LogDebug("Post-grace second reconnect completed; clearing UI hold");
+            }
+        });
     }
 
     private void CancelPendingDisconnectGrace(bool clearUiGraceOnly)
@@ -915,6 +1137,7 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
         if (!clearUiGraceOnly)
         {
             _hasPendingDisconnectGrace = false;
+            _disconnectGraceStartedAtUtc = DateTimeOffset.MinValue;
         }
     }
 

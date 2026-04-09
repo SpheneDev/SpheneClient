@@ -355,22 +355,6 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
                         || !_lastSentHashPerUser.TryGetValue(u, out var lastSentHash)
                         || !string.Equals(lastSentHash, currentHash, StringComparison.Ordinal));
 
-                    if (legacyRecipients.Count > 0)
-                    {
-                        _pairManager.SetPendingAcknowledgmentForSender([.. legacyRecipients], hashKey);
-                    }
-
-                    if (requiresAck)
-                    {
-                        Logger.LogDebug("{tag} Ack pending before push: hash={hash}", SyncProgressTag, hashKey);
-                        _pairManager.SetPendingAcknowledgmentForSender([.. ackCapableRecipients], hashKey);
-                    }
-                    Mediator.Publish(new DebugLogEventMessage(
-                        LogLevel.Debug,
-                        "ACK",
-                        "Ack outgoing push",
-                        Details: $"hash={hashKey[..Math.Min(8, hashKey.Length)]} requiresAck={requiresAck} recipients={usersToSend.Count} legacy={legacyRecipients.Count}"));
-
                     if (ackCapableRecipients.Count > 0)
                     {
                         Logger.LogDebug("{tag} Push send: hash={hash} ackKey={hashKey} requiresAck={requiresAck} users={users}",
@@ -383,6 +367,22 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
                             SyncProgressTag, dataToSend.DataHash, string.Join(", ", legacyRecipients.Select(k => k.AliasOrUID)));
                         await _apiController.PushCharacterData(dataToSend, [.. legacyRecipients], hashKey, requiresAcknowledgment: false).ConfigureAwait(false);
                     }
+
+                    if (legacyRecipients.Count > 0)
+                    {
+                        _pairManager.SetPendingAcknowledgmentForSender([.. legacyRecipients], hashKey);
+                    }
+
+                    if (requiresAck)
+                    {
+                        _pairManager.SetPendingAcknowledgmentForSender([.. ackCapableRecipients], hashKey);
+                    }
+
+                    Mediator.Publish(new DebugLogEventMessage(
+                        LogLevel.Debug,
+                        "ACK",
+                        "Ack outgoing push",
+                        Details: $"hash={hashKey[..Math.Min(8, hashKey.Length)]} requiresAck={requiresAck} recipients={usersToSend.Count} legacy={legacyRecipients.Count}"));
                     Logger.LogDebug("{tag} Push complete: hash={hash} users={users}", SyncProgressTag, dataToSend.DataHash, string.Join(", ", usersToSend.Select(k => k.AliasOrUID)));
 
                     foreach (var user in usersToSend)

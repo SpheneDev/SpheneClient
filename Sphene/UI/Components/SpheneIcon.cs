@@ -473,7 +473,7 @@ public class SpheneIcon : WindowMediatorSubscriberBase
 
     private void RefreshTooltipCache(bool iconLocked)
     {
-        var currentState = _apiController.DisplayServerState;
+        var currentState = _apiController.ServerState;
         var currentFromVersion = _updateInfo?.CurrentVersion;
         var currentToVersion = _updateInfo?.LatestVersion;
 
@@ -568,7 +568,7 @@ public class SpheneIcon : WindowMediatorSubscriberBase
         
         var statusColor = _apiController.IsTransientDisconnectInProgress
             ? Sphene.UI.Theme.SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning
-            : GetStatusColor(_apiController.DisplayServerState);
+            : GetStatusColor(_apiController.ServerState);
         var indicatorColor = ImGui.ColorConvertFloat4ToU32(statusColor);
         
         // Draw status indicator circle

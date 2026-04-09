@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using Sphene.API.Data;
 using Sphene.Services;
+using Sphene.Services.Events;
 using Sphene.Services.Mediator;
 using Sphene.SpheneConfiguration;
 using Sphene.WebAPI;
@@ -20,6 +21,11 @@ public class AcknowledgmentTimeoutManager : DisposableMediatorSubscriberBase
     private readonly DalamudUtilService _dalamudUtilService;
     private readonly SpheneConfigService _configService;
     private DateTime _lastPauseLogUtc = DateTime.MinValue;
+    private DateTime _lastConnectedUtc = DateTime.MinValue;
+    private bool _seenAckSuccessSinceConnect = false;
+    private int _ackTimeoutsSinceConnect = 0;
+    private int _autoReconnectsSinceConnect = 0;
+    private DateTime _lastAutoReconnectUtc = DateTime.MinValue;
 
     public AcknowledgmentTimeoutManager(ILogger<AcknowledgmentTimeoutManager> logger, 
         SpheneMediator mediator, Lazy<ApiController> apiController, Lazy<PairManager> pairManager,
@@ -31,6 +37,22 @@ public class AcknowledgmentTimeoutManager : DisposableMediatorSubscriberBase
         _dalamudUtilService = dalamudUtilService;
         _configService = configService;
         _timeoutTimer = new Timer(CheckTimeouts, null, CheckIntervalMs, CheckIntervalMs);
+
+        Mediator.Subscribe<ConnectedMessage>(this, _ =>
+        {
+            _lastConnectedUtc = DateTime.UtcNow;
+            _seenAckSuccessSinceConnect = false;
+            _ackTimeoutsSinceConnect = 0;
+            _autoReconnectsSinceConnect = 0;
+        });
+
+        Mediator.Subscribe<PairAcknowledgmentStatusChangedMessage>(this, msg =>
+        {
+            if (msg.LastAcknowledgmentSuccess == true)
+            {
+                _seenAckSuccessSinceConnect = true;
+            }
+        });
     }
 
     public void StartTimeout(string acknowledgmentId, UserData userData, string dataHash)
@@ -150,6 +172,7 @@ public class AcknowledgmentTimeoutManager : DisposableMediatorSubscriberBase
                 Details: $"ackId={entry.AcknowledgmentId[..Math.Min(8, entry.AcknowledgmentId.Length)]} {context}"));
 
             _pendingTimeouts.TryRemove(entry.Key, out _);
+            await TryAutoReconnectForAckFailureAsync().ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -258,6 +281,61 @@ public class AcknowledgmentTimeoutManager : DisposableMediatorSubscriberBase
         foreach (var entry in _invalidHashTimeouts.ToArray())
         {
             _invalidHashTimeouts[entry.Key] = entry.Value with { StartTime = entry.Value.StartTime.Add(delay) };
+        }
+    }
+
+    private async Task TryAutoReconnectForAckFailureAsync()
+    {
+        var apiController = _apiController.Value;
+
+        if (!apiController.IsConnected || apiController.IsTransientDisconnectInProgress)
+        {
+            return;
+        }
+
+        if (_autoReconnectsSinceConnect >= 1)
+        {
+            return;
+        }
+
+        if (_seenAckSuccessSinceConnect)
+        {
+            return;
+        }
+
+        var nowUtc = DateTime.UtcNow;
+        if (_lastConnectedUtc == DateTime.MinValue || nowUtc - _lastConnectedUtc > TimeSpan.FromSeconds(90))
+        {
+            return;
+        }
+
+        if (_lastAutoReconnectUtc != DateTime.MinValue && nowUtc - _lastAutoReconnectUtc < TimeSpan.FromSeconds(30))
+        {
+            return;
+        }
+
+        _ackTimeoutsSinceConnect++;
+        if (_ackTimeoutsSinceConnect < 2)
+        {
+            return;
+        }
+
+        _autoReconnectsSinceConnect++;
+        _lastAutoReconnectUtc = nowUtc;
+
+        Mediator.Publish(new DebugLogEventMessage(
+            LogLevel.Warning,
+            "ACK",
+            "Triggering auto-reconnect due to repeated acknowledgment timeouts",
+            Details: $"timeoutsSinceConnect={_ackTimeoutsSinceConnect}"));
+
+        try
+        {
+            await apiController.CreateConnectionsAsync(forceCharacterDataReload: true).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Auto-reconnect failed");
         }
     }
 }

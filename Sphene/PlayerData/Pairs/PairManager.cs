@@ -1227,11 +1227,14 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         {
             if (_allClientPairs.TryGetValue(recipient, out var pair))
             {
-                _ = pair.SetPendingAcknowledgment(acknowledgmentId);
                 ScheduleLegacyAssumedSuccess(pair.UserData.UID, acknowledgmentId);
                 if (!pair.IsLegacyAcknowledgmentClient)
                 {
                     ackRecipients.Add(recipient);
+                }
+                else
+                {
+                    _ = pair.SetPendingAcknowledgment(acknowledgmentId);
                 }
             }
         }
