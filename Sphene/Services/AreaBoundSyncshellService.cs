@@ -201,6 +201,12 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
         {
             try
             {
+                if (syncshell.IsLocked)
+                {
+                    syncshellsWithoutConsent.Add(syncshell);
+                    continue;
+                }
+
                 var hasValidConsent = await _apiController.GroupCheckAreaBoundConsent(syncshell.GID).ConfigureAwait(false);
                 if (hasValidConsent)
                 {
@@ -223,6 +229,10 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
         {
             try
             {
+                if (syncshell.IsLocked)
+                {
+                    continue;
+                }
                 _logger.LogDebug("User has valid consent for syncshell {SyncshellId}, auto-joining", syncshell.GID);
                 await JoinAreaBoundSyncshell(syncshell.GID, true, syncshell.Settings.RulesVersion).ConfigureAwait(false);
             }
@@ -330,6 +340,13 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
     {
         try
         {
+            if (_areaBoundSyncshells.TryGetValue(syncshellId, out var syncshell) && syncshell.IsLocked)
+            {
+                _logger.LogDebug("Skipping join for locked area-bound syncshell {SyncshellId}", syncshellId);
+                SendAreaBoundNotification(syncshell);
+                return;
+            }
+
             _logger.LogDebug("Attempting to join area-bound syncshell {SyncshellId} with consent", syncshellId);
             
             // Set consent first
@@ -1059,7 +1076,9 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
 
         var notificationLocation = _configService.Current.AreaBoundSyncshellNotification;
         var title = "Area Syncshell Available";
-        var message = $"Area-bound syncshell '{syncshell.Group.Alias}' is now available in this area!";
+        var message = syncshell.IsLocked
+            ? $"Area-bound syncshell '{syncshell.Group.Alias}' is locked. Joining is currently disabled."
+            : $"Area-bound syncshell '{syncshell.Group.Alias}' is now available in this area!";
 
         _logger.LogDebug("Publishing area-bound notification: {Title} - {Message} (Location: {Location})", title, message, notificationLocation);
 

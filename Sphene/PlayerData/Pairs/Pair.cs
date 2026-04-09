@@ -917,6 +917,31 @@ public class Pair : DisposableMediatorSubscriberBase
         LastAcknowledgmentId = null; // No specific acknowledgment ID for build start
     }
 
+    public void ClearBuildStartPendingStatus()
+    {
+        if (!HasPendingAcknowledgment || LastAcknowledgmentId != null)
+        {
+            return;
+        }
+
+        HasPendingAcknowledgment = false;
+        LastAcknowledgmentSuccess = null;
+        LastAcknowledgmentTime = null;
+
+        Mediator.Publish(new PairAcknowledgmentStatusChangedMessage(
+            UserData,
+            null,
+            HasPendingAcknowledgment,
+            LastAcknowledgmentSuccess,
+            LastAcknowledgmentTime
+        ));
+
+        var ackData = new AcknowledgmentStatusData(HasPendingAcknowledgment, LastAcknowledgmentSuccess, LastAcknowledgmentTime);
+        Mediator.Publish(new UserPairIconUpdateMessage(UserData, IconUpdateType.AcknowledgmentStatus, ackData));
+
+        Mediator.Publish(new AcknowledgmentUiRefreshMessage(User: UserData));
+    }
+
     public async Task ClearPendingAcknowledgment(string acknowledgmentId, MessageService? messageService = null)
     {
         // Only clear if this is the acknowledgment we're waiting for

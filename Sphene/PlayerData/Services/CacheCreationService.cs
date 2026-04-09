@@ -345,6 +345,7 @@ public sealed class CacheCreationService : DisposableMediatorSubscriberBase
                     else
                     {
                         Logger.LogDebug("Character data unchanged, skipping update. Hash: {hash}", newHash ?? "null");
+                        Mediator.Publish(new CharacterDataBuildNoChangesMessage(newHash));
                     }
                 }
                 

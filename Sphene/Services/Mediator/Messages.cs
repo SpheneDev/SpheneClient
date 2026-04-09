@@ -65,6 +65,7 @@ public record CreateCacheForObjectMessage(GameObjectHandler ObjectToCreateFor) :
 public record ClearCacheForObjectMessage(GameObjectHandler ObjectToCreateFor) : SameThreadMessage;
 public record CharacterDataCreatedMessage(CharacterData CharacterData) : SameThreadMessage;
 public record CharacterDataBuildStartedMessage : MessageBase;
+public record CharacterDataBuildNoChangesMessage(string? DataHash = null) : MessageBase;
 public record CharacterDataApplicationCompletedMessage(string PlayerName, string UserUID, Guid ApplicationId, bool Success, string? DataHash,
     Sphene.API.Dto.User.AcknowledgmentErrorCode ErrorCode = Sphene.API.Dto.User.AcknowledgmentErrorCode.None,
     string? ErrorMessage = null) : MessageBase;

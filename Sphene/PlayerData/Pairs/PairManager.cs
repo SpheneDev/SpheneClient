@@ -103,6 +103,7 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
             EnforceVanillaForPausedPairs("ZoneSwitchEnd");
         });
         Mediator.Subscribe<CharacterDataBuildStartedMessage>(this, (_) => SetPendingAcknowledgmentForBuildStart());
+        Mediator.Subscribe<CharacterDataBuildNoChangesMessage>(this, (_) => ClearBuildStartPendingAcknowledgments());
         Mediator.Subscribe<GposeStartMessage>(this, (msg) => { _ = _apiController.Value.UserUpdateGposeState(true); });
         Mediator.Subscribe<GposeEndMessage>(this, (msg) => { _ = _apiController.Value.UserUpdateGposeState(false); });
         Mediator.Subscribe<PenumbraModTransferCompletedMessage>(this, OnPenumbraModTransferCompleted);
@@ -1353,6 +1354,16 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
                 TimeSpan.FromSeconds(3)
             );
         }
+    }
+
+    private void ClearBuildStartPendingAcknowledgments()
+    {
+        foreach (var pair in _allClientPairs.Values)
+        {
+            pair.ClearBuildStartPendingStatus();
+        }
+
+        Mediator.Publish(new RefreshUiMessage());
     }
 
     public Pair? GetPairForUser(UserData userData)

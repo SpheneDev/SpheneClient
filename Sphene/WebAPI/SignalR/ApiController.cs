@@ -946,7 +946,9 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
             Logger.LogDebug("Broadcast area: {Area}, Users in area: {UserCount}", dto.Area, dto.UsersInArea.Count);
 
             var title = "Area Syncshell Available";
-            var message = $"Area-bound syncshell '{dto.Group.Alias}' is available in this area!";
+            var message = dto.IsLocked
+                ? $"Area-bound syncshell '{dto.Group.Alias}' is locked. Joining is currently disabled."
+                : $"Area-bound syncshell '{dto.Group.Alias}' is available in this area!";
 
             var notificationLocation = _SpheneConfigService?.Current?.AreaBoundSyncshellNotification ?? NotificationLocation.Toast;
 
