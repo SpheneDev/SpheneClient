@@ -236,7 +236,10 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
                                     using (ImRaii.PushIndent(ImGuiHelpers.GlobalScale * 10f))
                                     {
                                         var normalizedDescription = NormalizeDescription(e.Description);
-                                        UiSharedService.TextWrapped(normalizedDescription);
+                                        if (!DrawImportantDescriptionIfTagged(normalizedDescription))
+                                        {
+                                            UiSharedService.TextWrapped(normalizedDescription);
+                                        }
                                     }
                                 }
 
@@ -454,6 +457,43 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
         }
 
         return sb.ToString();
+    }
+
+    private static bool DrawImportantDescriptionIfTagged(string description)
+    {
+        const string token = "!!IMPORTANT!!";
+        if (string.IsNullOrWhiteSpace(description) || description.IndexOf(token, StringComparison.Ordinal) < 0)
+        {
+            return false;
+        }
+
+        var text = description.Replace(token, string.Empty, StringComparison.Ordinal).TrimStart();
+        var avail = Math.Max(1f, ImGui.GetContentRegionAvail().X);
+        var padX = ImGuiHelpers.GlobalScale * 8f;
+        var padY = ImGuiHelpers.GlobalScale * 6f;
+        var start = ImGui.GetCursorScreenPos();
+        var icon = FontAwesomeIcon.ExclamationTriangle.ToIconString();
+        Vector2 iconSize;
+        using (ImRaii.PushFont(UiBuilder.IconFont))
+            iconSize = ImGui.CalcTextSize(icon);
+        var textSize = ImGui.CalcTextSize(text, false, avail - iconSize.X - padX * 2 - ImGui.GetStyle().ItemInnerSpacing.X);
+        var rectMin = new Vector2(start.X - padX, start.Y - padY);
+        var rectMax = new Vector2(start.X + avail, start.Y + Math.Max(iconSize.Y, textSize.Y) + padY);
+        var baseCol = ImGuiColors.DalamudYellow;
+        var bg = ImGui.GetColorU32(new Vector4(baseCol.X, baseCol.Y, baseCol.Z, 0.12f));
+        var border = ImGui.GetColorU32(new Vector4(baseCol.X, baseCol.Y, baseCol.Z, 0.55f));
+        ImGui.GetWindowDrawList().AddRectFilled(rectMin, rectMax, bg, ImGui.GetStyle().FrameRounding);
+        ImGui.GetWindowDrawList().AddRect(rectMin, rectMax, border, ImGui.GetStyle().FrameRounding);
+
+        using (ImRaii.PushFont(UiBuilder.IconFont))
+        using (ImRaii.PushColor(ImGuiCol.Text, baseCol))
+        {
+            ImGui.TextUnformatted(icon);
+        }
+        ImGui.SameLine();
+        UiSharedService.TextWrapped(text);
+        ImGui.Dummy(new Vector2(0, ImGui.GetTextLineHeightWithSpacing() * 0.5f));
+        return true;
     }
 
     private static void DrawDescriptionGradientBackground(string text)
