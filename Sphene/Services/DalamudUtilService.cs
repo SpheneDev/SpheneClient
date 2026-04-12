@@ -384,23 +384,34 @@ public class DalamudUtilService : IHostedService, IMediatorSubscriber
             var currentHouseId = houseMan->GetCurrentHouseId();
             if (currentHouseId.Id != 0)
             {
-                territoryId = (uint)currentHouseId.TerritoryTypeId;
-                wardId = (uint)(currentHouseId.WardIndex + 1);
-                if (currentHouseId.IsApartment)
+                var terr = (uint)currentHouseId.TerritoryTypeId;
+                var wardIndex = (int)currentHouseId.WardIndex;
+                var plotIndex = (int)currentHouseId.PlotIndex;
+
+                var terrValid = terr != 0 && terr != 65535;
+                var wardValid = wardIndex is >= 0 and <= 29;
+                var plotValid = plotIndex is >= 0 and <= 59;
+
+                if (terrValid && (currentHouseId.IsApartment ? wardValid : (wardValid && plotValid)))
                 {
-                    divisionId = currentHouseId.ApartmentDivision;
-                    houseId = 100;
-                    if (!currentHouseId.IsWorkshop)
+                    territoryId = terr;
+                    wardId = (uint)(wardIndex + 1);
+                    if (currentHouseId.IsApartment)
                     {
-                        roomId = (uint)currentHouseId.RoomNumber;
+                        divisionId = currentHouseId.ApartmentDivision;
+                        houseId = 100;
+                        if (!currentHouseId.IsWorkshop)
+                        {
+                            roomId = (uint)currentHouseId.RoomNumber;
+                        }
                     }
-                }
-                else
-                {
-                    houseId = (uint)(currentHouseId.PlotIndex + 1);
-                    if (!currentHouseId.IsWorkshop && currentHouseId.RoomNumber > 0)
+                    else
                     {
-                        roomId = (uint)currentHouseId.RoomNumber;
+                        houseId = (uint)(plotIndex + 1);
+                        if (!currentHouseId.IsWorkshop && currentHouseId.RoomNumber > 0)
+                        {
+                            roomId = (uint)currentHouseId.RoomNumber;
+                        }
                     }
                 }
             }

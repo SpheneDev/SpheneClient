@@ -36,9 +36,12 @@ public class CitySyncshellService : DisposableMediatorSubscriberBase, IHostedSer
     // Define the main cities with their territory IDs
     private readonly Dictionary<uint, string> _mainCities = new()
     {
+        { 128, "Limsa Lominsa" },
         { 129, "Limsa Lominsa" },
-        { 132, "New Gridania" },
-        { 130, "Ul'dah" }
+        { 132, "Gridania" },
+        { 133, "Gridania" },
+        { 130, "Ul'dah" },
+        { 131, "Ul'dah" }
     };
 
     public CitySyncshellService(ILogger<CitySyncshellService> logger, 
@@ -62,6 +65,10 @@ public class CitySyncshellService : DisposableMediatorSubscriberBase, IHostedSer
         _locationCheckTimer = new Timer(CheckLocationChange, null, Timeout.Infinite, Timeout.Infinite);
         
         Mediator.Subscribe<CitySyncshellExplanationResponseMessage>(this, OnExplanationResponse);
+        Mediator.Subscribe<ConnectedMessage>(this, _ =>
+        {
+            _lastLocation = null;
+        });
     }
 
     public Task StartAsync(CancellationToken cancellationToken)
@@ -147,8 +154,7 @@ public class CitySyncshellService : DisposableMediatorSubscriberBase, IHostedSer
                 return; // Don't proceed with join logic until explanation is handled
             }
             
-            // After explanation has been seen, check if user has area syncshell consent popups enabled
-            if (!_configService.Current.AutoShowAreaBoundSyncshellConsent)
+            if (!_configService.Current.EnableCitySyncshellJoinRequests)
             {
                 return;
             }
@@ -175,15 +181,39 @@ public class CitySyncshellService : DisposableMediatorSubscriberBase, IHostedSer
     {
         try
         {
-            // Get the city alias that matches the server's naming convention (now includes full server name)
-            var cityAlias = await GetCityAliasAsync(cityName).ConfigureAwait(false);
+            var (baseAlias, worldName) = await GetCityAliasComponentsAsync(cityName).ConfigureAwait(false);
             
             // Get all area-bound syncshells to find the city syncshell
             var areaBoundSyncshells = await _apiController.GroupGetAreaBoundSyncshells().ConfigureAwait(false);
             
-            // Find the city syncshell by alias
-            var citySyncshell = areaBoundSyncshells.FirstOrDefault(s => 
-                string.Equals(s.Group.Alias, cityAlias, StringComparison.OrdinalIgnoreCase));
+            var candidates = new[]
+            {
+                $"{baseAlias} {worldName}",
+                baseAlias,
+                cityName,
+                $"{cityName} {worldName}"
+            }
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+            AreaBoundSyncshellDto? citySyncshell = null;
+            foreach (var c in candidates)
+            {
+                citySyncshell = areaBoundSyncshells.FirstOrDefault(s =>
+                    string.Equals(s.Group.Alias, c, StringComparison.OrdinalIgnoreCase));
+                if (citySyncshell != null)
+                {
+                    break;
+                }
+            }
+
+            if (citySyncshell == null)
+            {
+                citySyncshell = areaBoundSyncshells.FirstOrDefault(s =>
+                    !string.IsNullOrWhiteSpace(s.Group.Alias)
+                    && s.Group.Alias.StartsWith(baseAlias, StringComparison.OrdinalIgnoreCase));
+            }
             
             if (citySyncshell != null)
             {
@@ -210,12 +240,14 @@ public class CitySyncshellService : DisposableMediatorSubscriberBase, IHostedSer
                         _logger.LogError(ex, "Error checking consent for city syncshell {SyncshellId}", citySyncshell.GID);
                     }
                     
-                    // Show consent UI for rules acceptance
-                    var consentMessage = new AreaBoundSyncshellConsentRequestMessage(citySyncshell, requiresRulesAcceptance);
-                    await _framework.RunOnFrameworkThread(() =>
+                    if (_configService.Current.AutoShowAreaBoundSyncshellConsent)
                     {
-                        _mediator.Publish(consentMessage);
-                    }).ConfigureAwait(false);
+                        var consentMessage = new AreaBoundSyncshellConsentRequestMessage(citySyncshell, requiresRulesAcceptance);
+                        await _framework.RunOnFrameworkThread(() =>
+                        {
+                            _mediator.Publish(consentMessage);
+                        }).ConfigureAwait(false);
+                    }
                     
                 }
                 else
@@ -227,7 +259,7 @@ public class CitySyncshellService : DisposableMediatorSubscriberBase, IHostedSer
             }
             else
             {
-                _logger.LogWarning("Could not find city syncshell for {cityName} (alias: {alias})", cityName, cityAlias);
+                _logger.LogWarning("Could not find city syncshell for {cityName}", cityName);
             }
         }
         catch (Exception ex)
@@ -236,23 +268,21 @@ public class CitySyncshellService : DisposableMediatorSubscriberBase, IHostedSer
         }
     }
 
-    private async Task<string> GetCityAliasAsync(string cityName)
+    private async Task<(string BaseAlias, string WorldName)> GetCityAliasComponentsAsync(string cityName)
     {
         // Get the current world name
         var worldId = await _dalamudUtilService.GetWorldIdAsync().ConfigureAwait(false);
         var worldName = _dalamudUtilService.WorldData.Value.TryGetValue((ushort)worldId, out var name) ? name : $"World{worldId}";
         
-        // Get the base city alias
         var baseAlias = cityName switch
         {
-            "Limsa Lominsa" => "Limsa",
-            "New Gridania" => "Gridania", 
-            "Ul'dah" => "Uldah",
-            _ => cityName.Substring(0, Math.Min(10, cityName.Length))
+            var s when s.Contains("Limsa", StringComparison.OrdinalIgnoreCase) => "Limsa",
+            var s when s.Contains("Gridania", StringComparison.OrdinalIgnoreCase) => "Gridania",
+            var s when s.Contains("Ul", StringComparison.OrdinalIgnoreCase) => "Uldah",
+            _ => cityName.Substring(0, Math.Min(10, cityName.Length)).Trim()
         };
         
-        // Return the full alias with server name (matching server's new naming pattern)
-        return $"{baseAlias} {worldName}";
+        return (baseAlias, worldName);
     }
 
     private static bool LocationsEqual(LocationInfo loc1, LocationInfo loc2)
