@@ -346,6 +346,41 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         return _penumbraCollection;
     }
 
+    internal void ResetSpheneDataToVanilla()
+    {
+        Logger.LogDebug("Resetting Sphene data to vanilla for {user}", Pair.UserData.AliasOrUID);
+
+        // Clear honorific title
+        if (_ipcManager.Honorific.APIAvailable && PlayerCharacter != nint.Zero)
+        {
+            Logger.LogDebug("Clearing Honorific title for {user}", Pair.UserData.AliasOrUID);
+            _ = _ipcManager.Honorific.ClearTitleAsync(PlayerCharacter);
+        }
+
+        // Clear BypassEmote state
+        if (_ipcManager.BypassEmote.APIAvailable && PlayerCharacter != nint.Zero)
+        {
+            Logger.LogDebug("Clearing BypassEmote state for {user}", Pair.UserData.AliasOrUID);
+            _ = _ipcManager.BypassEmote.SetStateForCharacterAsync(PlayerCharacter, string.Empty);
+        }
+
+        // Revert Glamourer
+        if (_ipcManager.Glamourer.APIAvailable && !string.IsNullOrEmpty(PlayerName))
+        {
+            Logger.LogDebug("Reverting Glamourer for {user}", Pair.UserData.AliasOrUID);
+            var applicationId = Guid.NewGuid();
+            _ = _ipcManager.Glamourer.RevertByNameAsync(Logger, PlayerName, applicationId);
+        }
+
+        // Remove temporary Penumbra collection
+        if (_ipcManager.Penumbra.APIAvailable)
+        {
+            Logger.LogDebug("Removing temporary Penumbra collection for {user}", Pair.UserData.AliasOrUID);
+            var applicationId = Guid.NewGuid();
+            _ = _ipcManager.Penumbra.RemoveTemporaryCollectionAsync(Logger, applicationId, _penumbraCollection);
+        }
+    }
+
     internal IReadOnlyDictionary<string, string> GetLastLoadedCollectionPathsSnapshot()
     {
         return _lastLoadedCollectionPaths.ToDictionary(k => k.Key, k => k.Value, StringComparer.OrdinalIgnoreCase);
@@ -822,6 +857,21 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                 Logger.LogTrace("[{applicationId}] Restoring state for {name} ({OnlineUser})", applicationId, name, Pair.UserPair);
                 Logger.LogDebug("[{applicationId}] Removing Temp Collection for {name} ({user})", applicationId, name, Pair.UserPair);
                 _ipcManager.Penumbra.RemoveTemporaryCollectionAsync(Logger, applicationId, _penumbraCollection).GetAwaiter().GetResult();
+                
+                // Clear honorific title
+                if (_ipcManager.Honorific.APIAvailable)
+                {
+                    Logger.LogDebug("[{applicationId}] Clearing Honorific title for {name} ({user})", applicationId, name, Pair.UserPair);
+                    _ipcManager.Honorific.ClearTitleAsync(PlayerCharacter).GetAwaiter().GetResult();
+                }
+                
+                // Clear BypassEmote state
+                if (_ipcManager.BypassEmote.APIAvailable && PlayerCharacter != nint.Zero)
+                {
+                    Logger.LogDebug("[{applicationId}] Clearing BypassEmote state for {name} ({user})", applicationId, name, Pair.UserPair);
+                    _ipcManager.BypassEmote.SetStateForCharacterAsync(PlayerCharacter, string.Empty).GetAwaiter().GetResult();
+                }
+                
                 if (!IsVisible)
                 {
                     Logger.LogDebug("[{applicationId}] Restoring Glamourer for {name} ({user})", applicationId, name, Pair.UserPair);

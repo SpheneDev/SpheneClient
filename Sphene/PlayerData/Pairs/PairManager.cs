@@ -574,20 +574,18 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
 
     public void RemoveGroup(GroupData data)
     {
-        _allGroups.TryRemove(data, out _);
+        _allGroups.TryRemove(new KeyValuePair<GroupData, GroupFullInfoDto>(data, default));
 
         foreach (var item in _allClientPairs.ToList())
         {
-            item.Value.UserPair.Groups.Remove(data.GID);
-
-            if (!item.Value.HasAnyConnection())
+            if (item.Value.UserPair.Groups.Contains(data.GID))
             {
+                item.Value.UserPair.Groups.Remove(data.GID);
                 item.Value.MarkOffline();
                 _allClientPairs.TryRemove(item.Key, out _);
             }
         }
 
-        EnforceVanillaForPausedPairs("RemoveGroup");
         RecreateLazy();
     }
 
@@ -763,6 +761,14 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         if (pair.UserPair.OtherPermissions.IsPaused() != dto.Permissions.IsPaused())
         {
             Mediator.Publish(new ClearProfileDataMessage(dto.User));
+            
+            if (dto.Permissions.IsPaused())
+            {
+                var key = GetOfflineGraceKey(dto.User);
+                CancelPendingOfflineGraceByKey(key);
+                pair.ResetSpheneDataToVanilla();
+                pair.MarkOffline();
+            }
         }
 
         pair.UserPair.OtherPermissions = dto.Permissions;
@@ -857,17 +863,11 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
     internal void SetGroupPermissions(GroupPermissionDto dto)
     {
         _allGroups[dto.Group].GroupPermissions = dto.Permissions;
-        EnforceVanillaForPausedPairs("SetGroupPermissions");
         RecreateLazy();
     }
 
     public void EnforceVanillaForPausedPairs(string source)
     {
-        if (!_configurationService.Current.IsIncognitoModeActive)
-        {
-            return;
-        }
-
         var affectedPairs = 0;
         foreach (var pair in _allClientPairs.Values)
         {
@@ -876,19 +876,18 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
                 continue;
             }
 
-            if (!pair.IsOnline && pair.LastReceivedCharacterData == null)
-            {
-                continue;
-            }
-
+            // Reset all Sphene-manipulated data to vanilla for ALL paused pairs, including non-visible and offline ones
+            pair.ResetSpheneDataToVanilla();
+            
             Mediator.Publish(new ClearProfileDataMessage(pair.UserData));
             pair.MarkOffline();
+            
             affectedPairs++;
         }
 
         if (affectedPairs > 0)
         {
-            Logger.LogInformation("Incognito cleanup ({source}): enforced vanilla for {count} paused pair(s)", source, affectedPairs);
+            Logger.LogInformation("Vanilla cleanup ({source}): enforced vanilla for {count} paused pair(s)", source, affectedPairs);
         }
     }
 
@@ -1053,7 +1052,7 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         }
     }
 
-    private void CancelAllPendingOfflineGrace()
+    public void CancelAllPendingOfflineGrace()
     {
         foreach (var pending in _pendingOfflineGrace.ToArray())
         {

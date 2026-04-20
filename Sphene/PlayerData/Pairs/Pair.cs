@@ -309,6 +309,14 @@ public class Pair : DisposableMediatorSubscriberBase
         Mediator.Publish(new StructuralRefreshUiMessage());
     }
 
+    internal void ResetSpheneDataToVanilla()
+    {
+        if (CachedPlayer == null) return;
+
+        Logger.LogDebug("Resetting Sphene data to vanilla for {user}", UserData.AliasOrUID);
+        CachedPlayer.ResetSpheneDataToVanilla();
+    }
+
     private void ResetAcknowledgmentState()
     {
         HasPendingAcknowledgment = false;

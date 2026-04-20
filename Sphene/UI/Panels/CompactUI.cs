@@ -2439,6 +2439,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                 _isIncognitoModeActive = true;
                 _configService.Current.IsIncognitoModeActive = _isIncognitoModeActive;
                 _pairManager.EnforceVanillaForPausedPairs("IncognitoModeActivated");
+                _pairManager.CancelAllPendingOfflineGrace();
                 _logger.LogInformation("Incognito mode activated");
                 
                 // Save configuration

@@ -130,6 +130,12 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
     {
         using var id = ImRaii.PushId(GetType() + _id);
         var hasOfflineGrace = _pairManager.IsUserInOfflineGrace(_pair.UserData);
+        // Don't show grace highlight if player is offline due to being paused by other
+        var isPausedByOther = _pair.UserPair?.OtherPermissions.IsPaused() ?? false;
+        if (isPausedByOther && !_pair.IsOnline)
+        {
+            hasOfflineGrace = false;
+        }
         var hasTimingSyncTarget = _localPairEmoteForceSyncService.IsTargetSelected(_pair.UserData.UID);
         var hasTimingLeader = _localPairEmoteForceSyncService.IsLeader(_pair.UserData.UID);
         var color = ImRaii.PushColor(ImGuiCol.ChildBg, ImGui.GetColorU32(ImGuiCol.FrameBgHovered), _wasHovered && !hasOfflineGrace);
