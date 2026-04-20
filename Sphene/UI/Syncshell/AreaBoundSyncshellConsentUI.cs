@@ -65,6 +65,10 @@ public class AreaBoundSyncshellConsentUI : WindowMediatorSubscriberBase
         // Display syncshell information
         ImGui.Text($"Syncshell: {_currentRequest.Syncshell.Group.AliasOrGID}");
         ImGui.Text($"ID: {_currentRequest.Syncshell.Group.GID}");
+        if (syncshell.IsLocked)
+        {
+            ImGui.TextColored(ImGuiColors.DalamudRed, "This syncshell is locked. Joining is disabled.");
+        }
         
         // Calculate fixed bottom section height
         var buttonHeight = ImGui.GetFrameHeight();
@@ -148,7 +152,7 @@ public class AreaBoundSyncshellConsentUI : WindowMediatorSubscriberBase
         var buttonWidth = (ImGui.GetContentRegionAvail().X - ImGui.GetStyle().ItemSpacing.X) / 2;
         
         // Accept button
-        bool canAccept = !_currentRequest.RequiresRulesAcceptance || _rulesAccepted;
+        bool canAccept = (!syncshell.IsLocked) && (!_currentRequest.RequiresRulesAcceptance || _rulesAccepted);
         using (ImRaii.Disabled(!canAccept))
         {
             if (ImGui.Button("Accept and Join", new Vector2(buttonWidth, 0)))
@@ -163,7 +167,14 @@ public class AreaBoundSyncshellConsentUI : WindowMediatorSubscriberBase
         
         if (!canAccept && ImGui.IsItemHovered())
         {
-            ImGui.SetTooltip("You must accept the rules to join this syncshell");
+            if (syncshell.IsLocked)
+            {
+                ImGui.SetTooltip("This syncshell is locked. Joining is disabled.");
+            }
+            else
+            {
+                ImGui.SetTooltip("You must accept the rules to join this syncshell");
+            }
         }
         
         ImGui.SameLine();

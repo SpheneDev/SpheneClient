@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using Sphene.API.Data;
 using Sphene.API.Dto.CharaData;
 using Sphene.API.Dto.Files;
+using Sphene.API.Dto.Group;
 
 namespace Sphene.SpheneConfiguration.Configurations;
 
@@ -116,6 +117,9 @@ public class SpheneConfig : ISpheneConfiguration
     // Housing Ownership Settings
     public List<LocationInfo> OwnedHousingProperties { get; set; } = new();
     public List<VerifiedHousingProperty> VerifiedOwnedHousingProperties { get; set; } = new();
+    public Dictionary<string, Dictionary<string, List<AreaBoundLocationDto>>> SuspendedAreaBoundLocationsByGroupAndProperty { get; set; } = new(StringComparer.Ordinal);
+    public Dictionary<string, List<byte>> HousingPlotSizesByTerritoryId { get; set; } = new(StringComparer.Ordinal);
+    public Dictionary<string, HousingInteriorFloorMapIds> HousingInteriorFloorMapIdsByTerritoryAndSize { get; set; } = new(StringComparer.Ordinal);
     
     // Theme Settings
     public string SelectedThemeName { get; set; } = "Default Sphene";

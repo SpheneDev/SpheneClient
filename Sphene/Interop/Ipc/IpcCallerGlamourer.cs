@@ -207,6 +207,7 @@ public sealed class IpcCallerGlamourer : DisposableMediatorSubscriberBase, IIpcC
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Error during Glamourer RevertByName");
+            _spheneMediator.Publish(new DebugLogEventMessage(LogLevel.Warning, "IPC", "Glamourer RevertByName failed", Details: ex.ToString()));
         }
     }
 

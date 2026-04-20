@@ -164,6 +164,7 @@ public sealed class IpcCallerBypassEmote : IIpcCaller
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Could not obtain BypassEmote data");
+            _mediator.Publish(new DebugLogEventMessage(LogLevel.Warning, "IPC", "BypassEmote GetState failed", Details: ex.ToString()));
         }
 
         return string.Empty;
@@ -192,6 +193,7 @@ public sealed class IpcCallerBypassEmote : IIpcCaller
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Could not apply BypassEmote data");
+            _mediator.Publish(new DebugLogEventMessage(LogLevel.Warning, "IPC", "BypassEmote SetState failed", Details: ex.ToString()));
         }
     }
 

@@ -991,7 +991,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                 var uidTextSize = ImGui.CalcTextSize(unsupported);
                 ImGui.SetCursorPosX((ImGui.GetWindowContentRegionMax().X + ImGui.GetWindowContentRegionMin().X) / 2 - uidTextSize.X / 2);
                 ImGui.AlignTextToFramePadding();
-                ImGui.TextColored(SpheneCustomTheme.Colors.Error, unsupported);
+                ImGui.TextColored(SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning, unsupported);
             }
             UiSharedService.ColorTextWrapped($"Your Network client is outdated, current version is {ver.Major}.{ver.Minor}.{ver.Build}. " +
             $"Please update your client to maintain Network compatibility. Open /xlplugins and update the plugin.", SpheneCustomTheme.Colors.Error);
@@ -999,7 +999,7 @@ public class CompactUi : WindowMediatorSubscriberBase
 
         if (!_ipcManager.Initialized)
         {
-            var unsupported = "MISSING CORE COMPONENTS";
+            var unsupported = "Limited functionality";
 
             using (_uiSharedService.UidFont.Push())
             {
@@ -1011,16 +1011,16 @@ public class CompactUi : WindowMediatorSubscriberBase
             var penumAvailable = _ipcManager.Penumbra.APIAvailable;
             var glamAvailable = _ipcManager.Glamourer.APIAvailable;
 
-            UiSharedService.ColorTextWrapped($"One or more components essential for Network operation are unavailable. Enable or update the following:", SpheneCustomTheme.Colors.Error);
+            UiSharedService.ColorTextWrapped("Some features are currently unavailable. To enable full synchronization, please make sure these plugins are enabled and up to date:", SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning);
             using var indent = ImRaii.PushIndent(10f);
             if (!penumAvailable)
             {
-                UiSharedService.TextWrapped("Penumbra");
+                UiSharedService.TextWrapped("Penumbra (required)");
                 _uiSharedService.BooleanToColoredIcon(penumAvailable, true);
             }
             if (!glamAvailable)
             {
-                UiSharedService.TextWrapped("Glamourer");
+                UiSharedService.TextWrapped("Glamourer (required)");
                 _uiSharedService.BooleanToColoredIcon(glamAvailable, true);
             }
             ImGui.Separator();
@@ -1039,13 +1039,355 @@ public class CompactUi : WindowMediatorSubscriberBase
         var style = ImGui.GetStyle();
         DrawHeaderCard(style);
 
+        if (!_apiController.HasEverConnected
+            && !_apiController.IsConnected
+            && _apiController.ServerState is ServerState.Connecting or ServerState.Reconnecting or ServerState.Disconnected or ServerState.Offline)
+        {
+            ImGui.Spacing();
+            using var disabled = ImRaii.PushStyle(ImGuiStyleVar.Alpha, 0.85f);
+            static void CenterDisabledLine(string text)
+            {
+                var startX = ImGui.GetCursorPosX();
+                var avail = ImGui.GetContentRegionAvail().X;
+                var size = ImGui.CalcTextSize(text);
+                ImGui.SetCursorPosX(startX + MathF.Max(0, (avail - size.X) * 0.5f));
+                ImGui.AlignTextToFramePadding();
+                ImGui.TextDisabled(text);
+            }
+
+            static void CenterDisabledWrapped(string text)
+            {
+                var startX = ImGui.GetCursorPosX();
+                var avail = ImGui.GetContentRegionAvail().X;
+                if (avail <= 1)
+                {
+                    ImGui.TextDisabled(text);
+                    return;
+                }
+
+                var words = text.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                if (words.Length == 0)
+                {
+                    ImGui.TextDisabled(string.Empty);
+                    return;
+                }
+
+                var current = string.Empty;
+                foreach (var word in words)
+                {
+                    var candidate = string.IsNullOrEmpty(current) ? word : current + " " + word;
+                    if (ImGui.CalcTextSize(candidate).X <= avail)
+                    {
+                        current = candidate;
+                        continue;
+                    }
+
+                    if (!string.IsNullOrEmpty(current))
+                    {
+                        ImGui.SetCursorPosX(startX);
+                        CenterDisabledLine(current);
+                    }
+                    current = word;
+                }
+
+                if (!string.IsNullOrEmpty(current))
+                {
+                    ImGui.SetCursorPosX(startX);
+                    CenterDisabledLine(current);
+                }
+            }
+
+            var status = _apiController.ServerState switch
+            {
+                ServerState.Offline => "Server is not reachable...",
+                ServerState.Disconnected => "Unable to connect. Retrying...",
+                ServerState.Reconnecting => "Connecting to server...",
+                _ => "Connecting to server...",
+            };
+            var reason = "Sphene is trying to establish a connection. The server may be offline, restarting, or undergoing maintenance.";
+            var elapsed = _apiController.InitialConnectElapsed;
+            var elapsedText = elapsed.TotalSeconds >= 1 ? $"Elapsed: {elapsed.Minutes:00}:{elapsed.Seconds:00}" : "Elapsed: 00:00";
+
+            ImGui.Separator();
+            ImGui.Spacing();
+
+            var title = "Connecting";
+            var titleSize = ImGui.CalcTextSize(title);
+            ImGui.SetCursorPosX((ImGui.GetWindowContentRegionMax().X + ImGui.GetWindowContentRegionMin().X) * 0.5f - titleSize.X * 0.5f);
+            ImGui.AlignTextToFramePadding();
+            ImGui.TextColored(SpheneCustomTheme.CurrentTheme.CompactHeaderText, title);
+
+            ImGui.Spacing();
+
+            var centerX = (ImGui.GetWindowContentRegionMax().X + ImGui.GetWindowContentRegionMin().X) * 0.5f;
+            var spinnerSize = ImGui.GetTextLineHeight();
+            ImGui.SetCursorPosX(centerX - spinnerSize * 0.5f);
+            using (ImRaii.PushColor(ImGuiCol.Text, SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning))
+            {
+                DrawRotatingSpinnerIcon(1.0f);
+            }
+
+            using (ImRaii.PushColor(ImGuiCol.Text, SpheneCustomTheme.CurrentTheme.TextPrimary))
+            {
+                CenterDisabledLine(status);
+            }
+
+            ImGuiHelpers.ScaledDummy(4f);
+            CenterDisabledLine(elapsedText);
+
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.Spacing();
+
+            var contentMin = ImGui.GetWindowContentRegionMin().X;
+            var contentMax = ImGui.GetWindowContentRegionMax().X;
+            var contentWidth = contentMax - contentMin;
+            var boxWidth = MathF.Min(contentWidth, 360f * ImGuiHelpers.GlobalScale);
+            ImGui.SetCursorPosX(contentMin + MathF.Max(0, (contentWidth - boxWidth) * 0.5f));
+            using (ImRaii.Child("initial-connect-hold-box", new Vector2(boxWidth, 0), false))
+            {
+                ImGui.Spacing();
+                var headerPad = 4f * ImGuiHelpers.GlobalScale;
+                var header = "What's happening";
+                var headerSize = ImGui.CalcTextSize(header);
+                var headerAvail = ImGui.GetContentRegionAvail().X;
+                ImGui.SetCursorPosX(ImGui.GetCursorPosX() + MathF.Max(0, (headerAvail - headerSize.X) * 0.5f));
+                ImGui.AlignTextToFramePadding();
+                using (ImRaii.PushStyle(ImGuiStyleVar.FramePadding, new Vector2(headerPad, ImGui.GetStyle().FramePadding.Y)))
+                using (ImRaii.PushColor(ImGuiCol.Text, SpheneCustomTheme.Colors.SpheneGold))
+                {
+                    ImGui.TextUnformatted(header);
+                }
+                ImGui.Separator();
+                ImGuiHelpers.ScaledDummy(6f);
+                CenterDisabledWrapped(reason);
+
+                ImGuiHelpers.ScaledDummy(10f);
+                var showDiscordHint = elapsed.TotalSeconds >= 60;
+                var hint = showDiscordHint
+                    ? "If this takes longer than a minute, check Discord announcements for maintenance updates."
+                    : "If this continues, it may be related to maintenance or a server restart.";
+                var header2 = "What you can do";
+                var header2Size = ImGui.CalcTextSize(header2);
+                headerAvail = ImGui.GetContentRegionAvail().X;
+                ImGui.SetCursorPosX(ImGui.GetCursorPosX() + MathF.Max(0, (headerAvail - header2Size.X) * 0.5f));
+                ImGui.AlignTextToFramePadding();
+                using (ImRaii.PushStyle(ImGuiStyleVar.FramePadding, new Vector2(headerPad, ImGui.GetStyle().FramePadding.Y)))
+                using (ImRaii.PushColor(ImGuiCol.Text, SpheneCustomTheme.Colors.SpheneGold))
+                {
+                    ImGui.TextUnformatted(header2);
+                }
+                ImGui.Separator();
+                ImGuiHelpers.ScaledDummy(6f);
+                CenterDisabledWrapped(hint);
+            }
+            return;
+        }
+
         // 4. Error Text (if any) - Displayed below the header block
         if (_apiController.DisplayServerState != ServerState.Connected)
         {
              ImGui.Spacing();
-             UiSharedService.ColorTextWrapped(GetServerError(), GetServerStatusColor());
+             if (_apiController.IsPostGraceUiHoldActive)
+             {
+                 // Avoid duplicate messaging; the recovery screen below has a more detailed and centered presentation
+             }
+             else if (_apiController.DisplayServerState == ServerState.Reconnecting && _apiController.IsTransientDisconnectInProgress)
+             {
+                 var dots = (int)(ImGui.GetTime() * 2.0) % 4;
+                 var text = "Reconnecting" + new string('.', dots);
+                 var textSize = ImGui.CalcTextSize(text);
+                 var avail = ImGui.GetContentRegionAvail().X;
+                 ImGui.SetCursorPosX(ImGui.GetCursorPosX() + MathF.Max(0, (avail - textSize.X) * 0.5f));
+                 ImGui.AlignTextToFramePadding();
+                 ImGui.TextDisabled(text);
+             }
+             else
+             {
+                 UiSharedService.ColorTextWrapped(GetServerError(), GetServerStatusColor());
+             }
         }
 
+        // Hard gate: if we are in post-grace UI hold, show loading and skip building the list entirely this frame
+        if (_apiController.IsPostGraceUiHoldActive)
+        {
+            ImGui.Spacing();
+            using var disabled = ImRaii.PushStyle(ImGuiStyleVar.Alpha, 0.85f);
+            static void CenterDisabledLine(string text)
+            {
+                var startX = ImGui.GetCursorPosX();
+                var avail = ImGui.GetContentRegionAvail().X;
+                var size = ImGui.CalcTextSize(text);
+                if (size.X <= avail)
+                {
+                    ImGui.SetCursorPosX(startX + MathF.Max(0, (avail - size.X) * 0.5f));
+                    ImGui.AlignTextToFramePadding();
+                    ImGui.TextDisabled(text);
+                    return;
+                }
+
+                ImGui.SetCursorPosX(startX);
+                ImGui.PushStyleColor(ImGuiCol.Text, SpheneCustomTheme.CurrentTheme.TextSecondary);
+                ImGui.PushTextWrapPos(startX + avail);
+                ImGui.TextUnformatted(text);
+                ImGui.PopTextWrapPos();
+                ImGui.PopStyleColor();
+            }
+            
+            static void CenterDisabledWrapped(string text)
+            {
+                var startX = ImGui.GetCursorPosX();
+                var avail = ImGui.GetContentRegionAvail().X;
+                if (avail <= 1)
+                {
+                    ImGui.TextDisabled(text);
+                    return;
+                }
+
+                var words = text.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                if (words.Length == 0)
+                {
+                    ImGui.TextDisabled(string.Empty);
+                    return;
+                }
+
+                var current = string.Empty;
+                foreach (var word in words)
+                {
+                    var candidate = string.IsNullOrEmpty(current) ? word : current + " " + word;
+                    if (ImGui.CalcTextSize(candidate).X <= avail)
+                    {
+                        current = candidate;
+                        continue;
+                    }
+
+                    if (!string.IsNullOrEmpty(current))
+                    {
+                        ImGui.SetCursorPosX(startX);
+                        CenterDisabledLine(current);
+                    }
+                    current = word;
+                }
+
+                if (!string.IsNullOrEmpty(current))
+                {
+                    ImGui.SetCursorPosX(startX);
+                    CenterDisabledLine(current);
+                }
+            }
+
+            var stage = _apiController.PostGraceUiHoldStageValue;
+            var status = stage switch
+            {
+                2 => "Connected. Reloading required data...",
+                3 => "Refreshing connection...",
+                _ => "Trying to reconnect...",
+            };
+            var reason = string.IsNullOrWhiteSpace(_apiController.PostGraceUiHoldReason)
+                ? "Connection issues detected. Recovering session state."
+                : _apiController.PostGraceUiHoldReason;
+            var sub = stage switch
+            {
+                2 => "Loading required data from the server.",
+                3 => "Finalizing sync.",
+                _ => string.Empty,
+            };
+            var elapsed = _apiController.PostGraceUiHoldElapsed;
+            var elapsedText = elapsed.TotalSeconds >= 1 ? $"Elapsed: {elapsed.Minutes:00}:{elapsed.Seconds:00}" : "Elapsed: 00:00";
+
+            ImGui.Separator();
+            ImGui.Spacing();
+
+            var title = "Connection recovery";
+            var titleSize = ImGui.CalcTextSize(title);
+            ImGui.SetCursorPosX((ImGui.GetWindowContentRegionMax().X + ImGui.GetWindowContentRegionMin().X) * 0.5f - titleSize.X * 0.5f);
+            ImGui.AlignTextToFramePadding();
+            ImGui.TextColored(SpheneCustomTheme.CurrentTheme.CompactHeaderText, title);
+
+            ImGui.Spacing();
+
+            var centerX = (ImGui.GetWindowContentRegionMax().X + ImGui.GetWindowContentRegionMin().X) * 0.5f;
+            var spinnerSize = ImGui.GetTextLineHeight();
+            ImGui.SetCursorPosX(centerX - spinnerSize * 0.5f);
+            using (ImRaii.PushColor(ImGuiCol.Text, SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning))
+            {
+                DrawRotatingSpinnerIcon(1.0f);
+            }
+
+            using (ImRaii.PushColor(ImGuiCol.Text, SpheneCustomTheme.CurrentTheme.TextPrimary))
+            {
+                CenterDisabledLine(status);
+            }
+
+            ImGuiHelpers.ScaledDummy(4f);
+            CenterDisabledLine(elapsedText);
+
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.Spacing();
+
+            var contentMin = ImGui.GetWindowContentRegionMin().X;
+            var contentMax = ImGui.GetWindowContentRegionMax().X;
+            var contentWidth = contentMax - contentMin;
+            var boxWidth = MathF.Min(contentWidth, 360f * ImGuiHelpers.GlobalScale);
+            ImGui.SetCursorPosX(contentMin + MathF.Max(0, (contentWidth - boxWidth) * 0.5f));
+            using (ImRaii.Child("post-grace-hold-box", new Vector2(boxWidth, 0), false))
+            {
+                ImGui.Spacing();
+                var headerPad = 4f * ImGuiHelpers.GlobalScale;
+                var header1 = "What's happening";
+                var header1Size = ImGui.CalcTextSize(header1);
+                var headerAvail = ImGui.GetContentRegionAvail().X;
+                ImGui.SetCursorPosX(ImGui.GetCursorPosX() + MathF.Max(0, (headerAvail - header1Size.X) * 0.5f));
+                ImGui.AlignTextToFramePadding();
+                using (ImRaii.PushStyle(ImGuiStyleVar.FramePadding, new Vector2(headerPad, ImGui.GetStyle().FramePadding.Y)))
+                using (ImRaii.PushColor(ImGuiCol.Text, SpheneCustomTheme.Colors.SpheneGold))
+                {
+                    ImGui.TextUnformatted(header1);
+                }
+                ImGui.Separator();
+                ImGui.Spacing();
+                CenterDisabledWrapped(reason);
+                ImGuiHelpers.ScaledDummy(6f);
+                if (!string.IsNullOrWhiteSpace(sub))
+                {
+                    CenterDisabledWrapped(sub);
+                }
+
+                ImGuiHelpers.ScaledDummy(10f);
+                var showDiscordHint = elapsed.TotalSeconds >= 30;
+                var hint = showDiscordHint
+                    ? "If this takes longer than a minute, check Discord announcements for maintenance updates."
+                    : "If this continues, it may be related to maintenance or a server restart.";
+                ImGuiHelpers.ScaledDummy(4f);
+                var header2 = "What you can do";
+                var header2Size = ImGui.CalcTextSize(header2);
+                headerAvail = ImGui.GetContentRegionAvail().X;
+                ImGui.SetCursorPosX(ImGui.GetCursorPosX() + MathF.Max(0, (headerAvail - header2Size.X) * 0.5f));
+                ImGui.AlignTextToFramePadding();
+                using (ImRaii.PushStyle(ImGuiStyleVar.FramePadding, new Vector2(headerPad, ImGui.GetStyle().FramePadding.Y)))
+                using (ImRaii.PushColor(ImGuiCol.Text, SpheneCustomTheme.Colors.SpheneGold))
+                {
+                    ImGui.TextUnformatted(header2);
+                }
+                ImGui.Separator();
+                ImGuiHelpers.ScaledDummy(6f);
+                CenterDisabledWrapped(hint);
+                if (ImGui.IsItemHovered())
+                {
+                    using (SpheneCustomTheme.ApplyTooltipTheme())
+                    {
+                        ImGui.BeginTooltip();
+                        ImGui.TextUnformatted("Tip");
+                        ImGui.Separator();
+                        ImGui.TextWrapped("If your community runs this server, maintenance notices are typically posted in a Discord #announcements channel.");
+                        ImGui.EndTooltip();
+                    }
+                }
+            }
+            return;
+        }
+        
         
         if (_apiController.DisplayServerState is ServerState.Connected)
         {            
@@ -1306,6 +1648,19 @@ public class CompactUi : WindowMediatorSubscriberBase
             ImGui.PushStyleColor(ImGuiCol.ButtonActive, active);
             ImGui.PushStyleColor(ImGuiCol.Text, SpheneColors.CrystalWhite);
         }
+        else if (!hasAreaSyncshells)
+        {
+            var baseColor = SpheneCustomTheme.CurrentTheme.CompactActionButton;
+            var textColor = SpheneCustomTheme.CurrentTheme.TextSecondary;
+            var disabledButton = new Vector4(baseColor.X, baseColor.Y, baseColor.Z, 0.18f);
+            var disabledHovered = new Vector4(baseColor.X, baseColor.Y, baseColor.Z, 0.18f);
+            var disabledActive = new Vector4(baseColor.X, baseColor.Y, baseColor.Z, 0.18f);
+            var disabledText = new Vector4(textColor.X, textColor.Y, textColor.Z, 0.55f);
+            ImGui.PushStyleColor(ImGuiCol.Button, disabledButton);
+            ImGui.PushStyleColor(ImGuiCol.ButtonHovered, disabledHovered);
+            ImGui.PushStyleColor(ImGuiCol.ButtonActive, disabledActive);
+            ImGui.PushStyleColor(ImGuiCol.Text, disabledText);
+        }
         bool clicked;
         using (ImRaii.Disabled(!hasAreaSyncshells))
         {
@@ -1321,16 +1676,23 @@ public class CompactUi : WindowMediatorSubscriberBase
             drawList.AddCircleFilled(badgeCenter, 5.5f, ImGui.ColorConvertFloat4ToU32(SpheneCustomTheme.Colors.Warning));
             drawList.AddCircle(badgeCenter, 5.5f, ImGui.ColorConvertFloat4ToU32(SpheneCustomTheme.CurrentTheme.Border), 12, 1.5f);
         }
+        else if (!hasAreaSyncshells)
+        {
+            ImGui.PopStyleColor(4);
+        }
         if (clicked)
         {
             _areaBoundSyncshellService.TriggerAreaSyncshellSelection();
         }
-        var joinedCount = _areaBoundSyncshellService.JoinedAreaSyncshellCount;
+        var hasAnyAreaSyncshellsHere = _areaBoundSyncshellService.HasAnyAreaSyncshellsInCurrentLocation();
+        var isInAreaSyncshellHere = _areaBoundSyncshellService.IsInAreaSyncshellInCurrentLocation();
         UiSharedService.AttachToolTip(hasAreaSyncshells
             ? "Open Area Syncshell Selection"
-            : joinedCount > 0
-                ? "No other Area Syncshells found"
-                : "No Area Syncshells available in this area");
+            : !hasAnyAreaSyncshellsHere
+                ? "No Area Syncshells found"
+                : isInAreaSyncshellHere
+                    ? "No other Area Syncshells found"
+                    : "No Area Syncshells available");
         ImGui.EndGroup();
     }
 
@@ -2211,7 +2573,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                 // If analysis is running or blocking, show busy indicator and avoid interactive content
                 if ((_popupAnalysisTask != null && !_popupAnalysisTask.IsCompleted) || _isPopupAnalysisBlocking)
                 {
-                    UiSharedService.ColorTextWrapped("Analyzing character data…", SpheneCustomTheme.Colors.Warning);
+                    UiSharedService.ColorTextWrapped("Analyzing character data...", SpheneCustomTheme.Colors.Warning);
                     if (_characterAnalyzer.IsAnalysisRunning)
                     {
                         ImGui.SameLine();
@@ -2256,7 +2618,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                     else
                     {
                         _allBackupsStatusText = scanning
-                            ? "Scanning for backups… none found yet."
+                            ? "Scanning for backups... none found yet."
                             : "No texture backups found.";
                     }
                 }
@@ -2330,7 +2692,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                     detectionInProgress = _isTextureBackupScanInProgress || (_shrinkUDetectionTask != null && !_shrinkUDetectionTask.IsCompleted);
                     withinForcedWindow = _backupScanTriggeredAt != DateTime.MinValue && (DateTime.UtcNow - _backupScanTriggeredAt) < TimeSpan.FromSeconds(10);
                     scanning = (detectionInProgress || withinForcedWindow);
-                    var msg = scanning ? "Scanning for backups… none found yet." : "No texture backups found.";
+                    var msg = scanning ? "Scanning for backups... none found yet." : "No texture backups found.";
                     if (scanning)
                     {
                         DrawRotatingSpinnerIcon(1.0f);
@@ -2493,7 +2855,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                 else
                 {
                     _currentBackupsStatusText = scanningCurrent
-                        ? "Scanning for backups… none found yet."
+                        ? "Scanning for backups... none found yet."
                         : "No backups found for current textures.";
                 }
             }
@@ -2947,7 +3309,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                         catch (Exception ex) { _logger.LogDebug(ex, "Failed to cancel ShrinkU conversion"); }
                     }
                     ImGui.SameLine();
-                    UiSharedService.ColorText("Conversion is running…", SpheneCustomTheme.Colors.Warning);
+                    UiSharedService.ColorText("Conversion is running...", SpheneCustomTheme.Colors.Warning);
                 }
                 else
                 {
@@ -3038,7 +3400,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                             catch (Exception ex) { _logger.LogDebug(ex, "Failed to cancel restore operation"); }
                         }
                         ImGui.SameLine();
-                        UiSharedService.ColorText("Restore is running…", SpheneCustomTheme.Colors.Warning);
+                        UiSharedService.ColorText("Restore is running...", SpheneCustomTheme.Colors.Warning);
                     }
                     else
                     {

@@ -3,6 +3,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Sphene.API.Dto.CharaData;
 using Sphene.API.Data;
+using Sphene.API.Data.Extensions;
 using Sphene.API.Data.Enum;
 using Sphene.API.Dto.Group;
 using Sphene.PlayerData.Pairs;
@@ -30,6 +31,8 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
     private readonly PairManager _pairManager;
     
     private LocationInfo? _lastLocation;
+    private string? _currentInteriorPropertyKey;
+    private uint _currentInteriorEntryMapId;
     private readonly Dictionary<string, AreaBoundSyncshellDto> _areaBoundSyncshells = new(StringComparer.Ordinal);
     private readonly HashSet<string> _currentlyJoinedAreaSyncshells = new(StringComparer.Ordinal);
     private readonly Lock _joinedSyncshellsLock = new();
@@ -129,6 +132,8 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
 
     private async Task HandleLocationChange(LocationInfo? oldLocation, LocationInfo newLocation)
     {
+        UpdateInteriorEntryBaseline(oldLocation, newLocation);
+
         // Only process area-bound syncshells when connected to server
         if (!_apiController.IsConnected)
         {
@@ -196,6 +201,12 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
         {
             try
             {
+                if (syncshell.IsLocked)
+                {
+                    syncshellsWithoutConsent.Add(syncshell);
+                    continue;
+                }
+
                 var hasValidConsent = await _apiController.GroupCheckAreaBoundConsent(syncshell.GID).ConfigureAwait(false);
                 if (hasValidConsent)
                 {
@@ -218,6 +229,10 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
         {
             try
             {
+                if (syncshell.IsLocked)
+                {
+                    continue;
+                }
                 _logger.LogDebug("User has valid consent for syncshell {SyncshellId}, auto-joining", syncshell.GID);
                 await JoinAreaBoundSyncshell(syncshell.GID, true, syncshell.Settings.RulesVersion).ConfigureAwait(false);
             }
@@ -291,24 +306,47 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
 
     private async Task<bool> ShouldLeaveSyncshell(string syncshellId)
     {
-        bool isOwner = false;
+        bool shouldLeave = true;
         try
         {
             var allGroups = await _apiController.GroupsGetAll().ConfigureAwait(false);
             var groupInfo = allGroups.FirstOrDefault(g => string.Equals(g.Group.GID, syncshellId, StringComparison.Ordinal));
-            isOwner = groupInfo != null && string.Equals(groupInfo.OwnerUID, _apiController.UID, StringComparison.Ordinal);
+            if (groupInfo == null)
+            {
+                return true;
+            }
+
+            var isOwner = string.Equals(groupInfo.OwnerUID, _apiController.UID, StringComparison.Ordinal);
+            if (isOwner)
+            {
+                return false;
+            }
+
+            var isModerator = groupInfo.GroupUserInfo.IsModerator();
+            var isPinned = groupInfo.GroupUserInfo.IsPinned();
+            if (isModerator || isPinned)
+            {
+                return false;
+            }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error checking ownership for syncshell {SyncshellId}", syncshellId);
         }
-        return !isOwner;
+        return shouldLeave;
     }
 
     public async Task JoinAreaBoundSyncshell(string syncshellId, bool acceptRules = false, int rulesVersion = 0)
     {
         try
         {
+            if (_areaBoundSyncshells.TryGetValue(syncshellId, out var syncshell) && syncshell.IsLocked)
+            {
+                _logger.LogDebug("Skipping join for locked area-bound syncshell {SyncshellId}", syncshellId);
+                SendAreaBoundNotification(syncshell);
+                return;
+            }
+
             _logger.LogDebug("Attempting to join area-bound syncshell {SyncshellId} with consent", syncshellId);
             
             // Set consent first
@@ -391,7 +429,7 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
         }
     }
 
-    private static bool IsLocationInBounds(AreaBoundSyncshellDto syncshell, LocationInfo location)
+    private bool IsLocationInBounds(AreaBoundSyncshellDto syncshell, LocationInfo location)
     {
         // Check if any of the syncshell's bound areas match the user's location
         foreach (var boundArea in syncshell.BoundAreas)
@@ -440,6 +478,43 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
                     matches = (boundArea.Location.WardId == 0 || boundArea.Location.WardId == location.WardId) &&
                              (boundArea.Location.HouseId == 0 || boundArea.Location.HouseId == location.HouseId) &&
                              location.IsIndoor; // Only match when player is inside
+                    if (matches)
+                    {
+                        if (IsHouseInterior(location) && _currentInteriorEntryMapId != 0)
+                        {
+                            var key = GetInteriorPropertyKey(location);
+                            if (string.Equals(key, _currentInteriorPropertyKey, StringComparison.Ordinal))
+                            {
+                                if (boundArea.Location.MapId == 0)
+                                {
+                                    matches = location.MapId == _currentInteriorEntryMapId;
+                                }
+                                else
+                                {
+                                    var delta = (int)location.MapId - (int)_currentInteriorEntryMapId;
+                                    matches = boundArea.Location.MapId switch
+                                    {
+                                        HousingInteriorRelativeMapIds.Ground => delta == 0,
+                                        HousingInteriorRelativeMapIds.Basement => delta == 1,
+                                        HousingInteriorRelativeMapIds.Second => delta == 2,
+                                        _ => boundArea.Location.MapId == location.MapId
+                                    };
+                                }
+                            }
+                            else
+                            {
+                                matches = boundArea.Location.MapId == 0 || boundArea.Location.MapId == location.MapId;
+                            }
+                        }
+                        else
+                        {
+                            matches = boundArea.Location.MapId == 0 || boundArea.Location.MapId == location.MapId;
+                        }
+                        if (matches && boundArea.Location.RoomId != 0)
+                        {
+                            matches = location.RoomId == boundArea.Location.RoomId;
+                        }
+                    }
                     break;
             }
 
@@ -450,6 +525,42 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
         }
 
         return false;
+    }
+
+    private void UpdateInteriorEntryBaseline(LocationInfo? oldLocation, LocationInfo newLocation)
+    {
+        if (!IsHouseInterior(newLocation))
+        {
+            _currentInteriorPropertyKey = null;
+            _currentInteriorEntryMapId = 0;
+            return;
+        }
+
+        var newKey = GetInteriorPropertyKey(newLocation);
+        var isNewEntry = oldLocation == null
+                         || !IsHouseInterior(oldLocation.Value)
+                         || !string.Equals(GetInteriorPropertyKey(oldLocation.Value), newKey, StringComparison.Ordinal);
+
+        if (isNewEntry || !string.Equals(_currentInteriorPropertyKey, newKey, StringComparison.Ordinal))
+        {
+            _currentInteriorPropertyKey = newKey;
+            _currentInteriorEntryMapId = newLocation.MapId;
+        }
+    }
+
+    private static bool IsHouseInterior(LocationInfo location)
+    {
+        return location.IsIndoor
+               && location.RoomId == 0
+               && location.WardId > 0
+               && location.HouseId is >= 1 and <= 60
+               && location.MapId != 0
+               && location.TerritoryId != 0;
+    }
+
+    private static string GetInteriorPropertyKey(LocationInfo location)
+    {
+        return $"{location.ServerId}_{location.TerritoryId}_{location.WardId}_{location.HouseId}";
     }
 
     private static bool LocationsMatch(LocationInfo loc1, LocationInfo loc2)
@@ -682,6 +793,8 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
             
             _logger.LogDebug("Refreshed {Count} area-bound syncshells", syncshells.Count);
             _hasRefreshedAreaSyncshells = true;
+
+            await LeaveNoLongerAreaBoundSyncshells().ConfigureAwait(false);
             
             // After reconnection, check if we're still members of area-bound syncshells that are no longer valid for our location
             await ValidateCurrentAreaBoundMemberships().ConfigureAwait(false);
@@ -696,6 +809,44 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error refreshing area-bound syncshells: {Message}", ex.Message);
+        }
+    }
+
+    private async Task LeaveNoLongerAreaBoundSyncshells()
+    {
+        HashSet<string> joined;
+        _joinedSyncshellsLock.Enter();
+        try
+        {
+            joined = new HashSet<string>(_currentlyJoinedAreaSyncshells, StringComparer.Ordinal);
+        }
+        finally
+        {
+            _joinedSyncshellsLock.Exit();
+        }
+
+        if (joined.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var syncshellId in joined)
+        {
+            if (_areaBoundSyncshells.ContainsKey(syncshellId))
+            {
+                continue;
+            }
+
+            if (await ShouldLeaveSyncshell(syncshellId).ConfigureAwait(false))
+            {
+                await LeaveSyncshell(syncshellId).ConfigureAwait(false);
+                _notifiedSyncshells.Remove(syncshellId);
+                _logger.LogDebug("Left syncshell {SyncshellId} because it is no longer area-bound", syncshellId);
+            }
+            else
+            {
+                _logger.LogDebug("Skipping auto-leave for syncshell {SyncshellId} because user is owner", syncshellId);
+            }
         }
     }
 
@@ -795,14 +946,68 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
         if (!_hasRefreshedAreaSyncshells || _lastLocation == null)
             return false;
 
+        HashSet<string> joined;
+        _joinedSyncshellsLock.Enter();
+        try
+        {
+            joined = new HashSet<string>(_currentlyJoinedAreaSyncshells, StringComparer.Ordinal);
+        }
+        finally
+        {
+            _joinedSyncshellsLock.Exit();
+        }
+
         // Check if there are any area syncshells available in the current location
         // that are not already joined
         var availableSyncshells = _areaBoundSyncshells.Values
-            .Where(syncshell => !_currentlyJoinedAreaSyncshells.Contains(syncshell.GID) && 
+            .Where(syncshell => !joined.Contains(syncshell.GID) &&
                                IsLocationInBounds(syncshell, _lastLocation.Value))
             .ToList();
 
         return availableSyncshells.Any();
+    }
+
+    public bool HasAnyAreaSyncshellsInCurrentLocation()
+    {
+        if (!_hasRefreshedAreaSyncshells || _lastLocation == null)
+            return false;
+
+        foreach (var syncshell in _areaBoundSyncshells.Values)
+        {
+            if (IsLocationInBounds(syncshell, _lastLocation.Value))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public bool IsInAreaSyncshellInCurrentLocation()
+    {
+        if (!_hasRefreshedAreaSyncshells || _lastLocation == null)
+            return false;
+
+        HashSet<string> joined;
+        _joinedSyncshellsLock.Enter();
+        try
+        {
+            joined = new HashSet<string>(_currentlyJoinedAreaSyncshells, StringComparer.Ordinal);
+        }
+        finally
+        {
+            _joinedSyncshellsLock.Exit();
+        }
+
+        foreach (var syncshell in _areaBoundSyncshells.Values)
+        {
+            if (joined.Contains(syncshell.GID) && IsLocationInBounds(syncshell, _lastLocation.Value))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public void TriggerAreaSyncshellSelection()
@@ -871,7 +1076,9 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
 
         var notificationLocation = _configService.Current.AreaBoundSyncshellNotification;
         var title = "Area Syncshell Available";
-        var message = $"Area-bound syncshell '{syncshell.Group.Alias}' is now available in this area!";
+        var message = syncshell.IsLocked
+            ? $"Area-bound syncshell '{syncshell.Group.Alias}' is locked. Joining is currently disabled."
+            : $"Area-bound syncshell '{syncshell.Group.Alias}' is now available in this area!";
 
         _logger.LogDebug("Publishing area-bound notification: {Title} - {Message} (Location: {Location})", title, message, notificationLocation);
 

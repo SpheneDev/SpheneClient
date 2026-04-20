@@ -40,13 +40,15 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
     private readonly VisibilityGateService _visibilityGateService;
     private readonly PairCharacterCacheConfigService _pairCharacterCacheConfigService;
     private readonly DalamudUtilService _dalamudUtilService;
-    private readonly Timer _ackStatusPollTimer;
+    private const int LegacyAckAssumeSuccessSeconds = 5;
+    private readonly ConcurrentDictionary<string, Timer> _legacyAckAssumeSuccessTimers = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _pendingOfflineGrace = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, CancellationTokenSource> _pendingOfflineCharacterDataPurge = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, OnlineUserIdentDto> _pendingOnlineDtos = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, OnlineUserCharaDataDto> _pendingCharaDataDtos = new(StringComparer.Ordinal);
     private readonly TimeSpan _offlineGraceWindow = TimeSpan.FromSeconds(10);
+    private readonly TimeSpan _offlineCharacterDataPurgeWindow = TimeSpan.FromMinutes(1);
     private const int MaxPairCharacterCacheEntries = 200;
-    private int _ackStatusPollRunning = 0;
 
     private volatile bool _localVisibilityGateActive = false;
     private readonly Lock _individualPairRequestLock = new();
@@ -101,7 +103,7 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
             EnforceVanillaForPausedPairs("ZoneSwitchEnd");
         });
         Mediator.Subscribe<CharacterDataBuildStartedMessage>(this, (_) => SetPendingAcknowledgmentForBuildStart());
-        Mediator.Subscribe<CharacterDataApplicationCompletedMessage>(this, OnCharacterDataApplicationCompleted);
+        Mediator.Subscribe<CharacterDataBuildNoChangesMessage>(this, (_) => ClearBuildStartPendingAcknowledgments());
         Mediator.Subscribe<GposeStartMessage>(this, (msg) => { _ = _apiController.Value.UserUpdateGposeState(true); });
         Mediator.Subscribe<GposeEndMessage>(this, (msg) => { _ = _apiController.Value.UserUpdateGposeState(false); });
         Mediator.Subscribe<PenumbraModTransferCompletedMessage>(this, OnPenumbraModTransferCompleted);
@@ -110,7 +112,8 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         _pairsWithGroupsInternal = PairsWithGroupsLazy();
 
         _dalamudContextMenu.OnMenuOpened += DalamudContextMenuOnOnOpenGameObjectContextMenu;
-        _ackStatusPollTimer = new Timer(OnAckStatusPollTimer, null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
+
+        ClearAllCachedPairCharacterDataOnStartup();
     }
 
     public List<Pair> DirectPairs => _directPairsInternal.Value;
@@ -360,6 +363,7 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
     public void ClearPairs()
     {
         CancelAllPendingOfflineGrace();
+        CancelAllPendingOfflineCharacterDataPurges();
         Logger.LogDebug("Clearing all Pairs");
         DisposePairs();
         _allClientPairs.Clear();
@@ -371,6 +375,7 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         {
             _inboundIndividualPairRequestUids.Clear();
             _unseenInboundIndividualPairRequestUids.Clear();
+            _ignoredInboundIndividualPairRequestUids.Clear();
         }
         finally
         {
@@ -395,6 +400,7 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
     {
         var key = GetOfflineGraceKey(user);
         CancelPendingOfflineGraceByKey(key);
+        CancelPendingOfflineCharacterDataPurgeByKey(key);
         var cts = new CancellationTokenSource();
         _pendingOfflineGrace[key] = cts;
 
@@ -415,6 +421,7 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
                     pair.MarkOffline();
                     RecreateLazy();
                 }
+                StartOfflineCharacterDataPurge(user);
             }
             catch (OperationCanceledException)
             {
@@ -450,6 +457,7 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
 
         var key = GetOfflineGraceKey(dto.User);
         var hadPendingOfflineGrace = CancelPendingOfflineGraceByKey(key);
+        CancelPendingOfflineCharacterDataPurgeByKey(key);
 
         var pair = _allClientPairs[dto.User];
         var wasOnline = pair.IsOnline;
@@ -542,7 +550,7 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         }
 
         // Process via session acknowledgment manager (single source of truth)
-        var processedBySession = _sessionAcknowledgmentManager.ProcessReceivedAcknowledgment(acknowledgmentDto.DataHash, acknowledgmentDto.User);
+        var processedBySession = _sessionAcknowledgmentManager.ProcessReceivedAcknowledgment(acknowledgmentDto);
         if (!processedBySession)
         {
             Logger.LogDebug("{tag} Ack receive ignored: not latest user={user} hash={hash}", 
@@ -556,19 +564,8 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
             acknowledgmentDto.Success);
 
         // Cancel timeout tracking since acknowledgment was received
-        _acknowledgmentTimeoutManager.CancelTimeout(acknowledgmentDto.DataHash);
+        _acknowledgmentTimeoutManager.CancelTimeout(acknowledgmentDto.DataHash, acknowledgmentDto.User.UID);
         _acknowledgmentTimeoutManager.CancelInvalidHashTimeout(acknowledgmentDto.User.UID);
-
-        if (_allClientPairs.TryGetValue(acknowledgmentDto.User, out var pair))
-        {
-            var otherPermissions = pair.UserPair.OtherPermissions;
-            var newAckYouStatus = acknowledgmentDto.Success;
-            if (otherPermissions.IsAckYou() != newAckYouStatus)
-            {
-                otherPermissions.SetAckYou(newAckYouStatus);
-                pair.UserPair.OtherPermissions = otherPermissions;
-            }
-        }
 
         Mediator.Publish(new EventMessage(new Event(acknowledgmentDto.User, nameof(PairManager), EventSeverity.Informational,
             acknowledgmentDto.Success ? "Character Data Acknowledged" : "Character Data Acknowledgment Failed")));
@@ -675,6 +672,10 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
 
     public void RemoveUserPair(UserDto dto)
     {
+        var key = GetOfflineGraceKey(dto.User);
+        CancelPendingOfflineGraceByKey(key);
+        CancelPendingOfflineCharacterDataPurgeByKey(key);
+
         if (_allClientPairs.TryGetValue(dto.User, out var pair))
         {
             pair.UserPair.IndividualPairStatus = API.Data.Enum.IndividualPairStatus.None;
@@ -772,17 +773,6 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
             pair.UserPair.OtherPermissions.IsDisableSounds(),
             pair.UserPair.OtherPermissions.IsDisableVFX());
 
-        var currentOtherAckYou = pair.UserPair.OtherPermissions.IsAckYou();
-        Logger.LogDebug("UpdatePairPermissions: User {user} AckYou={ackYou}, HasPendingAck={pending}", 
-            dto.User.AliasOrUID, currentOtherAckYou, pair.HasPendingAcknowledgment);
-
-        if (currentOtherAckYou && pair.HasPendingAcknowledgment)
-        {
-            Logger.LogDebug("Resolving pending acknowledgment for user {user} due to remote AckYou=true", dto.User.AliasOrUID);
-            _sessionAcknowledgmentManager.ResolvePendingAcknowledgmentFromRemoteAckYou(dto.User, pair.LastAcknowledgmentId);
-            pair.ResolvePendingAcknowledgmentFromRemoteAckYou();
-        }
-
         if (!pair.IsPaused)
             pair.ApplyLastReceivedData();
 
@@ -838,10 +828,6 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         if (_allClientPairs.TryGetValue(dto.User, out var existingPair) && existingPair.IsVisible)
         {
             existingPair.SetIsUploading(dto.IsUploading);
-            if (dto.IsUploading)
-            {
-                SetOwnAckYouForTransfer(existingPair, false);
-            }
         }
     }
 
@@ -860,43 +846,6 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         }
 
         pair.SetIsUploading(isUploading: false);
-    }
-
-    private void OnCharacterDataApplicationCompleted(CharacterDataApplicationCompletedMessage message)
-    {
-        if (!message.Success)
-        {
-            return;
-        }
-
-        var pair = GetPairByUID(message.UserUID);
-        if (pair == null)
-        {
-            return;
-        }
-
-        SetOwnAckYouForTransfer(pair, true);
-    }
-
-    private void SetOwnAckYouForTransfer(Pair pair, bool newStatus)
-    {
-        var permissions = pair.UserPair.OwnPermissions;
-        if (permissions.IsAckYou() == newStatus)
-        {
-            return;
-        }
-
-        permissions.SetAckYou(newStatus);
-        pair.UserPair.OwnPermissions = permissions;
-
-        try
-        {
-            _ = _apiController.Value.UserSetPairPermissions(new(pair.UserData, permissions));
-        }
-        catch (Exception ex)
-        {
-            Logger.LogDebug(ex, "TransferAck: Failed to set Own AckYou={status} for user {user}", newStatus, pair.UserData.AliasOrUID);
-        }
     }
 
     internal void SetGroupPairStatusInfo(GroupPairUserInfoDto dto)
@@ -973,8 +922,8 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         base.Dispose(disposing);
 
         CancelAllPendingOfflineGrace();
+        CancelAllPendingOfflineCharacterDataPurges();
         _dalamudContextMenu.OnMenuOpened -= DalamudContextMenuOnOnOpenGameObjectContextMenu;
-        _ackStatusPollTimer.Dispose();
 
         DisposePairs();
     }
@@ -1024,6 +973,84 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         }
 
         return false;
+    }
+
+    private void CancelPendingOfflineCharacterDataPurgeByKey(string key)
+    {
+        if (_pendingOfflineCharacterDataPurge.TryRemove(key, out var cts))
+        {
+            cts.Cancel();
+            cts.Dispose();
+        }
+    }
+
+    private void CancelAllPendingOfflineCharacterDataPurges()
+    {
+        foreach (var pending in _pendingOfflineCharacterDataPurge.ToArray())
+        {
+            CancelPendingOfflineCharacterDataPurgeByKey(pending.Key);
+        }
+    }
+
+    private void StartOfflineCharacterDataPurge(UserData user)
+    {
+        var key = GetOfflineGraceKey(user);
+        CancelPendingOfflineCharacterDataPurgeByKey(key);
+
+        var cts = new CancellationTokenSource();
+        _pendingOfflineCharacterDataPurge[key] = cts;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(_offlineCharacterDataPurgeWindow, cts.Token).ConfigureAwait(false);
+
+                if (!_pendingOfflineCharacterDataPurge.TryGetValue(key, out var activeCts) || !ReferenceEquals(activeCts, cts))
+                {
+                    return;
+                }
+
+                if (_allClientPairs.TryGetValue(user, out var pair) && !pair.IsOnline)
+                {
+                    RemoveCachedPairCharacterData(user);
+                    pair.MarkOffline();
+                    RecreateLazy();
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                Logger.LogDebug("{tag} Offline character data purge cancelled for userKey={key}", SyncProgressTag, key);
+            }
+            finally
+            {
+                if (_pendingOfflineCharacterDataPurge.TryGetValue(key, out var activeCts) && ReferenceEquals(activeCts, cts))
+                {
+                    _pendingOfflineCharacterDataPurge.TryRemove(key, out _);
+                }
+
+                cts.Dispose();
+            }
+        });
+    }
+
+    private void ClearAllCachedPairCharacterDataOnStartup()
+    {
+        try
+        {
+            if (_pairCharacterCacheConfigService.Current.PairCharacterDataCache.Count == 0)
+            {
+                return;
+            }
+
+            _pairCharacterCacheConfigService.Current.PairCharacterDataCache.Clear();
+            _pairCharacterCacheConfigService.Save();
+            Logger.LogInformation("Cleared cached pair character data on startup");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Failed to clear cached pair character data on startup");
+        }
     }
 
     private void CancelAllPendingOfflineGrace()
@@ -1163,11 +1190,7 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
                 Logger.LogDebug("Set pending acknowledgment for user {user} with ID {id}", userData.AliasOrUID, acknowledgmentId);
                 
                 // Start timeout tracking for this acknowledgment
-                var currentHash = pair.GetCurrentDataHash();
-                if (!string.IsNullOrEmpty(currentHash))
-                {
-                    _acknowledgmentTimeoutManager.StartTimeout(acknowledgmentId, userData, currentHash);
-                }
+                _acknowledgmentTimeoutManager.StartTimeout(acknowledgmentId, userData, acknowledgmentId);
             }
         }
         
@@ -1199,26 +1222,90 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
 
     public void SetPendingAcknowledgmentForSender(List<UserData> recipients, string acknowledgmentId)
     {
-        // Use hash-based acknowledgment manager for thread-safe handling
-        _sessionAcknowledgmentManager.SetPendingAcknowledgmentForHashVersion(recipients, acknowledgmentId);
-
-        // Also set pending acknowledgment on individual pairs for UI display
+        var ackRecipients = new List<UserData>();
         foreach (var recipient in recipients)
         {
             if (_allClientPairs.TryGetValue(recipient, out var pair))
             {
-                _ = pair.SetPendingAcknowledgment(acknowledgmentId);
-                Logger.LogDebug("Set pending acknowledgment on pair for recipient {user} with ID {id}", recipient.AliasOrUID, acknowledgmentId);
-                
-                // Start timeout tracking for this acknowledgment
-                var currentHash = pair.GetCurrentDataHash();
-                if (!string.IsNullOrEmpty(currentHash))
+                ScheduleLegacyAssumedSuccess(pair.UserData.UID, acknowledgmentId);
+                if (!pair.IsLegacyAcknowledgmentClient)
                 {
-                    _acknowledgmentTimeoutManager.StartTimeout(acknowledgmentId, recipient, currentHash);
+                    ackRecipients.Add(recipient);
+                }
+                else
+                {
+                    _ = pair.SetPendingAcknowledgment(acknowledgmentId);
                 }
             }
         }
+
+        if (ackRecipients.Count > 0)
+        {
+            _sessionAcknowledgmentManager.SetPendingAcknowledgmentForHashVersion(ackRecipients, acknowledgmentId);
+
+            foreach (var recipient in ackRecipients)
+            {
+                if (_allClientPairs.TryGetValue(recipient, out var pair))
+                {
+                    _ = pair.SetPendingAcknowledgment(acknowledgmentId);
+                    Logger.LogDebug("Set pending acknowledgment on pair for recipient {user} with ID {id}", recipient.AliasOrUID, acknowledgmentId);
+                    _acknowledgmentTimeoutManager.StartTimeout(acknowledgmentId, recipient, acknowledgmentId);
+                }
+            }
+        }
+
         Mediator.Publish(new RefreshUiMessage());
+    }
+
+    private void ScheduleLegacyAssumedSuccess(string? userUid, string acknowledgmentId)
+    {
+        if (string.IsNullOrWhiteSpace(userUid) || string.IsNullOrWhiteSpace(acknowledgmentId))
+        {
+            return;
+        }
+
+        var key = userUid;
+        var newTimer = new Timer(_ =>
+        {
+            try
+            {
+                var pair = GetPairByUID(userUid);
+                if (pair == null)
+                {
+                    return;
+                }
+
+                if (!pair.IsLegacyAcknowledgmentClient)
+                {
+                    return;
+                }
+
+                if (!pair.HasPendingAcknowledgment || !string.Equals(pair.LastAcknowledgmentId, acknowledgmentId, StringComparison.Ordinal))
+                {
+                    return;
+                }
+
+                _acknowledgmentTimeoutManager.CancelTimeout(acknowledgmentId, userUid);
+                pair.UpdateAcknowledgmentStatus(acknowledgmentId, true, DateTimeOffset.UtcNow).GetAwaiter().GetResult();
+            }
+            catch (Exception ex)
+            {
+                Logger.LogDebug(ex, "Legacy ack auto-success failed for uid={uid} ackId={ackId}", userUid, acknowledgmentId);
+            }
+            finally
+            {
+                if (_legacyAckAssumeSuccessTimers.TryRemove(key, out var t))
+                {
+                    t.Dispose();
+                }
+            }
+        }, null, TimeSpan.FromSeconds(LegacyAckAssumeSuccessSeconds), Timeout.InfiniteTimeSpan);
+
+        _legacyAckAssumeSuccessTimers.AddOrUpdate(key, newTimer, (_, oldTimer) =>
+        {
+            oldTimer.Dispose();
+            return newTimer;
+        });
     }
 
     public bool HasPendingAcknowledgmentForUser(UserData userData)
@@ -1243,72 +1330,6 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
             }
         }
         return anyPairPending || _sessionAcknowledgmentManager.HasPendingAcknowledgments();
-    }
-
-    private void OnAckStatusPollTimer(object? state)
-    {
-        if (!_apiController.Value.IsConnected)
-        {
-            return;
-        }
-
-        var pendingUserUids = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var pair in _allClientPairs.Values)
-        {
-            if (pair.HasPendingAcknowledgment && !string.IsNullOrEmpty(pair.UserData.UID))
-            {
-                pendingUserUids.Add(pair.UserData.UID);
-            }
-        }
-
-        if (pendingUserUids.Count == 0)
-        {
-            return;
-        }
-
-        if (Interlocked.Exchange(ref _ackStatusPollRunning, 1) == 1)
-        {
-            return;
-        }
-
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                var pairs = await _apiController.Value.UserGetPairedClients().ConfigureAwait(false);
-                foreach (var dto in pairs)
-                {
-                    if (!string.IsNullOrEmpty(dto.User.UID) && !pendingUserUids.Contains(dto.User.UID))
-                    {
-                        continue;
-                    }
-
-                    if (_allClientPairs.TryGetValue(dto.User, out var pair)
-                        && pair.HasPendingAcknowledgment
-                        && pair.UserPair.OtherPermissions.IsAckYou() != dto.OtherPermissions.IsAckYou())
-                    {
-                        UpdatePairPermissions(new UserPermissionsDto(dto.User, dto.OtherPermissions));
-                    }
-
-                    if (!string.IsNullOrEmpty(dto.User.UID))
-                    {
-                        pendingUserUids.Remove(dto.User.UID);
-                        if (pendingUserUids.Count == 0)
-                        {
-                            break;
-                        }
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Logger.LogDebug(ex, "Failed to poll acknowledgment status from server");
-            }
-            finally
-            {
-                Interlocked.Exchange(ref _ackStatusPollRunning, 0);
-            }
-        });
     }
 
     public void SetPendingAcknowledgmentForBuildStart()
@@ -1336,6 +1357,16 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
                 TimeSpan.FromSeconds(3)
             );
         }
+    }
+
+    private void ClearBuildStartPendingAcknowledgments()
+    {
+        foreach (var pair in _allClientPairs.Values)
+        {
+            pair.ClearBuildStartPendingStatus();
+        }
+
+        Mediator.Publish(new RefreshUiMessage());
     }
 
     public Pair? GetPairForUser(UserData userData)
@@ -1378,28 +1409,11 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
                 continue;
             }
 
-            var ownAckYouChanged = pair.UserPair.OwnPermissions.IsAckYou() != dto.OwnPermissions.IsAckYou();
-            var otherAckYouChanged = pair.UserPair.OtherPermissions.IsAckYou() != dto.OtherPermissions.IsAckYou();
-
-            if (ownAckYouChanged)
-            {
-                pair.UserPair.OwnPermissions = dto.OwnPermissions;
-                permissionsChanged = true;
-            }
-
-            if (otherAckYouChanged)
-            {
-                pair.UserPair.OtherPermissions = dto.OtherPermissions;
-                permissionsChanged = true;
-            }
-
             var cachedHash = pair.LastReceivedCharacterDataHash;
             if (string.IsNullOrEmpty(cachedHash) || string.IsNullOrEmpty(dto.User.UID))
             {
                 continue;
             }
-
-            SetOwnAckYouForTransfer(pair, false);
 
             try
             {
@@ -1420,10 +1434,7 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
             }
         }
 
-        if (permissionsChanged)
-        {
-            RecreateLazy();
-        }
+        if (permissionsChanged) RecreateLazy();
     }
 
     private void ProcessPendingPairEvents(string? uid)

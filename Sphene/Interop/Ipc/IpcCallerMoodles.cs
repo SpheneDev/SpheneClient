@@ -78,6 +78,7 @@ public sealed class IpcCallerMoodles : IIpcCaller
         catch (Exception e)
         {
             _logger.LogWarning(e, "Could not Get Moodles Status");
+            _spheneMediator.Publish(new DebugLogEventMessage(LogLevel.Warning, "IPC", "Moodles GetStatus failed", Details: e.ToString()));
             return null;
         }
     }
@@ -92,6 +93,7 @@ public sealed class IpcCallerMoodles : IIpcCaller
         catch (Exception e)
         {
             _logger.LogWarning(e, "Could not Set Moodles Status");
+            _spheneMediator.Publish(new DebugLogEventMessage(LogLevel.Warning, "IPC", "Moodles SetStatus failed", Details: e.ToString()));
         }
     }
 
@@ -105,6 +107,7 @@ public sealed class IpcCallerMoodles : IIpcCaller
         catch (Exception e)
         {
             _logger.LogWarning(e, "Could not Revert Moodles Status");
+            _spheneMediator.Publish(new DebugLogEventMessage(LogLevel.Warning, "IPC", "Moodles RevertStatus failed", Details: e.ToString()));
         }
     }
 }

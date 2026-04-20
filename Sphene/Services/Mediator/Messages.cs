@@ -13,6 +13,7 @@ using Sphene.Services;
 using Sphene.WebAPI.Files.Models;
 using Sphene.API.Dto.Files;
 using System.Numerics;
+using Microsoft.Extensions.Logging;
 
 namespace Sphene.Services.Mediator;
 
@@ -64,13 +65,17 @@ public record CreateCacheForObjectMessage(GameObjectHandler ObjectToCreateFor) :
 public record ClearCacheForObjectMessage(GameObjectHandler ObjectToCreateFor) : SameThreadMessage;
 public record CharacterDataCreatedMessage(CharacterData CharacterData) : SameThreadMessage;
 public record CharacterDataBuildStartedMessage : MessageBase;
-public record CharacterDataApplicationCompletedMessage(string PlayerName, string UserUID, Guid ApplicationId, bool Success, string? DataHash) : MessageBase;
+public record CharacterDataBuildNoChangesMessage(string? DataHash = null) : MessageBase;
+public record CharacterDataApplicationCompletedMessage(string PlayerName, string UserUID, Guid ApplicationId, bool Success, string? DataHash,
+    Sphene.API.Dto.User.AcknowledgmentErrorCode ErrorCode = Sphene.API.Dto.User.AcknowledgmentErrorCode.None,
+    string? ErrorMessage = null) : MessageBase;
 public record CharacterDataAnalyzedMessage : MessageBase;
 public record PenumbraStartRedrawMessage(IntPtr Address) : MessageBase;
 public record PenumbraEndRedrawMessage(IntPtr Address) : MessageBase;
 public record HubReconnectingMessage(Exception? Exception) : SameThreadMessage;
 public record HubReconnectedMessage(string? Arg) : SameThreadMessage;
 public record HubClosedMessage(Exception? Exception) : SameThreadMessage;
+public record DebugLogEventMessage(LogLevel Level, string Category, string Message, string? Uid = null, string? Details = null) : SameThreadMessage;
 public record DownloadReadyMessage(Guid RequestId) : MessageBase;
 public record DownloadStartedMessage(GameObjectHandler DownloadId, Dictionary<string, FileDownloadStatus> DownloadStatus) : MessageBase;
 public record DownloadFinishedMessage(GameObjectHandler DownloadId) : MessageBase;
@@ -125,6 +130,7 @@ public record GPoseLobbyReceiveCharaData(CharaDataDownloadDto CharaDataDownloadD
 public record GPoseLobbyReceivePoseData(UserData UserData, PoseData PoseData) : MessageBase;
 public record GPoseLobbyReceiveWorldData(UserData UserData, WorldData WorldData) : MessageBase;
 public record CharacterDataRefreshRequestedMessage(UserData Requester) : MessageBase;
+public record RequestRemoteCharacterDataRefreshMessage(UserData Target, string? DataHash, string? Reason) : MessageBase;
 public record CharacterDataReceivedForPairMessage(Pair Pair, Sphene.API.Data.CharacterData? CharacterData) : MessageBase;
 public record OpenCharaDataHubWithFilterMessage(UserData UserData) : MessageBase;
 public record SendCharacterDataAcknowledgmentMessage(CharacterDataAcknowledgmentDto AcknowledgmentDto) : MessageBase;

@@ -82,7 +82,8 @@ public class AreaBoundSyncshellSelectionUI : WindowMediatorSubscriberBase
                     ImGui.PushStyleColor(ImGuiCol.HeaderActive, new Vector4(0.2f, 0.6f, 1.0f, 0.5f));
                 }
                 
-                bool nodeOpen = ImGui.TreeNodeEx($"##syncshell_tree_{i}", treeNodeFlags, $"{syncshell.Group.AliasOrGID}");
+                var headerLabel = syncshell.IsLocked ? $"{syncshell.Group.AliasOrGID} (Locked)" : $"{syncshell.Group.AliasOrGID}";
+                bool nodeOpen = ImGui.TreeNodeEx($"##syncshell_tree_{i}", treeNodeFlags, headerLabel);
                 
                 if (_selectedIndex == i)
                 {
@@ -110,6 +111,11 @@ public class AreaBoundSyncshellSelectionUI : WindowMediatorSubscriberBase
                         ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 0.8f, 0.2f, 1.0f));
                         ImGui.Text("⚠ Requires rules acceptance");
                         ImGui.PopStyleColor();
+                    }
+
+                    if (syncshell.IsLocked)
+                    {
+                        ImGui.TextColored(ImGuiColors.DalamudRed, "This syncshell is locked. Joining is disabled.");
                     }
                     
                     // Custom join message
@@ -157,7 +163,9 @@ public class AreaBoundSyncshellSelectionUI : WindowMediatorSubscriberBase
         var buttonWidth = (ImGui.GetContentRegionAvail().X - ImGui.GetStyle().ItemSpacing.X * 2) / 3;
         
         // Join button
-        bool canJoin = _selectedIndex >= 0 && _selectedIndex < _availableSyncshells.Count;
+        bool canJoin = _selectedIndex >= 0
+                       && _selectedIndex < _availableSyncshells.Count
+                       && !_availableSyncshells[_selectedIndex].IsLocked;
         using (ImRaii.Disabled(!canJoin))
         {
             if (ImGui.Button("Join Selected", new Vector2(buttonWidth, 0)))
@@ -172,24 +180,41 @@ public class AreaBoundSyncshellSelectionUI : WindowMediatorSubscriberBase
         
         if (!canJoin && ImGui.IsItemHovered())
         {
-            ImGui.SetTooltip("Please select a syncshell to join");
+            if (_selectedIndex >= 0 && _selectedIndex < _availableSyncshells.Count && _availableSyncshells[_selectedIndex].IsLocked)
+            {
+                ImGui.SetTooltip("This syncshell is locked. Joining is disabled.");
+            }
+            else
+            {
+                ImGui.SetTooltip("Please select a syncshell to join");
+            }
         }
         
         ImGui.SameLine();
         
         // Join All button
-        if (ImGui.Button("Join All", new Vector2(buttonWidth, 0)))
+        using (ImRaii.Disabled(_availableSyncshells.All(s => s.IsLocked)))
         {
-            _ = Task.Run(async () =>
+            if (ImGui.Button("Join All", new Vector2(buttonWidth, 0)))
             {
-                try { await HandleJoinAll().ConfigureAwait(false); }
-                catch (Exception ex) { _logger.LogError(ex, "Background error joining all area-bound syncshells"); }
-            });
+                _ = Task.Run(async () =>
+                {
+                    try { await HandleJoinAll().ConfigureAwait(false); }
+                    catch (Exception ex) { _logger.LogError(ex, "Background error joining all area-bound syncshells"); }
+                });
+            }
         }
         
         if (ImGui.IsItemHovered())
         {
-            ImGui.SetTooltip("Join all available syncshells in this area");
+            if (_availableSyncshells.All(s => s.IsLocked))
+            {
+                ImGui.SetTooltip("All syncshells in this area are locked. Joining is disabled.");
+            }
+            else
+            {
+                ImGui.SetTooltip("Join all available syncshells in this area");
+            }
         }
         
         ImGui.SameLine();
@@ -221,6 +246,12 @@ public class AreaBoundSyncshellSelectionUI : WindowMediatorSubscriberBase
         
         try
         {
+            if (selectedSyncshell.IsLocked)
+            {
+                _errorMessage = "This syncshell is locked. Joining is currently disabled.";
+                return;
+            }
+
             // Always check if user already has valid consent (for auto-rejoin)
             var hasValidConsent = await _apiController.GroupCheckAreaBoundConsent(selectedSyncshell.Group.GID).ConfigureAwait(false);
             
@@ -268,6 +299,10 @@ public class AreaBoundSyncshellSelectionUI : WindowMediatorSubscriberBase
         {
             foreach (var syncshell in _availableSyncshells)
             {
+                if (syncshell.IsLocked)
+                {
+                    continue;
+                }
                 // Always check if user already has valid consent (for auto-rejoin)
                 var hasValidConsent = await _apiController.GroupCheckAreaBoundConsent(syncshell.Group.GID).ConfigureAwait(false);
                 

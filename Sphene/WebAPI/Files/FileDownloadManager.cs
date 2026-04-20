@@ -655,19 +655,31 @@ public partial class FileDownloadManager : DisposableMediatorSubscriberBase
     {
         if (!_orchestrator.IsInitialized) throw new InvalidOperationException("FileTransferManager is not initialized");
         HttpResponseMessage response;
+        Uri usedBaseUri;
         try
         {
-            response = await _orchestrator.SendRequestAsync(HttpMethod.Get, SpheneFiles.ServerFilesGetSizesFullPath(_orchestrator.FilesCdnUri!), hashes, ct).ConfigureAwait(false);
+            usedBaseUri = _orchestrator.FilesCdnUri!;
+            response = await _orchestrator.SendRequestAsync(HttpMethod.Post, SpheneFiles.ServerFilesGetSizesFullPath(usedBaseUri), hashes, ct).ConfigureAwait(false);
         }
         catch (HttpRequestException ex) when (_orchestrator.FilesCdnFallbackUri != null)
         {
             Logger.LogWarning(ex, "FilesGetSizes failed against primary file server, retrying fallback: {fallback}", _orchestrator.FilesCdnFallbackUri);
-            response = await _orchestrator.SendRequestAsync(HttpMethod.Get, SpheneFiles.ServerFilesGetSizesFullPath(_orchestrator.FilesCdnFallbackUri), hashes, ct).ConfigureAwait(false);
+            usedBaseUri = _orchestrator.FilesCdnFallbackUri;
+            response = await _orchestrator.SendRequestAsync(HttpMethod.Post, SpheneFiles.ServerFilesGetSizesFullPath(usedBaseUri), hashes, ct).ConfigureAwait(false);
         }
 
         if (_orchestrator.FilesCdnFallbackUri != null)
         {
             Logger.LogDebug("FilesGetSizes completed. primary={primary}, fallback={fallback}", _orchestrator.FilesCdnUri, _orchestrator.FilesCdnFallbackUri);
+        }
+
+        if (!response.IsSuccessStatusCode
+            && response.StatusCode is HttpStatusCode.MethodNotAllowed or HttpStatusCode.NotFound)
+        {
+            var status = response.StatusCode;
+            response.Dispose();
+            Logger.LogDebug("FilesGetSizes POST not supported (status={status}), falling back to GET for backwards compatibility", status);
+            response = await _orchestrator.SendRequestAsync(HttpMethod.Get, SpheneFiles.ServerFilesGetSizesFullPath(usedBaseUri), hashes, ct).ConfigureAwait(false);
         }
 
         return await response.Content.ReadFromJsonAsync<List<DownloadFileDto>>(cancellationToken: ct).ConfigureAwait(false) ?? [];

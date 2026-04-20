@@ -48,19 +48,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
     private bool _wasHovered = false;
     private static readonly Vector4 SoftToggleEnabledColor = new(0.56f, 0.82f, 0.62f, 1f);
     private static readonly Vector4 SoftToggleDisabledColor = new(0.86f, 0.58f, 0.58f, 1f);
-    
-    // Static dictionary to track reload timers for each user
-    private static readonly Dictionary<string, System.Threading.Timer> _reloadTimers = new(StringComparer.Ordinal);
-    private static readonly System.Threading.Lock _timerLock = new();
-    
-    // Global rate limiting and status tracking per user (static to prevent multiple instances from sending)
-    private static readonly Dictionary<string, bool?> _globalLastSentAckYouStatus = new(StringComparer.Ordinal);
-    private static readonly Dictionary<string, DateTime> _globalLastAckYouSentTime = new(StringComparer.Ordinal);
-    private static readonly System.Threading.Lock _globalAckYouLock = new();
-    
-    
-    private bool _cachedHasPendingAck = false;
-    private DateTime _lastAckStatusPoll = DateTime.MinValue;
+
     private readonly List<FileTransferNotificationDto> _pendingModNotifications = new();
     public DrawUserPair(string id, Pair entry, List<GroupFullInfoDto> syncedGroups,
         GroupFullInfoDto? currentGroup,
@@ -86,104 +74,13 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         _pairManager = pairManager;
         _configService = configService;
         _localPairEmoteForceSyncService = localPairEmoteForceSyncService;
-        
-        // Subscribe to acknowledgment status changes to automatically update AckYou
-        _mediator.Subscribe<PairAcknowledgmentStatusChangedMessage>(this, OnAcknowledgmentStatusChanged);
-        _mediator.Subscribe<AcknowledgmentPendingMessage>(this, OnAcknowledgmentPending);
-        _mediator.Subscribe<AcknowledgmentUiRefreshMessage>(this, OnAcknowledgmentUiRefresh);
-        
-        
-        
-        // Subscribe to selective icon updates for performance optimization
-        _mediator.Subscribe<UserPairIconUpdateMessage>(this, OnIconUpdate);
         _mediator.Subscribe<PenumbraModTransferAvailableMessage>(this, OnPenumbraModTransferAvailable);
         _mediator.Subscribe<PenumbraModTransferCompletedMessage>(this, OnPenumbraModTransferCompleted);
         _mediator.Subscribe<PenumbraModTransferDiscardedMessage>(this, OnPenumbraModTransferDiscarded);
-        
-        // Initialize cache once during construction to avoid frequent PairManager calls
-        _cachedHasPendingAck = _pairManager.HasPendingAcknowledgmentForUser(_pair.UserData);
-        
-        var userUID = _pair.UserData.UID ?? string.Empty;
-
-        // Initialize global status tracking for this user to prevent initial spam
-        _globalAckYouLock.Enter();
-        try
-        {
-            if (!_globalLastSentAckYouStatus.ContainsKey(userUID))
-            {
-                _globalLastSentAckYouStatus[userUID] = _pair.UserPair.OwnPermissions.IsAckYou();
-                _globalLastAckYouSentTime[userUID] = DateTime.MinValue;
-            }
-        }
-        finally
-        {
-            _globalAckYouLock.Exit();
-        }
     }
     
     public SpheneMediator Mediator => _mediator;
     
-    private void OnAcknowledgmentStatusChanged(PairAcknowledgmentStatusChangedMessage message)
-    {
-        // Only handle events for this specific pair
-        if (!string.Equals(message.User.UID, _pair.UserData.UID, StringComparison.Ordinal)) return;
-        
-        _cachedHasPendingAck = message.HasPendingAcknowledgment;
-    }
-    
-    
-    
-    private void OnAcknowledgmentPending(AcknowledgmentPendingMessage message)
-    {
-        // Only handle events for this specific pair
-        if (!string.Equals(message.Event.User.UID, _pair.UserData.UID, StringComparison.Ordinal)) return;
-        
-        // Update cached acknowledgment status to pending
-        _cachedHasPendingAck = true;
-        
-    }
-    
-    private void OnAcknowledgmentUiRefresh(AcknowledgmentUiRefreshMessage message)
-    {
-        // Handle refresh for this specific pair or global refresh
-        if (message.RefreshAll || 
-            (message.User != null && string.Equals(message.User.UID, _pair.UserData.UID, StringComparison.Ordinal)))
-        {
-            // Force cache refresh by querying current status
-            _cachedHasPendingAck = _pairManager.HasPendingAcknowledgmentForUser(_pair.UserData);
-        }
-    }
-    
-    private void OnIconUpdate(UserPairIconUpdateMessage message)
-    {
-        if (!string.Equals(message.User.UID, _pair.UserData.UID, StringComparison.Ordinal)) return;
-
-        switch (message.UpdateType)
-        {
-            case IconUpdateType.AcknowledgmentStatus:
-                if (message.UpdateData is AcknowledgmentStatusData ackData)
-                {
-                    _cachedHasPendingAck = ackData.HasPending;
-                }
-                break;
-
-            case IconUpdateType.ConnectionStatus:
-                break;
-
-            case IconUpdateType.PermissionStatus:
-                break;
-
-            case IconUpdateType.IndividualPermissions:
-                break;
-
-            case IconUpdateType.GroupRole:
-                break;
-
-            case IconUpdateType.ReloadTimer:
-                break;
-        }
-    }
-
     private void OnPenumbraModTransferAvailable(PenumbraModTransferAvailableMessage message)
     {
         var senderUid = message.Notification.Sender?.UID ?? string.Empty;
@@ -226,35 +123,11 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         _pendingModNotifications.RemoveAll(n => string.Equals(n.Hash, message.Notification.Hash, StringComparison.Ordinal));
     }
 
-    private void HandleReloadTimer(bool isAckYou)
-    {
-        var userUID = _pair.UserData.UID;
-        
-        _timerLock.Enter();
-        try
-        {
-            // If AckYou is true (green eye), stop any existing timer
-            if (isAckYou && _reloadTimers.TryGetValue(userUID, out var existingTimer))
-            {
-                existingTimer.Dispose();
-                _reloadTimers.Remove(userUID);
-            }
-            // 8-second timer temporarily disabled
-        }
-        finally
-        {
-            _timerLock.Exit();
-        }
-    }
-    
-    
-
     public Pair Pair => _pair;
     public UserFullPairDto UserPair => _pair.UserPair!;
 
     public void DrawPairedClient()
     {
-        RefreshAckStatusIfDue();
         using var id = ImRaii.PushId(GetType() + _id);
         var hasOfflineGrace = _pairManager.IsUserInOfflineGrace(_pair.UserData);
         var hasTimingSyncTarget = _localPairEmoteForceSyncService.IsTargetSelected(_pair.UserData.UID);
@@ -613,36 +486,9 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         if (_disposed) return;
         if (disposing)
         {
-            _mediator.Unsubscribe<UserPairIconUpdateMessage>(this);
             _mediator.Unsubscribe<PenumbraModTransferAvailableMessage>(this);
             _mediator.Unsubscribe<PenumbraModTransferCompletedMessage>(this);
             _mediator.Unsubscribe<PenumbraModTransferDiscardedMessage>(this);
-            _mediator.Unsubscribe<PairAcknowledgmentStatusChangedMessage>(this);
-            _mediator.Unsubscribe<AcknowledgmentPendingMessage>(this);
-            _mediator.Unsubscribe<AcknowledgmentUiRefreshMessage>(this);
-            _timerLock.Enter();
-            try
-            {
-                if (_reloadTimers.TryGetValue(_pair.UserData.UID, out var timer))
-                {
-                    timer.Dispose();
-                    _reloadTimers.Remove(_pair.UserData.UID);
-                }
-            }
-            finally
-            {
-                _timerLock.Exit();
-            }
-            _globalAckYouLock.Enter();
-            try
-            {
-                _globalLastSentAckYouStatus.Remove(_pair.UserData.UID);
-                _globalLastAckYouSentTime.Remove(_pair.UserData.UID);
-            }
-            finally
-            {
-                _globalAckYouLock.Exit();
-            }
         }
         _disposed = true;
     }
@@ -700,16 +546,14 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
 
     private void DrawLeftSide()
     {
-        string userPairText = string.Empty;
+        var tooltipTitle = _pair.UserData.AliasOrUID;
+        string? tooltipMeta = null;
+        var tooltipLines = new List<string>(4);
         var showUserPairTooltip = false;
 
         ImGui.AlignTextToFramePadding();
 
         var isVisibleForIcon = _pair.IsMutuallyVisible || (_uiSharedService.IsInGpose && _pair.WasMutuallyVisibleInGpose);
-        var partnerAckYou = _pair.UserPair.OtherPermissions.IsAckYou();
-        var ownAckYou = _pair.UserPair.OwnPermissions.IsAckYou();
-        var latestDataApplied = _pair.IsLatestReceivedDataApplied();
-        var effectiveOwnAckYou = _pair.LastReceivedCharacterData != null ? latestDataApplied : ownAckYou;
         var suppressAckUi = _pair.IsInDuty;
         var isTimingSyncTarget = _localPairEmoteForceSyncService.IsTargetSelected(_pair.UserData.UID);
         var isAutoResetActiveForTargets = _localPairEmoteForceSyncService.AutoResetOnLocalEmoteEnabled;
@@ -719,7 +563,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
             using var _ = ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.DalamudYellow);
             _uiSharedService.IconText(FontAwesomeIcon.PauseCircle);
             showUserPairTooltip = ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled);
-            userPairText = _pair.UserData.AliasOrUID + " is paused";
+            tooltipLines.Add("Paused");
         }
         else if (!_pair.IsOnline)
         {
@@ -729,7 +573,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
                 : (_pair.IndividualPairStatus == API.Data.Enum.IndividualPairStatus.Bidirectional
                     ? FontAwesomeIcon.User : FontAwesomeIcon.Users));
             showUserPairTooltip = ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled);
-            userPairText = _pair.UserData.AliasOrUID + " is offline";
+            tooltipLines.Add("Offline");
         }
         else if (isVisibleForIcon)
         {
@@ -740,27 +584,20 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
                 ImGui.SameLine();
             }
             
-            var iconColor = suppressAckUi ? ImGuiColors.ParsedGreen : (effectiveOwnAckYou ? ImGuiColors.ParsedGreen : ImGuiColors.DalamudYellow);
+            var incomingStateForIcon = _pair.GetIncomingAckV3State();
+            var outgoingStateForIcon = _pair.GetOutgoingAckV3State();
+            var stateForIcon = GetMostSevereAckState(incomingStateForIcon, outgoingStateForIcon);
+            var iconColor = suppressAckUi ? ImGuiColors.ParsedGreen : stateForIcon.Outcome switch
+            {
+                Pair.AckV3Outcome.Success => ImGuiColors.ParsedGreen,
+                Pair.AckV3Outcome.Fail => ImGuiColors.DalamudRed,
+                Pair.AckV3Outcome.Pending => ImGuiColors.DalamudYellow,
+                _ => ImGuiColors.ParsedGreen
+            };
             var icon = (_uiSharedService.IsInGpose || _pair.IsInGpose) ? FontAwesomeIcon.Camera : FontAwesomeIcon.Eye;
             _uiSharedService.IconText(icon, iconColor);
             showUserPairTooltip = ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled);
-            
-            if (suppressAckUi)
-            {
-                userPairText = _pair.UserData.AliasOrUID + " is visible: " + _pair.PlayerName + Environment.NewLine + "Click to target this player";
-            }
-            else
-            {
-                var ackStatus = effectiveOwnAckYou ? "You acknowledge this user's data" : "You do not acknowledge this user's data";
-                if (partnerAckYou != effectiveOwnAckYou)
-                {
-                    var partnerStatus = partnerAckYou ? "This user acknowledges your data" : "This user does not acknowledge your data";
-                    ackStatus += Environment.NewLine + partnerStatus;
-                }
-                userPairText = _pair.UserData.AliasOrUID + " is visible: " + _pair.PlayerName + Environment.NewLine + ackStatus + Environment.NewLine + "Click to target this player";
-            }
-            
-            HandleReloadTimer(effectiveOwnAckYou);
+            tooltipLines.Add(string.IsNullOrWhiteSpace(_pair.PlayerName) ? "Visible" : $"Visible: {_pair.PlayerName}");
             
             if (ImGui.IsItemClicked())
             {
@@ -774,46 +611,45 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
             {
                 _uiSharedService.IconText(FontAwesomeIcon.Camera);
                 showUserPairTooltip = ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled);
-                userPairText = _pair.UserData.AliasOrUID + " is in GPose" + Environment.NewLine + "No data is shared while in GPose";
+                tooltipLines.Add("GPose (no data shared)");
             }
             else
             {
                 _uiSharedService.IconText(_pair.IndividualPairStatus == API.Data.Enum.IndividualPairStatus.Bidirectional
                     ? FontAwesomeIcon.User : FontAwesomeIcon.Users);
                 showUserPairTooltip = ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled);
-                userPairText = _pair.UserData.AliasOrUID + " is online";
+                tooltipLines.Add("Online");
             }
         }
 
         if (_pair.IsOnline && _pair.IsMutuallyVisible && !suppressAckUi)
         {
             ImGui.SameLine();
-            if (_pair.HasPendingAcknowledgment)
+            var outgoing = _pair.GetOutgoingAckV3State();
+            if (outgoing.Outcome == Pair.AckV3Outcome.Pending)
             {
                 using var _ = ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.DalamudYellow);
                 _uiSharedService.IconText(FontAwesomeIcon.Clock);
-                UiSharedService.AttachToolTip("Processing character data...");
+                UiSharedService.AttachToolTip("Sync in progress...");
             }
-            else if (_pair.LastAcknowledgmentSuccess.HasValue)
+            else if (outgoing.Outcome == Pair.AckV3Outcome.Success)
             {
-                if (_pair.LastAcknowledgmentSuccess.Value)
-                {
-                    using var _ = ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.ParsedGreen);
-                    _uiSharedService.IconText(FontAwesomeIcon.CheckCircle);
-                    var timeAgo = _pair.LastAcknowledgmentTime.HasValue 
-                        ? $" ({(DateTimeOffset.UtcNow - _pair.LastAcknowledgmentTime.Value).TotalSeconds:F0}s ago)"
-                        : string.Empty;
-                    UiSharedService.AttachToolTip($"Data synchronized successfully{timeAgo}");
-                }
-                else
-                {
-                    using var _ = ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.DalamudRed);
-                    _uiSharedService.IconText(FontAwesomeIcon.ExclamationTriangle);
-                    var timeAgo = _pair.LastAcknowledgmentTime.HasValue 
-                        ? $" ({(DateTimeOffset.UtcNow - _pair.LastAcknowledgmentTime.Value).TotalSeconds:F0}s ago)"
-                        : string.Empty;
-                    UiSharedService.AttachToolTip($"Synchronization failed{timeAgo}");
-                }
+                using var _ = ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.ParsedGreen);
+                _uiSharedService.IconText(FontAwesomeIcon.CheckCircle);
+                var timeAgo = outgoing.Time.HasValue
+                    ? $" ({(DateTimeOffset.UtcNow - outgoing.Time.Value).TotalSeconds:F0}s ago)"
+                    : string.Empty;
+                UiSharedService.AttachToolTip($"Synced{timeAgo}");
+            }
+            else if (outgoing.Outcome == Pair.AckV3Outcome.Fail)
+            {
+                using var _ = ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.DalamudRed);
+                _uiSharedService.IconText(FontAwesomeIcon.ExclamationTriangle);
+                var timeAgo = outgoing.Time.HasValue
+                    ? $" ({(DateTimeOffset.UtcNow - outgoing.Time.Value).TotalSeconds:F0}s ago)"
+                    : string.Empty;
+                var reason = GetFriendlyAckFailureReason(outgoing.ErrorCode, outgoing.ErrorMessage);
+                UiSharedService.AttachToolTip($"Sync failed{timeAgo}{Environment.NewLine}{reason}");
             }
         }
 
@@ -827,81 +663,68 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
 
         if (_pair.IndividualPairStatus == API.Data.Enum.IndividualPairStatus.OneSided)
         {
-            userPairText += UiSharedService.TooltipSeparator + "One-sided individual pair";
+            tooltipLines.Add("One-sided individual pair");
         }
         else if (_pair.IndividualPairStatus == API.Data.Enum.IndividualPairStatus.Bidirectional)
         {
-            userPairText += UiSharedService.TooltipSeparator + "You are directly Paired";
+            tooltipLines.Add("Direct pair");
+        }
+        else if (_syncedGroups.Any())
+        {
+            if (_syncedGroups.Count == 1)
+            {
+                var entry = _syncedGroups[0];
+                var groupNote = _serverConfigurationManager.GetNoteForGid(entry.GID);
+                var groupString = string.IsNullOrEmpty(groupNote) ? entry.GroupAliasOrGID : $"{groupNote} ({entry.GroupAliasOrGID})";
+                tooltipLines.Add($"Syncshell: {groupString}");
+            }
+            else
+            {
+                tooltipLines.Add($"Syncshells: {_syncedGroups.Count}");
+            }
         }
 
-        if (_pair.IsOnline && !string.IsNullOrWhiteSpace(UserPair.RemoteClientVersion))
+        if (!string.IsNullOrWhiteSpace(UserPair.RemoteClientVersion))
         {
-            var remoteClientVersion = UserPair.RemoteClientVersion;
-            if (Version.TryParse(remoteClientVersion, out var parsedRemoteClientVersion))
-            {
-                var normalizedVersion = parsedRemoteClientVersion.Build >= 0
-                    ? $"{parsedRemoteClientVersion.Major}.{parsedRemoteClientVersion.Minor}.{parsedRemoteClientVersion.Build}"
-                    : $"{parsedRemoteClientVersion.Major}.{parsedRemoteClientVersion.Minor}";
-                if (parsedRemoteClientVersion.Revision >= 0)
-                    remoteClientVersion = $"{normalizedVersion} rev.{parsedRemoteClientVersion.Revision}";
-                else
-                    remoteClientVersion = normalizedVersion;
-            }
-
-            userPairText += UiSharedService.TooltipSeparator + $"Client Version: {remoteClientVersion}";
+            tooltipMeta = $"v{FormatRemoteClientVersion(UserPair.RemoteClientVersion)}";
         }
 
         if (_pair.LastAppliedDataBytes >= 0)
         {
-            userPairText += UiSharedService.TooltipSeparator;
-            userPairText += ((!_pair.IsPaired) ? "(Last) " : string.Empty) + "Mods Info" + Environment.NewLine;
-            userPairText += "Files Size: " + UiSharedService.ByteToString(_pair.LastAppliedDataBytes, true);
+            var labelPrefix = _pair.IsPaired ? string.Empty : "Last ";
+            tooltipLines.Add($"{labelPrefix}Mods: {UiSharedService.ByteToString(_pair.LastAppliedDataBytes, true)}");
+
             if (_pair.LastAppliedApproximateVRAMBytes >= 0)
             {
-                userPairText += Environment.NewLine + "Approx. VRAM Usage: " + UiSharedService.ByteToString(_pair.LastAppliedApproximateVRAMBytes, true);
+                tooltipLines.Add($"VRAM: {UiSharedService.ByteToString(_pair.LastAppliedApproximateVRAMBytes, true)}");
             }
+
             if (_pair.LastAppliedDataTris >= 0)
             {
-                userPairText += Environment.NewLine + "Approx. Triangle Count (excl. Vanilla): "
-                    + (_pair.LastAppliedDataTris > 1000 ? (_pair.LastAppliedDataTris / 1000d).ToString("0.0'k'") : _pair.LastAppliedDataTris);
+                tooltipLines.Add($"Tris: {FormatTriangleCountCompact(_pair.LastAppliedDataTris)}");
             }
         }
 
-        // Add synchronization status information - only show for visible pairs
-        if (_pair.IsOnline && _pair.IsVisible && !suppressAckUi)
+        if (_pair.IsOnline && _pair.IsMutuallyVisible && !suppressAckUi)
         {
-            // Show sync status for any pending acknowledgment (including build start)
-            if (GetCachedHasPendingAcknowledgment())
+            var incoming = _pair.GetIncomingAckV3State();
+            var outgoing = _pair.GetOutgoingAckV3State();
+            if (incoming.Outcome != Pair.AckV3Outcome.Success || outgoing.Outcome != Pair.AckV3Outcome.Success)
             {
-                userPairText += UiSharedService.TooltipSeparator + "Data Sync: Waiting for acknowledgment from this user...";
-            }
-            else if (_pair.LastAcknowledgmentSuccess.HasValue)
-            {
-                var syncStatus = _pair.LastAcknowledgmentSuccess.Value ? "Successfully synchronized" : "Synchronization failed";
-                var timeAgo = _pair.LastAcknowledgmentTime.HasValue 
-                    ? $" ({(DateTimeOffset.UtcNow - _pair.LastAcknowledgmentTime.Value).TotalSeconds:F0}s ago)"
-                    : string.Empty;
-                userPairText += UiSharedService.TooltipSeparator + $"Data Sync: {syncStatus}{timeAgo}";
+                var summary = GetCompactSyncSummary(incoming, outgoing);
+                if (!string.IsNullOrWhiteSpace(summary))
+                {
+                    tooltipLines.Add(summary);
+                }
             }
         }
 
         if (_pair.IsInDuty)
         {
-            userPairText += UiSharedService.TooltipSeparator + "Info: In duty, acknowledgment display is hidden.";
+            tooltipLines.Add("In duty (sync hidden)");
         }
 
-        if (_syncedGroups.Any())
-        {
-            userPairText += UiSharedService.TooltipSeparator + string.Join(Environment.NewLine,
-                _syncedGroups.Select(g =>
-                {
-                    var groupNote = _serverConfigurationManager.GetNoteForGid(g.GID);
-                    var groupString = string.IsNullOrEmpty(groupNote) ? g.GroupAliasOrGID : $"{groupNote} ({g.GroupAliasOrGID})";
-                    return "Paired through " + groupString;
-                }));
-        }
-
-        DrawTooltipForHoveredItem(showUserPairTooltip, userPairText);
+        DrawTooltipForHoveredItem(showUserPairTooltip, tooltipTitle, tooltipMeta, tooltipLines);
 
         if (_performanceConfigService.Current.ShowPerformanceIndicator
             && !_performanceConfigService.Current.UIDsToIgnore
@@ -936,29 +759,178 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         ImGui.SameLine();
     }
 
-    private static void DrawTooltipForHoveredItem(bool isHovered, string text)
+    private static string GetFriendlyAckFailureReason(Sphene.API.Dto.User.AcknowledgmentErrorCode code, string? message)
+    {
+        var baseReason = code switch
+        {
+            Sphene.API.Dto.User.AcknowledgmentErrorCode.DownloadFailed => "Couldn't download required files.",
+            Sphene.API.Dto.User.AcknowledgmentErrorCode.ApplyFailed => "Couldn't apply the update.",
+            Sphene.API.Dto.User.AcknowledgmentErrorCode.MismatchFailed => "Data mismatch detected. It will retry automatically.",
+            Sphene.API.Dto.User.AcknowledgmentErrorCode.HashVerificationFailed => "Data integrity check failed.",
+            Sphene.API.Dto.User.AcknowledgmentErrorCode.NotArrivedTimeout => "No response received in time.",
+            Sphene.API.Dto.User.AcknowledgmentErrorCode.Timeout => "No response received in time.",
+            _ => "Something went wrong."
+        };
+
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return baseReason;
+        }
+
+        var hasDutyContext = message.Contains("localInDuty=True", StringComparison.OrdinalIgnoreCase);
+        var hasCombatContext = message.Contains("localInCombat=True", StringComparison.OrdinalIgnoreCase);
+        if (hasDutyContext || hasCombatContext)
+        {
+            if (hasDutyContext && hasCombatContext)
+            {
+                return $"{baseReason} You're currently in duty/combat; sync may be delayed.";
+            }
+            if (hasDutyContext)
+            {
+                return $"{baseReason} You're currently in duty; sync may be delayed.";
+            }
+            return $"{baseReason} You're currently in combat; sync may be delayed.";
+        }
+
+        var cleaned = message;
+        var idx = cleaned.IndexOf("(ctx:", StringComparison.OrdinalIgnoreCase);
+        if (idx >= 0)
+        {
+            cleaned = cleaned[..idx].Trim();
+        }
+        else
+        {
+            idx = cleaned.IndexOf("ctx:", StringComparison.OrdinalIgnoreCase);
+            if (idx >= 0)
+            {
+                cleaned = cleaned[..idx].Trim();
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(cleaned))
+        {
+            return baseReason;
+        }
+
+        return $"{baseReason} {cleaned}";
+    }
+
+    private static void DrawTooltipForHoveredItem(bool isHovered, string title, string? meta, IReadOnlyList<string> lines)
     {
         if (!isHovered) return;
         using (SpheneCustomTheme.ApplyTooltipTheme())
         {
             ImGui.BeginTooltip();
             ImGui.PushTextWrapPos(ImGui.GetFontSize() * 35f);
-            if (text.IndexOf(UiSharedService.TooltipSeparator, StringComparison.Ordinal) >= 0)
+            ImGui.TextUnformatted(title);
+
+            if (lines.Count > 0)
             {
-                var splitText = text.Split(UiSharedService.TooltipSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-                for (int i = 0; i < splitText.Length; i++)
+                ImGui.Separator();
+                for (int i = 0; i < lines.Count; i++)
                 {
-                    ImGui.TextUnformatted(splitText[i]);
-                    if (i != splitText.Length - 1) ImGui.Separator();
+                    ImGui.TextUnformatted(lines[i]);
                 }
             }
-            else
+
+            if (!string.IsNullOrWhiteSpace(meta))
             {
-                ImGui.TextUnformatted(text);
+                ImGui.PopTextWrapPos();
+                ImGui.Spacing();
+
+                var textSize = ImGui.CalcTextSize(meta);
+                var cursorStartX = ImGui.GetCursorPosX();
+                var availableWidth = ImGui.GetContentRegionAvail().X;
+                ImGui.SetCursorPosX(cursorStartX + Math.Max(0, availableWidth - textSize.X));
+                ImGui.TextColored(ImGuiColors.DalamudGrey2, meta);
+                ImGui.PushTextWrapPos(ImGui.GetFontSize() * 35f);
             }
+
             ImGui.PopTextWrapPos();
             ImGui.EndTooltip();
         }
+    }
+
+    private static string FormatRemoteClientVersion(string? remoteClientVersion)
+    {
+        if (string.IsNullOrWhiteSpace(remoteClientVersion))
+        {
+            return "Unknown";
+        }
+
+        var formatted = remoteClientVersion.Trim();
+        if (Version.TryParse(formatted, out var parsedRemoteClientVersion))
+        {
+            var normalizedVersion = parsedRemoteClientVersion.Build >= 0
+                ? $"{parsedRemoteClientVersion.Major}.{parsedRemoteClientVersion.Minor}.{parsedRemoteClientVersion.Build}"
+                : $"{parsedRemoteClientVersion.Major}.{parsedRemoteClientVersion.Minor}";
+            formatted = parsedRemoteClientVersion.Revision >= 0
+                ? $"{normalizedVersion}.{parsedRemoteClientVersion.Revision}"
+                : normalizedVersion;
+        }
+
+        return formatted;
+    }
+
+    private static string GetCompactSyncSummary(Pair.AckV3State incoming, Pair.AckV3State outgoing)
+    {
+        if (incoming.Outcome == Pair.AckV3Outcome.Fail || outgoing.Outcome == Pair.AckV3Outcome.Fail)
+        {
+            var failedState = outgoing.Outcome == Pair.AckV3Outcome.Fail ? outgoing : incoming;
+            var reason = GetFriendlyAckFailureReason(failedState.ErrorCode, failedState.ErrorMessage);
+            return TrimWithEllipsis($"Sync: Failed ({reason})", 110);
+        }
+
+        if (incoming.Outcome == Pair.AckV3Outcome.Pending || outgoing.Outcome == Pair.AckV3Outcome.Pending)
+        {
+            return "Sync: In progress";
+        }
+
+        return string.Empty;
+    }
+
+    private static string TrimWithEllipsis(string value, int maxLength)
+    {
+        if (string.IsNullOrEmpty(value) || value.Length <= maxLength)
+        {
+            return value;
+        }
+
+        return value[..Math.Max(0, maxLength - 1)] + "…";
+    }
+
+    private static Pair.AckV3State GetMostSevereAckState(Pair.AckV3State incoming, Pair.AckV3State outgoing)
+    {
+        var incomingSeverity = GetAckOutcomeSeverity(incoming.Outcome);
+        var outgoingSeverity = GetAckOutcomeSeverity(outgoing.Outcome);
+        if (outgoingSeverity > incomingSeverity)
+        {
+            return outgoing;
+        }
+
+        return incoming;
+    }
+
+    private static int GetAckOutcomeSeverity(Pair.AckV3Outcome outcome)
+    {
+        return outcome switch
+        {
+            Pair.AckV3Outcome.Fail => 3,
+            Pair.AckV3Outcome.Pending => 2,
+            Pair.AckV3Outcome.Unknown => 1,
+            Pair.AckV3Outcome.Success => 0,
+            _ => 1
+        };
+    }
+
+    private static string FormatTriangleCountCompact(long triangleCount)
+    {
+        if (triangleCount >= 1000)
+        {
+            return (triangleCount / 1000d).ToString("0.0'k'");
+        }
+
+        return triangleCount.ToString();
     }
 
     private void DrawName(float leftSide, float rightSide)
@@ -1337,26 +1309,9 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         }
     }
     
-    private bool GetCachedHasPendingAcknowledgment()
-    {
-        return _cachedHasPendingAck;
-    }
-
-    private void RefreshAckStatusIfDue()
-    {
-        var now = DateTime.UtcNow;
-        if (now - _lastAckStatusPoll < TimeSpan.FromMilliseconds(500))
-        {
-            return;
-        }
-
-        _lastAckStatusPoll = now;
-        _cachedHasPendingAck = _pairManager.HasPendingAcknowledgmentForUser(_pair.UserData);
-    }
-
     public void RefreshIcon()
     {
-        _cachedHasPendingAck = _pairManager.HasPendingAcknowledgmentForUser(_pair.UserData);
-        _lastAckStatusPoll = DateTime.UtcNow;
+        _ = _pair.GetOutgoingAckV3State();
+        _ = _pair.GetIncomingAckV3State();
     }
 }

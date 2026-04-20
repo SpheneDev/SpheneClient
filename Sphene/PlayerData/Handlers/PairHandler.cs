@@ -14,6 +14,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Text;
 using System.Threading;
 using ObjectKind = Sphene.API.Data.Enum.ObjectKind;
 using System.Numerics;
@@ -88,13 +89,54 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
     private DateTime _lastMinionTempModsApplyAttempt = DateTime.MinValue;
     private nint _lastMinionTempModsAddress = nint.Zero;
     private int _lastMinionTempModsHash;
+    private Guid _lastMinionTempModsCollection = Guid.Empty;
     private int _minionTempModsApplyInProgress;
+    private DateTime _lastMinionReapplyDebugLogUtc = DateTime.MinValue;
+    private string _lastMinionReapplyDebugKey = string.Empty;
+    private readonly ConcurrentDictionary<string, long> _minionLogThrottle = new(StringComparer.Ordinal);
     private const int MinionReapplyRetryDelayMs = 500;
     private const int MinionCollectionBindRetryDelayMs = 1500;
     private const int MinionTempModsCooldownMs = 2000;
 
     private bool ShouldDestroyTemporaryCollectionOnInvisible()
         => !Pair.IsDirectlyPaired || Pair.IsOneSidedPair;
+
+    private bool ShouldLogMinionReapplyDebug(string key)
+    {
+        var now = DateTime.UtcNow;
+        if (!string.Equals(_lastMinionReapplyDebugKey, key, StringComparison.Ordinal)
+            || now - _lastMinionReapplyDebugLogUtc > TimeSpan.FromSeconds(5))
+        {
+            _lastMinionReapplyDebugKey = key;
+            _lastMinionReapplyDebugLogUtc = now;
+            return true;
+        }
+
+        return false;
+    }
+
+    private void PublishMinionDebug(string message, string? details = null)
+    {
+        Mediator.Publish(new DebugLogEventMessage(LogLevel.Debug, "MINION", message, Uid: Pair.UserData.UID, Details: details));
+    }
+
+    private void PublishMinionScdDebug(string message, string? details = null)
+    {
+        Mediator.Publish(new DebugLogEventMessage(LogLevel.Debug, "MINION_SCD", message, Uid: Pair.UserData.UID, Details: details));
+    }
+
+    private bool ShouldLogMinionThrottled(string key, TimeSpan minInterval)
+    {
+        var nowTicks = DateTime.UtcNow.Ticks;
+        if (_minionLogThrottle.TryGetValue(key, out var lastTicks)
+            && nowTicks - lastTicks < minInterval.Ticks)
+        {
+            return false;
+        }
+
+        _minionLogThrottle[key] = nowTicks;
+        return true;
+    }
 
     private void TryDestroyTemporaryCollectionOnInvisible(string reason)
     {
@@ -106,6 +148,9 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
 
         var collectionToRemove = _penumbraCollection;
         _penumbraCollection = Guid.Empty;
+        _lastMinionTempModsCollection = Guid.Empty;
+        _lastMinionTempModsAddress = nint.Zero;
+        _lastMinionTempModsHash = 0;
         var applicationId = Guid.NewGuid();
         _ = Task.Run(async () =>
         {
@@ -260,6 +305,9 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         {
             _pendingPenumbraReapply = true;
             _penumbraCollection = Guid.Empty;
+            _lastMinionTempModsCollection = Guid.Empty;
+            _lastMinionTempModsAddress = nint.Zero;
+            _lastMinionTempModsHash = 0;
         });
         Mediator.Subscribe<ClassJobChangedMessage>(this, (msg) =>
         {
@@ -814,7 +862,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         }
     }
 
-    private async Task ApplyCustomizationDataAsync(Guid applicationId, KeyValuePair<ObjectKind, HashSet<PlayerChanges>> changes, CharacterData charaData, bool forceRedrawIfDisabled, CancellationToken token)
+    private async Task ApplyCustomizationDataAsync(Guid applicationId, KeyValuePair<ObjectKind, HashSet<PlayerChanges>> changes, CharacterData charaData, RedrawTracking redrawTracking, bool forceRedrawIfDisabled, CancellationToken token)
     {
         if (PlayerCharacter == nint.Zero) return;
         var ptr = PlayerCharacter;
@@ -895,6 +943,14 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                         break;
 
                     case PlayerChanges.ForcedRedraw:
+                        if (changes.Key is ObjectKind.MinionOrMount or ObjectKind.Pet or ObjectKind.Companion
+                            && ShouldLogMinionReapplyDebug($"forced-redraw:{changes.Key}"))
+                        {
+                            var hasFiles = charaData.FileReplacements.TryGetValue(changes.Key, out var replacements) && replacements.Count > 0;
+                            Logger.LogDebug("{tag} Forced redraw for {user} {objectKind} (hasFileReplacements={hasFiles}, collection={collection})",
+                                SyncProgressTag, Pair.UserData.AliasOrUID, changes.Key, hasFiles, _penumbraCollection);
+                            PublishMinionDebug($"Forced redraw: {changes.Key}", $"hasFileReplacements={hasFiles} collection={_penumbraCollection}");
+                        }
                         if (changes.Key == ObjectKind.MinionOrMount
                             && _penumbraCollection != Guid.Empty
                             && charaData.FileReplacements.TryGetValue(ObjectKind.MinionOrMount, out var minionReplacements)
@@ -902,8 +958,16 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                         {
                             await EnsureMinionCollectionBindingsAsync(handler.Address).ConfigureAwait(false);
                         }
-                        if (!IsDutyCombatNoRedrawModeActive())
+                        redrawTracking.MarkRequested();
+                        if (IsDutyCombatNoRedrawModeActive())
+                        {
+                            redrawTracking.MarkSuppressed();
+                        }
+                        else
+                        {
                             await _ipcManager.Penumbra.RedrawAsync(Logger, handler, applicationId, token, forceRedrawIfDisabled).ConfigureAwait(false);
+                            redrawTracking.MarkTriggered();
+                        }
                         break;
 
                     default:
@@ -1138,9 +1202,14 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                 Logger.LogDebug("{tag} Apply pipeline failed: user={user} hash={hash} type={type} message={message}",
                     SyncProgressTag, Pair.UserData.AliasOrUID, charaData.DataHash?.Value ?? "null", ex.GetType().Name, ex.Message);
                 Logger.LogWarning(ex, "Error in DownloadAndApplyCharacterAsync for {obj}: {message}", this, ex.Message);
+                Mediator.Publish(new DebugLogEventMessage(LogLevel.Error, "APPLY",
+                    "Apply pipeline failed",
+                    Uid: Pair.UserData.UID,
+                    Details: ex.ToString()));
                 
                 // Publish failure message to notify other components
-                Mediator.Publish(new CharacterDataApplicationCompletedMessage(PlayerName ?? string.Empty, Pair.UserData.UID, applicationBase, false, charaData.DataHash?.Value));
+                Mediator.Publish(new CharacterDataApplicationCompletedMessage(PlayerName ?? string.Empty, Pair.UserData.UID, applicationBase, false, charaData.DataHash?.Value,
+                    Sphene.API.Dto.User.AcknowledgmentErrorCode.ApplyFailed, ex.Message));
             }
             finally
             {
@@ -1183,6 +1252,10 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
 
                 Mediator.Publish(new EventMessage(new Event(PlayerName, Pair.UserData, nameof(PairHandler), EventSeverity.Informational,
                     $"Starting download for {toDownloadReplacements.Count} files")));
+                Mediator.Publish(new DebugLogEventMessage(LogLevel.Information, "DL",
+                    $"Starting download batch (files={toDownloadReplacements.Count})",
+                    Uid: Pair.UserData.UID,
+                    Details: $"applicationBase={applicationBase}"));
                 var toDownloadFiles = await _downloadManager.InitiateDownloadList(_charaHandler!, toDownloadReplacements, downloadToken).ConfigureAwait(false);
                 Logger.LogDebug("{tag} Download batch: user={user} hash={hash} missingFiles={count}",
                     SyncProgressTag, Pair.UserData.AliasOrUID, charaData.DataHash?.Value ?? "null", toDownloadFiles.Count);
@@ -1191,6 +1264,10 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                 {
                     Logger.LogDebug("{tag} Download paused: user={user} hash={hash} reason=performance",
                         SyncProgressTag, Pair.UserData.AliasOrUID, charaData.DataHash?.Value ?? "null");
+                    Mediator.Publish(new DebugLogEventMessage(LogLevel.Warning, "DL",
+                        "Download paused (performance thresholds)",
+                        Uid: Pair.UserData.UID,
+                        Details: $"applicationBase={applicationBase}"));
                     _downloadManager.ClearDownload();
                     return;
                 }
@@ -1198,6 +1275,10 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                 _pairDownloadTask = Task.Run(async () => await _downloadManager.DownloadFiles(_charaHandler!, toDownloadReplacements, downloadToken).ConfigureAwait(false));
 
                 await _pairDownloadTask.ConfigureAwait(false);
+                Mediator.Publish(new DebugLogEventMessage(LogLevel.Information, "DL",
+                    "Download batch completed",
+                    Uid: Pair.UserData.UID,
+                    Details: $"applicationBase={applicationBase}"));
 
                 if (downloadToken.IsCancellationRequested)
                 {
@@ -1217,11 +1298,28 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
 
             if (toDownloadReplacements.Count > 0)
             {
-                Logger.LogWarning("[BASE-{appBase}] Missing {count} files after download attempts for player {name}, {kind}", applicationBase, toDownloadReplacements.Count, PlayerName, updatedData);
-                Logger.LogDebug("{tag} Download failed: user={user} hash={hash} missingFiles={count}",
-                    SyncProgressTag, Pair.UserData.AliasOrUID, charaData.DataHash?.Value ?? "null", toDownloadReplacements.Count);
-                Mediator.Publish(new CharacterDataApplicationCompletedMessage(PlayerName ?? string.Empty, Pair.UserData.UID, applicationBase, false, charaData.DataHash?.Value));
-                return;
+                var missingSummary = BuildMissingFilesSummary(charaData, toDownloadReplacements);
+                Mediator.Publish(new RequestRemoteCharacterDataRefreshMessage(Pair.UserData, charaData.DataHash?.Value, missingSummary.Summary));
+                if (missingSummary.HasPlayerMissing)
+                {
+                    Logger.LogWarning("[BASE-{appBase}] Missing {count} files after download attempts for player {name}, {kind}", applicationBase, toDownloadReplacements.Count, PlayerName, updatedData);
+                    Logger.LogDebug("{tag} Download failed: user={user} hash={hash} missingFiles={count}",
+                        SyncProgressTag, Pair.UserData.AliasOrUID, charaData.DataHash?.Value ?? "null", toDownloadReplacements.Count);
+                    Mediator.Publish(new DebugLogEventMessage(LogLevel.Warning, "DL",
+                        $"Download failed (missing files={toDownloadReplacements.Count})",
+                        Uid: Pair.UserData.UID,
+                        Details: $"applicationBase={applicationBase} {missingSummary.Summary}{Environment.NewLine}{missingSummary.Details}"));
+                    Mediator.Publish(new CharacterDataApplicationCompletedMessage(PlayerName ?? string.Empty, Pair.UserData.UID, applicationBase, false, charaData.DataHash?.Value,
+                        Sphene.API.Dto.User.AcknowledgmentErrorCode.DownloadFailed, $"Missing player files after download attempts: {toDownloadReplacements.Count}"));
+                    return;
+                }
+
+                Logger.LogWarning("[BASE-{appBase}] Missing {count} non-player files after download attempts for player {name}. Continuing with partial apply.", applicationBase, toDownloadReplacements.Count, PlayerName);
+                Mediator.Publish(new DebugLogEventMessage(LogLevel.Warning, "DL",
+                    $"Download incomplete (missing non-player files={toDownloadReplacements.Count})",
+                    Uid: Pair.UserData.UID,
+                    Details: $"applicationBase={applicationBase} {missingSummary.Summary}{Environment.NewLine}{missingSummary.Details}"));
+                _downloadManager.ClearDownload();
             }
 
             if (toDownloadReplacements.Count == 0)
@@ -1323,11 +1421,33 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         _applicationTask = ApplyCharacterDataAsync(applicationBase, charaData, updatedData, updateModdedPaths, updateManip, moddedPaths, forceRedrawIfDisabled, token);
     }
 
+    private sealed class RedrawTracking
+    {
+        public bool Requested { get; private set; }
+        public bool Triggered { get; private set; }
+        public bool Suppressed { get; private set; }
+
+        public void MarkRequested() => Requested = true;
+        public void MarkTriggered()
+        {
+            Requested = true;
+            Triggered = true;
+        }
+
+        public void MarkSuppressed()
+        {
+            Requested = true;
+            Suppressed = true;
+        }
+    }
+
     private async Task ApplyCharacterDataAsync(Guid applicationBase, CharacterData charaData, Dictionary<ObjectKind, HashSet<PlayerChanges>> updatedData, bool updateModdedPaths, bool updateManip,
         Dictionary<(string GamePath, string? Hash), string> moddedPaths, bool forceRedrawIfDisabled, CancellationToken token)
     {
         try
         {
+            var previousHash = _cachedData?.DataHash?.Value;
+            var redrawTracking = new RedrawTracking();
             _applicationId = Guid.NewGuid();
             Logger.LogDebug("[BASE-{applicationId}] Starting application task for {this}: {appId}", applicationBase, this, _applicationId);
 
@@ -1368,7 +1488,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
 
             foreach (var kind in updatedData)
             {
-                await ApplyCustomizationDataAsync(_applicationId, kind, charaData, forceRedrawIfDisabled, token).ConfigureAwait(false);
+                await ApplyCustomizationDataAsync(_applicationId, kind, charaData, redrawTracking, forceRedrawIfDisabled, token).ConfigureAwait(false);
                 token.ThrowIfCancellationRequested();
             }
 
@@ -1378,7 +1498,9 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                 && !playerChanges.Contains(PlayerChanges.ForcedRedraw)
                 && !IsDutyCombatNoRedrawModeActive())
             {
+                redrawTracking.MarkRequested();
                 await _ipcManager.Penumbra.RedrawAsync(Logger, _charaHandler, _applicationId, token, forceRedrawIfDisabled).ConfigureAwait(false);
+                redrawTracking.MarkTriggered();
             }
 
             if (_forceRedrawAfterCurrentApplication
@@ -1387,8 +1509,16 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                     || (!playerUpdates.Contains(PlayerChanges.ForcedRedraw) && !playerUpdates.Contains(PlayerChanges.ModFiles))))
             {
                 _forceRedrawAfterCurrentApplication = false;
-                if (!IsDutyCombatNoRedrawModeActive())
+                redrawTracking.MarkRequested();
+                if (IsDutyCombatNoRedrawModeActive())
+                {
+                    redrawTracking.MarkSuppressed();
+                }
+                else
+                {
                     await _ipcManager.Penumbra.RedrawAsync(Logger, _charaHandler, _applicationId, token, forceRedrawIfDisabled).ConfigureAwait(false);
+                    redrawTracking.MarkTriggered();
+                }
             }
             else
             {
@@ -1404,6 +1534,20 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             _lastSuccessfullyAppliedCharacterAddress = _charaHandler?.Address ?? nint.Zero;
 
             Logger.LogDebug("[{applicationId}] Application finished", _applicationId);
+
+            var newHash = charaData.DataHash?.Value;
+            var changeText = string.Join("; ",
+                updatedData
+                    .Where(k => k.Value.Count > 0)
+                    .OrderBy(k => (int)k.Key)
+                    .Select(k => $"{k.Key}=[{string.Join(",", k.Value.OrderBy(v => (int)v))}]"));
+            var redrawText = $"requested={redrawTracking.Requested} triggered={redrawTracking.Triggered} suppressed={redrawTracking.Suppressed}";
+            var flagsText = $"updateMods={updateModdedPaths} updateManip={updateManip} forceRedrawIfDisabled={forceRedrawIfDisabled}";
+            var hashText = $"prev={previousHash ?? "NONE"} new={newHash ?? "NONE"}";
+            Mediator.Publish(new DebugLogEventMessage(LogLevel.Information, "APPLY",
+                $"Applied hash={(string.IsNullOrEmpty(newHash) ? "NONE" : newHash[..Math.Min(8, newHash.Length)])}",
+                Uid: Pair.UserData.UID,
+                Details: $"{hashText} redraw({redrawText}) {flagsText} changes={changeText}"));
             
             // Publish message that character data application is completed
             Mediator.Publish(new CharacterDataApplicationCompletedMessage(PlayerName ?? string.Empty, Pair.UserData.UID, _applicationId, true, charaData.DataHash?.Value));
@@ -1411,7 +1555,8 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         catch (OperationCanceledException ex)
         {
             Logger.LogDebug("{tag} Apply cancelled: appId={appId} message={message}", SyncProgressTag, _applicationId, ex.Message);
-            Mediator.Publish(new CharacterDataApplicationCompletedMessage(PlayerName ?? string.Empty, Pair.UserData.UID, _applicationId, false, charaData.DataHash?.Value));
+            Mediator.Publish(new CharacterDataApplicationCompletedMessage(PlayerName ?? string.Empty, Pair.UserData.UID, _applicationId, false, charaData.DataHash?.Value,
+                Sphene.API.Dto.User.AcknowledgmentErrorCode.Timeout, ex.Message));
         }
         catch (Exception ex)
         {
@@ -1431,7 +1576,8 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             }
             
             // Publish message that character data application failed
-            Mediator.Publish(new CharacterDataApplicationCompletedMessage(PlayerName ?? string.Empty, Pair.UserData.UID, _applicationId, false, charaData.DataHash?.Value));
+            Mediator.Publish(new CharacterDataApplicationCompletedMessage(PlayerName ?? string.Empty, Pair.UserData.UID, _applicationId, false, charaData.DataHash?.Value,
+                Sphene.API.Dto.User.AcknowledgmentErrorCode.ApplyFailed, ex.Message));
         }
         finally
         {
@@ -1730,11 +1876,21 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         var minionData = GetMinionReapplyData();
         if (minionData == null)
         {
+            if (ShouldLogMinionReapplyDebug("minion-reapply-skip:no-data"))
+            {
+                Logger.LogDebug("{tag} Minion reapply skipped for {user} (no cached/known minion data) address={address:X}", SyncProgressTag, Pair.UserData.AliasOrUID, minionAddress);
+                PublishMinionDebug("Minion reapply skipped (no data)", $"address={minionAddress:X}");
+            }
             return;
         }
 
         if (!TryGetMinionReapplyChanges(minionData, out var changes, out var hasCustomize, out var hasGlamourer, out var hasFileReplacements))
         {
+            if (ShouldLogMinionReapplyDebug("minion-reapply-skip:no-changes"))
+            {
+                Logger.LogDebug("{tag} Minion reapply skipped for {user} (no minion changes) address={address:X}", SyncProgressTag, Pair.UserData.AliasOrUID, minionAddress);
+                PublishMinionDebug("Minion reapply skipped (no changes)", $"address={minionAddress:X}");
+            }
             return;
         }
 
@@ -1773,8 +1929,13 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             });
         }
 
-        Logger.LogDebug("Queueing minion reapply for {this} address {address:X} (customize:{customize}, glamourer:{glamourer}, files:{files})",
-            this, minionAddress, hasCustomize, hasGlamourer, hasFileReplacements);
+        if (ShouldLogMinionReapplyDebug("minion-reapply-queued"))
+        {
+            Logger.LogDebug("{tag} Queueing minion reapply for {user} address={address:X} lastApplied={lastApplied:X} lastBound={lastBound:X} (customize={customize}, glamourer={glamourer}, files={files}, collection={collection})",
+                SyncProgressTag, Pair.UserData.AliasOrUID, minionAddress, _lastAppliedMinionAddress, _lastBoundMinionAddress, hasCustomize, hasGlamourer, hasFileReplacements, _penumbraCollection);
+            PublishMinionDebug("Minion reapply queued",
+                $"address={minionAddress:X} lastApplied={_lastAppliedMinionAddress:X} lastBound={_lastBoundMinionAddress:X} customize={hasCustomize} glamourer={hasGlamourer} files={hasFileReplacements} collection={_penumbraCollection}");
+        }
 
         _minionReapplyInProgress = true;
         _lastMinionReapplyAttempt = DateTime.UtcNow;
@@ -1782,7 +1943,11 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         {
             try
             {
-                Logger.LogDebug("Reapplying cached minion data for {this}", this);
+                if (ShouldLogMinionReapplyDebug("minion-reapply-start"))
+                {
+                    Logger.LogDebug("{tag} Reapplying minion data for {user} address={address:X}", SyncProgressTag, Pair.UserData.AliasOrUID, minionAddress);
+                    PublishMinionDebug("Minion reapply start", $"address={minionAddress:X}");
+                }
                 var localChanges = new HashSet<PlayerChanges>(changes);
                 var appliedFiles = false;
                 if (hasFileReplacements)
@@ -1793,7 +1958,8 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                 await ApplyCustomizationDataAsync(Guid.NewGuid(),
                     new KeyValuePair<ObjectKind, HashSet<PlayerChanges>>(ObjectKind.MinionOrMount, localChanges),
                     minionData,
-                    forceRedrawIfDisabled: false,
+                    new RedrawTracking(),
+                    false,
                     CancellationToken.None).ConfigureAwait(false);
 
                 if (appliedFiles)
@@ -1805,10 +1971,18 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                 {
                     _lastAppliedMinionAddress = minionAddress;
                 }
+                else if (ShouldLogMinionReapplyDebug("minion-reapply-result:files-failed"))
+                {
+                    Logger.LogDebug("{tag} Minion reapply finished for {user} but file replacements were not applied; will retry (address={address:X} collection={collection})",
+                        SyncProgressTag, Pair.UserData.AliasOrUID, minionAddress, _penumbraCollection);
+                    PublishMinionDebug("Minion reapply finished (files not applied; will retry)",
+                        $"address={minionAddress:X} collection={_penumbraCollection}");
+                }
             }
             catch (Exception ex)
             {
                 Logger.LogDebug(ex, "Minion reapply failed for {this}", this);
+                PublishMinionDebug("Minion reapply failed", ex.ToString());
             }
             finally
             {
@@ -1854,17 +2028,38 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         var hasCollection = await EnsureMinionCollectionBindingsAsync(minionAddress).ConfigureAwait(false);
         if (!hasCollection)
         {
+            if (ShouldLogMinionReapplyDebug("minion-files:bind-failed"))
+            {
+                Logger.LogDebug("{tag} Minion file replacements not applied for {user}: collection binding failed (address={address:X} collection={collection})",
+                    SyncProgressTag, Pair.UserData.AliasOrUID, minionAddress, _penumbraCollection);
+                PublishMinionDebug("Minion file replacements not applied (collection binding failed)",
+                    $"address={minionAddress:X} collection={_penumbraCollection}");
+            }
             return false;
         }
 
         if (_penumbraCollection == Guid.Empty)
         {
+            if (ShouldLogMinionReapplyDebug("minion-files:no-collection"))
+            {
+                Logger.LogDebug("{tag} Minion file replacements not applied for {user}: Penumbra collection is empty (address={address:X})",
+                    SyncProgressTag, Pair.UserData.AliasOrUID, minionAddress);
+                PublishMinionDebug("Minion file replacements not applied (collection empty)", $"address={minionAddress:X}");
+            }
             return false;
         }
 
         var missingFiles = TryCalculateModdedDictionary(Guid.NewGuid(), minionData, out var moddedPaths, token);
         if (missingFiles.Count > 0 || moddedPaths.Count == 0)
         {
+            if (ShouldLogMinionReapplyDebug("minion-files:missing-or-empty"))
+            {
+                var firstMissingHash = missingFiles.Count > 0 ? (missingFiles[0]?.Hash ?? string.Empty) : string.Empty;
+                Logger.LogDebug("{tag} Minion file replacements not applied for {user}: missingFiles={missing} firstMissingHash={hash} moddedPaths={paths} (address={address:X})",
+                    SyncProgressTag, Pair.UserData.AliasOrUID, missingFiles.Count, firstMissingHash, moddedPaths.Count, minionAddress);
+                PublishMinionDebug("Minion file replacements not applied (missing files or empty paths)",
+                    $"address={minionAddress:X} missingFiles={missingFiles.Count} firstMissingHash={firstMissingHash} moddedPaths={moddedPaths.Count}");
+            }
             return false;
         }
 
@@ -1874,7 +2069,16 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             var normalizedGamePath = entry.Key.GamePath.Replace('\\', '/').ToLowerInvariant();
             tempMods[normalizedGamePath] = entry.Value;
         }
-        return await ApplyMinionTempModsAsync(minionAddress, tempMods, token).ConfigureAwait(false);
+        var applied = await ApplyMinionTempModsAsync(minionAddress, tempMods, token).ConfigureAwait(false);
+        if (!applied && ShouldLogMinionReapplyDebug("minion-files:tempmods-failed"))
+        {
+            Logger.LogDebug("{tag} Minion file replacements not applied for {user}: temp mods apply failed (address={address:X} entries={entries} collection={collection})",
+                SyncProgressTag, Pair.UserData.AliasOrUID, minionAddress, tempMods.Count, _penumbraCollection);
+            PublishMinionDebug("Minion file replacements not applied (temp mods apply failed)",
+                $"address={minionAddress:X} entries={tempMods.Count} collection={_penumbraCollection}");
+        }
+
+        return applied;
     }
 
     private async Task<bool> ApplyMinionTempModsToCollectionAsync(Dictionary<string, string> tempMods)
@@ -1914,6 +2118,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         _lastMinionTempModsApplyAttempt = DateTime.UtcNow;
         _lastMinionTempModsAddress = nint.Zero;
         _lastMinionTempModsHash = tempModsHash;
+        _lastMinionTempModsCollection = _penumbraCollection;
 
         return true;
     }
@@ -1925,18 +2130,25 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             return false;
         }
 
+        var tempModsHash = ComputeTempModsHash(tempMods);
+        if (!_pendingPenumbraReapply
+            && _penumbraCollection != Guid.Empty
+            && minionAddress == _lastMinionTempModsAddress
+            && tempModsHash == _lastMinionTempModsHash
+            && _penumbraCollection == _lastMinionTempModsCollection)
+        {
+            if (ShouldLogMinionReapplyDebug("minion-tempmods:skip-unchanged"))
+            {
+                PublishMinionDebug("Minion temp mods unchanged (skipping redraw)",
+                    $"address={minionAddress:X} collection={_penumbraCollection} entries={tempMods.Count}");
+            }
+            return true;
+        }
+
         var hasCollection = await EnsureMinionCollectionBindingsAsync(minionAddress).ConfigureAwait(false);
         if (!hasCollection || _penumbraCollection == Guid.Empty)
         {
             return false;
-        }
-
-        var tempModsHash = ComputeTempModsHash(tempMods);
-        if (minionAddress == _lastMinionTempModsAddress
-            && tempModsHash == _lastMinionTempModsHash
-            && DateTime.UtcNow - _lastMinionTempModsApplyAttempt < TimeSpan.FromMilliseconds(MinionTempModsCooldownMs))
-        {
-            return true;
         }
 
         if (Interlocked.Exchange(ref _minionTempModsApplyInProgress, 1) == 1)
@@ -1958,6 +2170,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         _lastMinionTempModsApplyAttempt = DateTime.UtcNow;
         _lastMinionTempModsAddress = minionAddress;
         _lastMinionTempModsHash = tempModsHash;
+        _lastMinionTempModsCollection = _penumbraCollection;
 
         return true;
     }
@@ -2071,11 +2284,17 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                 {
                     Logger.LogDebug("Attempting to bind collection to {addr:X} and apply temp mods", resourceAddress);
                     await TryBindCollectionToGameObjectAsync(resourceAddress).ConfigureAwait(false);
+                    if (ShouldLogMinionThrottled("minion-scd:" + gamePath, TimeSpan.FromSeconds(10)))
+                    {
+                        PublishMinionScdDebug("SCD override apply",
+                            $"gamePath={gamePath} resource={resourceAddress:X} minion={minionAddress:X} entries={tempMods.Count}");
+                    }
                     await ApplyMinionTempModsAsync(minionAddress, tempMods, CancellationToken.None).ConfigureAwait(false);
                 }
                 catch (Exception ex)
                 {
                     Logger.LogDebug(ex, "Minion SCD override retry failed for {this}", this);
+                    PublishMinionScdDebug("SCD override apply failed", ex.ToString());
                 }
             });
         }
@@ -2133,6 +2352,12 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         await EnsurePenumbraCollectionAsync().ConfigureAwait(false);
         if (_penumbraCollection == Guid.Empty)
         {
+            if (ShouldLogMinionReapplyDebug("minion-bind:no-collection"))
+            {
+                Logger.LogDebug("{tag} Minion collection bind failed for {user}: Penumbra collection is empty (minionAddress={address:X})",
+                    SyncProgressTag, Pair.UserData.AliasOrUID, minionAddress);
+                PublishMinionDebug("Minion collection bind failed (collection empty)", $"minionAddress={minionAddress:X}");
+            }
             return false;
         }
 
@@ -2141,6 +2366,13 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         {
             playerIndex = await _dalamudUtil.RunOnFrameworkThread(() => _charaHandler.GetGameObject()!.ObjectIndex).ConfigureAwait(false);
             await _ipcManager.Penumbra.AssignTemporaryCollectionAsync(Logger, _penumbraCollection, playerIndex.Value).ConfigureAwait(false);
+        }
+        else if (ShouldLogMinionReapplyDebug("minion-bind:no-player"))
+        {
+            Logger.LogDebug("{tag} Minion collection bind warning for {user}: player handler missing while binding minion (minionAddress={address:X} collection={collection})",
+                SyncProgressTag, Pair.UserData.AliasOrUID, minionAddress, _penumbraCollection);
+            PublishMinionDebug("Minion collection bind warning (no player handler)",
+                $"minionAddress={minionAddress:X} collection={_penumbraCollection}");
         }
 
         int? minionIndex = null;
@@ -2156,7 +2388,22 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
 
         if (!minionIndex.HasValue)
         {
+            if (ShouldLogMinionReapplyDebug("minion-bind:no-index"))
+            {
+                Logger.LogDebug("{tag} Minion collection bind failed for {user}: could not resolve object index (minionAddress={address:X} playerIndex={playerIndex} collection={collection})",
+                    SyncProgressTag, Pair.UserData.AliasOrUID, minionAddress, playerIndex, _penumbraCollection);
+                PublishMinionDebug("Minion collection bind failed (no object index)",
+                    $"minionAddress={minionAddress:X} playerIndex={playerIndex} collection={_penumbraCollection}");
+            }
             return false;
+        }
+
+        if (ShouldLogMinionReapplyDebug("minion-bind:assign"))
+        {
+            Logger.LogDebug("{tag} Binding collection for {user}: playerIndex={playerIndex} minionIndex={minionIndex} (minionAddress={address:X} collection={collection})",
+                SyncProgressTag, Pair.UserData.AliasOrUID, playerIndex, minionIndex.Value, minionAddress, _penumbraCollection);
+            PublishMinionDebug("Minion collection bind",
+                $"playerIndex={playerIndex} minionIndex={minionIndex.Value} minionAddress={minionAddress:X} collection={_penumbraCollection}");
         }
 
         await _ipcManager.Penumbra.AssignTemporaryCollectionAsync(Logger, _penumbraCollection, minionIndex.Value).ConfigureAwait(false);
@@ -2173,6 +2420,9 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         try
         {
             _penumbraCollection = await _ipcManager.Penumbra.CreateTemporaryCollectionAsync(Logger, Pair.UserData.UID).ConfigureAwait(false);
+            _lastMinionTempModsCollection = Guid.Empty;
+            _lastMinionTempModsAddress = nint.Zero;
+            _lastMinionTempModsHash = 0;
             if (_charaHandler != null && _charaHandler.Address != nint.Zero)
             {
                 var idx = await _dalamudUtil.RunOnFrameworkThread(() => _charaHandler.GetGameObject()!.ObjectIndex).ConfigureAwait(false);
@@ -2279,6 +2529,142 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                 await _ipcManager.Penumbra.RedrawAsync(Logger, tempHandler, applicationId, cancelToken).ConfigureAwait(false);
             }
         }
+    }
+
+    private sealed record MissingFilesSummary(bool HasPlayerMissing, string Summary, string Details);
+
+    private static MissingFilesSummary BuildMissingFilesSummary(CharacterData charaData, IReadOnlyList<FileReplacementData> missingFiles)
+    {
+        var missingHashes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < missingFiles.Count; i++)
+        {
+            var hash = missingFiles[i].Hash;
+            if (!string.IsNullOrWhiteSpace(hash))
+            {
+                missingHashes.Add(hash);
+            }
+        }
+
+        var byKind = new Dictionary<ObjectKind, List<(string Hash, string GamePath)>>();
+        var mappedHashes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        if (charaData.FileReplacements != null)
+        {
+            foreach (var (kind, replacements) in charaData.FileReplacements)
+            {
+                if (replacements == null || replacements.Count == 0)
+                {
+                    continue;
+                }
+
+                var uniqueHashes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                for (int i = 0; i < replacements.Count; i++)
+                {
+                    var replacement = replacements[i];
+                    if (replacement == null)
+                    {
+                        continue;
+                    }
+
+                    if (!string.IsNullOrEmpty(replacement.FileSwapPath))
+                    {
+                        continue;
+                    }
+
+                    var hash = replacement.Hash;
+                    if (string.IsNullOrWhiteSpace(hash) || !missingHashes.Contains(hash) || !uniqueHashes.Add(hash))
+                    {
+                        continue;
+                    }
+
+                    var gamePath = replacement.GamePaths is { Length: > 0 } ? replacement.GamePaths[0] : "-";
+                    if (!byKind.TryGetValue(kind, out var list))
+                    {
+                        list = new List<(string Hash, string GamePath)>();
+                        byKind[kind] = list;
+                    }
+
+                    list.Add((hash, gamePath));
+                    mappedHashes.Add(hash);
+                }
+            }
+        }
+
+        var unmapped = new List<string>();
+        foreach (var hash in missingHashes)
+        {
+            if (!mappedHashes.Contains(hash))
+            {
+                unmapped.Add(hash);
+            }
+        }
+
+        var kinds = byKind.Keys.ToList();
+        kinds.Sort((a, b) => ((int)a).CompareTo((int)b));
+
+        var summaryParts = new List<string>(kinds.Count + 1);
+        for (int i = 0; i < kinds.Count; i++)
+        {
+            var kind = kinds[i];
+            summaryParts.Add($"{kind}({byKind[kind].Count})");
+        }
+        if (unmapped.Count > 0)
+        {
+            summaryParts.Add($"Unmapped({unmapped.Count})");
+        }
+
+        var summary = summaryParts.Count == 0 ? "missingByKind=Unknown" : $"missingByKind={string.Join(", ", summaryParts)}";
+
+        var detailsBuilder = new StringBuilder(256);
+        for (int i = 0; i < kinds.Count; i++)
+        {
+            var kind = kinds[i];
+            var entries = byKind[kind];
+            detailsBuilder.Append(kind).Append(": ").Append(entries.Count).Append(" ");
+
+            var maxExamples = Math.Min(3, entries.Count);
+            for (int j = 0; j < maxExamples; j++)
+            {
+                var (hash, gamePath) = entries[j];
+                var shortHash = hash.Length > 10 ? hash[..10] : hash;
+                detailsBuilder.Append(shortHash).Append(' ').Append(gamePath);
+                if (j != maxExamples - 1)
+                {
+                    detailsBuilder.Append(" | ");
+                }
+            }
+
+            if (entries.Count > maxExamples)
+            {
+                detailsBuilder.Append(" (+").Append(entries.Count - maxExamples).Append(" more)");
+            }
+
+            detailsBuilder.AppendLine();
+        }
+
+        if (unmapped.Count > 0)
+        {
+            detailsBuilder.Append("Unmapped: ");
+            var maxUnmapped = Math.Min(5, unmapped.Count);
+            for (int i = 0; i < maxUnmapped; i++)
+            {
+                var hash = unmapped[i];
+                var shortHash = hash.Length > 10 ? hash[..10] : hash;
+                detailsBuilder.Append(shortHash);
+                if (i != maxUnmapped - 1)
+                {
+                    detailsBuilder.Append(", ");
+                }
+            }
+            if (unmapped.Count > maxUnmapped)
+            {
+                detailsBuilder.Append(" (+").Append(unmapped.Count - maxUnmapped).Append(" more)");
+            }
+            detailsBuilder.AppendLine();
+        }
+
+        var hasPlayerMissing = byKind.ContainsKey(ObjectKind.Player);
+        return new MissingFilesSummary(hasPlayerMissing, summary, detailsBuilder.ToString().TrimEnd());
     }
 
     private List<FileReplacementData> TryCalculateModdedDictionary(Guid applicationBase, CharacterData charaData, out Dictionary<(string GamePath, string? Hash), string> moddedDictionary, CancellationToken token)

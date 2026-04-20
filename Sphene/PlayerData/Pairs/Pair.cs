@@ -32,6 +32,7 @@ public class Pair : DisposableMediatorSubscriberBase
     private readonly DalamudUtilService _dalamudUtilService;
     private CancellationTokenSource _applicationCts = new();
     private OnlineUserIdentDto? _onlineUserIdentDto = null;
+    private static readonly Version LegacyAckMaxClientVersion = new(1, 1, 13, 1);
     private readonly VisibilityGateService _visibilityGateService;
     private const int BaseApplyRetryDelaySeconds = 2;
     private const int MaxApplyRetryDelaySeconds = 30;
@@ -91,14 +92,134 @@ public class Pair : DisposableMediatorSubscriberBase
     public long LastAppliedDataTris { get; set; } = -1;
     public long LastAppliedApproximateVRAMBytes { get; set; } = -1;
     public string Ident => _onlineUserIdentDto?.Ident ?? string.Empty;
+    public string? RemoteClientVersion => UserPair.RemoteClientVersion ?? _onlineUserIdentDto?.ClientVersion;
+    public bool IsLegacyAcknowledgmentClient => TryGetNormalizedRemoteClientVersion(out var v) && v <= LegacyAckMaxClientVersion;
     internal int ApplyRetryCount => _applyRetryCount;
+
+    private bool TryGetNormalizedRemoteClientVersion(out Version version)
+    {
+        version = new Version(0, 0, 0, 0);
+        var raw = RemoteClientVersion;
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return false;
+        }
+
+        if (!Version.TryParse(raw, out var parsed))
+        {
+            return false;
+        }
+
+        var major = parsed.Major;
+        var minor = parsed.Minor;
+        var build = parsed.Build < 0 ? 0 : parsed.Build;
+        var revision = parsed.Revision < 0 ? 0 : parsed.Revision;
+        version = new Version(major, minor, build, revision);
+        return true;
+    }
     
     // Data synchronization status properties
     public bool? LastAcknowledgmentSuccess { get; private set; } = null;
     public DateTimeOffset? LastAcknowledgmentTime { get; private set; } = null;
     public string? LastAcknowledgmentId { get; private set; } = null;
     public bool HasPendingAcknowledgment { get; private set; } = false;
+    public Sphene.API.Dto.User.AcknowledgmentErrorCode LastAcknowledgmentErrorCode { get; private set; } = Sphene.API.Dto.User.AcknowledgmentErrorCode.None;
+    public string? LastAcknowledgmentErrorMessage { get; private set; } = null;
+
+    public string? LastAcknowledgedIncomingDataHash { get; private set; } = null;
+    public DateTimeOffset? LastAcknowledgedIncomingTime { get; private set; } = null;
+    public string? LastIncomingAcknowledgmentHash { get; private set; } = null;
+    public bool? LastIncomingAcknowledgmentSuccess { get; private set; } = null;
+    public Sphene.API.Dto.User.AcknowledgmentErrorCode LastIncomingAcknowledgmentErrorCode { get; private set; } = Sphene.API.Dto.User.AcknowledgmentErrorCode.None;
+    public string? LastIncomingAcknowledgmentErrorMessage { get; private set; } = null;
+    public DateTimeOffset? LastIncomingAcknowledgmentTime { get; private set; } = null;
+    public string? LastOutgoingAcknowledgmentHash { get; private set; } = null;
+    public string? LastOutgoingAcknowledgmentSessionId { get; private set; } = null;
+
+    public enum AckV3Outcome
+    {
+        Unknown = 0,
+        Pending = 1,
+        Success = 2,
+        Fail = 3
+    }
+
+    public readonly record struct AckV3State(AckV3Outcome Outcome, string? Hash, DateTimeOffset? Time,
+        Sphene.API.Dto.User.AcknowledgmentErrorCode ErrorCode, string? ErrorMessage);
+
+    public AckV3State GetOutgoingAckV3State()
+    {
+        if (!IsMutuallyVisible)
+        {
+            return new(AckV3Outcome.Unknown, null, null, Sphene.API.Dto.User.AcknowledgmentErrorCode.None, null);
+        }
+
+        if (HasPendingAcknowledgment)
+        {
+            return new(AckV3Outcome.Pending, LastAcknowledgmentId, LastAcknowledgmentTime, Sphene.API.Dto.User.AcknowledgmentErrorCode.None, null);
+        }
+
+        if (LastAcknowledgmentSuccess == true)
+        {
+            return new(AckV3Outcome.Success, LastAcknowledgmentId, LastAcknowledgmentTime, Sphene.API.Dto.User.AcknowledgmentErrorCode.None, null);
+        }
+
+        if (LastAcknowledgmentSuccess == false)
+        {
+            return new(AckV3Outcome.Fail, LastAcknowledgmentId, LastAcknowledgmentTime, LastAcknowledgmentErrorCode, LastAcknowledgmentErrorMessage);
+        }
+
+        return new(AckV3Outcome.Unknown, LastAcknowledgmentId, LastAcknowledgmentTime, Sphene.API.Dto.User.AcknowledgmentErrorCode.None, null);
+    }
+
+    public AckV3State GetIncomingAckV3State()
+    {
+        if (!IsMutuallyVisible)
+        {
+            return new(AckV3Outcome.Unknown, null, null, Sphene.API.Dto.User.AcknowledgmentErrorCode.None, null);
+        }
+
+        var currentHash = LastReceivedCharacterDataHash;
+        if (string.IsNullOrWhiteSpace(currentHash))
+        {
+            return new(AckV3Outcome.Unknown, null, null, Sphene.API.Dto.User.AcknowledgmentErrorCode.None, null);
+        }
+
+        var ctx = _lastIncomingAckContext;
+        if (ctx != null
+            && string.Equals(ctx.DataHash, currentHash, StringComparison.Ordinal)
+            && !ctx.RequiresAcknowledgment)
+        {
+            return new(AckV3Outcome.Success, currentHash, LastReceivedCharacterDataTime, Sphene.API.Dto.User.AcknowledgmentErrorCode.None, null);
+        }
+
+        if (string.Equals(LastIncomingAcknowledgmentHash, currentHash, StringComparison.Ordinal))
+        {
+            if (LastIncomingAcknowledgmentSuccess == true)
+            {
+                return new(AckV3Outcome.Success, currentHash, LastIncomingAcknowledgmentTime, Sphene.API.Dto.User.AcknowledgmentErrorCode.None, null);
+            }
+
+            if (LastIncomingAcknowledgmentSuccess == false)
+            {
+                return new(AckV3Outcome.Fail, currentHash, LastIncomingAcknowledgmentTime, LastIncomingAcknowledgmentErrorCode, LastIncomingAcknowledgmentErrorMessage);
+            }
+        }
+
+        return new(AckV3Outcome.Pending, currentHash, LastReceivedCharacterDataTime, Sphene.API.Dto.User.AcknowledgmentErrorCode.None, null);
+    }
     
+    private sealed record LastReceivedAckContext(string DataHash, bool RequiresAcknowledgment, string? SessionId);
+    private LastReceivedAckContext? _lastIncomingAckContext;
+    public string? LastIncomingAckHash => _lastIncomingAckContext?.DataHash;
+    public string? LastIncomingAckSessionId => _lastIncomingAckContext?.SessionId;
+
+    public void SetOutgoingAcknowledgmentContext(string? dataHash, string? sessionId)
+    {
+        LastOutgoingAcknowledgmentHash = dataHash;
+        LastOutgoingAcknowledgmentSessionId = sessionId;
+    }
+
     // Queue for pending acknowledgment data to handle multiple rapid requests
     private readonly ConcurrentQueue<OnlineUserCharaDataDto> _pendingAcknowledgmentQueue = new();
     private volatile int _acknowledgmentSequence = 0;
@@ -180,8 +301,36 @@ public class Pair : DisposableMediatorSubscriberBase
     internal void SetMutualVisibility(bool isMutual)
     {
         if (IsMutuallyVisible == isMutual) return;
+        if (!isMutual)
+        {
+            ResetAcknowledgmentState();
+        }
         IsMutuallyVisible = isMutual;
         Mediator.Publish(new StructuralRefreshUiMessage());
+    }
+
+    private void ResetAcknowledgmentState()
+    {
+        HasPendingAcknowledgment = false;
+        LastAcknowledgmentSuccess = null;
+        LastAcknowledgmentTime = null;
+        LastAcknowledgmentId = null;
+        LastAcknowledgmentErrorCode = Sphene.API.Dto.User.AcknowledgmentErrorCode.None;
+        LastAcknowledgmentErrorMessage = null;
+
+        LastAcknowledgedIncomingDataHash = null;
+        LastAcknowledgedIncomingTime = null;
+        LastIncomingAcknowledgmentHash = null;
+        LastIncomingAcknowledgmentSuccess = null;
+        LastIncomingAcknowledgmentErrorCode = Sphene.API.Dto.User.AcknowledgmentErrorCode.None;
+        LastIncomingAcknowledgmentErrorMessage = null;
+        LastIncomingAcknowledgmentTime = null;
+        _lastIncomingAckContext = null;
+
+        LastOutgoingAcknowledgmentHash = null;
+        LastOutgoingAcknowledgmentSessionId = null;
+
+        Mediator.Publish(new AcknowledgmentUiRefreshMessage(User: UserData));
     }
 
     internal void SetGposeState(bool isInGpose)
@@ -316,6 +465,10 @@ public class Pair : DisposableMediatorSubscriberBase
     public void ApplyData(OnlineUserCharaDataDto data)
     {
         _applicationCts = _applicationCts.CancelRecreate();
+        if (!string.IsNullOrWhiteSpace(data.DataHash))
+        {
+            _lastIncomingAckContext = new LastReceivedAckContext(data.DataHash, data.RequiresAcknowledgment, data.SessionId);
+        }
         UpdateReceivedCharacterDataCache(data);
         ResetApplyRetry();
         var forceRedrawFromReload = ConsumeForcedRedrawRequest();
@@ -381,7 +534,9 @@ public class Pair : DisposableMediatorSubscriberBase
                 else
                 {
                     Logger.LogDebug("{tag} Apply delayed path timed out: uid={uid} hash={hash}", SyncProgressTag, data.User.UID, shortHash);
-                    await SendAcknowledgmentIfRequired(data, false).ConfigureAwait(false);
+                    await SendAcknowledgmentIfRequired(data, false, true,
+                        Sphene.API.Dto.User.AcknowledgmentErrorCode.Timeout,
+                        "Apply delayed path timed out").ConfigureAwait(false);
                 }
             });
             return;
@@ -591,6 +746,18 @@ public class Pair : DisposableMediatorSubscriberBase
             PreviousReceivedCharacterDataHash = null;
             LastReceivedCharacterDataTime = null;
             LastReceivedCharacterDataChangeTime = null;
+            LastAcknowledgedIncomingDataHash = null;
+            LastAcknowledgedIncomingTime = null;
+            LastIncomingAcknowledgmentHash = null;
+            LastIncomingAcknowledgmentSuccess = null;
+            LastIncomingAcknowledgmentErrorCode = Sphene.API.Dto.User.AcknowledgmentErrorCode.None;
+            LastIncomingAcknowledgmentErrorMessage = null;
+            LastIncomingAcknowledgmentTime = null;
+            LastOutgoingAcknowledgmentHash = null;
+            LastOutgoingAcknowledgmentSessionId = null;
+            _lastIncomingAckContext = null;
+            LastAcknowledgmentErrorCode = Sphene.API.Dto.User.AcknowledgmentErrorCode.None;
+            LastAcknowledgmentErrorMessage = null;
             var player = CachedPlayer;
             CachedPlayer = null;
             player?.Dispose();
@@ -661,13 +828,17 @@ public class Pair : DisposableMediatorSubscriberBase
         return data;
     }
 
-    public async Task UpdateAcknowledgmentStatus(string? acknowledgmentId, bool success, DateTimeOffset timestamp)
+    public async Task UpdateAcknowledgmentStatus(string? acknowledgmentId, bool success, DateTimeOffset timestamp,
+        Sphene.API.Dto.User.AcknowledgmentErrorCode errorCode = Sphene.API.Dto.User.AcknowledgmentErrorCode.None,
+        string? errorMessage = null)
     {
         Logger.LogDebug("Updating acknowledgment status: {acknowledgmentId} - Success: {success} for user {user}", acknowledgmentId ?? "null", success, UserData.AliasOrUID);
         LastAcknowledgmentId = acknowledgmentId;
         LastAcknowledgmentSuccess = success;
         LastAcknowledgmentTime = timestamp;
         HasPendingAcknowledgment = false;
+        LastAcknowledgmentErrorCode = success ? Sphene.API.Dto.User.AcknowledgmentErrorCode.None : errorCode;
+        LastAcknowledgmentErrorMessage = success ? null : errorMessage;
         
         // Publish specific pair acknowledgment status change event
         Mediator.Publish(new PairAcknowledgmentStatusChangedMessage(
@@ -696,6 +867,8 @@ public class Pair : DisposableMediatorSubscriberBase
         HasPendingAcknowledgment = true;
         LastAcknowledgmentSuccess = null;
         LastAcknowledgmentTime = null;
+        LastAcknowledgmentErrorCode = Sphene.API.Dto.User.AcknowledgmentErrorCode.None;
+        LastAcknowledgmentErrorMessage = null;
         
         // Publish specific pair acknowledgment status change event
         Mediator.Publish(new PairAcknowledgmentStatusChangedMessage(
@@ -735,23 +908,29 @@ public class Pair : DisposableMediatorSubscriberBase
         ));
     }
 
-    public void ResolvePendingAcknowledgmentFromRemoteAckYou()
+    public void SetBuildStartPendingStatus()
     {
-        if (!HasPendingAcknowledgment)
+        Logger.LogInformation("Setting build start pending status for user {user}", UserData.AliasOrUID);
+        HasPendingAcknowledgment = true;
+        LastAcknowledgmentSuccess = null;
+        LastAcknowledgmentTime = null;
+        LastAcknowledgmentId = null; // No specific acknowledgment ID for build start
+    }
+
+    public void ClearBuildStartPendingStatus()
+    {
+        if (!HasPendingAcknowledgment || LastAcknowledgmentId != null)
         {
             return;
         }
 
-        var acknowledgmentId = LastAcknowledgmentId;
-        Logger.LogDebug("Resolving pending acknowledgment from remote AckYou for user {user} (AckId: {ackId})", UserData.AliasOrUID, acknowledgmentId);
-
         HasPendingAcknowledgment = false;
-        LastAcknowledgmentSuccess = true;
-        LastAcknowledgmentTime = DateTimeOffset.UtcNow;
+        LastAcknowledgmentSuccess = null;
+        LastAcknowledgmentTime = null;
 
         Mediator.Publish(new PairAcknowledgmentStatusChangedMessage(
             UserData,
-            acknowledgmentId,
+            null,
             HasPendingAcknowledgment,
             LastAcknowledgmentSuccess,
             LastAcknowledgmentTime
@@ -760,30 +939,7 @@ public class Pair : DisposableMediatorSubscriberBase
         var ackData = new AcknowledgmentStatusData(HasPendingAcknowledgment, LastAcknowledgmentSuccess, LastAcknowledgmentTime);
         Mediator.Publish(new UserPairIconUpdateMessage(UserData, IconUpdateType.AcknowledgmentStatus, ackData));
 
-        Mediator.Publish(new AcknowledgmentUiRefreshMessage(
-            AcknowledgmentId: acknowledgmentId,
-            User: UserData
-        ));
-
-        if (!string.IsNullOrEmpty(acknowledgmentId))
-        {
-            Mediator.Publish(new AcknowledgmentStatusChangedMessage(
-                new AcknowledgmentEventDto(
-                    acknowledgmentId,
-                    UserData,
-                    AcknowledgmentStatus.Received,
-                    DateTime.UtcNow)
-            ));
-        }
-    }
-
-    public void SetBuildStartPendingStatus()
-    {
-        Logger.LogInformation("Setting build start pending status for user {user}", UserData.AliasOrUID);
-        HasPendingAcknowledgment = true;
-        LastAcknowledgmentSuccess = null;
-        LastAcknowledgmentTime = null;
-        LastAcknowledgmentId = null; // No specific acknowledgment ID for build start
+        Mediator.Publish(new AcknowledgmentUiRefreshMessage(User: UserData));
     }
 
     public async Task ClearPendingAcknowledgment(string acknowledgmentId, MessageService? messageService = null)
@@ -891,7 +1047,8 @@ public class Pair : DisposableMediatorSubscriberBase
 
 
 
-    private async Task SendAcknowledgmentIfRequired(OnlineUserCharaDataDto data, bool success, bool hashVerificationPassed = true)
+    private async Task SendAcknowledgmentIfRequired(OnlineUserCharaDataDto data, bool success, bool hashVerificationPassed = true,
+        Sphene.API.Dto.User.AcknowledgmentErrorCode? errorCodeOverride = null, string? errorMessageOverride = null)
     {
         Logger.LogDebug("SendAcknowledgmentIfRequired called - RequiresAcknowledgment: {requires}, Hash: {hash}, Success: {success}, HashVerification: {hashVerification}", 
             data.RequiresAcknowledgment, data.DataHash[..Math.Min(8, data.DataHash.Length)], success, hashVerificationPassed);
@@ -908,16 +1065,22 @@ public class Pair : DisposableMediatorSubscriberBase
             var finalSuccess = success && hashVerificationPassed;
             var errorCode = Sphene.API.Dto.User.AcknowledgmentErrorCode.None;
             string? errorMessage = null;
-            
+
             if (!success)
             {
-                errorCode = Sphene.API.Dto.User.AcknowledgmentErrorCode.DataCorrupted;
-                errorMessage = "Failed to apply character data";
+                errorCode = errorCodeOverride ?? Sphene.API.Dto.User.AcknowledgmentErrorCode.ApplyFailed;
+                errorMessage = errorMessageOverride ?? "Failed to apply character data";
             }
             else if (!hashVerificationPassed)
             {
-                errorCode = Sphene.API.Dto.User.AcknowledgmentErrorCode.HashVerificationFailed;
-                errorMessage = "Data hash verification failed - data integrity compromised";
+                errorCode = errorCodeOverride ?? Sphene.API.Dto.User.AcknowledgmentErrorCode.HashVerificationFailed;
+                errorMessage = errorMessageOverride ?? "Data hash verification failed - data integrity compromised";
+            }
+
+            if (!finalSuccess)
+            {
+                var context = $"ctx: localInDuty={_dalamudUtilService.IsInDuty} localInCombat={_dalamudUtilService.IsInCombatOrPerforming}";
+                errorMessage = string.IsNullOrWhiteSpace(errorMessage) ? context : $"{errorMessage} ({context})";
             }
             
             var acknowledgmentDto = new CharacterDataAcknowledgmentDto(UserData, data.DataHash)
@@ -926,31 +1089,46 @@ public class Pair : DisposableMediatorSubscriberBase
                 ErrorCode = errorCode,
                 ErrorMessage = errorMessage,
                 AcknowledgedAt = DateTime.UtcNow,
-                SessionId = data.SessionId // Include session ID for batch acknowledgment tracking
+                SessionId = data.SessionId ?? string.Empty
             };
+
+            LastIncomingAcknowledgmentHash = data.DataHash;
+            LastIncomingAcknowledgmentSuccess = finalSuccess;
+            LastIncomingAcknowledgmentErrorCode = finalSuccess ? Sphene.API.Dto.User.AcknowledgmentErrorCode.None : errorCode;
+            LastIncomingAcknowledgmentErrorMessage = finalSuccess ? null : errorMessage;
+            LastIncomingAcknowledgmentTime = DateTimeOffset.UtcNow;
 
             Logger.LogDebug("Sending acknowledgment to server - Hash: {hash}, User: {user}, Success: {success}, ErrorCode: {errorCode}", 
                 data.DataHash[..Math.Min(8, data.DataHash.Length)], UserData.AliasOrUID, finalSuccess, errorCode);
 
             // Send acknowledgment through the mediator
              Mediator.Publish(new SendCharacterDataAcknowledgmentMessage(acknowledgmentDto));
+            Mediator.Publish(new DebugLogEventMessage(
+                finalSuccess ? LogLevel.Information : LogLevel.Warning,
+                "ACK",
+                finalSuccess ? "Ack sent" : "Ack sent (fail)",
+                Uid: UserData.UID,
+                Details: $"hash={data.DataHash[..Math.Min(8, data.DataHash.Length)]} code={errorCode} msg={errorMessage ?? "-"} session={data.SessionId ?? "-"}"));
             Logger.LogDebug("Successfully published SendCharacterDataAcknowledgmentMessage for Hash: {hash}", 
                 data.DataHash[..Math.Min(8, data.DataHash.Length)]);
 
-            var permissions = UserPair.OwnPermissions;
-            var newAckYouStatus = finalSuccess;
-            if (permissions.IsAckYou() != newAckYouStatus)
+            if (finalSuccess)
             {
-                Logger.LogDebug("SendAcknowledgmentIfRequired: Setting Own AckYou={status} for user {user}", newAckYouStatus, UserData.AliasOrUID);
-                permissions.SetAckYou(newAckYouStatus);
-                try
+                var currentReceivedHash = LastReceivedCharacterDataHash;
+                if (!string.IsNullOrEmpty(currentReceivedHash)
+                    && !string.Equals(currentReceivedHash, data.DataHash, StringComparison.Ordinal))
                 {
-                    await _apiController.Value.UserSetPairPermissions(new(UserData, permissions)).ConfigureAwait(false);
+                    var shortAck = data.DataHash[..Math.Min(8, data.DataHash.Length)];
+                    var shortCurrent = currentReceivedHash[..Math.Min(8, currentReceivedHash.Length)];
+                    Mediator.Publish(new DebugLogEventMessage(LogLevel.Warning, "ACK",
+                        "Ack sent for non-latest hash",
+                        Uid: UserData.UID,
+                        Details: $"acked={shortAck} current={shortCurrent} session={data.SessionId ?? "-"}"));
                 }
-                catch (Exception ex)
-                {
-                    Logger.LogDebug(ex, "SendAcknowledgmentIfRequired: Failed to send Own AckYou update for user {user}", UserData.AliasOrUID);
-                }
+
+                LastAcknowledgedIncomingDataHash = data.DataHash;
+                LastAcknowledgedIncomingTime = DateTimeOffset.UtcNow;
+                Mediator.Publish(new RefreshUiMessage());
             }
         }
         catch (Exception ex)
@@ -974,10 +1152,6 @@ public class Pair : DisposableMediatorSubscriberBase
             if (message.Success)
             {
                 ResetApplyRetry();
-            }
-            else
-            {
-                ScheduleApplyRetry(increment: true);
             }
             
             if (!_pendingAcknowledgmentQueue.IsEmpty)
@@ -1017,21 +1191,82 @@ public class Pair : DisposableMediatorSubscriberBase
                 {
                     try
                     {
-                        var verificationSuccess = true;
-                        if (!_dalamudUtilService.IsInDuty && !_dalamudUtilService.IsInCombatOrPerforming)
+                        if (!message.Success)
                         {
-                            verificationSuccess = VerifyDataHashIntegrity(matchingAcknowledgment, appliedHash);
+                            if (_applyRetryCount < MaxApplyRetryBackoffSteps)
+                            {
+                                ScheduleApplyRetry(increment: true);
+                                _pendingAcknowledgmentQueue.Enqueue(matchingAcknowledgment);
+                                return;
+                            }
+
+                            var errorCodeOverride = message.ErrorCode == Sphene.API.Dto.User.AcknowledgmentErrorCode.None
+                                ? Sphene.API.Dto.User.AcknowledgmentErrorCode.ApplyFailed
+                                : message.ErrorCode;
+                            var errorMessageOverride = string.IsNullOrWhiteSpace(message.ErrorMessage)
+                                ? "Apply failed after retries"
+                                : message.ErrorMessage;
+                            await SendAcknowledgmentIfRequired(matchingAcknowledgment, false, true, errorCodeOverride, errorMessageOverride).ConfigureAwait(false);
+                            return;
                         }
-                        if (verificationSuccess && message.Success)
+
+                        var verificationSuccess = true;
+                        var verificationErrorCode = (Sphene.API.Dto.User.AcknowledgmentErrorCode?)null;
+                        var verificationErrorMessage = (string?)null;
+
+                        for (var attempt = 1; attempt <= 5; attempt++)
                         {
-                            verificationSuccess = await VerifyServerHashIntegrityAsync(matchingAcknowledgment, appliedHash).ConfigureAwait(false);
+                            verificationSuccess = true;
+                            verificationErrorCode = null;
+                            verificationErrorMessage = null;
+
+                            if (!_dalamudUtilService.IsInDuty && !_dalamudUtilService.IsInCombatOrPerforming)
+                            {
+                                verificationSuccess = VerifyDataHashIntegrity(matchingAcknowledgment, appliedHash);
+                                if (!verificationSuccess)
+                                {
+                                    verificationErrorCode = Sphene.API.Dto.User.AcknowledgmentErrorCode.MismatchFailed;
+                                    verificationErrorMessage = "Local data verification failed";
+                                }
+                            }
+
+                            if (verificationSuccess)
+                            {
+                                verificationSuccess = await VerifyServerHashIntegrityAsync(matchingAcknowledgment, appliedHash).ConfigureAwait(false);
+                                if (!verificationSuccess)
+                                {
+                                    verificationErrorCode = Sphene.API.Dto.User.AcknowledgmentErrorCode.HashVerificationFailed;
+                                    verificationErrorMessage = "Server hash verification failed";
+                                }
+                            }
+
+                            if (verificationSuccess && !_dalamudUtilService.IsInDuty && !_dalamudUtilService.IsInCombatOrPerforming)
+                            {
+                                var (pathsOk, mismatchCount, examplePath) = await VerifyPenumbraActivePathsIntegrityAsync(matchingAcknowledgment).ConfigureAwait(false);
+                                if (!pathsOk)
+                                {
+                                    verificationSuccess = false;
+                                    verificationErrorCode = Sphene.API.Dto.User.AcknowledgmentErrorCode.MismatchFailed;
+                                    verificationErrorMessage = $"Active paths mismatch count={mismatchCount}{(string.IsNullOrWhiteSpace(examplePath) ? string.Empty : $" example={examplePath}")}";
+                                }
+                            }
+
+                            if (verificationSuccess)
+                            {
+                                break;
+                            }
+
+                            if (attempt < 5)
+                            {
+                                await Task.Delay(TimeSpan.FromMilliseconds(500)).ConfigureAwait(false);
+                            }
                         }
                         
                         Logger.LogDebug("{tag} Ack sending: appSuccess={appSuccess} hashVerified={hashSuccess} hash={hash}", 
                             SyncProgressTag,
                             message.Success, verificationSuccess, string.IsNullOrEmpty(appliedHash) ? "NONE" : appliedHash[..Math.Min(8, appliedHash.Length)]);
                         
-                        await SendAcknowledgmentIfRequired(matchingAcknowledgment, message.Success, verificationSuccess).ConfigureAwait(false);
+                        await SendAcknowledgmentIfRequired(matchingAcknowledgment, true, verificationSuccess, verificationErrorCode, verificationErrorMessage).ConfigureAwait(false);
                     }
                     catch (Exception ex)
                     {
@@ -1044,16 +1279,20 @@ public class Pair : DisposableMediatorSubscriberBase
                         SyncProgressTag,
                         string.IsNullOrEmpty(appliedHash) ? "NONE" : appliedHash[..Math.Min(8, appliedHash.Length)],
                         remaining.Count);
+
+                    if (!message.Success && remaining.Count > 0 && _applyRetryCount < MaxApplyRetryBackoffSteps)
+                    {
+                        ScheduleApplyRetry(increment: true);
+                    }
                 }
             }
             else
             {
                 Logger.LogDebug("{tag} Ack queue empty: playerName={playerName} success={success}", SyncProgressTag, message.PlayerName, message.Success);
 
-                if (HasPendingAcknowledgment || (message.Success && !UserPair.OwnPermissions.IsAckYou()))
+                if (!message.Success && _applyRetryCount < MaxApplyRetryBackoffSteps)
                 {
-                    Logger.LogDebug("{tag} Ack auto-complete: success={success} lastAckId={ackId}", SyncProgressTag, message.Success, LastAcknowledgmentId ?? "null");
-                    await UpdateAcknowledgmentStatus(LastAcknowledgmentId, message.Success, DateTime.UtcNow).ConfigureAwait(false);
+                    ScheduleApplyRetry(increment: true);
                 }
             }
         }
@@ -1219,6 +1458,112 @@ public class Pair : DisposableMediatorSubscriberBase
             Logger.LogWarning(ex, "{tag} Server hash verify failed with exception", SyncProgressTag);
             return false;
         }
+    }
+
+    private async Task<(bool Success, int MismatchCount, string? ExamplePath)> VerifyPenumbraActivePathsIntegrityAsync(OnlineUserCharaDataDto acknowledgmentData)
+    {
+        try
+        {
+            if (CachedPlayer == null)
+            {
+                return (true, 0, null);
+            }
+
+            var charaData = acknowledgmentData?.CharaData;
+            if (charaData == null || charaData.FileReplacements == null)
+            {
+                return (true, 0, null);
+            }
+
+            var delivered = BuildDeliveredPathState(charaData);
+            if (delivered.Count == 0)
+            {
+                return (true, 0, null);
+            }
+
+            var playerActivePaths = await GetCurrentPenumbraActivePathsByGamePathAsync().ConfigureAwait(false);
+            var minionActivePaths = await GetMinionOrMountActivePathsByGamePathAsync().ConfigureAwait(false);
+            var petActivePaths = await GetPetActivePathsByGamePathAsync().ConfigureAwait(false);
+
+            var mismatchCount = 0;
+            string? example = null;
+
+            foreach (var kvp in delivered)
+            {
+                var gamePath = kvp.Key;
+                var state = kvp.Value;
+                if (!state.IsActive)
+                {
+                    continue;
+                }
+
+                var activePaths = state.IsMinionOrMount ? minionActivePaths : state.IsPet ? petActivePaths : playerActivePaths;
+                var isPenumbraActive = activePaths.TryGetValue(gamePath, out var source) && !string.IsNullOrEmpty(source);
+                if (isPenumbraActive)
+                {
+                    continue;
+                }
+
+                mismatchCount++;
+                example ??= gamePath;
+                if (mismatchCount >= 10)
+                {
+                    break;
+                }
+            }
+
+            return (mismatchCount == 0, mismatchCount, example);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "{tag} Active paths verify failed with exception", SyncProgressTag);
+            return (true, 0, null);
+        }
+    }
+
+    private static Dictionary<string, DeliveredPathState> BuildDeliveredPathState(CharacterData characterData)
+    {
+        var result = new Dictionary<string, DeliveredPathState>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var objectKvp in characterData.FileReplacements)
+        {
+            var objectKind = objectKvp.Key;
+            foreach (var fileReplacement in objectKvp.Value)
+            {
+                if (fileReplacement.GamePaths == null)
+                {
+                    continue;
+                }
+
+                foreach (var gamePath in fileReplacement.GamePaths)
+                {
+                    if (string.IsNullOrWhiteSpace(gamePath))
+                    {
+                        continue;
+                    }
+
+                    var normalizedPath = gamePath.Replace('\\', '/').ToLowerInvariant();
+                    if (!result.TryGetValue(normalizedPath, out var state))
+                    {
+                        state = new DeliveredPathState();
+                        result[normalizedPath] = state;
+                    }
+
+                    state.IsActive = fileReplacement.IsActive;
+                    state.IsMinionOrMount |= objectKind == ObjectKind.MinionOrMount;
+                    state.IsPet |= objectKind == ObjectKind.Pet;
+                }
+            }
+        }
+
+        return result;
+    }
+
+    private sealed class DeliveredPathState
+    {
+        public bool IsActive { get; set; }
+        public bool IsMinionOrMount { get; set; }
+        public bool IsPet { get; set; }
     }
 
     protected override void Dispose(bool disposing)
