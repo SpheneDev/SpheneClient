@@ -225,7 +225,15 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
     {
         if (!_isModerator && !_isOwner) return;
 
-        GroupFullInfo = _pairManager.Groups[GroupFullInfo.Group];
+        // Find group by GID instead of GroupData object to handle alias renames
+        var updatedGroupFullInfo = _pairManager.Groups.Values.FirstOrDefault(g => 
+            string.Equals(g.Group.GID, GroupFullInfo.Group.GID, StringComparison.Ordinal));
+        
+        if (updatedGroupFullInfo == null)
+        {
+            return;
+        }
+        GroupFullInfo = updatedGroupFullInfo;
 
         using var id = ImRaii.PushId("syncshell_admin_" + GroupFullInfo.GID);
 
