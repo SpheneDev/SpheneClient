@@ -2313,6 +2313,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                 foreach (var groupPair in groupPairs)
                 {
                     var group = groupPair.Key;
+                    var pairsInGroup = groupPair.Value;
                     
                     // Only unpause if this syncshell was NOT already paused before incognito mode
                     if (group.GroupUserPermissions.IsPaused() && !_prePausedSyncshells.Contains(group.Group.GID))
@@ -2321,6 +2322,18 @@ public class CompactUi : WindowMediatorSubscriberBase
                         unpausedPermissions.SetPaused(false);
                         syncshellsToUnpause[group.Group.GID] = unpausedPermissions;
                         _logger.LogInformation("Will unpause group (was paused by incognito): {gid}", group.Group.GID);
+
+                        // Also unpause individual pairs within this syncshell that were paused by incognito
+                        foreach (var pair in pairsInGroup)
+                        {
+                            if (pair.UserPair != null && pair.UserPair.OwnPermissions.IsPaused() && !_prePausedPairs.Contains(pair.UserData.UID))
+                            {
+                                var permissions = pair.UserPair.OwnPermissions;
+                                permissions.SetPaused(false);
+                                await _apiController.UserSetPairPermissions(new(pair.UserData, permissions)).ConfigureAwait(false);
+                                _logger.LogInformation("Unpaused pair in syncshell (was paused by incognito): {uid} - {playerName}", pair.UserData.UID, pair.PlayerName);
+                            }
+                        }
                     }
                     else if (_prePausedSyncshells.Contains(group.Group.GID))
                     {
@@ -2422,6 +2435,22 @@ public class CompactUi : WindowMediatorSubscriberBase
                         pausedPermissions.SetPaused(true);
                         syncshellsToPause[group.Group.GID] = pausedPermissions;
                         _logger.LogInformation("Will pause group (no party members): {gid}", group.Group.GID);
+
+                        // Also pause individual pairs within this syncshell that are not directly paired
+                        foreach (var pair in pairsInGroup)
+                        {
+                            if (pair.UserPair != null && !pair.UserPair.OwnPermissions.IsPaused())
+                            {
+                                // Track this pair as not pre-paused (we're pausing it now)
+                                if (!_prePausedPairs.Contains(pair.UserData.UID))
+                                {
+                                    var permissions = pair.UserPair.OwnPermissions;
+                                    permissions.SetPaused(true);
+                                    await _apiController.UserSetPairPermissions(new(pair.UserData, permissions)).ConfigureAwait(false);
+                                    _logger.LogInformation("Paused pair in syncshell (not in party): {uid} - {playerName}", pair.UserData.UID, pair.PlayerName);
+                                }
+                            }
+                        }
                     }
                     else
                     {
