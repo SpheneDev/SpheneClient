@@ -581,8 +581,13 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
             if (item.Value.UserPair.Groups.Contains(data.GID))
             {
                 item.Value.UserPair.Groups.Remove(data.GID);
-                item.Value.MarkOffline();
-                _allClientPairs.TryRemove(item.Key, out _);
+
+                // Only mark offline if not directly paired and has no other group connections
+                if (!item.Value.UserPair.Groups.Any() && !item.Value.IsDirectlyPaired)
+                {
+                    item.Value.MarkOffline();
+                    _allClientPairs.TryRemove(item.Key, out _);
+                }
             }
         }
 
@@ -595,14 +600,15 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         {
             pair.UserPair.Groups.Remove(dto.Group.GID);
 
-            if (!pair.HasAnyConnection())
+            // If the pair has no group connections left AND is not directly paired, mark them offline
+            // Directly paired users should remain online regardless of group membership
+            if (!pair.UserPair.Groups.Any() && !pair.IsDirectlyPaired)
             {
                 pair.MarkOffline();
                 _allClientPairs.TryRemove(dto.User, out _);
             }
         }
 
-        EnforceVanillaForPausedPairs("RemoveGroupPair");
         RecreateLazy();
     }
 
