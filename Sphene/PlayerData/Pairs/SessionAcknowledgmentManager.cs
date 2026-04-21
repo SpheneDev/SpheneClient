@@ -22,6 +22,10 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
     
     // Thread-safe storage for latest acknowledgment per user pair with timestamps
     private readonly ConcurrentDictionary<string, LatestAcknowledgmentInfo> _userLatestAcknowledgments = new(StringComparer.Ordinal);
+    
+    // Thread-safe storage for recent acknowledgment history per user (max 5 per user) to handle out-of-order acknowledgments
+    private readonly ConcurrentDictionary<string, List<string>> _userAcknowledgmentHistory = new(StringComparer.Ordinal);
+    private const int MaxHistoryEntriesPerUser = 5;
 
     private long _resultTotal = 0;
     private long _resultSuccess = 0;
@@ -55,6 +59,46 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
         {
             AcknowledgmentId = acknowledgmentId;
             CreatedAt = DateTime.UtcNow;
+        }
+    }
+    
+    // Add acknowledgment to user history (max 5 entries per user)
+    private void AddToAcknowledgmentHistory(string userKey, string hashVersionKey)
+    {
+        _userAcknowledgmentHistory.AddOrUpdate(userKey,
+            addKey => new List<string> { hashVersionKey },
+            (key, existingList) =>
+            {
+                var newList = new List<string>(existingList);
+                // Remove if already exists to move to end
+                newList.Remove(hashVersionKey);
+                // Add to end (most recent)
+                newList.Add(hashVersionKey);
+                // Keep only max entries
+                if (newList.Count > MaxHistoryEntriesPerUser)
+                {
+                    newList.RemoveAt(0);
+                }
+                return newList;
+            });
+    }
+    
+    // Check if hash exists in user's acknowledgment history
+    private bool IsHashInHistory(string userKey, string hashVersionKey)
+    {
+        if (_userAcknowledgmentHistory.TryGetValue(userKey, out var history))
+        {
+            return history.Contains(hashVersionKey, StringComparer.Ordinal);
+        }
+        return false;
+    }
+    
+    // Remove hash from user's acknowledgment history
+    private void RemoveFromHistory(string userKey, string hashVersionKey)
+    {
+        if (_userAcknowledgmentHistory.TryGetValue(userKey, out var history))
+        {
+            history.Remove(hashVersionKey);
         }
     }
     
@@ -173,6 +217,9 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
             latestInfo,
             (key, existing) => latestInfo);
         
+        // Add to history before clearing previous to handle out-of-order acknowledgments
+        AddToAcknowledgmentHistory(userKey, hashVersionKey);
+        
         if (oldInfo != null && !string.Equals(oldInfo.AcknowledgmentId, hashVersionKey, StringComparison.Ordinal))
         {
             _logger.LogDebug("Replaced acknowledgment {oldHashVersion} with {newHashVersion} for user {user}", 
@@ -226,11 +273,26 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
         var userKey = acknowledgingUser.UID;
         
         // Check if this acknowledgment matches the latest one for this user
-        if (!_userLatestAcknowledgments.TryGetValue(userKey, out var latestInfo) || 
-            !string.Equals(latestInfo.AcknowledgmentId, hashVersionKey, StringComparison.Ordinal))
+        // OR if it's in the acknowledgment history (to handle out-of-order acknowledgments)
+        bool matchesLatest = _userLatestAcknowledgments.TryGetValue(userKey, out var latestInfo) && 
+            string.Equals(latestInfo.AcknowledgmentId, hashVersionKey, StringComparison.Ordinal);
+        
+        bool matchesHistory = !matchesLatest && IsHashInHistory(userKey, hashVersionKey);
+        
+        if (!matchesLatest && !matchesHistory)
         {
-            _logger.LogDebug("Acknowledgment {hashVersionKey} from {user} is not the latest or not found", hashVersionKey, acknowledgingUser.AliasOrUID);
+            _logger.LogDebug("Acknowledgment {hashVersionKey} from {user} is not the latest, not found, and not in history", hashVersionKey, acknowledgingUser.AliasOrUID);
             return false;
+        }
+        
+        // If it matches history but not latest, use the latest info for timing metrics
+        if (matchesHistory && !matchesLatest)
+        {
+            _logger.LogDebug("Acknowledgment {hashVersionKey} from {user} matched history (out-of-order)", hashVersionKey, acknowledgingUser.AliasOrUID);
+            if (!_userLatestAcknowledgments.TryGetValue(userKey, out latestInfo))
+            {
+                latestInfo = new LatestAcknowledgmentInfo(hashVersionKey);
+            }
         }
         
         var now = DateTime.UtcNow;
@@ -250,6 +312,9 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
 
         // Remove the acknowledgment as it's been received
         _userLatestAcknowledgments.TryRemove(userKey, out _);
+        
+        // Remove from history to prevent duplicate processing
+        RemoveFromHistory(userKey, hashVersionKey);
         
         // Update the pair's acknowledgment status
         var pair = _getPairFunc(acknowledgingUser);
@@ -387,6 +452,9 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
             // Remove pending entry
             if (_userLatestAcknowledgments.TryRemove(userKey, out var removedInfo))
             {
+                // Remove from history
+                RemoveFromHistory(userKey, removedInfo.AcknowledgmentId);
+                
                 // Clear pair pending state and related notifications
                 var pair = _getPairFunc(user);
                 if (pair != null)
@@ -445,6 +513,9 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
         {
             if (_userLatestAcknowledgments.TryRemove(userKey, out _))
             {
+                // Remove from history
+                RemoveFromHistory(userKey, ackId);
+                
                 var now = DateTime.UtcNow;
                 var responseMs = Math.Max(0, (long)(now - createdAt).TotalMilliseconds);
                 Interlocked.Increment(ref _resultTotal);
@@ -564,6 +635,9 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
         {
             if (_userLatestAcknowledgments.TryRemove(userKey, out _))
             {
+                // Remove from history
+                RemoveFromHistory(userKey, hashVersionKey);
+                
                 var now = DateTime.UtcNow;
                 var responseMs = Math.Max(0, (long)(now - createdAt).TotalMilliseconds);
                 Interlocked.Increment(ref _resultTotal);

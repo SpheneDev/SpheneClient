@@ -65,10 +65,10 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
         {
             var previousHash = _lastCreatedData?.DataHash?.Value;
             var newHash = msg.CharacterData.DataHash?.Value;
-            
             _lastCreatedData = msg.CharacterData;
             Logger.LogDebug("{tag} Data created: previousHash={oldHash} newHash={newHash}", SyncProgressTag, previousHash ?? "null", newHash ?? "null");
-            
+
+
             // Only push if hash actually changed or if we have users waiting for data
             if (!string.Equals(previousHash, newHash, StringComparison.Ordinal) || _usersToPushDataTo.Count > 0)
             {

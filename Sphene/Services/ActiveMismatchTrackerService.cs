@@ -161,7 +161,12 @@ public sealed class ActiveMismatchTrackerService : IDisposable
             }
 
             var json = JsonSerializer.Serialize(dtos, new JsonSerializerOptions { WriteIndented = true });
-            File.WriteAllText(filePath, json);
+            
+            // Use atomic write pattern: write to temp file, then move to final location
+            var tempPath = filePath + ".tmp";
+            File.WriteAllText(tempPath, json);
+            File.Move(tempPath, filePath, overwrite: true);
+            
             _dirty = false;
             _logger.LogDebug("Saved {count} active mismatch records to {path}", dtos.Count, filePath);
         }

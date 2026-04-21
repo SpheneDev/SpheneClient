@@ -13,10 +13,9 @@ namespace Sphene.WebAPI;
 #pragma warning disable MA0040
 public partial class ApiController
 {
-    public async Task PushCharacterData(CharacterData data, List<UserData> visibleCharacters, string? acknowledgmentId = null, bool requiresAcknowledgment = true)
+    public async Task PushCharacterData(API.Data.CharacterData data, List<UserData> visibleCharacters, string? acknowledgmentId = null, bool requiresAcknowledgment = true)
     {
         if (!IsConnected) return;
-
         try
         {
             await PushCharacterDataInternal(data, [.. visibleCharacters], acknowledgmentId, requiresAcknowledgment).ConfigureAwait(false);
@@ -78,10 +77,27 @@ public partial class ApiController
         return await _spheneHub!.InvokeAsync<UserProfileDto>(nameof(UserGetProfile), dto).ConfigureAwait(false);
     }
 
+    // Track last push data time per session to debounce rapid successive pushes (e.g., after zoning)
+    private DateTime _lastPushDataTime = DateTime.MinValue;
+    private const int PushDataDebounceMs = 500; // Minimum 500ms between data pushes to prevent duplicates
+
     public async Task UserPushData(UserCharaDataMessageDto dto)
     {
         try
         {
+            var now = DateTime.UtcNow;
+            var timeSinceLastPush = (now - _lastPushDataTime).TotalMilliseconds;
+            
+            // Debounce rapid successive data pushes to prevent duplicates (e.g., after zoning)
+            if (timeSinceLastPush < PushDataDebounceMs)
+            {
+                Logger.LogDebug("Debouncing data push - only {ms}ms since last push (threshold: {threshold}ms)", 
+                    timeSinceLastPush, PushDataDebounceMs);
+                return; // Skip this push to prevent duplicate
+            }
+            
+            _lastPushDataTime = now;
+            
             await _spheneHub!.InvokeAsync(nameof(UserPushData), dto).ConfigureAwait(false);
         }
         catch (Exception ex)
@@ -257,7 +273,7 @@ public partial class ApiController
         }
     }
 
-    private async Task PushCharacterDataInternal(CharacterData character, List<UserData> visibleCharacters, string? acknowledgmentId = null, bool requiresAcknowledgment = true)
+    private async Task PushCharacterDataInternal(API.Data.CharacterData character, List<UserData> visibleCharacters, string? acknowledgmentId = null, bool requiresAcknowledgment = true)
     {
         Logger.LogDebug("Pushing character data for {hash} to {charas} with acknowledgment ID {ackId}", character.DataHash.Value, string.Join(", ", visibleCharacters.Select(c => c.AliasOrUID)), acknowledgmentId);
         StringBuilder sb = new();

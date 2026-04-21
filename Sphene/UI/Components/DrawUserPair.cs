@@ -564,6 +564,10 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         var isTimingSyncTarget = _localPairEmoteForceSyncService.IsTargetSelected(_pair.UserData.UID);
         var isAutoResetActiveForTargets = _localPairEmoteForceSyncService.AutoResetOnLocalEmoteEnabled;
 
+        // Use combined state to prevent race conditions between separate calls
+        var (incomingStateForIcon, outgoingStateForIcon) = _pair.GetCombinedAckV3State();
+        var stateForIcon = GetMostSevereAckState(incomingStateForIcon, outgoingStateForIcon);
+
         if (_pair.IsPaused)
         {
             using var _ = ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.DalamudYellow);
@@ -590,9 +594,6 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
                 ImGui.SameLine();
             }
             
-            var incomingStateForIcon = _pair.GetIncomingAckV3State();
-            var outgoingStateForIcon = _pair.GetOutgoingAckV3State();
-            var stateForIcon = GetMostSevereAckState(incomingStateForIcon, outgoingStateForIcon);
             var iconColor = suppressAckUi ? ImGuiColors.ParsedGreen : stateForIcon.Outcome switch
             {
                 Pair.AckV3Outcome.Success => ImGuiColors.ParsedGreen,

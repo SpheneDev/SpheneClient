@@ -14,7 +14,8 @@ public class CharacterData
     public string ManipulationString { get; set; } = string.Empty;
     public string MoodlesData { get; set; } = string.Empty;
     public string PetNamesData { get; set; } = string.Empty;
-    public string BypassEmoteData { get; set; } = string.Empty;
+    public string BypassEmoteData { get; set; } = string.Empty; // Kept for internal use, not sent to API
+    public bool HasBypassEmote { get; set; } = false;
 
     public void SetFragment(ObjectKind kind, CharacterDataFragment? fragment)
     {
@@ -27,6 +28,7 @@ public class CharacterData
             MoodlesData = playerFragment?.MoodlesData ?? string.Empty;
             PetNamesData = playerFragment?.PetNamesData ?? string.Empty;
             BypassEmoteData = playerFragment?.BypassEmoteData ?? string.Empty;
+            HasBypassEmote = !string.IsNullOrEmpty(BypassEmoteData);
         }
 
         if (fragment is null)
@@ -74,7 +76,7 @@ public class CharacterData
             HonorificData = HonorificData,
             MoodlesData = MoodlesData,
             PetNamesData = PetNamesData,
-            BypassEmoteData = BypassEmoteData
+            HasBypassEmote = HasBypassEmote
         };
     }
 }

@@ -30,6 +30,8 @@ public class Pair : DisposableMediatorSubscriberBase
     private readonly PlayerPerformanceConfigService _playerPerformanceConfigService;
     private readonly Lazy<ApiController> _apiController;
     private readonly DalamudUtilService _dalamudUtilService;
+    private readonly object _ackStateLock = new();
+    private long _acknowledgmentVersion = 0;
     private CancellationTokenSource _applicationCts = new();
     private OnlineUserIdentDto? _onlineUserIdentDto = null;
     private static readonly Version LegacyAckMaxClientVersion = new(1, 1, 13, 1);
@@ -154,22 +156,39 @@ public class Pair : DisposableMediatorSubscriberBase
             return new(AckV3Outcome.Unknown, null, null, Sphene.API.Dto.User.AcknowledgmentErrorCode.None, null);
         }
 
-        if (HasPendingAcknowledgment)
+        bool hasPending;
+        string? ackId;
+        DateTimeOffset? ackTime;
+        bool? ackSuccess;
+        Sphene.API.Dto.User.AcknowledgmentErrorCode errorCode;
+        string? errorMessage;
+
+        lock (_ackStateLock)
         {
-            return new(AckV3Outcome.Pending, LastAcknowledgmentId, LastAcknowledgmentTime, Sphene.API.Dto.User.AcknowledgmentErrorCode.None, null);
+            hasPending = HasPendingAcknowledgment;
+            ackId = LastAcknowledgmentId;
+            ackTime = LastAcknowledgmentTime;
+            ackSuccess = LastAcknowledgmentSuccess;
+            errorCode = LastAcknowledgmentErrorCode;
+            errorMessage = LastAcknowledgmentErrorMessage;
         }
 
-        if (LastAcknowledgmentSuccess == true)
+        if (hasPending)
         {
-            return new(AckV3Outcome.Success, LastAcknowledgmentId, LastAcknowledgmentTime, Sphene.API.Dto.User.AcknowledgmentErrorCode.None, null);
+            return new(AckV3Outcome.Pending, ackId, ackTime, Sphene.API.Dto.User.AcknowledgmentErrorCode.None, null);
         }
 
-        if (LastAcknowledgmentSuccess == false)
+        if (ackSuccess == true)
         {
-            return new(AckV3Outcome.Fail, LastAcknowledgmentId, LastAcknowledgmentTime, LastAcknowledgmentErrorCode, LastAcknowledgmentErrorMessage);
+            return new(AckV3Outcome.Success, ackId, ackTime, Sphene.API.Dto.User.AcknowledgmentErrorCode.None, null);
         }
 
-        return new(AckV3Outcome.Unknown, LastAcknowledgmentId, LastAcknowledgmentTime, Sphene.API.Dto.User.AcknowledgmentErrorCode.None, null);
+        if (ackSuccess == false)
+        {
+            return new(AckV3Outcome.Fail, ackId, ackTime, errorCode, errorMessage);
+        }
+
+        return new(AckV3Outcome.Unknown, ackId, ackTime, Sphene.API.Dto.User.AcknowledgmentErrorCode.None, null);
     }
 
     public AckV3State GetIncomingAckV3State()
@@ -193,20 +212,86 @@ public class Pair : DisposableMediatorSubscriberBase
             return new(AckV3Outcome.Success, currentHash, LastReceivedCharacterDataTime, Sphene.API.Dto.User.AcknowledgmentErrorCode.None, null);
         }
 
-        if (string.Equals(LastIncomingAcknowledgmentHash, currentHash, StringComparison.Ordinal))
+        string? incomingHash;
+        bool? incomingSuccess;
+        DateTimeOffset? incomingTime;
+        Sphene.API.Dto.User.AcknowledgmentErrorCode incomingErrorCode;
+        string? incomingErrorMessage;
+
+        lock (_ackStateLock)
         {
-            if (LastIncomingAcknowledgmentSuccess == true)
+            incomingHash = LastIncomingAcknowledgmentHash;
+            incomingSuccess = LastIncomingAcknowledgmentSuccess;
+            incomingTime = LastIncomingAcknowledgmentTime;
+            incomingErrorCode = LastIncomingAcknowledgmentErrorCode;
+            incomingErrorMessage = LastIncomingAcknowledgmentErrorMessage;
+        }
+
+        if (string.Equals(incomingHash, currentHash, StringComparison.Ordinal))
+        {
+            if (incomingSuccess == true)
             {
-                return new(AckV3Outcome.Success, currentHash, LastIncomingAcknowledgmentTime, Sphene.API.Dto.User.AcknowledgmentErrorCode.None, null);
+                return new(AckV3Outcome.Success, currentHash, incomingTime, Sphene.API.Dto.User.AcknowledgmentErrorCode.None, null);
             }
 
-            if (LastIncomingAcknowledgmentSuccess == false)
+            if (incomingSuccess == false)
             {
-                return new(AckV3Outcome.Fail, currentHash, LastIncomingAcknowledgmentTime, LastIncomingAcknowledgmentErrorCode, LastIncomingAcknowledgmentErrorMessage);
+                return new(AckV3Outcome.Fail, currentHash, incomingTime, incomingErrorCode, incomingErrorMessage);
             }
         }
 
         return new(AckV3Outcome.Pending, currentHash, LastReceivedCharacterDataTime, Sphene.API.Dto.User.AcknowledgmentErrorCode.None, null);
+    }
+    
+    // Get both incoming and outgoing acknowledgment states atomically to prevent race conditions in UI
+    public (AckV3State Incoming, AckV3State Outgoing) GetCombinedAckV3State()
+    {
+        if (!IsMutuallyVisible)
+        {
+            var unknownState = new AckV3State(AckV3Outcome.Unknown, null, null, Sphene.API.Dto.User.AcknowledgmentErrorCode.None, null);
+            return (unknownState, unknownState);
+        }
+
+        // Read all outgoing state atomically
+        bool hasPending;
+        string? outgoingAckId;
+        DateTimeOffset? outgoingAckTime;
+        bool? outgoingAckSuccess;
+        Sphene.API.Dto.User.AcknowledgmentErrorCode outgoingErrorCode;
+        string? outgoingErrorMessage;
+
+        lock (_ackStateLock)
+        {
+            hasPending = HasPendingAcknowledgment;
+            outgoingAckId = LastAcknowledgmentId;
+            outgoingAckTime = LastAcknowledgmentTime;
+            outgoingAckSuccess = LastAcknowledgmentSuccess;
+            outgoingErrorCode = LastAcknowledgmentErrorCode;
+            outgoingErrorMessage = LastAcknowledgmentErrorMessage;
+        }
+
+        AckV3State outgoingState;
+        if (hasPending)
+        {
+            outgoingState = new(AckV3Outcome.Pending, outgoingAckId, outgoingAckTime, Sphene.API.Dto.User.AcknowledgmentErrorCode.None, null);
+        }
+        else if (outgoingAckSuccess == true)
+        {
+            outgoingState = new(AckV3Outcome.Success, outgoingAckId, outgoingAckTime, Sphene.API.Dto.User.AcknowledgmentErrorCode.None, null);
+        }
+        else if (outgoingAckSuccess == false)
+        {
+            outgoingState = new(AckV3Outcome.Fail, outgoingAckId, outgoingAckTime, outgoingErrorCode, outgoingErrorMessage);
+        }
+        else
+        {
+            outgoingState = new(AckV3Outcome.Unknown, outgoingAckId, outgoingAckTime, Sphene.API.Dto.User.AcknowledgmentErrorCode.None, null);
+        }
+
+        // Get incoming state (already atomic from GetIncomingAckV3State)
+        var incomingState = GetIncomingAckV3State();
+
+        return (incomingState, outgoingState);
     }
     
     private sealed record LastReceivedAckContext(string DataHash, bool RequiresAcknowledgment, string? SessionId);
@@ -216,8 +301,11 @@ public class Pair : DisposableMediatorSubscriberBase
 
     public void SetOutgoingAcknowledgmentContext(string? dataHash, string? sessionId)
     {
-        LastOutgoingAcknowledgmentHash = dataHash;
-        LastOutgoingAcknowledgmentSessionId = sessionId;
+        lock (_ackStateLock)
+        {
+            LastOutgoingAcknowledgmentHash = dataHash;
+            LastOutgoingAcknowledgmentSessionId = sessionId;
+        }
     }
 
     // Queue for pending acknowledgment data to handle multiple rapid requests
@@ -319,24 +407,31 @@ public class Pair : DisposableMediatorSubscriberBase
 
     private void ResetAcknowledgmentState()
     {
-        HasPendingAcknowledgment = false;
-        LastAcknowledgmentSuccess = null;
-        LastAcknowledgmentTime = null;
-        LastAcknowledgmentId = null;
-        LastAcknowledgmentErrorCode = Sphene.API.Dto.User.AcknowledgmentErrorCode.None;
-        LastAcknowledgmentErrorMessage = null;
+        lock (_ackStateLock)
+        {
+            HasPendingAcknowledgment = false;
+            LastAcknowledgmentSuccess = null;
+            LastAcknowledgmentTime = null;
+            LastAcknowledgmentId = null;
+            LastAcknowledgmentErrorCode = Sphene.API.Dto.User.AcknowledgmentErrorCode.None;
+            LastAcknowledgmentErrorMessage = null;
 
-        LastAcknowledgedIncomingDataHash = null;
-        LastAcknowledgedIncomingTime = null;
-        LastIncomingAcknowledgmentHash = null;
-        LastIncomingAcknowledgmentSuccess = null;
-        LastIncomingAcknowledgmentErrorCode = Sphene.API.Dto.User.AcknowledgmentErrorCode.None;
-        LastIncomingAcknowledgmentErrorMessage = null;
-        LastIncomingAcknowledgmentTime = null;
-        _lastIncomingAckContext = null;
+            // Preserve incoming acknowledgment history - only clear outgoing state
+            // Incoming acknowledgment state should persist regardless of visibility changes
+            LastAcknowledgedIncomingDataHash = null;
+            LastAcknowledgedIncomingTime = null;
+            // Do NOT clear: LastIncomingAcknowledgmentHash, LastIncomingAcknowledgmentSuccess, etc.
+            // These should persist across visibility changes
+            // LastIncomingAcknowledgmentHash = null;
+            // LastIncomingAcknowledgmentSuccess = null;
+            // LastIncomingAcknowledgmentErrorCode = Sphene.API.Dto.User.AcknowledgmentErrorCode.None;
+            // LastIncomingAcknowledgmentErrorMessage = null;
+            // LastIncomingAcknowledgmentTime = null;
+            // _lastIncomingAckContext = null;
 
-        LastOutgoingAcknowledgmentHash = null;
-        LastOutgoingAcknowledgmentSessionId = null;
+            LastOutgoingAcknowledgmentHash = null;
+            LastOutgoingAcknowledgmentSessionId = null;
+        }
 
         Mediator.Publish(new AcknowledgmentUiRefreshMessage(User: UserData));
     }
@@ -841,24 +936,41 @@ public class Pair : DisposableMediatorSubscriberBase
         string? errorMessage = null)
     {
         Logger.LogDebug("Updating acknowledgment status: {acknowledgmentId} - Success: {success} for user {user}", acknowledgmentId ?? "null", success, UserData.AliasOrUID);
-        LastAcknowledgmentId = acknowledgmentId;
-        LastAcknowledgmentSuccess = success;
-        LastAcknowledgmentTime = timestamp;
-        HasPendingAcknowledgment = false;
-        LastAcknowledgmentErrorCode = success ? Sphene.API.Dto.User.AcknowledgmentErrorCode.None : errorCode;
-        LastAcknowledgmentErrorMessage = success ? null : errorMessage;
         
-        // Publish specific pair acknowledgment status change event
+        bool hasPending;
+        bool? ackSuccess;
+        DateTimeOffset? ackTime;
+        long currentVersion;
+        
+        lock (_ackStateLock)
+        {
+            LastAcknowledgmentId = acknowledgmentId;
+            LastAcknowledgmentSuccess = success;
+            LastAcknowledgmentTime = timestamp;
+            HasPendingAcknowledgment = false;
+            LastAcknowledgmentErrorCode = success ? Sphene.API.Dto.User.AcknowledgmentErrorCode.None : errorCode;
+            LastAcknowledgmentErrorMessage = success ? null : errorMessage;
+            
+            hasPending = HasPendingAcknowledgment;
+            ackSuccess = LastAcknowledgmentSuccess;
+            ackTime = LastAcknowledgmentTime;
+            
+            // Increment version counter for UI update coordination
+            currentVersion = Interlocked.Increment(ref _acknowledgmentVersion);
+        }
+        
+        // Publish specific pair acknowledgment status change event with version
         Mediator.Publish(new PairAcknowledgmentStatusChangedMessage(
             UserData,
             acknowledgmentId,
-            HasPendingAcknowledgment,
-            LastAcknowledgmentSuccess,
-            LastAcknowledgmentTime
+            hasPending,
+            ackSuccess,
+            ackTime,
+            currentVersion
         ));
         
         // Publish optimized icon update for acknowledgment status
-        var ackData = new AcknowledgmentStatusData(HasPendingAcknowledgment, LastAcknowledgmentSuccess, LastAcknowledgmentTime);
+        var ackData = new AcknowledgmentStatusData(hasPending, ackSuccess, ackTime);
         Mediator.Publish(new UserPairIconUpdateMessage(UserData, IconUpdateType.AcknowledgmentStatus, ackData));
         
         // Publish granular UI refresh for this specific acknowledgment
@@ -871,24 +983,41 @@ public class Pair : DisposableMediatorSubscriberBase
     public async Task SetPendingAcknowledgment(string acknowledgmentId)
     {
         Logger.LogDebug("Setting pending acknowledgment: {acknowledgmentId} for user {user}", acknowledgmentId, UserData.AliasOrUID);
-        LastAcknowledgmentId = acknowledgmentId;
-        HasPendingAcknowledgment = true;
-        LastAcknowledgmentSuccess = null;
-        LastAcknowledgmentTime = null;
-        LastAcknowledgmentErrorCode = Sphene.API.Dto.User.AcknowledgmentErrorCode.None;
-        LastAcknowledgmentErrorMessage = null;
         
-        // Publish specific pair acknowledgment status change event
+        bool hasPending;
+        bool? ackSuccess;
+        DateTimeOffset? ackTime;
+        long currentVersion;
+        
+        lock (_ackStateLock)
+        {
+            LastAcknowledgmentId = acknowledgmentId;
+            HasPendingAcknowledgment = true;
+            LastAcknowledgmentSuccess = null;
+            LastAcknowledgmentTime = null;
+            LastAcknowledgmentErrorCode = Sphene.API.Dto.User.AcknowledgmentErrorCode.None;
+            LastAcknowledgmentErrorMessage = null;
+            
+            hasPending = HasPendingAcknowledgment;
+            ackSuccess = LastAcknowledgmentSuccess;
+            ackTime = LastAcknowledgmentTime;
+            
+            // Increment version counter for UI update coordination
+            currentVersion = Interlocked.Increment(ref _acknowledgmentVersion);
+        }
+        
+        // Publish specific pair acknowledgment status change event with version
         Mediator.Publish(new PairAcknowledgmentStatusChangedMessage(
             UserData,
             acknowledgmentId,
-            HasPendingAcknowledgment,
-            LastAcknowledgmentSuccess,
-            LastAcknowledgmentTime
+            hasPending,
+            ackSuccess,
+            ackTime,
+            currentVersion
         ));
         
         // Publish optimized icon update for acknowledgment status
-        var ackData = new AcknowledgmentStatusData(HasPendingAcknowledgment, LastAcknowledgmentSuccess, LastAcknowledgmentTime);
+        var ackData = new AcknowledgmentStatusData(hasPending, ackSuccess, ackTime);
         Mediator.Publish(new UserPairIconUpdateMessage(UserData, IconUpdateType.AcknowledgmentStatus, ackData));
         
         // Publish acknowledgment pending event
@@ -919,29 +1048,47 @@ public class Pair : DisposableMediatorSubscriberBase
     public void SetBuildStartPendingStatus()
     {
         Logger.LogInformation("Setting build start pending status for user {user}", UserData.AliasOrUID);
-        HasPendingAcknowledgment = true;
-        LastAcknowledgmentSuccess = null;
-        LastAcknowledgmentTime = null;
-        LastAcknowledgmentId = null; // No specific acknowledgment ID for build start
+        lock (_ackStateLock)
+        {
+            HasPendingAcknowledgment = true;
+            LastAcknowledgmentSuccess = null;
+            LastAcknowledgmentTime = null;
+            LastAcknowledgmentId = null; // No specific acknowledgment ID for build start
+        }
     }
 
     public void ClearBuildStartPendingStatus()
     {
-        if (!HasPendingAcknowledgment || LastAcknowledgmentId != null)
+        bool shouldClear;
+        long currentVersion = 0;
+        
+        lock (_ackStateLock)
         {
-            return;
+            if (!HasPendingAcknowledgment || LastAcknowledgmentId != null)
+            {
+                shouldClear = false;
+            }
+            else
+            {
+                HasPendingAcknowledgment = false;
+                LastAcknowledgmentSuccess = null;
+                LastAcknowledgmentTime = null;
+                shouldClear = true;
+                
+                // Increment version counter for UI update coordination
+                currentVersion = Interlocked.Increment(ref _acknowledgmentVersion);
+            }
         }
 
-        HasPendingAcknowledgment = false;
-        LastAcknowledgmentSuccess = null;
-        LastAcknowledgmentTime = null;
+        if (!shouldClear) return;
 
         Mediator.Publish(new PairAcknowledgmentStatusChangedMessage(
             UserData,
             null,
             HasPendingAcknowledgment,
             LastAcknowledgmentSuccess,
-            LastAcknowledgmentTime
+            LastAcknowledgmentTime,
+            currentVersion
         ));
 
         var ackData = new AcknowledgmentStatusData(HasPendingAcknowledgment, LastAcknowledgmentSuccess, LastAcknowledgmentTime);
@@ -952,59 +1099,89 @@ public class Pair : DisposableMediatorSubscriberBase
 
     public async Task ClearPendingAcknowledgment(string acknowledgmentId, MessageService? messageService = null)
     {
-        // Only clear if this is the acknowledgment we're waiting for
-        if (string.Equals(LastAcknowledgmentId, acknowledgmentId, StringComparison.Ordinal))
+        bool shouldClear;
+        long currentVersion = 0;
+        
+        lock (_ackStateLock)
         {
-            Logger.LogDebug("Clearing pending acknowledgment: {acknowledgmentId} for user {user}", acknowledgmentId, UserData.AliasOrUID);
-            HasPendingAcknowledgment = false;
-            LastAcknowledgmentId = null;
-            
-            // Add notification if MessageService is available
-            messageService?.AddTaggedMessage(
-                $"pair_clear_{acknowledgmentId}_{UserData.UID}",
-                $"Cleared pending acknowledgment for {UserData.AliasOrUID}",
-                NotificationType.Info,
-                "Acknowledgment Cleared",
-                TimeSpan.FromSeconds(2)
-            );
-            
-            // Publish specific pair acknowledgment status change event
-            Mediator.Publish(new PairAcknowledgmentStatusChangedMessage(
-                UserData,
+            // Only clear if this is the acknowledgment we're waiting for
+            if (string.Equals(LastAcknowledgmentId, acknowledgmentId, StringComparison.Ordinal))
+            {
+                Logger.LogDebug("Clearing pending acknowledgment: {acknowledgmentId} for user {user}", acknowledgmentId, UserData.AliasOrUID);
+                HasPendingAcknowledgment = false;
+                LastAcknowledgmentId = null;
+                shouldClear = true;
+                
+                // Increment version counter for UI update coordination
+                currentVersion = Interlocked.Increment(ref _acknowledgmentVersion);
+            }
+            else
+            {
+                Logger.LogDebug("Not clearing pending acknowledgment - ID mismatch. Expected: {expected}, Got: {got} for user {user}", 
+                    LastAcknowledgmentId, acknowledgmentId, UserData.AliasOrUID);
+                shouldClear = false;
+            }
+        }
+
+        if (!shouldClear) return;
+        
+        // Add notification if MessageService is available
+        messageService?.AddTaggedMessage(
+            $"pair_clear_{acknowledgmentId}_{UserData.UID}",
+            $"Cleared pending acknowledgment for {UserData.AliasOrUID}",
+            NotificationType.Info,
+            "Acknowledgment Cleared",
+            TimeSpan.FromSeconds(2)
+        );
+        
+        // Publish specific pair acknowledgment status change event with version
+        Mediator.Publish(new PairAcknowledgmentStatusChangedMessage(
+            UserData,
+            acknowledgmentId,
+            HasPendingAcknowledgment,
+            LastAcknowledgmentSuccess,
+            LastAcknowledgmentTime,
+            currentVersion
+        ));
+        
+        // Publish granular UI refresh for this specific acknowledgment
+        Mediator.Publish(new AcknowledgmentUiRefreshMessage(
+            AcknowledgmentId: acknowledgmentId,
+            User: UserData
+        ));
+        
+        // Publish acknowledgment status change event
+        Mediator.Publish(new AcknowledgmentStatusChangedMessage(
+            new AcknowledgmentEventDto(
                 acknowledgmentId,
-                HasPendingAcknowledgment,
-                LastAcknowledgmentSuccess,
-                LastAcknowledgmentTime
-            ));
-            
-            // Publish granular UI refresh for this specific acknowledgment
-            Mediator.Publish(new AcknowledgmentUiRefreshMessage(
-                AcknowledgmentId: acknowledgmentId,
-                User: UserData
-            ));
-            
-            // Publish acknowledgment status change event
-            Mediator.Publish(new AcknowledgmentStatusChangedMessage(
-                new AcknowledgmentEventDto(
-                    acknowledgmentId,
-                    UserData,
-                    AcknowledgmentStatus.Received,
-                    DateTime.UtcNow)
-            ));
-        }
-        else
-        {
-            Logger.LogDebug("Not clearing pending acknowledgment - ID mismatch. Expected: {expected}, Got: {got} for user {user}", 
-                LastAcknowledgmentId, acknowledgmentId, UserData.AliasOrUID);
-        }
+                UserData,
+                AcknowledgmentStatus.Received,
+                DateTime.UtcNow)
+        ));
     }
 
     public void ClearPendingAcknowledgmentForce(MessageService? messageService = null)
     {
-        var previousAckId = LastAcknowledgmentId;
-        Logger.LogDebug("Force clearing pending acknowledgment for user {user}", UserData.AliasOrUID);
-        HasPendingAcknowledgment = false;
-        LastAcknowledgmentId = null;
+        string? previousAckId;
+        bool hasPending;
+        bool? ackSuccess;
+        DateTimeOffset? ackTime;
+        long currentVersion;
+        
+        lock (_ackStateLock)
+        {
+            previousAckId = LastAcknowledgmentId;
+            Logger.LogDebug("Force clearing pending acknowledgment for user {user}", UserData.AliasOrUID);
+            HasPendingAcknowledgment = false;
+            LastAcknowledgmentId = null;
+            
+            hasPending = HasPendingAcknowledgment;
+            ackSuccess = LastAcknowledgmentSuccess;
+            ackTime = LastAcknowledgmentTime;
+            
+            // Increment version counter for UI update coordination
+            currentVersion = Interlocked.Increment(ref _acknowledgmentVersion);
+        }
         
         // Add notification if MessageService is available
         messageService?.AddTaggedMessage(
@@ -1015,13 +1192,14 @@ public class Pair : DisposableMediatorSubscriberBase
             TimeSpan.FromSeconds(3)
         );
         
-        // Publish specific pair acknowledgment status change event
+        // Publish specific pair acknowledgment status change event with version
         Mediator.Publish(new PairAcknowledgmentStatusChangedMessage(
             UserData,
             previousAckId,
-            HasPendingAcknowledgment,
-            LastAcknowledgmentSuccess,
-            LastAcknowledgmentTime
+            hasPending,
+            ackSuccess,
+            ackTime,
+            currentVersion
         ));
         
         // Publish granular UI refresh for this user

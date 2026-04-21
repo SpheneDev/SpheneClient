@@ -9,5 +9,6 @@ public record PairAcknowledgmentStatusChangedMessage(
     string? AcknowledgmentId,
     bool HasPendingAcknowledgment,
     bool? LastAcknowledgmentSuccess,
-    DateTimeOffset? LastAcknowledgmentTime
+    DateTimeOffset? LastAcknowledgmentTime,
+    long Version = 0
 ) : MessageBase;

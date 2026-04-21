@@ -37,7 +37,7 @@ public sealed record CharaDataExtendedUpdateDto : CharaDataUpdateDto
         HonorificData = base.HonorificData,
         MoodlesData = base.MoodlesData,
         PetNamesData = base.PetNamesData,
-        BypassEmoteData = base.BypassEmoteData,
+        HasBypassEmote = base.HasBypassEmote,
         Poses = Poses
     };
 
@@ -253,18 +253,18 @@ public sealed record CharaDataExtendedUpdateDto : CharaDataUpdateDto
         }
     }
 
-    public new string? BypassEmoteData
+    public new bool? HasBypassEmote
     {
         get
         {
-            return base.BypassEmoteData ?? _charaDataFullDto.BypassEmoteData;
+            return base.HasBypassEmote ?? _charaDataFullDto.HasBypassEmote;
         }
         set
         {
-            base.BypassEmoteData = value;
-            if (string.Equals(base.BypassEmoteData, _charaDataFullDto.BypassEmoteData, StringComparison.Ordinal))
+            base.HasBypassEmote = value;
+            if (Equals(base.HasBypassEmote, _charaDataFullDto.HasBypassEmote))
             {
-                base.BypassEmoteData = null;
+                base.HasBypassEmote = null;
             }
         }
     }

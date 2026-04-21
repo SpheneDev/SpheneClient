@@ -276,7 +276,7 @@ public sealed partial class CharaDataManager : DisposableMediatorSubscriberBase
             HonorificData = dataDto.HonorificData,
             MoodlesData = dataDto.MoodlesData,
             PetNamesData = dataDto.PetNamesData,
-            BypassEmoteData = dataDto.BypassEmoteData,
+            HasBypassEmote = dataDto.HasBypassEmote,
             UpdatedDate = dataDto.UpdatedDate
         };
 
@@ -811,7 +811,7 @@ public sealed partial class CharaDataManager : DisposableMediatorSubscriberBase
             HonorificData = dataDto.HonorificData,
             MoodlesData = dataDto.MoodlesData,
             PetNamesData = dataDto.PetNamesData,
-            BypassEmoteData = dataDto.BypassEmoteData,
+            HasBypassEmote = dataDto.HasBypassEmote,
             UpdatedDate = dataDto.UpdatedDate
         };
 
@@ -1076,10 +1076,8 @@ public sealed partial class CharaDataManager : DisposableMediatorSubscriberBase
 
         Logger.LogDebug("Pushing update dto to server: {data}", baseUpdateDto);
 
-        if (baseUpdateDto.BypassEmoteData != null)
+        if (baseUpdateDto.HasBypassEmote != null)
         {
-            await _apiController.BypassEmoteUpdate(new BypassEmoteUpdateDto(baseUpdateDto.Id, baseUpdateDto.BypassEmoteData)).ConfigureAwait(false);
-
             bool otherChanges = baseUpdateDto.Description != null
                || baseUpdateDto.ExpiryDate != null
                || baseUpdateDto.AccessType != null
@@ -1103,7 +1101,7 @@ public sealed partial class CharaDataManager : DisposableMediatorSubscriberBase
                 {
                     var newDto = currentExtended with
                     {
-                        BypassEmoteData = baseUpdateDto.BypassEmoteData,
+                        HasBypassEmote = baseUpdateDto.HasBypassEmote ?? false,
                         UpdatedDate = DateTime.UtcNow
                     };
                     await AddOrUpdateDto(newDto).ConfigureAwait(false);

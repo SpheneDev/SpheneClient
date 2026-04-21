@@ -203,31 +203,28 @@ public sealed class CacheCreationService : DisposableMediatorSubscriberBase
         Mediator.Subscribe<BypassEmoteMessage>(this, (msg) =>
         {
             if (_isZoning) return;
-            
+
             lock (_playerDataLock)
             {
                 if (!string.Equals(msg.BypassEmoteData, _playerData.BypassEmoteData, StringComparison.Ordinal))
                 {
                     Logger.LogDebug("Received BypassEmote change, fast-tracking update. Old Hash: {Hash}", _lastDataHash ?? "null");
                     _playerData.BypassEmoteData = msg.BypassEmoteData;
+                    _playerData.HasBypassEmote = !string.IsNullOrEmpty(msg.BypassEmoteData);
 
                     var newData = _playerData.ToAPI();
                     var newHash = newData.DataHash?.Value;
 
-                    // Fast path: Publish immediately using the NEW hash.
-                    // The receiver (CharaDataManager) needs a valid hash to send to the server.
-                    // Even if the server doesn't have this hash yet (Slow Path hasn't arrived),
-                    // the server can still forward the message to recipients.
-                    Mediator.Publish(new BypassEmoteUpdateMessage(msg.BypassEmoteData, newHash ?? string.Empty));
-                    
+                    // Publish CharacterDataCreatedMessage to ensure HasBypassEmote flag is transmitted to other clients
                     if (!string.Equals(newHash, _lastDataHash, StringComparison.Ordinal))
                     {
-                        Logger.LogDebug("Character data changed (BypassEmote), publishing update. Old hash: {OldHash}, New hash: {NewHash}", _lastDataHash ?? "null", newHash ?? "null");
+                        Logger.LogDebug("BypassEmote changed, publishing CharacterDataCreatedMessage. Hash: {hash}", newHash ?? "null");
                         _lastDataHash = newHash;
-                        
-                        // Slow path (consistency)
                         Mediator.Publish(new CharacterDataCreatedMessage(newData));
                     }
+
+                    // Fast path for actual bypass emote data
+                    Mediator.Publish(new BypassEmoteUpdateMessage(msg.BypassEmoteData, newHash ?? string.Empty));
                 }
             }
         });

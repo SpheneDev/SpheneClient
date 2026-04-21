@@ -131,11 +131,18 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
         catch (Exception ex)
         {
             Logger.LogError(ex, "Failed to send acknowledgment {ackId}", acknowledgment.AcknowledgmentId);
-            acknowledgment.MarkAsFailed(AcknowledgmentErrorCode.NetworkError, ex.Message);
+            var errorCode = DetermineErrorCode(ex);
+            acknowledgment.MarkAsFailed(errorCode, ex.Message);
             
-            if (_config.EnableAutoRetry && acknowledgment.RetryCount < _config.MaxRetryAttempts)
+            // Only retry if the error is retryable
+            if (_config.EnableAutoRetry && acknowledgment.RetryCount < _config.MaxRetryAttempts && ShouldRetry(errorCode))
             {
                 await ScheduleRetryAsync(acknowledgment).ConfigureAwait(false);
+            }
+            else if (!ShouldRetry(errorCode))
+            {
+                Logger.LogWarning("Non-retryable error for acknowledgment {ackId}: {errorCode}, not retrying", 
+                    acknowledgment.AcknowledgmentId, errorCode);
             }
             
             return false;
@@ -206,14 +213,20 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
         
         try
         {
-            // Add to pending acknowledgments for timeout tracking
-            var pendingAck = new PendingAcknowledgment(acknowledgment, DateTime.UtcNow.Add(timeout));
-            _pendingAcknowledgments[acknowledgment.AcknowledgmentId] = pendingAck;
+            // Check cache to avoid duplicate sends
+            var cacheKey = $"{acknowledgment.User.UID}_{acknowledgment.AcknowledgmentId}";
+            if (_acknowledgmentCache.TryGetValue(cacheKey, out var cached))
+            {
+                Logger.LogDebug("Acknowledgment {ackId} already cached for user {user}, skipping send", acknowledgment.AcknowledgmentId, acknowledgment.User.AliasOrUID);
+                return true;
+            }
             
             // Convert to legacy DTO for API compatibility
-            var legacyDto = new CharacterDataAcknowledgmentDto(acknowledgment.User, acknowledgment.DataHash)
+            var legacyDto = new CharacterDataAcknowledgmentDto(acknowledgment.User, acknowledgment.AcknowledgmentId)
             {
                 Success = acknowledgment.Success,
+                ErrorCode = (Sphene.API.Dto.User.AcknowledgmentErrorCode)acknowledgment.ErrorCode,
+                ErrorMessage = acknowledgment.ErrorMessage,
                 AcknowledgedAt = acknowledgment.AcknowledgedAt
             };
             
@@ -225,12 +238,23 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
             _metrics.RecordSuccess(acknowledgment.Priority, responseTime);
             _metrics.RecordSent();
             
-            // Remove any existing cache entries for this user (only latest acknowledgment per user)
+            // Remove any existing cache entries for this user (only older acknowledgments, not newer ones)
             var userPrefix = $"{acknowledgment.User.UID}_";
-            var keysToRemove = _acknowledgmentCache.Keys
-                .Where(key => key.StartsWith(userPrefix, StringComparison.Ordinal) &&
-                              !string.Equals(key, $"{acknowledgment.User.UID}_{acknowledgment.AcknowledgmentId}", StringComparison.Ordinal))
-                .ToList();
+            var currentTimestamp = DateTime.UtcNow;
+            var keysToRemove = new List<string>();
+            
+            foreach (var kvp in _acknowledgmentCache)
+            {
+                if (kvp.Key.StartsWith(userPrefix, StringComparison.Ordinal) &&
+                    !string.Equals(kvp.Key, $"{acknowledgment.User.UID}_{acknowledgment.AcknowledgmentId}", StringComparison.Ordinal))
+                {
+                    // Only remove if the cached acknowledgment is older than the current one
+                    if (kvp.Value.Timestamp < currentTimestamp)
+                    {
+                        keysToRemove.Add(kvp.Key);
+                    }
+                }
+            }
             
             foreach (var keyToRemove in keysToRemove)
             {
@@ -239,7 +263,6 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
             }
             
             // Cache the latest acknowledgment
-            var cacheKey = $"{acknowledgment.User.UID}_{acknowledgment.AcknowledgmentId}";
             _acknowledgmentCache[cacheKey] = new CachedAcknowledgment(acknowledgment, DateTime.UtcNow);
             
             Logger.LogDebug("Cached latest acknowledgment for user {user}: {ackId}", acknowledgment.User.AliasOrUID, acknowledgment.AcknowledgmentId);
@@ -328,6 +351,20 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
             UnauthorizedAccessException => AcknowledgmentErrorCode.AuthenticationFailed,
             ArgumentException => AcknowledgmentErrorCode.InvalidData,
             _ => AcknowledgmentErrorCode.NetworkError
+        };
+    }
+    
+    /// Determine if an error is retryable
+    private static bool ShouldRetry(AcknowledgmentErrorCode errorCode)
+    {
+        // Non-retryable errors - these should not be retried
+        return errorCode switch
+        {
+            AcknowledgmentErrorCode.AuthenticationFailed => false,
+            AcknowledgmentErrorCode.InsufficientPermissions => false,
+            AcknowledgmentErrorCode.InvalidData => false,
+            AcknowledgmentErrorCode.HashVerificationFailed => false,
+            _ => true // Retry all other errors (network, timeout, etc.)
         };
     }
     
@@ -594,10 +631,12 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
     {
         public EnhancedAcknowledgmentDto Acknowledgment { get; }
         public DateTime CachedAt { get; }
+        public DateTime Timestamp { get; }
         public CachedAcknowledgment(EnhancedAcknowledgmentDto acknowledgment, DateTime cachedAt)
         {
             Acknowledgment = acknowledgment;
             CachedAt = cachedAt;
+            Timestamp = cachedAt;
         }
     }
 }

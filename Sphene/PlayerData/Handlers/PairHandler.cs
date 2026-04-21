@@ -65,7 +65,6 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
     private string? _lastAppliedBypassEmoteData;
     private nint _lastAppliedBypassEmoteAddress = nint.Zero;
     private DateTime _lastAppliedBypassEmoteTime = DateTime.MinValue;
-    private bool _ignoreCharacterDataBypassEmote = false;
     private string? _lastSuccessfullyAppliedPenumbraHash;
     private string? _lastSuccessfullyAppliedGlamourerHash;
     private string? _lastSuccessfullyAppliedRestHash;
@@ -641,11 +640,6 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             _lastAppliedBypassEmoteData = data;
             _lastAppliedBypassEmoteAddress = _charaHandler.Address;
             _lastAppliedBypassEmoteTime = DateTime.UtcNow;
-            _ignoreCharacterDataBypassEmote = true;
-            if (_cachedData != null && !string.IsNullOrEmpty(_cachedData.BypassEmoteData))
-            {
-                _cachedData.BypassEmoteData = string.Empty;
-            }
 
             var applyDuration = (DateTime.UtcNow - startApply).TotalMilliseconds;
             if (applyDuration > 100)
@@ -670,10 +664,6 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
     public void ApplyCharacterData(Guid applicationBase, CharacterData characterData, bool forceApplyCustomization = false, bool forceRedrawIfDisabled = false, bool forceRedrawApplication = false)
     {
         _redrawOnNextApplication |= forceRedrawApplication;
-        if (_ignoreCharacterDataBypassEmote && _cachedData != null && !string.IsNullOrEmpty(_cachedData.BypassEmoteData))
-        {
-            _cachedData.BypassEmoteData = string.Empty;
-        }
 
         if (_dalamudUtil.IsInCombatOrPerforming && !IsDutyCombatNoRedrawModeActive())
         {
@@ -777,13 +767,6 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         _inProgressPipelineDataHash = characterData.DataHash?.Value;
 
         var charaDataToUpdate = characterData.CheckUpdatedData(applicationBase, _cachedData?.DeepClone() ?? new(), Logger, this, forceApplyCustomization, _forceApplyMods);
-        if (_ignoreCharacterDataBypassEmote)
-        {
-            foreach (var entry in charaDataToUpdate.Values)
-            {
-                entry.Remove(PlayerChanges.BypassEmote);
-            }
-        }
 
         if (_charaHandler != null && _forceApplyMods)
         {
@@ -2066,11 +2049,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
 
     private CharacterData GetEffectiveCharacterData(CharacterData data)
     {
-        if (!_ignoreCharacterDataBypassEmote) return data;
-        if (string.IsNullOrEmpty(data.BypassEmoteData)) return data;
-        var clone = data.DeepClone();
-        clone.BypassEmoteData = string.Empty;
-        return clone;
+        return data;
     }
 
     private async Task<bool> TryApplyMinionFileReplacementsAsync(nint minionAddress, CharacterData minionData, CancellationToken token)

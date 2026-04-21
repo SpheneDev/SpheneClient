@@ -22,10 +22,15 @@ public class AcknowledgmentTimeoutManager : DisposableMediatorSubscriberBase
     private readonly SpheneConfigService _configService;
     private DateTime _lastPauseLogUtc = DateTime.MinValue;
     private DateTime _lastConnectedUtc = DateTime.MinValue;
+    private DateTime _disconnectStartTime = DateTime.MinValue;
     private bool _seenAckSuccessSinceConnect = false;
     private int _ackTimeoutsSinceConnect = 0;
     private int _autoReconnectsSinceConnect = 0;
+    private int _autoReconnectFailures = 0; // Track consecutive failures for circuit breaker
     private DateTime _lastAutoReconnectUtc = DateTime.MinValue;
+    private DateTime _circuitBreakerResetUtc = DateTime.MinValue;
+    private const int CircuitBreakerMaxFailures = 3;
+    private static readonly TimeSpan CircuitBreakerCooldown = TimeSpan.FromMinutes(10);
 
     public AcknowledgmentTimeoutManager(ILogger<AcknowledgmentTimeoutManager> logger, 
         SpheneMediator mediator, Lazy<ApiController> apiController, Lazy<PairManager> pairManager,
@@ -41,9 +46,12 @@ public class AcknowledgmentTimeoutManager : DisposableMediatorSubscriberBase
         Mediator.Subscribe<ConnectedMessage>(this, _ =>
         {
             _lastConnectedUtc = DateTime.UtcNow;
+            _disconnectStartTime = DateTime.MinValue; // Reset disconnect start time on connect
             _seenAckSuccessSinceConnect = false;
             _ackTimeoutsSinceConnect = 0;
             _autoReconnectsSinceConnect = 0;
+            _autoReconnectFailures = 0; // Reset circuit breaker on connect
+            _circuitBreakerResetUtc = DateTime.MinValue;
         });
 
         Mediator.Subscribe<PairAcknowledgmentStatusChangedMessage>(this, msg =>
@@ -51,6 +59,8 @@ public class AcknowledgmentTimeoutManager : DisposableMediatorSubscriberBase
             if (msg.LastAcknowledgmentSuccess == true)
             {
                 _seenAckSuccessSinceConnect = true;
+                _autoReconnectFailures = 0; // Reset circuit breaker on successful acknowledgment
+                _circuitBreakerResetUtc = DateTime.MinValue;
             }
         });
     }
@@ -58,7 +68,8 @@ public class AcknowledgmentTimeoutManager : DisposableMediatorSubscriberBase
     public void StartTimeout(string acknowledgmentId, UserData userData, string dataHash)
     {
         var key = $"{acknowledgmentId}:{userData.UID}";
-        var entry = new AcknowledgmentTimeoutEntry(key, acknowledgmentId, userData, dataHash, DateTimeOffset.Now);
+        var now = DateTimeOffset.Now;
+        var entry = new AcknowledgmentTimeoutEntry(key, acknowledgmentId, userData, dataHash, now, now);
         _pendingTimeouts[key] = entry;
         Logger.LogDebug("Started timeout tracking for acknowledgment {ackId} for user {user}", 
             acknowledgmentId, userData.AliasOrUID);
@@ -244,7 +255,8 @@ public class AcknowledgmentTimeoutManager : DisposableMediatorSubscriberBase
         string AcknowledgmentId, 
         UserData UserData, 
         string DataHash, 
-        DateTimeOffset StartTime);
+        DateTimeOffset StartTime,
+        DateTimeOffset OriginalStartTime);
 
     private sealed record InvalidHashTimeoutEntry(
         string UserUID,
@@ -268,19 +280,76 @@ public class AcknowledgmentTimeoutManager : DisposableMediatorSubscriberBase
             return true;
         }
 
-        return apiController.IsTransientDisconnectInProgress || !apiController.IsConnected;
+        // Check disconnect timeout threshold - only pause if disconnect started recently (default 30s)
+        if (apiController.IsTransientDisconnectInProgress)
+        {
+            // Track disconnect start time if not already set
+            if (_disconnectStartTime == DateTime.MinValue)
+            {
+                _disconnectStartTime = DateTime.UtcNow;
+            }
+            
+            var disconnectDuration = DateTime.UtcNow - _disconnectStartTime;
+            var maxDisconnectPauseSeconds = _configService.Current.MaxDisconnectPauseSeconds > 0 
+                ? _configService.Current.MaxDisconnectPauseSeconds 
+                : 30; // Default 30 seconds
+            
+            if (disconnectDuration.TotalSeconds < maxDisconnectPauseSeconds)
+            {
+                return true;
+            }
+            
+            // Disconnect has exceeded threshold, allow timeout processing despite disconnect
+            if (_lastPauseLogUtc.AddSeconds(30) < DateTime.UtcNow)
+            {
+                _lastPauseLogUtc = DateTime.UtcNow;
+                Mediator.Publish(new DebugLogEventMessage(
+                    LogLevel.Debug,
+                    "ACK",
+                    "Ack timeout processing resumed - disconnect exceeded threshold",
+                    Details: $"ctx: disconnectDuration={disconnectDuration.TotalSeconds:F1}s threshold={maxDisconnectPauseSeconds}s"));
+            }
+        }
+
+        return !apiController.IsConnected;
     }
 
     private void DeferTimeouts(TimeSpan delay)
     {
+        var maxDeferredTimeoutSeconds = _configService.Current.MaxDeferredTimeoutSeconds > 0 
+            ? _configService.Current.MaxDeferredTimeoutSeconds 
+            : 300; // Default 5 minutes max deferral
+        var maxDeferredTimeout = TimeSpan.FromSeconds(maxDeferredTimeoutSeconds);
+
         foreach (var entry in _pendingTimeouts.ToArray())
         {
-            _pendingTimeouts[entry.Key] = entry.Value with { StartTime = entry.Value.StartTime.Add(delay) };
+            // Cap deferral time to prevent indefinite accumulation during duty/combat
+            var newStartTime = entry.Value.StartTime.Add(delay);
+            var maxAllowedStartTime = entry.Value.OriginalStartTime.Add(maxDeferredTimeout);
+            
+            if (newStartTime > maxAllowedStartTime)
+            {
+                // Don't defer beyond max allowed time
+                Logger.LogDebug("Capping timeout deferral for ack {ackId} - would exceed max deferred timeout", entry.Value.AcknowledgmentId);
+                newStartTime = maxAllowedStartTime;
+            }
+            
+            _pendingTimeouts[entry.Key] = entry.Value with { StartTime = newStartTime };
         }
 
         foreach (var entry in _invalidHashTimeouts.ToArray())
         {
-            _invalidHashTimeouts[entry.Key] = entry.Value with { StartTime = entry.Value.StartTime.Add(delay) };
+            // Invalid hash timeouts also need deferral capping
+            var newStartTime = entry.Value.StartTime.Add(delay);
+            var maxAllowedStartTime = entry.Value.StartTime.Add(maxDeferredTimeout);
+            
+            if (newStartTime > maxAllowedStartTime)
+            {
+                Logger.LogDebug("Capping invalid hash timeout deferral for user {user} - would exceed max deferred timeout", entry.Value.UserUID);
+                newStartTime = maxAllowedStartTime;
+            }
+            
+            _invalidHashTimeouts[entry.Key] = entry.Value with { StartTime = newStartTime };
         }
     }
 
@@ -293,9 +362,30 @@ public class AcknowledgmentTimeoutManager : DisposableMediatorSubscriberBase
             return;
         }
 
-        if (_autoReconnectsSinceConnect >= 1)
+        // Check circuit breaker - disable auto-reconnect after too many failures
+        if (_autoReconnectFailures >= CircuitBreakerMaxFailures)
         {
-            return;
+            // Check if cooldown period has elapsed
+            if (_circuitBreakerResetUtc != DateTime.MinValue && DateTime.UtcNow < _circuitBreakerResetUtc)
+            {
+                Logger.LogDebug("Circuit breaker active, skipping auto-reconnect. Resets at {resetTime}", _circuitBreakerResetUtc);
+                return;
+            }
+            else if (_circuitBreakerResetUtc != DateTime.MinValue && DateTime.UtcNow >= _circuitBreakerResetUtc)
+            {
+                // Cooldown elapsed, reset circuit breaker
+                _autoReconnectFailures = 0;
+                _circuitBreakerResetUtc = DateTime.MinValue;
+                Logger.LogInformation("Circuit breaker cooldown elapsed, auto-reconnect re-enabled");
+            }
+            else
+            {
+                // Circuit breaker just triggered, set cooldown
+                _circuitBreakerResetUtc = DateTime.UtcNow + CircuitBreakerCooldown;
+                Logger.LogWarning("Circuit breaker triggered due to {failures} auto-reconnect failures. Cooldown until {resetTime}", 
+                    _autoReconnectFailures, _circuitBreakerResetUtc);
+                return;
+            }
         }
 
         if (_seenAckSuccessSinceConnect)
@@ -309,8 +399,18 @@ public class AcknowledgmentTimeoutManager : DisposableMediatorSubscriberBase
             return;
         }
 
-        if (_lastAutoReconnectUtc != DateTime.MinValue && nowUtc - _lastAutoReconnectUtc < TimeSpan.FromSeconds(30))
+        // Calculate exponential backoff delay: 30s, 60s, 120s, etc.
+        var backoffDelay = TimeSpan.FromSeconds(30 * Math.Pow(2, _autoReconnectsSinceConnect));
+        var maxBackoff = TimeSpan.FromMinutes(5); // Cap at 5 minutes
+        if (backoffDelay > maxBackoff)
         {
+            backoffDelay = maxBackoff;
+        }
+
+        if (_lastAutoReconnectUtc != DateTime.MinValue && nowUtc - _lastAutoReconnectUtc < backoffDelay)
+        {
+            Logger.LogDebug("Auto-reconnect backoff in progress. Next attempt in {remaining}s", 
+                (backoffDelay - (nowUtc - _lastAutoReconnectUtc)).TotalSeconds);
             return;
         }
 
@@ -327,15 +427,30 @@ public class AcknowledgmentTimeoutManager : DisposableMediatorSubscriberBase
             LogLevel.Warning,
             "ACK",
             "Triggering auto-reconnect due to repeated acknowledgment timeouts",
-            Details: $"timeoutsSinceConnect={_ackTimeoutsSinceConnect}"));
+            Details: $"timeoutsSinceConnect={_ackTimeoutsSinceConnect} attempt={_autoReconnectsSinceConnect} backoff={backoffDelay.TotalSeconds}s"));
 
         try
         {
             await apiController.CreateConnectionsAsync(forceCharacterDataReload: true).ConfigureAwait(false);
+            
+            // Track successful reconnect
+            _autoReconnectFailures = 0;
+            _circuitBreakerResetUtc = DateTime.MinValue;
+            
+            Logger.LogInformation("Auto-reconnect successful after {attempt} attempts", _autoReconnectsSinceConnect);
         }
         catch (Exception ex)
         {
-            Logger.LogDebug(ex, "Auto-reconnect failed");
+            Logger.LogError(ex, "Auto-reconnect failed");
+            _autoReconnectFailures++;
+            
+            // If we've hit the max failures, set circuit breaker cooldown
+            if (_autoReconnectFailures >= CircuitBreakerMaxFailures)
+            {
+                _circuitBreakerResetUtc = DateTime.UtcNow + CircuitBreakerCooldown;
+                Logger.LogWarning("Circuit breaker triggered after {failures} auto-reconnect failures. Cooldown until {resetTime}", 
+                    _autoReconnectFailures, _circuitBreakerResetUtc);
+            }
         }
     }
 }
