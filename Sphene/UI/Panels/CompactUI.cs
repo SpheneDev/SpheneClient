@@ -994,7 +994,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                 ImGui.TextColored(SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning, unsupported);
             }
             UiSharedService.ColorTextWrapped($"Your Network client is outdated, current version is {ver.Major}.{ver.Minor}.{ver.Build}. " +
-            $"Please update your client to maintain Network compatibility. Open /xlplugins and update the plugin.", SpheneCustomTheme.Colors.Error);
+            $"Please update your client to maintain Network compatibility. Open /xlplugins and update the plugin.", SpheneCustomTheme.CurrentTheme.CompactServerStatusError);
         }
 
         if (!_ipcManager.Initialized)
@@ -1006,7 +1006,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                 var uidTextSize = ImGui.CalcTextSize(unsupported);
                 ImGui.SetCursorPosX((ImGui.GetWindowContentRegionMax().X + ImGui.GetWindowContentRegionMin().X) / 2 - uidTextSize.X / 2);
                 ImGui.AlignTextToFramePadding();
-                ImGui.TextColored(SpheneCustomTheme.Colors.Error, unsupported);
+                ImGui.TextColored(SpheneCustomTheme.CurrentTheme.CompactServerStatusError, unsupported);
             }
             var penumAvailable = _ipcManager.Penumbra.APIAvailable;
             var glamAvailable = _ipcManager.Glamourer.APIAvailable;
@@ -1154,7 +1154,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                 ImGui.SetCursorPosX(ImGui.GetCursorPosX() + MathF.Max(0, (headerAvail - headerSize.X) * 0.5f));
                 ImGui.AlignTextToFramePadding();
                 using (ImRaii.PushStyle(ImGuiStyleVar.FramePadding, new Vector2(headerPad, ImGui.GetStyle().FramePadding.Y)))
-                using (ImRaii.PushColor(ImGuiCol.Text, SpheneCustomTheme.Colors.SpheneGold))
+                using (ImRaii.PushColor(ImGuiCol.Text, SpheneCustomTheme.CurrentTheme.CompactHeaderText))
                 {
                     ImGui.TextUnformatted(header);
                 }
@@ -1173,7 +1173,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                 ImGui.SetCursorPosX(ImGui.GetCursorPosX() + MathF.Max(0, (headerAvail - header2Size.X) * 0.5f));
                 ImGui.AlignTextToFramePadding();
                 using (ImRaii.PushStyle(ImGuiStyleVar.FramePadding, new Vector2(headerPad, ImGui.GetStyle().FramePadding.Y)))
-                using (ImRaii.PushColor(ImGuiCol.Text, SpheneCustomTheme.Colors.SpheneGold))
+                using (ImRaii.PushColor(ImGuiCol.Text, SpheneCustomTheme.CurrentTheme.CompactHeaderText))
                 {
                     ImGui.TextUnformatted(header2);
                 }
@@ -1341,7 +1341,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                 ImGui.SetCursorPosX(ImGui.GetCursorPosX() + MathF.Max(0, (headerAvail - header1Size.X) * 0.5f));
                 ImGui.AlignTextToFramePadding();
                 using (ImRaii.PushStyle(ImGuiStyleVar.FramePadding, new Vector2(headerPad, ImGui.GetStyle().FramePadding.Y)))
-                using (ImRaii.PushColor(ImGuiCol.Text, SpheneCustomTheme.Colors.SpheneGold))
+                using (ImRaii.PushColor(ImGuiCol.Text, SpheneCustomTheme.CurrentTheme.CompactHeaderText))
                 {
                     ImGui.TextUnformatted(header1);
                 }
@@ -1366,7 +1366,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                 ImGui.SetCursorPosX(ImGui.GetCursorPosX() + MathF.Max(0, (headerAvail - header2Size.X) * 0.5f));
                 ImGui.AlignTextToFramePadding();
                 using (ImRaii.PushStyle(ImGuiStyleVar.FramePadding, new Vector2(headerPad, ImGui.GetStyle().FramePadding.Y)))
-                using (ImRaii.PushColor(ImGuiCol.Text, SpheneCustomTheme.Colors.SpheneGold))
+                using (ImRaii.PushColor(ImGuiCol.Text, SpheneCustomTheme.CurrentTheme.CompactHeaderText))
                 {
                     ImGui.TextUnformatted(header2);
                 }
@@ -1572,7 +1572,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         var isButtonDisabled = timeSinceLastClick.TotalSeconds < 5.0;
         if (_isIncognitoModeActive)
         {
-            var resumeColor = isButtonDisabled ? SpheneCustomTheme.CurrentTheme.TextSecondary : SpheneCustomTheme.Colors.Success;
+            var resumeColor = isButtonDisabled ? SpheneCustomTheme.CurrentTheme.TextSecondary : SpheneCustomTheme.CurrentTheme.CompactServerStatusConnected;
             ImGui.PushStyleColor(ImGuiCol.Text, resumeColor);
             using (ImRaii.Disabled(isButtonDisabled))
             {
@@ -1594,11 +1594,11 @@ public class CompactUi : WindowMediatorSubscriberBase
                 UiSharedService.AttachToolTip(tooltipText);
             }
             ImGui.SameLine();
-            ImGui.TextColored(SpheneCustomTheme.Colors.Success, "Incognito");
+            ImGui.TextColored(SpheneCustomTheme.CurrentTheme.CompactServerStatusConnected, "Incognito");
         }
         else
         {
-            var heartColor = isButtonDisabled ? SpheneCustomTheme.CurrentTheme.TextSecondary : SpheneCustomTheme.Colors.Error;
+            var heartColor = isButtonDisabled ? SpheneCustomTheme.CurrentTheme.TextSecondary : SpheneCustomTheme.CurrentTheme.CompactServerStatusError;
             ImGui.PushStyleColor(ImGuiCol.Text, heartColor);
             using (ImRaii.Disabled(isButtonDisabled))
             {
@@ -1639,7 +1639,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         {
             var time = (float)now.TimeOfDay.TotalSeconds;
             var pulse = 0.5f + 0.5f * MathF.Sin(time * 6.0f);
-            var highlight = Vector4.Lerp(SpheneCustomTheme.Colors.AccentCyan, SpheneCustomTheme.Colors.Warning, pulse * 0.65f);
+            var highlight = Vector4.Lerp(SpheneCustomTheme.CurrentTheme.CompactAccent, SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning, pulse * 0.65f);
             var button = new Vector4(highlight.X, highlight.Y, highlight.Z, 0.55f);
             var hovered = new Vector4(highlight.X, highlight.Y, highlight.Z, 0.75f);
             var active = new Vector4(highlight.X, highlight.Y, highlight.Z, 0.9f);
@@ -1673,7 +1673,7 @@ public class CompactUi : WindowMediatorSubscriberBase
             var min = ImGui.GetItemRectMin();
             var max = ImGui.GetItemRectMax();
             var badgeCenter = new Vector2(max.X - 7f, min.Y + 7f);
-            drawList.AddCircleFilled(badgeCenter, 5.5f, ImGui.ColorConvertFloat4ToU32(SpheneCustomTheme.Colors.Warning));
+            drawList.AddCircleFilled(badgeCenter, 5.5f, ImGui.ColorConvertFloat4ToU32(SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning));
             drawList.AddCircle(badgeCenter, 5.5f, ImGui.ColorConvertFloat4ToU32(SpheneCustomTheme.CurrentTheme.Border), 12, 1.5f);
         }
         else if (!hasAreaSyncshells)
@@ -1979,7 +1979,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         // Force the width to match the calculated available width exactly
         var bgMax = new Vector2(bgMin.X + availableWidth, groupMax.Y + padding.Y);
         
-        drawList.AddRectFilled(bgMin, bgMax, ImGui.GetColorU32(SpheneCustomTheme.Colors.HeaderBg), 10.0f);
+        drawList.AddRectFilled(bgMin, bgMax, ImGui.GetColorU32(SpheneCustomTheme.CurrentTheme.CompactControlPanelBg), 10.0f);
         
         drawList.ChannelsMerge();
         
@@ -2508,15 +2508,15 @@ public class CompactUi : WindowMediatorSubscriberBase
 
         if (textureSizeMB <= 300)
         {
-            return (SpheneCustomTheme.Colors.Success, $"Texture Size: Optimal ({textureSizeMB:F1} MB)", FontAwesomeIcon.CheckCircle);
+            return (SpheneCustomTheme.CurrentTheme.CompactServerStatusConnected, $"Texture Size: Optimal ({textureSizeMB:F1} MB)", FontAwesomeIcon.CheckCircle);
         }
         else if (textureSizeMB <= 600)
         {
-            return (SpheneCustomTheme.Colors.Warning, $"Texture Size: Large ({textureSizeMB:F1} MB)", FontAwesomeIcon.ExclamationTriangle);
+            return (SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning, $"Texture Size: Large ({textureSizeMB:F1} MB)", FontAwesomeIcon.ExclamationTriangle);
         }
         else
         {
-            return (SpheneCustomTheme.Colors.Error, $"Texture Size: Very Large ({textureSizeMB:F1} MB)", FontAwesomeIcon.ExclamationCircle);
+            return (SpheneCustomTheme.CurrentTheme.CompactServerStatusError, $"Texture Size: Very Large ({textureSizeMB:F1} MB)", FontAwesomeIcon.ExclamationCircle);
         }
     }
 
@@ -2543,15 +2543,15 @@ public class CompactUi : WindowMediatorSubscriberBase
                 using (SpheneCustomTheme.ApplyTooltipTheme())
                 {
                     ImGui.BeginTooltip();
-                    ImGui.TextColored(SpheneCustomTheme.Colors.SpheneGold, "Used VRAM Size");
+                    ImGui.TextColored(SpheneCustomTheme.CurrentTheme.CompactHeaderText, "Used VRAM Size");
                     ImGui.Separator();
                     ImGui.Text($"Current: {textureSizeMB:F0} MB");
                     ImGui.Spacing();
-                    ImGui.TextColored(SpheneCustomTheme.Colors.Success, "• 0-300 MB: Optimal");
-                    ImGui.TextColored(SpheneCustomTheme.Colors.Warning, "• 300-600 MB: Large");
-                    ImGui.TextColored(SpheneCustomTheme.Colors.Error, "• 600+ MB: Very Large");
+                    ImGui.TextColored(SpheneCustomTheme.CurrentTheme.CompactServerStatusConnected, "• 0-300 MB: Optimal");
+                    ImGui.TextColored(SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning, "• 300-600 MB: Large");
+                    ImGui.TextColored(SpheneCustomTheme.CurrentTheme.CompactServerStatusError, "• 600+ MB: Very Large");
                     ImGui.Spacing();
-                    ImGui.TextColored(SpheneCustomTheme.Colors.SpheneGold, "Tip: Click the button for quick conversion!");
+                    ImGui.TextColored(SpheneCustomTheme.CurrentTheme.CompactHeaderText, "Tip: Click the button for quick conversion!");
                     ImGui.EndTooltip();
                 }
             }
@@ -2569,15 +2569,15 @@ public class CompactUi : WindowMediatorSubscriberBase
                 using (SpheneCustomTheme.ApplyTooltipTheme())
                 {
                     ImGui.BeginTooltip();
-                    ImGui.TextColored(SpheneCustomTheme.Colors.SpheneGold, "Texture Size");
+                    ImGui.TextColored(SpheneCustomTheme.CurrentTheme.CompactHeaderText, "Texture Size");
                     ImGui.Separator();
                     ImGui.Text($"Current: {textureSizeMB:F0} MB");
                     ImGui.Spacing();
-                    ImGui.TextColored(SpheneCustomTheme.Colors.Success, "• 0-300 MB: Optimal");
-                    ImGui.TextColored(SpheneCustomTheme.Colors.Warning, "• 300-600 MB: Large");
-                    ImGui.TextColored(SpheneCustomTheme.Colors.Error, "• 600+ MB: Very Large");
+                    ImGui.TextColored(SpheneCustomTheme.CurrentTheme.CompactServerStatusConnected, "• 0-300 MB: Optimal");
+                    ImGui.TextColored(SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning, "• 300-600 MB: Large");
+                    ImGui.TextColored(SpheneCustomTheme.CurrentTheme.CompactServerStatusError, "• 600+ MB: Very Large");
                     ImGui.Spacing();
-                    ImGui.TextColored(SpheneCustomTheme.Colors.SpheneGold, "Tip: Click the button for quick conversion!");
+                    ImGui.TextColored(SpheneCustomTheme.CurrentTheme.CompactHeaderText, "Tip: Click the button for quick conversion!");
                     ImGui.EndTooltip();
                 }
             }
@@ -2603,7 +2603,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                 // If analysis is running or blocking, show busy indicator and avoid interactive content
                 if ((_popupAnalysisTask != null && !_popupAnalysisTask.IsCompleted) || _isPopupAnalysisBlocking)
                 {
-                    UiSharedService.ColorTextWrapped("Analyzing character data...", SpheneCustomTheme.Colors.Warning);
+                    UiSharedService.ColorTextWrapped("Analyzing character data...", SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning);
                     if (_characterAnalyzer.IsAnalysisRunning)
                     {
                         ImGui.SameLine();
@@ -2618,7 +2618,7 @@ public class CompactUi : WindowMediatorSubscriberBase
             
             if (analysis == null || !analysis.Any())
             {
-                ImGui.TextColored(SpheneCustomTheme.Colors.Error, "No character data available");
+                ImGui.TextColored(SpheneCustomTheme.CurrentTheme.CompactServerStatusError, "No character data available");
                 ImGui.Text("Please ensure you have a character loaded and analyzed.");
                 
                 // Still show backup management even without analysis
@@ -2661,7 +2661,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                 }
                 else
                 {
-                    UiSharedService.ColorTextWrapped(_allBackupsStatusText, allCount > 0 ? SpheneCustomTheme.Colors.Warning : SpheneCustomTheme.Colors.Error);
+                    UiSharedService.ColorTextWrapped(_allBackupsStatusText, allCount > 0 ? SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning : SpheneCustomTheme.CurrentTheme.CompactServerStatusError);
                 }
                 if (allCount == 0)
                 {
@@ -2691,9 +2691,9 @@ public class CompactUi : WindowMediatorSubscriberBase
                     if (_automaticModeEnabled)
                     {
                         ImGui.SameLine();
-                        _uiSharedService.IconText(FontAwesomeIcon.ExclamationTriangle, SpheneCustomTheme.Colors.Warning);
+                        _uiSharedService.IconText(FontAwesomeIcon.ExclamationTriangle, SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning);
                         ImGui.SameLine();
-                        UiSharedService.ColorText("Disabled in Automatic mode", SpheneCustomTheme.Colors.Warning);
+                        UiSharedService.ColorText("Disabled in Automatic mode", SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning);
                     }
                     ImGui.SameLine();
                     
@@ -2799,13 +2799,13 @@ public class CompactUi : WindowMediatorSubscriberBase
                 ImGui.TableNextRow();
 
                 ImGui.TableSetColumnIndex(0);
-                ImGui.TextColored(SpheneCustomTheme.Colors.SpheneGold, "Statistics");
+                ImGui.TextColored(SpheneCustomTheme.CurrentTheme.CompactHeaderText, "Statistics");
                 ImGui.Text($"Total Textures: {totalTextures}");
                 ImGui.Text($"BC7 Optimized: {bc7Textures}");
-                ImGui.TextColored(SpheneCustomTheme.Colors.Warning, $"To Convert: {nonBc7Textures?.Count ?? 0} ({totalSizeMB:F1} MB)");
+                ImGui.TextColored(SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning, $"To Convert: {nonBc7Textures?.Count ?? 0} ({totalSizeMB:F1} MB)");
 
                 ImGui.TableSetColumnIndex(1);
-                ImGui.TextColored(SpheneCustomTheme.Colors.SpheneGold, "Storage");
+                ImGui.TextColored(SpheneCustomTheme.CurrentTheme.CompactHeaderText, "Storage");
                 
                 // Ensure storage info task is started or refreshed periodically
                 try
@@ -2829,7 +2829,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                 if (fileCount > 0)
                 {
                     var sizeInMB = totalSize / (1024.0 * 1024.0);
-                    ImGui.TextColored(SpheneCustomTheme.Colors.Warning, $"Storage: {sizeInMB:F2} MB ({fileCount} files)");
+                    ImGui.TextColored(SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning, $"Storage: {sizeInMB:F2} MB ({fileCount} files)");
                 }
                 else
                 {

@@ -237,7 +237,8 @@ public class ThemeConfiguration
     public Vector4 CompactButton { get; set; } = new(0.1f, 0.15f, 0.25f, 0.8f);
     public Vector4 CompactButtonHovered { get; set; } = new(0.15f, 0.25f, 0.4f, 0.9f);
     public Vector4 CompactButtonActive { get; set; } = new(0.2f, 0.35f, 0.55f, 1.0f);
-    public Vector4 CompactHeaderBg { get; set; } = new(0.08f, 0.15f, 0.3f, 0.8f);
+    public Vector4 CompactHeaderBg { get; set; } = new(0.08f, 0.15f, 0.3f, 0.8f); // Window header with buttons
+    public Vector4 CompactControlPanelBg { get; set; } = new(0.08f, 0.15f, 0.3f, 0.8f); // Header card with UID/Incognito
     public Vector4 CompactBorder { get; set; } = new(0.3f, 0.5f, 0.8f, 0.8f);
     public Vector4 CompactText { get; set; } = new(0.9f, 0.9f, 0.9f, 1.0f);
     public Vector4 CompactTextSecondary { get; set; } = new(0.7f, 0.7f, 0.7f, 1.0f);
@@ -495,6 +496,7 @@ public class ThemeConfiguration
             CompactButtonHovered = CompactButtonHovered,
             CompactButtonActive = CompactButtonActive,
             CompactHeaderBg = CompactHeaderBg,
+            CompactControlPanelBg = CompactControlPanelBg,
             CompactBorder = CompactBorder,
             CompactText = CompactText,
             CompactTextSecondary = CompactTextSecondary,

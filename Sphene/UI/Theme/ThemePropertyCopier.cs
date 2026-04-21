@@ -164,6 +164,7 @@ public static class ThemePropertyCopier
         target.CompactButtonHovered = cloned.CompactButtonHovered;
         target.CompactButtonActive = cloned.CompactButtonActive;
         target.CompactHeaderBg = cloned.CompactHeaderBg;
+        target.CompactControlPanelBg = cloned.CompactControlPanelBg;
         target.CompactBorder = cloned.CompactBorder;
         target.CompactText = cloned.CompactText;
         target.CompactTextSecondary = cloned.CompactTextSecondary;

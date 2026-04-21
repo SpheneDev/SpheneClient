@@ -2749,6 +2749,12 @@ public class SettingsUi : WindowMediatorSubscriberBase
             theme.CompactFrameBg = compactFrameBg;
             themeChanged = true;
         }
+        var compactControlPanelBg = theme.CompactControlPanelBg;
+        if (ImGui.ColorEdit4("Control Panel UID Section", ref compactControlPanelBg))
+        {
+            theme.CompactControlPanelBg = compactControlPanelBg;
+            themeChanged = true;
+        }
 
         ImGui.Spacing();
         ImGui.Text("General Text");
