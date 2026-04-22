@@ -15,7 +15,7 @@ public class DrawGroupedGroupFolder : IDrawFolder
     private readonly UiSharedService _uiSharedService;
 
     public IImmutableList<DrawUserPair> DrawPairs => throw new NotSupportedException();
-    public int OnlinePairs => _groups.SelectMany(g => g.DrawPairs).Where(g => g.Pair.IsOnline).DistinctBy(g => g.Pair.UserData.UID).Count();
+    public int OnlinePairs => _groups.SelectMany(g => g.DrawPairs).Where(g => !g.Pair.IsEffectivelyOffline).DistinctBy(g => g.Pair.UserData.UID).Count();
     public int TotalPairs => _groups.Sum(g => g.TotalPairs);
 
     public DrawGroupedGroupFolder(IEnumerable<IDrawFolder> groups, TagHandler tagHandler, UiSharedService uiSharedService)

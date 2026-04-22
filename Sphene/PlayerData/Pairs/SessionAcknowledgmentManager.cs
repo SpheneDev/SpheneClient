@@ -310,9 +310,13 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
             _resultErrorCounts.AddOrUpdate(acknowledgmentDto.ErrorCode, 1, (_, old) => old + 1);
         }
 
-        // Remove the acknowledgment as it's been received
-        _userLatestAcknowledgments.TryRemove(userKey, out _);
-        
+        // Only remove the latest acknowledgment tracking if this response was for the latest one.
+        // A historical (out-of-order) response must not discard the current latest entry.
+        if (matchesLatest)
+        {
+            _userLatestAcknowledgments.TryRemove(userKey, out _);
+        }
+
         // Remove from history to prevent duplicate processing
         RemoveFromHistory(userKey, hashVersionKey);
         

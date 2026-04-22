@@ -58,12 +58,12 @@ public class DrawFolderGroup : DrawFolderBase
             if (_groupFullInfoDto.GroupPairUserInfos.Count == 0)
             {
                 // For area-bound syncshells, only count visible pairs that are online
-                return DrawPairs.Count(u => u.Pair.IsOnline);
+                return DrawPairs.Count(u => !u.Pair.IsEffectivelyOffline);
             }
             
             // For regular syncshells, count both visible and non-visible online users
             // Start with visible pairs that are online (from DrawPairs)
-            var visibleOnlineCount = DrawPairs.Count(u => u.Pair.IsOnline);
+            var visibleOnlineCount = DrawPairs.Count(u => !u.Pair.IsEffectivelyOffline);
             
             // Get all users in the syncshell from GroupPairUserInfos
             var allSyncshellUsers = _groupFullInfoDto.GroupPairUserInfos.Keys.ToList();
@@ -79,7 +79,7 @@ public class DrawFolderGroup : DrawFolderBase
                     continue;
                     
                 var pair = _pairManager.GetPairByUID(userUID);
-                if (pair != null && pair.IsOnline)
+                if (pair != null && !pair.IsEffectivelyOffline)
                 {
                     additionalOnlineCount++;
                 }

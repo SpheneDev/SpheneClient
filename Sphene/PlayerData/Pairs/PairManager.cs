@@ -404,6 +404,13 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         var cts = new CancellationTokenSource();
         _pendingOfflineGrace[key] = cts;
 
+        // Immediately set grace flag and trigger UI update for smooth transition
+        if (_allClientPairs.TryGetValue(user, out var pair))
+        {
+            pair.MarkOffline(wait: false, endGracePeriod: false);
+            RecreateLazy();
+        }
+
         _ = Task.Run(async () =>
         {
             try
@@ -418,7 +425,7 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
                 if (_allClientPairs.TryGetValue(user, out var pair) && pair.IsOnline)
                 {
                     Mediator.Publish(new ClearProfileDataMessage(pair.UserData));
-                    pair.MarkOffline();
+                    pair.MarkOffline(wait: true, endGracePeriod: true);
                     RecreateLazy();
                 }
                 StartOfflineCharacterDataPurge(user);

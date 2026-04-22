@@ -76,6 +76,7 @@ public class Pair : DisposableMediatorSubscriberBase
     public bool IsOneSidedPair => IndividualPairStatus == IndividualPairStatus.OneSided;
     public bool IsOnline => CachedPlayer != null;
     public bool IsInDuty => _dalamudUtilService.IsInDuty;
+    public bool IsEffectivelyOffline => !IsOnline || _isInOfflineGrace;
 
     public bool IsPaired => IndividualPairStatus == IndividualPairStatus.Bidirectional || UserPair.Groups.Any();
     public bool IsPaused => UserPair.OwnPermissions.IsPaused();
@@ -83,6 +84,7 @@ public class Pair : DisposableMediatorSubscriberBase
     public bool IsMutuallyVisible { get; private set; } = false;
     public bool WasMutuallyVisibleInGpose { get; private set; } = false;
     public bool IsInGpose { get; private set; } = false;
+    private bool _isInOfflineGrace = false;
     public CharacterData? LastReceivedCharacterData { get; private set; }
     public CharacterData? PreviousReceivedCharacterData { get; private set; }
     public string? LastReceivedCharacterDataHash { get; private set; }
@@ -836,12 +838,22 @@ public class Pair : DisposableMediatorSubscriberBase
         return UserPair.Groups.Any() || UserPair.IndividualPairStatus != IndividualPairStatus.None;
     }
 
-    public void MarkOffline(bool wait = true)
+    public void MarkOffline(bool wait = true, bool endGracePeriod = false)
     {
         try
         {
             if (wait)
                 _creationSemaphore.Wait();
+            
+            // If entering grace period, just set the flag and keep CachedPlayer
+            if (!endGracePeriod)
+            {
+                _isInOfflineGrace = true;
+                return;
+            }
+            
+            // Grace period ended - perform full offline cleanup
+            _isInOfflineGrace = false;
             ResetApplyRetry();
             LastReceivedCharacterData = null;
             PreviousReceivedCharacterData = null;
@@ -936,25 +948,34 @@ public class Pair : DisposableMediatorSubscriberBase
         string? errorMessage = null)
     {
         Logger.LogDebug("Updating acknowledgment status: {acknowledgmentId} - Success: {success} for user {user}", acknowledgmentId ?? "null", success, UserData.AliasOrUID);
-        
+
         bool hasPending;
         bool? ackSuccess;
         DateTimeOffset? ackTime;
         long currentVersion;
-        
+        bool idMatchesLatest;
+
         lock (_ackStateLock)
         {
-            LastAcknowledgmentId = acknowledgmentId;
-            LastAcknowledgmentSuccess = success;
-            LastAcknowledgmentTime = timestamp;
-            HasPendingAcknowledgment = false;
-            LastAcknowledgmentErrorCode = success ? Sphene.API.Dto.User.AcknowledgmentErrorCode.None : errorCode;
-            LastAcknowledgmentErrorMessage = success ? null : errorMessage;
-            
+            idMatchesLatest = string.Equals(LastAcknowledgmentId, acknowledgmentId, StringComparison.Ordinal);
+            if (idMatchesLatest)
+            {
+                LastAcknowledgmentSuccess = success;
+                LastAcknowledgmentTime = timestamp;
+                HasPendingAcknowledgment = false;
+                LastAcknowledgmentErrorCode = success ? Sphene.API.Dto.User.AcknowledgmentErrorCode.None : errorCode;
+                LastAcknowledgmentErrorMessage = success ? null : errorMessage;
+            }
+            else
+            {
+                Logger.LogDebug("Ignoring stale acknowledgment status update: expected {expected}, got {got} for user {user}",
+                    LastAcknowledgmentId, acknowledgmentId, UserData.AliasOrUID);
+            }
+
             hasPending = HasPendingAcknowledgment;
             ackSuccess = LastAcknowledgmentSuccess;
             ackTime = LastAcknowledgmentTime;
-            
+
             // Increment version counter for UI update coordination
             currentVersion = Interlocked.Increment(ref _acknowledgmentVersion);
         }

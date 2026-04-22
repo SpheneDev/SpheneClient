@@ -1395,7 +1395,7 @@ public class CompactUi : WindowMediatorSubscriberBase
             _tabMenu.Draw(GetPendingModSharingCount(), false);
             
             // Connected Pairs Section
-            var onlineCount = _pairManager.DirectPairs.Count(p => p.IsOnline);
+            var onlineCount = _pairManager.DirectPairs.Count(p => !p.IsEffectivelyOffline);
             var totalCount = _pairManager.DirectPairs.Count;
             var onlineText = $"Connected Pairs ({onlineCount} / {totalCount}) online";
             
@@ -2019,13 +2019,13 @@ public class CompactUi : WindowMediatorSubscriberBase
                     ? (_configService.Current.PreferNotesOverNamesForVisible ? u.Key.GetNote() : u.Key.PlayerName)
                     : (u.Key.GetNote() ?? u.Key.UserData.AliasOrUID));
         bool FilterOnlineOrPausedSelf(KeyValuePair<Pair, List<GroupFullInfoDto>> u)
-            => (u.Key.IsOnline || (!u.Key.IsOnline && !_configService.Current.ShowOfflineUsersSeparately))
+            => (!u.Key.IsEffectivelyOffline || (!u.Key.IsEffectivelyOffline && !_configService.Current.ShowOfflineUsersSeparately))
                 && !u.Key.UserPair.OwnPermissions.IsPaused();
         bool FilterPausedUsers(KeyValuePair<Pair, List<GroupFullInfoDto>> u)
             => u.Key.UserPair.OwnPermissions.IsPaused() && (!u.Key.IsMutuallyVisible || !_configService.Current.ShowVisibleUsersSeparately);
         Dictionary<Pair, List<GroupFullInfoDto>> BasicSortedDictionary(IEnumerable<KeyValuePair<Pair, List<GroupFullInfoDto>>> u)
             => u.OrderByDescending(u => u.Key.IsMutuallyVisible)
-                .ThenByDescending(u => u.Key.IsOnline)
+                .ThenByDescending(u => !u.Key.IsEffectivelyOffline)
                 .ThenBy(AlphabeticalSort, StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(u => u.Key, u => u.Value);
         ImmutableList<Pair> ImmutablePairList(IEnumerable<KeyValuePair<Pair, List<GroupFullInfoDto>>> u)
@@ -2056,9 +2056,9 @@ public class CompactUi : WindowMediatorSubscriberBase
         bool FilterNotTaggedUsers(KeyValuePair<Pair, List<GroupFullInfoDto>> u)
             => u.Key.IsDirectlyPaired && !u.Key.IsOneSidedPair && !_tagHandler.HasAnyTag(u.Key.UserData.UID) && (!u.Key.IsMutuallyVisible || !_configService.Current.ShowVisibleUsersSeparately);
         bool FilterOfflineUsers(KeyValuePair<Pair, List<GroupFullInfoDto>> u)
-            => u.Key.IsDirectlyPaired && !u.Key.IsOneSidedPair && !u.Key.IsOnline && !u.Key.UserPair.OwnPermissions.IsPaused() && (!u.Key.IsMutuallyVisible || !_configService.Current.ShowVisibleUsersSeparately);
+            => u.Key.IsDirectlyPaired && !u.Key.IsOneSidedPair && u.Key.IsEffectivelyOffline && !u.Key.UserPair.OwnPermissions.IsPaused() && (!u.Key.IsMutuallyVisible || !_configService.Current.ShowVisibleUsersSeparately);
         bool FilterOfflineSyncshellUsers(KeyValuePair<Pair, List<GroupFullInfoDto>> u)
-            => (!u.Key.IsDirectlyPaired && !u.Key.IsOnline && !u.Key.UserPair.OwnPermissions.IsPaused());
+            => (!u.Key.IsDirectlyPaired && u.Key.IsEffectivelyOffline && !u.Key.UserPair.OwnPermissions.IsPaused());
 
 
         if (_configService.Current.ShowVisibleUsersSeparately)
@@ -2079,7 +2079,7 @@ public class CompactUi : WindowMediatorSubscriberBase
 
             var filteredGroupPairs = filteredPairs
                 .Where(u => FilterGroupUsers(u, group) && FilterOnlineOrPausedSelf(u))
-                .OrderByDescending(u => u.Key.IsOnline)
+                .OrderByDescending(u => !u.Key.IsEffectivelyOffline)
                 .ThenBy(u =>
                 {
                     if (string.Equals(u.Key.UserData.UID, group.OwnerUID, StringComparison.Ordinal)) return 0;
