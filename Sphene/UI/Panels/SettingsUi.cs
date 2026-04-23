@@ -2275,6 +2275,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
         DrawSettingsSectionHeader("Basic Interface");
         AppearanceOptionBlock.DrawShowSpheneIconOption(_configService, "AppearanceShowSpheneIcon");
+        AppearanceOptionBlock.DrawHideSpheneIconInGposeOption(_configService, "AppearanceHideSpheneIconInGpose");
         AppearanceOptionBlock.DrawLockSpheneIconPositionOption(_configService, "AppearanceLockSpheneIconPosition");
         AppearanceOptionBlock.DrawEnableGameRightClickMenusOption(_configService, "AppearanceEnableGameRightClickMenus");
 

@@ -34,6 +34,7 @@ public class SpheneIcon : WindowMediatorSubscriberBase
     private readonly IpcManager _ipcManager;
     private readonly IDalamudPluginInterface _pluginInterface;
     private readonly ICommandManager _commandManager;
+    private readonly DalamudUtilService _dalamudUtilService;
     private readonly ShrinkUHostService _shrinkuHostService;
     // Built-in ShrinkU integration
     private readonly ShrinkU.Configuration.ShrinkUConfigService _shrinkuConfig;
@@ -81,7 +82,7 @@ public class SpheneIcon : WindowMediatorSubscriberBase
     public SpheneIcon(ILogger<SpheneIcon> logger, SpheneMediator mediator, 
         SpheneConfigService configService, UiSharedService uiSharedService, ApiController apiController, 
         PerformanceCollectorService performanceCollectorService, IpcManager ipcManager, IDalamudPluginInterface pluginInterface,
-        ICommandManager commandManager, ShrinkUHostService shrinkuHostService,
+        ICommandManager commandManager, DalamudUtilService dalamudUtilService, ShrinkUHostService shrinkuHostService,
         ShrinkU.Configuration.ShrinkUConfigService shrinkuConfig,
         ShrinkU.UI.ConversionUI shrinkuConversion,
         ShrinkU.UI.SettingsUI shrinkuSettings,
@@ -96,6 +97,7 @@ public class SpheneIcon : WindowMediatorSubscriberBase
         _ipcManager = ipcManager;
         _pluginInterface = pluginInterface;
         _commandManager = commandManager;
+        _dalamudUtilService = dalamudUtilService;
         _shrinkuHostService = shrinkuHostService;
         _shrinkuConfig = shrinkuConfig;
         _shrinkuConversion = shrinkuConversion;
@@ -348,6 +350,13 @@ public class SpheneIcon : WindowMediatorSubscriberBase
     protected override void DrawInternal()
     {
         var cfg = _configService.Current;
+
+        // Hide icon in GPose mode if configured
+        if (cfg.HideSpheneIconInGpose && _dalamudUtilService.IsInGpose)
+        {
+            return;
+        }
+
         var iconSize = 32f;
         var padding = 4f;
         var pulsePadding = 14f; // Extra space so pulse rings are not clipped

@@ -25,6 +25,24 @@ public static class AppearanceOptionBlock
         }
     }
 
+    public static void DrawHideSpheneIconInGposeOption(SpheneConfigService configService, string blockId = "HideSpheneIconInGpose")
+    {
+        ImGui.PushID(blockId);
+        try
+        {
+            var hideInGpose = configService.Current.HideSpheneIconInGpose;
+            if (ImGui.Checkbox("Hide Sphene Icon in GPose", ref hideInGpose))
+            {
+                configService.Current.HideSpheneIconInGpose = hideInGpose;
+                configService.Save();
+            }
+        }
+        finally
+        {
+            ImGui.PopID();
+        }
+    }
+
     public static void DrawLockSpheneIconPositionOption(SpheneConfigService configService, string blockId = "LockSpheneIconPosition")
     {
         ImGui.PushID(blockId);
