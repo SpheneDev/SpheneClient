@@ -359,8 +359,8 @@ public class SpheneIcon : WindowMediatorSubscriberBase
 
         var iconSize = 32f;
         var padding = 4f;
-        var pulsePadding = 14f; // Extra space so pulse rings are not clipped
-        var windowSize = iconSize + padding * 2 + pulsePadding * 2;
+        var windowSize = iconSize + padding * 2;
+
         var iconLocked = cfg.LockSpheneIcon;
 
         // Get latest active event config to determine bounce and glow behavior
@@ -381,7 +381,7 @@ public class SpheneIcon : WindowMediatorSubscriberBase
         var scaledIconSize = iconSize * bounceScale;
         var scaledOffset = (iconSize - scaledIconSize) / 2f;
 
-        // Set window size large enough to contain pulse rings and glow outside the icon
+        // Set window size to just the icon area (effects render on foreground drawlist outside window)
         ImGui.SetWindowSize(new Vector2(windowSize, windowSize), ImGuiCond.Always);
 
         // Get current window position
@@ -390,9 +390,12 @@ public class SpheneIcon : WindowMediatorSubscriberBase
         // Prune expired events before drawing
         PruneExpiredEvents();
 
+        // Use foreground drawlist for all visual elements so they overlay properly
+        // above the small transparent interaction window
+        var drawList = ImGui.GetForegroundDrawList();
+
         // Draw the Sphene logo/icon
-        var drawList = ImGui.GetWindowDrawList();
-        var baseIconPos = new Vector2(currentPos.X + padding + pulsePadding, currentPos.Y + padding + pulsePadding);
+        var baseIconPos = new Vector2(currentPos.X + padding, currentPos.Y + padding);
         var iconPos = new Vector2(baseIconPos.X + scaledOffset, baseIconPos.Y + scaledOffset);
         var iconAlpha = cfg.IconGlobalAlpha;
         var iconColorVec = SpheneColors.SpheneGold;
@@ -410,6 +413,7 @@ public class SpheneIcon : WindowMediatorSubscriberBase
         var glowRadius = latestEventType != IconEventType.None && latestEventConfig.EffectGlow
             ? latestEventConfig.GlowRadius
             : cfg.IconPermGlowRadius;
+        // Draw effects (behind icon) on foreground drawlist so they are not clipped
         if (glowActive)
         {
             DrawGlow(drawList, iconPos, scaledIconSize, glowColor, glowIntensity, glowRadius, iconAlpha);
@@ -471,7 +475,7 @@ public class SpheneIcon : WindowMediatorSubscriberBase
         DrawEventBadges(drawList, iconPos, scaledIconSize, cfg);
 
         // Handle dragging and clicking only for the icon area (rest of window is click-through)
-        ImGui.SetCursorPos(new Vector2(padding + pulsePadding, padding + pulsePadding));
+        ImGui.SetCursorPos(new Vector2(padding, padding));
         ImGui.InvisibleButton("##sphene_icon_window", new Vector2(iconSize, iconSize));
         
         // Handle mouse interactions (press-and-hold before dragging)
