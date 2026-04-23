@@ -2031,7 +2031,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         ImmutableList<Pair> ImmutablePairList(IEnumerable<KeyValuePair<Pair, List<GroupFullInfoDto>>> u)
             => u.Select(k => k.Key).ToImmutableList();
         bool FilterVisibleUsers(KeyValuePair<Pair, List<GroupFullInfoDto>> u)
-            => u.Key.IsMutuallyVisible
+            => u.Key.IsMutuallyVisible && !u.Key.IsEffectivelyOffline
                 && (_configService.Current.ShowSyncshellUsersInVisible || !(!_configService.Current.ShowSyncshellUsersInVisible && !u.Key.IsDirectlyPaired))
                 && (!_configService.Current.ShowVisibleSyncshellUsersOnlyInSyncshells || u.Key.IsDirectlyPaired);
         bool FilterTagusers(KeyValuePair<Pair, List<GroupFullInfoDto>> u, string tag)

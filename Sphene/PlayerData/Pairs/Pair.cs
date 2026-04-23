@@ -76,7 +76,7 @@ public class Pair : DisposableMediatorSubscriberBase
     public bool IsOneSidedPair => IndividualPairStatus == IndividualPairStatus.OneSided;
     public bool IsOnline => CachedPlayer != null;
     public bool IsInDuty => _dalamudUtilService.IsInDuty;
-    public bool IsEffectivelyOffline => !IsOnline || _isInOfflineGrace;
+    public bool IsEffectivelyOffline => !IsOnline;
 
     public bool IsPaired => IndividualPairStatus == IndividualPairStatus.Bidirectional || UserPair.Groups.Any();
     public bool IsPaused => UserPair.OwnPermissions.IsPaused();
@@ -854,6 +854,8 @@ public class Pair : DisposableMediatorSubscriberBase
             
             // Grace period ended - perform full offline cleanup
             _isInOfflineGrace = false;
+            SetMutualVisibility(false);
+            WasMutuallyVisibleInGpose = false;
             ResetApplyRetry();
             LastReceivedCharacterData = null;
             PreviousReceivedCharacterData = null;

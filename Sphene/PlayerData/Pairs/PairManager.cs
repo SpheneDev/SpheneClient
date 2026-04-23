@@ -386,9 +386,9 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
 
     public List<Pair> GetOnlineUserPairs() => _allClientPairs.Where(p => !string.IsNullOrEmpty(p.Value.GetPlayerNameHash())).Select(p => p.Value).ToList();
 
-    public int GetVisibleUserCount() => _allClientPairs.Count(p => p.Value.IsMutuallyVisible);
+    public int GetVisibleUserCount() => _allClientPairs.Count(p => p.Value.IsMutuallyVisible && !p.Value.IsEffectivelyOffline);
 
-    public List<UserData> GetVisibleUsers() => [.. _allClientPairs.Where(p => p.Value.IsMutuallyVisible).Select(p => p.Key)];
+    public List<UserData> GetVisibleUsers() => [.. _allClientPairs.Where(p => p.Value.IsMutuallyVisible && !p.Value.IsEffectivelyOffline).Select(p => p.Key)];
 
     public bool IsUserInOfflineGrace(UserData user)
     {
