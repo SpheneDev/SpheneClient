@@ -88,18 +88,76 @@ public class SpheneConfig : ISpheneConfiguration
     public bool LockSpheneIcon { get; set; } = false;
     public int IconEventExpirySeconds { get; set; } = 60;
 
-    // Icon Theme Settings (packed colors as uint ABGR for serialization)
-    public uint IconPulseModTransferColor { get; set; } = 0xFFE00060u; // Blue (#0060E0)
-    public uint IconPulsePairRequestColor { get; set; } = 0xFFB469FFu; // Pink (#FF69B4 hot pink)
-    public uint IconPulseNotificationColor { get; set; } = 0xFF0099FFu; // Orange (#FF9900)
-    public uint IconPulsePermanentColor { get; set; } = 0xFFE86699u;    // Purple (#9966E8)
-    public float IconPulseEventMinRadius { get; set; } = 0.46f;
-    public float IconPulseEventMaxRadius { get; set; } = 0.6f;
-    public float IconPulsePermanentMinRadius { get; set; } = 0.46f;
-    public float IconPulsePermanentMaxRadius { get; set; } = 0.6f;
+    // Icon Theme Settings - Per-Event-Type Configuration (Flexible Effect System)
+    // Each notification type can have its own color, alpha, and combination of effects
+
+    // Global Settings (only rainbow speed is truly global)
+    public float IconGlobalAlpha { get; set; } = 1.0f;
+    public float IconRainbowSpeed { get; set; } = 1.0f;
+
+    // Badge Visibility
     public bool IconShowModTransferBadge { get; set; } = true;
     public bool IconShowPairRequestBadge { get; set; } = true;
     public bool IconShowNotificationBadge { get; set; } = true;
+
+    // === PER-EVENT-TYPE CONFIGURATION ===
+    // Format: Prefix = EventType, Suffix = Property
+
+    // PERMANENT (Background) Event
+    public uint IconPermColor { get; set; } = 0xFFE86699u; // Purple (#9966E8)
+    public float IconPermAlpha { get; set; } = 0.3f;
+    public bool IconPermEffectPulse { get; set; } = true;
+    public bool IconPermEffectGlow { get; set; } = false;
+    public bool IconPermEffectBounce { get; set; } = false;
+    public bool IconPermEffectRainbow { get; set; } = false;
+    public float IconPermPulseMinRadius { get; set; } = 0.46f;
+    public float IconPermPulseMaxRadius { get; set; } = 0.6f;
+    public float IconPermGlowIntensity { get; set; } = 0.6f;
+    public float IconPermGlowRadius { get; set; } = 1.2f;
+    public float IconPermBounceIntensity { get; set; } = 0.12f;
+    public float IconPermBounceSpeed { get; set; } = 1.5f;
+
+    // MOD TRANSFER Event
+    public uint IconModTransferColor { get; set; } = 0xFFE00060u; // Blue (#0060E0)
+    public float IconModTransferAlpha { get; set; } = 0.6f;
+    public bool IconModTransferEffectPulse { get; set; } = true;
+    public bool IconModTransferEffectGlow { get; set; } = false;
+    public bool IconModTransferEffectBounce { get; set; } = false;
+    public bool IconModTransferEffectRainbow { get; set; } = false;
+    public float IconModTransferPulseMinRadius { get; set; } = 0.46f;
+    public float IconModTransferPulseMaxRadius { get; set; } = 0.6f;
+    public float IconModTransferGlowIntensity { get; set; } = 0.6f;
+    public float IconModTransferGlowRadius { get; set; } = 1.2f;
+    public float IconModTransferBounceIntensity { get; set; } = 0.12f;
+    public float IconModTransferBounceSpeed { get; set; } = 1.5f;
+
+    // PAIR REQUEST Event
+    public uint IconPairRequestColor { get; set; } = 0xFFB469FFu; // Pink (#FF69B4)
+    public float IconPairRequestAlpha { get; set; } = 0.6f;
+    public bool IconPairRequestEffectPulse { get; set; } = true;
+    public bool IconPairRequestEffectGlow { get; set; } = false;
+    public bool IconPairRequestEffectBounce { get; set; } = false;
+    public bool IconPairRequestEffectRainbow { get; set; } = false;
+    public float IconPairRequestPulseMinRadius { get; set; } = 0.46f;
+    public float IconPairRequestPulseMaxRadius { get; set; } = 0.6f;
+    public float IconPairRequestGlowIntensity { get; set; } = 0.6f;
+    public float IconPairRequestGlowRadius { get; set; } = 1.2f;
+    public float IconPairRequestBounceIntensity { get; set; } = 0.12f;
+    public float IconPairRequestBounceSpeed { get; set; } = 1.5f;
+
+    // NOTIFICATION (General) Event
+    public uint IconNotificationColor { get; set; } = 0xFF0099FFu; // Orange (#FF9900)
+    public float IconNotificationAlpha { get; set; } = 0.6f;
+    public bool IconNotificationEffectPulse { get; set; } = true;
+    public bool IconNotificationEffectGlow { get; set; } = false;
+    public bool IconNotificationEffectBounce { get; set; } = false;
+    public bool IconNotificationEffectRainbow { get; set; } = false;
+    public float IconNotificationPulseMinRadius { get; set; } = 0.46f;
+    public float IconNotificationPulseMaxRadius { get; set; } = 0.6f;
+    public float IconNotificationGlowIntensity { get; set; } = 0.6f;
+    public float IconNotificationGlowRadius { get; set; } = 1.2f;
+    public float IconNotificationBounceIntensity { get; set; } = 0.12f;
+    public float IconNotificationBounceSpeed { get; set; } = 1.5f;
 
     public float PenumbraSendPopupPosX { get; set; } = 0f;
     public float PenumbraSendPopupPosY { get; set; } = 0f;

@@ -2693,77 +2693,30 @@ public class SettingsUi : WindowMediatorSubscriberBase
         ImGui.Spacing();
 
         // Helper to edit packed uint color as Vector4
-        bool EditPackedColor(string label, ref uint packedColor)
+        (bool Changed, uint NewValue) EditPackedColor(string label, uint packedColor)
         {
             var vec = ImGui.ColorConvertU32ToFloat4(packedColor);
             if (ImGui.ColorEdit4(label, ref vec))
             {
-                packedColor = ImGui.ColorConvertFloat4ToU32(vec);
-                return true;
+                return (true, ImGui.ColorConvertFloat4ToU32(vec));
             }
-            return false;
+            return (false, packedColor);
         }
 
-        ImGui.Text("Pulse Colors");
+        ImGui.Text("Global Visual Settings");
         ImGui.Separator();
 
-        var modColor = cfg.IconPulseModTransferColor;
-        if (EditPackedColor("Mod Transfer (Available / Completed)", ref modColor))
+        var iconGlobalAlpha = cfg.IconGlobalAlpha;
+        if (ImGui.SliderFloat("Icon Global Opacity", ref iconGlobalAlpha, 0.1f, 1.0f, "%.2f"))
         {
-            cfg.IconPulseModTransferColor = modColor;
+            cfg.IconGlobalAlpha = iconGlobalAlpha;
             configChanged = true;
         }
 
-        var pairColor = cfg.IconPulsePairRequestColor;
-        if (EditPackedColor("Pair Request", ref pairColor))
+        var rainbowSpeed = cfg.IconRainbowSpeed;
+        if (ImGui.SliderFloat("Rainbow Cycle Speed", ref rainbowSpeed, 0.1f, 5.0f, "%.2f"))
         {
-            cfg.IconPulsePairRequestColor = pairColor;
-            configChanged = true;
-        }
-
-        var notifColor = cfg.IconPulseNotificationColor;
-        if (EditPackedColor("General Notification", ref notifColor))
-        {
-            cfg.IconPulseNotificationColor = notifColor;
-            configChanged = true;
-        }
-
-        var permColor = cfg.IconPulsePermanentColor;
-        if (EditPackedColor("Permanent Background Pulse", ref permColor))
-        {
-            cfg.IconPulsePermanentColor = permColor;
-            configChanged = true;
-        }
-
-        ImGui.Spacing();
-        ImGui.Text("Pulse Ring Sizes (multiplier of icon size)");
-        ImGui.Separator();
-
-        var evtMin = cfg.IconPulseEventMinRadius;
-        if (ImGui.SliderFloat("Event Pulse Min Radius", ref evtMin, 0.0f, 1.5f, "%.2f"))
-        {
-            cfg.IconPulseEventMinRadius = evtMin;
-            configChanged = true;
-        }
-
-        var evtMax = cfg.IconPulseEventMaxRadius;
-        if (ImGui.SliderFloat("Event Pulse Max Radius", ref evtMax, 0.0f, 1.5f, "%.2f"))
-        {
-            cfg.IconPulseEventMaxRadius = evtMax;
-            configChanged = true;
-        }
-
-        var permMin = cfg.IconPulsePermanentMinRadius;
-        if (ImGui.SliderFloat("Permanent Pulse Min Radius", ref permMin, 0.0f, 1.5f, "%.2f"))
-        {
-            cfg.IconPulsePermanentMinRadius = permMin;
-            configChanged = true;
-        }
-
-        var permMax = cfg.IconPulsePermanentMaxRadius;
-        if (ImGui.SliderFloat("Permanent Pulse Max Radius", ref permMax, 0.0f, 1.5f, "%.2f"))
-        {
-            cfg.IconPulsePermanentMaxRadius = permMax;
+            cfg.IconRainbowSpeed = rainbowSpeed;
             configChanged = true;
         }
 
@@ -2790,6 +2743,139 @@ public class SettingsUi : WindowMediatorSubscriberBase
         {
             cfg.IconShowNotificationBadge = showNotif;
             configChanged = true;
+        }
+
+        ImGui.Spacing();
+        ImGui.Text("Per-Event Configuration");
+        ImGui.Separator();
+        ImGui.TextWrapped("Each event type can have its own color, alpha, and effects. Multiple effects can be combined.");
+
+        // Permanent (Background)
+        if (ImGui.CollapsingHeader("Permanent (Background)"))
+        {
+            var (permColorChanged, permColorNew) = EditPackedColor("Color##perm", cfg.IconPermColor);
+            if (permColorChanged) { cfg.IconPermColor = permColorNew; configChanged = true; }
+            var permAlpha = cfg.IconPermAlpha;
+            if (ImGui.SliderFloat("Alpha##perm", ref permAlpha, 0.01f, 1.0f, "%.2f")) { cfg.IconPermAlpha = permAlpha; configChanged = true; }
+            var permPulse = cfg.IconPermEffectPulse;
+            if (ImGui.Checkbox("Pulse##perm", ref permPulse)) { cfg.IconPermEffectPulse = permPulse; configChanged = true; }
+            ImGui.SameLine();
+            var permGlow = cfg.IconPermEffectGlow;
+            if (ImGui.Checkbox("Glow##perm", ref permGlow)) { cfg.IconPermEffectGlow = permGlow; configChanged = true; }
+            ImGui.SameLine();
+            var permBounce = cfg.IconPermEffectBounce;
+            if (ImGui.Checkbox("Bounce##perm", ref permBounce)) { cfg.IconPermEffectBounce = permBounce; configChanged = true; }
+            ImGui.SameLine();
+            var permRainbow = cfg.IconPermEffectRainbow;
+            if (ImGui.Checkbox("Rainbow##perm", ref permRainbow)) { cfg.IconPermEffectRainbow = permRainbow; configChanged = true; }
+            var permPulseMin = cfg.IconPermPulseMinRadius;
+            if (ImGui.SliderFloat("Pulse Min Radius##perm", ref permPulseMin, 0.0f, 1.5f, "%.2f")) { cfg.IconPermPulseMinRadius = permPulseMin; configChanged = true; }
+            var permPulseMax = cfg.IconPermPulseMaxRadius;
+            if (ImGui.SliderFloat("Pulse Max Radius##perm", ref permPulseMax, 0.0f, 1.5f, "%.2f")) { cfg.IconPermPulseMaxRadius = permPulseMax; configChanged = true; }
+            var permGlowInt = cfg.IconPermGlowIntensity;
+            if (ImGui.SliderFloat("Glow Intensity##perm", ref permGlowInt, 0.1f, 1.0f, "%.2f")) { cfg.IconPermGlowIntensity = permGlowInt; configChanged = true; }
+            var permGlowRad = cfg.IconPermGlowRadius;
+            if (ImGui.SliderFloat("Glow Radius##perm", ref permGlowRad, 0.5f, 2.0f, "%.2f")) { cfg.IconPermGlowRadius = permGlowRad; configChanged = true; }
+            var permBounceInt = cfg.IconPermBounceIntensity;
+            if (ImGui.SliderFloat("Bounce Scale##perm", ref permBounceInt, 0.0f, 0.3f, "%.2f")) { cfg.IconPermBounceIntensity = permBounceInt; configChanged = true; }
+            var permBounceSpd = cfg.IconPermBounceSpeed;
+            if (ImGui.SliderFloat("Bounce Speed##perm", ref permBounceSpd, 0.1f, 3.0f, "%.2f")) { cfg.IconPermBounceSpeed = permBounceSpd; configChanged = true; }
+        }
+
+        // Mod Transfer
+        if (ImGui.CollapsingHeader("Mod Transfer"))
+        {
+            var (modColorChanged, modColorNew) = EditPackedColor("Color##mod", cfg.IconModTransferColor);
+            if (modColorChanged) { cfg.IconModTransferColor = modColorNew; configChanged = true; }
+            var modAlpha = cfg.IconModTransferAlpha;
+            if (ImGui.SliderFloat("Alpha##mod", ref modAlpha, 0.01f, 1.0f, "%.2f")) { cfg.IconModTransferAlpha = modAlpha; configChanged = true; }
+            var modPulse = cfg.IconModTransferEffectPulse;
+            if (ImGui.Checkbox("Pulse##mod", ref modPulse)) { cfg.IconModTransferEffectPulse = modPulse; configChanged = true; }
+            ImGui.SameLine();
+            var modGlow = cfg.IconModTransferEffectGlow;
+            if (ImGui.Checkbox("Glow##mod", ref modGlow)) { cfg.IconModTransferEffectGlow = modGlow; configChanged = true; }
+            ImGui.SameLine();
+            var modBounce = cfg.IconModTransferEffectBounce;
+            if (ImGui.Checkbox("Bounce##mod", ref modBounce)) { cfg.IconModTransferEffectBounce = modBounce; configChanged = true; }
+            ImGui.SameLine();
+            var modRainbow = cfg.IconModTransferEffectRainbow;
+            if (ImGui.Checkbox("Rainbow##mod", ref modRainbow)) { cfg.IconModTransferEffectRainbow = modRainbow; configChanged = true; }
+            var modPulseMin = cfg.IconModTransferPulseMinRadius;
+            if (ImGui.SliderFloat("Pulse Min Radius##mod", ref modPulseMin, 0.0f, 1.5f, "%.2f")) { cfg.IconModTransferPulseMinRadius = modPulseMin; configChanged = true; }
+            var modPulseMax = cfg.IconModTransferPulseMaxRadius;
+            if (ImGui.SliderFloat("Pulse Max Radius##mod", ref modPulseMax, 0.0f, 1.5f, "%.2f")) { cfg.IconModTransferPulseMaxRadius = modPulseMax; configChanged = true; }
+            var modGlowInt = cfg.IconModTransferGlowIntensity;
+            if (ImGui.SliderFloat("Glow Intensity##mod", ref modGlowInt, 0.1f, 1.0f, "%.2f")) { cfg.IconModTransferGlowIntensity = modGlowInt; configChanged = true; }
+            var modGlowRad = cfg.IconModTransferGlowRadius;
+            if (ImGui.SliderFloat("Glow Radius##mod", ref modGlowRad, 0.5f, 2.0f, "%.2f")) { cfg.IconModTransferGlowRadius = modGlowRad; configChanged = true; }
+            var modBounceInt = cfg.IconModTransferBounceIntensity;
+            if (ImGui.SliderFloat("Bounce Scale##mod", ref modBounceInt, 0.0f, 0.3f, "%.2f")) { cfg.IconModTransferBounceIntensity = modBounceInt; configChanged = true; }
+            var modBounceSpd = cfg.IconModTransferBounceSpeed;
+            if (ImGui.SliderFloat("Bounce Speed##mod", ref modBounceSpd, 0.1f, 3.0f, "%.2f")) { cfg.IconModTransferBounceSpeed = modBounceSpd; configChanged = true; }
+        }
+
+        // Pair Request
+        if (ImGui.CollapsingHeader("Pair Request"))
+        {
+            var (pairColorChanged, pairColorNew) = EditPackedColor("Color##pair", cfg.IconPairRequestColor);
+            if (pairColorChanged) { cfg.IconPairRequestColor = pairColorNew; configChanged = true; }
+            var pairAlpha = cfg.IconPairRequestAlpha;
+            if (ImGui.SliderFloat("Alpha##pair", ref pairAlpha, 0.01f, 1.0f, "%.2f")) { cfg.IconPairRequestAlpha = pairAlpha; configChanged = true; }
+            var pairPulse = cfg.IconPairRequestEffectPulse;
+            if (ImGui.Checkbox("Pulse##pair", ref pairPulse)) { cfg.IconPairRequestEffectPulse = pairPulse; configChanged = true; }
+            ImGui.SameLine();
+            var pairGlow = cfg.IconPairRequestEffectGlow;
+            if (ImGui.Checkbox("Glow##pair", ref pairGlow)) { cfg.IconPairRequestEffectGlow = pairGlow; configChanged = true; }
+            ImGui.SameLine();
+            var pairBounce = cfg.IconPairRequestEffectBounce;
+            if (ImGui.Checkbox("Bounce##pair", ref pairBounce)) { cfg.IconPairRequestEffectBounce = pairBounce; configChanged = true; }
+            ImGui.SameLine();
+            var pairRainbow = cfg.IconPairRequestEffectRainbow;
+            if (ImGui.Checkbox("Rainbow##pair", ref pairRainbow)) { cfg.IconPairRequestEffectRainbow = pairRainbow; configChanged = true; }
+            var pairPulseMin = cfg.IconPairRequestPulseMinRadius;
+            if (ImGui.SliderFloat("Pulse Min Radius##pair", ref pairPulseMin, 0.0f, 1.5f, "%.2f")) { cfg.IconPairRequestPulseMinRadius = pairPulseMin; configChanged = true; }
+            var pairPulseMax = cfg.IconPairRequestPulseMaxRadius;
+            if (ImGui.SliderFloat("Pulse Max Radius##pair", ref pairPulseMax, 0.0f, 1.5f, "%.2f")) { cfg.IconPairRequestPulseMaxRadius = pairPulseMax; configChanged = true; }
+            var pairGlowInt = cfg.IconPairRequestGlowIntensity;
+            if (ImGui.SliderFloat("Glow Intensity##pair", ref pairGlowInt, 0.1f, 1.0f, "%.2f")) { cfg.IconPairRequestGlowIntensity = pairGlowInt; configChanged = true; }
+            var pairGlowRad = cfg.IconPairRequestGlowRadius;
+            if (ImGui.SliderFloat("Glow Radius##pair", ref pairGlowRad, 0.5f, 2.0f, "%.2f")) { cfg.IconPairRequestGlowRadius = pairGlowRad; configChanged = true; }
+            var pairBounceInt = cfg.IconPairRequestBounceIntensity;
+            if (ImGui.SliderFloat("Bounce Scale##pair", ref pairBounceInt, 0.0f, 0.3f, "%.2f")) { cfg.IconPairRequestBounceIntensity = pairBounceInt; configChanged = true; }
+            var pairBounceSpd = cfg.IconPairRequestBounceSpeed;
+            if (ImGui.SliderFloat("Bounce Speed##pair", ref pairBounceSpd, 0.1f, 3.0f, "%.2f")) { cfg.IconPairRequestBounceSpeed = pairBounceSpd; configChanged = true; }
+        }
+
+        // Notification
+        if (ImGui.CollapsingHeader("Notification"))
+        {
+            var (notifColorChanged, notifColorNew) = EditPackedColor("Color##notif", cfg.IconNotificationColor);
+            if (notifColorChanged) { cfg.IconNotificationColor = notifColorNew; configChanged = true; }
+            var notifAlpha = cfg.IconNotificationAlpha;
+            if (ImGui.SliderFloat("Alpha##notif", ref notifAlpha, 0.01f, 1.0f, "%.2f")) { cfg.IconNotificationAlpha = notifAlpha; configChanged = true; }
+            var notifPulse = cfg.IconNotificationEffectPulse;
+            if (ImGui.Checkbox("Pulse##notif", ref notifPulse)) { cfg.IconNotificationEffectPulse = notifPulse; configChanged = true; }
+            ImGui.SameLine();
+            var notifGlow = cfg.IconNotificationEffectGlow;
+            if (ImGui.Checkbox("Glow##notif", ref notifGlow)) { cfg.IconNotificationEffectGlow = notifGlow; configChanged = true; }
+            ImGui.SameLine();
+            var notifBounce = cfg.IconNotificationEffectBounce;
+            if (ImGui.Checkbox("Bounce##notif", ref notifBounce)) { cfg.IconNotificationEffectBounce = notifBounce; configChanged = true; }
+            ImGui.SameLine();
+            var notifRainbow = cfg.IconNotificationEffectRainbow;
+            if (ImGui.Checkbox("Rainbow##notif", ref notifRainbow)) { cfg.IconNotificationEffectRainbow = notifRainbow; configChanged = true; }
+            var notifPulseMin = cfg.IconNotificationPulseMinRadius;
+            if (ImGui.SliderFloat("Pulse Min Radius##notif", ref notifPulseMin, 0.0f, 1.5f, "%.2f")) { cfg.IconNotificationPulseMinRadius = notifPulseMin; configChanged = true; }
+            var notifPulseMax = cfg.IconNotificationPulseMaxRadius;
+            if (ImGui.SliderFloat("Pulse Max Radius##notif", ref notifPulseMax, 0.0f, 1.5f, "%.2f")) { cfg.IconNotificationPulseMaxRadius = notifPulseMax; configChanged = true; }
+            var notifGlowInt = cfg.IconNotificationGlowIntensity;
+            if (ImGui.SliderFloat("Glow Intensity##notif", ref notifGlowInt, 0.1f, 1.0f, "%.2f")) { cfg.IconNotificationGlowIntensity = notifGlowInt; configChanged = true; }
+            var notifGlowRad = cfg.IconNotificationGlowRadius;
+            if (ImGui.SliderFloat("Glow Radius##notif", ref notifGlowRad, 0.5f, 2.0f, "%.2f")) { cfg.IconNotificationGlowRadius = notifGlowRad; configChanged = true; }
+            var notifBounceInt = cfg.IconNotificationBounceIntensity;
+            if (ImGui.SliderFloat("Bounce Scale##notif", ref notifBounceInt, 0.0f, 0.3f, "%.2f")) { cfg.IconNotificationBounceIntensity = notifBounceInt; configChanged = true; }
+            var notifBounceSpd = cfg.IconNotificationBounceSpeed;
+            if (ImGui.SliderFloat("Bounce Speed##notif", ref notifBounceSpd, 0.1f, 3.0f, "%.2f")) { cfg.IconNotificationBounceSpeed = notifBounceSpd; configChanged = true; }
         }
 
         ImGui.Spacing();

@@ -1,6 +1,7 @@
 using Dalamud.Interface;
 using Dalamud.Interface.Colors;
 using Dalamud.Interface.Utility;
+using Dalamud.Interface.Utility.Raii;
 using Dalamud.Interface.Windowing;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Game.Command;
@@ -346,15 +347,34 @@ public class SpheneIcon : WindowMediatorSubscriberBase
     
     protected override void DrawInternal()
     {
+        var cfg = _configService.Current;
         var iconSize = 32f;
         var padding = 4f;
         var pulsePadding = 14f; // Extra space so pulse rings are not clipped
         var windowSize = iconSize + padding * 2 + pulsePadding * 2;
-        var iconLocked = _configService.Current.LockSpheneIcon;
+        var iconLocked = cfg.LockSpheneIcon;
 
-        // Set window size large enough to contain pulse rings outside the icon
+        // Get latest active event config to determine bounce and glow behavior
+        var latestEventType = GetLatestUnacknowledgedEventType();
+        var latestEventConfig = GetEventConfig(latestEventType, cfg);
+
+        // Determine bounce: use per-event settings if active, otherwise permanent settings
+        var bounceActive = cfg.IconPermEffectBounce || (latestEventType != IconEventType.None && latestEventConfig.EffectBounce);
+        var bounceIntensity = latestEventType != IconEventType.None && latestEventConfig.EffectBounce
+            ? latestEventConfig.BounceIntensity
+            : cfg.IconPermBounceIntensity;
+        var bounceSpeed = latestEventType != IconEventType.None && latestEventConfig.EffectBounce
+            ? latestEventConfig.BounceSpeed
+            : cfg.IconPermBounceSpeed;
+        var bounceScale = bounceActive
+            ? 1.0f + bounceIntensity * MathF.Sin(_pluginInterface.UiBuilder.FrameCount * bounceSpeed * 0.05f)
+            : 1.0f;
+        var scaledIconSize = iconSize * bounceScale;
+        var scaledOffset = (iconSize - scaledIconSize) / 2f;
+
+        // Set window size large enough to contain pulse rings and glow outside the icon
         ImGui.SetWindowSize(new Vector2(windowSize, windowSize), ImGuiCond.Always);
-        
+
         // Get current window position
         var currentPos = ImGui.GetWindowPos();
 
@@ -363,53 +383,83 @@ public class SpheneIcon : WindowMediatorSubscriberBase
 
         // Draw the Sphene logo/icon
         var drawList = ImGui.GetWindowDrawList();
-        var iconPos = new Vector2(currentPos.X + padding + pulsePadding, currentPos.Y + padding + pulsePadding);
-        var iconColor = ImGui.ColorConvertFloat4ToU32(SpheneColors.SpheneGold);
+        var baseIconPos = new Vector2(currentPos.X + padding + pulsePadding, currentPos.Y + padding + pulsePadding);
+        var iconPos = new Vector2(baseIconPos.X + scaledOffset, baseIconPos.Y + scaledOffset);
+        var iconAlpha = cfg.IconGlobalAlpha;
+        var iconColorVec = SpheneColors.SpheneGold;
+        iconColorVec.W *= iconAlpha;
+        var iconColor = ImGui.ColorConvertFloat4ToU32(iconColorVec);
+
+        // Determine glow: use most recent event glow (or permanent if no events)
+        var glowActive = cfg.IconPermEffectGlow || (latestEventType != IconEventType.None && latestEventConfig.EffectGlow);
+        var glowColor = latestEventType != IconEventType.None && latestEventConfig.EffectGlow
+            ? latestEventConfig.Color
+            : cfg.IconPermColor;
+        var glowIntensity = latestEventType != IconEventType.None && latestEventConfig.EffectGlow
+            ? latestEventConfig.GlowIntensity
+            : cfg.IconPermGlowIntensity;
+        var glowRadius = latestEventType != IconEventType.None && latestEventConfig.EffectGlow
+            ? latestEventConfig.GlowRadius
+            : cfg.IconPermGlowRadius;
+        if (glowActive)
+        {
+            DrawGlow(drawList, iconPos, scaledIconSize, glowColor, glowIntensity, glowRadius, iconAlpha);
+        }
 
         // Draw permanent weak purple pulse
-        DrawPermanentPurplePulse(drawList, iconPos, iconSize);
+        if (cfg.IconPermEffectPulse)
+        {
+            DrawPermanentPurplePulse(drawList, baseIconPos, iconSize,
+                cfg.IconPermAlpha, cfg.IconPermPulseMinRadius, cfg.IconPermPulseMaxRadius,
+                cfg.IconPermColor, cfg.IconPermEffectRainbow, cfg.IconRainbowSpeed, iconAlpha);
+        }
 
         // Draw pulse ring behind icon if events are active (stronger pulse)
-        if (_pulseActive)
+        if (_pulseActive && latestEventType != IconEventType.None && latestEventConfig.EffectPulse)
         {
-            DrawPulseRing(drawList, iconPos, iconSize);
+            DrawPulseRing(drawList, baseIconPos, iconSize,
+                (latestEventConfig.Color, latestEventConfig.Alpha, latestEventConfig.EffectRainbow,
+                 latestEventConfig.PulseMinRadius, latestEventConfig.PulseMaxRadius), iconAlpha, cfg.IconRainbowSpeed);
         }
 
         // Draw Sphene Logo or fallback
         if (_spheneLogoTexture != null)
         {
-            drawList.AddImage(_spheneLogoTexture.Handle, iconPos, iconPos + new Vector2(iconSize, iconSize));
+            var tintColor = ImGui.ColorConvertFloat4ToU32(new Vector4(1, 1, 1, iconAlpha));
+            drawList.AddImage(_spheneLogoTexture.Handle, iconPos, iconPos + new Vector2(scaledIconSize, scaledIconSize),
+                Vector2.Zero, Vector2.One, tintColor);
         }
         else
         {
             // Fallback: Draw a simple circle as icon
-            drawList.AddCircleFilled(new Vector2(iconPos.X + iconSize/2, iconPos.Y + iconSize/2), 
-                iconSize/2 - 2, iconColor);
-            
+            drawList.AddCircleFilled(new Vector2(iconPos.X + scaledIconSize/2, iconPos.Y + scaledIconSize/2),
+                scaledIconSize/2 - 2, iconColor);
+
             // Add "S" text in the center
             using (_uiSharedService.UidFont.Push())
             {
                 var text = "S";
                 var textSize = ImGui.CalcTextSize(text);
                 var textPos = new Vector2(
-                    iconPos.X + (iconSize - textSize.X) / 2,
-                    iconPos.Y + (iconSize - textSize.Y) / 2
+                    iconPos.X + (scaledIconSize - textSize.X) / 2,
+                    iconPos.Y + (scaledIconSize - textSize.Y) / 2
                 );
-                drawList.AddText(textPos, ImGui.ColorConvertFloat4ToU32(new Vector4(0, 0, 0, 1)), text);
+                var textColor = ImGui.ColorConvertFloat4ToU32(new Vector4(0, 0, 0, iconAlpha));
+                drawList.AddText(textPos, textColor, text);
             }
         }
-        
+
         // Draw status indicator
-        DrawStatusIndicator(drawList, iconPos, iconSize);
-        
+        DrawStatusIndicator(drawList, iconPos, scaledIconSize, iconAlpha);
+
         // Draw update indicator if available
         if (_updateAvailable)
         {
-            DrawUpdateIndicator(drawList, iconPos, iconSize);
+            DrawUpdateIndicator(drawList, iconPos, scaledIconSize, iconAlpha);
         }
 
         // Draw event badges
-        DrawEventBadges(drawList, iconPos, iconSize);
+        DrawEventBadges(drawList, iconPos, scaledIconSize, cfg);
 
         // Handle dragging and clicking only for the icon area (rest of window is click-through)
         ImGui.SetCursorPos(new Vector2(padding + pulsePadding, padding + pulsePadding));
@@ -623,49 +673,43 @@ public class SpheneIcon : WindowMediatorSubscriberBase
         }
     }
     
-    private void DrawStatusIndicator(ImDrawListPtr drawList, Vector2 iconPos, float iconSize)
+    private void DrawStatusIndicator(ImDrawListPtr drawList, Vector2 iconPos, float iconSize, float alpha = 1.0f)
     {
         var indicatorRadius = 4f;
         var indicatorPos = new Vector2(
             iconPos.X + iconSize - indicatorRadius - 2f,
             iconPos.Y + indicatorRadius + 2f
         );
-        
+
         var statusColor = _apiController.IsTransientDisconnectInProgress
             ? Sphene.UI.Theme.SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning
             : GetStatusColor(_apiController.ServerState);
+        statusColor.W *= alpha;
         var indicatorColor = ImGui.ColorConvertFloat4ToU32(statusColor);
-        
+
         // Draw status indicator circle
         drawList.AddCircleFilled(indicatorPos, indicatorRadius, indicatorColor);
-        
+
         // Draw white border around indicator for better visibility
-        drawList.AddCircle(indicatorPos, indicatorRadius, ImGui.ColorConvertFloat4ToU32(new Vector4(1, 1, 1, 0.8f)), 0, 1f);
+        var borderColor = new Vector4(1, 1, 1, 0.8f * alpha);
+        drawList.AddCircle(indicatorPos, indicatorRadius, ImGui.ColorConvertFloat4ToU32(borderColor), 0, 1f);
     }
 
     // Draw a green arrow overlay indicating an available update
-    private static void DrawUpdateIndicator(ImDrawListPtr drawList, Vector2 iconPos, float iconSize)
+    private static void DrawUpdateIndicator(ImDrawListPtr drawList, Vector2 iconPos, float iconSize, float alpha = 1.0f)
     {
-        // Position near bottom-right corner and make it visually prominent
         var arrowText = FontAwesomeIcon.ArrowCircleUp.ToIconString();
-        ImGui.PushFont(UiBuilder.IconFont);
+        var textSize = ImGui.CalcTextSize(arrowText);
+        var arrowPos = new Vector2(
+            iconPos.X + iconSize - textSize.X - 4f,
+            iconPos.Y + iconSize - textSize.Y - 4f
+        );
 
-        // Use a brighter green and add a subtle shadow for better readability
-        var arrowColor = ImGui.ColorConvertFloat4ToU32(ImGuiColors.HealerGreen);
-        var shadowColor = ImGui.ColorConvertFloat4ToU32(new Vector4(0, 0, 0, 0.85f));
-
-        // Anchor near bottom-right of the icon
-        var overlayPos = new Vector2(iconPos.X + iconSize - 14f, iconPos.Y + iconSize - 14f);
-
-        // Draw a semi-transparent dark bubble behind the arrow to improve contrast
-        var bubbleCenter = new Vector2(overlayPos.X + 6f, overlayPos.Y + 8f);
-        drawList.AddCircleFilled(bubbleCenter, 9f, ImGui.ColorConvertFloat4ToU32(new Vector4(0, 0, 0, 0.5f)));
-
-        // Shadow then arrow
-        drawList.AddText(new Vector2(overlayPos.X + 1f, overlayPos.Y + 1f), shadowColor, arrowText);
-        drawList.AddText(overlayPos, arrowColor, arrowText);
-
-        ImGui.PopFont();
+        using (ImRaii.PushFont(UiBuilder.IconFont))
+        {
+            var green = new Vector4(0.2f, 0.9f, 0.2f, alpha);
+            drawList.AddText(arrowPos, ImGui.ColorConvertFloat4ToU32(green), arrowText);
+        }
     }
 
     private void OnUpdateAvailable(ShowUpdateNotificationMessage msg)
@@ -753,50 +797,98 @@ public class SpheneIcon : WindowMediatorSubscriberBase
         }
     }
 
-    private void DrawPulseRing(ImDrawListPtr drawList, Vector2 iconPos, float iconSize)
+    private void DrawGlow(ImDrawListPtr drawList, Vector2 iconPos, float iconSize,
+        uint glowColor, float glowIntensity, float glowRadius, float globalAlpha)
     {
         var center = new Vector2(iconPos.X + iconSize / 2, iconPos.Y + iconSize / 2);
-        var cfg = _configService.Current;
+        var glowColorVec = ImGui.ColorConvertU32ToFloat4(glowColor);
+        var baseRadius = iconSize / 2f;
+
+        for (int i = 0; i < 5; i++)
+        {
+            var layerAlpha = glowIntensity * (1.0f - i * 0.2f) * globalAlpha;
+            var radius = baseRadius * (1.0f + i * 0.12f * glowRadius);
+            var color = new Vector4(glowColorVec.X, glowColorVec.Y, glowColorVec.Z, layerAlpha);
+            drawList.AddCircleFilled(center, radius, ImGui.ColorConvertFloat4ToU32(color));
+        }
+    }
+
+    private void DrawPulseRing(ImDrawListPtr drawList, Vector2 iconPos, float iconSize,
+        (uint Color, float Alpha, bool EffectRainbow, float MinRadius, float MaxRadius) eventConfig,
+        float globalAlpha, float rainbowSpeed)
+    {
+        var center = new Vector2(iconPos.X + iconSize / 2, iconPos.Y + iconSize / 2);
 
         // Outward ripple: ring expands from icon center and fades to nothing (~1.5s cycle)
         var cycleDuration = 1.5;
         var t = (float)((DateTimeOffset.UtcNow.Ticks % (long)(cycleDuration * 10_000_000L)) / (cycleDuration * 10_000_000L));
 
-        var minRadius = iconSize * cfg.IconPulseEventMinRadius;
-        var maxRadius = iconSize * cfg.IconPulseEventMaxRadius;
+        var minRadius = iconSize * eventConfig.MinRadius;
+        var maxRadius = iconSize * eventConfig.MaxRadius;
         var radius = minRadius + (maxRadius - minRadius) * t;
 
         // Alpha fades out quadratically as ring expands
-        var alpha = 0.6f * (1f - t * t);
+        var alpha = eventConfig.Alpha * (1f - t * t) * globalAlpha;
 
-        // Determine color from most recent unacknowledged event
-        var color = GetPulseColor();
+        // Determine color from per-event config (rainbow overrides)
+        var color = eventConfig.EffectRainbow
+            ? GetRainbowColor(rainbowSpeed, alpha)
+            : ImGui.ColorConvertU32ToFloat4(eventConfig.Color);
         var uintColor = ImGui.ColorConvertFloat4ToU32(new Vector4(color.X, color.Y, color.Z, alpha));
 
         drawList.AddCircle(center, radius, uintColor, 32, 2.5f);
     }
 
-    private void DrawPermanentPurplePulse(ImDrawListPtr drawList, Vector2 iconPos, float iconSize)
+    private void DrawPermanentPurplePulse(ImDrawListPtr drawList, Vector2 iconPos, float iconSize,
+        float alpha, float minRadius, float maxRadius, uint color, bool rainbow, float rainbowSpeed, float globalAlpha)
     {
         var center = new Vector2(iconPos.X + iconSize / 2, iconPos.Y + iconSize / 2);
-        var cfg = _configService.Current;
 
         // Outward ripple: ring expands from icon center and fades to nothing (~2.5s cycle)
         var cycleDuration = 2.5;
         var t = (float)((DateTimeOffset.UtcNow.Ticks % (long)(cycleDuration * 10_000_000L)) / (cycleDuration * 10_000_000L));
 
-        var minRadius = iconSize * cfg.IconPulsePermanentMinRadius;
-        var maxRadius = iconSize * cfg.IconPulsePermanentMaxRadius;
-        var radius = minRadius + (maxRadius - minRadius) * t;
+        var radiusMin = iconSize * minRadius;
+        var radiusMax = iconSize * maxRadius;
+        var radius = radiusMin + (radiusMax - radiusMin) * t;
 
         // Alpha fades out quadratically as ring expands — full at start, gone at outer edge
-        var alpha = 0.3f * (1f - t * t);
+        var pulseAlpha = alpha * (1f - t * t) * globalAlpha;
 
-        var color = ImGui.ColorConvertU32ToFloat4(cfg.IconPulsePermanentColor);
-        var pulseColor = new Vector4(color.X, color.Y, color.Z, alpha);
+        var rgb = rainbow
+            ? GetRainbowColor(rainbowSpeed * 0.7f, pulseAlpha)
+            : ImGui.ColorConvertU32ToFloat4(color);
+        var pulseColor = new Vector4(rgb.X, rgb.Y, rgb.Z, pulseAlpha);
         var uintColor = ImGui.ColorConvertFloat4ToU32(pulseColor);
 
         drawList.AddCircle(center, radius, uintColor, 32, 2.5f);
+    }
+
+    private Vector4 GetRainbowColor(float speed, float alpha)
+    {
+        var hue = ((_pluginInterface.UiBuilder.FrameCount * speed * 0.5f) % 360f) / 360f;
+        var rgb = HsvToRgb(hue, 1.0f, 1.0f);
+        return new Vector4(rgb.X, rgb.Y, rgb.Z, alpha);
+    }
+
+    private static Vector3 HsvToRgb(float h, float s, float v)
+    {
+        var i = (int)(h * 6f);
+        var f = h * 6f - i;
+        var p = v * (1f - s);
+        var q = v * (1f - f * s);
+        var t = v * (1f - (1f - f) * s);
+
+        i = Math.Abs(i % 6);
+        return i switch
+        {
+            0 => new Vector3(v, t, p),
+            1 => new Vector3(q, v, p),
+            2 => new Vector3(p, v, t),
+            3 => new Vector3(p, q, v),
+            4 => new Vector3(t, p, v),
+            _ => new Vector3(v, p, q),
+        };
     }
 
     private Vector4 GetPulseColor()
@@ -813,18 +905,61 @@ public class SpheneIcon : WindowMediatorSubscriberBase
 
             return latest.Type switch
             {
-                IconEventType.ModTransferAvailable => ImGui.ColorConvertU32ToFloat4(cfg.IconPulseModTransferColor),
-                IconEventType.ModTransferCompleted => ImGui.ColorConvertU32ToFloat4(cfg.IconPulseModTransferColor),
-                IconEventType.PairRequest => ImGui.ColorConvertU32ToFloat4(cfg.IconPulsePairRequestColor),
-                IconEventType.Notification => ImGui.ColorConvertU32ToFloat4(cfg.IconPulseNotificationColor),
+                IconEventType.ModTransferAvailable => ImGui.ColorConvertU32ToFloat4(cfg.IconModTransferColor),
+                IconEventType.ModTransferCompleted => ImGui.ColorConvertU32ToFloat4(cfg.IconModTransferColor),
+                IconEventType.PairRequest => ImGui.ColorConvertU32ToFloat4(cfg.IconPairRequestColor),
+                IconEventType.Notification => ImGui.ColorConvertU32ToFloat4(cfg.IconNotificationColor),
                 _ => SpheneColors.SpheneGold
             };
         }
     }
 
-    private void DrawEventBadges(ImDrawListPtr drawList, Vector2 iconPos, float iconSize)
+    private IconEventType GetLatestUnacknowledgedEventType()
     {
-        var cfg = _configService.Current;
+        lock (_eventsLock)
+        {
+            var latest = _activeEvents
+                .Where(e => e.Timestamp > _lastEventAcknowledgeTime)
+                .OrderByDescending(e => e.Timestamp)
+                .FirstOrDefault();
+            return latest?.Type ?? IconEventType.None;
+        }
+    }
+
+    private (uint Color, float Alpha, bool EffectPulse, bool EffectGlow, bool EffectBounce, bool EffectRainbow,
+        float PulseMinRadius, float PulseMaxRadius, float GlowIntensity, float GlowRadius,
+        float BounceIntensity, float BounceSpeed)
+        GetEventConfig(IconEventType type, Sphene.SpheneConfiguration.Configurations.SpheneConfig cfg)
+    {
+        return type switch
+        {
+            IconEventType.ModTransferAvailable or IconEventType.ModTransferCompleted =>
+                (cfg.IconModTransferColor, cfg.IconModTransferAlpha,
+                 cfg.IconModTransferEffectPulse, cfg.IconModTransferEffectGlow,
+                 cfg.IconModTransferEffectBounce, cfg.IconModTransferEffectRainbow,
+                 cfg.IconModTransferPulseMinRadius, cfg.IconModTransferPulseMaxRadius,
+                 cfg.IconModTransferGlowIntensity, cfg.IconModTransferGlowRadius,
+                 cfg.IconModTransferBounceIntensity, cfg.IconModTransferBounceSpeed),
+            IconEventType.PairRequest =>
+                (cfg.IconPairRequestColor, cfg.IconPairRequestAlpha,
+                 cfg.IconPairRequestEffectPulse, cfg.IconPairRequestEffectGlow,
+                 cfg.IconPairRequestEffectBounce, cfg.IconPairRequestEffectRainbow,
+                 cfg.IconPairRequestPulseMinRadius, cfg.IconPairRequestPulseMaxRadius,
+                 cfg.IconPairRequestGlowIntensity, cfg.IconPairRequestGlowRadius,
+                 cfg.IconPairRequestBounceIntensity, cfg.IconPairRequestBounceSpeed),
+            IconEventType.Notification =>
+                (cfg.IconNotificationColor, cfg.IconNotificationAlpha,
+                 cfg.IconNotificationEffectPulse, cfg.IconNotificationEffectGlow,
+                 cfg.IconNotificationEffectBounce, cfg.IconNotificationEffectRainbow,
+                 cfg.IconNotificationPulseMinRadius, cfg.IconNotificationPulseMaxRadius,
+                 cfg.IconNotificationGlowIntensity, cfg.IconNotificationGlowRadius,
+                 cfg.IconNotificationBounceIntensity, cfg.IconNotificationBounceSpeed),
+            _ => (0xFFE86699u, 0.3f, false, false, false, false, 0.46f, 0.6f, 0.6f, 1.2f, 0.12f, 1.5f)
+        };
+    }
+
+    private void DrawEventBadges(ImDrawListPtr drawList, Vector2 iconPos, float iconSize, Sphene.SpheneConfiguration.Configurations.SpheneConfig cfg)
+    {
         lock (_eventsLock)
         {
             var unacknowledged = _activeEvents
@@ -850,22 +985,25 @@ public class SpheneIcon : WindowMediatorSubscriberBase
                 var evt = unacknowledged[i];
                 var badgeColor = evt.Type switch
                 {
-                    IconEventType.ModTransferAvailable or IconEventType.ModTransferCompleted => ImGui.ColorConvertU32ToFloat4(cfg.IconPulseModTransferColor),
-                    IconEventType.PairRequest => ImGui.ColorConvertU32ToFloat4(cfg.IconPulsePairRequestColor),
-                    IconEventType.Notification => ImGui.ColorConvertU32ToFloat4(cfg.IconPulseNotificationColor),
+                    IconEventType.ModTransferAvailable or IconEventType.ModTransferCompleted => ImGui.ColorConvertU32ToFloat4(cfg.IconModTransferColor),
+                    IconEventType.PairRequest => ImGui.ColorConvertU32ToFloat4(cfg.IconPairRequestColor),
+                    IconEventType.Notification => ImGui.ColorConvertU32ToFloat4(cfg.IconNotificationColor),
                     _ => SpheneColors.SpheneGold
                 };
+                badgeColor.W *= cfg.IconGlobalAlpha;
 
                 var pos = new Vector2(startX - i * spacing, startY);
                 drawList.AddCircleFilled(pos, badgeRadius, ImGui.ColorConvertFloat4ToU32(badgeColor));
-                drawList.AddCircle(pos, badgeRadius, ImGui.ColorConvertFloat4ToU32(new Vector4(1, 1, 1, 0.6f)), 0, 1f);
+                var borderColor = new Vector4(1, 1, 1, 0.6f * cfg.IconGlobalAlpha);
+                drawList.AddCircle(pos, badgeRadius, ImGui.ColorConvertFloat4ToU32(borderColor), 0, 1f);
             }
 
             // Overflow indicator if more than 4 events
             if (unacknowledged.Count > 4)
             {
                 var pos = new Vector2(startX - 4 * spacing, startY);
-                drawList.AddCircleFilled(pos, badgeRadius, ImGui.ColorConvertFloat4ToU32(new Vector4(0.5f, 0.5f, 0.5f, 0.8f)));
+                var overflowColor = new Vector4(0.5f, 0.5f, 0.5f, 0.8f * cfg.IconGlobalAlpha);
+                drawList.AddCircleFilled(pos, badgeRadius, ImGui.ColorConvertFloat4ToU32(overflowColor));
             }
         }
     }
@@ -914,6 +1052,7 @@ public class SpheneIcon : WindowMediatorSubscriberBase
 
     private enum IconEventType
     {
+        None,
         ModTransferAvailable,
         ModTransferCompleted,
         PairRequest,
