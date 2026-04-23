@@ -66,8 +66,17 @@ public class SpheneIcon : WindowMediatorSubscriberBase
     private string _tooltipHeaderText = string.Empty;
     private string _tooltipStatusText = string.Empty;
     private string _tooltipUpdateText = string.Empty;
-    
-    
+
+    // Event badge tracking
+    private readonly List<IconEvent> _activeEvents = new();
+    private readonly Lock _eventsLock = new();
+    private DateTimeOffset _lastEventAcknowledgeTime = DateTimeOffset.MinValue;
+    private bool _pulseActive = false;
+
+    // Tooltip cache for events
+    private List<string> _cachedEventDescriptions = new();
+    private int _lastEventCacheHash = 0;
+
     public SpheneIcon(ILogger<SpheneIcon> logger, SpheneMediator mediator, 
         SpheneConfigService configService, UiSharedService uiSharedService, ApiController apiController, 
         PerformanceCollectorService performanceCollectorService, IpcManager ipcManager, IDalamudPluginInterface pluginInterface,
@@ -115,7 +124,12 @@ public class SpheneIcon : WindowMediatorSubscriberBase
         
         // Subscribe to update availability messages
         Mediator.Subscribe<ShowUpdateNotificationMessage>(this, OnUpdateAvailable);
-        
+
+        // Subscribe to event badge messages
+        Mediator.Subscribe<PenumbraModTransferAvailableMessage>(this, OnModTransferAvailable);
+        Mediator.Subscribe<PenumbraModTransferCompletedMessage>(this, OnModTransferCompleted);
+        Mediator.Subscribe<NotificationMessage>(this, OnNotification);
+
         _logger.LogDebug("SpheneIcon created at position {Position}", _iconPosition);
     }
     
@@ -333,20 +347,33 @@ public class SpheneIcon : WindowMediatorSubscriberBase
     {
         var iconSize = 32f;
         var padding = 4f;
-        var windowSize = iconSize + padding * 2;
+        var pulsePadding = 14f; // Extra space so pulse rings are not clipped
+        var windowSize = iconSize + padding * 2 + pulsePadding * 2;
         var iconLocked = _configService.Current.LockSpheneIcon;
-        
-        // Set window size to fit the icon with padding
+
+        // Set window size large enough to contain pulse rings outside the icon
         ImGui.SetWindowSize(new Vector2(windowSize, windowSize), ImGuiCond.Always);
         
         // Get current window position
         var currentPos = ImGui.GetWindowPos();
-        
+
+        // Prune expired events before drawing
+        PruneExpiredEvents();
+
         // Draw the Sphene logo/icon
         var drawList = ImGui.GetWindowDrawList();
-        var iconPos = new Vector2(currentPos.X + padding, currentPos.Y + padding);
+        var iconPos = new Vector2(currentPos.X + padding + pulsePadding, currentPos.Y + padding + pulsePadding);
         var iconColor = ImGui.ColorConvertFloat4ToU32(SpheneColors.SpheneGold);
-        
+
+        // Draw permanent weak purple pulse
+        DrawPermanentPurplePulse(drawList, iconPos, iconSize);
+
+        // Draw pulse ring behind icon if events are active (stronger pulse)
+        if (_pulseActive)
+        {
+            DrawPulseRing(drawList, iconPos, iconSize);
+        }
+
         // Draw Sphene Logo or fallback
         if (_spheneLogoTexture != null)
         {
@@ -379,10 +406,13 @@ public class SpheneIcon : WindowMediatorSubscriberBase
         {
             DrawUpdateIndicator(drawList, iconPos, iconSize);
         }
-        
-        // Handle dragging and clicking for the entire window
-        ImGui.SetCursorPos(new Vector2(0, 0));
-        ImGui.InvisibleButton("##sphene_icon_window", new Vector2(windowSize, windowSize));
+
+        // Draw event badges
+        DrawEventBadges(drawList, iconPos, iconSize);
+
+        // Handle dragging and clicking only for the icon area (rest of window is click-through)
+        ImGui.SetCursorPos(new Vector2(padding + pulsePadding, padding + pulsePadding));
+        ImGui.InvisibleButton("##sphene_icon_window", new Vector2(iconSize, iconSize));
         
         // Handle mouse interactions (press-and-hold before dragging)
         // Start tracking on left-press over the icon
@@ -442,6 +472,7 @@ public class SpheneIcon : WindowMediatorSubscriberBase
                 if (dragDistance < 3.0f) // Only trigger click if mouse didn't move much
                 {
                     ToggleMainWindow();
+                    AcknowledgeEvents();
                 }
             }
             
@@ -463,6 +494,14 @@ public class SpheneIcon : WindowMediatorSubscriberBase
                     ImGui.Separator();
                     ImGui.TextUnformatted(_tooltipUpdateText);
                 }
+                if (_cachedEventDescriptions.Count > 0)
+                {
+                    ImGui.Separator();
+                    foreach (var description in _cachedEventDescriptions)
+                    {
+                        ImGui.TextUnformatted(description);
+                    }
+                }
                 ImGui.EndTooltip();
             }
         }
@@ -476,12 +515,14 @@ public class SpheneIcon : WindowMediatorSubscriberBase
         var currentState = _apiController.ServerState;
         var currentFromVersion = _updateInfo?.CurrentVersion;
         var currentToVersion = _updateInfo?.LatestVersion;
+        var currentEventsHash = GetEventsCacheHash();
 
         if (_tooltipCacheInitialized
             && _tooltipCachedIconLocked == iconLocked
             && _tooltipCachedServerState == currentState
             && EqualityComparer<Version?>.Default.Equals(_tooltipCachedUpdateFromVersion, currentFromVersion)
-            && EqualityComparer<Version?>.Default.Equals(_tooltipCachedUpdateToVersion, currentToVersion))
+            && EqualityComparer<Version?>.Default.Equals(_tooltipCachedUpdateToVersion, currentToVersion)
+            && _lastEventCacheHash == currentEventsHash)
         {
             return;
         }
@@ -491,6 +532,7 @@ public class SpheneIcon : WindowMediatorSubscriberBase
         _tooltipCachedServerState = currentState;
         _tooltipCachedUpdateFromVersion = currentFromVersion;
         _tooltipCachedUpdateToVersion = currentToVersion;
+        _lastEventCacheHash = currentEventsHash;
 
         _tooltipHeaderText = iconLocked
             ? "Click to toggle Sphene | Drag is locked | Right-click for menu"
@@ -499,6 +541,28 @@ public class SpheneIcon : WindowMediatorSubscriberBase
         _tooltipUpdateText = (_updateAvailable && _updateInfo != null)
             ? $"Update available: {_updateInfo.CurrentVersion} -> {_updateInfo.LatestVersion}"
             : string.Empty;
+
+        // Build event descriptions for tooltip
+        lock (_eventsLock)
+        {
+            _cachedEventDescriptions = _activeEvents
+                .Where(e => e.Timestamp > _lastEventAcknowledgeTime)
+                .Select(e => e.Description)
+                .ToList();
+        }
+    }
+
+    private int GetEventsCacheHash()
+    {
+        lock (_eventsLock)
+        {
+            var hash = _activeEvents.Count.GetHashCode();
+            foreach (var evt in _activeEvents)
+            {
+                hash = HashCode.Combine(hash, evt.Type, evt.Description);
+            }
+            return hash;
+        }
     }
     
     private void ToggleMainWindow()
@@ -669,6 +733,175 @@ public class SpheneIcon : WindowMediatorSubscriberBase
         };
     }
     
+    private void PruneExpiredEvents()
+    {
+        var expiry = TimeSpan.FromSeconds(_configService.Current.IconEventExpirySeconds);
+        var now = DateTimeOffset.UtcNow;
+        var hadEvents = false;
+
+        lock (_eventsLock)
+        {
+            hadEvents = _activeEvents.Count > 0;
+            _activeEvents.RemoveAll(e => now - e.Timestamp > expiry);
+            _pulseActive = _activeEvents.Any(e => e.Timestamp > _lastEventAcknowledgeTime);
+        }
+
+        if (hadEvents && !_pulseActive)
+        {
+            _cachedEventDescriptions.Clear();
+        }
+    }
+
+    private void DrawPulseRing(ImDrawListPtr drawList, Vector2 iconPos, float iconSize)
+    {
+        var center = new Vector2(iconPos.X + iconSize / 2, iconPos.Y + iconSize / 2);
+
+        // Outward ripple: ring expands from icon center and fades to nothing (~1.5s cycle)
+        var cycleDuration = 1.5;
+        var t = (float)((DateTimeOffset.UtcNow.Ticks % (long)(cycleDuration * 10_000_000L)) / (cycleDuration * 10_000_000L));
+
+        var minRadius = iconSize * 0.4f;
+        var maxRadius = iconSize * 0.85f;
+        var radius = minRadius + (maxRadius - minRadius) * t;
+
+        // Alpha fades out quadratically as ring expands
+        var alpha = 0.6f * (1f - t * t);
+
+        // Determine color from most recent unacknowledged event
+        var color = GetPulseColor();
+        var uintColor = ImGui.ColorConvertFloat4ToU32(new Vector4(color.X, color.Y, color.Z, alpha));
+
+        drawList.AddCircle(center, radius, uintColor, 32, 2.5f);
+    }
+
+    private void DrawPermanentPurplePulse(ImDrawListPtr drawList, Vector2 iconPos, float iconSize)
+    {
+        var center = new Vector2(iconPos.X + iconSize / 2, iconPos.Y + iconSize / 2);
+
+        // Outward ripple: ring expands from icon center and fades to nothing (~2.5s cycle)
+        var cycleDuration = 2.5;
+        var t = (float)((DateTimeOffset.UtcNow.Ticks % (long)(cycleDuration * 10_000_000L)) / (cycleDuration * 10_000_000L));
+
+        var minRadius = iconSize * 0.35f;
+        var maxRadius = iconSize * 0.8f;
+        var radius = minRadius + (maxRadius - minRadius) * t;
+
+        // Alpha fades out quadratically as ring expands — full at start, gone at outer edge
+        var alpha = 0.3f * (1f - t * t);
+
+        var purpleColor = new Vector4(0.6f, 0.2f, 0.9f, alpha);
+        var uintColor = ImGui.ColorConvertFloat4ToU32(purpleColor);
+
+        drawList.AddCircle(center, radius, uintColor, 32, 2.5f);
+    }
+
+    private Vector4 GetPulseColor()
+    {
+        lock (_eventsLock)
+        {
+            var latest = _activeEvents
+                .Where(e => e.Timestamp > _lastEventAcknowledgeTime)
+                .OrderByDescending(e => e.Timestamp)
+                .FirstOrDefault();
+
+            if (latest == null) return SpheneColors.SpheneGold;
+
+            return latest.Type switch
+            {
+                IconEventType.ModTransferAvailable => ImGuiColors.HealerGreen,
+                IconEventType.ModTransferCompleted => ImGuiColors.HealerGreen,
+                IconEventType.Notification => new Vector4(1.0f, 0.6f, 0.0f, 1.0f), // Orange
+                _ => SpheneColors.SpheneGold
+            };
+        }
+    }
+
+    private void DrawEventBadges(ImDrawListPtr drawList, Vector2 iconPos, float iconSize)
+    {
+        lock (_eventsLock)
+        {
+            var unacknowledged = _activeEvents.Where(e => e.Timestamp > _lastEventAcknowledgeTime).ToList();
+            if (unacknowledged.Count == 0) return;
+
+            var badgeRadius = 5f;
+            var startX = iconPos.X + iconSize - badgeRadius;
+            var startY = iconPos.Y + badgeRadius;
+            var spacing = badgeRadius * 2.5f;
+
+            for (var i = 0; i < unacknowledged.Count && i < 4; i++)
+            {
+                var evt = unacknowledged[i];
+                var badgeColor = evt.Type switch
+                {
+                    IconEventType.ModTransferAvailable => ImGuiColors.HealerGreen,
+                    IconEventType.ModTransferCompleted => ImGuiColors.DalamudViolet,
+                    IconEventType.Notification => new Vector4(1.0f, 0.6f, 0.0f, 1.0f),
+                    _ => SpheneColors.SpheneGold
+                };
+
+                var pos = new Vector2(startX - i * spacing, startY);
+                drawList.AddCircleFilled(pos, badgeRadius, ImGui.ColorConvertFloat4ToU32(badgeColor));
+                drawList.AddCircle(pos, badgeRadius, ImGui.ColorConvertFloat4ToU32(new Vector4(1, 1, 1, 0.6f)), 0, 1f);
+            }
+
+            // Overflow indicator if more than 4 events
+            if (unacknowledged.Count > 4)
+            {
+                var pos = new Vector2(startX - 4 * spacing, startY);
+                drawList.AddCircleFilled(pos, badgeRadius, ImGui.ColorConvertFloat4ToU32(new Vector4(0.5f, 0.5f, 0.5f, 0.8f)));
+            }
+        }
+    }
+
+    private void AcknowledgeEvents()
+    {
+        _lastEventAcknowledgeTime = DateTimeOffset.UtcNow;
+        _pulseActive = false;
+        _cachedEventDescriptions.Clear();
+    }
+
+    private void AddEvent(IconEventType type, string description)
+    {
+        lock (_eventsLock)
+        {
+            _activeEvents.Add(new IconEvent(type, description, DateTimeOffset.UtcNow));
+            // Keep max 20 events to prevent unbounded growth
+            if (_activeEvents.Count > 20)
+            {
+                _activeEvents.RemoveAt(0);
+            }
+            _pulseActive = true;
+        }
+        _logger.LogDebug("Icon event added: {type} - {desc}", type, description);
+    }
+
+    private void OnModTransferAvailable(PenumbraModTransferAvailableMessage msg)
+    {
+        AddEvent(IconEventType.ModTransferAvailable, $"Mod transfer available: {msg.Notification.ModFolderName ?? "Unknown"}");
+    }
+
+    private void OnModTransferCompleted(PenumbraModTransferCompletedMessage msg)
+    {
+        AddEvent(IconEventType.ModTransferCompleted, $"Mod transfer completed: {msg.Notification.ModFolderName ?? "Unknown"}");
+    }
+
+    private void OnNotification(NotificationMessage msg)
+    {
+        if (msg.Type == NotificationType.Error || msg.Type == NotificationType.Warning)
+        {
+            AddEvent(IconEventType.Notification, $"{msg.Type}: {msg.Title}");
+        }
+    }
+
+    private sealed record IconEvent(IconEventType Type, string Description, DateTimeOffset Timestamp);
+
+    private enum IconEventType
+    {
+        ModTransferAvailable,
+        ModTransferCompleted,
+        Notification
+    }
+
     private void OnConfigurationChanged(object? sender, EventArgs e)
     {
         // Update icon visibility when configuration changes

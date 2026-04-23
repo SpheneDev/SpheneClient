@@ -86,6 +86,7 @@ public class SpheneConfig : ISpheneConfiguration
     public float IconPositionY { get; set; } = 100f;
     public bool ShowSpheneIcon { get; set; } = true;
     public bool LockSpheneIcon { get; set; } = false;
+    public int IconEventExpirySeconds { get; set; } = 60;
     public float PenumbraSendPopupPosX { get; set; } = 0f;
     public float PenumbraSendPopupPosY { get; set; } = 0f;
     public bool PenumbraSendPopupUseCustomPosition { get; set; } = false;
