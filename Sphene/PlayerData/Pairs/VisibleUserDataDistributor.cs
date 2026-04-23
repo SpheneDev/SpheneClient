@@ -128,6 +128,7 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
         _uploadingCharacterData = _lastCreatedData.DeepClone();
         Logger.LogDebug("{tag} Warm upload start: hash={hash}", SyncProgressTag, currentHash);
         _fileUploadTask = _fileTransferManager.UploadFiles(_uploadingCharacterData, []);
+        _ = ObserveTaskAsync(_fileUploadTask);
     }
 
     protected override void Dispose(bool disposing)
@@ -507,5 +508,18 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
     public string? GetLastSentHashForUser(UserData user)
     {
         return _lastSentHashPerUser.TryGetValue(user, out var hash) ? hash : null;
+    }
+
+    private async Task ObserveTaskAsync(Task<CharacterData>? task)
+    {
+        if (task == null) return;
+        try
+        {
+            await task.ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "{tag} Fire-and-forget upload task failed", SyncProgressTag);
+        }
     }
 }

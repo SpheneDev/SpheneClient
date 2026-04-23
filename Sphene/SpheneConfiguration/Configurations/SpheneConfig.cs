@@ -87,6 +87,20 @@ public class SpheneConfig : ISpheneConfiguration
     public bool ShowSpheneIcon { get; set; } = true;
     public bool LockSpheneIcon { get; set; } = false;
     public int IconEventExpirySeconds { get; set; } = 60;
+
+    // Icon Theme Settings (packed colors as uint ABGR for serialization)
+    public uint IconPulseModTransferColor { get; set; } = 0xFFE00060u; // Blue (#0060E0)
+    public uint IconPulsePairRequestColor { get; set; } = 0xFFB469FFu; // Pink (#FF69B4 hot pink)
+    public uint IconPulseNotificationColor { get; set; } = 0xFF0099FFu; // Orange (#FF9900)
+    public uint IconPulsePermanentColor { get; set; } = 0xFFE86699u;    // Purple (#9966E8)
+    public float IconPulseEventMinRadius { get; set; } = 0.46f;
+    public float IconPulseEventMaxRadius { get; set; } = 0.6f;
+    public float IconPulsePermanentMinRadius { get; set; } = 0.46f;
+    public float IconPulsePermanentMaxRadius { get; set; } = 0.6f;
+    public bool IconShowModTransferBadge { get; set; } = true;
+    public bool IconShowPairRequestBadge { get; set; } = true;
+    public bool IconShowNotificationBadge { get; set; } = true;
+
     public float PenumbraSendPopupPosX { get; set; } = 0f;
     public float PenumbraSendPopupPosY { get; set; } = 0f;
     public bool PenumbraSendPopupUseCustomPosition { get; set; } = false;

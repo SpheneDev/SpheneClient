@@ -129,6 +129,7 @@ public class SpheneIcon : WindowMediatorSubscriberBase
         Mediator.Subscribe<PenumbraModTransferAvailableMessage>(this, OnModTransferAvailable);
         Mediator.Subscribe<PenumbraModTransferCompletedMessage>(this, OnModTransferCompleted);
         Mediator.Subscribe<NotificationMessage>(this, OnNotification);
+        Mediator.Subscribe<TestIconEventMessage>(this, OnTestIconEvent);
 
         _logger.LogDebug("SpheneIcon created at position {Position}", _iconPosition);
     }
@@ -755,13 +756,14 @@ public class SpheneIcon : WindowMediatorSubscriberBase
     private void DrawPulseRing(ImDrawListPtr drawList, Vector2 iconPos, float iconSize)
     {
         var center = new Vector2(iconPos.X + iconSize / 2, iconPos.Y + iconSize / 2);
+        var cfg = _configService.Current;
 
         // Outward ripple: ring expands from icon center and fades to nothing (~1.5s cycle)
         var cycleDuration = 1.5;
         var t = (float)((DateTimeOffset.UtcNow.Ticks % (long)(cycleDuration * 10_000_000L)) / (cycleDuration * 10_000_000L));
 
-        var minRadius = iconSize * 0.4f;
-        var maxRadius = iconSize * 0.85f;
+        var minRadius = iconSize * cfg.IconPulseEventMinRadius;
+        var maxRadius = iconSize * cfg.IconPulseEventMaxRadius;
         var radius = minRadius + (maxRadius - minRadius) * t;
 
         // Alpha fades out quadratically as ring expands
@@ -777,26 +779,29 @@ public class SpheneIcon : WindowMediatorSubscriberBase
     private void DrawPermanentPurplePulse(ImDrawListPtr drawList, Vector2 iconPos, float iconSize)
     {
         var center = new Vector2(iconPos.X + iconSize / 2, iconPos.Y + iconSize / 2);
+        var cfg = _configService.Current;
 
         // Outward ripple: ring expands from icon center and fades to nothing (~2.5s cycle)
         var cycleDuration = 2.5;
         var t = (float)((DateTimeOffset.UtcNow.Ticks % (long)(cycleDuration * 10_000_000L)) / (cycleDuration * 10_000_000L));
 
-        var minRadius = iconSize * 0.35f;
-        var maxRadius = iconSize * 0.8f;
+        var minRadius = iconSize * cfg.IconPulsePermanentMinRadius;
+        var maxRadius = iconSize * cfg.IconPulsePermanentMaxRadius;
         var radius = minRadius + (maxRadius - minRadius) * t;
 
         // Alpha fades out quadratically as ring expands — full at start, gone at outer edge
         var alpha = 0.3f * (1f - t * t);
 
-        var purpleColor = new Vector4(0.6f, 0.2f, 0.9f, alpha);
-        var uintColor = ImGui.ColorConvertFloat4ToU32(purpleColor);
+        var color = ImGui.ColorConvertU32ToFloat4(cfg.IconPulsePermanentColor);
+        var pulseColor = new Vector4(color.X, color.Y, color.Z, alpha);
+        var uintColor = ImGui.ColorConvertFloat4ToU32(pulseColor);
 
         drawList.AddCircle(center, radius, uintColor, 32, 2.5f);
     }
 
     private Vector4 GetPulseColor()
     {
+        var cfg = _configService.Current;
         lock (_eventsLock)
         {
             var latest = _activeEvents
@@ -808,9 +813,10 @@ public class SpheneIcon : WindowMediatorSubscriberBase
 
             return latest.Type switch
             {
-                IconEventType.ModTransferAvailable => ImGuiColors.HealerGreen,
-                IconEventType.ModTransferCompleted => ImGuiColors.HealerGreen,
-                IconEventType.Notification => new Vector4(1.0f, 0.6f, 0.0f, 1.0f), // Orange
+                IconEventType.ModTransferAvailable => ImGui.ColorConvertU32ToFloat4(cfg.IconPulseModTransferColor),
+                IconEventType.ModTransferCompleted => ImGui.ColorConvertU32ToFloat4(cfg.IconPulseModTransferColor),
+                IconEventType.PairRequest => ImGui.ColorConvertU32ToFloat4(cfg.IconPulsePairRequestColor),
+                IconEventType.Notification => ImGui.ColorConvertU32ToFloat4(cfg.IconPulseNotificationColor),
                 _ => SpheneColors.SpheneGold
             };
         }
@@ -818,9 +824,20 @@ public class SpheneIcon : WindowMediatorSubscriberBase
 
     private void DrawEventBadges(ImDrawListPtr drawList, Vector2 iconPos, float iconSize)
     {
+        var cfg = _configService.Current;
         lock (_eventsLock)
         {
-            var unacknowledged = _activeEvents.Where(e => e.Timestamp > _lastEventAcknowledgeTime).ToList();
+            var unacknowledged = _activeEvents
+                .Where(e => e.Timestamp > _lastEventAcknowledgeTime)
+                .Where(e => e.Type switch
+                {
+                    IconEventType.ModTransferAvailable or IconEventType.ModTransferCompleted => cfg.IconShowModTransferBadge,
+                    IconEventType.PairRequest => cfg.IconShowPairRequestBadge,
+                    IconEventType.Notification => cfg.IconShowNotificationBadge,
+                    _ => true
+                })
+                .ToList();
+
             if (unacknowledged.Count == 0) return;
 
             var badgeRadius = 5f;
@@ -833,9 +850,9 @@ public class SpheneIcon : WindowMediatorSubscriberBase
                 var evt = unacknowledged[i];
                 var badgeColor = evt.Type switch
                 {
-                    IconEventType.ModTransferAvailable => ImGuiColors.HealerGreen,
-                    IconEventType.ModTransferCompleted => ImGuiColors.DalamudViolet,
-                    IconEventType.Notification => new Vector4(1.0f, 0.6f, 0.0f, 1.0f),
+                    IconEventType.ModTransferAvailable or IconEventType.ModTransferCompleted => ImGui.ColorConvertU32ToFloat4(cfg.IconPulseModTransferColor),
+                    IconEventType.PairRequest => ImGui.ColorConvertU32ToFloat4(cfg.IconPulsePairRequestColor),
+                    IconEventType.Notification => ImGui.ColorConvertU32ToFloat4(cfg.IconPulseNotificationColor),
                     _ => SpheneColors.SpheneGold
                 };
 
@@ -899,7 +916,21 @@ public class SpheneIcon : WindowMediatorSubscriberBase
     {
         ModTransferAvailable,
         ModTransferCompleted,
+        PairRequest,
         Notification
+    }
+
+    private void OnTestIconEvent(TestIconEventMessage msg)
+    {
+        var type = msg.EventType switch
+        {
+            TestIconEventType.ModTransferAvailable => IconEventType.ModTransferAvailable,
+            TestIconEventType.ModTransferCompleted => IconEventType.ModTransferCompleted,
+            TestIconEventType.PairRequest => IconEventType.PairRequest,
+            TestIconEventType.Notification => IconEventType.Notification,
+            _ => IconEventType.Notification
+        };
+        AddEvent(type, $"[Test] {msg.Description}");
     }
 
     private void OnConfigurationChanged(object? sender, EventArgs e)

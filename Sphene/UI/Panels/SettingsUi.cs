@@ -101,6 +101,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
     }
     private SettingsPage _activeSettingsPage = SettingsPage.Home;
     private bool _preferPanelThemeTab = false;
+    private bool _preferIconThemeTab = false;
     private bool _preferButtonStylesTab = false;
 
 
@@ -2417,15 +2418,15 @@ public class SettingsUi : WindowMediatorSubscriberBase
         
         DrawSettingsSectionHeader("Theme Editor");
         
-        if (ApiController.IsAdmin)
+        using (var themeTabBar = ImRaii.TabBar("ThemeTabBar"))
         {
-            using (var themeTabBar = ImRaii.TabBar("ThemeTabBar"))
+            if (themeTabBar)
             {
-                if (themeTabBar)
-                {
-                    var availableRegion = ImGui.GetContentRegionAvail();
-                    var tabContentHeight = availableRegion.Y;
+                var availableRegion = ImGui.GetContentRegionAvail();
+                var tabContentHeight = availableRegion.Y;
 
+                if (ApiController.IsAdmin)
+                {
                     #pragma warning disable S1066
                     var generalTab = ImRaii.TabItem("General Theme", ImGuiTabItemFlags.None);
                     if (generalTab)
@@ -2438,33 +2439,36 @@ public class SettingsUi : WindowMediatorSubscriberBase
                     }
                     #pragma warning restore S1066
                     generalTab.Dispose();
-
-                    #pragma warning disable S1066
-                    var panelTab = ImRaii.TabItem("Panel Theme", _preferPanelThemeTab ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None);
-                    if (panelTab)
-                    {
-                        if (ImGui.BeginChild("PanelThemeChild", new Vector2(0, tabContentHeight), true))
-                        {
-                            DrawCompactUIThemeSettings();
-                            ImGui.EndChild();
-                        }
-                    }
-                    #pragma warning restore S1066
-                    panelTab.Dispose();
-                    _preferPanelThemeTab = false;
                 }
+
+                #pragma warning disable S1066
+                var iconTab = ImRaii.TabItem("Icon Theme", _preferIconThemeTab ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None);
+                if (iconTab)
+                {
+                    if (ImGui.BeginChild("IconThemeChild", new Vector2(0, tabContentHeight), true))
+                    {
+                        DrawIconThemeSettings();
+                        ImGui.EndChild();
+                    }
+                }
+                #pragma warning restore S1066
+                iconTab.Dispose();
+                _preferIconThemeTab = false;
+
+                #pragma warning disable S1066
+                var panelTab = ImRaii.TabItem("Panel Theme", _preferPanelThemeTab ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None);
+                if (panelTab)
+                {
+                    if (ImGui.BeginChild("PanelThemeChild", new Vector2(0, tabContentHeight), true))
+                    {
+                        DrawCompactUIThemeSettings();
+                        ImGui.EndChild();
+                    }
+                }
+                #pragma warning restore S1066
+                panelTab.Dispose();
+                _preferPanelThemeTab = false;
             }
-        }
-        else
-        {
-            var availableRegion = ImGui.GetContentRegionAvail();
-            var tabContentHeight = availableRegion.Y;
-            if (ImGui.BeginChild("PanelThemeChild", new Vector2(0, tabContentHeight), true))
-            {
-                DrawCompactUIThemeSettings();
-                ImGui.EndChild();
-            }
-            _preferPanelThemeTab = false;
         }
     }
 
@@ -2679,12 +2683,146 @@ public class SettingsUi : WindowMediatorSubscriberBase
     
     
 
+    private void DrawIconThemeSettings()
+    {
+        var cfg = _configService.Current;
+        bool configChanged = false;
+
+        UiSharedService.ColorTextWrapped("Customize the Sphene floating icon pulse colors, ring sizes, and which notifications appear as badges.", ImGuiColors.DalamudGrey);
+        UiSharedService.ColorTextWrapped("Changes apply immediately to the icon. Use the test buttons below to preview each effect.", ImGuiColors.DalamudYellow);
+        ImGui.Spacing();
+
+        // Helper to edit packed uint color as Vector4
+        bool EditPackedColor(string label, ref uint packedColor)
+        {
+            var vec = ImGui.ColorConvertU32ToFloat4(packedColor);
+            if (ImGui.ColorEdit4(label, ref vec))
+            {
+                packedColor = ImGui.ColorConvertFloat4ToU32(vec);
+                return true;
+            }
+            return false;
+        }
+
+        ImGui.Text("Pulse Colors");
+        ImGui.Separator();
+
+        var modColor = cfg.IconPulseModTransferColor;
+        if (EditPackedColor("Mod Transfer (Available / Completed)", ref modColor))
+        {
+            cfg.IconPulseModTransferColor = modColor;
+            configChanged = true;
+        }
+
+        var pairColor = cfg.IconPulsePairRequestColor;
+        if (EditPackedColor("Pair Request", ref pairColor))
+        {
+            cfg.IconPulsePairRequestColor = pairColor;
+            configChanged = true;
+        }
+
+        var notifColor = cfg.IconPulseNotificationColor;
+        if (EditPackedColor("General Notification", ref notifColor))
+        {
+            cfg.IconPulseNotificationColor = notifColor;
+            configChanged = true;
+        }
+
+        var permColor = cfg.IconPulsePermanentColor;
+        if (EditPackedColor("Permanent Background Pulse", ref permColor))
+        {
+            cfg.IconPulsePermanentColor = permColor;
+            configChanged = true;
+        }
+
+        ImGui.Spacing();
+        ImGui.Text("Pulse Ring Sizes (multiplier of icon size)");
+        ImGui.Separator();
+
+        var evtMin = cfg.IconPulseEventMinRadius;
+        if (ImGui.SliderFloat("Event Pulse Min Radius", ref evtMin, 0.0f, 1.5f, "%.2f"))
+        {
+            cfg.IconPulseEventMinRadius = evtMin;
+            configChanged = true;
+        }
+
+        var evtMax = cfg.IconPulseEventMaxRadius;
+        if (ImGui.SliderFloat("Event Pulse Max Radius", ref evtMax, 0.0f, 1.5f, "%.2f"))
+        {
+            cfg.IconPulseEventMaxRadius = evtMax;
+            configChanged = true;
+        }
+
+        var permMin = cfg.IconPulsePermanentMinRadius;
+        if (ImGui.SliderFloat("Permanent Pulse Min Radius", ref permMin, 0.0f, 1.5f, "%.2f"))
+        {
+            cfg.IconPulsePermanentMinRadius = permMin;
+            configChanged = true;
+        }
+
+        var permMax = cfg.IconPulsePermanentMaxRadius;
+        if (ImGui.SliderFloat("Permanent Pulse Max Radius", ref permMax, 0.0f, 1.5f, "%.2f"))
+        {
+            cfg.IconPulsePermanentMaxRadius = permMax;
+            configChanged = true;
+        }
+
+        ImGui.Spacing();
+        ImGui.Text("Badge Visibility");
+        ImGui.Separator();
+
+        var showMod = cfg.IconShowModTransferBadge;
+        if (ImGui.Checkbox("Show Mod Transfer Badges", ref showMod))
+        {
+            cfg.IconShowModTransferBadge = showMod;
+            configChanged = true;
+        }
+
+        var showPair = cfg.IconShowPairRequestBadge;
+        if (ImGui.Checkbox("Show Pair Request Badges", ref showPair))
+        {
+            cfg.IconShowPairRequestBadge = showPair;
+            configChanged = true;
+        }
+
+        var showNotif = cfg.IconShowNotificationBadge;
+        if (ImGui.Checkbox("Show Notification Badges", ref showNotif))
+        {
+            cfg.IconShowNotificationBadge = showNotif;
+            configChanged = true;
+        }
+
+        ImGui.Spacing();
+        ImGui.Text("Live Preview (Test Buttons)");
+        ImGui.Separator();
+
+        if (ImGui.Button("Test Mod Transfer"))
+        {
+            Mediator.Publish(new TestIconEventMessage(TestIconEventType.ModTransferAvailable, "Test Mod Transfer"));
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Test Pair Request"))
+        {
+            Mediator.Publish(new TestIconEventMessage(TestIconEventType.PairRequest, "Test Pair Request"));
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Test Notification"))
+        {
+            Mediator.Publish(new TestIconEventMessage(TestIconEventType.Notification, "Test Notification"));
+        }
+
+        if (configChanged)
+        {
+            _configService.Save();
+        }
+    }
+
     private void DrawCompactUIThemeSettings()
     {
         var theme = SpheneCustomTheme.CurrentTheme;
         bool themeChanged = false;
-        
-        
+
+
         UiSharedService.ColorTextWrapped("Customize how the Panel looks and feels.", ImGuiColors.DalamudGrey);
         UiSharedService.ColorTextWrapped("Panel will be opened automaticly and you can see changes immediately.", ImGuiColors.DalamudYellow);
         ImGui.Spacing();

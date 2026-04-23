@@ -121,6 +121,16 @@ public record CombatOrPerformanceEndMessage : MessageBase;
 public record EventMessage(Event Event) : MessageBase;
 public record PenumbraDirectoryChangedMessage(string? ModDirectory) : MessageBase;
 public record PenumbraRedrawCharacterMessage(ICharacter Character) : SameThreadMessage;
+
+public enum TestIconEventType
+{
+    ModTransferAvailable,
+    ModTransferCompleted,
+    PairRequest,
+    Notification
+}
+
+public record TestIconEventMessage(TestIconEventType EventType, string Description) : MessageBase;
 public record GameObjectHandlerCreatedMessage(GameObjectHandler GameObjectHandler, bool OwnedObject) : SameThreadMessage;
 public record GameObjectHandlerDestroyedMessage(GameObjectHandler GameObjectHandler, bool OwnedObject) : SameThreadMessage;
 public record HaltCharaDataCreation(bool Resume = false) : SameThreadMessage;

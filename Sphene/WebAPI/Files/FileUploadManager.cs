@@ -197,6 +197,13 @@ public sealed class FileUploadManager : DisposableMediatorSubscriberBase
 
     public async Task<CharacterData> UploadFiles(CharacterData data, List<UserData> visiblePlayers)
     {
+        // Skip upload if file transfer orchestrator is not yet initialized (early startup phase)
+        if (!_orchestrator.IsInitialized)
+        {
+            Logger.LogDebug("Skipping UploadFiles - FileTransferOrchestrator not yet initialized (startup phase)");
+            return data;
+        }
+
         await _uploadStateGate.WaitAsync().ConfigureAwait(false);
         try
         {
