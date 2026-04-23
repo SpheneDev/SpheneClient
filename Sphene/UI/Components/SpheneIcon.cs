@@ -778,17 +778,63 @@ public class SpheneIcon : WindowMediatorSubscriberBase
         };
     }
     
+    private int GetEffectDuration(IconEventType type)
+    {
+        var cfg = _configService.Current;
+        return type switch
+        {
+            IconEventType.ModTransferAvailable or IconEventType.ModTransferCompleted => cfg.IconModTransferEffectDurationSeconds,
+            IconEventType.PairRequest => cfg.IconPairRequestEffectDurationSeconds,
+            IconEventType.Notification => cfg.IconNotificationEffectDurationSeconds,
+            _ => cfg.IconEventExpirySeconds
+        };
+    }
+
+    private int GetBadgeDuration(IconEventType type)
+    {
+        var cfg = _configService.Current;
+        return type switch
+        {
+            IconEventType.ModTransferAvailable or IconEventType.ModTransferCompleted => cfg.IconModTransferBadgeDurationSeconds,
+            IconEventType.PairRequest => cfg.IconPairRequestBadgeDurationSeconds,
+            IconEventType.Notification => cfg.IconNotificationBadgeDurationSeconds,
+            _ => cfg.IconEventExpirySeconds
+        };
+    }
+
+    private bool IsEffectActive(IconEvent e)
+    {
+        var duration = GetEffectDuration(e.Type);
+        if (duration <= 0) return e.Timestamp > _lastEventAcknowledgeTime;
+        return e.Timestamp > _lastEventAcknowledgeTime && (DateTimeOffset.UtcNow - e.Timestamp <= TimeSpan.FromSeconds(duration));
+    }
+
+    private bool IsBadgeActive(IconEvent e)
+    {
+        var duration = GetBadgeDuration(e.Type);
+        if (duration <= 0) return e.Timestamp > _lastEventAcknowledgeTime;
+        return e.Timestamp > _lastEventAcknowledgeTime && (DateTimeOffset.UtcNow - e.Timestamp <= TimeSpan.FromSeconds(duration));
+    }
+
     private void PruneExpiredEvents()
     {
-        var expiry = TimeSpan.FromSeconds(_configService.Current.IconEventExpirySeconds);
         var now = DateTimeOffset.UtcNow;
         var hadEvents = false;
 
         lock (_eventsLock)
         {
             hadEvents = _activeEvents.Count > 0;
-            _activeEvents.RemoveAll(e => now - e.Timestamp > expiry);
-            _pulseActive = _activeEvents.Any(e => e.Timestamp > _lastEventAcknowledgeTime);
+            _activeEvents.RemoveAll(e =>
+            {
+                var effectDuration = GetEffectDuration(e.Type);
+                var badgeDuration = GetBadgeDuration(e.Type);
+                var effectExpired = effectDuration > 0 && (now - e.Timestamp > TimeSpan.FromSeconds(effectDuration));
+                var badgeAcknowledged = e.Timestamp <= _lastEventAcknowledgeTime;
+                var badgeExpired = !badgeAcknowledged && badgeDuration > 0 && (now - e.Timestamp > TimeSpan.FromSeconds(badgeDuration));
+                // Remove if effect expired AND (badge expired or badge acknowledged)
+                return effectExpired && (badgeExpired || badgeAcknowledged);
+            });
+            _pulseActive = _activeEvents.Any(IsEffectActive);
         }
 
         if (hadEvents && !_pulseActive)
@@ -897,7 +943,7 @@ public class SpheneIcon : WindowMediatorSubscriberBase
         lock (_eventsLock)
         {
             var latest = _activeEvents
-                .Where(e => e.Timestamp > _lastEventAcknowledgeTime)
+                .Where(IsEffectActive)
                 .OrderByDescending(e => e.Timestamp)
                 .FirstOrDefault();
 
@@ -919,7 +965,7 @@ public class SpheneIcon : WindowMediatorSubscriberBase
         lock (_eventsLock)
         {
             var latest = _activeEvents
-                .Where(e => e.Timestamp > _lastEventAcknowledgeTime)
+                .Where(IsEffectActive)
                 .OrderByDescending(e => e.Timestamp)
                 .FirstOrDefault();
             return latest?.Type ?? IconEventType.None;
@@ -963,7 +1009,7 @@ public class SpheneIcon : WindowMediatorSubscriberBase
         lock (_eventsLock)
         {
             var unacknowledged = _activeEvents
-                .Where(e => e.Timestamp > _lastEventAcknowledgeTime)
+                .Where(IsBadgeActive)
                 .Where(e => e.Type switch
                 {
                     IconEventType.ModTransferAvailable or IconEventType.ModTransferCompleted => cfg.IconShowModTransferBadge,

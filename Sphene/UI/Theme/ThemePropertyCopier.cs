@@ -251,5 +251,66 @@ public static class ThemePropertyCopier
                 BorderSize = kv.Value.BorderSize
             }, StringComparer.Ordinal
         );
+
+        // Icon theme settings
+        target.IconGlobalAlpha = cloned.IconGlobalAlpha;
+        target.IconRainbowSpeed = cloned.IconRainbowSpeed;
+        target.IconShowModTransferBadge = cloned.IconShowModTransferBadge;
+        target.IconShowPairRequestBadge = cloned.IconShowPairRequestBadge;
+        target.IconShowNotificationBadge = cloned.IconShowNotificationBadge;
+        target.IconPermColor = cloned.IconPermColor;
+        target.IconPermAlpha = cloned.IconPermAlpha;
+        target.IconPermEffectPulse = cloned.IconPermEffectPulse;
+        target.IconPermEffectGlow = cloned.IconPermEffectGlow;
+        target.IconPermEffectBounce = cloned.IconPermEffectBounce;
+        target.IconPermEffectRainbow = cloned.IconPermEffectRainbow;
+        target.IconPermPulseMinRadius = cloned.IconPermPulseMinRadius;
+        target.IconPermPulseMaxRadius = cloned.IconPermPulseMaxRadius;
+        target.IconPermGlowIntensity = cloned.IconPermGlowIntensity;
+        target.IconPermGlowRadius = cloned.IconPermGlowRadius;
+        target.IconPermBounceIntensity = cloned.IconPermBounceIntensity;
+        target.IconPermBounceSpeed = cloned.IconPermBounceSpeed;
+        target.IconModTransferColor = cloned.IconModTransferColor;
+        target.IconModTransferAlpha = cloned.IconModTransferAlpha;
+        target.IconModTransferEffectPulse = cloned.IconModTransferEffectPulse;
+        target.IconModTransferEffectGlow = cloned.IconModTransferEffectGlow;
+        target.IconModTransferEffectBounce = cloned.IconModTransferEffectBounce;
+        target.IconModTransferEffectRainbow = cloned.IconModTransferEffectRainbow;
+        target.IconModTransferPulseMinRadius = cloned.IconModTransferPulseMinRadius;
+        target.IconModTransferPulseMaxRadius = cloned.IconModTransferPulseMaxRadius;
+        target.IconModTransferGlowIntensity = cloned.IconModTransferGlowIntensity;
+        target.IconModTransferGlowRadius = cloned.IconModTransferGlowRadius;
+        target.IconModTransferBounceIntensity = cloned.IconModTransferBounceIntensity;
+        target.IconModTransferBounceSpeed = cloned.IconModTransferBounceSpeed;
+        target.IconPairRequestColor = cloned.IconPairRequestColor;
+        target.IconPairRequestAlpha = cloned.IconPairRequestAlpha;
+        target.IconPairRequestEffectPulse = cloned.IconPairRequestEffectPulse;
+        target.IconPairRequestEffectGlow = cloned.IconPairRequestEffectGlow;
+        target.IconPairRequestEffectBounce = cloned.IconPairRequestEffectBounce;
+        target.IconPairRequestEffectRainbow = cloned.IconPairRequestEffectRainbow;
+        target.IconPairRequestPulseMinRadius = cloned.IconPairRequestPulseMinRadius;
+        target.IconPairRequestPulseMaxRadius = cloned.IconPairRequestPulseMaxRadius;
+        target.IconPairRequestGlowIntensity = cloned.IconPairRequestGlowIntensity;
+        target.IconPairRequestGlowRadius = cloned.IconPairRequestGlowRadius;
+        target.IconPairRequestBounceIntensity = cloned.IconPairRequestBounceIntensity;
+        target.IconPairRequestBounceSpeed = cloned.IconPairRequestBounceSpeed;
+        target.IconNotificationColor = cloned.IconNotificationColor;
+        target.IconNotificationAlpha = cloned.IconNotificationAlpha;
+        target.IconNotificationEffectPulse = cloned.IconNotificationEffectPulse;
+        target.IconNotificationEffectGlow = cloned.IconNotificationEffectGlow;
+        target.IconNotificationEffectBounce = cloned.IconNotificationEffectBounce;
+        target.IconNotificationEffectRainbow = cloned.IconNotificationEffectRainbow;
+        target.IconNotificationPulseMinRadius = cloned.IconNotificationPulseMinRadius;
+        target.IconNotificationPulseMaxRadius = cloned.IconNotificationPulseMaxRadius;
+        target.IconNotificationGlowIntensity = cloned.IconNotificationGlowIntensity;
+        target.IconNotificationGlowRadius = cloned.IconNotificationGlowRadius;
+        target.IconNotificationBounceIntensity = cloned.IconNotificationBounceIntensity;
+        target.IconNotificationBounceSpeed = cloned.IconNotificationBounceSpeed;
+        target.IconModTransferEffectDurationSeconds = cloned.IconModTransferEffectDurationSeconds;
+        target.IconPairRequestEffectDurationSeconds = cloned.IconPairRequestEffectDurationSeconds;
+        target.IconNotificationEffectDurationSeconds = cloned.IconNotificationEffectDurationSeconds;
+        target.IconModTransferBadgeDurationSeconds = cloned.IconModTransferBadgeDurationSeconds;
+        target.IconPairRequestBadgeDurationSeconds = cloned.IconPairRequestBadgeDurationSeconds;
+        target.IconNotificationBadgeDurationSeconds = cloned.IconNotificationBadgeDurationSeconds;
     }
 }

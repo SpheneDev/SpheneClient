@@ -2812,6 +2812,13 @@ public class SettingsUi : WindowMediatorSubscriberBase
             if (ImGui.SliderFloat("Bounce Scale##mod", ref modBounceInt, 0.0f, 0.3f, "%.2f")) { cfg.IconModTransferBounceIntensity = modBounceInt; configChanged = true; }
             var modBounceSpd = cfg.IconModTransferBounceSpeed;
             if (ImGui.SliderFloat("Bounce Speed##mod", ref modBounceSpd, 0.1f, 3.0f, "%.2f")) { cfg.IconModTransferBounceSpeed = modBounceSpd; configChanged = true; }
+            ImGui.Spacing();
+            var modEffectDuration = cfg.IconModTransferEffectDurationSeconds;
+            if (ImGui.SliderInt("Effect Duration##mod", ref modEffectDuration, 0, 300, modEffectDuration == 0 ? "Never" : "%ds")) { cfg.IconModTransferEffectDurationSeconds = modEffectDuration; configChanged = true; }
+            _uiShared.DrawHelpText("How long the pulse/glow/bounce effects last. 0 = never expires until icon is clicked.");
+            var modBadgeDuration = cfg.IconModTransferBadgeDurationSeconds;
+            if (ImGui.SliderInt("Badge Duration##mod", ref modBadgeDuration, 0, 300, modBadgeDuration == 0 ? "Never" : "%ds")) { cfg.IconModTransferBadgeDurationSeconds = modBadgeDuration; configChanged = true; }
+            _uiShared.DrawHelpText("How long the badge dot remains visible. 0 = never expires until icon is clicked. Separate from effect duration.");
         }
 
         // Pair Request
@@ -2844,6 +2851,13 @@ public class SettingsUi : WindowMediatorSubscriberBase
             if (ImGui.SliderFloat("Bounce Scale##pair", ref pairBounceInt, 0.0f, 0.3f, "%.2f")) { cfg.IconPairRequestBounceIntensity = pairBounceInt; configChanged = true; }
             var pairBounceSpd = cfg.IconPairRequestBounceSpeed;
             if (ImGui.SliderFloat("Bounce Speed##pair", ref pairBounceSpd, 0.1f, 3.0f, "%.2f")) { cfg.IconPairRequestBounceSpeed = pairBounceSpd; configChanged = true; }
+            ImGui.Spacing();
+            var pairEffectDuration = cfg.IconPairRequestEffectDurationSeconds;
+            if (ImGui.SliderInt("Effect Duration##pair", ref pairEffectDuration, 0, 300, pairEffectDuration == 0 ? "Never" : "%ds")) { cfg.IconPairRequestEffectDurationSeconds = pairEffectDuration; configChanged = true; }
+            _uiShared.DrawHelpText("How long the pulse/glow/bounce effects last. 0 = never expires until icon is clicked.");
+            var pairBadgeDuration = cfg.IconPairRequestBadgeDurationSeconds;
+            if (ImGui.SliderInt("Badge Duration##pair", ref pairBadgeDuration, 0, 300, pairBadgeDuration == 0 ? "Never" : "%ds")) { cfg.IconPairRequestBadgeDurationSeconds = pairBadgeDuration; configChanged = true; }
+            _uiShared.DrawHelpText("How long the badge dot remains visible. 0 = never expires until icon is clicked. Separate from effect duration.");
         }
 
         // Notification
@@ -2876,6 +2890,13 @@ public class SettingsUi : WindowMediatorSubscriberBase
             if (ImGui.SliderFloat("Bounce Scale##notif", ref notifBounceInt, 0.0f, 0.3f, "%.2f")) { cfg.IconNotificationBounceIntensity = notifBounceInt; configChanged = true; }
             var notifBounceSpd = cfg.IconNotificationBounceSpeed;
             if (ImGui.SliderFloat("Bounce Speed##notif", ref notifBounceSpd, 0.1f, 3.0f, "%.2f")) { cfg.IconNotificationBounceSpeed = notifBounceSpd; configChanged = true; }
+            ImGui.Spacing();
+            var notifEffectDuration = cfg.IconNotificationEffectDurationSeconds;
+            if (ImGui.SliderInt("Effect Duration##notif", ref notifEffectDuration, 0, 300, notifEffectDuration == 0 ? "Never" : "%ds")) { cfg.IconNotificationEffectDurationSeconds = notifEffectDuration; configChanged = true; }
+            _uiShared.DrawHelpText("How long the pulse/glow/bounce effects last. 0 = never expires until icon is clicked.");
+            var notifBadgeDuration = cfg.IconNotificationBadgeDurationSeconds;
+            if (ImGui.SliderInt("Badge Duration##notif", ref notifBadgeDuration, 0, 300, notifBadgeDuration == 0 ? "Never" : "%ds")) { cfg.IconNotificationBadgeDurationSeconds = notifBadgeDuration; configChanged = true; }
+            _uiShared.DrawHelpText("How long the badge dot remains visible. 0 = never expires until icon is clicked. Separate from effect duration.");
         }
 
         ImGui.Spacing();
@@ -4393,26 +4414,93 @@ public class SettingsUi : WindowMediatorSubscriberBase
     private void ApplySelectedPresetTheme(string themeName, List<string> builtInThemes)
     {
         var currentTheme = SpheneCustomTheme.CurrentTheme;
-        
+        ThemeConfiguration? sourceTheme = null;
+
         if (builtInThemes.Contains(themeName, StringComparer.Ordinal))
         {
             // Apply built-in theme
-            var presetTheme = ThemePresets.BuiltInThemes[themeName];
-            ThemePropertyCopier.Copy(presetTheme, currentTheme);
+            sourceTheme = ThemePresets.BuiltInThemes[themeName];
+            ThemePropertyCopier.Copy(sourceTheme, currentTheme);
         }
         else
         {
             // Apply custom theme
-            var loadedTheme = ThemeManager.LoadTheme(themeName);
-            if (loadedTheme != null)
+            sourceTheme = ThemeManager.LoadTheme(themeName);
+            if (sourceTheme != null)
             {
-                ThemePropertyCopier.Copy(loadedTheme, currentTheme);
+                ThemePropertyCopier.Copy(sourceTheme, currentTheme);
             }
         }
-        
+
+        // Apply icon theme settings from the loaded/preset theme to config
+        if (sourceTheme != null)
+        {
+            var cfg = _configService.Current;
+            cfg.IconGlobalAlpha = sourceTheme.IconGlobalAlpha;
+            cfg.IconRainbowSpeed = sourceTheme.IconRainbowSpeed;
+            cfg.IconShowModTransferBadge = sourceTheme.IconShowModTransferBadge;
+            cfg.IconShowPairRequestBadge = sourceTheme.IconShowPairRequestBadge;
+            cfg.IconShowNotificationBadge = sourceTheme.IconShowNotificationBadge;
+            cfg.IconPermColor = sourceTheme.IconPermColor;
+            cfg.IconPermAlpha = sourceTheme.IconPermAlpha;
+            cfg.IconPermEffectPulse = sourceTheme.IconPermEffectPulse;
+            cfg.IconPermEffectGlow = sourceTheme.IconPermEffectGlow;
+            cfg.IconPermEffectBounce = sourceTheme.IconPermEffectBounce;
+            cfg.IconPermEffectRainbow = sourceTheme.IconPermEffectRainbow;
+            cfg.IconPermPulseMinRadius = sourceTheme.IconPermPulseMinRadius;
+            cfg.IconPermPulseMaxRadius = sourceTheme.IconPermPulseMaxRadius;
+            cfg.IconPermGlowIntensity = sourceTheme.IconPermGlowIntensity;
+            cfg.IconPermGlowRadius = sourceTheme.IconPermGlowRadius;
+            cfg.IconPermBounceIntensity = sourceTheme.IconPermBounceIntensity;
+            cfg.IconPermBounceSpeed = sourceTheme.IconPermBounceSpeed;
+            cfg.IconModTransferColor = sourceTheme.IconModTransferColor;
+            cfg.IconModTransferAlpha = sourceTheme.IconModTransferAlpha;
+            cfg.IconModTransferEffectPulse = sourceTheme.IconModTransferEffectPulse;
+            cfg.IconModTransferEffectGlow = sourceTheme.IconModTransferEffectGlow;
+            cfg.IconModTransferEffectBounce = sourceTheme.IconModTransferEffectBounce;
+            cfg.IconModTransferEffectRainbow = sourceTheme.IconModTransferEffectRainbow;
+            cfg.IconModTransferPulseMinRadius = sourceTheme.IconModTransferPulseMinRadius;
+            cfg.IconModTransferPulseMaxRadius = sourceTheme.IconModTransferPulseMaxRadius;
+            cfg.IconModTransferGlowIntensity = sourceTheme.IconModTransferGlowIntensity;
+            cfg.IconModTransferGlowRadius = sourceTheme.IconModTransferGlowRadius;
+            cfg.IconModTransferBounceIntensity = sourceTheme.IconModTransferBounceIntensity;
+            cfg.IconModTransferBounceSpeed = sourceTheme.IconModTransferBounceSpeed;
+            cfg.IconPairRequestColor = sourceTheme.IconPairRequestColor;
+            cfg.IconPairRequestAlpha = sourceTheme.IconPairRequestAlpha;
+            cfg.IconPairRequestEffectPulse = sourceTheme.IconPairRequestEffectPulse;
+            cfg.IconPairRequestEffectGlow = sourceTheme.IconPairRequestEffectGlow;
+            cfg.IconPairRequestEffectBounce = sourceTheme.IconPairRequestEffectBounce;
+            cfg.IconPairRequestEffectRainbow = sourceTheme.IconPairRequestEffectRainbow;
+            cfg.IconPairRequestPulseMinRadius = sourceTheme.IconPairRequestPulseMinRadius;
+            cfg.IconPairRequestPulseMaxRadius = sourceTheme.IconPairRequestPulseMaxRadius;
+            cfg.IconPairRequestGlowIntensity = sourceTheme.IconPairRequestGlowIntensity;
+            cfg.IconPairRequestGlowRadius = sourceTheme.IconPairRequestGlowRadius;
+            cfg.IconPairRequestBounceIntensity = sourceTheme.IconPairRequestBounceIntensity;
+            cfg.IconPairRequestBounceSpeed = sourceTheme.IconPairRequestBounceSpeed;
+            cfg.IconNotificationColor = sourceTheme.IconNotificationColor;
+            cfg.IconNotificationAlpha = sourceTheme.IconNotificationAlpha;
+            cfg.IconNotificationEffectPulse = sourceTheme.IconNotificationEffectPulse;
+            cfg.IconNotificationEffectGlow = sourceTheme.IconNotificationEffectGlow;
+            cfg.IconNotificationEffectBounce = sourceTheme.IconNotificationEffectBounce;
+            cfg.IconNotificationEffectRainbow = sourceTheme.IconNotificationEffectRainbow;
+            cfg.IconNotificationPulseMinRadius = sourceTheme.IconNotificationPulseMinRadius;
+            cfg.IconNotificationPulseMaxRadius = sourceTheme.IconNotificationPulseMaxRadius;
+            cfg.IconNotificationGlowIntensity = sourceTheme.IconNotificationGlowIntensity;
+            cfg.IconNotificationGlowRadius = sourceTheme.IconNotificationGlowRadius;
+            cfg.IconNotificationBounceIntensity = sourceTheme.IconNotificationBounceIntensity;
+            cfg.IconNotificationBounceSpeed = sourceTheme.IconNotificationBounceSpeed;
+            cfg.IconModTransferEffectDurationSeconds = sourceTheme.IconModTransferEffectDurationSeconds;
+            cfg.IconPairRequestEffectDurationSeconds = sourceTheme.IconPairRequestEffectDurationSeconds;
+            cfg.IconNotificationEffectDurationSeconds = sourceTheme.IconNotificationEffectDurationSeconds;
+            cfg.IconModTransferBadgeDurationSeconds = sourceTheme.IconModTransferBadgeDurationSeconds;
+            cfg.IconPairRequestBadgeDurationSeconds = sourceTheme.IconPairRequestBadgeDurationSeconds;
+            cfg.IconNotificationBadgeDurationSeconds = sourceTheme.IconNotificationBadgeDurationSeconds;
+            _configService.Save();
+        }
+
         // Save selected theme to configuration for persistence
         ThemeManager.SetSelectedTheme(themeName);
-        
+
         // Reset change tracking when applying a preset theme
         _hasUnsavedThemeChanges = false;
         _currentThemeName = themeName;

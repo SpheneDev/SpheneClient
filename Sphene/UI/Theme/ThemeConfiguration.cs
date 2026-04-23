@@ -283,7 +283,79 @@ public class ThemeConfiguration
 
     // Per-button style overrides
     public Dictionary<string, ButtonStyleOverride> ButtonStyles { get; set; } = new(StringComparer.Ordinal);
-    
+
+    // === ICON THEME SETTINGS (persisted with theme) ===
+    public float IconGlobalAlpha { get; set; } = 1.0f;
+    public float IconRainbowSpeed { get; set; } = 1.0f;
+
+    public bool IconShowModTransferBadge { get; set; } = true;
+    public bool IconShowPairRequestBadge { get; set; } = true;
+    public bool IconShowNotificationBadge { get; set; } = true;
+
+    // PERMANENT (Background) Event
+    public uint IconPermColor { get; set; } = 0xFFE86699u;
+    public float IconPermAlpha { get; set; } = 0.3f;
+    public bool IconPermEffectPulse { get; set; } = true;
+    public bool IconPermEffectGlow { get; set; } = true;
+    public bool IconPermEffectBounce { get; set; } = false;
+    public bool IconPermEffectRainbow { get; set; } = false;
+    public float IconPermPulseMinRadius { get; set; } = 0.46f;
+    public float IconPermPulseMaxRadius { get; set; } = 0.6f;
+    public float IconPermGlowIntensity { get; set; } = 0.3f;
+    public float IconPermGlowRadius { get; set; } = 1.2f;
+    public float IconPermBounceIntensity { get; set; } = 0.12f;
+    public float IconPermBounceSpeed { get; set; } = 1.5f;
+
+    // MOD TRANSFER Event
+    public uint IconModTransferColor { get; set; } = 0xFFE00060u;
+    public float IconModTransferAlpha { get; set; } = 0.6f;
+    public bool IconModTransferEffectPulse { get; set; } = true;
+    public bool IconModTransferEffectGlow { get; set; } = false;
+    public bool IconModTransferEffectBounce { get; set; } = false;
+    public bool IconModTransferEffectRainbow { get; set; } = true;
+    public float IconModTransferPulseMinRadius { get; set; } = 0.46f;
+    public float IconModTransferPulseMaxRadius { get; set; } = 0.6f;
+    public float IconModTransferGlowIntensity { get; set; } = 0.6f;
+    public float IconModTransferGlowRadius { get; set; } = 1.2f;
+    public float IconModTransferBounceIntensity { get; set; } = 0.12f;
+    public float IconModTransferBounceSpeed { get; set; } = 1.5f;
+
+    // PAIR REQUEST Event
+    public uint IconPairRequestColor { get; set; } = 0xFFB469FFu;
+    public float IconPairRequestAlpha { get; set; } = 0.6f;
+    public bool IconPairRequestEffectPulse { get; set; } = true;
+    public bool IconPairRequestEffectGlow { get; set; } = false;
+    public bool IconPairRequestEffectBounce { get; set; } = false;
+    public bool IconPairRequestEffectRainbow { get; set; } = true;
+    public float IconPairRequestPulseMinRadius { get; set; } = 0.46f;
+    public float IconPairRequestPulseMaxRadius { get; set; } = 0.6f;
+    public float IconPairRequestGlowIntensity { get; set; } = 0.6f;
+    public float IconPairRequestGlowRadius { get; set; } = 1.2f;
+    public float IconPairRequestBounceIntensity { get; set; } = 0.12f;
+    public float IconPairRequestBounceSpeed { get; set; } = 1.5f;
+
+    // NOTIFICATION (General) Event
+    public uint IconNotificationColor { get; set; } = 0xFF0099FFu;
+    public float IconNotificationAlpha { get; set; } = 0.6f;
+    public bool IconNotificationEffectPulse { get; set; } = true;
+    public bool IconNotificationEffectGlow { get; set; } = false;
+    public bool IconNotificationEffectBounce { get; set; } = false;
+    public bool IconNotificationEffectRainbow { get; set; } = true;
+    public float IconNotificationPulseMinRadius { get; set; } = 0.46f;
+    public float IconNotificationPulseMaxRadius { get; set; } = 0.6f;
+    public float IconNotificationGlowIntensity { get; set; } = 0.6f;
+    public float IconNotificationGlowRadius { get; set; } = 1.2f;
+    public float IconNotificationBounceIntensity { get; set; } = 0.12f;
+    public float IconNotificationBounceSpeed { get; set; } = 1.5f;
+
+    // Icon event durations (seconds, 0 = never expire)
+    public int IconModTransferEffectDurationSeconds { get; set; } = 60;
+    public int IconPairRequestEffectDurationSeconds { get; set; } = 60;
+    public int IconNotificationEffectDurationSeconds { get; set; } = 60;
+    public int IconModTransferBadgeDurationSeconds { get; set; } = 60;
+    public int IconPairRequestBadgeDurationSeconds { get; set; } = 60;
+    public int IconNotificationBadgeDurationSeconds { get; set; } = 60;
+
     // Method to trigger theme change notification
     public void NotifyThemeChanged()
     {
@@ -536,7 +608,68 @@ public class ThemeConfiguration
                 Icon = kv.Value.Icon,
                 Border = kv.Value.Border,
                 BorderSize = kv.Value.BorderSize
-            }, StringComparer.Ordinal)
+            }, StringComparer.Ordinal),
+
+            // Icon theme settings
+            IconGlobalAlpha = IconGlobalAlpha,
+            IconRainbowSpeed = IconRainbowSpeed,
+            IconShowModTransferBadge = IconShowModTransferBadge,
+            IconShowPairRequestBadge = IconShowPairRequestBadge,
+            IconShowNotificationBadge = IconShowNotificationBadge,
+            IconPermColor = IconPermColor,
+            IconPermAlpha = IconPermAlpha,
+            IconPermEffectPulse = IconPermEffectPulse,
+            IconPermEffectGlow = IconPermEffectGlow,
+            IconPermEffectBounce = IconPermEffectBounce,
+            IconPermEffectRainbow = IconPermEffectRainbow,
+            IconPermPulseMinRadius = IconPermPulseMinRadius,
+            IconPermPulseMaxRadius = IconPermPulseMaxRadius,
+            IconPermGlowIntensity = IconPermGlowIntensity,
+            IconPermGlowRadius = IconPermGlowRadius,
+            IconPermBounceIntensity = IconPermBounceIntensity,
+            IconPermBounceSpeed = IconPermBounceSpeed,
+            IconModTransferColor = IconModTransferColor,
+            IconModTransferAlpha = IconModTransferAlpha,
+            IconModTransferEffectPulse = IconModTransferEffectPulse,
+            IconModTransferEffectGlow = IconModTransferEffectGlow,
+            IconModTransferEffectBounce = IconModTransferEffectBounce,
+            IconModTransferEffectRainbow = IconModTransferEffectRainbow,
+            IconModTransferPulseMinRadius = IconModTransferPulseMinRadius,
+            IconModTransferPulseMaxRadius = IconModTransferPulseMaxRadius,
+            IconModTransferGlowIntensity = IconModTransferGlowIntensity,
+            IconModTransferGlowRadius = IconModTransferGlowRadius,
+            IconModTransferBounceIntensity = IconModTransferBounceIntensity,
+            IconModTransferBounceSpeed = IconModTransferBounceSpeed,
+            IconPairRequestColor = IconPairRequestColor,
+            IconPairRequestAlpha = IconPairRequestAlpha,
+            IconPairRequestEffectPulse = IconPairRequestEffectPulse,
+            IconPairRequestEffectGlow = IconPairRequestEffectGlow,
+            IconPairRequestEffectBounce = IconPairRequestEffectBounce,
+            IconPairRequestEffectRainbow = IconPairRequestEffectRainbow,
+            IconPairRequestPulseMinRadius = IconPairRequestPulseMinRadius,
+            IconPairRequestPulseMaxRadius = IconPairRequestPulseMaxRadius,
+            IconPairRequestGlowIntensity = IconPairRequestGlowIntensity,
+            IconPairRequestGlowRadius = IconPairRequestGlowRadius,
+            IconPairRequestBounceIntensity = IconPairRequestBounceIntensity,
+            IconPairRequestBounceSpeed = IconPairRequestBounceSpeed,
+            IconNotificationColor = IconNotificationColor,
+            IconNotificationAlpha = IconNotificationAlpha,
+            IconNotificationEffectPulse = IconNotificationEffectPulse,
+            IconNotificationEffectGlow = IconNotificationEffectGlow,
+            IconNotificationEffectBounce = IconNotificationEffectBounce,
+            IconNotificationEffectRainbow = IconNotificationEffectRainbow,
+            IconNotificationPulseMinRadius = IconNotificationPulseMinRadius,
+            IconNotificationPulseMaxRadius = IconNotificationPulseMaxRadius,
+            IconNotificationGlowIntensity = IconNotificationGlowIntensity,
+            IconNotificationGlowRadius = IconNotificationGlowRadius,
+            IconNotificationBounceIntensity = IconNotificationBounceIntensity,
+            IconNotificationBounceSpeed = IconNotificationBounceSpeed,
+            IconModTransferEffectDurationSeconds = IconModTransferEffectDurationSeconds,
+            IconPairRequestEffectDurationSeconds = IconPairRequestEffectDurationSeconds,
+            IconNotificationEffectDurationSeconds = IconNotificationEffectDurationSeconds,
+            IconModTransferBadgeDurationSeconds = IconModTransferBadgeDurationSeconds,
+            IconPairRequestBadgeDurationSeconds = IconPairRequestBadgeDurationSeconds,
+            IconNotificationBadgeDurationSeconds = IconNotificationBadgeDurationSeconds
         };
     }
     

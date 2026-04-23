@@ -88,6 +88,14 @@ public class SpheneConfig : ISpheneConfiguration
     public bool LockSpheneIcon { get; set; } = false;
     public int IconEventExpirySeconds { get; set; } = 60;
 
+    // Per-event-type durations (seconds, 0 = never expire until clicked)
+    public int IconModTransferEffectDurationSeconds { get; set; } = 60;
+    public int IconPairRequestEffectDurationSeconds { get; set; } = 60;
+    public int IconNotificationEffectDurationSeconds { get; set; } = 60;
+    public int IconModTransferBadgeDurationSeconds { get; set; } = 60;
+    public int IconPairRequestBadgeDurationSeconds { get; set; } = 60;
+    public int IconNotificationBadgeDurationSeconds { get; set; } = 60;
+
     // Icon Theme Settings - Per-Event-Type Configuration (Flexible Effect System)
     // Each notification type can have its own color, alpha, and combination of effects
 
@@ -107,12 +115,12 @@ public class SpheneConfig : ISpheneConfiguration
     public uint IconPermColor { get; set; } = 0xFFE86699u; // Purple (#9966E8)
     public float IconPermAlpha { get; set; } = 0.3f;
     public bool IconPermEffectPulse { get; set; } = true;
-    public bool IconPermEffectGlow { get; set; } = false;
+    public bool IconPermEffectGlow { get; set; } = true;
     public bool IconPermEffectBounce { get; set; } = false;
     public bool IconPermEffectRainbow { get; set; } = false;
     public float IconPermPulseMinRadius { get; set; } = 0.46f;
     public float IconPermPulseMaxRadius { get; set; } = 0.6f;
-    public float IconPermGlowIntensity { get; set; } = 0.6f;
+    public float IconPermGlowIntensity { get; set; } = 0.3f;
     public float IconPermGlowRadius { get; set; } = 1.2f;
     public float IconPermBounceIntensity { get; set; } = 0.12f;
     public float IconPermBounceSpeed { get; set; } = 1.5f;
@@ -123,7 +131,7 @@ public class SpheneConfig : ISpheneConfiguration
     public bool IconModTransferEffectPulse { get; set; } = true;
     public bool IconModTransferEffectGlow { get; set; } = false;
     public bool IconModTransferEffectBounce { get; set; } = false;
-    public bool IconModTransferEffectRainbow { get; set; } = false;
+    public bool IconModTransferEffectRainbow { get; set; } = true;
     public float IconModTransferPulseMinRadius { get; set; } = 0.46f;
     public float IconModTransferPulseMaxRadius { get; set; } = 0.6f;
     public float IconModTransferGlowIntensity { get; set; } = 0.6f;
@@ -137,7 +145,7 @@ public class SpheneConfig : ISpheneConfiguration
     public bool IconPairRequestEffectPulse { get; set; } = true;
     public bool IconPairRequestEffectGlow { get; set; } = false;
     public bool IconPairRequestEffectBounce { get; set; } = false;
-    public bool IconPairRequestEffectRainbow { get; set; } = false;
+    public bool IconPairRequestEffectRainbow { get; set; } = true;
     public float IconPairRequestPulseMinRadius { get; set; } = 0.46f;
     public float IconPairRequestPulseMaxRadius { get; set; } = 0.6f;
     public float IconPairRequestGlowIntensity { get; set; } = 0.6f;
@@ -151,7 +159,7 @@ public class SpheneConfig : ISpheneConfiguration
     public bool IconNotificationEffectPulse { get; set; } = true;
     public bool IconNotificationEffectGlow { get; set; } = false;
     public bool IconNotificationEffectBounce { get; set; } = false;
-    public bool IconNotificationEffectRainbow { get; set; } = false;
+    public bool IconNotificationEffectRainbow { get; set; } = true;
     public float IconNotificationPulseMinRadius { get; set; } = 0.46f;
     public float IconNotificationPulseMaxRadius { get; set; } = 0.6f;
     public float IconNotificationGlowIntensity { get; set; } = 0.6f;
