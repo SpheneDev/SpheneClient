@@ -49,8 +49,11 @@ public class SpheneIcon : WindowMediatorSubscriberBase
     private Vector2 _dragStartMousePos;
     private Vector2 _dragStartIconPos;
     private DateTime _mouseDownAt;
+    private DateTime _dragRingFadeStart;
+    private bool _showDragRingFade = false;
+    private const int DragRingFadeDurationMs = 250;
     private Vector2 _lastSavedIconPosition = new(float.NaN, float.NaN);
-    private const int DragStartDelayMs = 100; // delay (ms) before drag begins on hold
+    private const int DragStartDelayMs = 350; // delay (ms) before drag begins on hold
     private IDalamudTextureWrap? _spheneLogoTexture;
     
     // Context menu state
@@ -474,6 +477,53 @@ public class SpheneIcon : WindowMediatorSubscriberBase
         // Draw event badges
         DrawEventBadges(drawList, iconPos, scaledIconSize, cfg);
 
+        // Draw hold-progress ring when mouse is held and drag is not locked
+        if (!iconLocked && ImGui.IsMouseDown(ImGuiMouseButton.Left) && (_wasClicked || _isDragging))
+        {
+            var elapsedMs = (DateTime.UtcNow - _mouseDownAt).TotalMilliseconds;
+            var progress = _isDragging
+                ? 1.0
+                : Math.Min(Math.Max((elapsedMs - 200) / (DragStartDelayMs - 200.0), 0.0), 1.0);
+
+            if (progress > 0 || _isDragging)
+            {
+                var center = new Vector2(iconPos.X + scaledIconSize / 2, iconPos.Y + scaledIconSize / 2);
+                var radius = scaledIconSize / 2 + 4f;
+                var ringColor = ImGui.ColorConvertFloat4ToU32(SpheneColors.EtherealPurple with { W = 0.9f * iconAlpha });
+                var bgRingColor = ImGui.ColorConvertFloat4ToU32(new Vector4(1, 1, 1, 0.12f * iconAlpha));
+
+                // Background ring
+                drawList.AddCircle(center, radius, bgRingColor, 64, 2f);
+
+                // Progress arc
+                var startAngle = -MathF.PI / 2; // Start at top
+                var endAngle = startAngle + (float)(progress * 2 * Math.PI);
+
+                drawList.PathArcTo(center, radius, startAngle, endAngle, 64);
+                drawList.PathStroke(ringColor, ImDrawFlags.None, 2f);
+            }
+        }
+
+        // Fade out the ring after dragging ends
+        if (_showDragRingFade)
+        {
+            var fadeElapsedMs = (DateTime.UtcNow - _dragRingFadeStart).TotalMilliseconds;
+            if (fadeElapsedMs < DragRingFadeDurationMs)
+            {
+                var fade = 1.0f - (float)(fadeElapsedMs / DragRingFadeDurationMs);
+                var center = new Vector2(iconPos.X + scaledIconSize / 2, iconPos.Y + scaledIconSize / 2);
+                var radius = scaledIconSize / 2 + 4f;
+                var ringColor = ImGui.ColorConvertFloat4ToU32(SpheneColors.EtherealPurple with { W = 0.9f * iconAlpha * fade });
+
+                drawList.PathArcTo(center, radius, -MathF.PI / 2, -MathF.PI / 2 + MathF.PI * 2, 64);
+                drawList.PathStroke(ringColor, ImDrawFlags.None, 2f);
+            }
+            else
+            {
+                _showDragRingFade = false;
+            }
+        }
+
         // Handle dragging and clicking only for the icon area (rest of window is click-through)
         ImGui.SetCursorPos(new Vector2(padding, padding));
         ImGui.InvisibleButton("##sphene_icon_window", new Vector2(iconSize, iconSize));
@@ -491,7 +541,7 @@ public class SpheneIcon : WindowMediatorSubscriberBase
         }
 
         // While holding, only begin dragging after a short hold delay (if not locked)
-        if (!iconLocked && ImGui.IsItemActive() && ImGui.IsMouseDown(ImGuiMouseButton.Left))
+        if (!iconLocked && _wasClicked && ImGui.IsMouseDown(ImGuiMouseButton.Left))
         {
             var elapsedMs = (DateTime.UtcNow - _mouseDownAt).TotalMilliseconds;
             var currentMouse = ImGui.GetMousePos();
@@ -499,7 +549,6 @@ public class SpheneIcon : WindowMediatorSubscriberBase
             if (!_isDragging && elapsedMs >= DragStartDelayMs)
             {
                 _isDragging = true;
-                _wasClicked = false;
                 _dragStartMousePos = currentMouse;
                 _dragStartIconPos = ImGui.GetWindowPos();
             }
@@ -512,11 +561,10 @@ public class SpheneIcon : WindowMediatorSubscriberBase
                 _iconPosition = newPos;
             }
         }
-        
-        // Handle right-click for context menu - removed manual handling since BeginPopupContextItem handles this automatically
-        
-        // Handle mouse release
-        if (ImGui.IsItemDeactivated())
+
+        // Handle mouse release (using !IsMouseDown instead of IsItemDeactivated
+        // so the release is detected even if the cursor leaves the item area)
+        if (_wasClicked && !ImGui.IsMouseDown(ImGuiMouseButton.Left))
         {
             if (_isDragging)
             {
@@ -525,21 +573,23 @@ public class SpheneIcon : WindowMediatorSubscriberBase
                 _iconPosition = ImGui.GetWindowPos();
                 _hasStoredIconPosition = true;
                 SaveIconPositionToConfig();
+                _showDragRingFade = true;
+                _dragRingFadeStart = DateTime.UtcNow;
                 _logger.LogDebug("Icon position saved: {Position}", _iconPosition);
             }
-            else if (_wasClicked)
+            else
             {
                 // Handle click to toggle main window (only if not dragging)
                 var currentMousePos = ImGui.GetMousePos();
                 var dragDistance = Vector2.Distance(_clickStartPos, currentMousePos);
-                
+
                 if (dragDistance < 3.0f) // Only trigger click if mouse didn't move much
                 {
                     ToggleMainWindow();
                     AcknowledgeEvents();
                 }
             }
-            
+
             _wasClicked = false;
         }
         
@@ -600,7 +650,7 @@ public class SpheneIcon : WindowMediatorSubscriberBase
 
         _tooltipHeaderText = iconLocked
             ? "Click to toggle Sphene | Drag is locked | Right-click for menu"
-            : "Click to toggle Sphene | Hold and drag to move | Right-click for menu";
+            : "Click to toggle Sphene | Hold for drag (0.5 s) | Right-click for menu";
         _tooltipStatusText = "Server Status: " + GetStatusText(currentState);
         _tooltipUpdateText = (_updateAvailable && _updateInfo != null)
             ? $"Update available: {_updateInfo.CurrentVersion} -> {_updateInfo.LatestVersion}"
