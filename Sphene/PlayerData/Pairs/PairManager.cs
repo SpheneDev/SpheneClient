@@ -107,6 +107,10 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         Mediator.Subscribe<GposeStartMessage>(this, (msg) => { _ = _apiController.Value.UserUpdateGposeState(true); });
         Mediator.Subscribe<GposeEndMessage>(this, (msg) => { _ = _apiController.Value.UserUpdateGposeState(false); });
         Mediator.Subscribe<PenumbraModTransferCompletedMessage>(this, OnPenumbraModTransferCompleted);
+        Mediator.Subscribe<AreaBoundSyncshellLeftMessage>(this, (msg) =>
+        {
+             RemoveGroup(new GroupData(msg.SyncshellId));
+        });
         _directPairsInternal = DirectPairsLazy();
         _groupPairsInternal = GroupPairsLazy();
         _pairsWithGroupsInternal = PairsWithGroupsLazy();
@@ -581,7 +585,7 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
 
     public void RemoveGroup(GroupData data)
     {
-        _allGroups.TryRemove(new KeyValuePair<GroupData, GroupFullInfoDto>(data, default));
+        var removed = _allGroups.TryRemove(data, out _);
 
         foreach (var item in _allClientPairs.ToList())
         {
