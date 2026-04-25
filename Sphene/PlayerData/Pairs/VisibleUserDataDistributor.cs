@@ -84,8 +84,17 @@ public class VisibleUserDataDistributor : DisposableMediatorSubscriberBase
         });
 
         Mediator.Subscribe<ConnectedMessage>(this, (_) => PushToAllVisibleUsers());
-        Mediator.Subscribe<DisconnectedMessage>(this, (_) => 
+        Mediator.Subscribe<DisconnectedMessage>(this, (_) =>
         {
+            _previouslyVisiblePlayers.Clear();
+            _lastSentHashPerUser.Clear();
+            _refreshRequestCooldownByUid.Clear();
+            _delayedPushUsers.Clear();
+            _usersToPushDataTo.Clear();
+        });
+        Mediator.Subscribe<ZoneSwitchEndMessage>(this, (_) =>
+        {
+            Logger.LogDebug("{tag} Zone switch ended, clearing hash history to force re-send", SyncProgressTag);
             _previouslyVisiblePlayers.Clear();
             _lastSentHashPerUser.Clear();
             _refreshRequestCooldownByUid.Clear();

@@ -828,6 +828,26 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             _charaHandler = null;
             _lastAppliedBypassEmoteAddress = nint.Zero;
 
+            // Wait for any pending character data application tasks to complete or timeout
+            // before proceeding with IPC cleanup to avoid race conditions
+            try
+            {
+                _applicationTask?.Wait(TimeSpan.FromSeconds(2));
+            }
+            catch (Exception ex)
+            {
+                Logger.LogDebug(ex, "Application task wait timed out or failed during disposal for {name}", name);
+            }
+
+            try
+            {
+                _applyPipelineTask?.Wait(TimeSpan.FromSeconds(2));
+            }
+            catch (Exception ex)
+            {
+                Logger.LogDebug(ex, "Apply pipeline task wait timed out or failed during disposal for {name}", name);
+            }
+
             if (!string.IsNullOrEmpty(name))
             {
                 Mediator.Publish(new EventMessage(new Event(name, Pair.UserData, nameof(PairHandler), EventSeverity.Informational, "Disposing User")));
