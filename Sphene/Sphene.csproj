@@ -3,9 +3,9 @@
   <PropertyGroup>
     <Authors></Authors>
     <Company></Company>
-    <Version>1.1.14.6</Version>
-    <AssemblyVersion>1.1.14.6</AssemblyVersion>
-    <FileVersion>1.1.14.6</FileVersion>
+    <Version>1.1.14.28</Version>
+    <AssemblyVersion>1.1.14.28</AssemblyVersion>
+    <FileVersion>1.1.14.28</FileVersion>
     <Description>Through the power of Living Memory, this plugin harmonizes your Penumbra modifications and Glamourer configurations across all connected souls, ensuring endless synchronization in your shared digital realm.</Description>
     <Copyright></Copyright>
     <PackageProjectUrl>https://github.com/SpheneDev/client</PackageProjectUrl>
@@ -46,9 +46,9 @@
     <BuildDate>$([System.DateTime]::Now.ToString("ddMM"))</BuildDate>
     <BuildTime>$([System.DateTime]::Now.ToString("HHMM"))</BuildTime>
     <BuildTimestamp>$([System.DateTime]::Now.ToString("dd-MM-yy HH:mm:ss"))</BuildTimestamp>
-    <Version>1.1.14.6</Version>
-    <AssemblyVersion>1.1.14.6</AssemblyVersion>
-    <FileVersion>1.1.14.6</FileVersion>
+    <Version>1.1.14.28</Version>
+    <AssemblyVersion>1.1.14.28</AssemblyVersion>
+    <FileVersion>1.1.14.28</FileVersion>
     <DefineConstants>$(DefineConstants);BUILD_TIMESTAMP</DefineConstants>
   </PropertyGroup>
   
@@ -86,6 +86,7 @@
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
+    <PackageReference Include="NAudio" Version="2.2.1" />
     <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.*" />
     <PackageReference Include="Microsoft.AspNetCore.SignalR.Protocols.MessagePack" Version="10.0.*" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.*" />

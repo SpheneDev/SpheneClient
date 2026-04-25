@@ -370,6 +370,7 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         CancelAllPendingOfflineCharacterDataPurges();
         Logger.LogDebug("Clearing all Pairs");
         DisposePairs();
+        ClearCurrentPairCharacterCache();
         _allClientPairs.Clear();
         _allGroups.Clear();
         _pendingOnlineDtos.Clear();
@@ -964,6 +965,7 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         foreach (var item in _allClientPairs)
         {
             item.Value.MarkOffline(wait: true);
+            item.Value.Dispose();
         }
 
         RecreateLazy();
@@ -1552,6 +1554,26 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         if (cache.Remove(user.UID))
         {
             _pairCharacterCacheConfigService.Save();
+        }
+    }
+
+    private void ClearCurrentPairCharacterCache()
+    {
+        try
+        {
+            var playerName = _dalamudUtilService.GetPlayerNameAsync().GetAwaiter().GetResult();
+            var worldId = _dalamudUtilService.GetHomeWorldIdAsync().GetAwaiter().GetResult();
+            var cacheKey = playerName + "_" + worldId.ToString(CultureInfo.InvariantCulture);
+
+            if (_pairCharacterCacheConfigService.Current.PairCharacterDataCache.Remove(cacheKey))
+            {
+                _pairCharacterCacheConfigService.Save();
+                Logger.LogDebug("Cleared pair character data cache for {cacheKey}", cacheKey);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Failed to clear pair character data cache");
         }
     }
 

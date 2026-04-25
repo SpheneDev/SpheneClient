@@ -1,6 +1,7 @@
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface;
 using Dalamud.Interface.Colors;
+using Dalamud.Interface.ImGuiFileDialog;
 using Dalamud.Interface.Utility;
 using Dalamud.Interface.Utility.Raii;
 using Dalamud.Utility;
@@ -62,6 +63,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
     private readonly UiSharedService _uiShared;
     private readonly ShrinkUHostService _shrinkUHostService;
     private readonly ChangelogService _changelogService;
+    private readonly GameSoundManager _gameSoundManager;
+    private readonly FileDialogManager _fileDialogManager;
     private readonly string _shrinkUVersion;
     private readonly IProgress<(int, int, FileCacheEntity)> _validationProgress;
     private (int, int, FileCacheEntity) _currentProgress;
@@ -102,6 +105,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
     private SettingsPage _activeSettingsPage = SettingsPage.Home;
     private bool _preferPanelThemeTab = false;
     private bool _preferIconThemeTab = false;
+    private bool _preferSoundsThemeTab = false;
     private bool _preferButtonStylesTab = false;
 
 
@@ -118,7 +122,9 @@ public class SettingsUi : WindowMediatorSubscriberBase
         IpcManager ipcManager, CacheMonitor cacheMonitor,
         ShrinkUHostService shrinkUHostService,
         DalamudUtilService dalamudUtilService, HttpClient httpClient,
-        ChangelogService changelogService) : base(logger, mediator, "Network Configuration", performanceCollector)
+        ChangelogService changelogService,
+        GameSoundManager gameSoundManager,
+        FileDialogManager fileDialogManager) : base(logger, mediator, "Network Configuration", performanceCollector)
     {
         _configService = configService;
         _pairManager = pairManager;
@@ -137,6 +143,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
         _uiShared = uiShared;
         _shrinkUHostService = shrinkUHostService;
         _changelogService = changelogService;
+        _gameSoundManager = gameSoundManager;
+        _fileDialogManager = fileDialogManager;
         _shrinkUVersion = GetShrinkUAssemblyVersion();
         AllowClickthrough = false;
         AllowPinning = false;
@@ -2469,6 +2477,20 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 #pragma warning restore S1066
                 panelTab.Dispose();
                 _preferPanelThemeTab = false;
+
+                #pragma warning disable S1066
+                var soundsTab = ImRaii.TabItem("Sounds", _preferSoundsThemeTab ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None);
+                if (soundsTab)
+                {
+                    if (ImGui.BeginChild("SoundsThemeChild", new Vector2(0, tabContentHeight), true))
+                    {
+                        DrawSoundThemeSettings();
+                        ImGui.EndChild();
+                    }
+                }
+                #pragma warning restore S1066
+                soundsTab.Dispose();
+                _preferSoundsThemeTab = false;
             }
         }
     }
@@ -4707,6 +4729,111 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 }
             }
             ImGui.End();
+        }
+    }
+
+    private void DrawSoundThemeSettings()
+    {
+        var cfg = _configService.Current;
+        bool configChanged = false;
+
+        UiSharedService.ColorTextWrapped("Customize notification sounds for each category. Use Game System for in-game SCD sounds or Windows Audio for external WAV files.", ImGuiColors.DalamudGrey);
+        ImGui.Spacing();
+
+        void DrawSoundConfig(string label, NotificationSoundConfig soundConfig)
+        {
+            if (ImGui.TreeNodeEx(label, ImGuiTreeNodeFlags.SpanAvailWidth))
+            {
+                var enabled = soundConfig.Enabled;
+                if (ImGui.Checkbox("Enabled", ref enabled))
+                {
+                    soundConfig.Enabled = enabled;
+                    configChanged = true;
+                }
+
+                var outputMode = (int)soundConfig.OutputMode;
+                if (ImGui.Combo("Output Mode", ref outputMode, "Game System\0Custom Sound\0"))
+                {
+                    soundConfig.OutputMode = (SoundOutputMode)outputMode;
+                    configChanged = true;
+                }
+
+                if (soundConfig.OutputMode == SoundOutputMode.GameSystem)
+                {
+                    var registry = GameSoundRegistry.Sounds;
+                    if (registry.Count > 0)
+                    {
+                        if (string.IsNullOrWhiteSpace(soundConfig.SelectedGameSoundName))
+                        {
+                            soundConfig.SelectedGameSoundName = registry[0].Name;
+                            configChanged = true;
+                        }
+
+                        var soundNames = string.Join("\0", registry.Select(s => s.Name)) + "\0";
+                        var currentIndex = registry.Select((s, i) => new { s, i }).FirstOrDefault(x => string.Equals(x.s.Name, soundConfig.SelectedGameSoundName, StringComparison.Ordinal))?.i ?? 0;
+                        if (ImGui.Combo("Sound", ref currentIndex, soundNames))
+                        {
+                            soundConfig.SelectedGameSoundName = registry[currentIndex].Name;
+                            configChanged = true;
+                        }
+                    }
+                    else
+                    {
+                        UiSharedService.ColorTextWrapped("No predefined game sounds available.", ImGuiColors.DalamudGrey);
+                    }
+                }
+                else
+                {
+                    ImGui.Text("Sound File");
+                    var customPath = soundConfig.CustomSoundPath;
+                    var inputAvailWidth = ImGui.GetContentRegionAvail().X;
+                    var browseBtnWidth = ImGui.CalcTextSize("Browse...").X + ImGui.GetStyle().FramePadding.X * 2f;
+                    ImGui.SetNextItemWidth(inputAvailWidth - browseBtnWidth - ImGui.GetStyle().ItemSpacing.X);
+                    if (ImGui.InputText("##CustomSoundPath", ref customPath, 256))
+                    {
+                        soundConfig.CustomSoundPath = customPath;
+                        configChanged = true;
+                    }
+                    ImGui.SameLine();
+                    if (ImGui.Button("Browse..."))
+                    {
+                        _fileDialogManager.OpenFileDialog("Select Sound File", ".wav,.mp3", (success, file) =>
+                        {
+                            if (success && !string.IsNullOrWhiteSpace(file))
+                            {
+                                soundConfig.CustomSoundPath = file;
+                                _configService.Save();
+                            }
+                        });
+                    }
+                }
+
+                var volume = soundConfig.Volume;
+                if (ImGui.SliderFloat("Volume", ref volume, 0.0f, 1.0f, "%.2f"))
+                {
+                    soundConfig.Volume = volume;
+                    configChanged = true;
+                }
+
+                if (ImGui.Button("Test Sound"))
+                {
+                    _gameSoundManager.PlayNotificationSound(soundConfig);
+                }
+
+                ImGui.TreePop();
+            }
+        }
+
+        DrawSoundConfig("Info Notifications", cfg.InfoNotificationSound);
+        DrawSoundConfig("Warning Notifications", cfg.WarningNotificationSound);
+        DrawSoundConfig("Error Notifications", cfg.ErrorNotificationSound);
+        DrawSoundConfig("Success Notifications", cfg.SuccessNotificationSound);
+        DrawSoundConfig("Area-bound Syncshell Notifications", cfg.AreaBoundNotificationSound);
+        DrawSoundConfig("File Transfer Notifications", cfg.FileTransferNotificationSound);
+
+        if (configChanged)
+        {
+            _configService.Save();
         }
     }
 }

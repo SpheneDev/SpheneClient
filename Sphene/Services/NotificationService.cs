@@ -22,6 +22,7 @@ public class NotificationService : DisposableMediatorSubscriberBase, IHostedServ
     private readonly Sphene.PlayerData.Factories.FileDownloadManagerFactory _fileDownloadManagerFactory;
     private readonly ShrinkU.Services.TextureBackupService _shrinkuBackupService;
     private readonly ServerConfigurationManager _serverConfigurationManager;
+    private readonly GameSoundManager _gameSoundManager;
     private readonly Lock _penumbraModToastLock = new();
     private readonly HashSet<string> _pendingPenumbraModToastHashes = new(StringComparer.OrdinalIgnoreCase);
     private string? _pendingPenumbraModToastLastSender;
@@ -34,7 +35,8 @@ public class NotificationService : DisposableMediatorSubscriberBase, IHostedServ
         IChatGui chatGui, SpheneConfigService configurationService,
         Sphene.PlayerData.Factories.FileDownloadManagerFactory fileDownloadManagerFactory,
         ShrinkU.Services.TextureBackupService shrinkuBackupService,
-        ServerConfigurationManager serverConfigurationManager) : base(logger, mediator)
+        ServerConfigurationManager serverConfigurationManager,
+        GameSoundManager gameSoundManager) : base(logger, mediator)
     {
         _dalamudUtilService = dalamudUtilService;
         _notificationManager = notificationManager;
@@ -43,7 +45,8 @@ public class NotificationService : DisposableMediatorSubscriberBase, IHostedServ
         _fileDownloadManagerFactory = fileDownloadManagerFactory;
         _shrinkuBackupService = shrinkuBackupService;
         _serverConfigurationManager = serverConfigurationManager;
-        
+        _gameSoundManager = gameSoundManager;
+
         mediator.Subscribe<FileTransferNotificationMessage>(this, OnFileTransferNotification);
         mediator.Subscribe<InstallReceivedPenumbraModMessage>(this, msg => _ = HandlePenumbraModTransferAsync(msg.Notification));
     }
@@ -253,6 +256,7 @@ public class NotificationService : DisposableMediatorSubscriberBase, IHostedServ
             if (dalamudNotification != null)
             {
                 _notificationManager.AddNotification(dalamudNotification);
+                _gameSoundManager.PlayNotificationSound(_configurationService.Current.FileTransferNotificationSound);
             }
         });
     }
@@ -483,7 +487,7 @@ public class NotificationService : DisposableMediatorSubscriberBase, IHostedServ
 
     private void ShowNotification(NotificationMessage msg)
     {
-        if (!_dalamudUtilService.IsLoggedIn) 
+        if (!_dalamudUtilService.IsLoggedIn)
         {
             return;
         }
@@ -492,18 +496,22 @@ public class NotificationService : DisposableMediatorSubscriberBase, IHostedServ
         {
             case NotificationType.Info:
                 ShowNotificationLocationBased(msg, _configurationService.Current.InfoNotification);
+                _gameSoundManager.PlayNotificationSound(_configurationService.Current.InfoNotificationSound);
                 break;
 
             case NotificationType.Warning:
                 ShowNotificationLocationBased(msg, _configurationService.Current.WarningNotification);
+                _gameSoundManager.PlayNotificationSound(_configurationService.Current.WarningNotificationSound);
                 break;
 
             case NotificationType.Error:
                 ShowNotificationLocationBased(msg, _configurationService.Current.ErrorNotification);
+                _gameSoundManager.PlayNotificationSound(_configurationService.Current.ErrorNotificationSound);
                 break;
 
             case NotificationType.Success:
                 ShowNotificationLocationBased(msg, _configurationService.Current.AcknowledgmentNotification);
+                _gameSoundManager.PlayNotificationSound(_configurationService.Current.SuccessNotificationSound);
                 break;
         }
     }
@@ -564,6 +572,7 @@ public class NotificationService : DisposableMediatorSubscriberBase, IHostedServ
         _ = _dalamudUtilService.RunOnFrameworkThread(() =>
         {
             ShowNotificationLocationBased(new NotificationMessage(msg.Title, msg.Message, NotificationType.Info), msg.Location);
+            _gameSoundManager.PlayNotificationSound(_configurationService.Current.AreaBoundNotificationSound);
         });
     }
 }

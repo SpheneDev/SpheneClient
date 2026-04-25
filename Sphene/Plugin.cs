@@ -253,6 +253,7 @@ public sealed class Plugin : IDalamudPlugin
             collection.AddSingleton<CharaDataNearbyManager>();
             collection.AddSingleton<CharaDataGposeTogetherManager>();
             collection.AddSingleton<TextureBackupService>();
+            collection.AddSingleton<GameSoundManager>();
             collection.AddSingleton(s => new HousingOwnershipService(
                 s.GetRequiredService<ILogger<HousingOwnershipService>>(),
                 s.GetRequiredService<DalamudUtilService>(),
@@ -328,7 +329,8 @@ public sealed class Plugin : IDalamudPlugin
                 notificationManager, chatGui, s.GetRequiredService<SpheneConfigService>(),
                 s.GetRequiredService<FileDownloadManagerFactory>(),
                 s.GetRequiredService<ShrinkU.Services.TextureBackupService>(),
-                s.GetRequiredService<ServerConfigurationManager>()));
+                s.GetRequiredService<ServerConfigurationManager>(),
+                s.GetRequiredService<GameSoundManager>()));
             collection.AddSingleton((s) =>
             {
                 var httpClient = new HttpClient();

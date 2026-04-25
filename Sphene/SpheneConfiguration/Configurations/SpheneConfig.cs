@@ -210,6 +210,14 @@ public class SpheneConfig : ISpheneConfiguration
     public string SelectedTheme { get; set; } = "Default Sphene";
     public bool AutoLoadThemeOnStartup { get; set; } = true;
 
+    // Notification Sound Settings
+    public NotificationSoundConfig InfoNotificationSound { get; set; } = new();
+    public NotificationSoundConfig WarningNotificationSound { get; set; } = new();
+    public NotificationSoundConfig ErrorNotificationSound { get; set; } = new();
+    public NotificationSoundConfig SuccessNotificationSound { get; set; } = new();
+    public NotificationSoundConfig AreaBoundNotificationSound { get; set; } = new();
+    public NotificationSoundConfig FileTransferNotificationSound { get; set; } = new();
+
     // Release Changelog
     public string LastSeenVersionChangelog { get; set; } = string.Empty;
     public string LastSeenNewOptionsTag { get; set; } = string.Empty;
