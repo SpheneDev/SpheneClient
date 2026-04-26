@@ -33,6 +33,8 @@ public sealed class IpcCallerPenumbra : DisposableMediatorSubscriberBase, IIpcCa
     }
 
     private CancellationTokenSource _debouncedRedrawCts = new();
+    private readonly HashSet<Guid> _activeTemporaryCollections = new();
+    private bool _isDisposed;
 
     private readonly EventSubscriber _penumbraDispose;
     private readonly EventSubscriber<nint, string, string> _penumbraGameObjectResourcePathResolved;
@@ -84,6 +86,10 @@ public sealed class IpcCallerPenumbra : DisposableMediatorSubscriberBase, IIpcCa
         _penumbraGameObjectResourcePathResolved = GameObjectResourcePathResolved.Subscriber(pi, ResourceLoaded);
 
         CheckAPI();
+        if (APIAvailable)
+        {
+            _ = Task.Run(async () => await CleanupAllTemporaryCollectionsAsync(Logger).ConfigureAwait(false));
+        }
         CheckModDirectory();
 
         Mediator.Subscribe<PenumbraRedrawCharacterMessage>(this, (msg) =>
@@ -146,9 +152,22 @@ public sealed class IpcCallerPenumbra : DisposableMediatorSubscriberBase, IIpcCa
 
     protected override void Dispose(bool disposing)
     {
+        _isDisposed = true;
         base.Dispose(disposing);
 
         _redrawManager.Cancel();
+
+        if (APIAvailable)
+        {
+            try
+            {
+                CleanupAllTemporaryCollectionsAsync(Logger).GetAwaiter().GetResult();
+            }
+            catch (Exception ex)
+            {
+                Logger.LogDebug(ex, "Failed to clean up temporary collections during dispose");
+            }
+        }
 
         _penumbraModSettingChanged.Dispose();
         _penumbraGameObjectResourcePathResolved.Dispose();
@@ -255,6 +274,13 @@ public sealed class IpcCallerPenumbra : DisposableMediatorSubscriberBase, IIpcCa
             var collName = "Sphene_" + uid;
             _penumbraCreateNamedTemporaryCollection.Invoke("Sphene", collName, out var actualCollId);
             logger.LogTrace("Creating Temp Collection {collName}, GUID: {collId}", collName, actualCollId);
+            if (actualCollId != Guid.Empty)
+            {
+                lock (_activeTemporaryCollections)
+                {
+                    _activeTemporaryCollections.Add(actualCollId);
+                }
+            }
             return actualCollId;
 
         }).ConfigureAwait(false);
@@ -306,7 +332,38 @@ public sealed class IpcCallerPenumbra : DisposableMediatorSubscriberBase, IIpcCa
             logger.LogTrace("[{applicationId}] Removing temp collection for {collId}", applicationId, collId);
             var ret2 = _penumbraRemoveTemporaryCollection.Invoke(collId);
             logger.LogTrace("[{applicationId}] RemoveTemporaryCollection: {ret2}", applicationId, ret2);
+            lock (_activeTemporaryCollections)
+            {
+                _activeTemporaryCollections.Remove(collId);
+            }
         }).ConfigureAwait(false);
+    }
+
+    public async Task CleanupAllTemporaryCollectionsAsync(ILogger logger)
+    {
+        if (!APIAvailable) return;
+        Guid[] collectionsToRemove;
+        lock (_activeTemporaryCollections)
+        {
+            collectionsToRemove = _activeTemporaryCollections.ToArray();
+            _activeTemporaryCollections.Clear();
+        }
+
+        foreach (var collId in collectionsToRemove)
+        {
+            try
+            {
+                logger.LogDebug("Cleaning up orphaned temporary collection {collId}", collId);
+                await _dalamudUtil.RunOnFrameworkThread(() =>
+                {
+                    _penumbraRemoveTemporaryCollection.Invoke(collId);
+                }).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                logger.LogDebug(ex, "Failed to remove orphaned temporary collection {collId}", collId);
+            }
+        }
     }
 
     public async Task<(string[] forward, string[][] reverse)> ResolvePathsAsync(string[] forward, string[] reverse)
@@ -363,6 +420,7 @@ public sealed class IpcCallerPenumbra : DisposableMediatorSubscriberBase, IIpcCa
 
     private void ResourceLoaded(IntPtr ptr, string arg1, string arg2)
     {
+        if (_isDisposed) return;
         if (ptr == IntPtr.Zero) return;
 
         // Always publish SCD files to allow minion sound overrides to hook in even if currently unmodded (Default collection)
@@ -383,6 +441,7 @@ public sealed class IpcCallerPenumbra : DisposableMediatorSubscriberBase, IIpcCa
     {
         APIAvailable = true;
         ModDirectory = _penumbraResolveModDir.Invoke();
+        _ = Task.Run(async () => await CleanupAllTemporaryCollectionsAsync(Logger).ConfigureAwait(false));
         _spheneMediator.Publish(new PenumbraInitializedMessage());
         _penumbraRedraw!.Invoke(0, setting: RedrawType.Redraw);
     }

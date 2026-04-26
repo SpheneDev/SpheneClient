@@ -962,10 +962,16 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
     private void DisposePairs()
     {
         Logger.LogDebug("Disposing all Pairs");
-        foreach (var item in _allClientPairs)
+        foreach (var item in _allClientPairs.ToList())
         {
-            item.Value.MarkOffline(wait: true);
-            item.Value.Dispose();
+            try
+            {
+                item.Value.Dispose();
+            }
+            catch (Exception ex)
+            {
+                Logger.LogDebug(ex, "Failed to dispose pair for {user}", item.Key);
+            }
         }
 
         RecreateLazy();
