@@ -98,11 +98,11 @@ public static class VariousExtensions
                 if (hasNewAndOldFileReplacements)
                 {
                     bool listsAreEqual = oldData.FileReplacements[objectKind].SequenceEqual(newData.FileReplacements[objectKind], PlayerData.Data.FileReplacementDataComparer.Instance);
-                    if (!listsAreEqual || forceApplyMods)
+                    if (!listsAreEqual || forceApplyMods || forceApplyCustomization)
                     {
-                        logger.LogDebug("[BASE-{appBase}] Updating {object}/{kind} (FileReplacements not equal) => {change}", applicationBase, cachedPlayer, objectKind, PlayerChanges.ModFiles);
+                        logger.LogDebug("[BASE-{appBase}] Updating {object}/{kind} (FileReplacements not equal or forced) => {change}", applicationBase, cachedPlayer, objectKind, PlayerChanges.ModFiles);
                         charaDataToUpdate[objectKind].Add(PlayerChanges.ModFiles);
-                        if (forceApplyMods || objectKind != ObjectKind.Player)
+                        if (forceApplyMods || forceApplyCustomization || objectKind != ObjectKind.Player)
                         {
                             charaDataToUpdate[objectKind].Add(PlayerChanges.ForcedRedraw);
                         }
@@ -147,9 +147,14 @@ public static class VariousExtensions
                     bool glamourerDataDifferent = !string.Equals(oldData.GlamourerData[objectKind], newData.GlamourerData[objectKind], StringComparison.Ordinal);
                     if (glamourerDataDifferent || forceApplyCustomization)
                     {
-                        logger.LogDebug("[BASE-{appBase}] Updating {object}/{kind} (Glamourer different) => {change}", applicationBase, cachedPlayer, objectKind, PlayerChanges.Glamourer);
+                        logger.LogDebug("[BASE-{appBase}] Updating {object}/{kind} (Glamourer different or forced) => {change}", applicationBase, cachedPlayer, objectKind, PlayerChanges.Glamourer);
                         charaDataToUpdate[objectKind].Add(PlayerChanges.Glamourer);
                     }
+                }
+                else if (forceApplyCustomization && newGlamourerData != null)
+                {
+                    logger.LogDebug("[BASE-{appBase}] Updating {object}/{kind} (Glamourer forced reapply) => {change}", applicationBase, cachedPlayer, objectKind, PlayerChanges.Glamourer);
+                    charaDataToUpdate[objectKind].Add(PlayerChanges.Glamourer);
                 }
             }
 
@@ -169,9 +174,9 @@ public static class VariousExtensions
             if (objectKind != ObjectKind.Player) continue;
 
             bool manipDataDifferent = !string.Equals(oldData.ManipulationData, newData.ManipulationData, StringComparison.Ordinal);
-            if (manipDataDifferent || forceApplyMods)
+            if (manipDataDifferent || forceApplyMods || forceApplyCustomization)
             {
-                logger.LogDebug("[BASE-{appBase}] Updating {object}/{kind} (Diff manip data) => {change}", applicationBase, cachedPlayer, objectKind, PlayerChanges.ModManip);
+                logger.LogDebug("[BASE-{appBase}] Updating {object}/{kind} (Diff manip data or forced) => {change}", applicationBase, cachedPlayer, objectKind, PlayerChanges.ModManip);
                 charaDataToUpdate[objectKind].Add(PlayerChanges.ModManip);
             }
 

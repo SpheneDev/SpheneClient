@@ -62,6 +62,12 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
     private string? _inProgressRestHash;
     private string? _inProgressDataHash;
     private string? _inProgressPipelineDataHash;
+    private readonly object _coalesceLock = new();
+    private CharacterData? _pendingCoalescedData;
+    private bool _pendingCoalescedForceApply;
+    private bool _pendingCoalescedForceRedrawIfDisabled;
+    private bool _pendingCoalescedForceRedrawApplication;
+    private Guid _pendingCoalescedApplicationBase;
     private string? _lastAppliedBypassEmoteData;
     private nint _lastAppliedBypassEmoteAddress = nint.Zero;
     private DateTime _lastAppliedBypassEmoteTime = DateTime.MinValue;
@@ -697,32 +703,33 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             applicationBase, this, forceApplyCustomization, _forceApplyMods, forceRedrawApplication);
         Logger.LogDebug("[BASE-{appbase}] Hash for data is {newHash}, current cache hash is {oldHash}", applicationBase, characterData.DataHash.Value, _cachedData?.DataHash.Value ?? "NODATA");
 
-        if (_applyPipelineTask != null
-            && !_applyPipelineTask.IsCompleted
-            && (AreComponentHashesEqual(characterData, _inProgressPenumbraHash, _inProgressGlamourerHash, _inProgressRestHash)
-                || AreDataHashesEqual(characterData, _inProgressPipelineDataHash)))
+        if (_applyPipelineTask != null && !_applyPipelineTask.IsCompleted)
         {
-            if (forceApplyCustomization || _forceApplyMods || _redrawOnNextApplication)
+            lock (_coalesceLock)
             {
-                _forceRedrawAfterCurrentApplication = true;
-                _redrawOnNextApplication = false;
+                _pendingCoalescedData = characterData.DeepClone();
+                _pendingCoalescedForceApply = forceApplyCustomization || _pendingCoalescedForceApply;
+                _pendingCoalescedForceRedrawIfDisabled = forceRedrawIfDisabled || _pendingCoalescedForceRedrawIfDisabled;
+                _pendingCoalescedForceRedrawApplication = forceRedrawApplication || _pendingCoalescedForceRedrawApplication;
+                _pendingCoalescedApplicationBase = applicationBase;
             }
-            Logger.LogDebug("{tag} Apply pipeline skipped: already in progress hash={hash}", SyncProgressTag,
-                characterData.DataHash?.Value ?? "null");
-            return;
-        }
 
-        if (_applicationTask != null
-            && !_applicationTask.IsCompleted
-            && (AreComponentHashesEqual(characterData, _inProgressPenumbraHash, _inProgressGlamourerHash, _inProgressRestHash)
-                || AreDataHashesEqual(characterData, _inProgressDataHash)))
-        {
-            if (forceApplyCustomization || _forceApplyMods || _redrawOnNextApplication)
+            if (!string.IsNullOrEmpty(characterData.DataHash?.Value))
             {
-                _forceRedrawAfterCurrentApplication = true;
-                _redrawOnNextApplication = false;
+                var shortHash = characterData.DataHash.Value[..Math.Min(8, characterData.DataHash.Value.Length)];
+                Logger.LogDebug("{tag} Acking coalesced hash as superseded: hash={hash}", SyncProgressTag, shortHash);
+                Mediator.Publish(new CharacterDataApplicationCompletedMessage(
+                    PlayerName ?? string.Empty,
+                    Pair.UserData.UID,
+                    Guid.Empty,
+                    true,
+                    characterData.DataHash.Value,
+                    Sphene.API.Dto.User.AcknowledgmentErrorCode.None,
+                    "Coalesced into newer pending apply"));
             }
-            Logger.LogDebug("[BASE-{appbase}] Skipping application - component hashes already in progress", applicationBase);
+
+            Logger.LogDebug("{tag} Apply coalesced into pending: user={user} hash={hash}",
+                SyncProgressTag, Pair.UserData.AliasOrUID, characterData.DataHash?.Value ?? "null");
             return;
         }
 
@@ -1206,19 +1213,27 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
     {
         if (!updatedData.Any())
         {
-            Logger.LogDebug("[BASE-{appBase}] Nothing to update for {obj}", applicationBase, this);
-            _cachedData = charaData;
-            UpdateLastKnownMinionData(charaData);
-            if (_charaHandler != null)
+            if (forceApplyCustomization && _charaHandler != null)
             {
-                _lastSuccessfullyAppliedPenumbraHash = charaData.PenumbraHash.Value;
-                _lastSuccessfullyAppliedGlamourerHash = charaData.GlamourerHash.Value;
-                _lastSuccessfullyAppliedRestHash = charaData.RestHash.Value;
-            _lastSuccessfullyAppliedDataHash = charaData.DataHash?.Value;
-                _lastSuccessfullyAppliedCharacterAddress = _charaHandler.Address;
+                Logger.LogDebug("[BASE-{appBase}] No diff updates but forceApplyCustomization=true, injecting ForcedRedraw for {obj}", applicationBase, this);
+                updatedData[ObjectKind.Player] = [PlayerChanges.ForcedRedraw];
             }
-            Mediator.Publish(new CharacterDataApplicationCompletedMessage(PlayerName ?? string.Empty, Pair.UserData.UID, applicationBase, true, charaData.DataHash?.Value));
-            return Task.CompletedTask;
+            else
+            {
+                Logger.LogDebug("[BASE-{appBase}] Nothing to update for {obj}", applicationBase, this);
+                _cachedData = charaData;
+                UpdateLastKnownMinionData(charaData);
+                if (_charaHandler != null)
+                {
+                    _lastSuccessfullyAppliedPenumbraHash = charaData.PenumbraHash.Value;
+                    _lastSuccessfullyAppliedGlamourerHash = charaData.GlamourerHash.Value;
+                    _lastSuccessfullyAppliedRestHash = charaData.RestHash.Value;
+                _lastSuccessfullyAppliedDataHash = charaData.DataHash?.Value;
+                    _lastSuccessfullyAppliedCharacterAddress = _charaHandler.Address;
+                }
+                Mediator.Publish(new CharacterDataApplicationCompletedMessage(PlayerName ?? string.Empty, Pair.UserData.UID, applicationBase, true, charaData.DataHash?.Value));
+                return Task.CompletedTask;
+            }
         }
 
         if (_dalamudUtil.IsInCombatOrPerforming && !IsDutyCombatNoRedrawModeActive())
@@ -1271,6 +1286,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                     _applyPipelineTask = null;
                     _inProgressPipelineDataHash = null;
                 }
+                ProcessPendingCoalescedApply();
             }
         });
         return pipelineTask;
@@ -1466,7 +1482,8 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             return;
         }
 
-        _applicationCancellationTokenSource = _applicationCancellationTokenSource.CancelRecreate() ?? new CancellationTokenSource();
+        _applicationCancellationTokenSource?.Dispose();
+        _applicationCancellationTokenSource = new CancellationTokenSource();
         var token = _applicationCancellationTokenSource.Token;
 
         Logger.LogDebug("{tag} Apply start: user={user} hash={hash} applicationBase={appBase}",
@@ -2954,5 +2971,34 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
     {
         return !string.IsNullOrWhiteSpace(value)
             && value.Contains(CharacterLegacyShpkToken, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void ProcessPendingCoalescedApply()
+    {
+        CharacterData? pendingData;
+        bool forceApply;
+        bool forceRedrawIfDisabled;
+        bool forceRedrawApp;
+        Guid appBase;
+
+        lock (_coalesceLock)
+        {
+            pendingData = _pendingCoalescedData;
+            _pendingCoalescedData = null;
+            forceApply = _pendingCoalescedForceApply;
+            forceRedrawIfDisabled = _pendingCoalescedForceRedrawIfDisabled;
+            forceRedrawApp = _pendingCoalescedForceRedrawApplication;
+            appBase = _pendingCoalescedApplicationBase;
+            _pendingCoalescedForceApply = false;
+            _pendingCoalescedForceRedrawIfDisabled = false;
+            _pendingCoalescedForceRedrawApplication = false;
+        }
+
+        if (pendingData != null)
+        {
+            Logger.LogDebug("{tag} Apply coalesced pending: user={user} hash={hash}",
+                SyncProgressTag, Pair.UserData.AliasOrUID, pendingData.DataHash?.Value ?? "null");
+            ApplyCharacterData(appBase, pendingData, forceApply, forceRedrawIfDisabled, forceRedrawApp);
+        }
     }
 }
