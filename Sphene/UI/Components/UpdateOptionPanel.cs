@@ -15,13 +15,15 @@ public static class UpdateOptionPanel
         ShowTestBuildUpdates,
         FilterCharacterLegacyShpkOutgoing,
         MismatchTrackerFilters,
-        TransfersUseSpheneCdnDirectDownloads
+        TransfersUseSpheneCdnDirectDownloads,
+        NotificationSoundsSpheneDefault
     }
 
     private static readonly ReleaseDefinition[] Releases =
     [
         new("v.1.1.11.1071", [Link.SyncIncomingWithoutRedraw, Link.SyncOutgoingBatching]),
         new("v.1.1.13.0", [Link.ShowTestBuildUpdates, Link.FilterCharacterLegacyShpkOutgoing, Link.MismatchTrackerFilters, Link.TransfersUseSpheneCdnDirectDownloads]),
+        new("v.1.1.15", [Link.NotificationSoundsSpheneDefault]),
     ];
 
     private static readonly IReadOnlyDictionary<Link, string> LinkTitles = new Dictionary<Link, string>
@@ -31,7 +33,8 @@ public static class UpdateOptionPanel
         [Link.ShowTestBuildUpdates] = "Notifications: Testbuild Update Hints (Default: Disabled)",
         [Link.FilterCharacterLegacyShpkOutgoing] = "Sync: Filter characterlegacy.shpk in Sync Data (Experimental, Default: Disabled)",
         [Link.MismatchTrackerFilters] = "Diagnostics: Active Mismatch Tracker Filters (Defaults: Equipment Off, Companions Off)",
-        [Link.TransfersUseSpheneCdnDirectDownloads] = "Transfers: Use CDN direct downloads (Default: Enabled)"
+        [Link.TransfersUseSpheneCdnDirectDownloads] = "Transfers: Use CDN direct downloads (Default: Enabled)",
+        [Link.NotificationSoundsSpheneDefault] = "Notifications: Sphene Default Sound Mode (Default: Sphene Default)"
     };
 
     private static readonly IReadOnlyDictionary<Link, Action<SpheneConfigService, UiSharedService, SpheneMediator, float>> LinkDrawers
@@ -48,7 +51,9 @@ public static class UpdateOptionPanel
         [Link.MismatchTrackerFilters] = (configService, uiShared, _, _) =>
             DebugOptionBlock.DrawActiveMismatchTrackerFilterOptions(configService, uiShared, "UpdateOptionMismatchTrackerFilters"),
         [Link.TransfersUseSpheneCdnDirectDownloads] = (configService, uiShared, _, _) =>
-            TransfersOptionBlock.DrawUseSpheneCdnDirectDownloadsOption(configService, uiShared, "UpdateOptionTransfersUseSpheneCdnDirectDownloads")
+            TransfersOptionBlock.DrawUseSpheneCdnDirectDownloadsOption(configService, uiShared, "UpdateOptionTransfersUseSpheneCdnDirectDownloads"),
+        [Link.NotificationSoundsSpheneDefault] = (configService, uiShared, mediator, _) =>
+            NotificationsOptionBlock.DrawSpheneDefaultSoundModeOption(configService, uiShared, mediator, "UpdateOptionNotificationSoundsSpheneDefault")
     };
 
     public static string GetTitle(Link link)

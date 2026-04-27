@@ -1,5 +1,9 @@
+using System.Linq;
 using Dalamud.Bindings.ImGui;
+using Dalamud.Interface.Colors;
 using Sphene.API.Data;
+using Sphene.Services;
+using Sphene.Services.Mediator;
 using Sphene.SpheneConfiguration;
 using Sphene.SpheneConfiguration.Models;
 
@@ -144,5 +148,33 @@ public static class NotificationsOptionBlock
         }
 
         uiShared.DrawHelpText("When enabled, consent dialogs for area-bound syncshells will appear automatically when entering areas. When disabled, you can manually trigger consent using the button in the Compact UI. This setting also controls city syncshell join requests.");
+    }
+
+    public static void DrawSpheneDefaultSoundModeOption(SpheneConfigService configService, UiSharedService uiShared, SpheneMediator mediator, string blockId = "SpheneDefaultSoundMode")
+    {
+        uiShared.DrawHelpText("Notification sounds can use Game System SCD sounds, Sphene Default built-in WAV sounds, or Custom Sound files. Each notification type has a preset default.");
+        ImGui.Spacing();
+
+        void DrawNotificationSection(string label, NotificationSoundConfig soundConfig, string defaultText, string sectionId)
+        {
+            if (ImGui.TreeNodeEx(label, ImGuiTreeNodeFlags.SpanAvailWidth))
+            {
+                UiSharedService.ColorTextWrapped($"Default: {defaultText}", ImGuiColors.DalamudGrey);
+
+                if (NotificationSoundOptionBlock.DrawNotificationSoundConfig(configService, uiShared, soundConfig, onTestSound: config => mediator.Publish(new PlayNotificationSoundTestMessage(config)), blockId: sectionId))
+                {
+                    configService.Save();
+                }
+
+                ImGui.TreePop();
+            }
+        }
+
+        DrawNotificationSection("Info Notifications", configService.Current.InfoNotificationSound, "Sphene Default – Default sound, Volume 0.30", blockId + "Info");
+        DrawNotificationSection("Warning Notifications", configService.Current.WarningNotificationSound, "Sphene Default – Error sound, Volume 0.00 (silent until changed)", blockId + "Warning");
+        DrawNotificationSection("Error Notifications", configService.Current.ErrorNotificationSound, "Sphene Default – Error sound, Volume 0.30", blockId + "Error");
+        DrawNotificationSection("Success Notifications", configService.Current.SuccessNotificationSound, "Sphene Default – Default sound, Volume 0.30", blockId + "Success");
+        DrawNotificationSection("Area-bound Syncshell Notifications", configService.Current.AreaBoundNotificationSound, "Sphene Default – Attention sound, Volume 0.30", blockId + "AreaBound");
+        DrawNotificationSection("File Transfer Notifications", configService.Current.FileTransferNotificationSound, "Sphene Default – Attention sound, Volume 0.30", blockId + "FileTransfer");
     }
 }

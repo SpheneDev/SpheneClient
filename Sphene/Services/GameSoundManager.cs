@@ -1,26 +1,53 @@
 using System.IO;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using FFXIVClientStructs.FFXIV.Client.Sound;
 using Microsoft.Extensions.Logging;
 using NAudio.Wave;
 using NAudio.Wave.SampleProviders;
+using Sphene.Services.Mediator;
 using Sphene.SpheneConfiguration.Models;
 
 namespace Sphene.Services;
 
-public unsafe class GameSoundManager
+public unsafe class GameSoundManager : IMediatorSubscriber
 {
     private readonly ILogger<GameSoundManager> _logger;
 
-    public GameSoundManager(ILogger<GameSoundManager> logger)
+    public SpheneMediator Mediator { get; }
+
+    public GameSoundManager(ILogger<GameSoundManager> logger, SpheneMediator mediator)
     {
         _logger = logger;
+        Mediator = mediator;
+        mediator.Subscribe<PlayNotificationSoundTestMessage>(this, msg => PlayNotificationSoundTest(msg.Config));
     }
 
     public void PlayNotificationSound(NotificationSoundConfig config)
     {
-        if (config == null || !config.Enabled)
+        if (config == null || !config.Enabled || config.Volume <= 0.0f)
         {
+            return;
+        }
+
+        PlaySoundInternal(config);
+    }
+
+    public void PlayNotificationSoundTest(NotificationSoundConfig config)
+    {
+        if (config == null || config.Volume <= 0.0f)
+        {
+            return;
+        }
+
+        PlaySoundInternal(config);
+    }
+
+    private void PlaySoundInternal(NotificationSoundConfig config)
+    {
+        if (config.OutputMode == SoundOutputMode.SpheneDefault)
+        {
+            PlaySpheneDefault(config);
             return;
         }
 
@@ -62,44 +89,99 @@ public unsafe class GameSoundManager
             volumeCategory: SoundVolumeCategory.BypassVolumeRules);
     }
 
-    private void PlayCustomSound(NotificationSoundConfig config)
+    private static void PlaySpheneDefault(NotificationSoundConfig config)
     {
-        if (string.IsNullOrWhiteSpace(config.CustomSoundPath) || !File.Exists(config.CustomSoundPath))
+        var sound = SpheneSoundRegistry.FindByName(config.SelectedSpheneDefaultSound);
+        if (sound == null && !string.IsNullOrWhiteSpace(config.SelectedSpheneDefaultSound))
         {
-            _logger.LogDebug("Custom sound path is invalid or file does not exist: {Path}", config.CustomSoundPath);
             return;
         }
 
-        var ext = Path.GetExtension(config.CustomSoundPath).ToLowerInvariant();
-
-        try
+        sound ??= SpheneSoundRegistry.Sounds.FirstOrDefault();
+        if (sound == null)
         {
-            if (string.Equals(ext, ".mp3", StringComparison.OrdinalIgnoreCase))
-            {
-                PlayMp3(config);
-            }
-            else if (string.Equals(ext, ".wav", StringComparison.OrdinalIgnoreCase))
-            {
-                PlayWav(config);
-            }
-            else
-            {
-                _logger.LogDebug("Unsupported custom sound file extension: {Extension}", ext);
-            }
+            return;
         }
-        catch (Exception ex)
+
+        var bytes = LoadBuiltinWavBytes(sound.ResourceName);
+        if (bytes != null)
         {
-            _logger.LogWarning(ex, "Failed to play custom sound: {Path}", config.CustomSoundPath);
+            PlayWavBytes(bytes, config.Volume);
         }
     }
 
-    private static void PlayWav(NotificationSoundConfig config)
+    private void PlayCustomSound(NotificationSoundConfig config)
     {
-        var wavData = File.ReadAllBytes(config.CustomSoundPath);
-
-        if (config.Volume < 1.0f && config.Volume > 0.0f)
+        if (!string.IsNullOrWhiteSpace(config.CustomSoundPath) && File.Exists(config.CustomSoundPath))
         {
-            ApplyVolumeToWavData(wavData, config.Volume);
+            var ext = Path.GetExtension(config.CustomSoundPath).ToLowerInvariant();
+            try
+            {
+                if (string.Equals(ext, ".mp3", StringComparison.OrdinalIgnoreCase))
+                {
+                    PlayMp3(config.CustomSoundPath, config.Volume);
+                }
+                else if (string.Equals(ext, ".wav", StringComparison.OrdinalIgnoreCase))
+                {
+                    PlayWav(config.CustomSoundPath, config.Volume);
+                }
+                else
+                {
+                    _logger.LogDebug("Unsupported custom sound file extension: {Extension}", ext);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to play custom sound: {Path}", config.CustomSoundPath);
+            }
+            return;
+        }
+
+        var fallbackResource = SpheneSoundRegistry.Sounds.FirstOrDefault()?.ResourceName;
+        if (!string.IsNullOrEmpty(fallbackResource))
+        {
+            var builtinBytes = LoadBuiltinWavBytes(fallbackResource);
+            if (builtinBytes != null)
+            {
+                PlayWavBytes(builtinBytes, config.Volume);
+            }
+        }
+    }
+
+    private static byte[]? LoadBuiltinWavBytes(string resourceName)
+    {
+        var assembly = typeof(GameSoundManager).Assembly;
+        var allNames = assembly.GetManifestResourceNames();
+        var fullResourceName = allNames
+            .FirstOrDefault(n => string.Equals(n, resourceName, StringComparison.OrdinalIgnoreCase)
+                || n.EndsWith(resourceName, StringComparison.OrdinalIgnoreCase));
+        if (fullResourceName == null)
+        {
+            return null;
+        }
+
+        using var stream = assembly.GetManifestResourceStream(fullResourceName);
+        if (stream == null)
+        {
+            return null;
+        }
+
+        using var ms = new MemoryStream();
+        stream.CopyTo(ms);
+        return ms.ToArray();
+    }
+
+    private static void PlayWav(string soundPath, float volume)
+    {
+        var wavData = File.ReadAllBytes(soundPath);
+        PlayWavBytes(wavData, volume);
+    }
+
+    private static void PlayWavBytes(byte[] wavData, float volume)
+    {
+        if (volume < 1.0f && volume > 0.0f)
+        {
+            ApplyVolumeToWavData(wavData, volume);
         }
 
         var ptr = Marshal.AllocHGlobal(wavData.Length);
@@ -108,16 +190,14 @@ public unsafe class GameSoundManager
         NativeMethods.PlaySound(ptr, IntPtr.Zero, NativeMethods.SND_MEMORY | NativeMethods.SND_ASYNC | NativeMethods.SND_NODEFAULT);
     }
 
-    private void PlayMp3(NotificationSoundConfig config)
+    private void PlayMp3(string soundPath, float volume)
     {
-        _logger.LogDebug("Playing MP3 via NAudio: {Path} (volume {Volume})", config.CustomSoundPath, config.Volume);
-
-        var reader = new Mp3FileReader(config.CustomSoundPath);
+        var reader = new Mp3FileReader(soundPath);
         var waveOut = new WaveOutEvent();
 
         var volumeProvider = new VolumeSampleProvider(reader.ToSampleProvider())
         {
-            Volume = config.Volume
+            Volume = volume
         };
 
         waveOut.Init(volumeProvider);

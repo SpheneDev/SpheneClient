@@ -212,11 +212,11 @@ public class SpheneConfig : ISpheneConfiguration
 
     // Notification Sound Settings
     public NotificationSoundConfig InfoNotificationSound { get; set; } = new();
-    public NotificationSoundConfig WarningNotificationSound { get; set; } = new();
-    public NotificationSoundConfig ErrorNotificationSound { get; set; } = new();
+    public NotificationSoundConfig WarningNotificationSound { get; set; } = new() { SelectedSpheneDefaultSound = "Error", Volume = 0.0f };
+    public NotificationSoundConfig ErrorNotificationSound { get; set; } = new() { SelectedSpheneDefaultSound = "Error", Volume = 0.3f };
     public NotificationSoundConfig SuccessNotificationSound { get; set; } = new();
-    public NotificationSoundConfig AreaBoundNotificationSound { get; set; } = new();
-    public NotificationSoundConfig FileTransferNotificationSound { get; set; } = new();
+    public NotificationSoundConfig AreaBoundNotificationSound { get; set; } = new() { SelectedSpheneDefaultSound = "Attention", Volume = 0.3f };
+    public NotificationSoundConfig FileTransferNotificationSound { get; set; } = new() { SelectedSpheneDefaultSound = "Attention", Volume = 0.3f };
 
     // Release Changelog
     public string LastSeenVersionChangelog { get; set; } = string.Empty;

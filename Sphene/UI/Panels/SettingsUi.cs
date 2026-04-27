@@ -4742,99 +4742,28 @@ public class SettingsUi : WindowMediatorSubscriberBase
         var cfg = _configService.Current;
         bool configChanged = false;
 
-        UiSharedService.ColorTextWrapped("Customize notification sounds for each category. Use Game System for in-game SCD sounds or Windows Audio for external WAV files.", ImGuiColors.DalamudGrey);
+        UiSharedService.ColorTextWrapped("Customize notification sounds for each category. Use Game System for in-game SCD sounds, Sphene Default for built-in sounds, or Custom Sound for external WAV/MP3 files.", ImGuiColors.DalamudGrey);
         ImGui.Spacing();
 
-        void DrawSoundConfig(string label, NotificationSoundConfig soundConfig)
+        void DrawSoundConfig(string label, NotificationSoundConfig soundConfig, string blockId)
         {
             if (ImGui.TreeNodeEx(label, ImGuiTreeNodeFlags.SpanAvailWidth))
             {
-                var enabled = soundConfig.Enabled;
-                if (ImGui.Checkbox("Enabled", ref enabled))
+                if (NotificationSoundOptionBlock.DrawNotificationSoundConfig(
+                    _configService, _uiShared, soundConfig, _fileDialogManager, config => _gameSoundManager.PlayNotificationSoundTest(config), blockId))
                 {
-                    soundConfig.Enabled = enabled;
                     configChanged = true;
                 }
-
-                var outputMode = (int)soundConfig.OutputMode;
-                if (ImGui.Combo("Output Mode", ref outputMode, "Game System\0Custom Sound\0"))
-                {
-                    soundConfig.OutputMode = (SoundOutputMode)outputMode;
-                    configChanged = true;
-                }
-
-                if (soundConfig.OutputMode == SoundOutputMode.GameSystem)
-                {
-                    var registry = GameSoundRegistry.Sounds;
-                    if (registry.Count > 0)
-                    {
-                        if (string.IsNullOrWhiteSpace(soundConfig.SelectedGameSoundName))
-                        {
-                            soundConfig.SelectedGameSoundName = registry[0].Name;
-                            configChanged = true;
-                        }
-
-                        var soundNames = string.Join("\0", registry.Select(s => s.Name)) + "\0";
-                        var currentIndex = registry.Select((s, i) => new { s, i }).FirstOrDefault(x => string.Equals(x.s.Name, soundConfig.SelectedGameSoundName, StringComparison.Ordinal))?.i ?? 0;
-                        if (ImGui.Combo("Sound", ref currentIndex, soundNames))
-                        {
-                            soundConfig.SelectedGameSoundName = registry[currentIndex].Name;
-                            configChanged = true;
-                        }
-                    }
-                    else
-                    {
-                        UiSharedService.ColorTextWrapped("No predefined game sounds available.", ImGuiColors.DalamudGrey);
-                    }
-                }
-                else
-                {
-                    ImGui.Text("Sound File");
-                    var customPath = soundConfig.CustomSoundPath;
-                    var inputAvailWidth = ImGui.GetContentRegionAvail().X;
-                    var browseBtnWidth = ImGui.CalcTextSize("Browse...").X + ImGui.GetStyle().FramePadding.X * 2f;
-                    ImGui.SetNextItemWidth(inputAvailWidth - browseBtnWidth - ImGui.GetStyle().ItemSpacing.X);
-                    if (ImGui.InputText("##CustomSoundPath", ref customPath, 256))
-                    {
-                        soundConfig.CustomSoundPath = customPath;
-                        configChanged = true;
-                    }
-                    ImGui.SameLine();
-                    if (ImGui.Button("Browse..."))
-                    {
-                        _fileDialogManager.OpenFileDialog("Select Sound File", ".wav,.mp3", (success, file) =>
-                        {
-                            if (success && !string.IsNullOrWhiteSpace(file))
-                            {
-                                soundConfig.CustomSoundPath = file;
-                                _configService.Save();
-                            }
-                        });
-                    }
-                }
-
-                var volume = soundConfig.Volume;
-                if (ImGui.SliderFloat("Volume", ref volume, 0.0f, 1.0f, "%.2f"))
-                {
-                    soundConfig.Volume = volume;
-                    configChanged = true;
-                }
-
-                if (ImGui.Button("Test Sound"))
-                {
-                    _gameSoundManager.PlayNotificationSound(soundConfig);
-                }
-
                 ImGui.TreePop();
             }
         }
 
-        DrawSoundConfig("Info Notifications", cfg.InfoNotificationSound);
-        DrawSoundConfig("Warning Notifications", cfg.WarningNotificationSound);
-        DrawSoundConfig("Error Notifications", cfg.ErrorNotificationSound);
-        DrawSoundConfig("Success Notifications", cfg.SuccessNotificationSound);
-        DrawSoundConfig("Area-bound Syncshell Notifications", cfg.AreaBoundNotificationSound);
-        DrawSoundConfig("File Transfer Notifications", cfg.FileTransferNotificationSound);
+        DrawSoundConfig("Info Notifications", cfg.InfoNotificationSound, "SettingsInfoSound");
+        DrawSoundConfig("Warning Notifications", cfg.WarningNotificationSound, "SettingsWarningSound");
+        DrawSoundConfig("Error Notifications", cfg.ErrorNotificationSound, "SettingsErrorSound");
+        DrawSoundConfig("Success Notifications", cfg.SuccessNotificationSound, "SettingsSuccessSound");
+        DrawSoundConfig("Area-bound Syncshell Notifications", cfg.AreaBoundNotificationSound, "SettingsAreaBoundSound");
+        DrawSoundConfig("File Transfer Notifications", cfg.FileTransferNotificationSound, "SettingsFileTransferSound");
 
         if (configChanged)
         {
