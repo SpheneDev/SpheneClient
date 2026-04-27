@@ -93,8 +93,9 @@ public static class ConnectivityOptionBlock
             }
 
             uiShared.DrawHelpText("On wine, Sphene will automatically fall back to ServerSentEvents/LongPolling, even if WebSockets is selected. "
+                + "If you experience connection issues or cannot connect at all, try enabling this option. "
                 + "WebSockets are known to crash XIV entirely on wine 8.5 shipped with Dalamud. "
-                + "Only enable this if you are not running wine 8.5." + Environment.NewLine
+                + "Only enable this if you are not running wine 8.5 or if the fallback transports fail to connect." + Environment.NewLine
                 + "Note: If the issue gets resolved at some point this option will be removed.");
         }
         finally

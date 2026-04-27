@@ -11,6 +11,7 @@ using Sphene.SpheneConfiguration.Models;
 using Sphene.Services;
 using Sphene.Services.Mediator;
 using Sphene.Services.ServerConfiguration;
+using Sphene.UI.Components;
 using Microsoft.Extensions.Logging;
 using System.Numerics;
 using System.Text.RegularExpressions;
@@ -358,6 +359,12 @@ public partial class IntroUi : WindowMediatorSubscriberBase
             _useLegacyLogin = true;
             selectedServer.UseOAuth2 = false;
             _serverConfigurationManager.Save();
+
+            if (_dalamudUtilService.IsWine)
+            {
+                ImGui.Spacing();
+                ConnectivityOptionBlock.DrawWineForceWebSocketsOption(selectedServer, _serverConfigurationManager, _uiShared, "IntroWineForceWebSockets");
+            }
         });
 
         ImGui.Spacing();

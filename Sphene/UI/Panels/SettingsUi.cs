@@ -1402,6 +1402,11 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
                 if (_dalamudUtilService.IsWine)
                 {
+                    if (!selectedServer.ForceWebSockets)
+                    {
+                        UiSharedService.ColorTextWrapped("Wine/Proton detected. WebSockets are disabled by default which may cause connection issues. Enable Force WebSockets below if you cannot connect.", ImGuiColors.DalamudOrange);
+                        ImGuiHelpers.ScaledDummy(2);
+                    }
                     ConnectivityOptionBlock.DrawWineForceWebSocketsOption(selectedServer, _serverConfigurationManager, _uiShared, "ConnectivityWineForceWebSockets");
                 }
 

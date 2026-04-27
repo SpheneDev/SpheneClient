@@ -1281,12 +1281,12 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             }
             finally
             {
+                ProcessPendingCoalescedApply();
                 if (ReferenceEquals(_applyPipelineTask, pipelineTask))
                 {
                     _applyPipelineTask = null;
                     _inProgressPipelineDataHash = null;
                 }
-                ProcessPendingCoalescedApply();
             }
         });
         return pipelineTask;

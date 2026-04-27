@@ -754,7 +754,6 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
         }
 
         await LoadOnlinePairsAsync().ConfigureAwait(false);
-        await EnsurePairStateStabilizedAsync().ConfigureAwait(false);
         if (_connectionDto != null)
         {
             Mediator.Publish(new ConnectedMessage(_connectionDto, forceCharacterDataReload));
@@ -771,66 +770,6 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
                     Logger.LogDebug(ex, "Post-connect reconcile failed");
                 }
             });
-        }
-    }
-
-    private async Task EnsurePairStateStabilizedAsync()
-    {
-        try
-        {
-            var lastGroupCount = _pairManager.GroupPairs.Count;
-            var lastPairCount = _pairManager.DirectPairs.Count;
-            var stableIterations = 0;
-
-            for (var i = 0; i < 6; i++)
-            {
-                try
-                {
-                    var groups = await GroupsGetAll().ConfigureAwait(false);
-                    foreach (var group in groups)
-                    {
-                        _pairManager.AddGroup(group);
-                    }
-
-                    var pairedUsers = await UserGetPairedClients().ConfigureAwait(false);
-                    foreach (var pair in pairedUsers)
-                    {
-                        _pairManager.AddUserPair(pair);
-                    }
-
-                    var onlineUsers = await UserGetOnlinePairs(null).ConfigureAwait(false);
-                    foreach (var online in onlineUsers)
-                    {
-                        _pairManager.MarkPairOnline(online, sendNotif: false);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Logger.LogDebug(ex, "Pair state stabilization step failed");
-                }
-
-                var groupCount = _pairManager.GroupPairs.Count;
-                var pairCount = _pairManager.DirectPairs.Count;
-                if (groupCount >= lastGroupCount && pairCount >= lastPairCount)
-                {
-                    if (groupCount == lastGroupCount && pairCount == lastPairCount)
-                    {
-                        stableIterations++;
-                        if (stableIterations >= 2) break;
-                    }
-                    else
-                    {
-                        stableIterations = 0;
-                    }
-                }
-                lastGroupCount = groupCount;
-                lastPairCount = pairCount;
-                await Task.Delay(800).ConfigureAwait(false);
-            }
-        }
-        catch (Exception ex)
-        {
-            Logger.LogDebug(ex, "Pair state stabilization failed");
         }
     }
 
