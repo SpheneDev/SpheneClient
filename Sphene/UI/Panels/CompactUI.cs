@@ -1043,6 +1043,12 @@ public class CompactUi : WindowMediatorSubscriberBase
             && !_apiController.IsConnected
             && _apiController.ServerState is ServerState.Connecting or ServerState.Reconnecting or ServerState.Disconnected or ServerState.Offline)
         {
+            if (_apiController.IsConnectionPaused)
+            {
+                DrawManuallyDisconnectedScreen();
+                return;
+            }
+
             ImGui.Spacing();
             using var disabled = ImRaii.PushStyle(ImGuiStyleVar.Alpha, 0.85f);
             static void CenterDisabledLine(string text)
@@ -1181,6 +1187,15 @@ public class CompactUi : WindowMediatorSubscriberBase
                 ImGuiHelpers.ScaledDummy(6f);
                 CenterDisabledWrapped(hint);
             }
+            return;
+        }
+
+        if (_apiController.HasEverConnected
+            && !_apiController.IsConnected
+            && _apiController.IsConnectionPaused
+            && _apiController.ServerState is ServerState.Disconnected or ServerState.Offline)
+        {
+            DrawManuallyDisconnectedScreen();
             return;
         }
 
@@ -1884,6 +1899,38 @@ public class CompactUi : WindowMediatorSubscriberBase
         }
     }
 
+    private void DrawManuallyDisconnectedScreen()
+    {
+        ImGui.Spacing();
+        var pausedTitle = "Manually Disconnected";
+        var pausedTitleSize = ImGui.CalcTextSize(pausedTitle);
+        ImGui.SetCursorPosX((ImGui.GetWindowContentRegionMax().X + ImGui.GetWindowContentRegionMin().X) * 0.5f - pausedTitleSize.X * 0.5f);
+        ImGui.AlignTextToFramePadding();
+        UiSharedService.ColorText(pausedTitle, ImGuiColors.DalamudOrange);
+        ImGui.Spacing();
+        var pausedMessage = "You manually disconnected from the Sphene server. Press the Connect button to reconnect.";
+        var pausedContentMin = ImGui.GetWindowContentRegionMin().X;
+        var pausedContentMax = ImGui.GetWindowContentRegionMax().X;
+        var pausedContentWidth = pausedContentMax - pausedContentMin;
+        var pausedMsgBoxWidth = MathF.Min(pausedContentWidth, 380f * ImGuiHelpers.GlobalScale);
+        var padding = ImGui.GetStyle().WindowPadding.X * 2;
+        var availWidth = pausedMsgBoxWidth - padding;
+        var textSize = ImGui.CalcTextSize(pausedMessage, wrapWidth: availWidth);
+        var startX = pausedContentMin + MathF.Max(0, (pausedContentWidth - pausedMsgBoxWidth) * 0.5f) + MathF.Max(0, (pausedMsgBoxWidth - textSize.X) * 0.5f);
+        ImGui.SetCursorPosX(startX);
+        UiSharedService.ColorTextWrapped(pausedMessage, ImGuiColors.DalamudGrey, startX + availWidth);
+        ImGui.Spacing();
+        var btnWidth = _uiSharedService.GetIconTextButtonSize(FontAwesomeIcon.Link, "Connect");
+        ImGui.SetCursorPosX(pausedContentMin + MathF.Max(0, (pausedContentWidth - btnWidth) * 0.5f));
+        if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.Link, "Connect") && _serverManager.CurrentServer != null)
+        {
+            _serverManager.CurrentServer.FullPause = false;
+            _serverManager.Save();
+            _ = _apiController.CreateConnectionsAsync();
+        }
+        UiSharedService.AttachToolTip("Reconnect to the Sphene server");
+    }
+
     private void DrawHeaderCard(ImGuiStylePtr style)
     {
         // 0. Pre-Flight Check: Fonts
@@ -2187,7 +2234,9 @@ public class CompactUi : WindowMediatorSubscriberBase
         {
             ServerState.Connecting => "Attempting to connect to the server.",
             ServerState.Reconnecting => "Connection to server interrupted, attempting to reconnect to the server.",
-            ServerState.Disconnected => "You are currently disconnected from the Sphene server.",
+            ServerState.Disconnected => _apiController.IsConnectionPaused
+                ? "You manually disconnected from the Sphene server last time. Please Press Connect to reconnect."
+                : "You are currently disconnected from the Sphene server.",
             ServerState.Disconnecting => "Disconnecting from the server",
             ServerState.Unauthorized => "Server Response: " + _apiController.AuthFailureMessage,
             ServerState.Offline => "Your selected Sphene server is currently offline.",

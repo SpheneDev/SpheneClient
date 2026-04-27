@@ -136,6 +136,7 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
     public int PostGraceUiHoldStageValue => (int)_postGraceUiHoldStage;
     public TimeSpan PostGraceUiHoldElapsed => _postGraceUiHoldStartedAtUtc == DateTimeOffset.MinValue ? TimeSpan.Zero : (DateTimeOffset.UtcNow - _postGraceUiHoldStartedAtUtc);
     public bool HasEverConnected => _hasEverConnected;
+    public bool IsConnectionPaused => _serverManager.CurrentServer?.FullPause ?? false;
     public TimeSpan InitialConnectElapsed => _initialConnectAttemptStartedAtUtc == DateTimeOffset.MinValue ? TimeSpan.Zero : (DateTimeOffset.UtcNow - _initialConnectAttemptStartedAtUtc);
 
     public ServerState ServerState
