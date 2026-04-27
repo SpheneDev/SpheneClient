@@ -906,7 +906,7 @@ public class SpheneIcon : WindowMediatorSubscriberBase
         }
     }
 
-    private void DrawGlow(ImDrawListPtr drawList, Vector2 iconPos, float iconSize,
+    private static void DrawGlow(ImDrawListPtr drawList, Vector2 iconPos, float iconSize,
         uint glowColor, float glowIntensity, float glowRadius, float globalAlpha)
     {
         var center = new Vector2(iconPos.X + iconSize / 2, iconPos.Y + iconSize / 2);
@@ -1000,29 +1000,6 @@ public class SpheneIcon : WindowMediatorSubscriberBase
         };
     }
 
-    private Vector4 GetPulseColor()
-    {
-        var cfg = _configService.Current;
-        lock (_eventsLock)
-        {
-            var latest = _activeEvents
-                .Where(IsEffectActive)
-                .OrderByDescending(e => e.Timestamp)
-                .FirstOrDefault();
-
-            if (latest == null) return SpheneColors.SpheneGold;
-
-            return latest.Type switch
-            {
-                IconEventType.ModTransferAvailable => ImGui.ColorConvertU32ToFloat4(cfg.IconModTransferColor),
-                IconEventType.ModTransferCompleted => ImGui.ColorConvertU32ToFloat4(cfg.IconModTransferColor),
-                IconEventType.PairRequest => ImGui.ColorConvertU32ToFloat4(cfg.IconPairRequestColor),
-                IconEventType.Notification => ImGui.ColorConvertU32ToFloat4(cfg.IconNotificationColor),
-                _ => SpheneColors.SpheneGold
-            };
-        }
-    }
-
     private IconEventType GetLatestUnacknowledgedEventType()
     {
         lock (_eventsLock)
@@ -1035,7 +1012,7 @@ public class SpheneIcon : WindowMediatorSubscriberBase
         }
     }
 
-    private (uint Color, float Alpha, bool EffectPulse, bool EffectGlow, bool EffectBounce, bool EffectRainbow,
+    private static (uint Color, float Alpha, bool EffectPulse, bool EffectGlow, bool EffectBounce, bool EffectRainbow,
         float PulseMinRadius, float PulseMaxRadius, float GlowIntensity, float GlowRadius,
         float BounceIntensity, float BounceSpeed)
         GetEventConfig(IconEventType type, Sphene.SpheneConfiguration.Configurations.SpheneConfig cfg)

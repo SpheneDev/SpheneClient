@@ -57,12 +57,8 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
     private Guid _penumbraCollection;
     private bool _redrawOnNextApplication = false;
     private bool _forceRedrawAfterCurrentApplication = false;
-    private string? _inProgressPenumbraHash;
-    private string? _inProgressGlamourerHash;
-    private string? _inProgressRestHash;
-    private string? _inProgressDataHash;
     private string? _inProgressPipelineDataHash;
-    private readonly object _coalesceLock = new();
+    private readonly System.Threading.Lock _coalesceLock = new();
     private CharacterData? _pendingCoalescedData;
     private bool _pendingCoalescedForceApply;
     private bool _pendingCoalescedForceRedrawIfDisabled;
@@ -767,10 +763,6 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
 
         _forceApplyMods |= forceApplyCustomization;
 
-        _inProgressPenumbraHash = characterData.PenumbraHash.Value;
-        _inProgressGlamourerHash = characterData.GlamourerHash.Value;
-        _inProgressRestHash = characterData.RestHash.Value;
-        _inProgressDataHash = characterData.DataHash?.Value;
         _inProgressPipelineDataHash = characterData.DataHash?.Value;
 
         var charaDataToUpdate = characterData.CheckUpdatedData(applicationBase, _cachedData?.DeepClone() ?? new(), Logger, this, forceApplyCustomization, _forceApplyMods);
@@ -1049,18 +1041,6 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         return string.Equals(newData.PenumbraHash.Value, cachedData.PenumbraHash.Value, StringComparison.Ordinal)
             && string.Equals(newData.GlamourerHash.Value, cachedData.GlamourerHash.Value, StringComparison.Ordinal)
             && string.Equals(newData.RestHash.Value, cachedData.RestHash.Value, StringComparison.Ordinal);
-    }
-
-    private static bool AreComponentHashesEqual(CharacterData cachedData, string? penumbraHash, string? glamourerHash, string? restHash)
-    {
-        if (string.IsNullOrEmpty(penumbraHash) || string.IsNullOrEmpty(glamourerHash) || string.IsNullOrEmpty(restHash))
-        {
-            return false;
-        }
-
-        return string.Equals(cachedData.PenumbraHash.Value, penumbraHash, StringComparison.Ordinal)
-            && string.Equals(cachedData.GlamourerHash.Value, glamourerHash, StringComparison.Ordinal)
-            && string.Equals(cachedData.RestHash.Value, restHash, StringComparison.Ordinal);
     }
 
     private static bool AreDataHashesEqual(CharacterData newData, CharacterData? cachedData)
@@ -1649,13 +1629,6 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             Mediator.Publish(new CharacterDataApplicationCompletedMessage(PlayerName ?? string.Empty, Pair.UserData.UID, _applicationId, false, charaData.DataHash?.Value,
                 Sphene.API.Dto.User.AcknowledgmentErrorCode.ApplyFailed, ex.Message));
         }
-        finally
-        {
-            _inProgressPenumbraHash = null;
-            _inProgressGlamourerHash = null;
-            _inProgressRestHash = null;
-            _inProgressDataHash = null;
-        }
     }
 
     private void FrameworkUpdate()
@@ -2084,7 +2057,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         return (payload, true, ticks);
     }
 
-    private CharacterData GetEffectiveCharacterData(CharacterData data)
+    private static CharacterData GetEffectiveCharacterData(CharacterData data)
     {
         return data;
     }

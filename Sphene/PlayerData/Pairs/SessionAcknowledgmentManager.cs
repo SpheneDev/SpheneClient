@@ -295,6 +295,7 @@ public class SessionAcknowledgmentManager : DisposableMediatorSubscriberBase
             }
         }
         
+        latestInfo ??= new LatestAcknowledgmentInfo(hashVersionKey);
         var now = DateTime.UtcNow;
         var responseMs = Math.Max(0, (long)(now - latestInfo.CreatedAt).TotalMilliseconds);
         Interlocked.Increment(ref _resultTotal);

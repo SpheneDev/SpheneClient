@@ -30,7 +30,7 @@ public class Pair : DisposableMediatorSubscriberBase
     private readonly PlayerPerformanceConfigService _playerPerformanceConfigService;
     private readonly Lazy<ApiController> _apiController;
     private readonly DalamudUtilService _dalamudUtilService;
-    private readonly object _ackStateLock = new();
+    private readonly System.Threading.Lock _ackStateLock = new();
     private long _acknowledgmentVersion = 0;
     private CancellationTokenSource _applicationCts = new();
     private OnlineUserIdentDto? _onlineUserIdentDto = null;
@@ -84,7 +84,6 @@ public class Pair : DisposableMediatorSubscriberBase
     public bool IsMutuallyVisible { get; private set; } = false;
     public bool WasMutuallyVisibleInGpose { get; private set; } = false;
     public bool IsInGpose { get; private set; } = false;
-    private bool _isInOfflineGrace = false;
     public CharacterData? LastReceivedCharacterData { get; private set; }
     public CharacterData? PreviousReceivedCharacterData { get; private set; }
     public string? LastReceivedCharacterDataHash { get; private set; }
@@ -424,13 +423,6 @@ public class Pair : DisposableMediatorSubscriberBase
             LastAcknowledgedIncomingTime = null;
             // Do NOT clear: LastIncomingAcknowledgmentHash, LastIncomingAcknowledgmentSuccess, etc.
             // These should persist across visibility changes
-            // LastIncomingAcknowledgmentHash = null;
-            // LastIncomingAcknowledgmentSuccess = null;
-            // LastIncomingAcknowledgmentErrorCode = Sphene.API.Dto.User.AcknowledgmentErrorCode.None;
-            // LastIncomingAcknowledgmentErrorMessage = null;
-            // LastIncomingAcknowledgmentTime = null;
-            // _lastIncomingAckContext = null;
-
             LastOutgoingAcknowledgmentHash = null;
             LastOutgoingAcknowledgmentSessionId = null;
         }
@@ -845,15 +837,13 @@ public class Pair : DisposableMediatorSubscriberBase
             if (wait)
                 _creationSemaphore.Wait();
             
-            // If entering grace period, just set the flag and keep CachedPlayer
+            // If entering grace period, just keep CachedPlayer and return
             if (!endGracePeriod)
             {
-                _isInOfflineGrace = true;
                 return;
             }
             
             // Grace period ended - perform full offline cleanup
-            _isInOfflineGrace = false;
             SetMutualVisibility(false);
             WasMutuallyVisibleInGpose = false;
             ResetApplyRetry();

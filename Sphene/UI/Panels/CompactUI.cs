@@ -2439,16 +2439,12 @@ public class CompactUi : WindowMediatorSubscriberBase
                         // Also pause individual pairs within this syncshell that are not directly paired
                         foreach (var pair in pairsInGroup)
                         {
-                            if (pair.UserPair != null && !pair.UserPair.OwnPermissions.IsPaused())
+                            if (pair.UserPair != null && !pair.UserPair.OwnPermissions.IsPaused() && !_prePausedPairs.Contains(pair.UserData.UID))
                             {
-                                // Track this pair as not pre-paused (we're pausing it now)
-                                if (!_prePausedPairs.Contains(pair.UserData.UID))
-                                {
-                                    var permissions = pair.UserPair.OwnPermissions;
-                                    permissions.SetPaused(true);
-                                    await _apiController.UserSetPairPermissions(new(pair.UserData, permissions)).ConfigureAwait(false);
-                                    _logger.LogInformation("Paused pair in syncshell (not in party): {uid} - {playerName}", pair.UserData.UID, pair.PlayerName);
-                                }
+                                var permissions = pair.UserPair.OwnPermissions;
+                                permissions.SetPaused(true);
+                                await _apiController.UserSetPairPermissions(new(pair.UserData, permissions)).ConfigureAwait(false);
+                                _logger.LogInformation("Paused pair in syncshell (not in party): {uid} - {playerName}", pair.UserData.UID, pair.PlayerName);
                             }
                         }
                     }

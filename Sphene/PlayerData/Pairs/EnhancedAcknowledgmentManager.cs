@@ -26,13 +26,9 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
     private readonly ConcurrentQueue<EnhancedAcknowledgmentDto> _mediumPriorityQueue = new();
     private readonly ConcurrentQueue<EnhancedAcknowledgmentDto> _lowPriorityQueue = new();
     
-    // Pending acknowledgments with timeout tracking
-    private readonly ConcurrentDictionary<string, PendingAcknowledgment> _pendingAcknowledgments = new(StringComparer.Ordinal);
-    
     // Batch processing
     private readonly ConcurrentDictionary<AcknowledgmentPriority, BatchAcknowledgmentDto> _currentBatches = new();
     private readonly Timer _batchProcessingTimer;
-    private readonly Timer _timeoutCheckTimer;
     private readonly Timer _retryTimer;
     
     // Caching
@@ -49,7 +45,6 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
     private readonly SemaphoreSlim _batchSemaphore = new(1, 1);
     private readonly CancellationTokenSource _cancellationTokenSource = new();
 
-    private const double DutyTimeoutMultiplier = 3.0;
     private static readonly TimeSpan DefaultOldPendingMaxAge = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan DutyOldPendingMaxAge = TimeSpan.FromMinutes(3);
     private static readonly TimeSpan DefaultSessionMaxAge = TimeSpan.FromMinutes(2);
@@ -72,10 +67,6 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
         _batchProcessingTimer = new Timer(ProcessBatches, null, 
             TimeSpan.FromMilliseconds(_config.BatchTimeoutMs / 2), 
             TimeSpan.FromMilliseconds(_config.BatchTimeoutMs / 2));
-            
-        _timeoutCheckTimer = new Timer(CheckTimeouts, null, 
-            TimeSpan.FromSeconds(5), 
-            TimeSpan.FromSeconds(5));
             
         _retryTimer = new Timer(ProcessRetries, null, 
             TimeSpan.FromSeconds(10), 
@@ -208,14 +199,11 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
     private async Task<bool> SendSingleAcknowledgmentAsync(EnhancedAcknowledgmentDto acknowledgment)
     {
         var startTime = DateTime.UtcNow;
-        var baseTimeoutSeconds = _config.GetTimeoutForPriority(acknowledgment.Priority);
-        var timeout = TimeSpan.FromSeconds(_isInDuty ? baseTimeoutSeconds * DutyTimeoutMultiplier : baseTimeoutSeconds);
-        
         try
         {
             // Check cache to avoid duplicate sends
             var cacheKey = $"{acknowledgment.User.UID}_{acknowledgment.AcknowledgmentId}";
-            if (_acknowledgmentCache.TryGetValue(cacheKey, out var cached))
+            if (_acknowledgmentCache.TryGetValue(cacheKey, out _))
             {
                 Logger.LogDebug("Acknowledgment {ackId} already cached for user {user}, skipping send", acknowledgment.AcknowledgmentId, acknowledgment.User.AliasOrUID);
                 return true;
@@ -246,13 +234,10 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
             foreach (var kvp in _acknowledgmentCache)
             {
                 if (kvp.Key.StartsWith(userPrefix, StringComparison.Ordinal) &&
-                    !string.Equals(kvp.Key, $"{acknowledgment.User.UID}_{acknowledgment.AcknowledgmentId}", StringComparison.Ordinal))
+                    !string.Equals(kvp.Key, $"{acknowledgment.User.UID}_{acknowledgment.AcknowledgmentId}", StringComparison.Ordinal) &&
+                    kvp.Value.Timestamp < currentTimestamp)
                 {
-                    // Only remove if the cached acknowledgment is older than the current one
-                    if (kvp.Value.Timestamp < currentTimestamp)
-                    {
-                        keysToRemove.Add(kvp.Key);
-                    }
+                    keysToRemove.Add(kvp.Key);
                 }
             }
             
@@ -267,9 +252,6 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
             
             Logger.LogDebug("Cached latest acknowledgment for user {user}: {ackId}", acknowledgment.User.AliasOrUID, acknowledgment.AcknowledgmentId);
             
-            // Remove from pending
-            _pendingAcknowledgments.TryRemove(acknowledgment.AcknowledgmentId, out _);
-            
             Logger.LogDebug("Successfully sent acknowledgment {ackId} in {ms}ms", 
                 acknowledgment.AcknowledgmentId, responseTime);
             
@@ -282,9 +264,6 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
             var errorCode = DetermineErrorCode(ex);
             acknowledgment.MarkAsFailed(errorCode, ex.Message);
             _metrics.RecordFailure(acknowledgment.Priority, errorCode);
-            
-            // Remove from pending
-            _pendingAcknowledgments.TryRemove(acknowledgment.AcknowledgmentId, out _);
             
             return false;
         }
@@ -435,50 +414,6 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
     }
     
 
-    // Timer callback to check for timeouts
-    private void CheckTimeouts(object? state)
-    {
-        _ = Task.Run(() =>
-        {
-            try
-            {
-                var now = DateTime.UtcNow;
-                var timedOutAcks = new List<string>();
-                
-                foreach (var kvp in _pendingAcknowledgments)
-                {
-                    if (now >= kvp.Value.TimeoutAt)
-                    {
-                        timedOutAcks.Add(kvp.Key);
-                    }
-                }
-                
-                foreach (var ackId in timedOutAcks)
-                {
-                    if (_pendingAcknowledgments.TryRemove(ackId, out var pendingAck))
-                    {
-                        Logger.LogWarning("Acknowledgment {ackId} timed out", ackId);
-                        pendingAck.Acknowledgment.MarkAsFailed(AcknowledgmentErrorCode.Timeout);
-                        _metrics.RecordFailure(pendingAck.Acknowledgment.Priority, AcknowledgmentErrorCode.Timeout);
-                        
-                        // Update pair acknowledgment status for timeout
-                        _sessionManager.ProcessTimeoutAcknowledgment(ackId);
-                        
-                        if (_config.EnableAutoRetry && pendingAck.Acknowledgment.RetryCount < _config.MaxRetryAttempts)
-                        {
-                            _ = ScheduleRetryAsync(pendingAck.Acknowledgment);
-                        }
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError(ex, "Error in timeout check timer");
-            }
-        });
-    }
-    
-    
     /// Timer callback to process retries
     
     private void ProcessRetries(object? state)
@@ -606,7 +541,6 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
         {
             _cancellationTokenSource.Cancel();
             _batchProcessingTimer?.Dispose();
-            _timeoutCheckTimer?.Dispose();
             _retryTimer?.Dispose();
             _cacheCleanupTimer?.Dispose();
             _oldPendingCleanupTimer?.Dispose();
@@ -615,16 +549,6 @@ public class EnhancedAcknowledgmentManager : DisposableMediatorSubscriberBase
         }
         
         base.Dispose(disposing);
-    }
-    private sealed class PendingAcknowledgment
-    {
-        public EnhancedAcknowledgmentDto Acknowledgment { get; }
-        public DateTime TimeoutAt { get; }
-        public PendingAcknowledgment(EnhancedAcknowledgmentDto acknowledgment, DateTime timeoutAt)
-        {
-            Acknowledgment = acknowledgment;
-            TimeoutAt = timeoutAt;
-        }
     }
 
     private sealed class CachedAcknowledgment

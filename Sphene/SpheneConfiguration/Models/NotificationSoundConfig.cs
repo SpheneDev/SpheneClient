@@ -1,11 +1,5 @@
 namespace Sphene.SpheneConfiguration.Models;
 
-public enum SoundOutputMode
-{
-    GameSystem,
-    CustomSound
-}
-
 public class NotificationSoundConfig
 {
     public bool Enabled { get; set; } = false;

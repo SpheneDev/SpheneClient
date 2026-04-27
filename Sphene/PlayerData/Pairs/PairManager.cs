@@ -586,11 +586,11 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
 
     public void RemoveGroup(GroupData data)
     {
-        var removed = _allGroups.TryRemove(data, out _);
+        _allGroups.TryRemove(data, out _);
 
         foreach (var item in _allClientPairs.ToList())
         {
-            if (item.Value.UserPair.Groups.Contains(data.GID))
+            if (item.Value.UserPair.Groups.Contains(data.GID, StringComparer.Ordinal))
             {
                 item.Value.UserPair.Groups.Remove(data.GID);
 
