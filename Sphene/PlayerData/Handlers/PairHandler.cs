@@ -815,7 +815,6 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         Logger.LogDebug("Disposing {name} ({user})", name, Pair);
         try
         {
-            Guid applicationId = Guid.NewGuid();
             _applicationCancellationTokenSource?.Cancel();
             _applicationCancellationTokenSource?.Dispose();
             _applicationCancellationTokenSource = null;
@@ -847,59 +846,12 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                 Logger.LogDebug(ex, "Apply pipeline task wait timed out or failed during disposal for {name}", name);
             }
 
-            if (!string.IsNullOrEmpty(name))
+            if (!string.IsNullOrEmpty(name) && !_lifetime.ApplicationStopping.IsCancellationRequested)
             {
                 Mediator.Publish(new EventMessage(new Event(name, Pair.UserData, nameof(PairHandler), EventSeverity.Informational, "Disposing User")));
             }
 
-            if (_lifetime.ApplicationStopping.IsCancellationRequested) return;
-
-            if (_dalamudUtil is { IsZoning: false, IsInCutscene: false } && !string.IsNullOrEmpty(name))
-            {
-                Logger.LogTrace("[{applicationId}] Restoring state for {name} ({OnlineUser})", applicationId, name, Pair.UserPair);
-                Logger.LogDebug("[{applicationId}] Removing Temp Collection for {name} ({user})", applicationId, name, Pair.UserPair);
-                _ipcManager.Penumbra.RemoveTemporaryCollectionAsync(Logger, applicationId, _penumbraCollection).GetAwaiter().GetResult();
-                
-                // Clear honorific title
-                if (_ipcManager.Honorific.APIAvailable)
-                {
-                    Logger.LogDebug("[{applicationId}] Clearing Honorific title for {name} ({user})", applicationId, name, Pair.UserPair);
-                    _ipcManager.Honorific.ClearTitleAsync(PlayerCharacter).GetAwaiter().GetResult();
-                }
-                
-                // Clear BypassEmote state
-                if (_ipcManager.BypassEmote.APIAvailable && PlayerCharacter != nint.Zero)
-                {
-                    Logger.LogDebug("[{applicationId}] Clearing BypassEmote state for {name} ({user})", applicationId, name, Pair.UserPair);
-                    _ipcManager.BypassEmote.SetStateForCharacterAsync(PlayerCharacter, string.Empty).GetAwaiter().GetResult();
-                }
-                
-                if (!IsVisible)
-                {
-                    Logger.LogDebug("[{applicationId}] Restoring Glamourer for {name} ({user})", applicationId, name, Pair.UserPair);
-                    _ipcManager.Glamourer.RevertByNameAsync(Logger, name, applicationId).GetAwaiter().GetResult();
-                }
-                else
-                {
-                    using var cts = new CancellationTokenSource();
-                    cts.CancelAfter(TimeSpan.FromSeconds(60));
-
-                    Logger.LogInformation("[{applicationId}] CachedData is null {isNull}, contains things: {contains}", applicationId, _cachedData == null, _cachedData?.FileReplacements.Any() ?? false);
-
-                    foreach (KeyValuePair<ObjectKind, List<FileReplacementData>> item in _cachedData?.FileReplacements ?? [])
-                    {
-                        try
-                        {
-                            RevertCustomizationDataAsync(item.Key, name, applicationId, cts.Token).GetAwaiter().GetResult();
-                        }
-                        catch (InvalidOperationException ex)
-                        {
-                            Logger.LogWarning(ex, "Failed disposing player (not present anymore?)");
-                            break;
-                        }
-                    }
-                }
-            }
+            RestoreVanillaState();
         }
         catch (Exception ex)
         {
@@ -911,6 +863,79 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             _cachedData = null;
         Pair.ReportVisibility(false);
         Logger.LogDebug("Disposing {name} complete", name);
+        }
+    }
+
+    public void RestoreVanillaState()
+    {
+        var name = PlayerName;
+        if (string.IsNullOrEmpty(name)) return;
+
+        if (_dalamudUtil is not { IsZoning: false, IsInCutscene: false }) return;
+
+        var applicationId = Guid.NewGuid();
+        try
+        {
+            Logger.LogDebug("[{applicationId}] Restoring vanilla state for {name} ({OnlineUser})", applicationId, name, Pair.UserPair);
+            Logger.LogDebug("[{applicationId}] Removing Temp Collection for {name} ({user})", applicationId, name, Pair.UserPair);
+            _ipcManager.Penumbra.RemoveTemporaryCollectionAsync(Logger, applicationId, _penumbraCollection).GetAwaiter().GetResult();
+
+            // Clear honorific title
+            if (_ipcManager.Honorific.APIAvailable)
+            {
+                Logger.LogDebug("[{applicationId}] Clearing Honorific title for {name} ({user})", applicationId, name, Pair.UserPair);
+                _ipcManager.Honorific.ClearTitleAsync(PlayerCharacter).GetAwaiter().GetResult();
+            }
+
+            // Clear BypassEmote state
+            if (_ipcManager.BypassEmote.APIAvailable && PlayerCharacter != nint.Zero)
+            {
+                Logger.LogDebug("[{applicationId}] Clearing BypassEmote state for {name} ({user})", applicationId, name, Pair.UserPair);
+                _ipcManager.BypassEmote.SetStateForCharacterAsync(PlayerCharacter, string.Empty).GetAwaiter().GetResult();
+            }
+
+            if (!IsVisible)
+            {
+                Logger.LogDebug("[{applicationId}] Restoring Glamourer for {name} ({user})", applicationId, name, Pair.UserPair);
+                _ipcManager.Glamourer.RevertByNameAsync(Logger, name, applicationId).GetAwaiter().GetResult();
+            }
+            else
+            {
+                Logger.LogInformation("[{applicationId}] CachedData is null {isNull}, contains things: {contains}", applicationId, _cachedData == null, _cachedData?.FileReplacements.Any() ?? false);
+
+                var cts = new CancellationTokenSource();
+                try
+                {
+                    RevertCustomizationDataAsync(ObjectKind.Player, name, applicationId, cts.Token).GetAwaiter().GetResult();
+                }
+                finally
+                {
+                    cts.Cancel();
+                    cts.Dispose();
+                }
+
+                foreach (var item in _cachedData?.FileReplacements.Where(f => f.Key is ObjectKind.MinionOrMount or ObjectKind.Pet) ?? [])
+                {
+                    var cts2 = new CancellationTokenSource();
+                    try
+                    {
+                        RevertCustomizationDataAsync(item.Key, name, applicationId, cts2.Token).GetAwaiter().GetResult();
+                    }
+                    catch (InvalidOperationException ex)
+                    {
+                        Logger.LogDebug(ex, "[{applicationId}] Failed to revert customization data for {objectKind}", applicationId, item.Key);
+                    }
+                    finally
+                    {
+                        cts2.Cancel();
+                        cts2.Dispose();
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Failed to restore vanilla state for {name}", name);
         }
     }
 

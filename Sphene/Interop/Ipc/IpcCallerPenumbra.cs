@@ -267,7 +267,7 @@ public sealed class IpcCallerPenumbra : DisposableMediatorSubscriberBase, IIpcCa
 
     public async Task<Guid> CreateTemporaryCollectionAsync(ILogger logger, string uid)
     {
-        if (!APIAvailable) return Guid.Empty;
+        if (!APIAvailable || _isDisposed) return Guid.Empty;
 
         return await _dalamudUtil.RunOnFrameworkThread(() =>
         {
