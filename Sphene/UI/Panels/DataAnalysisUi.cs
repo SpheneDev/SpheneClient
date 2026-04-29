@@ -794,14 +794,11 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                     {
                         fileGroupText += " (!)";
                     }
-                    ImRaii.IEndObject fileTab;
-                    using (var textcol = ImRaii.PushColor(ImGuiCol.Text, UiSharedService.Color(new(0, 0, 0, 1)),
-                        requiresCompute && !string.Equals(_selectedFileTypeTab, fileGroup.Key, StringComparison.Ordinal)))
-                    {
-                        fileTab = ImRaii.TabItem(fileGroupText + "###" + fileGroup.Key);
-                    }
+                    using var textcol = ImRaii.PushColor(ImGuiCol.Text, UiSharedService.Color(new(0, 0, 0, 1)),
+                        requiresCompute && !string.Equals(_selectedFileTypeTab, fileGroup.Key, StringComparison.Ordinal));
+                    using var fileTab = ImRaii.TabItem(fileGroupText + "###" + fileGroup.Key);
 
-                    if (!fileTab) { fileTab.Dispose(); continue; }
+                    if (!fileTab) { continue; }
 
                     if (!string.Equals(fileGroup.Key, _selectedFileTypeTab, StringComparison.Ordinal))
                     {

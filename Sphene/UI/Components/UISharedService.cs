@@ -164,7 +164,7 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
                 }
                 else
                 {
-                    tk.AddDalamudAssetFont(Dalamud.DalamudAsset.NotoSansJpMedium, new()
+                    tk.AddDalamudAssetFont(Dalamud.DalamudAsset.NotoSansCjkMedium, new()
                     {
                         SizePx = 35
                     });
