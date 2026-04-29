@@ -3,6 +3,7 @@ using Dalamud.Interface;
 using Dalamud.Interface.Colors;
 using Dalamud.Interface.Utility;
 using Dalamud.Interface.Utility.Raii;
+using Dalamud.Interface.Windowing;
 using Microsoft.Extensions.Logging;
 using Sphene.API.Data;
 using Sphene.API.Dto.Files;

@@ -271,20 +271,18 @@ public sealed class CharaDataFileHandler : IDisposable
             // BypassEmoteData is NOT saved - only applied via fast-path real-time updates
 
             var hasFiles = data.FileReplacements.TryGetValue(ObjectKind.Player, out var fileReplacements);
-            if (!hasFiles)
+            if (hasFiles && fileReplacements != null)
             {
-                updateDto.FileGamePaths = [];
-                updateDto.FileSwaps = [];
+                updateDto.FileGamePaths = fileReplacements.SelectMany(f => f.GamePaths, (file, path) => new GamePathEntry(file.Hash, path)).ToList();
             }
             else
             {
-                updateDto.FileGamePaths = [.. fileReplacements!.Where(u => string.IsNullOrEmpty(u.FileSwapPath)).SelectMany(u => u.GamePaths, (file, path) => new GamePathEntry(file.Hash, path))];
-                updateDto.FileSwaps = [.. fileReplacements!.Where(u => !string.IsNullOrEmpty(u.FileSwapPath)).SelectMany(u => u.GamePaths, (file, path) => new GamePathEntry(file.FileSwapPath, path))];
+                updateDto.FileGamePaths = null;
             }
         }
     }
 
-    internal async Task SaveCharaFileAsync(string description, string filePath)
+    public async Task SaveCharaFileAsync(string description, string filePath)
     {
         var tempFilePath = filePath + ".tmp";
 
