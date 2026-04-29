@@ -3,6 +3,8 @@ using Dalamud.Plugin.Ipc;
 using Sphene.Services;
 using Sphene.Services.Mediator;
 using Microsoft.Extensions.Logging;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace Sphene.Interop.Ipc;
 
@@ -88,12 +90,40 @@ public sealed class IpcCallerMoodles : IIpcCaller
         if (!APIAvailable) return;
         try
         {
-            await _dalamudUtil.RunOnFrameworkThread(() => _moodlesSetStatus.InvokeAction(pointer, status)).ConfigureAwait(false);
+            var updatedStatus = await UpdateApplierToLocalPlayerAsync(status).ConfigureAwait(false);
+            await _dalamudUtil.RunOnFrameworkThread(() => _moodlesSetStatus.InvokeAction(pointer, updatedStatus)).ConfigureAwait(false);
         }
         catch (Exception e)
         {
             _logger.LogWarning(e, "Could not Set Moodles Status");
             _spheneMediator.Publish(new DebugLogEventMessage(LogLevel.Warning, "IPC", "Moodles SetStatus failed", Details: e.ToString()));
+        }
+    }
+
+    private async Task<string> UpdateApplierToLocalPlayerAsync(string status)
+    {
+        try
+        {
+            var jsonNode = JsonNode.Parse(status);
+            if (jsonNode is JsonObject jsonObject && jsonObject.ContainsKey("Applier"))
+            {
+                var localPlayer = await _dalamudUtil.GetPlayerCharacterAsync().ConfigureAwait(false);
+                if (localPlayer != null)
+                {
+                    var worldId = await _dalamudUtil.GetHomeWorldIdAsync().ConfigureAwait(false);
+                    var worldData = _dalamudUtil.WorldData.Value;
+                    var worldName = worldData.TryGetValue((ushort)worldId, out var name) ? name : "Unknown";
+                    var nameWithWorld = $"{localPlayer.Name.TextValue}@{worldName}";
+                    jsonObject["Applier"] = nameWithWorld;
+                    _logger.LogDebug("Updated Moodles Applier to local player: {applier}", nameWithWorld);
+                }
+            }
+            return jsonNode?.ToJsonString() ?? status;
+        }
+        catch (Exception e)
+        {
+            _logger.LogWarning(e, "Could not update Moodles Applier field, using original status");
+            return status;
         }
     }
 
