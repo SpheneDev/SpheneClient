@@ -486,7 +486,8 @@ public class ServerConfigurationManager
     private void EnsureMainExists()
     {
         const string mainServerName = "Sphene Server";
-        const string mainServerUri = "ws://sphene.online:6000";
+        const string mainServerUri = "wss://sphene.online";
+        const string oldMainServerUri = "ws://sphene.online:6000";
 
         var servers = _configService.Current.ServerStorage;
         bool hasMainServer = false;
@@ -508,6 +509,7 @@ public class ServerConfigurationManager
 
             bool isMainServer = string.Equals(server.ServerName, mainServerName, StringComparison.OrdinalIgnoreCase) ||
                                 string.Equals(server.ServerUri, mainServerUri, StringComparison.OrdinalIgnoreCase) ||
+                                string.Equals(server.ServerUri, oldMainServerUri, StringComparison.OrdinalIgnoreCase) ||
                                 (server.ServerUri.Contains("sphene.online", StringComparison.OrdinalIgnoreCase) &&
                                  !server.ServerUri.Contains("test", StringComparison.OrdinalIgnoreCase) &&
                                  server.ServerName.Contains("Sphene", StringComparison.OrdinalIgnoreCase) &&
@@ -523,6 +525,12 @@ public class ServerConfigurationManager
                 hasMainServer = true;
                 mainServerIndex = i;
                 server.ServerName = mainServerName;
+                
+                // Migrate old URI to new URI while preserving all user data
+                if (string.Equals(server.ServerUri, oldMainServerUri, StringComparison.OrdinalIgnoreCase))
+                {
+                    _logger.LogInformation("Migrating server URI from {oldUri} to {newUri} for server {serverName}", oldMainServerUri, mainServerUri, server.ServerName);
+                }
                 server.ServerUri = mainServerUri;
                 server.UseOAuth2 = false;
             }
@@ -552,6 +560,7 @@ public class ServerConfigurationManager
 
                 bool isMainServer = string.Equals(server.ServerName, mainServerName, StringComparison.OrdinalIgnoreCase) ||
                                     string.Equals(server.ServerUri, mainServerUri, StringComparison.OrdinalIgnoreCase) ||
+                                    string.Equals(server.ServerUri, oldMainServerUri, StringComparison.OrdinalIgnoreCase) ||
                                     (server.ServerUri.Contains("sphene.online", StringComparison.OrdinalIgnoreCase) &&
                                      !server.ServerUri.Contains("test", StringComparison.OrdinalIgnoreCase) &&
                                      server.ServerName.Contains("Sphene", StringComparison.OrdinalIgnoreCase) &&
@@ -567,6 +576,12 @@ public class ServerConfigurationManager
                     hasMainServer = true;
                     mainServerIndex = i;
                     server.ServerName = mainServerName;
+                    
+                    // Migrate old URI to new URI while preserving all user data
+                    if (string.Equals(server.ServerUri, oldMainServerUri, StringComparison.OrdinalIgnoreCase))
+                    {
+                        _logger.LogInformation("Migrating server URI from {oldUri} to {newUri} for server {serverName}", oldMainServerUri, mainServerUri, server.ServerName);
+                    }
                     server.ServerUri = mainServerUri;
                     server.UseOAuth2 = false;
                 }
