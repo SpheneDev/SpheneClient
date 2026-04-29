@@ -25,7 +25,7 @@ namespace Sphene.WebAPI;
 public sealed partial class ApiController : DisposableMediatorSubscriberBase, ISpheneHubClient
 {
     public const string MainServer = "Sphene Server";
-    public const string MainServiceUri = "ws://sphene.online:6000";
+    public const string MainServiceUri = "wss://sphene.online";
 
     private readonly DalamudUtilService _dalamudUtil;
     private readonly HubFactory _hubFactory;
