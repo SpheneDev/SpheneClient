@@ -17,7 +17,7 @@
     <Tags>customization</Tags>
     <IconUrl>https://raw.githubusercontent.com/SpheneDev/repo/main/images/Sphene.png</IconUrl>
     <ApplicableVersion>any</ApplicableVersion>
-    <DalamudApiLevel>14</DalamudApiLevel>
+    <DalamudApiLevel>15</DalamudApiLevel>
   </PropertyGroup>
 
   <PropertyGroup>
