@@ -1,5 +1,6 @@
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Colors;
+using Dalamud.Interface.Windowing;
 using Sphene.SpheneConfiguration;
 using Sphene.PlayerData.Handlers;
 using Sphene.Services;

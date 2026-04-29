@@ -5,6 +5,7 @@ using Dalamud.Interface.Utility;
 using Dalamud.Interface.Utility.Raii;
 using Dalamud.Interface.ImGuiFileDialog;
 using Dalamud.Interface.Textures.TextureWraps;
+using Dalamud.Interface.Windowing;
 using Sphene.API.Data.Enum;
 using Sphene.API.Data.Extensions;
 using Sphene.API.Dto.Group;
