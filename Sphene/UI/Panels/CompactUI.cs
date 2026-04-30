@@ -79,6 +79,7 @@ public class CompactUi : WindowMediatorSubscriberBase
  private Vector2 _lastSize = Vector2.One;
  // One-time check to correct persisted width below minimum
  private bool _widthCorrectionChecked = false;
+    private bool _pendingClose = false;
     private const string ControlPanelTitle = "Sphene Control Panel";
 #if IS_TEST_BUILD
     private const string TestServerDisclaimerPopupName = "Test Server Disclaimer";
@@ -724,6 +725,12 @@ public class CompactUi : WindowMediatorSubscriberBase
 
     public override void PreDraw()
     {
+        if (_pendingClose)
+        {
+            IsOpen = false;
+            _pendingClose = false;
+        }
+
         if (_stickEnabled && !IsOpen)
         {
             IsOpen = true;
@@ -4404,7 +4411,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         if (_uiSharedService.IconButton(FontAwesomeIcon.Times, null, null, null, null, ButtonStyleKeys.Compact_Close))
         {
             _logger.LogDebug("Close button clicked, closing CompactUI");
-            IsOpen = false;
+            _pendingClose = true;
         }
         if (ImGui.IsItemHovered())
         {
