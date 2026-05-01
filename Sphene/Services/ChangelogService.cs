@@ -8,7 +8,7 @@ public sealed class ChangelogService
 {
     private readonly ILogger<ChangelogService> _logger;
     private readonly HttpClient _httpClient;
-    private const string DefaultUrl = "https://sphene.online/sphene_changelogs/changelog.json";
+    private const string DefaultUrl = "https://raw.githubusercontent.com/SpheneDev/repo/refs/heads/main/changelogs/sphene.json";
 
     public ChangelogService(ILogger<ChangelogService> logger, HttpClient httpClient)
     {
