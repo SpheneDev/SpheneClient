@@ -873,70 +873,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
 
         if (_dalamudUtil is not { IsZoning: false, IsInCutscene: false }) return;
 
-        var applicationId = Guid.NewGuid();
-        try
-        {
-            Logger.LogDebug("[{applicationId}] Restoring vanilla state for {name} ({OnlineUser})", applicationId, name, Pair.UserPair);
-            Logger.LogDebug("[{applicationId}] Removing Temp Collection for {name} ({user})", applicationId, name, Pair.UserPair);
-            _ipcManager.Penumbra.RemoveTemporaryCollectionAsync(Logger, applicationId, _penumbraCollection).GetAwaiter().GetResult();
-
-            // Clear honorific title
-            if (_ipcManager.Honorific.APIAvailable)
-            {
-                Logger.LogDebug("[{applicationId}] Clearing Honorific title for {name} ({user})", applicationId, name, Pair.UserPair);
-                _ipcManager.Honorific.ClearTitleAsync(PlayerCharacter).GetAwaiter().GetResult();
-            }
-
-            // Clear BypassEmote state
-            if (_ipcManager.BypassEmote.APIAvailable && PlayerCharacter != nint.Zero)
-            {
-                Logger.LogDebug("[{applicationId}] Clearing BypassEmote state for {name} ({user})", applicationId, name, Pair.UserPair);
-                _ipcManager.BypassEmote.SetStateForCharacterAsync(PlayerCharacter, string.Empty).GetAwaiter().GetResult();
-            }
-
-            if (!IsVisible)
-            {
-                Logger.LogDebug("[{applicationId}] Restoring Glamourer for {name} ({user})", applicationId, name, Pair.UserPair);
-                _ipcManager.Glamourer.RevertByNameAsync(Logger, name, applicationId).GetAwaiter().GetResult();
-            }
-            else
-            {
-                Logger.LogInformation("[{applicationId}] CachedData is null {isNull}, contains things: {contains}", applicationId, _cachedData == null, _cachedData?.FileReplacements.Any() ?? false);
-
-                var cts = new CancellationTokenSource();
-                try
-                {
-                    RevertCustomizationDataAsync(ObjectKind.Player, name, applicationId, cts.Token).GetAwaiter().GetResult();
-                }
-                finally
-                {
-                    cts.Cancel();
-                    cts.Dispose();
-                }
-
-                foreach (var item in _cachedData?.FileReplacements.Where(f => f.Key is ObjectKind.MinionOrMount or ObjectKind.Pet) ?? [])
-                {
-                    var cts2 = new CancellationTokenSource();
-                    try
-                    {
-                        RevertCustomizationDataAsync(item.Key, name, applicationId, cts2.Token).GetAwaiter().GetResult();
-                    }
-                    catch (InvalidOperationException ex)
-                    {
-                        Logger.LogDebug(ex, "[{applicationId}] Failed to revert customization data for {objectKind}", applicationId, item.Key);
-                    }
-                    finally
-                    {
-                        cts2.Cancel();
-                        cts2.Dispose();
-                    }
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            Logger.LogDebug(ex, "Failed to restore vanilla state for {name}", name);
-        }
+        Logger.LogDebug("Skipping vanilla state restoration during disposal for {name} - game will handle automatically", name);
     }
 
     private async Task ApplyCustomizationDataAsync(Guid applicationId, KeyValuePair<ObjectKind, HashSet<PlayerChanges>> changes, CharacterData charaData, RedrawTracking redrawTracking, bool forceRedrawIfDisabled, CancellationToken token)
