@@ -873,7 +873,107 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
 
         if (_dalamudUtil is not { IsZoning: false, IsInCutscene: false }) return;
 
-        Logger.LogDebug("Skipping vanilla state restoration during disposal for {name} - game will handle automatically", name);
+        // Restore vanilla state synchronously with short timeouts to complete before players despawn
+        Logger.LogDebug("Starting vanilla state restoration for {name}", name);
+        nint address = _dalamudUtil.GetPlayerCharacterFromCachedTableByIdent(Pair.Ident);
+        if (address == nint.Zero)
+        {
+            Logger.LogDebug("Player address is zero for {name}, skipping vanilla restore", name);
+            return;
+        }
+
+        Logger.LogDebug("Restoring vanilla state for {name} at address {address}", name, address);
+
+        // Restore Glamourer (synchronous with short timeout)
+        try
+        {
+            using GameObjectHandler tempHandler = _gameObjectHandlerFactory.Create(ObjectKind.Player, () => address, isWatched: false).GetAwaiter().GetResult();
+            tempHandler.CompareNameAndThrow(name);
+            var applicationId = Guid.NewGuid();
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(CancellationToken.None);
+            cts.CancelAfter(TimeSpan.FromSeconds(2));
+            _ipcManager.Glamourer.RevertAsync(Logger, tempHandler, applicationId, cts.Token).GetAwaiter().GetResult();
+            Logger.LogDebug("Restored Glamourer for {name}", name);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Failed to restore Glamourer for {name}", name);
+        }
+
+        // Restore Heels (synchronous with short timeout)
+        try
+        {
+            _ipcManager.Heels.RestoreOffsetForPlayerAsync(address).GetAwaiter().GetResult();
+            Logger.LogDebug("Restored Heels for {name}", name);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Failed to restore Heels for {name}", name);
+        }
+
+        // Restore Customize+ (if customizeIds exist)
+        var customizeIdsCopy = _customizeIds.ToDictionary();
+        foreach (var (objectKind, customizeId) in customizeIdsCopy)
+        {
+            try
+            {
+                _ipcManager.CustomizePlus.RevertByIdAsync(customizeId).GetAwaiter().GetResult();
+                Logger.LogDebug("Restored Customize+ for {name} {objectKind}", name, objectKind);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogDebug(ex, "Failed to restore Customize+ for {name} {objectKind}", name, objectKind);
+            }
+        }
+
+        // Restore Honorific (synchronous with short timeout)
+        try
+        {
+            _ipcManager.Honorific.ClearTitleAsync(address).GetAwaiter().GetResult();
+            Logger.LogDebug("Restored Honorific for {name}", name);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Failed to restore Honorific for {name}", name);
+        }
+
+        // Restore Moodles (synchronous with short timeout)
+        try
+        {
+            _ipcManager.Moodles.RevertStatusAsync(address).GetAwaiter().GetResult();
+            Logger.LogDebug("Restored Moodles for {name}", name);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Failed to restore Moodles for {name}", name);
+        }
+
+        // Restore Pet Nicknames (synchronous with short timeout)
+        try
+        {
+            _ipcManager.PetNames.ClearPlayerData(address).GetAwaiter().GetResult();
+            Logger.LogDebug("Restored Pet Nicknames for {name}", name);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Failed to restore Pet Nicknames for {name}", name);
+        }
+
+        // Restore BypassEmote (synchronous with short timeout)
+        try
+        {
+            _ipcManager.BypassEmote.SetStateForCharacterAsync(address, string.Empty).GetAwaiter().GetResult();
+            Logger.LogDebug("Restored BypassEmote for {name}", name);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Failed to restore BypassEmote for {name}", name);
+        }
+
+        // Note: Redraw removed - doesn't work during disposal as players are despawning
+        // Penumbra collections are cleaned up by IpcCallerPenumbra.Dispose instead
+
+        Logger.LogDebug("Completed vanilla state restoration for {name}", name);
     }
 
     private async Task ApplyCustomizationDataAsync(Guid applicationId, KeyValuePair<ObjectKind, HashSet<PlayerChanges>> changes, CharacterData charaData, RedrawTracking redrawTracking, bool forceRedrawIfDisabled, CancellationToken token)
@@ -1634,9 +1734,8 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                     if ((now - _postZoneLastCheck) > TimeSpan.FromSeconds(1))
                     {
                         _postZoneLastCheck = now;
-                        var screenPos = gameObj != null ? _dalamudUtil.WorldToScreen(gameObj) : Vector2.Zero;
-                        bool onScreen = screenPos != Vector2.Zero;
-                        bool shouldReportVisible = onScreen && withinPartyRange && !_localVisibilityGateActive;
+                        // Remove on-screen check during post-zone period to handle cases where GameObjects are still loading
+                        bool shouldReportVisible = withinPartyRange && !_localVisibilityGateActive;
                         if (shouldReportVisible && !_proximityReportedVisible)
                         {
                             Pair.ReportVisibility(true);
@@ -1644,7 +1743,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                         }
                         else if (shouldReportVisible && _proximityReportedVisible && !Pair.IsMutuallyVisible && !_postZoneReaffirmDone)
                         {
-                            Logger.LogDebug("Post-zone reaffirm visibility for {this}: onScreen=true distance={dist:F1}m", this, distance);
+                            Logger.LogDebug("Post-zone reaffirm visibility for {this}: distance={dist:F1}m", this, distance);
                             Pair.ReportVisibility(true);
                             _postZoneReaffirmDone = true;
                         }

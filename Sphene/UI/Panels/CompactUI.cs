@@ -2073,6 +2073,7 @@ public class CompactUi : WindowMediatorSubscriberBase
             => u.Key.UserPair.OwnPermissions.IsPaused() && (!u.Key.IsMutuallyVisible || !_configService.Current.ShowVisibleUsersSeparately);
         Dictionary<Pair, List<GroupFullInfoDto>> BasicSortedDictionary(IEnumerable<KeyValuePair<Pair, List<GroupFullInfoDto>>> u)
             => u.OrderByDescending(u => u.Key.IsMutuallyVisible)
+                .ThenByDescending(u => !u.Key.IsEffectivelyOffline && u.Key.IsMutuallyVisible)
                 .ThenByDescending(u => !u.Key.IsEffectivelyOffline)
                 .ThenBy(AlphabeticalSort, StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(u => u.Key, u => u.Value);
@@ -2127,7 +2128,9 @@ public class CompactUi : WindowMediatorSubscriberBase
 
             var filteredGroupPairs = filteredPairs
                 .Where(u => FilterGroupUsers(u, group) && FilterOnlineOrPausedSelf(u))
-                .OrderByDescending(u => !u.Key.IsEffectivelyOffline)
+                .OrderByDescending(u => u.Key.IsMutuallyVisible)
+                .ThenByDescending(u => !u.Key.IsEffectivelyOffline && u.Key.IsMutuallyVisible)
+                .ThenByDescending(u => !u.Key.IsEffectivelyOffline)
                 .ThenBy(u =>
                 {
                     if (string.Equals(u.Key.UserData.UID, group.OwnerUID, StringComparison.Ordinal)) return 0;
@@ -2136,7 +2139,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                         if (info.IsModerator()) return 1;
                         if (info.IsPinned()) return 2;
                     }
-                    return u.Key.IsMutuallyVisible ? 3 : 4;
+                    return 3;
                 })
                 .ThenBy(AlphabeticalSort, StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(k => k.Key, k => k.Value);

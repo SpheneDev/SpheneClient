@@ -42,9 +42,28 @@ using System.IO;
 
 namespace Sphene;
 
-public sealed class Plugin : IDalamudPlugin
+public sealed class Plugin : IAsyncDalamudPlugin
 {
-    private readonly IHost _host;
+    private IHost _host;
+    private readonly IDalamudPluginInterface _pluginInterface;
+    private readonly ICommandManager _commandManager;
+    private readonly IDataManager _gameData;
+    private readonly IFramework _framework;
+    private readonly IObjectTable _objectTable;
+    private readonly IClientState _clientState;
+    private readonly ICondition _condition;
+    private readonly IChatGui _chatGui;
+    private readonly IGameGui _gameGui;
+    private readonly IDtrBar _dtrBar;
+    private readonly IPluginLog _pluginLog;
+    private readonly ITargetManager _targetManager;
+    private readonly INotificationManager _notificationManager;
+    private readonly ITextureProvider _textureProvider;
+    private readonly IContextMenu _contextMenu;
+    private readonly IGameInteropProvider _gameInteropProvider;
+    private readonly IGameConfig _gameConfig;
+    private readonly ISigScanner _sigScanner;
+    private readonly IPartyList _partyList;
 
     public Plugin(IDalamudPluginInterface pluginInterface, ICommandManager commandManager, IDataManager gameData,
         IFramework framework, IObjectTable objectTable, IClientState clientState, ICondition condition, IChatGui chatGui,
@@ -52,9 +71,32 @@ public sealed class Plugin : IDalamudPlugin
         ITextureProvider textureProvider, IContextMenu contextMenu, IGameInteropProvider gameInteropProvider, IGameConfig gameConfig,
         ISigScanner sigScanner, IPartyList partyList)
     {
-        if (!Directory.Exists(pluginInterface.ConfigDirectory.FullName))
-            Directory.CreateDirectory(pluginInterface.ConfigDirectory.FullName);
-        var traceDir = Path.Join(pluginInterface.ConfigDirectory.FullName, "tracelog");
+        _pluginInterface = pluginInterface;
+        _commandManager = commandManager;
+        _gameData = gameData;
+        _framework = framework;
+        _objectTable = objectTable;
+        _clientState = clientState;
+        _condition = condition;
+        _chatGui = chatGui;
+        _gameGui = gameGui;
+        _dtrBar = dtrBar;
+        _pluginLog = pluginLog;
+        _targetManager = targetManager;
+        _notificationManager = notificationManager;
+        _textureProvider = textureProvider;
+        _contextMenu = contextMenu;
+        _gameInteropProvider = gameInteropProvider;
+        _gameConfig = gameConfig;
+        _sigScanner = sigScanner;
+        _partyList = partyList;
+    }
+
+    public async Task LoadAsync(CancellationToken token)
+    {
+        if (!Directory.Exists(_pluginInterface.ConfigDirectory.FullName))
+            Directory.CreateDirectory(_pluginInterface.ConfigDirectory.FullName);
+        var traceDir = Path.Join(_pluginInterface.ConfigDirectory.FullName, "tracelog");
         if (!Directory.Exists(traceDir))
             Directory.CreateDirectory(traceDir);
 
@@ -80,11 +122,11 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         _host = new HostBuilder()
-        .UseContentRoot(pluginInterface.ConfigDirectory.FullName)
+        .UseContentRoot(_pluginInterface.ConfigDirectory.FullName)
         .ConfigureLogging(lb =>
         {
             lb.ClearProviders();
-            lb.AddDalamudLogging(pluginLog, gameData.HasModifiedGameDataFiles);
+            lb.AddDalamudLogging(_pluginLog, _gameData.HasModifiedGameDataFiles);
             lb.AddFile(Path.Combine(traceDir, $"sphene-trace-{DateTime.Now:yyyy-MM-dd-HH-mm-ss}.log"), (opt) =>
             {
                 opt.Append = true;
@@ -99,16 +141,16 @@ public sealed class Plugin : IDalamudPlugin
             collection.AddSingleton(new WindowSystem("Sphene"));
             collection.AddSingleton<FileDialogManager>();
             collection.AddSingleton(new Dalamud.Localization("Sphene.Localization.", "", useEmbedded: true));
-            collection.AddSingleton(commandManager);
-            collection.AddSingleton(framework);
-            collection.AddSingleton(pluginInterface);
+            collection.AddSingleton(_commandManager);
+            collection.AddSingleton(_framework);
+            collection.AddSingleton(_pluginInterface);
 
             // ShrinkU integration services and windows
             collection.AddSingleton<Microsoft.Extensions.Logging.ILogger>(s => s.GetRequiredService<ILoggerFactory>().CreateLogger("ShrinkU"));
             collection.AddSingleton<ShrinkUConfigService>(s =>
             {
                 var logger = s.GetRequiredService<Microsoft.Extensions.Logging.ILogger>();
-                var cfgSvc = new ShrinkUConfigService(pluginInterface, logger);
+                var cfgSvc = new ShrinkUConfigService(_pluginInterface, logger);
                 try
                 {
                     var spheneCfg = s.GetRequiredService<SpheneConfigService>();
@@ -135,7 +177,7 @@ public sealed class Plugin : IDalamudPlugin
                 catch (Exception ex) { logger.LogDebug(ex, "Failed to initialize ShrinkU configuration integration"); }
                 return cfgSvc;
             });
-            collection.AddSingleton<ShrinkU.Services.PenumbraIpc>(s => new ShrinkU.Services.PenumbraIpc(pluginInterface, s.GetRequiredService<Microsoft.Extensions.Logging.ILogger>()));
+            collection.AddSingleton<ShrinkU.Services.PenumbraIpc>(s => new ShrinkU.Services.PenumbraIpc(_pluginInterface, s.GetRequiredService<Microsoft.Extensions.Logging.ILogger>()));
             collection.AddSingleton<ShrinkU.Services.DebugTraceService>(s => new ShrinkU.Services.DebugTraceService(1000));
             collection.AddSingleton<ShrinkU.Services.ModStateService>(s => new ShrinkU.Services.ModStateService(
                 s.GetRequiredService<Microsoft.Extensions.Logging.ILogger>(),
@@ -165,7 +207,7 @@ public sealed class Plugin : IDalamudPlugin
                 new System.Net.Http.HttpClient(),
                 s.GetRequiredService<ShrinkUConfigService>()));
             collection.AddSingleton<ShrinkU.UI.ReleaseChangelogUI>(s => new ShrinkU.UI.ReleaseChangelogUI(
-                pluginInterface,
+                _pluginInterface,
                 s.GetRequiredService<Microsoft.Extensions.Logging.ILogger>(),
                 s.GetRequiredService<ShrinkUConfigService>(),
                 s.GetRequiredService<ShrinkU.Services.ChangelogService>()));
@@ -259,25 +301,25 @@ public sealed class Plugin : IDalamudPlugin
                 s.GetRequiredService<DalamudUtilService>(),
                 s.GetRequiredService<SpheneConfigService>(),
                 s.GetRequiredService<ApiController>(),
-                condition));
+                _condition));
 
             collection.AddSingleton(s => new VfxSpawnManager(s.GetRequiredService<ILogger<VfxSpawnManager>>(),
-                gameInteropProvider, s.GetRequiredService<SpheneMediator>()));
-            collection.AddSingleton((s) => new BlockedCharacterHandler(s.GetRequiredService<ILogger<BlockedCharacterHandler>>(), gameInteropProvider));
+                _gameInteropProvider, s.GetRequiredService<SpheneMediator>()));
+            collection.AddSingleton((s) => new BlockedCharacterHandler(s.GetRequiredService<ILogger<BlockedCharacterHandler>>(), _gameInteropProvider));
             collection.AddSingleton((s) => new IpcProvider(s.GetRequiredService<ILogger<IpcProvider>>(),
-                pluginInterface,
+                _pluginInterface,
                 s.GetRequiredService<CharaDataManager>(),
                 s.GetRequiredService<SpheneMediator>()));
             collection.AddSingleton<SelectPairForTagUi>();
-            collection.AddSingleton((s) => new EventAggregator(pluginInterface.ConfigDirectory.FullName,
+            collection.AddSingleton((s) => new EventAggregator(_pluginInterface.ConfigDirectory.FullName,
                 s.GetRequiredService<ILogger<EventAggregator>>(), s.GetRequiredService<SpheneMediator>()));
             collection.AddSingleton((s) => new DalamudUtilService(s.GetRequiredService<ILogger<DalamudUtilService>>(),
-                clientState, objectTable, framework, gameGui, condition, gameData, targetManager, gameConfig, partyList,
+                _clientState, _objectTable, _framework, _gameGui, _condition, _gameData, _targetManager, _gameConfig, _partyList,
                 s.GetRequiredService<BlockedCharacterHandler>(), s.GetRequiredService<SpheneMediator>(), s.GetRequiredService<PerformanceCollectorService>(),
                 s.GetRequiredService<SpheneConfigService>()));
             collection.AddSingleton((s) => new CharacterStatusService(s.GetRequiredService<ILogger<CharacterStatusService>>(),
-                objectTable, condition, gameData, s.GetRequiredService<SpheneMediator>()));
-            collection.AddSingleton((s) => new DtrEntry(s.GetRequiredService<ILogger<DtrEntry>>(), dtrBar, s.GetRequiredService<SpheneConfigService>(),
+                _objectTable, _condition, _gameData, s.GetRequiredService<SpheneMediator>()));
+            collection.AddSingleton((s) => new DtrEntry(s.GetRequiredService<ILogger<DtrEntry>>(), _dtrBar, s.GetRequiredService<SpheneConfigService>(),
                 s.GetRequiredService<SpheneMediator>(), s.GetRequiredService<PairManager>(), s.GetRequiredService<ApiController>()));
             collection.AddSingleton<Lazy<ApiController>>(s => new Lazy<ApiController>(() => s.GetRequiredService<ApiController>()));
             collection.AddSingleton<Lazy<PairManager>>(s => new Lazy<PairManager>(() => s.GetRequiredService<PairManager>()));
@@ -286,7 +328,7 @@ public sealed class Plugin : IDalamudPlugin
                 s.GetRequiredService<SpheneMediator>(), s.GetRequiredService<Lazy<ApiController>>(), s.GetRequiredService<Lazy<PairManager>>(),
                 s.GetRequiredService<DalamudUtilService>(), s.GetRequiredService<SpheneConfigService>()));
             collection.AddSingleton(s => new PairManager(s.GetRequiredService<ILogger<PairManager>>(), s.GetRequiredService<PairFactory>(),
-                s.GetRequiredService<SpheneConfigService>(), s.GetRequiredService<SpheneMediator>(), contextMenu,
+                s.GetRequiredService<SpheneConfigService>(), s.GetRequiredService<SpheneMediator>(), _contextMenu,
                 s.GetRequiredService<Lazy<ApiController>>(), s.GetRequiredService<SessionAcknowledgmentManager>(), s.GetRequiredService<MessageService>(),
                 s.GetRequiredService<AcknowledgmentTimeoutManager>(), s.GetRequiredService<Lazy<AreaBoundSyncshellService>>(),
                 s.GetRequiredService<VisibilityGateService>(), s.GetRequiredService<PairCharacterCacheConfigService>(),
@@ -296,37 +338,37 @@ public sealed class Plugin : IDalamudPlugin
                 s.GetRequiredService<Lazy<ApiController>>().Value, s.GetRequiredService<DalamudUtilService>(), s.GetRequiredService<SpheneMediator>(),
                 new AcknowledgmentConfiguration(), s.GetRequiredService<SessionAcknowledgmentManager>()));
             collection.AddSingleton<RedrawManager>();
-            collection.AddSingleton((s) => new IpcCallerPenumbra(s.GetRequiredService<ILogger<IpcCallerPenumbra>>(), pluginInterface,
+            collection.AddSingleton((s) => new IpcCallerPenumbra(s.GetRequiredService<ILogger<IpcCallerPenumbra>>(), _pluginInterface,
                 s.GetRequiredService<DalamudUtilService>(), s.GetRequiredService<SpheneMediator>(), s.GetRequiredService<RedrawManager>()));
-            collection.AddSingleton((s) => new IpcCallerGlamourer(s.GetRequiredService<ILogger<IpcCallerGlamourer>>(), pluginInterface,
+            collection.AddSingleton((s) => new IpcCallerGlamourer(s.GetRequiredService<ILogger<IpcCallerGlamourer>>(), _pluginInterface,
                 s.GetRequiredService<DalamudUtilService>(), s.GetRequiredService<SpheneMediator>(), s.GetRequiredService<RedrawManager>()));
-            collection.AddSingleton((s) => new IpcCallerCustomize(s.GetRequiredService<ILogger<IpcCallerCustomize>>(), pluginInterface,
+            collection.AddSingleton((s) => new IpcCallerCustomize(s.GetRequiredService<ILogger<IpcCallerCustomize>>(), _pluginInterface,
                 s.GetRequiredService<DalamudUtilService>(), s.GetRequiredService<SpheneMediator>()));
-            collection.AddSingleton((s) => new IpcCallerHeels(s.GetRequiredService<ILogger<IpcCallerHeels>>(), pluginInterface,
+            collection.AddSingleton((s) => new IpcCallerHeels(s.GetRequiredService<ILogger<IpcCallerHeels>>(), _pluginInterface,
                 s.GetRequiredService<DalamudUtilService>(), s.GetRequiredService<SpheneMediator>()));
-            collection.AddSingleton((s) => new IpcCallerHonorific(s.GetRequiredService<ILogger<IpcCallerHonorific>>(), pluginInterface,
+            collection.AddSingleton((s) => new IpcCallerHonorific(s.GetRequiredService<ILogger<IpcCallerHonorific>>(), _pluginInterface,
                 s.GetRequiredService<DalamudUtilService>(), s.GetRequiredService<SpheneMediator>()));
-            collection.AddSingleton((s) => new IpcCallerMoodles(s.GetRequiredService<ILogger<IpcCallerMoodles>>(), pluginInterface,
+            collection.AddSingleton((s) => new IpcCallerMoodles(s.GetRequiredService<ILogger<IpcCallerMoodles>>(), _pluginInterface,
                 s.GetRequiredService<DalamudUtilService>(), s.GetRequiredService<SpheneMediator>()));
-            collection.AddSingleton((s) => new IpcCallerPetNames(s.GetRequiredService<ILogger<IpcCallerPetNames>>(), pluginInterface,
+            collection.AddSingleton((s) => new IpcCallerPetNames(s.GetRequiredService<ILogger<IpcCallerPetNames>>(), _pluginInterface,
                 s.GetRequiredService<DalamudUtilService>(), s.GetRequiredService<SpheneMediator>()));
-            collection.AddSingleton((s) => new IpcCallerBypassEmote(s.GetRequiredService<ILogger<IpcCallerBypassEmote>>(), pluginInterface,
+            collection.AddSingleton((s) => new IpcCallerBypassEmote(s.GetRequiredService<ILogger<IpcCallerBypassEmote>>(), _pluginInterface,
                 s.GetRequiredService<DalamudUtilService>(), s.GetRequiredService<SpheneMediator>()));
-            collection.AddSingleton((s) => new IpcCallerBrio(s.GetRequiredService<ILogger<IpcCallerBrio>>(), pluginInterface,
+            collection.AddSingleton((s) => new IpcCallerBrio(s.GetRequiredService<ILogger<IpcCallerBrio>>(), _pluginInterface,
                 s.GetRequiredService<DalamudUtilService>()));
             collection.AddSingleton((s) => new IpcManager(s.GetRequiredService<ILogger<IpcManager>>(),
                 s.GetRequiredService<SpheneMediator>(), s.GetRequiredService<IpcCallerPenumbra>(), s.GetRequiredService<IpcCallerGlamourer>(),
                 s.GetRequiredService<IpcCallerCustomize>(), s.GetRequiredService<IpcCallerHeels>(), s.GetRequiredService<IpcCallerHonorific>(),
                 s.GetRequiredService<IpcCallerMoodles>(), s.GetRequiredService<IpcCallerPetNames>(), s.GetRequiredService<IpcCallerBypassEmote>(),
                 s.GetRequiredService<IpcCallerBrio>()));
-            collection.AddSingleton((s) => new MessageService(s.GetRequiredService<ILogger<MessageService>>(), notificationManager, s.GetRequiredService<SpheneConfigService>(), s.GetRequiredService<SpheneMediator>()));
+            collection.AddSingleton((s) => new MessageService(s.GetRequiredService<ILogger<MessageService>>(), _notificationManager, s.GetRequiredService<SpheneConfigService>(), s.GetRequiredService<SpheneMediator>()));
             collection.AddSingleton((s) => new AcknowledgmentBatchingService(
                 s.GetRequiredService<ILogger<AcknowledgmentBatchingService>>(),
                 s.GetRequiredService<SpheneMediator>(),
                 s.GetRequiredService<MessageService>()));
             collection.AddSingleton((s) => new NotificationService(s.GetRequiredService<ILogger<NotificationService>>(),
                 s.GetRequiredService<SpheneMediator>(), s.GetRequiredService<DalamudUtilService>(),
-                notificationManager, chatGui, s.GetRequiredService<SpheneConfigService>(),
+                _notificationManager, _chatGui, s.GetRequiredService<SpheneConfigService>(),
                 s.GetRequiredService<FileDownloadManagerFactory>(),
                 s.GetRequiredService<ShrinkU.Services.TextureBackupService>(),
                 s.GetRequiredService<ServerConfigurationManager>(),
@@ -338,18 +380,18 @@ public sealed class Plugin : IDalamudPlugin
                 httpClient.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("Sphene", ver!.Major + "." + ver!.Minor + "." + ver!.Build));
                 return httpClient;
             });
-            collection.AddSingleton((s) => new SpheneConfigService(pluginInterface.ConfigDirectory.FullName));
-            collection.AddSingleton((s) => new ServerConfigService(pluginInterface.ConfigDirectory.FullName));
-            collection.AddSingleton((s) => new NotesConfigService(pluginInterface.ConfigDirectory.FullName));
-            collection.AddSingleton((s) => new ServerTagConfigService(pluginInterface.ConfigDirectory.FullName));
-            collection.AddSingleton((s) => new TransientConfigService(pluginInterface.ConfigDirectory.FullName));
-            collection.AddSingleton((s) => new PairCharacterCacheConfigService(pluginInterface.ConfigDirectory.FullName));
-            collection.AddSingleton((s) => new XivDataStorageService(pluginInterface.ConfigDirectory.FullName));
-            collection.AddSingleton((s) => new PlayerPerformanceConfigService(pluginInterface.ConfigDirectory.FullName));
-            collection.AddSingleton((s) => new CharaDataConfigService(pluginInterface.ConfigDirectory.FullName));
+            collection.AddSingleton((s) => new SpheneConfigService(_pluginInterface.ConfigDirectory.FullName));
+            collection.AddSingleton((s) => new ServerConfigService(_pluginInterface.ConfigDirectory.FullName));
+            collection.AddSingleton((s) => new NotesConfigService(_pluginInterface.ConfigDirectory.FullName));
+            collection.AddSingleton((s) => new ServerTagConfigService(_pluginInterface.ConfigDirectory.FullName));
+            collection.AddSingleton((s) => new TransientConfigService(_pluginInterface.ConfigDirectory.FullName));
+            collection.AddSingleton((s) => new PairCharacterCacheConfigService(_pluginInterface.ConfigDirectory.FullName));
+            collection.AddSingleton((s) => new XivDataStorageService(_pluginInterface.ConfigDirectory.FullName));
+            collection.AddSingleton((s) => new PlayerPerformanceConfigService(_pluginInterface.ConfigDirectory.FullName));
+            collection.AddSingleton((s) => new CharaDataConfigService(_pluginInterface.ConfigDirectory.FullName));
             collection.AddSingleton((s) => new ActiveMismatchTrackerService(
                 s.GetRequiredService<ILogger<ActiveMismatchTrackerService>>(),
-                pluginInterface.ConfigDirectory.FullName));
+                _pluginInterface.ConfigDirectory.FullName));
             collection.AddHostedService(s => s.GetRequiredService<ActiveMismatchTrackingHandler>());
             collection.AddSingleton(s => new ActiveMismatchTrackingHandler(
                 s.GetRequiredService<ILogger<ActiveMismatchTrackingHandler>>(),
@@ -469,16 +511,16 @@ public sealed class Plugin : IDalamudPlugin
             collection.AddSingleton<IconUpdateService>();
             collection.AddSingleton<HalloweenEasterEggService>();
             
-            collection.AddScoped((s) => new UiService(s.GetRequiredService<ILogger<UiService>>(), pluginInterface.UiBuilder, s.GetRequiredService<SpheneConfigService>(),
+            collection.AddScoped((s) => new UiService(s.GetRequiredService<ILogger<UiService>>(), _pluginInterface.UiBuilder, s.GetRequiredService<SpheneConfigService>(),
                 s.GetRequiredService<WindowSystem>(), s.GetServices<WindowMediatorSubscriberBase>(),
                 s.GetRequiredService<UiFactory>(),
                 s.GetRequiredService<FileDialogManager>(), s.GetRequiredService<SpheneMediator>()));
-            collection.AddScoped((s) => new CommandManagerService(commandManager, s.GetRequiredService<PerformanceCollectorService>(),
+            collection.AddScoped((s) => new CommandManagerService(_commandManager, s.GetRequiredService<PerformanceCollectorService>(),
                 s.GetRequiredService<ServerConfigurationManager>(), s.GetRequiredService<CacheMonitor>(), s.GetRequiredService<ApiController>(),
                 s.GetRequiredService<SpheneMediator>(), s.GetRequiredService<SpheneConfigService>()));
             collection.AddScoped((s) => new UiSharedService(s.GetRequiredService<ILogger<UiSharedService>>(), s.GetRequiredService<IpcManager>(), s.GetRequiredService<ApiController>(),
                 s.GetRequiredService<CacheMonitor>(), s.GetRequiredService<FileDialogManager>(), s.GetRequiredService<SpheneConfigService>(), s.GetRequiredService<DalamudUtilService>(),
-                pluginInterface, textureProvider, s.GetRequiredService<Dalamud.Localization>(), s.GetRequiredService<ServerConfigurationManager>(), s.GetRequiredService<TokenProvider>(),
+                _pluginInterface, _textureProvider, s.GetRequiredService<Dalamud.Localization>(), s.GetRequiredService<ServerConfigurationManager>(), s.GetRequiredService<TokenProvider>(),
                 s.GetRequiredService<SpheneMediator>()));
 
             collection.AddHostedService(p => p.GetRequiredService<ConfigurationSaveService>());
@@ -512,6 +554,7 @@ public sealed class Plugin : IDalamudPlugin
         .Build();
 
         var startTask = _host.StartAsync();
+        await startTask.ConfigureAwait(false);
         _ = startTask.ContinueWith(t =>
         {
             var logger = _host.Services.GetService<ILogger<Plugin>>();
@@ -519,9 +562,9 @@ public sealed class Plugin : IDalamudPlugin
         }, TaskContinuationOptions.OnlyOnFaulted);
     }
 
-    public void Dispose()
+    public async ValueTask DisposeAsync()
     {
-        _host.StopAsync().GetAwaiter().GetResult();
+        await _host.StopAsync().ConfigureAwait(false);
         _host.Dispose();
     }
 }
