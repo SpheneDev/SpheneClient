@@ -137,6 +137,24 @@ public class SpheneIcon : WindowMediatorSubscriberBase
         Mediator.Subscribe<NotificationMessage>(this, OnNotification);
         Mediator.Subscribe<TestIconEventMessage>(this, OnTestIconEvent);
 
+        // Subscribe to GPose messages to properly hide/show icon
+        Mediator.Subscribe<GposeStartMessage>(this, (_) =>
+        {
+            if (_configService.Current.HideSpheneIconInGpose)
+            {
+                IsOpen = false;
+                _logger.LogDebug("SpheneIcon hidden on GPose start");
+            }
+        });
+        Mediator.Subscribe<GposeEndMessage>(this, (_) =>
+        {
+            if (_configService.Current.HideSpheneIconInGpose)
+            {
+                IsOpen = _configService.Current.ShowSpheneIcon;
+                _logger.LogDebug("SpheneIcon restored on GPose end. IsOpen={IsOpen}", IsOpen);
+            }
+        });
+
         _logger.LogDebug("SpheneIcon created at position {Position}", _iconPosition);
     }
     
@@ -1161,7 +1179,15 @@ public class SpheneIcon : WindowMediatorSubscriberBase
     private void OnConfigurationChanged(object? sender, EventArgs e)
     {
         // Update icon visibility when configuration changes
-        IsOpen = _configService.Current.ShowSpheneIcon;
+        // If currently in GPose and hide-in-GPose is enabled, keep icon hidden
+        if (_dalamudUtilService.IsInGpose && _configService.Current.HideSpheneIconInGpose)
+        {
+            IsOpen = false;
+        }
+        else
+        {
+            IsOpen = _configService.Current.ShowSpheneIcon;
+        }
     }
     
     protected override void Dispose(bool disposing)
