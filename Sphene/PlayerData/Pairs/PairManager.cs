@@ -106,6 +106,13 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         Mediator.Subscribe<CharacterDataBuildNoChangesMessage>(this, (_) => ClearBuildStartPendingAcknowledgments());
         Mediator.Subscribe<GposeStartMessage>(this, (msg) => { _ = _apiController.Value.UserUpdateGposeState(true); });
         Mediator.Subscribe<GposeEndMessage>(this, (msg) => { _ = _apiController.Value.UserUpdateGposeState(false); });
+        Mediator.Subscribe<DalamudLogoutMessage>(this, (_) =>
+        {
+            foreach (var pair in _allClientPairs.Values)
+            {
+                pair.ResetSpheneDataToVanilla();
+            }
+        });
         Mediator.Subscribe<PenumbraModTransferCompletedMessage>(this, OnPenumbraModTransferCompleted);
         Mediator.Subscribe<AreaBoundSyncshellLeftMessage>(this, (msg) =>
         {
