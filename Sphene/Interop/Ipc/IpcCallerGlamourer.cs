@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Dalamud.Game.ClientState.Objects.Types;
 using Dalamud.Plugin;
 using Glamourer.Api.Helpers;
@@ -25,10 +26,13 @@ public sealed class IpcCallerGlamourer : DisposableMediatorSubscriberBase, IIpcC
     private readonly RevertStateName _glamourerRevertByName;
     private readonly UnlockState _glamourerUnlock;
     private readonly UnlockStateName _glamourerUnlockByName;
+    private readonly ReapplyStateName _glamourerReapplyByName;
     private readonly EventSubscriber<nint>? _glamourerStateChanged;
 
     private bool _shownGlamourerUnavailable = false;
     private readonly uint LockCode = 0x6D617265;
+
+    private readonly ConcurrentDictionary<nint, string> _previousStates = new();
 
     public IpcCallerGlamourer(ILogger<IpcCallerGlamourer> logger, IDalamudPluginInterface pi, DalamudUtilService dalamudUtil, SpheneMediator spheneMediator,
         RedrawManager redrawManager) : base(logger, spheneMediator)
@@ -40,6 +44,7 @@ public sealed class IpcCallerGlamourer : DisposableMediatorSubscriberBase, IIpcC
         _glamourerRevertByName = new RevertStateName(pi);
         _glamourerUnlock = new UnlockState(pi);
         _glamourerUnlockByName = new UnlockStateName(pi);
+        _glamourerReapplyByName = new ReapplyStateName(pi);
 
         _logger = logger;
         _pi = pi;
@@ -116,6 +121,22 @@ public sealed class IpcCallerGlamourer : DisposableMediatorSubscriberBase, IIpcC
             {
                 try
                 {
+                    try
+                    {
+                        var currentState = _glamourerGetAllCustomization!.Invoke(chara.ObjectIndex).Item2 ?? string.Empty;
+                        if (!string.IsNullOrEmpty(currentState))
+                        {
+                            _previousStates[handler.Address] = currentState;
+                        }
+                    }
+                    catch
+                    {
+                        // ignore snapshot failure, proceed with apply
+                    }
+
+                    logger.LogDebug("[{appid}] Calling on IPC: GlamourerRevert (pre-apply cleanup)", applicationId);
+                    _glamourerRevert.Invoke(chara.ObjectIndex, LockCode);
+
                     logger.LogDebug("[{appid}] Calling on IPC: GlamourerApplyAll", applicationId);
                     _glamourerApplyAll!.Invoke(customization, chara.ObjectIndex, LockCode);
                 }
@@ -164,8 +185,18 @@ public sealed class IpcCallerGlamourer : DisposableMediatorSubscriberBase, IIpcC
                 {
                     logger.LogDebug("[{appid}] Calling On IPC: GlamourerUnlockName", applicationId);
                     _glamourerUnlock.Invoke(chara.ObjectIndex, LockCode);
-                    logger.LogDebug("[{appid}] Calling On IPC: GlamourerRevert", applicationId);
-                    _glamourerRevert.Invoke(chara.ObjectIndex, LockCode);
+
+                    if (_previousStates.TryRemove(handler.Address, out var previousState) && !string.IsNullOrEmpty(previousState))
+                    {
+                        logger.LogDebug("[{appid}] Calling on IPC: GlamourerApplyAll (restore previous state)", applicationId);
+                        _glamourerApplyAll!.Invoke(previousState, chara.ObjectIndex, 0);
+                    }
+                    else
+                    {
+                        logger.LogDebug("[{appid}] Calling On IPC: GlamourerRevert", applicationId);
+                        _glamourerRevert.Invoke(chara.ObjectIndex, LockCode);
+                    }
+
                     logger.LogDebug("[{appid}] Calling On IPC: PenumbraRedraw", applicationId);
 
                     _spheneMediator.Publish(new PenumbraRedrawCharacterMessage(chara));
@@ -203,6 +234,8 @@ public sealed class IpcCallerGlamourer : DisposableMediatorSubscriberBase, IIpcC
             _glamourerRevertByName.Invoke(name, LockCode);
             logger.LogDebug("[{appid}] Calling On IPC: GlamourerUnlockName", applicationId);
             _glamourerUnlockByName.Invoke(name, LockCode);
+            logger.LogDebug("[{appid}] Calling On IPC: GlamourerReapplyByName", applicationId);
+            _glamourerReapplyByName.Invoke(name, LockCode);
         }
         catch (Exception ex)
         {
