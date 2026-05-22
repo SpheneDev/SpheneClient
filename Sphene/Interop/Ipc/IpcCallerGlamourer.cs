@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using Dalamud.Game.ClientState.Objects.Types;
 using Dalamud.Plugin;
+using Glamourer.Api.Enums;
 using Glamourer.Api.Helpers;
 using Glamourer.Api.IpcSubscribers;
 using Sphene.SpheneConfiguration.Models;
@@ -116,27 +117,41 @@ public sealed class IpcCallerGlamourer : DisposableMediatorSubscriberBase, IIpcC
 
         try
         {
+            await _redrawManager.PenumbraRedrawInternalAsync(logger, handler, applicationId, (chara) =>
+            {
+                try
+                {
+                    var currentState = _glamourerGetAllCustomization!.Invoke(chara.ObjectIndex).Item2 ?? string.Empty;
+                    if (!string.IsNullOrEmpty(currentState))
+                    {
+                        _previousStates[handler.Address] = currentState;
+                    }
+                }
+                catch
+                {
+                    // ignore snapshot failure
+                }
+            }, token, waitForRedrawEvent: false).ConfigureAwait(false);
 
             await _redrawManager.PenumbraRedrawInternalAsync(logger, handler, applicationId, (chara) =>
             {
                 try
                 {
-                    try
-                    {
-                        var currentState = _glamourerGetAllCustomization!.Invoke(chara.ObjectIndex).Item2 ?? string.Empty;
-                        if (!string.IsNullOrEmpty(currentState))
-                        {
-                            _previousStates[handler.Address] = currentState;
-                        }
-                    }
-                    catch
-                    {
-                        // ignore snapshot failure, proceed with apply
-                    }
-
                     logger.LogDebug("[{appid}] Calling on IPC: GlamourerRevert (pre-apply cleanup)", applicationId);
                     _glamourerRevert.Invoke(chara.ObjectIndex, LockCode);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "[{appid}] Failed to revert Glamourer data", applicationId);
+                }
+            }, token, waitForRedrawEvent: false).ConfigureAwait(false);
 
+            await Task.Delay(100, token).ConfigureAwait(false);
+
+            await _redrawManager.PenumbraRedrawInternalAsync(logger, handler, applicationId, (chara) =>
+            {
+                try
+                {
                     logger.LogDebug("[{appid}] Calling on IPC: GlamourerApplyAll", applicationId);
                     _glamourerApplyAll!.Invoke(customization, chara.ObjectIndex, LockCode);
                 }
