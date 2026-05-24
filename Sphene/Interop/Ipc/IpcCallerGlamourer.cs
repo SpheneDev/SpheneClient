@@ -117,21 +117,27 @@ public sealed class IpcCallerGlamourer : DisposableMediatorSubscriberBase, IIpcC
 
         try
         {
-            await _redrawManager.PenumbraRedrawInternalAsync(logger, handler, applicationId, (chara) =>
+            try
             {
-                try
+                var currentState = await _dalamudUtil.RunOnFrameworkThread(() =>
                 {
-                    var currentState = _glamourerGetAllCustomization!.Invoke(chara.ObjectIndex).Item2 ?? string.Empty;
-                    if (!string.IsNullOrEmpty(currentState))
+                    var gameObj = _dalamudUtil.CreateGameObject(handler.Address);
+                    if (gameObj is ICharacter chara)
                     {
-                        _previousStates[handler.Address] = currentState;
+                        return _glamourerGetAllCustomization!.Invoke(chara.ObjectIndex).Item2 ?? string.Empty;
                     }
-                }
-                catch
+                    return string.Empty;
+                }).ConfigureAwait(false);
+
+                if (!string.IsNullOrEmpty(currentState))
                 {
-                    // ignore snapshot failure
+                    _previousStates[handler.Address] = currentState;
                 }
-            }, token, waitForRedrawEvent: false).ConfigureAwait(false);
+            }
+            catch
+            {
+                // ignore snapshot failure
+            }
 
             await _redrawManager.PenumbraRedrawInternalAsync(logger, handler, applicationId, (chara) =>
             {
