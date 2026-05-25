@@ -892,7 +892,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             var applicationId = Guid.NewGuid();
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(CancellationToken.None);
             cts.CancelAfter(TimeSpan.FromSeconds(2));
-            _ipcManager.Glamourer.RevertAsync(Logger, tempHandler, applicationId, cts.Token).GetAwaiter().GetResult();
+            _ipcManager.Glamourer.RevertAsync(Logger, tempHandler, applicationId, cts.Token, restorePreviousState: false).GetAwaiter().GetResult();
             Logger.LogDebug("Restored Glamourer for {name}", name);
         }
         catch (Exception ex)
@@ -2579,7 +2579,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             using GameObjectHandler tempHandler = await _gameObjectHandlerFactory.Create(ObjectKind.Player, () => address, isWatched: false).ConfigureAwait(false);
             tempHandler.CompareNameAndThrow(name);
             Logger.LogDebug("[{applicationId}] Restoring Customization and Equipment for {alias}/{name}", applicationId, Pair.UserData.AliasOrUID, name);
-            await _ipcManager.Glamourer.RevertAsync(Logger, tempHandler, applicationId, cancelToken).ConfigureAwait(false);
+            await _ipcManager.Glamourer.RevertAsync(Logger, tempHandler, applicationId, cancelToken, restorePreviousState: false).ConfigureAwait(false);
             tempHandler.CompareNameAndThrow(name);
             Logger.LogDebug("[{applicationId}] Restoring Heels for {alias}/{name}", applicationId, Pair.UserData.AliasOrUID, name);
             await _ipcManager.Heels.RestoreOffsetForPlayerAsync(address).ConfigureAwait(false);
@@ -2603,7 +2603,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             {
                 await _ipcManager.CustomizePlus.RevertByIdAsync(customizeId).ConfigureAwait(false);
                 using GameObjectHandler tempHandler = await _gameObjectHandlerFactory.Create(ObjectKind.MinionOrMount, () => minionOrMount, isWatched: false).ConfigureAwait(false);
-                await _ipcManager.Glamourer.RevertAsync(Logger, tempHandler, applicationId, cancelToken).ConfigureAwait(false);
+                await _ipcManager.Glamourer.RevertAsync(Logger, tempHandler, applicationId, cancelToken, restorePreviousState: false).ConfigureAwait(false);
                 await _ipcManager.Penumbra.RedrawAsync(Logger, tempHandler, applicationId, cancelToken).ConfigureAwait(false);
             }
         }
@@ -2614,7 +2614,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             {
                 await _ipcManager.CustomizePlus.RevertByIdAsync(customizeId).ConfigureAwait(false);
                 using GameObjectHandler tempHandler = await _gameObjectHandlerFactory.Create(ObjectKind.Pet, () => pet, isWatched: false).ConfigureAwait(false);
-                await _ipcManager.Glamourer.RevertAsync(Logger, tempHandler, applicationId, cancelToken).ConfigureAwait(false);
+                await _ipcManager.Glamourer.RevertAsync(Logger, tempHandler, applicationId, cancelToken, restorePreviousState: false).ConfigureAwait(false);
                 await _ipcManager.Penumbra.RedrawAsync(Logger, tempHandler, applicationId, cancelToken).ConfigureAwait(false);
             }
         }
@@ -2625,7 +2625,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             {
                 await _ipcManager.CustomizePlus.RevertByIdAsync(customizeId).ConfigureAwait(false);
                 using GameObjectHandler tempHandler = await _gameObjectHandlerFactory.Create(ObjectKind.Pet, () => companion, isWatched: false).ConfigureAwait(false);
-                await _ipcManager.Glamourer.RevertAsync(Logger, tempHandler, applicationId, cancelToken).ConfigureAwait(false);
+                await _ipcManager.Glamourer.RevertAsync(Logger, tempHandler, applicationId, cancelToken, restorePreviousState: false).ConfigureAwait(false);
                 await _ipcManager.Penumbra.RedrawAsync(Logger, tempHandler, applicationId, cancelToken).ConfigureAwait(false);
             }
         }

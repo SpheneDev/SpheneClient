@@ -33,7 +33,7 @@ public sealed class IpcCallerGlamourer : DisposableMediatorSubscriberBase, IIpcC
     private bool _shownGlamourerUnavailable = false;
     private readonly uint LockCode = 0x6D617265;
 
-    private readonly ConcurrentDictionary<nint, string> _previousStates = new();
+    private readonly ConcurrentDictionary<nint, PreviousGlamourerState> _previousStates = new();
 
     public IpcCallerGlamourer(ILogger<IpcCallerGlamourer> logger, IDalamudPluginInterface pi, DalamudUtilService dalamudUtil, SpheneMediator spheneMediator,
         RedrawManager redrawManager) : base(logger, spheneMediator)
@@ -52,6 +52,9 @@ public sealed class IpcCallerGlamourer : DisposableMediatorSubscriberBase, IIpcC
         _dalamudUtil = dalamudUtil;
         _spheneMediator = spheneMediator;
         _redrawManager = redrawManager;
+
+        Mediator.Subscribe<DalamudLogoutMessage>(this, (_) => _previousStates.Clear());
+        Mediator.Subscribe<DisconnectedMessage>(this, (_) => _previousStates.Clear());
         CheckAPI();
 
         _glamourerStateChanged = StateChanged.Subscriber(pi, GlamourerChanged);
@@ -131,7 +134,7 @@ public sealed class IpcCallerGlamourer : DisposableMediatorSubscriberBase, IIpcC
 
                 if (!string.IsNullOrEmpty(currentState))
                 {
-                    _previousStates[handler.Address] = currentState;
+                    _previousStates[handler.Address] = new PreviousGlamourerState(handler.Name, currentState);
                 }
             }
             catch
@@ -194,7 +197,7 @@ public sealed class IpcCallerGlamourer : DisposableMediatorSubscriberBase, IIpcC
         }
     }
 
-    public async Task RevertAsync(ILogger logger, GameObjectHandler handler, Guid applicationId, CancellationToken token)
+    public async Task RevertAsync(ILogger logger, GameObjectHandler handler, Guid applicationId, CancellationToken token, bool restorePreviousState = true)
     {
         if ((!APIAvailable) || _dalamudUtil.IsZoning) return;
         try
@@ -207,10 +210,13 @@ public sealed class IpcCallerGlamourer : DisposableMediatorSubscriberBase, IIpcC
                     logger.LogDebug("[{appid}] Calling On IPC: GlamourerUnlockName", applicationId);
                     _glamourerUnlock.Invoke(chara.ObjectIndex, LockCode);
 
-                    if (_previousStates.TryRemove(handler.Address, out var previousState) && !string.IsNullOrEmpty(previousState))
+                    if (restorePreviousState
+                        && _previousStates.TryRemove(handler.Address, out var previousState)
+                        && !string.IsNullOrEmpty(previousState.State)
+                        && string.Equals(previousState.PlayerName, handler.Name, StringComparison.OrdinalIgnoreCase))
                     {
                         logger.LogDebug("[{appid}] Calling on IPC: GlamourerApplyAll (restore previous state)", applicationId);
-                        _glamourerApplyAll!.Invoke(previousState, chara.ObjectIndex, 0);
+                        _glamourerApplyAll!.Invoke(previousState.State, chara.ObjectIndex, 0);
                     }
                     else
                     {
@@ -269,4 +275,6 @@ public sealed class IpcCallerGlamourer : DisposableMediatorSubscriberBase, IIpcC
     {
         _spheneMediator.Publish(new GlamourerChangedMessage(address));
     }
+
+    private sealed record PreviousGlamourerState(string PlayerName, string State);
 }
