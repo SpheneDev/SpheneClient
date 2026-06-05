@@ -99,11 +99,11 @@ public sealed class IpcCallerPenumbra : DisposableMediatorSubscriberBase, IIpcCa
 
         Mediator.Subscribe<DalamudLoginMessage>(this, (msg) => _shownPenumbraUnavailable = false);
 
-        Mediator.Subscribe<DalamudLogoutMessage>(this, (_) =>
+        Mediator.Subscribe<DalamudLogoutMessage>(this, (msg) =>
         {
             if (APIAvailable)
             {
-                Task.Run(async () => await CleanupAllTemporaryCollectionsAsync(Logger).ConfigureAwait(false));
+                _ = Task.Run(async () => await CleanupAllTemporaryCollectionsAsync(Logger).ConfigureAwait(false));
             }
         });
     }

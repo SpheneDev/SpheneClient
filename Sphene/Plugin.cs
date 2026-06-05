@@ -66,14 +66,13 @@ public sealed class Plugin : IAsyncDalamudPlugin
     private readonly IContextMenu _contextMenu;
     private readonly IGameInteropProvider _gameInteropProvider;
     private readonly IGameConfig _gameConfig;
-    private readonly ISigScanner _sigScanner;
     private readonly IPartyList _partyList;
 
     public Plugin(IDalamudPluginInterface pluginInterface, ICommandManager commandManager, IDataManager gameData,
         IFramework framework, IObjectTable objectTable, IClientState clientState, ICondition condition, IChatGui chatGui,
         IGameGui gameGui, IDtrBar dtrBar, IPluginLog pluginLog, ITargetManager targetManager, INotificationManager notificationManager,
         ITextureProvider textureProvider, IContextMenu contextMenu, IGameInteropProvider gameInteropProvider, IGameConfig gameConfig,
-        ISigScanner sigScanner, IPartyList partyList)
+        IPartyList partyList)
     {
         _pluginInterface = pluginInterface;
         _commandManager = commandManager;
@@ -92,11 +91,10 @@ public sealed class Plugin : IAsyncDalamudPlugin
         _contextMenu = contextMenu;
         _gameInteropProvider = gameInteropProvider;
         _gameConfig = gameConfig;
-        _sigScanner = sigScanner;
         _partyList = partyList;
     }
 
-    public async Task LoadAsync(CancellationToken token)
+    public async Task LoadAsync(CancellationToken cancellationToken)
     {
         var otherName = string.Equals(_pluginInterface.InternalName, TestInternalName, StringComparison.OrdinalIgnoreCase)
             ? StableInternalName
