@@ -94,15 +94,19 @@ jobs:
     - name: Create release package
       run: |
         $version = "${{ steps.get_version.outputs.version }}"
+        $isRelease = "${{ github.event.inputs.is_release }}"
+        $assemblyName = if ($isRelease -eq "true") { "Sphene" } else { "SpheneTest" }
         $outputDir = "Sphene-v$version"
         New-Item -ItemType Directory -Path $outputDir -Force
         
-        # Copy all files from Release directory except Sphene subfolder
-        Get-ChildItem "Sphene/bin/x64/Release/" -File | Copy-Item -Destination $outputDir
+        $releasePath = "$assemblyName/bin/x64/Release/"
         
-        # Copy all subdirectories except Sphene subfolder
-        Get-ChildItem "Sphene/bin/x64/Release/" -Directory | Where-Object {
-          $_.Name -ne 'Sphene'
+        # Copy all files from Release directory except the plugin subfolder
+        Get-ChildItem "$releasePath" -File | Copy-Item -Destination $outputDir
+        
+        # Copy all subdirectories except the plugin subfolder
+        Get-ChildItem "$releasePath" -Directory | Where-Object {
+          $_.Name -ne $assemblyName
         } | Copy-Item -Destination $outputDir -Recurse
         
         # Create zip file
@@ -119,76 +123,94 @@ jobs:
         path: temp-repo
         token: ${{ secrets.REPO_ACCESS_TOKEN }}
         
-    - name: Update plogonmaster.json in repo
+    - name: Update repo JSON
       run: |
         cd temp-repo
-        
+
         # Configure git
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
-        
-        # Read full plugin array
-        $jsonArray = Get-Content "plogonmaster.json" -Raw | ConvertFrom-Json
-        
-        # Determine new version and tag
+
+        $isReleaseInput = "${{ github.event.inputs.is_release }}"
         $version = "${{ steps.get_version.outputs.version }}"
         $newTag = "${{ steps.get_version.outputs.tag }}"
-        $spheneEntry = $jsonArray | Where-Object { $_.InternalName -eq 'Sphene' -or $_.Name -eq 'Sphene' }
-        if ($null -eq $spheneEntry) {
-          Write-Error "Sphene entry not found in plogonmaster.json"
+
+        if ($isReleaseInput -eq "true") {
+          $repoFile = "plogonmaster.json"
+          $entryName = "Sphene"
+        } else {
+          $repoFile = "testplogon.json"
+          $entryName = "SpheneTest"
+        }
+
+        # Read full plugin array
+        $jsonArray = Get-Content $repoFile -Raw | ConvertFrom-Json
+
+        $entry = $jsonArray | Where-Object { $_.InternalName -eq $entryName -or $_.Name -eq $entryName }
+        if ($null -eq $entry) {
+          Write-Error "Entry '$entryName' not found in $repoFile"
           exit 1
         }
-        
-        $isReleaseInput = "${{ github.event.inputs.is_release }}"
-        if ($isReleaseInput -eq "true") {
-          $spheneEntry.AssemblyVersion = $version
-          $spheneEntry.DownloadLinkInstall = "https://github.com/SpheneDev/SpheneClient/releases/download/$newTag/latest.zip"
-          $spheneEntry.DownloadLinkUpdate = "https://github.com/SpheneDev/SpheneClient/releases/download/$newTag/latest.zip"
-        } else {
-          $spheneEntry.TestingAssemblyVersion = $version
-          $spheneEntry.DownloadLinkTesting = "https://github.com/SpheneDev/SpheneClient/releases/download/$newTag/latest.zip"
-        }
-        
+
+        $entry.AssemblyVersion = $version
+        $entry.DownloadLinkInstall = "https://github.com/SpheneDev/SpheneClient/releases/download/$newTag/latest.zip"
+        $entry.DownloadLinkUpdate = "https://github.com/SpheneDev/SpheneClient/releases/download/$newTag/latest.zip"
+
         # Write back the full array, preserving all entries
-        $jsonArray | ConvertTo-Json -Depth 10 | Set-Content "plogonmaster.json" -Encoding UTF8
-        
+        $jsonArray | ConvertTo-Json -Depth 10 | Set-Content $repoFile -Encoding UTF8
+
         # Commit and push changes
-        git add plogonmaster.json
-        git commit -m "Auto-update version to $version"
+        git add $repoFile
+        git commit -m "Auto-update $entryName version to $version"
         git push origin main
-        
+
         cd ..
         Remove-Item -Recurse -Force temp-repo
       shell: powershell
+      
+    - name: Generate release body
+      run: |
+        $isRelease = "${{ github.event.inputs.is_release }}"
+        $version = "${{ steps.get_version.outputs.version }}"
+        $repoUrl = if ($isRelease -eq "true") { "plogonmaster.json" } else { "testplogon.json" }
+        $pluginName = if ($isRelease -eq "true") { "Sphene" } else { "SpheneTest" }
+        $buildType = if ($isRelease -eq "true") { "Release" } else { "Testbuild" }
+        
+        $body = @"
+        ## Sphene Client $buildType v$version
+        
+        ### Installation via Dalamud Plugin Repository
+        
+        **Recommended Method:**
+        1. Open Dalamud Settings in-game (`/xlsettings`)
+        2. Go to "Experimental" tab
+        3. Add this repository URL: `https://raw.githubusercontent.com/SpheneDev/repo/refs/heads/main/$repoUrl`
+        4. Install "$pluginName" from the plugin installer
+        
+        ### Manual Installation
+        1. Download the `latest.zip` file from this release
+        2. Extract it to your Dalamud plugins directory
+        3. Restart Final Fantasy XIV or reload Dalamud plugins
+        
+        ### Registration Required
+        Before using Sphene, join our [Discord Server](https://discord.gg/GbnwsP2XsF) and register in the `#sphene-registration` channel to get your Secret Key.
+        
+        ### Changes
+        See commit history for detailed changes in this $buildType.
+        
+        **Full Changelog**: https://github.com/${{ github.repository }}/commits/${{ github.ref_name }}
+        "@
+        
+        $body | Out-File -FilePath "release_body.md" -Encoding utf8
+      shell: powershell
+      id: body
       
     - name: Create Release
       uses: softprops/action-gh-release@v2
       with:
         tag_name: ${{ steps.get_version.outputs.tag }}
         name: ${{ github.event.inputs.is_release == 'true' && format('Sphene Client v{0}', steps.get_version.outputs.version) || format('Sphene Client Testbuild v{0}', steps.get_version.outputs.version) }}
-        body: |
-          ## Sphene Client Release v${{ steps.get_version.outputs.version }}
-          
-          ### Installation via Dalamud Plugin Repository
-          
-          **Recommended Method:**
-          1. Open Dalamud Settings in-game (`/xlsettings`)
-          2. Go to "Experimental" tab
-          3. Add this repository URL: `https://raw.githubusercontent.com/SpheneDev/repo/refs/heads/main/plogonmaster.json`
-          4. Install "Sphene" from the plugin installer
-          
-          ### Manual Installation
-          1. Download the `latest.zip` file from this release
-          2. Extract it to your Dalamud plugins directory
-          3. Restart Final Fantasy XIV or reload Dalamud plugins
-          
-          ### Registration Required
-          Before using Sphene, join our [Discord Server](https://discord.gg/GbnwsP2XsF) and register in the `#sphene-registration` channel to get your Secret Key.
-          
-          ### Changes
-          See commit history for detailed changes in this release.
-          
-          **Full Changelog**: https://github.com/${{ github.repository }}/commits/${{ github.ref_name }}
+        body_path: release_body.md
         files: |
           ${{ steps.package.outputs.zip_name }}
         draft: false

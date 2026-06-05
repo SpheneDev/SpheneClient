@@ -38,13 +38,17 @@ using ShrinkU.Configuration;
 using ShrinkU.Interop;
 using ShrinkU.UI;
 using System;
+using System.Collections;
 using System.IO;
 
 namespace Sphene;
 
 public sealed class Plugin : IAsyncDalamudPlugin
 {
-    private IHost _host;
+    private const string StableInternalName = "Sphene";
+    private const string TestInternalName = "SpheneTest";
+
+    private IHost _host = null!;
     private readonly IDalamudPluginInterface _pluginInterface;
     private readonly ICommandManager _commandManager;
     private readonly IDataManager _gameData;
@@ -94,6 +98,18 @@ public sealed class Plugin : IAsyncDalamudPlugin
 
     public async Task LoadAsync(CancellationToken token)
     {
+        var otherName = string.Equals(_pluginInterface.InternalName, TestInternalName, StringComparison.OrdinalIgnoreCase)
+            ? StableInternalName
+            : TestInternalName;
+
+        if (IsOtherVariantLoaded(otherName))
+        {
+            _chatGui.PrintError($"[{_pluginInterface.InternalName}] Cannot load while {otherName} is active. Disabling...");
+            _pluginLog.Warning("Mutual exclusion: {Other} is already loaded. Self-disabling {Self}.", otherName, _pluginInterface.InternalName);
+            _ = Task.Run(async () => await DisableSelfAsync().ConfigureAwait(false));
+            return;
+        }
+
         if (!Directory.Exists(_pluginInterface.ConfigDirectory.FullName))
             Directory.CreateDirectory(_pluginInterface.ConfigDirectory.FullName);
         var traceDir = Path.Join(_pluginInterface.ConfigDirectory.FullName, "tracelog");
@@ -564,7 +580,124 @@ public sealed class Plugin : IAsyncDalamudPlugin
 
     public async ValueTask DisposeAsync()
     {
-        await _host.StopAsync().ConfigureAwait(false);
-        _host.Dispose();
+        if (_host != null)
+        {
+            await _host.StopAsync().ConfigureAwait(false);
+            _host.Dispose();
+        }
+    }
+
+    private bool IsOtherVariantLoaded(string otherName)
+    {
+        foreach (var plugin in _pluginInterface.InstalledPlugins)
+        {
+            var internalNameProp = plugin.GetType().GetProperty("InternalName");
+            var internalName = internalNameProp?.GetValue(plugin)?.ToString();
+            if (!string.Equals(internalName, otherName, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            var isLoadedProp = plugin.GetType().GetProperty("IsLoaded");
+            if (isLoadedProp?.GetValue(plugin) is bool isLoaded && isLoaded)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarQube", "S3011:Reflection should not be used to increase accessibility of classes, methods, or fields", Justification = "Accessing internal Dalamud methods for plugin management.")]
+    private async Task DisableSelfAsync()
+    {
+        try
+        {
+            var assembly = typeof(IDalamudPluginInterface).Assembly;
+            var serviceType = assembly.DefinedTypes.FirstOrDefault(t => string.Equals(t.Name, "Service`1", StringComparison.Ordinal) && t.IsGenericType);
+            var pluginManagerType = assembly.DefinedTypes.FirstOrDefault(t => string.Equals(t.Name, "PluginManager", StringComparison.Ordinal));
+
+            if (serviceType == null || pluginManagerType == null)
+            {
+                _pluginLog.Warning("Could not find Service<> or PluginManager types for self-disable.");
+                return;
+            }
+
+            var pluginManagerService = serviceType.MakeGenericType(pluginManagerType);
+            var pluginManagerGetter = pluginManagerService.GetMethod("Get", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+            if (pluginManagerGetter == null)
+            {
+                _pluginLog.Warning("Could not find Service.Get() method for PluginManager.");
+                return;
+            }
+
+            var pluginManager = pluginManagerGetter.Invoke(null, null);
+            if (pluginManager == null)
+            {
+                _pluginLog.Warning("Could not retrieve PluginManager instance.");
+                return;
+            }
+
+            var installedPluginsProp = pluginManagerType.GetProperty("InstalledPlugins", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            if (installedPluginsProp == null)
+            {
+                _pluginLog.Warning("Could not find InstalledPlugins property.");
+                return;
+            }
+
+            var installedPlugins = installedPluginsProp.GetValue(pluginManager) as IEnumerable;
+            if (installedPlugins == null)
+            {
+                _pluginLog.Warning("InstalledPlugins is null.");
+                return;
+            }
+
+            foreach (var plugin in installedPlugins)
+            {
+                var nameProp = plugin.GetType().GetProperty("InternalName");
+                var currentName = nameProp?.GetValue(plugin)?.ToString();
+                if (!string.Equals(currentName, _pluginInterface.InternalName, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var isLoadedProp = plugin.GetType().GetProperty("IsLoaded");
+                if (isLoadedProp?.GetValue(plugin) is bool isLoaded && !isLoaded)
+                {
+                    return;
+                }
+
+                var unloadMethod = plugin.GetType().GetMethod("UnloadAsync", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                if (unloadMethod == null)
+                {
+                    _pluginLog.Warning("Could not find UnloadAsync on LocalPlugin.");
+                    return;
+                }
+
+                object? result;
+                var parameters = unloadMethod.GetParameters();
+                if (parameters.Length == 0)
+                {
+                    result = unloadMethod.Invoke(plugin, null);
+                }
+                else if (parameters.Length == 1)
+                {
+                    var paramType = parameters[0].ParameterType;
+                    object? paramValue = paramType.IsEnum
+                        ? Enum.Parse(paramType, "WaitBeforeDispose")
+                        : Activator.CreateInstance(paramType);
+                    result = unloadMethod.Invoke(plugin, new[] { paramValue });
+                }
+                else
+                {
+                    result = null;
+                }
+
+                if (result is Task task) await task.ConfigureAwait(false);
+                return;
+            }
+        }
+        catch (Exception ex)
+        {
+            _pluginLog.Error(ex, "Failed to disable self via reflection.");
+        }
     }
 }
