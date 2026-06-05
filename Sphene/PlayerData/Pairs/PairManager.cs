@@ -604,7 +604,8 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
                 // Only mark offline if not directly paired and has no other group connections
                 if (!item.Value.UserPair.Groups.Any() && !item.Value.IsDirectlyPaired)
                 {
-                    item.Value.MarkOffline();
+                    item.Value.ResetSpheneDataToVanilla();
+                    item.Value.MarkOffline(wait: true, endGracePeriod: true);
                     _allClientPairs.TryRemove(item.Key, out _);
                 }
             }
@@ -623,7 +624,8 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
             // Directly paired users should remain online regardless of group membership
             if (!pair.UserPair.Groups.Any() && !pair.IsDirectlyPaired)
             {
-                pair.MarkOffline();
+                pair.ResetSpheneDataToVanilla();
+                pair.MarkOffline(wait: true, endGracePeriod: true);
                 _allClientPairs.TryRemove(dto.User, out _);
             }
         }
