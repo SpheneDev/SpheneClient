@@ -428,6 +428,7 @@ public sealed class Plugin : IAsyncDalamudPlugin
             collection.AddSingleton<IConfigService<ISpheneConfiguration>>(s => s.GetRequiredService<CharaDataConfigService>());
             collection.AddSingleton<ConfigurationMigrator>();
             collection.AddSingleton<ConfigurationSaveService>();
+            collection.AddSingleton<ConfigBackupService>();
 
             collection.AddSingleton<HubFactory>();
             

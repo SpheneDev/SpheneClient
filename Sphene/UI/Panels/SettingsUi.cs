@@ -28,10 +28,12 @@ using Sphene.WebAPI.Files.Models;
 using Sphene.WebAPI.SignalR.Utils;
 using Sphene.UI.Components;
 using Sphene.UI.Theme;
+using ShrinkU.Configuration;
 using Microsoft.AspNetCore.Http.Connections;
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.IO;
 using System.Globalization;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -108,7 +110,19 @@ public class SettingsUi : WindowMediatorSubscriberBase
     private bool _preferIconThemeTab = false;
     private bool _preferSoundsThemeTab = false;
     private bool _preferButtonStylesTab = false;
-
+    private readonly ConfigBackupService _configBackupService;
+    private readonly ShrinkUConfigService _shrinkUConfigService;
+    private bool _showExportModal = false;
+    private bool _showImportModal = false;
+    private string _exportPassword = string.Empty;
+    private string _importPassword = string.Empty;
+    private string _importFilePath = string.Empty;
+    private bool _importRestoreCachePath = true;
+    private bool _importRestoreShrinkUPath = true;
+    private string? _lastImportError = null;
+    private string? _lastImportSuccess = null;
+    private string _backupCachePath = string.Empty;
+    private string _backupShrinkUPath = string.Empty;
 
     public SettingsUi(ILogger<SettingsUi> logger,
         UiSharedService uiShared, SpheneConfigService configService,
@@ -125,7 +139,9 @@ public class SettingsUi : WindowMediatorSubscriberBase
         DalamudUtilService dalamudUtilService, HttpClient httpClient,
         ChangelogService changelogService,
         GameSoundManager gameSoundManager,
-        FileDialogManager fileDialogManager) : base(logger, mediator, "Network Configuration", performanceCollector)
+        FileDialogManager fileDialogManager,
+        ConfigBackupService configBackupService,
+        ShrinkUConfigService shrinkUConfigService) : base(logger, mediator, "Network Configuration", performanceCollector)
     {
         _configService = configService;
         _pairManager = pairManager;
@@ -146,6 +162,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
         _changelogService = changelogService;
         _gameSoundManager = gameSoundManager;
         _fileDialogManager = fileDialogManager;
+        _configBackupService = configBackupService;
+        _shrinkUConfigService = shrinkUConfigService;
         _shrinkUVersion = GetShrinkUAssemblyVersion();
         AllowClickthrough = false;
         AllowPinning = false;
@@ -299,10 +317,14 @@ public class SettingsUi : WindowMediatorSubscriberBase
         }
 
         DrawSettingsContent();
-        
+
         // Draw theme save prompt if needed
         DrawThemeSavePrompt();
         DrawUnsavedCustomThemePrompt();
+
+        // Draw backup/restore modals
+        DrawExportBackupModal();
+        DrawImportBackupModal();
     }
     
 
@@ -2241,9 +2263,229 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 onDisableAction: async () => await _uiShared.DisablePluginViaReflectionAsync("BypassEmote").ConfigureAwait(false));
         });
 
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+        UiSharedService.ColorText("Backup & Restore", ImGuiColors.ParsedBlue);
+        UiSharedService.ColorTextWrapped("Export or import all Sphene settings in a single file. Secret keys can be protected with a password.", ImGuiColors.DalamudGrey);
+        ImGui.Spacing();
 
+        if (_uiShared.IconTextButton(FontAwesomeIcon.FileExport, "Export Config Backup"))
+        {
+            _showExportModal = true;
+            _exportPassword = string.Empty;
+            _lastImportError = null;
+            _lastImportSuccess = null;
+        }
+        ImGui.SameLine();
+        if (_uiShared.IconTextButton(FontAwesomeIcon.FileImport, "Import Config Backup"))
+        {
+            _showImportModal = true;
+            _importPassword = string.Empty;
+            _importFilePath = string.Empty;
+            _lastImportError = null;
+            _lastImportSuccess = null;
+            _importRestoreCachePath = true;
+            _importRestoreShrinkUPath = true;
+            _backupCachePath = string.Empty;
+            _backupShrinkUPath = string.Empty;
+        }
+
+        if (!string.IsNullOrEmpty(_lastImportSuccess))
+        {
+            ImGui.Spacing();
+            ImGui.TextColored(ImGuiColors.ParsedGreen, _lastImportSuccess);
+        }
+        if (!string.IsNullOrEmpty(_lastImportError))
+        {
+            ImGui.Spacing();
+            ImGui.TextColored(ImGuiColors.DalamudRed, _lastImportError);
+        }
     }
 
+    private void DrawExportBackupModal()
+    {
+        if (!_showExportModal) return;
+
+        var center = (ImGui.GetMainViewport().Size / 2) + ImGui.GetMainViewport().Pos;
+        ImGui.SetNextWindowPos(center, ImGuiCond.Appearing, new Vector2(0.5f, 0.5f));
+        ImGui.SetNextWindowSizeConstraints(new Vector2(400, 180), new Vector2(600, 300));
+
+        if (ImGui.Begin("Export Config Backup", ref _showExportModal, ImGuiWindowFlags.AlwaysAutoResize | ImGuiWindowFlags.NoCollapse))
+        {
+            using (SpheneCustomTheme.ApplyContextMenuTheme())
+            {
+                UiSharedService.ColorTextWrapped("Enter an optional password to protect secret keys. Leave blank for unencrypted export.", ImGuiColors.DalamudGrey);
+                ImGuiHelpers.ScaledDummy(5);
+                ImGui.TextUnformatted("Password (optional):");
+                ImGui.InputText("##exportPassword", ref _exportPassword, 64, ImGuiInputTextFlags.Password);
+                ImGuiHelpers.ScaledDummy(10);
+
+                var buttonSize = (ImGui.GetWindowContentRegionMax().X - ImGui.GetWindowContentRegionMin().X -
+                                  ImGui.GetStyle().ItemSpacing.X) / 2;
+
+                if (ImGui.Button("Export", new Vector2(buttonSize, 0)))
+                {
+                    var defaultFileName = $"sphene-backup-{DateTime.Now:yyyyMMdd-HHmmss}.json";
+                    _fileDialogManager.SaveFileDialog("Export Config Backup", ".json", defaultFileName, "json", (success, path) =>
+                    {
+                        if (success && !string.IsNullOrEmpty(path))
+                        {
+                            try
+                            {
+                                _configBackupService.ExportToFile(path, string.IsNullOrWhiteSpace(_exportPassword) ? null : _exportPassword);
+                                _lastImportSuccess = $"Backup exported to {Path.GetFileName(path)}";
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogError(ex, "Failed to export config backup");
+                                _lastImportError = "Failed to export backup: " + ex.Message;
+                            }
+                        }
+                        _showExportModal = false;
+                    });
+                }
+
+                ImGui.SameLine();
+                if (ImGui.Button("Cancel", new Vector2(buttonSize, 0)))
+                {
+                    _showExportModal = false;
+                }
+            }
+            ImGui.End();
+        }
+    }
+
+    private void DrawImportBackupModal()
+    {
+        if (!_showImportModal) return;
+
+        var center = (ImGui.GetMainViewport().Size / 2) + ImGui.GetMainViewport().Pos;
+        ImGui.SetNextWindowPos(center, ImGuiCond.Appearing, new Vector2(0.5f, 0.5f));
+        ImGui.SetNextWindowSizeConstraints(new Vector2(450, 250), new Vector2(700, 500));
+
+        if (ImGui.Begin("Import Config Backup", ref _showImportModal, ImGuiWindowFlags.AlwaysAutoResize | ImGuiWindowFlags.NoCollapse))
+        {
+            using (SpheneCustomTheme.ApplyContextMenuTheme())
+            {
+                if (string.IsNullOrEmpty(_importFilePath))
+                {
+                    UiSharedService.ColorTextWrapped("Select a backup file to restore all settings.", ImGuiColors.DalamudGrey);
+                    ImGuiHelpers.ScaledDummy(5);
+                    if (ImGui.Button("Select Backup File", new Vector2(0, 0)))
+                    {
+                        _fileDialogManager.OpenFileDialog("Import Config Backup", ".json", (success, path) =>
+                        {
+                            if (success && !string.IsNullOrEmpty(path) && File.Exists(path))
+                            {
+                                _importFilePath = path;
+                                try
+                                {
+                                    var json = File.ReadAllText(path);
+                                    var dto = JsonSerializer.Deserialize<SpheneBackupDto>(json);
+                                    if (dto != null)
+                                    {
+                                        _backupCachePath = ConfigBackupService.GetBackupCacheFolderPath(dto);
+                                        _backupShrinkUPath = ConfigBackupService.GetBackupShrinkUPath(dto);
+                                    }
+                                }
+                                catch { /* ignore */ }
+                            }
+                        });
+                    }
+                }
+                else
+                {
+                    UiSharedService.ColorTextWrapped($"Selected: {Path.GetFileName(_importFilePath)}", ImGuiColors.ParsedGreen);
+                    ImGuiHelpers.ScaledDummy(5);
+
+                    if (string.IsNullOrEmpty(_importPassword))
+                    {
+                        UiSharedService.ColorTextWrapped("If the backup is password-protected, enter the password below. Otherwise leave blank.", ImGuiColors.DalamudGrey);
+                    }
+                    ImGui.TextUnformatted("Password (if encrypted):");
+                    ImGui.InputText("##importPassword", ref _importPassword, 64, ImGuiInputTextFlags.Password);
+                    ImGuiHelpers.ScaledDummy(10);
+
+                    DrawSettingsSectionHeader("Path Options", "Choose whether to restore folder paths from the backup or keep current paths.");
+
+                    var currentCache = _configService.Current.CacheFolder;
+                    if (!string.IsNullOrEmpty(_backupCachePath))
+                    {
+                        ImGui.Checkbox($"Restore Cache Folder from backup: {_backupCachePath}", ref _importRestoreCachePath);
+                        if (!_importRestoreCachePath)
+                        {
+                            ImGui.Indent();
+                            UiSharedService.ColorTextWrapped($"Current cache folder will be kept: {currentCache}", ImGuiColors.DalamudGrey);
+                            ImGui.Unindent();
+                        }
+                    }
+                    else
+                    {
+                        _importRestoreCachePath = false;
+                        UiSharedService.ColorTextWrapped("No cache folder path in backup.", ImGuiColors.DalamudGrey);
+                    }
+
+                    ImGuiHelpers.ScaledDummy(5);
+
+                    var currentShrinkU = _shrinkUConfigService?.Current?.BackupFolderPath ?? "Not configured";
+                    if (!string.IsNullOrEmpty(_backupShrinkUPath))
+                    {
+                        ImGui.Checkbox($"Restore ShrinkU Backup Folder from backup: {_backupShrinkUPath}", ref _importRestoreShrinkUPath);
+                        if (!_importRestoreShrinkUPath)
+                        {
+                            ImGui.Indent();
+                            UiSharedService.ColorTextWrapped($"Current ShrinkU folder will be kept: {currentShrinkU}", ImGuiColors.DalamudGrey);
+                            ImGui.Unindent();
+                        }
+                    }
+                    else
+                    {
+                        _importRestoreShrinkUPath = false;
+                        UiSharedService.ColorTextWrapped("No ShrinkU backup folder path in backup.", ImGuiColors.DalamudGrey);
+                    }
+
+                    ImGuiHelpers.ScaledDummy(10);
+
+                    var buttonSize = (ImGui.GetWindowContentRegionMax().X - ImGui.GetWindowContentRegionMin().X -
+                                      ImGui.GetStyle().ItemSpacing.X) / 2;
+
+                    if (ImGui.Button("Import", new Vector2(buttonSize, 0)))
+                    {
+                        try
+                        {
+                            var password = string.IsNullOrWhiteSpace(_importPassword) ? null : _importPassword;
+                            var result = _configBackupService.ImportFromFile(_importFilePath, password, _importRestoreCachePath, _importRestoreShrinkUPath, _shrinkUConfigService);
+                            if (result.Success)
+                            {
+                                _lastImportSuccess = $"Import completed: {result.RestoredCount} config(s) restored, {result.SkippedCount} skipped, {result.FailedCount} failed.";
+                                _lastImportError = null;
+                            }
+                            else
+                            {
+                                _lastImportError = result.ErrorMessage ?? "Import failed.";
+                                _lastImportSuccess = null;
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex, "Failed to import config backup");
+                            _lastImportError = "Failed to import backup: " + ex.Message;
+                            _lastImportSuccess = null;
+                        }
+                        _showImportModal = false;
+                    }
+
+                    ImGui.SameLine();
+                    if (ImGui.Button("Cancel", new Vector2(buttonSize, 0)))
+                    {
+                        _showImportModal = false;
+                    }
+                }
+            }
+            ImGui.End();
+        }
+    }
 
     private void DrawGeneralUserManagement()
     {
