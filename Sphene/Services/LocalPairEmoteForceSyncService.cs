@@ -319,7 +319,7 @@ public sealed class LocalPairEmoteForceSyncService : DisposableMediatorSubscribe
 
         var character = (Character*)characterAddress;
         if (character->DrawObject == null) return false;
-        if (character->DrawObject->GetObjectType() != ObjectType.CharacterBase) return false;
+        if (character->DrawObject->GetObjectType() != FFXIVClientStructs.FFXIV.Client.Graphics.Scene.ObjectType.CharacterBase) return false;
         if (((CharacterBase*)character->DrawObject)->GetModelType() != CharacterBase.ModelType.Human) return false;
 
         var human = (Human*)character->DrawObject;
