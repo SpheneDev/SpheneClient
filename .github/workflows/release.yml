@@ -157,7 +157,7 @@ jobs:
         $entry.DownloadLinkUpdate = "https://github.com/SpheneDev/SpheneClient/releases/download/$newTag/latest.zip"
 
         # Write back the full array, preserving all entries
-        @($jsonArray) | ConvertTo-Json -Depth 10 | Set-Content $repoFile -Encoding UTF8
+        $jsonArray | ConvertTo-Json -Depth 10 -AsArray | Set-Content $repoFile -Encoding UTF8
 
         # Commit and push changes
         git add $repoFile
