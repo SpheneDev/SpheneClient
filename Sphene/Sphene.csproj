@@ -35,6 +35,9 @@
 
   <PropertyGroup Condition="'$(IsTestBuild)' == 'true'">
     <DefineConstants>$(DefineConstants);IS_TEST_BUILD</DefineConstants>
+    <Name>SpheneTest</Name>
+    <InternalName>sphenetest</InternalName>
+    <AssemblyName>SpheneTest</AssemblyName>
   </PropertyGroup>
 
   <ItemGroup Condition="'$(IsTestBuild)' == 'true'">
