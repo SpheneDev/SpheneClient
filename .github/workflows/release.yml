@@ -99,7 +99,7 @@ jobs:
         $outputDir = "Sphene-v$version"
         New-Item -ItemType Directory -Path $outputDir -Force
         
-        $releasePath = "$assemblyName/bin/x64/Release/"
+        $releasePath = "Sphene/bin/x64/Release/"
         
         # Copy all files from Release directory except the plugin subfolder
         Get-ChildItem "$releasePath" -File | Copy-Item -Destination $outputDir
