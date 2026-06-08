@@ -77,6 +77,12 @@ public sealed class IpcCallerMoodles : IIpcCaller
             return await _dalamudUtil.RunOnFrameworkThread(() => _moodlesGetStatus.InvokeFunc(address)).ConfigureAwait(false);
 
         }
+        catch (InvalidOperationException e)
+        {
+            _logger.LogWarning(e, "Invalid operation getting Moodles Status");
+            _spheneMediator.Publish(new DebugLogEventMessage(LogLevel.Warning, "IPC", "Moodles GetStatus failed", Details: e.ToString()));
+            return null;
+        }
         catch (Exception e)
         {
             _logger.LogWarning(e, "Could not Get Moodles Status");
@@ -92,6 +98,11 @@ public sealed class IpcCallerMoodles : IIpcCaller
         {
             var updatedStatus = await UpdateApplierToLocalPlayerAsync(status).ConfigureAwait(false);
             await _dalamudUtil.RunOnFrameworkThread(() => _moodlesSetStatus.InvokeAction(pointer, updatedStatus)).ConfigureAwait(false);
+        }
+        catch (InvalidOperationException e)
+        {
+            _logger.LogWarning(e, "Invalid operation setting Moodles Status");
+            _spheneMediator.Publish(new DebugLogEventMessage(LogLevel.Warning, "IPC", "Moodles SetStatus failed", Details: e.ToString()));
         }
         catch (Exception e)
         {
@@ -120,6 +131,16 @@ public sealed class IpcCallerMoodles : IIpcCaller
             }
             return jsonNode?.ToJsonString() ?? status;
         }
+        catch (JsonException e)
+        {
+            _logger.LogWarning(e, "JSON parse error updating Moodles Applier field, using original status");
+            return status;
+        }
+        catch (InvalidOperationException e)
+        {
+            _logger.LogWarning(e, "Invalid operation updating Moodles Applier field, using original status");
+            return status;
+        }
         catch (Exception e)
         {
             _logger.LogWarning(e, "Could not update Moodles Applier field, using original status");
@@ -133,6 +154,11 @@ public sealed class IpcCallerMoodles : IIpcCaller
         try
         {
             await _dalamudUtil.RunOnFrameworkThread(() => _moodlesRevertStatus.InvokeAction(pointer)).ConfigureAwait(false);
+        }
+        catch (InvalidOperationException e)
+        {
+            _logger.LogWarning(e, "Invalid operation reverting Moodles Status");
+            _spheneMediator.Publish(new DebugLogEventMessage(LogLevel.Warning, "IPC", "Moodles RevertStatus failed", Details: e.ToString()));
         }
         catch (Exception e)
         {

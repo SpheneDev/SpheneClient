@@ -107,6 +107,11 @@ public sealed class IpcCallerHonorific : IIpcCaller
                 }
             }).ConfigureAwait(false);
         }
+        catch (InvalidOperationException e)
+        {
+            _logger.LogWarning(e, "Invalid operation applying Honorific data");
+            _spheneMediator.Publish(new DebugLogEventMessage(LogLevel.Warning, "IPC", "Honorific apply failed", Details: e.ToString()));
+        }
         catch (Exception e)
         {
             _logger.LogWarning(e, "Could not apply Honorific data");
@@ -152,6 +157,12 @@ public sealed class IpcCallerHonorific : IIpcCaller
         {
             string title = await _dalamudUtil.RunOnFrameworkThread(() => _honorificGetLocalCharacterTitle.InvokeFunc()).ConfigureAwait(false);
             return (true, title ?? string.Empty);
+        }
+        catch (InvalidOperationException e)
+        {
+            _logger.LogWarning(e, "Invalid operation fetching Honorific title");
+            _spheneMediator.Publish(new DebugLogEventMessage(LogLevel.Warning, "IPC", "Honorific get title failed", Details: e.ToString()));
+            return (false, string.Empty);
         }
         catch (Exception e)
         {

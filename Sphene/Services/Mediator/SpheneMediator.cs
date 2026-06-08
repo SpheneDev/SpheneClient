@@ -204,6 +204,24 @@ public sealed class SpheneMediator : IHostedService
                     ((Action<T>)subscriber.Action).Invoke(message);
                 }
             }
+            catch (TargetInvocationException ex)
+            {
+                if (_lastErrorTime.TryGetValue(subscriber, out var lastErrorTime) && lastErrorTime.Add(TimeSpan.FromSeconds(10)) > DateTime.UtcNow)
+                    continue;
+
+                _logger.LogError(ex.InnerException ?? ex, "Target invocation error executing {type} for subscriber {subscriber}",
+                    message.GetType().Name, subscriber.Subscriber.GetType().Name);
+                _lastErrorTime[subscriber] = DateTime.UtcNow;
+            }
+            catch (InvalidOperationException ex)
+            {
+                if (_lastErrorTime.TryGetValue(subscriber, out var lastErrorTime) && lastErrorTime.Add(TimeSpan.FromSeconds(10)) > DateTime.UtcNow)
+                    continue;
+
+                _logger.LogError(ex, "Invalid operation executing {type} for subscriber {subscriber}",
+                    message.GetType().Name, subscriber.Subscriber.GetType().Name);
+                _lastErrorTime[subscriber] = DateTime.UtcNow;
+            }
             catch (Exception ex)
             {
                 if (_lastErrorTime.TryGetValue(subscriber, out var lastErrorTime) && lastErrorTime.Add(TimeSpan.FromSeconds(10)) > DateTime.UtcNow)

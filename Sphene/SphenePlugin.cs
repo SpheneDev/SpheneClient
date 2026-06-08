@@ -221,6 +221,10 @@ public class SphenePlugin : MediatorSubscriberBase, IHostedService
             }
 #endif
         }
+        catch (InvalidOperationException ex)
+        {
+            Logger?.LogCritical(ex, "Invalid operation during launch of managers");
+        }
         catch (Exception ex)
         {
             Logger?.LogCritical(ex, "Error during launch of managers");

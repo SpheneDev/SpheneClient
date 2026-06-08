@@ -23,6 +23,7 @@ using Microsoft.Extensions.Logging;
 using System.Collections;
 using System.Numerics;
 using System.Linq;
+using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text;
 using GameObject = FFXIVClientStructs.FFXIV.Client.Game.Object.GameObject;
@@ -566,6 +567,15 @@ public class DalamudUtilService : IHostedService, IMediatorSubscriber
 
             logger.LogTrace("[{redrawId}] Finished drawing after {curWaitTime}ms", redrawId, curWaitTime);
         }
+        catch (OperationCanceledException)
+        {
+            // cancellation is expected, no action needed
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogDebug(ex, "Invalid operation accessing {handler}, object likely despawned (Zoning={zoning}, Cutscene={cutscene}, Gpose={gpose})",
+                handler, IsZoning, IsInCutscene, IsInGpose);
+        }
         catch (Exception ex)
         {
             _logger.LogDebug(ex, "Access lost for {handler}, object likely despawned (Zoning={zoning}, Cutscene={cutscene}, Gpose={gpose})",
@@ -1076,6 +1086,18 @@ public class DalamudUtilService : IHostedService, IMediatorSubscriber
             }
             _plotSizeSourceTypeName = sheetType.FullName;
         }
+        catch (TargetInvocationException ex)
+        {
+            _logger.LogDebug(ex, "Target invocation failed loading HousingLandSet plot sizes");
+        }
+        catch (MissingMethodException ex)
+        {
+            _logger.LogDebug(ex, "Missing method loading HousingLandSet plot sizes");
+        }
+        catch (AmbiguousMatchException ex)
+        {
+            _logger.LogDebug(ex, "Ambiguous match loading HousingLandSet plot sizes");
+        }
         catch (Exception ex)
         {
             _logger.LogDebug(ex, "Failed to load HousingLandSet plot sizes");
@@ -1091,9 +1113,9 @@ public class DalamudUtilService : IHostedService, IMediatorSubscriber
                     ScanExcelForPlotSizesFallback(getExcelSheet);
                 }
             }
-            catch (Exception)
+            catch (Exception innerEx)
             {
-                // ignore
+                _logger.LogDebug(innerEx, "Fallback scan for plot sizes after primary load failure also failed");
             }
         }
     }
@@ -1138,6 +1160,18 @@ public class DalamudUtilService : IHostedService, IMediatorSubscriber
                 }
                 if (anyRow) break;
             }
+        }
+        catch (TargetInvocationException ex)
+        {
+            _logger.LogDebug(ex, "Target invocation failed during fallback scan for plot sizes");
+        }
+        catch (MissingMethodException ex)
+        {
+            _logger.LogDebug(ex, "Missing method during fallback scan for plot sizes");
+        }
+        catch (AmbiguousMatchException ex)
+        {
+            _logger.LogDebug(ex, "Ambiguous match during fallback scan for plot sizes");
         }
         catch (Exception ex)
         {
@@ -1810,6 +1844,10 @@ public class DalamudUtilService : IHostedService, IMediatorSubscriber
                 _configService.Save();
             }
         }
+        catch (IOException ex)
+        {
+            _logger.LogDebug(ex, "IO error loading HousingPlotSizesByTerritoryId from config");
+        }
         catch (Exception ex)
         {
             _logger.LogDebug(ex, "Failed to load HousingPlotSizesByTerritoryId from config");
@@ -1846,6 +1884,10 @@ public class DalamudUtilService : IHostedService, IMediatorSubscriber
                 dict[territoryId.ToString()] = newList;
                 _configService.Save();
             }
+        }
+        catch (IOException ex)
+        {
+            _logger.LogDebug(ex, "IO error saving HousingPlotSizesByTerritoryId for {Territory}", territoryId);
         }
         catch (Exception ex)
         {

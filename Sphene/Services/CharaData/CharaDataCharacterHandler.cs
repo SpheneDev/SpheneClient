@@ -32,6 +32,7 @@ public sealed class CharaDataCharacterHandler : DisposableMediatorSubscriberBase
                 _ = Task.Run(async () =>
                 {
                     try { await RevertHandledChara(chara).ConfigureAwait(false); }
+                    catch (InvalidOperationException ex) { Logger.LogError(ex, "Invalid operation reverting handled chara on Gpose end for {Name}", chara.Name); }
                     catch (Exception ex) { Logger.LogError(ex, "Failed to revert handled chara on Gpose end for {Name}", chara.Name); }
                 });
             }
@@ -63,6 +64,7 @@ public sealed class CharaDataCharacterHandler : DisposableMediatorSubscriberBase
             _ = Task.Run(async () =>
             {
                 try { await RevertHandledChara(chara).ConfigureAwait(false); }
+                catch (InvalidOperationException ex) { Logger.LogError(ex, "Invalid operation reverting handled chara during dispose for {Name}", chara.Name); }
                 catch (Exception ex) { Logger.LogError(ex, "Failed to revert handled chara during dispose for {Name}", chara.Name); }
             });
         }

@@ -132,6 +132,14 @@ public class NotificationService : DisposableMediatorSubscriberBase, IHostedServ
                     using var manager = _fileDownloadManagerFactory.Create();
                     isAvailable = await manager.IsFileAvailableAsync(hash, CancellationToken.None).ConfigureAwait(false);
                 }
+                catch (HttpRequestException ex)
+                {
+                    Logger.LogDebug(ex, "HTTP error while checking Penumbra mod availability for {hash}", hash);
+                }
+                catch (TaskCanceledException)
+                {
+                    // check was cancelled, no action needed
+                }
                 catch (Exception ex)
                 {
                     Logger.LogDebug(ex, "Error while checking Penumbra mod availability for {hash}", hash);
@@ -153,6 +161,14 @@ public class NotificationService : DisposableMediatorSubscriberBase, IHostedServ
             Mediator.Publish(new PenumbraModTransferAvailableMessage(notification));
 
             EnqueuePenumbraModToast(notification);
+        }
+        catch (InvalidOperationException ex)
+        {
+            Logger.LogWarning(ex, "Service not available preparing Penumbra mod popup for {mod}", notification.ModFolderName);
+        }
+        catch (HttpRequestException ex)
+        {
+            Logger.LogWarning(ex, "HTTP error preparing Penumbra mod popup for {mod}", notification.ModFolderName);
         }
         catch (Exception ex)
         {
@@ -183,8 +199,10 @@ public class NotificationService : DisposableMediatorSubscriberBase, IHostedServ
             if (_penumbraModToastCts != null)
             {
                 try { _penumbraModToastCts.Cancel(); }
+                catch (ObjectDisposedException) { /* already disposed */ }
                 catch (Exception ex) { Logger.LogDebug(ex, "Failed to cancel pending Penumbra mod toast"); }
                 try { _penumbraModToastCts.Dispose(); }
+                catch (ObjectDisposedException) { /* already disposed */ }
                 catch (Exception ex) { Logger.LogDebug(ex, "Failed to dispose pending Penumbra mod toast cancellation token source"); }
             }
 
@@ -222,6 +240,7 @@ public class NotificationService : DisposableMediatorSubscriberBase, IHostedServ
                 _pendingPenumbraModToastLastModName = null;
 
                 try { _penumbraModToastCts.Dispose(); }
+                catch (ObjectDisposedException) { /* already disposed */ }
                 catch (Exception ex) { Logger.LogDebug(ex, "Failed to dispose Penumbra mod toast cancellation token source"); }
                 _penumbraModToastCts = null;
             }
@@ -334,6 +353,18 @@ public class NotificationService : DisposableMediatorSubscriberBase, IHostedServ
                     var safeName = string.Join("_", modFolderName.Split(Path.GetInvalidFileNameChars()));
                     destinationPath = Path.Combine(downloadFolder, $"{safeName}_{hash}.pmp");
                 }
+                catch (UnauthorizedAccessException ex)
+                {
+                     Logger.LogWarning(ex, "Access denied using custom download folder {folder}, falling back to cache", downloadFolder);
+                }
+                catch (IOException ex)
+                {
+                     Logger.LogWarning(ex, "IO error using custom download folder {folder}, falling back to cache", downloadFolder);
+                }
+                catch (ArgumentException ex)
+                {
+                     Logger.LogWarning(ex, "Invalid path using custom download folder {folder}, falling back to cache", downloadFolder);
+                }
                 catch (Exception ex)
                 {
                      Logger.LogWarning(ex, "Failed to use custom download folder {folder}, falling back to cache", downloadFolder);
@@ -386,6 +417,18 @@ public class NotificationService : DisposableMediatorSubscriberBase, IHostedServ
                 1.0f));
             success = true;
         }
+        catch (HttpRequestException ex)
+        {
+            Logger.LogWarning(ex, "HTTP error handling Penumbra mod transfer for {mod}", notification.ModFolderName);
+        }
+        catch (IOException ex)
+        {
+            Logger.LogWarning(ex, "IO error handling Penumbra mod transfer for {mod}", notification.ModFolderName);
+        }
+        catch (TaskCanceledException)
+        {
+            // transfer was cancelled, no action needed
+        }
         catch (Exception ex)
         {
             Logger.LogWarning(ex, "Error handling Penumbra mod transfer for {mod}", notification.ModFolderName);
@@ -434,8 +477,10 @@ public class NotificationService : DisposableMediatorSubscriberBase, IHostedServ
             if (cts != null)
             {
                 try { cts.Cancel(); }
+                catch (ObjectDisposedException) { /* already disposed */ }
                 catch (Exception ex) { Logger.LogDebug(ex, "Failed to cancel Penumbra mod toast cancellation token source"); }
                 try { cts.Dispose(); }
+                catch (ObjectDisposedException) { /* already disposed */ }
                 catch (Exception ex) { Logger.LogDebug(ex, "Failed to dispose Penumbra mod toast cancellation token source"); }
             }
         }

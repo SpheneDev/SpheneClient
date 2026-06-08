@@ -206,6 +206,16 @@ public sealed class CharaDataFileHandler : IDisposable
             }
             return Task.FromResult((loadedCharaFile, expectedLength));
         }
+        catch (IOException ex)
+        {
+            _logger.LogWarning(ex, "IO error parsing MCDF header of file {file}", filePath);
+            throw new InvalidOperationException($"Could not parse MCDF header of file {filePath}", ex);
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogWarning(ex, "Invalid operation parsing MCDF header of file {file}", filePath);
+            throw new InvalidOperationException($"Could not parse MCDF header of file {filePath}", ex);
+        }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Could not parse MCDF header of file {file}", filePath);

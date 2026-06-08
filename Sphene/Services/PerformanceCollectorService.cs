@@ -195,6 +195,10 @@ public sealed class PerformanceCollectorService : IHostedService
                         _logger.LogDebug("Could not remove performance counter {counter}", entries.Key);
                     }
                 }
+                catch (InvalidOperationException e)
+                {
+                    _logger.LogWarning(e, "Concurrent modification error removing performance counter {counter}", entries.Key);
+                }
                 catch (Exception e)
                 {
                     _logger.LogWarning(e, "Error removing performance counter {counter}", entries.Key);

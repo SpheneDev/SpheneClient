@@ -176,6 +176,14 @@ public sealed class IpcCallerPenumbra : DisposableMediatorSubscriberBase, IIpcCa
                     Logger.LogDebug("CleanupAllTemporaryCollectionsAsync timed out during dispose");
                 }
             }
+            catch (TimeoutException ex)
+            {
+                Logger.LogDebug(ex, "Timeout cleaning up temporary collections during dispose");
+            }
+            catch (InvalidOperationException ex)
+            {
+                Logger.LogDebug(ex, "Invalid operation cleaning up temporary collections during dispose");
+            }
             catch (Exception ex)
             {
                 Logger.LogDebug(ex, "Failed to clean up temporary collections during dispose");

@@ -230,6 +230,14 @@ public sealed class FileCompactor
                 _ = DeviceIoControl(hDevice, FSCTL_DELETE_EXTERNAL_BACKING, nint.Zero, 0, nint.Zero, 0, out _, out _);
             }
         }
+        catch (UnauthorizedAccessException ex)
+        {
+            _logger.LogWarning(ex, "Access denied decompressing file {path}", path);
+        }
+        catch (IOException ex)
+        {
+            _logger.LogWarning(ex, "IO error decompressing file {path}", path);
+        }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Error decompressing file {path}", path);
@@ -283,6 +291,14 @@ public sealed class FileCompactor
                     }
                 }
             }
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            _logger.LogWarning(ex, "Access denied compacting file {path}", path);
+        }
+        catch (IOException ex)
+        {
+            _logger.LogWarning(ex, "IO error compacting file {path}", path);
         }
         catch (Exception ex)
         {

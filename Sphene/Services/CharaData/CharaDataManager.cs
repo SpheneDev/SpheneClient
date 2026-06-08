@@ -138,10 +138,15 @@ public sealed partial class CharaDataManager : DisposableMediatorSubscriberBase
                         else
                         {
                             try { _shrinkuConversionService.NotifyExternalTextureChange("ipc-auto-conversion-complete"); }
+                            catch (InvalidOperationException ex) { Logger.LogDebug(ex, "Invalid operation notifying external texture change (post-analysis conversion complete)"); }
                             catch (Exception ex) { Logger.LogDebug(ex, "Notify external texture change failed (post-analysis conversion complete)"); }
                             Logger.LogDebug("Automatic conversion after analysis completed");
                         }
                     });
+                }
+                catch (InvalidOperationException ex)
+                {
+                    Logger.LogDebug(ex, "Invalid operation starting automatic conversion after analysis");
                 }
                 catch (Exception ex)
                 {

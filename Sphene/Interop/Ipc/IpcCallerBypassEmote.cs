@@ -109,13 +109,15 @@ public sealed class IpcCallerBypassEmote : IIpcCaller
             _preferLocalPlayerStateEvents = version.Item1 > LocalPlayerEventApiMajorVersion
                                             || (version.Item1 == LocalPlayerEventApiMajorVersion && version.Item2 >= LocalPlayerEventApiMinorVersion);
         }
+        catch (IpcNotReadyError ex)
+        {
+            _preferLocalPlayerStateEvents = false;
+            hasAnySignal = true;
+            _logger.LogDebug(ex, "BypassEmote.ApiVersion IPC gate is not available");
+        }
         catch (Exception ex)
         {
             _preferLocalPlayerStateEvents = false;
-            if (ex is IpcNotReadyError)
-            {
-                hasAnySignal = true;
-            }
             _logger.LogDebug(ex, "BypassEmote.ApiVersion IPC gate is not available");
         }
 
@@ -124,12 +126,13 @@ public sealed class IpcCallerBypassEmote : IIpcCaller
             isReadyText = _isReady.InvokeFunc().ToString();
             hasAnySignal = true;
         }
+        catch (IpcNotReadyError ex)
+        {
+            hasAnySignal = true;
+            _logger.LogDebug(ex, "BypassEmote.IsReady IPC gate is not available");
+        }
         catch (Exception ex)
         {
-            if (ex is IpcNotReadyError)
-            {
-                hasAnySignal = true;
-            }
             _logger.LogDebug(ex, "BypassEmote.IsReady IPC gate is not available");
         }
 
@@ -161,6 +164,15 @@ public sealed class IpcCallerBypassEmote : IIpcCaller
         {
             return await _dalamudUtil.RunOnFrameworkThread(() => TryGetState(characterAddress)).ConfigureAwait(false);
         }
+        catch (IpcNotReadyError ex)
+        {
+            _logger.LogDebug(ex, "BypassEmote.GetState IPC gate is not available");
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogWarning(ex, "Invalid operation obtaining BypassEmote data");
+            _mediator.Publish(new DebugLogEventMessage(LogLevel.Warning, "IPC", "BypassEmote GetState failed", Details: ex.ToString()));
+        }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Could not obtain BypassEmote data");
@@ -190,6 +202,15 @@ public sealed class IpcCallerBypassEmote : IIpcCaller
                 }
             }).ConfigureAwait(false);
         }
+        catch (IpcNotReadyError ex)
+        {
+            _logger.LogDebug(ex, "BypassEmote.SetState IPC gate is not available");
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogWarning(ex, "Invalid operation applying BypassEmote data");
+            _mediator.Publish(new DebugLogEventMessage(LogLevel.Warning, "IPC", "BypassEmote SetState failed", Details: ex.ToString()));
+        }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Could not apply BypassEmote data");
@@ -204,24 +225,43 @@ public sealed class IpcCallerBypassEmote : IIpcCaller
             PluginDetected = true;
             return _getStateForCharacter.InvokeFunc(characterAddress);
         }
-        catch (Exception ex)
+        catch (IpcNotReadyError ex)
         {
-            if (ex is IpcNotReadyError)
-            {
-                PluginDetected = true;
-            }
+            PluginDetected = true;
             _logger.LogDebug(ex, "BypassEmote.GetStateForCharacter failed, trying V1");
             try
             {
                 PluginDetected = true;
                 return _getStateForCharacterV1.InvokeFunc(characterAddress);
             }
+            catch (IpcNotReadyError v1Ex)
+            {
+                PluginDetected = true;
+                _logger.LogDebug(v1Ex, "BypassEmote.GetStateForCharacterV1 IPC gate is not available");
+                return string.Empty;
+            }
             catch (Exception v1Ex)
             {
-                if (v1Ex is IpcNotReadyError)
-                {
-                    PluginDetected = true;
-                }
+                _logger.LogWarning(v1Ex, "BypassEmote.GetStateForCharacterV1 failed");
+                return string.Empty;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "BypassEmote.GetStateForCharacter failed, trying V1");
+            try
+            {
+                PluginDetected = true;
+                return _getStateForCharacterV1.InvokeFunc(characterAddress);
+            }
+            catch (IpcNotReadyError v1Ex)
+            {
+                PluginDetected = true;
+                _logger.LogDebug(v1Ex, "BypassEmote.GetStateForCharacterV1 IPC gate is not available");
+                return string.Empty;
+            }
+            catch (Exception v1Ex)
+            {
                 _logger.LogWarning(v1Ex, "BypassEmote.GetStateForCharacterV1 failed");
                 return string.Empty;
             }
@@ -238,13 +278,14 @@ public sealed class IpcCallerBypassEmote : IIpcCaller
                 _setStateV1.InvokeAction(data, true);
                 return;
             }
+            catch (IpcNotReadyError ex)
+            {
+                PluginDetected = true;
+                _logger.LogDebug(ex, "BypassEmote.SetStateV1 IPC gate is not available while applying IpcData payload");
+                return;
+            }
             catch (Exception ex)
             {
-                if (ex is IpcNotReadyError)
-                {
-                    PluginDetected = true;
-                }
-
                 _logger.LogDebug(ex, "BypassEmote.SetStateV1 failed while applying IpcData payload");
                 return;
             }
@@ -255,24 +296,40 @@ public sealed class IpcCallerBypassEmote : IIpcCaller
             PluginDetected = true;
             _setStateForCharacter.InvokeAction(characterAddress, data);
         }
-        catch (Exception ex)
+        catch (IpcNotReadyError ex)
         {
-            if (ex is IpcNotReadyError)
-            {
-                PluginDetected = true;
-            }
+            PluginDetected = true;
             _logger.LogDebug(ex, "BypassEmote.SetStateForCharacter failed, trying V1");
             try
             {
                 PluginDetected = true;
                 _setStateForCharacterV1.InvokeAction(characterAddress, data);
             }
+            catch (IpcNotReadyError v1Ex)
+            {
+                PluginDetected = true;
+                _logger.LogDebug(v1Ex, "BypassEmote.SetStateForCharacterV1 IPC gate is not available");
+            }
             catch (Exception v1Ex)
             {
-                if (v1Ex is IpcNotReadyError)
-                {
-                    PluginDetected = true;
-                }
+                _logger.LogWarning(v1Ex, "BypassEmote.SetStateForCharacterV1 failed");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "BypassEmote.SetStateForCharacter failed, trying V1");
+            try
+            {
+                PluginDetected = true;
+                _setStateForCharacterV1.InvokeAction(characterAddress, data);
+            }
+            catch (IpcNotReadyError v1Ex)
+            {
+                PluginDetected = true;
+                _logger.LogDebug(v1Ex, "BypassEmote.SetStateForCharacterV1 IPC gate is not available");
+            }
+            catch (Exception v1Ex)
+            {
                 _logger.LogWarning(v1Ex, "BypassEmote.SetStateForCharacterV1 failed");
             }
         }
@@ -285,24 +342,40 @@ public sealed class IpcCallerBypassEmote : IIpcCaller
             PluginDetected = true;
             _clearStateForCharacter.InvokeAction(characterAddress);
         }
-        catch (Exception ex)
+        catch (IpcNotReadyError ex)
         {
-            if (ex is IpcNotReadyError)
-            {
-                PluginDetected = true;
-            }
+            PluginDetected = true;
             _logger.LogDebug(ex, "BypassEmote.ClearStateForCharacter failed, trying V1");
             try
             {
                 PluginDetected = true;
                 _clearStateForCharacterV1.InvokeAction(characterAddress);
             }
+            catch (IpcNotReadyError v1Ex)
+            {
+                PluginDetected = true;
+                _logger.LogDebug(v1Ex, "BypassEmote.ClearStateForCharacterV1 IPC gate is not available");
+            }
             catch (Exception v1Ex)
             {
-                if (v1Ex is IpcNotReadyError)
-                {
-                    PluginDetected = true;
-                }
+                _logger.LogWarning(v1Ex, "BypassEmote.ClearStateForCharacterV1 failed");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "BypassEmote.ClearStateForCharacter failed, trying V1");
+            try
+            {
+                PluginDetected = true;
+                _clearStateForCharacterV1.InvokeAction(characterAddress);
+            }
+            catch (IpcNotReadyError v1Ex)
+            {
+                PluginDetected = true;
+                _logger.LogDebug(v1Ex, "BypassEmote.ClearStateForCharacterV1 IPC gate is not available");
+            }
+            catch (Exception v1Ex)
+            {
                 _logger.LogWarning(v1Ex, "BypassEmote.ClearStateForCharacterV1 failed");
             }
         }
@@ -440,6 +513,14 @@ public sealed class IpcCallerBypassEmote : IIpcCaller
         {
             subscribeAction.Invoke();
         }
+        catch (IpcNotReadyError ex)
+        {
+            _logger.LogDebug(ex, "BypassEmote IPC gate not ready during subscribe: {gate}", gateName);
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogDebug(ex, "BypassEmote IPC gate invalid operation during subscribe: {gate}", gateName);
+        }
         catch (Exception ex)
         {
             _logger.LogDebug(ex, "BypassEmote IPC gate unavailable during subscribe: {gate}", gateName);
@@ -451,6 +532,14 @@ public sealed class IpcCallerBypassEmote : IIpcCaller
         try
         {
             unsubscribeAction.Invoke();
+        }
+        catch (IpcNotReadyError ex)
+        {
+            _logger.LogDebug(ex, "BypassEmote IPC gate not ready during unsubscribe: {gate}", gateName);
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogDebug(ex, "BypassEmote IPC gate invalid operation during unsubscribe: {gate}", gateName);
         }
         catch (Exception ex)
         {

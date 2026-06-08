@@ -114,6 +114,16 @@ public sealed class FileCacheManager : IHostedService
                     brokenEntities.Add(fileCache);
                 }
             }
+            catch (UnauthorizedAccessException e)
+            {
+                _logger.LogWarning(e, "Access denied during validation of {file}", fileCache.ResolvedFilepath);
+                brokenEntities.Add(fileCache);
+            }
+            catch (IOException e)
+            {
+                _logger.LogWarning(e, "IO error during validation of {file}", fileCache.ResolvedFilepath);
+                brokenEntities.Add(fileCache);
+            }
             catch (Exception e)
             {
                 _logger.LogWarning(e, "Error during validation of {file}", fileCache.ResolvedFilepath);
@@ -128,6 +138,14 @@ public sealed class FileCacheManager : IHostedService
             try
             {
                 File.Delete(brokenEntity.ResolvedFilepath);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                _logger.LogWarning(ex, "Access denied deleting {file}", brokenEntity.ResolvedFilepath);
+            }
+            catch (IOException ex)
+            {
+                _logger.LogWarning(ex, "IO error deleting {file}", brokenEntity.ResolvedFilepath);
             }
             catch (Exception ex)
             {

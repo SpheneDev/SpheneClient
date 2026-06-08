@@ -5,6 +5,7 @@ using Sphene.API.Dto.CharaData;
 using Sphene.Services;
 using Microsoft.Extensions.Logging;
 using System.Numerics;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 
 namespace Sphene.Interop.Ipc;
@@ -136,6 +137,16 @@ public sealed class IpcCallerBrio : IIpcCaller
         {
             applicablePose = JsonNode.Parse(pose);
         }
+        catch (JsonException ex)
+        {
+            _logger.LogWarning(ex, "Failed to parse pose JSON for actor {actor}", gameObject.Name.TextValue);
+            return false;
+        }
+        catch (ArgumentException ex)
+        {
+            _logger.LogWarning(ex, "Invalid pose JSON for actor {actor}", gameObject.Name.TextValue);
+            return false;
+        }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to parse pose JSON for actor {actor}", gameObject.Name.TextValue);
@@ -159,6 +170,16 @@ public sealed class IpcCallerBrio : IIpcCaller
         try
         {
             currentPoseNode = JsonNode.Parse(currentPoseJson);
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogWarning(ex, "Failed to parse Brio pose JSON for actor {actor}", gameObject.Name.TextValue);
+            return false;
+        }
+        catch (ArgumentException ex)
+        {
+            _logger.LogWarning(ex, "Invalid Brio pose JSON for actor {actor}", gameObject.Name.TextValue);
+            return false;
         }
         catch (Exception ex)
         {

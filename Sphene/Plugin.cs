@@ -179,15 +179,19 @@ public sealed class Plugin : IAsyncDalamudPlugin
                         if (!cfgSvc.Current.FirstRunCompleted || isDefault || string.IsNullOrWhiteSpace(current))
                         {
                             try { Directory.CreateDirectory(target); }
+                            catch (UnauthorizedAccessException ex) { logger.LogDebug(ex, "Access denied creating ShrinkU backup directory {path}", target); }
+                            catch (IOException ex) { logger.LogDebug(ex, "IO error creating ShrinkU backup directory {path}", target); }
                             catch (Exception ex) { logger.LogDebug(ex, "Failed to create ShrinkU backup directory {path}", target); }
                             cfgSvc.Current.BackupFolderPath = target;
                             cfgSvc.Current.FirstRunCompleted = true;
                             try { cfgSvc.Save(); }
+                            catch (IOException ex) { logger.LogDebug(ex, "IO error saving ShrinkU configuration after setting backup path"); }
                             catch (Exception ex) { logger.LogDebug(ex, "Failed to save ShrinkU configuration after setting backup path"); }
                             logger.LogDebug("Configured ShrinkU backup path to Sphene texture_backups: {path}", target);
                         }
                     }
                 }
+                catch (InvalidOperationException ex) { logger.LogDebug(ex, "Failed to resolve required service for ShrinkU configuration integration"); }
                 catch (Exception ex) { logger.LogDebug(ex, "Failed to initialize ShrinkU configuration integration"); }
                 return cfgSvc;
             });
@@ -269,6 +273,7 @@ public sealed class Plugin : IAsyncDalamudPlugin
                 ui.OnCompleted = () =>
                 {
                     try { s.GetRequiredService<ConversionUI>().IsOpen = true; }
+                    catch (InvalidOperationException ex) { s.GetRequiredService<Microsoft.Extensions.Logging.ILogger>().LogDebug(ex, "ConversionUI not registered, cannot open after FirstRunSetup completion"); }
                     catch (Exception ex) { s.GetRequiredService<Microsoft.Extensions.Logging.ILogger>().LogDebug(ex, "Failed to open ConversionUI after FirstRunSetup completion"); }
                 };
                 return ui;
@@ -693,6 +698,18 @@ public sealed class Plugin : IAsyncDalamudPlugin
                 if (result is Task task) await task.ConfigureAwait(false);
                 return;
             }
+        }
+        catch (TargetInvocationException ex)
+        {
+            _pluginLog.Error(ex, "Failed to disable self via reflection: target invocation failed.");
+        }
+        catch (MissingMethodException ex)
+        {
+            _pluginLog.Error(ex, "Failed to disable self via reflection: missing method.");
+        }
+        catch (AmbiguousMatchException ex)
+        {
+            _pluginLog.Error(ex, "Failed to disable self via reflection: ambiguous match.");
         }
         catch (Exception ex)
         {

@@ -416,6 +416,10 @@ public sealed class CacheMonitor : DisposableMediatorSubscriberBase
                 {
                     _performanceCollector.LogPerformance(this, $"FullFileScan", () => FullFileScan(token));
                 }
+                catch (InvalidOperationException ex)
+                {
+                    Logger.LogError(ex, "Invalid operation during Full File Scan");
+                }
                 catch (Exception ex)
                 {
                     Logger.LogError(ex, "Error during Full File Scan");

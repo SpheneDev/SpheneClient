@@ -51,7 +51,7 @@ public class ConfigBackupService
                         if (strippedNode[key] is not null)
                         {
                             sensitivePayload[key] = strippedNode[key]?.DeepClone();
-                            strippedNode[key] = null;
+                            ((IDictionary<string, JsonNode?>)strippedNode).Remove(key);
                         }
                     }
 
@@ -109,6 +109,18 @@ public class ConfigBackupService
                 result.ErrorMessage = "Failed to parse backup file.";
                 return result;
             }
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogError(ex, "Failed to parse backup file");
+            result.ErrorMessage = "Failed to parse backup file: " + ex.Message;
+            return result;
+        }
+        catch (IOException ex)
+        {
+            _logger.LogError(ex, "Failed to read backup file");
+            result.ErrorMessage = "Failed to read backup file: " + ex.Message;
+            return result;
         }
         catch (Exception ex)
         {
@@ -199,6 +211,16 @@ public class ConfigBackupService
                 configService.Save();
                 result.RestoredCount++;
                 _logger.LogInformation("Restored config {name}", kvp.Key);
+            }
+            catch (JsonException ex)
+            {
+                _logger.LogError(ex, "Failed to parse config {name}", kvp.Key);
+                result.FailedCount++;
+            }
+            catch (InvalidOperationException ex)
+            {
+                _logger.LogError(ex, "Invalid operation restoring config {name}", kvp.Key);
+                result.FailedCount++;
             }
             catch (Exception ex)
             {

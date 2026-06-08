@@ -151,6 +151,16 @@ public sealed class ChangelogService
 
             return builder.ToString().Trim();
         }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogError(ex, "HTTP error fetching release changelog JSON");
+            return null;
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogError(ex, "JSON parse error in release changelog");
+            return null;
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to fetch or parse release changelog JSON");
@@ -244,6 +254,14 @@ public async Task<List<ReleaseChangelogViewEntry>> GetChangelogEntriesAsync(Canc
 
             // Sort descending by version
             result.Sort((a, b) => ParseVersionSafe(b.Version).CompareTo(ParseVersionSafe(a.Version)));
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogError(ex, "HTTP error fetching release changelog entries");
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogError(ex, "JSON parse error in release changelog entries");
         }
         catch (Exception ex)
         {

@@ -79,6 +79,14 @@ public class EventAggregator : MediatorSubscriberBase, IHostedService
                     File.Delete(filesInDirectory.OrderBy(f => new FileInfo(f).LastWriteTimeUtc).First());
                 }
             }
+            catch (UnauthorizedAccessException ex)
+            {
+                _logger.LogWarning(ex, "Access denied deleting old event logs");
+            }
+            catch (IOException ex)
+            {
+                _logger.LogWarning(ex, "IO error deleting old event logs");
+            }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Could not delete last events");
@@ -90,6 +98,14 @@ public class EventAggregator : MediatorSubscriberBase, IHostedService
         {
             if (!Directory.Exists(EventLogFolder)) Directory.CreateDirectory(EventLogFolder);
             File.AppendAllLines(eventLogFile, [receivedEvent.ToString()]);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            _logger.LogWarning(ex, "Access denied writing to event file {file}", eventLogFile);
+        }
+        catch (IOException ex)
+        {
+            _logger.LogWarning(ex, "IO error writing to event file {file}", eventLogFile);
         }
         catch (Exception ex)
         {

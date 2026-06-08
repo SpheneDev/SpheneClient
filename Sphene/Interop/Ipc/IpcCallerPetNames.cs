@@ -85,6 +85,11 @@ public sealed class IpcCallerPetNames : IIpcCaller
             string localNameData = _getPlayerData.InvokeFunc();
             return string.IsNullOrEmpty(localNameData) ? string.Empty : localNameData;
         } 
+        catch (InvalidOperationException e)
+        {
+            _logger.LogWarning(e, "Invalid operation obtaining Pet Nicknames data");
+            _mediator.Publish(new DebugLogEventMessage(LogLevel.Warning, "IPC", "PetNames GetLocalNames failed", Details: e.ToString()));
+        }
         catch (Exception e)
         {
             _logger.LogWarning(e, "Could not obtain Pet Nicknames data");
@@ -118,6 +123,11 @@ public sealed class IpcCallerPetNames : IIpcCaller
                 }
             }).ConfigureAwait(false);
         }
+        catch (InvalidOperationException e)
+        {
+            _logger.LogWarning(e, "Invalid operation applying Pet Nicknames data");
+            _mediator.Publish(new DebugLogEventMessage(LogLevel.Warning, "IPC", "PetNames SetPlayerData failed", Details: e.ToString()));
+        }
         catch (Exception e)
         {
             _logger.LogWarning(e, "Could not apply Pet Nicknames data");
@@ -139,6 +149,11 @@ public sealed class IpcCallerPetNames : IIpcCaller
                     _clearPlayerData.InvokeAction(pc.ObjectIndex);
                 }
             }).ConfigureAwait(false);
+        }
+        catch (InvalidOperationException e)
+        {
+            _logger.LogWarning(e, "Invalid operation clearing Pet Nicknames data");
+            _mediator.Publish(new DebugLogEventMessage(LogLevel.Warning, "IPC", "PetNames ClearPlayerData failed", Details: e.ToString()));
         }
         catch (Exception e)
         {

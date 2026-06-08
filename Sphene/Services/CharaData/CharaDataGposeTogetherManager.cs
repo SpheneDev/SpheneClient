@@ -402,6 +402,10 @@ public class CharaDataGposeTogetherManager : DisposableMediatorSubscriberBase
                 if (poseData.IsDelta)
                     _lastDeltaPoseData = poseData;
             }
+            catch (InvalidOperationException ex)
+            {
+                Logger.LogWarning(ex, "Invalid operation during Pose Data Generation");
+            }
             catch (Exception ex)
             {
                 Logger.LogWarning(ex, "Error during Pose Data Generation");
@@ -494,6 +498,10 @@ public class CharaDataGposeTogetherManager : DisposableMediatorSubscriberBase
                         entry.Value.SpawnedVfxId = null;
                     }
                 }
+            }
+            catch (InvalidOperationException ex)
+            {
+                Logger.LogWarning(ex, "Invalid operation during World Data Generation");
             }
             catch (Exception ex)
             {

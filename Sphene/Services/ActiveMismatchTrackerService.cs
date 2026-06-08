@@ -170,6 +170,18 @@ public sealed class ActiveMismatchTrackerService : IDisposable
             _dirty = false;
             _logger.LogDebug("Saved {count} active mismatch records to {path}", dtos.Count, filePath);
         }
+        catch (UnauthorizedAccessException ex)
+        {
+            _logger.LogWarning(ex, "Access denied saving active mismatch tracker data");
+        }
+        catch (IOException ex)
+        {
+            _logger.LogWarning(ex, "IO error saving active mismatch tracker data");
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogWarning(ex, "Serialization error saving active mismatch tracker data");
+        }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to save active mismatch tracker data");
@@ -211,6 +223,18 @@ public sealed class ActiveMismatchTrackerService : IDisposable
             }
 
             _logger.LogDebug("Loaded {count} active mismatch records from {path}", dtos.Count, filePath);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            _logger.LogWarning(ex, "Access denied loading active mismatch tracker data");
+        }
+        catch (IOException ex)
+        {
+            _logger.LogWarning(ex, "IO error loading active mismatch tracker data");
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogWarning(ex, "Deserialization error loading active mismatch tracker data");
         }
         catch (Exception ex)
         {
