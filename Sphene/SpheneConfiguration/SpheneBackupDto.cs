@@ -9,4 +9,5 @@ public class SpheneBackupDto
     public DateTime CreatedAt { get; set; }
     public Dictionary<string, JsonNode> Configs { get; set; } = new(StringComparer.Ordinal);
     public Dictionary<string, string>? EncryptedConfigs { get; set; }
+    public Dictionary<string, string>? CustomThemes { get; set; }
 }

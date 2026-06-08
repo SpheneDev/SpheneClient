@@ -15,6 +15,7 @@ public class ConfigBackupService
     private readonly ILogger<ConfigBackupService> _logger;
     private const int BackupVersion = 1;
     private const int Pbkdf2Iterations = 100000;
+    private const string CustomThemesFolder = "Custom_themes";
 
     public ConfigBackupService(
         IEnumerable<IConfigService<ISpheneConfiguration>> configServices,
@@ -71,13 +72,20 @@ public class ConfigBackupService
             }
         }
 
+        var customThemes = ReadCustomThemes();
+        if (customThemes != null && customThemes.Count > 0)
+        {
+            _logger.LogInformation("Backing up {count} custom themes", customThemes.Count);
+        }
+
         return new SpheneBackupDto
         {
             BackupVersion = BackupVersion,
             ClientVersion = clientVersion,
             CreatedAt = DateTime.UtcNow,
             Configs = configs,
-            EncryptedConfigs = encryptedConfigs.Count > 0 ? encryptedConfigs : null
+            EncryptedConfigs = encryptedConfigs.Count > 0 ? encryptedConfigs : null,
+            CustomThemes = customThemes != null && customThemes.Count > 0 ? customThemes : null
         };
     }
 
@@ -133,6 +141,8 @@ public class ConfigBackupService
         {
             _logger.LogWarning("Backup version {backupVer} is newer than supported {supportedVer}", dto.BackupVersion, BackupVersion);
         }
+
+        RestoreCustomThemes(dto);
 
         var configMap = _configServices.ToDictionary(
             c => c.ConfigurationName,
@@ -291,6 +301,85 @@ public class ConfigBackupService
         using var decryptor = aes.CreateDecryptor();
         var decrypted = decryptor.TransformFinalBlock(encryptedData, 16, encryptedData.Length - 16);
         return Encoding.UTF8.GetString(decrypted);
+    }
+
+    private string? GetCustomThemesDirectory()
+    {
+        var firstService = _configServices.FirstOrDefault();
+        if (firstService == null)
+            return null;
+        return Path.Combine(Path.GetDirectoryName(firstService.ConfigurationPath) ?? string.Empty, CustomThemesFolder);
+    }
+
+    private Dictionary<string, string>? ReadCustomThemes()
+    {
+        try
+        {
+            var themesDir = GetCustomThemesDirectory();
+            if (string.IsNullOrEmpty(themesDir) || !Directory.Exists(themesDir))
+                return null;
+
+            var themeFiles = Directory.GetFiles(themesDir, "*.json");
+            if (themeFiles.Length == 0)
+                return null;
+
+            var themes = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var file in themeFiles)
+            {
+                try
+                {
+                    var themeName = Path.GetFileNameWithoutExtension(file);
+                    var content = File.ReadAllText(file);
+                    themes[themeName] = content;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to read custom theme file {file}", file);
+                }
+            }
+
+            return themes.Count > 0 ? themes : null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to read custom themes directory");
+            return null;
+        }
+    }
+
+    private void RestoreCustomThemes(SpheneBackupDto dto)
+    {
+        if (dto.CustomThemes == null || dto.CustomThemes.Count == 0)
+            return;
+
+        try
+        {
+            var themesDir = GetCustomThemesDirectory();
+            if (string.IsNullOrEmpty(themesDir))
+                return;
+
+            if (!Directory.Exists(themesDir))
+                Directory.CreateDirectory(themesDir);
+
+            foreach (var kvp in dto.CustomThemes)
+            {
+                try
+                {
+                    var sanitized = string.Join("_", kvp.Key.Split(Path.GetInvalidFileNameChars()));
+                    var filePath = Path.Combine(themesDir, $"{sanitized}.json");
+                    File.WriteAllText(filePath, kvp.Value);
+                    _logger.LogInformation("Restored custom theme {theme} to {path}", kvp.Key, filePath);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to restore custom theme {theme}", kvp.Key);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to restore custom themes");
+        }
     }
 
     private static string GetConfigJsonString(JsonNode node)
