@@ -1656,66 +1656,68 @@ public class SettingsUi : WindowMediatorSubscriberBase
             _ => ("General", "Home")
         };
 
-        using var pageGroup = ImRaii.Group();
-        ImGui.PushTextWrapPos(pageStartX + maxPageWidth - 6f * ImGuiHelpers.GlobalScale);
-        ImGui.PushItemWidth(MathF.Min(360f * ImGuiHelpers.GlobalScale, maxPageWidth * 0.6f));
-        UiSharedService.ColorText(pageInfo.Item1, ImGuiColors.DalamudGrey);
-        ImGui.SameLine();
-        UiSharedService.ColorText("•", ImGuiColors.DalamudGrey3);
-        ImGui.SameLine();
-        ImGui.TextUnformatted(pageInfo.Item2);
-        ImGui.Separator();
-        ImGuiHelpers.ScaledDummy(0, 4);
-
-        var settingsOptionsIndentX = GetSettingsOptionsIndentX(_activeSettingsPage);
-        IDisposable? contentIndent = null;
-        if (_activeSettingsPage != SettingsPage.Home)
+        using (var pageGroup = ImRaii.Group())
         {
-            contentIndent = ImRaii.PushIndent(settingsOptionsIndentX);
-        }
+            ImGui.PushTextWrapPos(pageStartX + maxPageWidth - 6f * ImGuiHelpers.GlobalScale);
+            ImGui.PushItemWidth(MathF.Min(360f * ImGuiHelpers.GlobalScale, maxPageWidth * 0.6f));
+            UiSharedService.ColorText(pageInfo.Item1, ImGuiColors.DalamudGrey);
+            ImGui.SameLine();
+            UiSharedService.ColorText("•", ImGuiColors.DalamudGrey3);
+            ImGui.SameLine();
+            ImGui.TextUnformatted(pageInfo.Item2);
+            ImGui.Separator();
+            ImGuiHelpers.ScaledDummy(0, 4);
 
-        switch (_activeSettingsPage)
-        {
-            case SettingsPage.Home:
-                DrawOverview();
-                break;
-            case SettingsPage.Connectivity:
-                DrawServerConfiguration();
-                break;
-            case SettingsPage.PeopleNotes:
-                DrawGeneralUserManagement();
-                break;
-            case SettingsPage.Display:
-                DrawGeneralUiDisplaySettings();
-                break;
-            case SettingsPage.Theme:
-                DrawThemeSettings();
-                break;
-            case SettingsPage.Alerts:
-                DrawGeneralNotifications();
-                break;
-            case SettingsPage.Performance:
-                DrawPerformance();
-                break;
-            case SettingsPage.Transfers:
-                DrawCurrentTransfers();
-                break;
-            case SettingsPage.Storage:
-                DrawFileStorageSettings();
-                break;
-            case SettingsPage.SyncBehavior:
-                DrawSyncBehaviorSettings();
-                break;
-            case SettingsPage.Acknowledgment:
-                DrawAcknowledgmentSettings();
-                break;
-            case SettingsPage.Debug:
-                DrawDebug();
-                break;
+            var settingsOptionsIndentX = GetSettingsOptionsIndentX(_activeSettingsPage);
+            IDisposable? contentIndent = null;
+            if (_activeSettingsPage != SettingsPage.Home)
+            {
+                contentIndent = ImRaii.PushIndent(settingsOptionsIndentX);
+            }
+
+            switch (_activeSettingsPage)
+            {
+                case SettingsPage.Home:
+                    DrawOverview();
+                    break;
+                case SettingsPage.Connectivity:
+                    DrawServerConfiguration();
+                    break;
+                case SettingsPage.PeopleNotes:
+                    DrawGeneralUserManagement();
+                    break;
+                case SettingsPage.Display:
+                    DrawGeneralUiDisplaySettings();
+                    break;
+                case SettingsPage.Theme:
+                    DrawThemeSettings();
+                    break;
+                case SettingsPage.Alerts:
+                    DrawGeneralNotifications();
+                    break;
+                case SettingsPage.Performance:
+                    DrawPerformance();
+                    break;
+                case SettingsPage.Transfers:
+                    DrawCurrentTransfers();
+                    break;
+                case SettingsPage.Storage:
+                    DrawFileStorageSettings();
+                    break;
+                case SettingsPage.SyncBehavior:
+                    DrawSyncBehaviorSettings();
+                    break;
+                case SettingsPage.Acknowledgment:
+                    DrawAcknowledgmentSettings();
+                    break;
+                case SettingsPage.Debug:
+                    DrawDebug();
+                    break;
+            }
+            contentIndent?.Dispose();
+            ImGui.PopItemWidth();
+            ImGui.PopTextWrapPos();
         }
-        contentIndent?.Dispose();
-        ImGui.PopItemWidth();
-        ImGui.PopTextWrapPos();
 
         ImGui.EndChild();
     }
@@ -2083,7 +2085,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             }
             ImGui.SameLine();
             var overrideUrl = _configService.Current.TestServerApiUrl ?? string.Empty;
-            if (ImGui.InputText("", ref overrideUrl, 50))
+            if (ImGui.InputText("##testServerUrl", ref overrideUrl, 50))
             {
                 _configService.Current.TestServerApiUrl = overrideUrl;
                 _configService.Save();
