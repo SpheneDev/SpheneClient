@@ -96,6 +96,7 @@ public record RefreshUiMessage : MessageBase;
 public record StructuralRefreshUiMessage : MessageBase;
 public record OpenBanUserPopupMessage(Pair PairToBan, GroupFullInfoDto GroupFullInfoDto) : MessageBase;
 public record OpenCensusPopupMessage() : MessageBase;
+public record RequestSpheneReconnectMessage : MessageBase;
 public record OpenPenumbraModInstallPopupMessage(FileTransferNotificationDto Notification) : MessageBase;
 public record InstallReceivedPenumbraModMessage(FileTransferNotificationDto Notification) : SameThreadMessage;
 public record PenumbraModTransferAvailableMessage(FileTransferNotificationDto Notification) : MessageBase;

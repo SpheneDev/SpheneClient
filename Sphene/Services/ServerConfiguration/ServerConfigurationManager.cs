@@ -102,6 +102,31 @@ public class ServerConfigurationManager
         var worldId = _dalamudUtil.GetHomeWorldIdAsync().GetAwaiter().GetResult();
         var cid = _dalamudUtil.GetCIDAsync().GetAwaiter().GetResult();
 
+        // 1. Try matching by CID first (most reliable)
+        var authByCid = currentServer.Authentications.FindAll(f => f.LastSeenCID != null && f.LastSeenCID != 0 && f.LastSeenCID == cid);
+        if (authByCid.Count == 1)
+        {
+            var matchedAuth = authByCid.Single();
+            if (!string.Equals(matchedAuth.CharacterName, charaName) || matchedAuth.WorldId != worldId)
+            {
+                _logger.LogInformation("Detected character identity change for CID {cid}: {oldName}@{oldWorld} -> {newName}@{newWorld}",
+                    cid, matchedAuth.CharacterName, matchedAuth.WorldId, charaName, worldId);
+                matchedAuth.CharacterName = charaName;
+                matchedAuth.WorldId = worldId;
+                Save();
+            }
+
+            if (!string.IsNullOrEmpty(matchedAuth.UID) && !string.IsNullOrEmpty(currentServer.OAuthToken))
+            {
+                _logger.LogTrace("GetOAuth2 accessed via CID, returning {key} ({keyValue}) for {chara} on {world}", matchedAuth.UID, string.Join("", currentServer.OAuthToken.Take(10)), charaName, worldId);
+                return (currentServer.OAuthToken, matchedAuth.UID!);
+            }
+
+            _logger.LogTrace("GetOAuth2 accessed via CID, returning null because no UID found for {chara} on {world} or OAuthToken is not configured.", charaName, worldId);
+            return null;
+        }
+
+        // 2. Fallback to name + world
         var auth = currentServer.Authentications.FindAll(f => string.Equals(f.CharacterName, charaName) && f.WorldId == worldId);
         if (auth.Count >= 2)
         {
@@ -161,6 +186,31 @@ public class ServerConfigurationManager
             Save();
         }
 
+        // 1. Try matching by CID first (most reliable)
+        var authByCid = currentServer.Authentications.FindAll(f => f.LastSeenCID != null && f.LastSeenCID != 0 && f.LastSeenCID == cid);
+        if (authByCid.Count == 1)
+        {
+            var matchedAuth = authByCid.Single();
+            if (!string.Equals(matchedAuth.CharacterName, charaName, StringComparison.Ordinal) || matchedAuth.WorldId != worldId)
+            {
+                _logger.LogInformation("Detected character identity change for CID {cid}: {oldName}@{oldWorld} -> {newName}@{newWorld}",
+                    cid, matchedAuth.CharacterName, matchedAuth.WorldId, charaName, worldId);
+                matchedAuth.CharacterName = charaName;
+                matchedAuth.WorldId = worldId;
+                Save();
+            }
+
+            if (currentServer.SecretKeys.TryGetValue(matchedAuth.SecretKeyIdx, out var secretKey))
+            {
+                _logger.LogTrace("GetSecretKey accessed via CID, returning {key} ({keyValue}) for {chara} on {world}", secretKey.FriendlyName, string.Join("", secretKey.Key.Take(10)), charaName, worldId);
+                return secretKey.Key;
+            }
+
+            _logger.LogTrace("GetSecretKey accessed via CID, returning null because no fitting key found for {chara} on {world} for idx {idx}.", charaName, worldId, matchedAuth.SecretKeyIdx);
+            return null;
+        }
+
+        // 2. Fallback to name + world
         var auth = currentServer.Authentications.FindAll(f => string.Equals(f.CharacterName, charaName, StringComparison.Ordinal) && f.WorldId == worldId);
         if (auth.Count >= 2)
         {
@@ -182,10 +232,10 @@ public class ServerConfigurationManager
             Save();
         }
 
-        if (currentServer.SecretKeys.TryGetValue(auth.Single().SecretKeyIdx, out var secretKey))
+        if (currentServer.SecretKeys.TryGetValue(auth.Single().SecretKeyIdx, out var fallbackSecretKey))
         {
-            _logger.LogTrace("GetSecretKey accessed, returning {key} ({keyValue}) for {chara} on {world}", secretKey.FriendlyName, string.Join("", secretKey.Key.Take(10)), charaName, worldId);
-            return secretKey.Key;
+            _logger.LogTrace("GetSecretKey accessed, returning {key} ({keyValue}) for {chara} on {world}", fallbackSecretKey.FriendlyName, string.Join("", fallbackSecretKey.Key.Take(10)), charaName, worldId);
+            return fallbackSecretKey.Key;
         }
 
         _logger.LogTrace("GetSecretKey accessed, returning null because no fitting key found for {chara} on {world} for idx {idx}.", charaName, worldId, auth.Single().SecretKeyIdx);
@@ -258,16 +308,23 @@ public class ServerConfigurationManager
     {
         if (serverSelectionIndex == -1) serverSelectionIndex = CurrentServerIndex;
         var server = GetServerByIndex(serverSelectionIndex);
-        if (server.Authentications.Any(c => string.Equals(c.CharacterName, _dalamudUtil.GetPlayerNameAsync().GetAwaiter().GetResult(), StringComparison.Ordinal)
-                && c.WorldId == _dalamudUtil.GetHomeWorldIdAsync().GetAwaiter().GetResult()))
+        var charaName = _dalamudUtil.GetPlayerNameAsync().GetAwaiter().GetResult();
+        var worldId = _dalamudUtil.GetHomeWorldIdAsync().GetAwaiter().GetResult();
+        var cid = _dalamudUtil.GetCIDAsync().GetAwaiter().GetResult();
+
+        if (server.Authentications.Any(c => c.LastSeenCID != null && c.LastSeenCID != 0 && c.LastSeenCID == cid))
+            return;
+
+        if (server.Authentications.Any(c => string.Equals(c.CharacterName, charaName, StringComparison.Ordinal)
+                && c.WorldId == worldId))
             return;
 
         server.Authentications.Add(new Authentication()
         {
-            CharacterName = _dalamudUtil.GetPlayerNameAsync().GetAwaiter().GetResult(),
-            WorldId = _dalamudUtil.GetHomeWorldIdAsync().GetAwaiter().GetResult(),
+            CharacterName = charaName,
+            WorldId = worldId,
             SecretKeyIdx = !server.UseOAuth2 ? server.SecretKeys.Last().Key : -1,
-            LastSeenCID = _dalamudUtil.GetCIDAsync().GetAwaiter().GetResult()
+            LastSeenCID = cid
         });
         Save();
     }

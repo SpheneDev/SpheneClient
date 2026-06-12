@@ -88,6 +88,7 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
 
         Mediator.Subscribe<DalamudLoginMessage>(this, (_) => DalamudUtilOnLogIn());
         Mediator.Subscribe<DalamudLogoutMessage>(this, (_) => DalamudUtilOnLogOut());
+        Mediator.Subscribe<RequestSpheneReconnectMessage>(this, (msg) => { _ = Task.Run(() => CreateConnectionsAsync()); });
         Mediator.Subscribe<HubClosedMessage>(this, (msg) => SpheneHubOnClosed(msg.Exception));
         Mediator.Subscribe<HubReconnectedMessage>(this, (msg) => _ = SpheneHubOnReconnectedAsync());
         Mediator.Subscribe<HubReconnectingMessage>(this, (msg) => SpheneHubOnReconnecting(msg.Exception));

@@ -570,6 +570,8 @@ public sealed class Plugin : IAsyncDalamudPlugin
             collection.AddHostedService(p => p.GetRequiredService<CitySyncshellService>());
             collection.AddHostedService(p => p.GetRequiredService<HalloweenEasterEggService>());
             collection.AddHostedService(p => p.GetRequiredService<SphenePlugin>());
+            collection.AddSingleton<CharacterIdentityService>();
+            collection.AddHostedService(p => p.GetRequiredService<CharacterIdentityService>());
         })
         .Build();
 

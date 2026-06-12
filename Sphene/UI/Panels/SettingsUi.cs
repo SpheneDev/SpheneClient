@@ -79,6 +79,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
     private bool? _notesSuccessfullyApplied = null;
     private bool _overwriteExistingLabels = false;
     private bool _readClearCache = false;
+    private bool _showAdvancedCharacterMode = false;
     private int _selectedEntry = -1;
     private string _uidToAddForIgnore = string.Empty;
     private CancellationTokenSource? _validationCts;
@@ -1193,9 +1194,20 @@ public class SettingsUi : WindowMediatorSubscriberBase
                         ImGui.Separator();
                         ImGuiHelpers.ScaledDummy(5);
                     }
+                    if (selectedServer.Authentications.Any())
+                    {
+                        ImGui.Checkbox("Edit Mode", ref _showAdvancedCharacterMode);
+                        UiSharedService.AttachToolTip("When enabled, character names and homeworlds become editable and the stored CID is visible in the tooltip.");
+                        ImGuiHelpers.ScaledDummy(3);
+                        ImGuiHelpers.ScaledDummy(1);
+                    }
+
                     foreach (var item in selectedServer.Authentications.ToList())
                     {
                         using var charaId = ImRaii.PushId("selectedChara" + i);
+
+                        var drawList = ImGui.GetWindowDrawList();
+                        float rowStartY = ImGui.GetCursorScreenPos().Y;
 
                         var worldIdx = (ushort)item.WorldId;
                         var data = _uiShared.WorldData.OrderBy(u => u.Value, StringComparer.Ordinal).ToDictionary(k => k.Key, k => k.Value);
@@ -1231,63 +1243,112 @@ public class SettingsUi : WindowMediatorSubscriberBase
                         {
                             misManaged = true;
                         }
-                        Vector4 color = ImGuiColors.ParsedGreen;
-                        string text = thisIsYou ? "Your Current Character" : string.Empty;
+                        Vector4 warningColor = ImGuiColors.ParsedGreen;
+                        string warningText = string.Empty;
                         if (misManaged)
                         {
-                            text += " [MISMANAGED (" + (selectedServer.UseOAuth2 ? "No UID Set" : "No Secret Key Set") + ")]";
-                            color = ImGuiColors.DalamudRed;
+                            warningText = "[MISMANAGED (" + (selectedServer.UseOAuth2 ? "No UID Set" : "No Secret Key Set") + ")]";
+                            warningColor = ImGuiColors.DalamudRed;
                         }
                         if (selectedServer.Authentications.Where(e => e != item).Any(e => string.Equals(e.CharacterName, item.CharacterName, StringComparison.Ordinal)
                             && e.WorldId == item.WorldId))
                         {
-                            text += " [DUPLICATE]";
-                            color = ImGuiColors.DalamudRed;
+                            warningText = "[DUPLICATE]";
+                            warningColor = ImGuiColors.DalamudRed;
                         }
 
-                        if (!string.IsNullOrEmpty(text))
+                        if (!string.IsNullOrEmpty(warningText))
                         {
-                            text = text.Trim();
-                            _uiShared.BigText(text, color);
+                            _uiShared.BigText(warningText, warningColor);
                         }
-
-                        var charaName = item.CharacterName;
-                        if (ImGui.InputText("Character Name", ref charaName, 64))
+                        ImGuiHelpers.ScaledDummy(3);
+                        if (item.LastSeenCID != null && item.LastSeenCID != 0)
                         {
-                            item.CharacterName = charaName;
-                            _serverConfigurationManager.Save();
-                        }
-
-                        _uiShared.DrawCombo("World##" + item.CharacterName + i, data, (w) => w.Value,
-                            (w) =>
-                            {
-                                if (item.WorldId != w.Key)
-                                {
-                                    item.WorldId = w.Key;
-                                    _serverConfigurationManager.Save();
-                                }
-                            }, EqualityComparer<KeyValuePair<ushort, string>>.Default.Equals(data.FirstOrDefault(f => f.Key == worldIdx), default) ? data.First() : data.First(f => f.Key == worldIdx));
-
-                        if (!useOauth)
-                        {
-                            _uiShared.DrawCombo("Secret Key###" + item.CharacterName + i, keys, (w) => w.Value.FriendlyName,
-                                (w) =>
-                                {
-                                    if (w.Key != item.SecretKeyIdx)
-                                    {
-                                        item.SecretKeyIdx = w.Key;
-                                        _serverConfigurationManager.Save();
-                                    }
-                                }, EqualityComparer<KeyValuePair<int, SecretKey>>.Default.Equals(keys.FirstOrDefault(f => f.Key == item.SecretKeyIdx), default) ? keys.First() : keys.First(f => f.Key == item.SecretKeyIdx));
+                            _uiShared.IconText(FontAwesomeIcon.Fingerprint, ImGuiColors.ParsedGreen);
+                            var tooltipText = _showAdvancedCharacterMode
+                                ? $"This character's unique ID (CID) is stored locally." +
+                                  $" This allows Sphene to automatically detect and correct name or world changes for this character.\nStored CID: {item.LastSeenCID}"
+                                : "This character's unique ID (CID) is stored locally. This allows Sphene to automatically detect and correct name or world changes for this character.";
+                            UiSharedService.AttachToolTip(tooltipText);
                         }
                         else
                         {
-                            _uiShared.DrawUIDComboForAuthentication(i, item, selectedServer.ServerUri, _logger);
+                            _uiShared.IconText(FontAwesomeIcon.Fingerprint, ImGuiColors.DalamudGrey);
+                            UiSharedService.AttachToolTip("No CID stored for this character. Sphene will not be able to automatically detect name or world changes. Log in with this character to populate the CID.");
                         }
-                        ConnectivityOptionBlock.DrawCharacterAutoLoginOption(item, _serverConfigurationManager, _uiShared, "ConnectivityCharacterAutoLogin");
-                        if (_uiShared.IconTextButton(FontAwesomeIcon.Trash, "Delete Character") && UiSharedService.CtrlPressed())
-                            _serverConfigurationManager.RemoveCharacterFromServer(idx, item);
-                        UiSharedService.AttachToolTip("Hold CTRL to delete this entry.");
+                        if (!_showAdvancedCharacterMode)
+                        {
+                        ImGui.SameLine();
+                        ImGui.Dummy(new Vector2(1f, 0f));
+                        }
+                        ImGui.SameLine();
+
+                        if (_showAdvancedCharacterMode)
+                        {
+                            var charaName = item.CharacterName;
+                            ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X * 0.45f);
+                            if (ImGui.InputText("##charaName" + i, ref charaName, 64))
+                            {
+                                item.CharacterName = charaName;
+                                _serverConfigurationManager.Save();
+                            }
+
+                            ImGui.SameLine();
+
+                            ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X);
+                            _uiShared.DrawCombo("##world" + item.CharacterName + i, data, (w) => w.Value,
+                                (w) =>
+                                {
+                                    if (item.WorldId != w.Key)
+                                    {
+                                        item.WorldId = w.Key;
+                                        _serverConfigurationManager.Save();
+                                    }
+                                }, EqualityComparer<KeyValuePair<ushort, string>>.Default.Equals(data.FirstOrDefault(f => f.Key == worldIdx), default) ? data.First() : data.First(f => f.Key == worldIdx));
+                        }
+                        else
+                        {
+                            ImGui.AlignTextToFramePadding();
+                            var nameColor = thisIsYou ? ImGuiColors.ParsedGreen : ImGuiColors.DalamudWhite;
+                            UiSharedService.ColorText(item.CharacterName + " @ " + worldPreview, nameColor);
+                        }
+
+                        using (ImRaii.PushIndent())
+                        {
+                            if (!useOauth)
+                            {
+                                _uiShared.DrawCombo("Secret Key###" + item.CharacterName + i, keys, (w) => w.Value.FriendlyName,
+                                    (w) =>
+                                    {
+                                        if (w.Key != item.SecretKeyIdx)
+                                        {
+                                            item.SecretKeyIdx = w.Key;
+                                            _serverConfigurationManager.Save();
+                                        }
+                                    }, EqualityComparer<KeyValuePair<int, SecretKey>>.Default.Equals(keys.FirstOrDefault(f => f.Key == item.SecretKeyIdx), default) ? keys.First() : keys.First(f => f.Key == item.SecretKeyIdx));
+                            }
+                            else
+                            {
+                                _uiShared.DrawUIDComboForAuthentication(i, item, selectedServer.ServerUri, _logger);
+                            }
+                            ConnectivityOptionBlock.DrawCharacterAutoLoginOption(item, _serverConfigurationManager, _uiShared, "ConnectivityCharacterAutoLogin");
+                            if (_uiShared.IconTextButton(FontAwesomeIcon.Trash, "Delete Character") && UiSharedService.CtrlPressed())
+                                _serverConfigurationManager.RemoveCharacterFromServer(idx, item);
+                            UiSharedService.AttachToolTip("Hold CTRL to delete this entry.");
+                            ImGuiHelpers.ScaledDummy(3);
+                        }
+
+                        if (thisIsYou)
+                        {
+                            uint bgColor = ImGui.GetColorU32(new Vector4(0.0f, 1.0f, 0.0f, 0.06f));
+                            var winPos = ImGui.GetWindowPos();
+                            var contentMin = ImGui.GetWindowContentRegionMin();
+                            var contentMax = ImGui.GetWindowContentRegionMax();
+                            drawList.AddRectFilled(
+                                new Vector2(winPos.X + contentMin.X, rowStartY),
+                                new Vector2(winPos.X + contentMax.X, ImGui.GetCursorScreenPos().Y),
+                                bgColor, 3.0f);
+                        }
 
                         i++;
                         if (item != selectedServer.Authentications.ToList()[^1])
@@ -1301,6 +1362,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
                     if (selectedServer.Authentications.Any())
                         ImGui.Separator();
 
+                    bool currentCidKnown = selectedServer.Authentications.Any(c => c.LastSeenCID != null && c.LastSeenCID != 0 && c.LastSeenCID == youCid);
+
                     if (!selectedServer.Authentications.Exists(c => string.Equals(c.CharacterName, youName, StringComparison.Ordinal)
                         && c.WorldId == youWorld))
                     {
@@ -1311,7 +1374,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                         ImGui.SameLine();
                     }
 
-                    if (_uiShared.IconTextButton(FontAwesomeIcon.Plus, "Add new character"))
+                    if (!currentCidKnown && _uiShared.IconTextButton(FontAwesomeIcon.Plus, "Add new character"))
                     {
                         _serverConfigurationManager.AddEmptyCharacterToServer(idx);
                     }
