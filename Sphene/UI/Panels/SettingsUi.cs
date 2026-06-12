@@ -1258,7 +1258,10 @@ public class SettingsUi : WindowMediatorSubscriberBase
                         ImGuiHelpers.ScaledDummy(1);
                     }
 
-                    foreach (var item in selectedServer.Authentications.ToList())
+                    var sortedAuths = selectedServer.Authentications
+                        .OrderByDescending(a => string.Equals(a.CharacterName, youName, StringComparison.Ordinal) && a.WorldId == youWorld)
+                        .ToList();
+                    foreach (var item in sortedAuths)
                     {
                         using var charaId = ImRaii.PushId("selectedChara" + i);
 
@@ -1407,7 +1410,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                         }
 
                         i++;
-                        if (item != selectedServer.Authentications.ToList()[^1])
+                        if (item != sortedAuths[^1])
                         {
                             ImGuiHelpers.ScaledDummy(5);
                             ImGui.Separator();
