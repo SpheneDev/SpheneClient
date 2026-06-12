@@ -70,6 +70,8 @@ public class CompactUi : WindowMediatorSubscriberBase
     private DateTime _lastIncognitoButtonClick = DateTime.MinValue;
     private bool _hadAvailableAreaSyncshells = false;
     private DateTime _areaSyncshellAttentionUntilUtc = DateTime.MinValue;
+    private int _selectedSecretKeyForNewCharacter = -1;
+    private string _customSecretKeyInput = string.Empty;
     private readonly HashSet<string> _prePausedPairs;
     private readonly HashSet<string> _prePausedSyncshells;
     private readonly System.Threading.Lock _pendingModSharingLock = new();
@@ -1200,8 +1202,21 @@ public class CompactUi : WindowMediatorSubscriberBase
             return;
         }
 
+        var currentServer = _serverManager.CurrentServer;
+        bool isCharConfigured = true;
+        string youName = string.Empty;
+        uint youWorld = 0;
+        if (currentServer != null)
+        {
+            youName = _dalamudUtilService.GetPlayerName();
+            youWorld = _dalamudUtilService.GetHomeWorldId();
+            isCharConfigured = currentServer.Authentications.Exists(a =>
+                string.Equals(a.CharacterName, youName, StringComparison.Ordinal) && a.WorldId == youWorld);
+        }
+        bool showUnconfiguredSetup = _apiController.DisplayServerState == ServerState.NoAutoLogon && !isCharConfigured;
+
         // 4. Error Text (if any) - Displayed below the header block
-        if (_apiController.DisplayServerState != ServerState.Connected)
+        if (_apiController.DisplayServerState != ServerState.Connected && !showUnconfiguredSetup)
         {
              ImGui.Spacing();
              if (_apiController.IsPostGraceUiHoldActive)
@@ -1405,32 +1420,111 @@ public class CompactUi : WindowMediatorSubscriberBase
         }
         
         
-        if (_apiController.DisplayServerState is ServerState.Connected)
+        if (_apiController.DisplayServerState is ServerState.Connected || showUnconfiguredSetup)
         {            
             // Navigation / Buttons
             _tabMenu.Draw(GetPendingModSharingCount(), false);
-            
-            // Connected Pairs Section
-            var onlineCount = _pairManager.DirectPairs.Count(p => !p.IsEffectivelyOffline);
-            var totalCount = _pairManager.DirectPairs.Count;
-            var onlineText = $"Connected Pairs ({onlineCount} / {totalCount}) online";
-            
-            // Center the text
-            var textSize = ImGui.CalcTextSize(onlineText);
-            var availableWidthPairs = ImGui.GetContentRegionAvail().X;
-            var startX = (availableWidthPairs - textSize.X) / 2;
-            if (startX < 0) startX = 0;
-            
-            ImGui.SetCursorPosX(startX);
-            SpheneCustomTheme.DrawStyledText(onlineText, SpheneCustomTheme.CurrentTheme.CompactHeaderText);
-            
-            using (ImRaii.PushId("pairlist")) DrawPairs();
-            
-            float pairlistEnd = ImGui.GetCursorPosY();
-            using (ImRaii.PushId("transfers")) DrawTransfers();
-            _transferPartHeight = ImGui.GetCursorPosY() - pairlistEnd - ImGui.GetTextLineHeight();
-            using (ImRaii.PushId("group-user-popup")) _selectPairsForGroupUi.Draw(_pairManager.DirectPairs);
-            using (ImRaii.PushId("grouping-popup")) _selectGroupForPairUi.Draw();
+
+            if (!isCharConfigured && currentServer != null)
+            {
+                // Character not configured: show setup block in place of the pair list
+                // Note: rename/world changes are handled automatically by CharacterIdentityService,
+                // so only the "completely new character" case needs UI here.
+
+                var worldName = _dalamudUtilService.WorldData.Value.TryGetValue((ushort)youWorld, out var wn) ? wn : youWorld.ToString();
+                var charDisplay = $"{youName} @ {worldName}";
+
+                static void CenterLine(string text, Vector4 color)
+                {
+                    var size = ImGui.CalcTextSize(text).X;
+                    var avail = ImGui.GetContentRegionAvail().X;
+                    ImGui.SetCursorPosX(MathF.Max(0, (avail - size) / 2));
+                    UiSharedService.ColorText(text, color);
+                }
+
+                CenterLine("Your Character", SpheneCustomTheme.CurrentTheme.CompactHeaderText);
+                ImGuiHelpers.ScaledDummy(2);
+                ImGui.Separator();
+                CenterLine(charDisplay, SpheneCustomTheme.CurrentTheme.TextPrimary);
+                ImGui.Separator();
+                ImGuiHelpers.ScaledDummy(2);
+                CenterLine("is not yet synced to Sphene.", SpheneCustomTheme.CurrentTheme.CompactHeaderText);
+                CenterLine("Add it below to start syncing.", SpheneCustomTheme.CurrentTheme.CompactHeaderText);
+                ImGuiHelpers.ScaledDummy(5);
+                ImGui.Separator();
+
+                if (!currentServer.UseOAuth2 && currentServer.SecretKeys.Any())
+                {
+                    var keys = currentServer.SecretKeys.OrderBy(u => u.Key).ToDictionary(k => k.Key, k => k.Value);
+                    var initialKey = keys.ContainsKey(_selectedSecretKeyForNewCharacter)
+                        ? keys.First(f => f.Key == _selectedSecretKeyForNewCharacter)
+                        : keys.First();
+                    if (_selectedSecretKeyForNewCharacter == -1 || !keys.ContainsKey(_selectedSecretKeyForNewCharacter))
+                    {
+                        _selectedSecretKeyForNewCharacter = initialKey.Key;
+                    }
+                    CenterLine("Secret Key:", SpheneCustomTheme.CurrentTheme.TextSecondary);
+                    ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X);
+                    _uiSharedService.DrawCombo("##compactNewCharKey", keys,
+                        (w) => w.Value.FriendlyName,
+                        (w) => { _selectedSecretKeyForNewCharacter = w.Key; },
+                        initialKey);
+                    ImGuiHelpers.ScaledDummy(3);
+                    CenterLine("or enter a new key:", SpheneCustomTheme.CurrentTheme.TextSecondary);
+                    ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X);
+                    ImGui.InputTextWithHint("##customSecretKey", "enter secret key here", ref _customSecretKeyInput, 255);
+                    ImGuiHelpers.ScaledDummy(3);
+                }
+
+                var btnWidth2 = _uiSharedService.GetIconTextButtonSize(FontAwesomeIcon.User, "Add current character");
+                var availWidthBtn = ImGui.GetContentRegionAvail().X;
+                ImGui.SetCursorPosX(MathF.Max(0, (availWidthBtn - btnWidth2) / 2));
+                if (_uiSharedService.IconTextButton(FontAwesomeIcon.User, "Add current character"))
+                {
+                    int keyToUse = -1;
+                    if (!currentServer.UseOAuth2)
+                    {
+                        if (!string.IsNullOrWhiteSpace(_customSecretKeyInput))
+                        {
+                            var friendlyName = _customSecretKeyInput.Length > 10
+                                ? _customSecretKeyInput[..10] + "..."
+                                : _customSecretKeyInput;
+                            keyToUse = _serverManager.AddSecretKey(-1, _customSecretKeyInput.Trim(), friendlyName);
+                            _customSecretKeyInput = string.Empty;
+                        }
+                        else
+                        {
+                            keyToUse = _selectedSecretKeyForNewCharacter;
+                        }
+                    }
+                    _serverManager.AddCurrentCharacterToServer(-1, keyToUse);
+                    _ = _apiController.CreateConnectionsAsync();
+                }
+            }
+            else
+            {
+                // Connected Pairs Section
+                var onlineCount = _pairManager.DirectPairs.Count(p => !p.IsEffectivelyOffline);
+                var totalCount = _pairManager.DirectPairs.Count;
+                var onlineText = $"Connected Pairs ({onlineCount} / {totalCount}) online";
+                
+                // Center the text
+                var textSize = ImGui.CalcTextSize(onlineText);
+                var availableWidthPairs = ImGui.GetContentRegionAvail().X;
+                var startX = (availableWidthPairs - textSize.X) / 2;
+                if (startX < 0) startX = 0;
+                
+                ImGui.SetCursorPosX(startX);
+                SpheneCustomTheme.DrawStyledText(onlineText, SpheneCustomTheme.CurrentTheme.CompactHeaderText);
+                
+                using (ImRaii.PushId("pairlist")) DrawPairs();
+                
+                float pairlistEnd = ImGui.GetCursorPosY();
+                using (ImRaii.PushId("transfers")) DrawTransfers();
+                _transferPartHeight = ImGui.GetCursorPosY() - pairlistEnd - ImGui.GetTextLineHeight();
+                using (ImRaii.PushId("group-user-popup")) _selectPairsForGroupUi.Draw(_pairManager.DirectPairs);
+                using (ImRaii.PushId("grouping-popup")) _selectGroupForPairUi.Draw();
+            }
         }
         
         // Draw update notification at bottom if available or forced by theme

@@ -80,6 +80,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
     private bool _overwriteExistingLabels = false;
     private bool _readClearCache = false;
     private bool _showAdvancedCharacterMode = false;
+    private int _selectedSecretKeyForNewCharacter = -1;
+    private string _customSecretKeyInput = string.Empty;
     private int _selectedEntry = -1;
     private string _uidToAddForIgnore = string.Empty;
     private CancellationTokenSource? _validationCts;
@@ -1190,6 +1192,60 @@ public class SettingsUi : WindowMediatorSubscriberBase
                                 _serverConfigurationManager.Save();
                             }
                         }
+                        else
+                        {
+                            var worldName = _dalamudUtilService.WorldData.Value.TryGetValue((ushort)youWorld, out var wn) ? wn : youWorld.ToString();
+                            _uiShared.BigText("Your Character", ImGuiColors.DalamudRed);
+                            UiSharedService.ColorText($"{youName} @ {worldName}", ImGuiColors.DalamudWhite);
+                            UiSharedService.ColorText("is not yet synced to Sphene.", ImGuiColors.DalamudGrey);
+                            UiSharedService.ColorText("Add it below to start syncing.", ImGuiColors.DalamudGrey);
+                            ImGuiHelpers.ScaledDummy(5);
+
+                            if (!useOauth && selectedServer.SecretKeys.Any())
+                            {
+                                var keys = selectedServer.SecretKeys.OrderBy(u => u.Key).ToDictionary(k => k.Key, k => k.Value);
+                                var initialKey = keys.ContainsKey(_selectedSecretKeyForNewCharacter)
+                                    ? keys.First(f => f.Key == _selectedSecretKeyForNewCharacter)
+                                    : keys.First();
+                                if (_selectedSecretKeyForNewCharacter == -1 || !keys.ContainsKey(_selectedSecretKeyForNewCharacter))
+                                {
+                                    _selectedSecretKeyForNewCharacter = initialKey.Key;
+                                }
+                                UiSharedService.ColorText("Secret Key:", ImGuiColors.DalamudWhite);
+                                ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X);
+                                _uiShared.DrawCombo("##newCharKey", keys,
+                                    (w) => w.Value.FriendlyName,
+                                    (w) => { _selectedSecretKeyForNewCharacter = w.Key; },
+                                    initialKey);
+                                ImGuiHelpers.ScaledDummy(3);
+                                UiSharedService.ColorText("or enter a new key:", ImGuiColors.DalamudGrey);
+                                ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X);
+                                ImGui.InputTextWithHint("##customSecretKeySettings", "enter secret key here", ref _customSecretKeyInput, 255);
+                                ImGuiHelpers.ScaledDummy(3);
+                            }
+                            ImGuiHelpers.ScaledDummy(5);
+                            if (_uiShared.IconTextButton(FontAwesomeIcon.User, "Add current character"))
+                            {
+                                int keyToUse = -1;
+                                if (!useOauth)
+                                {
+                                    if (!string.IsNullOrWhiteSpace(_customSecretKeyInput))
+                                    {
+                                        var friendlyName = _customSecretKeyInput.Length > 10
+                                            ? _customSecretKeyInput[..10] + "..."
+                                            : _customSecretKeyInput;
+                                        keyToUse = _serverConfigurationManager.AddSecretKey(idx, _customSecretKeyInput.Trim(), friendlyName);
+                                        _customSecretKeyInput = string.Empty;
+                                    }
+                                    else
+                                    {
+                                        keyToUse = _selectedSecretKeyForNewCharacter;
+                                    }
+                                }
+                                _serverConfigurationManager.AddCurrentCharacterToServer(idx, keyToUse);
+                                _ = _apiController.CreateConnectionsAsync();
+                            }
+                        }
                         ImGuiHelpers.ScaledDummy(5);
                         ImGui.Separator();
                         ImGuiHelpers.ScaledDummy(5);
@@ -1363,16 +1419,6 @@ public class SettingsUi : WindowMediatorSubscriberBase
                         ImGui.Separator();
 
                     bool currentCidKnown = selectedServer.Authentications.Any(c => c.LastSeenCID != null && c.LastSeenCID != 0 && c.LastSeenCID == youCid);
-
-                    if (!selectedServer.Authentications.Exists(c => string.Equals(c.CharacterName, youName, StringComparison.Ordinal)
-                        && c.WorldId == youWorld))
-                    {
-                        if (_uiShared.IconTextButton(FontAwesomeIcon.User, "Add current character"))
-                        {
-                            _serverConfigurationManager.AddCurrentCharacterToServer(idx);
-                        }
-                        ImGui.SameLine();
-                    }
 
                     if (!currentCidKnown && _uiShared.IconTextButton(FontAwesomeIcon.Plus, "Add new character"))
                     {

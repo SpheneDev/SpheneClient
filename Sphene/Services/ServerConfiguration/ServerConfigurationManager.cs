@@ -304,7 +304,7 @@ public class ServerConfigurationManager
         Save();
     }
 
-    internal void AddCurrentCharacterToServer(int serverSelectionIndex = -1)
+    internal void AddCurrentCharacterToServer(int serverSelectionIndex = -1, int secretKeyIdx = -1)
     {
         if (serverSelectionIndex == -1) serverSelectionIndex = CurrentServerIndex;
         var server = GetServerByIndex(serverSelectionIndex);
@@ -319,11 +319,17 @@ public class ServerConfigurationManager
                 && c.WorldId == worldId))
             return;
 
+        int selectedKey = secretKeyIdx;
+        if (selectedKey == -1 && !server.UseOAuth2 && server.SecretKeys.Any())
+        {
+            selectedKey = server.SecretKeys.Last().Key;
+        }
+
         server.Authentications.Add(new Authentication()
         {
             CharacterName = charaName,
             WorldId = worldId,
-            SecretKeyIdx = !server.UseOAuth2 ? server.SecretKeys.Last().Key : -1,
+            SecretKeyIdx = !server.UseOAuth2 ? selectedKey : -1,
             LastSeenCID = cid
         });
         Save();
@@ -337,6 +343,24 @@ public class ServerConfigurationManager
             SecretKeyIdx = server.SecretKeys.Any() ? server.SecretKeys.First().Key : -1,
         });
         Save();
+    }
+
+    internal int AddSecretKey(int serverSelectionIndex, string key, string friendlyName)
+    {
+        if (serverSelectionIndex == -1) serverSelectionIndex = CurrentServerIndex;
+        var server = GetServerByIndex(serverSelectionIndex);
+        int nextIdx = server.SecretKeys.Keys.Count > 0 ? server.SecretKeys.Keys.Max() + 1 : 0;
+        while (server.SecretKeys.ContainsKey(nextIdx))
+        {
+            nextIdx++;
+        }
+        server.SecretKeys[nextIdx] = new SecretKey()
+        {
+            Key = key,
+            FriendlyName = friendlyName
+        };
+        Save();
+        return nextIdx;
     }
 
     internal void AddOpenPairTag(string tag)
