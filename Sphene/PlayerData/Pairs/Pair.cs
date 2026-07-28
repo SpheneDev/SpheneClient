@@ -22,7 +22,7 @@ using Sphene.API.Dto.Visibility;
 
 namespace Sphene.PlayerData.Pairs;
 
-public class Pair : DisposableMediatorSubscriberBase
+public class Pair : DisposableMediatorSubscriberBase, IPairAcknowledgment
 {
     private readonly PairHandlerFactory _cachedPlayerFactory;
     private readonly SemaphoreSlim _creationSemaphore = new(1);

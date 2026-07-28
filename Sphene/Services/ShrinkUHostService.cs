@@ -97,7 +97,7 @@ public sealed class ShrinkUHostService : IHostedService, IDisposable
             {
                 if (_penumbraExtension == null)
                 {
-                    _penumbraExtension = new PenumbraExtensionService(_penumbraIpc, _conversionUi, _logger);
+                    _penumbraExtension = new PenumbraExtensionService(_penumbraIpc, _conversionUi, _shrinkuConfigService, _logger);
                     _logger.LogDebug("Initialized ShrinkU Penumbra integration");
                 }
             }
