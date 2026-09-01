@@ -237,4 +237,26 @@ public class SpheneConfig : ISpheneConfiguration
     public bool MismatchTrackerTrackSkpFiles { get; set; } = true;
     public bool MismatchTrackerTrackPbdFiles { get; set; } = true;
 
+    // Supporter Nameplate Settings
+    public bool ShowSupporterNameplate { get; set; } = true;
+    public string SupporterSymbolChar { get; set; } = "✦";
+    public SupporterSymbolPosition SupporterSymbolPosition { get; set; } = SupporterSymbolPosition.Left;
+    public bool SupporterTextEnabled { get; set; } = false;
+    public string SupporterLabelText { get; set; } = "[Supporter]";
+    public SupporterLabelOrder SupporterLabelOrder { get; set; } = SupporterLabelOrder.SymbolThenText;
+    public ushort SupporterColorKey { get; set; } = 43;
+
+}
+
+public enum SupporterSymbolPosition
+{
+    Left = 0,
+    Right = 1,
+    Both = 2
+}
+
+public enum SupporterLabelOrder
+{
+    SymbolThenText = 0,
+    TextThenSymbol = 1
 }

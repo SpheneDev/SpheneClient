@@ -490,6 +490,12 @@ public partial class ApiController
         _spheneHub!.On(nameof(Client_UserCharacterDataRefreshRequested), act);
     }
 
+    public void OnUserUpdateSupporterStatus(Action<bool> act)
+    {
+        if (_initialized) return;
+        _spheneHub!.On(nameof(Client_UserUpdateSupporterStatus), act);
+    }
+
     // OnUserAckOtherUpdate method removed - AckOther is controlled by other player's AckYou
 
     public void OnGposeLobbyJoin(Action<UserData> act)
@@ -538,6 +544,19 @@ public partial class ApiController
         {
             Logger.LogDebug("Received area-bound join response for group: {GroupId}, Accepted: {Accepted}", dto.GID, dto.Accepted);
             Mediator.Publish(new AreaBoundJoinResponseMessage(dto));
+        });
+        return Task.CompletedTask;
+    }
+
+    public Task Client_UserUpdateSupporterStatus(bool isSupporter)
+    {
+        Logger.LogInformation("Supporter status updated: {isSupporter}", isSupporter);
+        ExecuteSafely(() =>
+        {
+            if (_connectionDto != null)
+            {
+                _connectionDto = _connectionDto with { IsSupporter = isSupporter };
+            }
         });
         return Task.CompletedTask;
     }

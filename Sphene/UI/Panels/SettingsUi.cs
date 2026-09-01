@@ -13,6 +13,7 @@ using Sphene.API.Routes;
 using Sphene.FileCache;
 using Sphene.Interop.Ipc;
 using Sphene.SpheneConfiguration;
+using Sphene.SpheneConfiguration.Configurations;
 using Sphene.SpheneConfiguration.Models;
 using Sphene.PlayerData.Handlers;
 using Sphene.PlayerData.Pairs;
@@ -2142,8 +2143,25 @@ public class SettingsUi : WindowMediatorSubscriberBase
         
         // --- Server Connection Section ---        
         // Discord Button (Right Aligned)
-        var rightButtonWidth = _uiShared.GetIconTextButtonSize(FontAwesomeIcon.Users, "Join Discord Community");
-        ImGui.SameLine(ImGui.GetContentRegionAvail().X - rightButtonWidth);
+        var discordButtonWidth = _uiShared.GetIconTextButtonSize(FontAwesomeIcon.Users, "Join Discord Community");
+        var kofiButtonWidth = _uiShared.GetIconTextButtonSize(FontAwesomeIcon.MugHot, "Support on Ko-fi");
+        var buttonGap = ImGui.GetStyle().ItemSpacing.X;
+        ImGui.SameLine(ImGui.GetContentRegionAvail().X - discordButtonWidth - kofiButtonWidth - buttonGap);
+        
+        // Ko-fi Button
+        var kofiColor = new Vector4(1.0f, 0.37f, 0.23f, 1.0f);
+        var kofiHoverColor = new Vector4(1.0f, 0.50f, 0.30f, 1.0f);
+        ImGui.PushStyleColor(ImGuiCol.Button, kofiColor);
+        ImGui.PushStyleColor(ImGuiCol.ButtonHovered, kofiHoverColor);
+        ImGui.PushStyleColor(ImGuiCol.ButtonActive, kofiHoverColor);
+        if (_uiShared.IconTextActionButton(FontAwesomeIcon.MugHot, "Support on Ko-fi"))
+        {
+            Util.OpenLink("https://ko-fi.com/sphenedev");
+        }
+        ImGui.PopStyleColor(3);
+        UiSharedService.AttachToolTip("Support Sphene's development on Ko-fi");
+        ImGui.SameLine();
+        
         if (_uiShared.IconTextActionButton(FontAwesomeIcon.Users, "Join Discord Community"))
         {
             Util.OpenLink("https://discord.gg/GbnwsP2XsF");
@@ -2414,6 +2432,95 @@ public class SettingsUi : WindowMediatorSubscriberBase
         {
             ImGui.Spacing();
             ImGui.TextColored(ImGuiColors.DalamudRed, _lastImportError);
+        }
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+        UiSharedService.ColorText("Supporter Nameplate", ImGuiColors.ParsedBlue);
+        UiSharedService.ColorTextWrapped("Display a symbol or text next to the nameplates of Sphene supporters. Supporter status is automatically synced from the server via Ko-fi donations.", ImGuiColors.DalamudGrey);
+        ImGui.Spacing();
+
+        var showNameplate = _configService.Current.ShowSupporterNameplate;
+        if (ImGui.Checkbox("Show Supporter Nameplate Indicators", ref showNameplate))
+        {
+            _configService.Current.ShowSupporterNameplate = showNameplate;
+            _configService.Save();
+        }
+
+        if (showNameplate)
+        {
+            ImGui.Indent();
+
+            var symbolChar = _configService.Current.SupporterSymbolChar ?? string.Empty;
+            ImGui.SetNextItemWidth(ClampSettingsItemWidth(80f));
+            if (ImGui.InputText("Symbol##supporterSymbol", ref symbolChar, 4))
+            {
+                _configService.Current.SupporterSymbolChar = symbolChar;
+                _configService.Save();
+            }
+            UiSharedService.AttachToolTip("The symbol to display next to supporter names. Leave empty to disable.");
+
+            var textEnabled = _configService.Current.SupporterTextEnabled;
+            if (ImGui.Checkbox("Show Text Label##supporterTextEnabled", ref textEnabled))
+            {
+                _configService.Current.SupporterTextEnabled = textEnabled;
+                _configService.Save();
+            }
+
+            if (textEnabled)
+            {
+                ImGui.Indent();
+                var labelText = _configService.Current.SupporterLabelText ?? string.Empty;
+                ImGui.SetNextItemWidth(ClampSettingsItemWidth(150f));
+                if (ImGui.InputText("Label Text##supporterLabelText", ref labelText, 30))
+                {
+                    _configService.Current.SupporterLabelText = labelText;
+                    _configService.Save();
+                }
+
+                var labelOrder = (int)_configService.Current.SupporterLabelOrder;
+                if (ImGui.Combo("Label Order##supporterLabelOrder", ref labelOrder, "Symbol then Text\0Text then Symbol\0"))
+                {
+                    _configService.Current.SupporterLabelOrder = (SupporterLabelOrder)labelOrder;
+                    _configService.Save();
+                }
+                ImGui.Unindent();
+            }
+
+            var position = (int)_configService.Current.SupporterSymbolPosition;
+            if (ImGui.Combo("Position##supporterPosition", ref position, "Left\0Right\0Both\0"))
+            {
+                _configService.Current.SupporterSymbolPosition = (SupporterSymbolPosition)position;
+                _configService.Save();
+            }
+
+            var colorKey = (int)_configService.Current.SupporterColorKey;
+            ImGui.SetNextItemWidth(ClampSettingsItemWidth(80f));
+            if (ImGui.InputInt("Color Key##supporterColorKey", ref colorKey))
+            {
+                if (colorKey < 0) colorKey = 0;
+                if (colorKey > 65535) colorKey = 65535;
+                _configService.Current.SupporterColorKey = (ushort)colorKey;
+                _configService.Save();
+            }
+            UiSharedService.AttachToolTip("UI Foreground color key for the symbol/text (0-65535). Default: 43 (gold).");
+
+            ImGui.Unindent();
+        }
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+        if (_apiController.IsSupporter)
+        {
+            UiSharedService.ColorText("Supporter Status: Active", ImGuiColors.ParsedGreen);
+            UiSharedService.ColorTextWrapped("Thank you for supporting Sphene! Your nameplate indicator is visible to other users.", ImGuiColors.DalamudGrey);
+        }
+        else
+        {
+            UiSharedService.ColorText("Supporter Status: Inactive", ImGuiColors.DalamudGrey);
+            UiSharedService.ColorTextWrapped("Support Sphene on Ko-fi to get a supporter nameplate indicator. Donate at ko-fi.com/sphenedev and include your Discord username or ID in the donation message.", ImGuiColors.DalamudGrey);
         }
     }
 

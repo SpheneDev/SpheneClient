@@ -67,12 +67,13 @@ public sealed class Plugin : IAsyncDalamudPlugin
     private readonly IGameInteropProvider _gameInteropProvider;
     private readonly IGameConfig _gameConfig;
     private readonly IPartyList _partyList;
+    private readonly INamePlateGui _namePlateGui;
 
     public Plugin(IDalamudPluginInterface pluginInterface, ICommandManager commandManager, IDataManager gameData,
         IFramework framework, IObjectTable objectTable, IClientState clientState, ICondition condition, IChatGui chatGui,
         IGameGui gameGui, IDtrBar dtrBar, IPluginLog pluginLog, ITargetManager targetManager, INotificationManager notificationManager,
         ITextureProvider textureProvider, IContextMenu contextMenu, IGameInteropProvider gameInteropProvider, IGameConfig gameConfig,
-        IPartyList partyList)
+        IPartyList partyList, INamePlateGui namePlateGui)
     {
         _pluginInterface = pluginInterface;
         _commandManager = commandManager;
@@ -92,6 +93,7 @@ public sealed class Plugin : IAsyncDalamudPlugin
         _gameInteropProvider = gameInteropProvider;
         _gameConfig = gameConfig;
         _partyList = partyList;
+        _namePlateGui = namePlateGui;
     }
 
     public async Task LoadAsync(CancellationToken cancellationToken)
@@ -158,6 +160,9 @@ public sealed class Plugin : IAsyncDalamudPlugin
             collection.AddSingleton(_commandManager);
             collection.AddSingleton(_framework);
             collection.AddSingleton(_pluginInterface);
+            collection.AddSingleton(_gameConfig);
+            collection.AddSingleton(_partyList);
+            collection.AddSingleton(_namePlateGui);
 
             // ShrinkU integration services and windows
             collection.AddSingleton<Microsoft.Extensions.Logging.ILogger>(s => s.GetRequiredService<ILoggerFactory>().CreateLogger("ShrinkU"));
@@ -530,6 +535,7 @@ public sealed class Plugin : IAsyncDalamudPlugin
             });
             collection.AddSingleton<IconUpdateService>();
             collection.AddSingleton<HalloweenEasterEggService>();
+            collection.AddSingleton<SupporterNameplateService>();
             
             collection.AddScoped((s) => new UiService(s.GetRequiredService<ILogger<UiService>>(), _pluginInterface.UiBuilder, s.GetRequiredService<SpheneConfigService>(),
                 s.GetRequiredService<WindowSystem>(), s.GetServices<WindowMediatorSubscriberBase>(),

@@ -121,6 +121,8 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
 
     public bool IsModerator => _connectionDto?.IsModerator ?? false;
 
+    public bool IsSupporter => _connectionDto?.IsSupporter ?? false;
+
     public int OnlineUsers => SystemInfoDto.OnlineUsers;
 
     public bool ServerAlive => ServerState is ServerState.Connected or ServerState.RateLimited or ServerState.Unauthorized or ServerState.Disconnected;
@@ -638,6 +640,7 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
         OnUserReceiveCharacterDataAcknowledgment(dto => _ = Client_UserReceiveCharacterDataAcknowledgment(dto));
         OnUserReceiveCharacterDataAcknowledgmentV2(dto => _ = Client_UserReceiveCharacterDataAcknowledgmentV2(dto));
         OnUserCharacterDataRefreshRequested(dto => _ = Client_UserCharacterDataRefreshRequested(dto));
+        OnUserUpdateSupporterStatus(dto => _ = Client_UserUpdateSupporterStatus(dto));
 
         OnGroupChangePermissions((dto) => _ = Client_GroupChangePermissions(dto));
         OnGroupDelete((dto) => _ = Client_GroupDelete(dto));

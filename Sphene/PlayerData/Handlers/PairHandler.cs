@@ -76,10 +76,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
     private nint _lastAppliedMinionAddress = nint.Zero;
     private bool _minionReapplyInProgress = false;
     private bool _initIdentMissingLogged = false;
-    private bool _proximityReportedVisible = false;
-    private DateTime _postZoneCheckUntil = DateTime.MinValue;
-    private DateTime _postZoneLastCheck = DateTime.MinValue;
-    private bool _postZoneReaffirmDone = false;
+    private readonly PairProximityReporter _proximityReporter = new();
     private bool _forceHonorificReapply = false;
     private bool _pendingPenumbraReapply = false;
     private DateTime _lastFrameworkUpdateError = DateTime.MinValue;
@@ -216,18 +213,14 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             {
                 IsVisible = false;
                 Pair.ReportVisibility(false);
-                _proximityReportedVisible = false;
             }
-            _postZoneReaffirmDone = false;
+            _proximityReporter.OnZoneSwitchStart();
         });
         Mediator.Subscribe<ZoneSwitchEndMessage>(this, (_) =>
         {
             _localVisibilityGateActive = false;
-            _postZoneCheckUntil = DateTime.UtcNow.AddSeconds(20);
-            _postZoneLastCheck = DateTime.MinValue;
             // Ensure we will re-report proximity when encountering the player after zoning
-            _proximityReportedVisible = false;
-            _postZoneReaffirmDone = false;
+            _proximityReporter.OnZoneSwitchEnd(DateTime.UtcNow);
             _forceHonorificReapply = true;
         });
         Mediator.Subscribe<CutsceneStartMessage>(this, (_) =>
@@ -241,8 +234,8 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             {
                 IsVisible = false;
                 Pair.ReportVisibility(false);
-                _proximityReportedVisible = false;
             }
+            _proximityReporter.Reset();
         });
         Mediator.Subscribe<CutsceneEndMessage>(this, (_) =>
         {
@@ -1728,37 +1721,25 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                 float distance = Vector3.Distance(selfPos, gamePos);
                 bool withinPartyRange = !inSameParty || distance <= maxRange;
 
-                if (DateTime.UtcNow < _postZoneCheckUntil)
-                {
-                    var now = DateTime.UtcNow;
-                    if ((now - _postZoneLastCheck) > TimeSpan.FromSeconds(1))
-                    {
-                        _postZoneLastCheck = now;
-                        // Remove on-screen check during post-zone period to handle cases where GameObjects are still loading
-                        bool shouldReportVisible = withinPartyRange && !_localVisibilityGateActive;
-                        if (shouldReportVisible && !_proximityReportedVisible)
-                        {
-                            Pair.ReportVisibility(true);
-                            _proximityReportedVisible = true;
-                        }
-                        else if (shouldReportVisible && _proximityReportedVisible && !Pair.IsMutuallyVisible && !_postZoneReaffirmDone)
-                        {
-                            Logger.LogDebug("Post-zone reaffirm visibility for {this}: distance={dist:F1}m", this, distance);
-                            Pair.ReportVisibility(true);
-                            _postZoneReaffirmDone = true;
-                        }
-                    }
-                }
+                // Proximity visibility reporting is delegated to PairProximityReporter so the
+                // client continues to reaffirm visibility after the post-zone window expires,
+                // preventing the deadlock where a player remains invisible after a teleport.
+                var visibilityAction = _proximityReporter.OnFrameworkUpdate(
+                    charaHandlerValid: _charaHandler?.Address != nint.Zero,
+                    withinPartyRange: withinPartyRange,
+                    isMutuallyVisible: Pair.IsMutuallyVisible,
+                    localVisibilityGateActive: _localVisibilityGateActive,
+                    isCurrentlyVisible: IsVisible,
+                    now: DateTime.UtcNow);
 
-                if (!_proximityReportedVisible && !_localVisibilityGateActive && withinPartyRange)
+                if (visibilityAction == VisibilityReportAction.ReportVisible)
                 {
                     Pair.ReportVisibility(true);
-                    _proximityReportedVisible = true;
                 }
-                if (_proximityReportedVisible && !withinPartyRange && !_dalamudUtil.IsInGpose)
+                else if (visibilityAction == VisibilityReportAction.ReportNotVisible
+                         && !_dalamudUtil.IsInGpose)
                 {
                     Pair.ReportVisibility(false);
-                    _proximityReportedVisible = false;
                 }
 
                 bool allowed = Pair.IsMutuallyVisible && withinPartyRange;
@@ -1797,7 +1778,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                     _downloadCancellationTokenSource = null;
                     CancelApplicationTokenSource(true);
                     Pair.ReportVisibility(false);
-                    _proximityReportedVisible = false;
+                    _proximityReporter.Reset();
                     TryDestroyTemporaryCollectionOnInvisible("visibility-not-mutual");
                     Logger.LogDebug("{this} visibility changed (not mutual), now: {visi}", this, IsVisible);
                 }
@@ -1863,7 +1844,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                 _downloadCancellationTokenSource = null;
                 CancelApplicationTokenSource(true);
                 Pair.ReportVisibility(false);
-                _proximityReportedVisible = false;
+                _proximityReporter.Reset();
                 TryDestroyTemporaryCollectionOnInvisible("character-address-zero");
                 Logger.LogTrace("{this} visibility changed, now: {visi}", this, IsVisible);
             }
@@ -1889,7 +1870,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
         if (!_localVisibilityGateActive)
         {
             Pair.ReportVisibility(true);
-            _proximityReportedVisible = true;
+            _proximityReporter.Reset();
         }
 
         Mediator.Subscribe<ConnectedMessage>(this, (_) =>
@@ -1899,7 +1880,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             if (!_localVisibilityGateActive)
             {
                 Pair.ReportVisibility(true);
-                _proximityReportedVisible = true;
+                _proximityReporter.Reset();
             }
         });
 
@@ -1910,7 +1891,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
             if (!_localVisibilityGateActive)
             {
                 Pair.ReportVisibility(true);
-                _proximityReportedVisible = true;
+                _proximityReporter.Reset();
             }
         });
 
@@ -1923,7 +1904,7 @@ public sealed class PairHandler : DisposableMediatorSubscriberBase
                 if (!_localVisibilityGateActive)
                 {
                     Pair.ReportVisibility(true);
-                    _proximityReportedVisible = true;
+                    _proximityReporter.Reset();
                 }
             }
         });
