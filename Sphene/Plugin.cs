@@ -163,6 +163,7 @@ public sealed class Plugin : IAsyncDalamudPlugin
             collection.AddSingleton(_gameConfig);
             collection.AddSingleton(_partyList);
             collection.AddSingleton(_namePlateGui);
+            collection.AddSingleton(_objectTable);
 
             // ShrinkU integration services and windows
             collection.AddSingleton<Microsoft.Extensions.Logging.ILogger>(s => s.GetRequiredService<ILoggerFactory>().CreateLogger("ShrinkU"));
@@ -575,6 +576,7 @@ public sealed class Plugin : IAsyncDalamudPlugin
             collection.AddHostedService(p => p.GetRequiredService<AreaBoundSyncshellService>());
             collection.AddHostedService(p => p.GetRequiredService<CitySyncshellService>());
             collection.AddHostedService(p => p.GetRequiredService<HalloweenEasterEggService>());
+            collection.AddHostedService(p => p.GetRequiredService<SupporterNameplateService>());
             collection.AddHostedService(p => p.GetRequiredService<SphenePlugin>());
             collection.AddSingleton<CharacterIdentityService>();
             collection.AddHostedService(p => p.GetRequiredService<CharacterIdentityService>());

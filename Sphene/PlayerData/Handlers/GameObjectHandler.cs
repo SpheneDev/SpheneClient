@@ -215,8 +215,8 @@ public sealed class GameObjectHandler : DisposableMediatorSubscriberBase, IHighP
 
                 ref var mh = ref chara->DrawData.Weapon(WeaponSlot.MainHand);
                 ref var oh = ref chara->DrawData.Weapon(WeaponSlot.OffHand);
-                equipDiff |= CompareAndUpdateMainHand((Weapon*)mh.DrawObject);
-                equipDiff |= CompareAndUpdateOffHand((Weapon*)oh.DrawObject);
+                equipDiff |= CompareAndUpdateMainHand((Weapon*)mh.DrawData.DrawObject);
+                equipDiff |= CompareAndUpdateOffHand((Weapon*)oh.DrawData.DrawObject);
 
                 if (equipDiff)
                     Logger.LogTrace("Checking [{this}] equip data as human from draw obj, result: {diff}", this, equipDiff);
