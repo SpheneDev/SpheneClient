@@ -123,6 +123,8 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
 
     public bool IsSupporter => _connectionDto?.IsSupporter ?? false;
 
+    public bool SupporterFeaturesEnabled => _connectionDto?.ServerInfo?.SupporterFeaturesEnabled ?? false;
+
     public int OnlineUsers => SystemInfoDto.OnlineUsers;
 
     public bool ServerAlive => ServerState is ServerState.Connected or ServerState.RateLimited or ServerState.Unauthorized or ServerState.Disconnected;

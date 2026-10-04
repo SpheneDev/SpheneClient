@@ -154,7 +154,7 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
 
     private void OnNamePlateUpdate(INamePlateUpdateContext ctx, IReadOnlyList<INamePlateUpdateHandler> handlers)
     {
-        if (!_configService.Current.ShowSupporterNameplate)
+        if (!_configService.Current.ShowSupporterNameplate || !_apiController.SupporterFeaturesEnabled)
         {
             _iconPositions = [];
             if (ShouldLogTrace())
@@ -490,7 +490,7 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
         return plateWorld + right * metersX - up * metersY;
     }
 
-    private unsafe bool ProbeOccluded(Vector3 origin, Vector3 target, out string debug, out string hitInfo)
+    private static unsafe bool ProbeOccluded(Vector3 origin, Vector3 target, out string debug, out string hitInfo)
     {
         hitInfo = string.Empty;
         var toTarget = target - origin;

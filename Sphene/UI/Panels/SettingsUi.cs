@@ -2141,26 +2141,30 @@ public class SettingsUi : WindowMediatorSubscriberBase
     {
         _lastTab = "Overview";
         
-        // --- Server Connection Section ---        
+        // --- Server Connection Section ---
         // Discord Button (Right Aligned)
+        var supporterFeaturesEnabled = _apiController.SupporterFeaturesEnabled;
         var discordButtonWidth = _uiShared.GetIconTextButtonSize(FontAwesomeIcon.Users, "Join Discord Community");
-        var kofiButtonWidth = _uiShared.GetIconTextButtonSize(FontAwesomeIcon.MugHot, "Support on Ko-fi");
-        var buttonGap = ImGui.GetStyle().ItemSpacing.X;
+        var kofiButtonWidth = supporterFeaturesEnabled ? _uiShared.GetIconTextButtonSize(FontAwesomeIcon.MugHot, "Support on Ko-fi") : 0f;
+        var buttonGap = supporterFeaturesEnabled ? ImGui.GetStyle().ItemSpacing.X : 0f;
         ImGui.SameLine(ImGui.GetContentRegionAvail().X - discordButtonWidth - kofiButtonWidth - buttonGap);
-        
+
         // Ko-fi Button
-        var kofiColor = new Vector4(1.0f, 0.37f, 0.23f, 1.0f);
-        var kofiHoverColor = new Vector4(1.0f, 0.50f, 0.30f, 1.0f);
-        ImGui.PushStyleColor(ImGuiCol.Button, kofiColor);
-        ImGui.PushStyleColor(ImGuiCol.ButtonHovered, kofiHoverColor);
-        ImGui.PushStyleColor(ImGuiCol.ButtonActive, kofiHoverColor);
-        if (_uiShared.IconTextActionButton(FontAwesomeIcon.MugHot, "Support on Ko-fi"))
+        if (supporterFeaturesEnabled)
         {
-            Util.OpenLink("https://ko-fi.com/sphenedev");
+            var kofiColor = new Vector4(1.0f, 0.37f, 0.23f, 1.0f);
+            var kofiHoverColor = new Vector4(1.0f, 0.50f, 0.30f, 1.0f);
+            ImGui.PushStyleColor(ImGuiCol.Button, kofiColor);
+            ImGui.PushStyleColor(ImGuiCol.ButtonHovered, kofiHoverColor);
+            ImGui.PushStyleColor(ImGuiCol.ButtonActive, kofiHoverColor);
+            if (_uiShared.IconTextActionButton(FontAwesomeIcon.MugHot, "Support on Ko-fi"))
+            {
+                Util.OpenLink("https://ko-fi.com/sphenedev");
+            }
+            ImGui.PopStyleColor(3);
+            UiSharedService.AttachToolTip("Support Sphene's development on Ko-fi");
+            ImGui.SameLine();
         }
-        ImGui.PopStyleColor(3);
-        UiSharedService.AttachToolTip("Support Sphene's development on Ko-fi");
-        ImGui.SameLine();
         
         if (_uiShared.IconTextActionButton(FontAwesomeIcon.Users, "Join Discord Community"))
         {
@@ -2434,6 +2438,14 @@ public class SettingsUi : WindowMediatorSubscriberBase
             ImGui.TextColored(ImGuiColors.DalamudRed, _lastImportError);
         }
 
+        if (supporterFeaturesEnabled)
+        {
+            DrawOverviewSupporterSection();
+        }
+    }
+
+    private void DrawOverviewSupporterSection()
+    {
         ImGui.Spacing();
         ImGui.Separator();
         ImGui.Spacing();
