@@ -77,6 +77,9 @@ public class SettingsUi : WindowMediatorSubscriberBase
     private bool _deleteAccountPopupModalShown = false;
     private bool _deleteFilesPopupModalShown = false;
     private string _lastTab = string.Empty;
+    private static readonly Vector4 SupporterKofiButtonColor = new(1.0f, 0.37f, 0.23f, 1.0f);
+    private static readonly Vector4 SupporterKofiButtonHoverColor = new(1.0f, 0.50f, 0.30f, 1.0f);
+    private static readonly Vector4 SupporterAccentTextColor = new(0.13f, 0.10f, 0.02f, 1.0f);
     private bool? _notesSuccessfullyApplied = null;
     private bool _overwriteExistingLabels = false;
     private bool _readClearCache = false;
@@ -107,6 +110,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         Storage,
         SyncBehavior,
         Acknowledgment,
+        Supporter,
         Debug
     }
     private SettingsPage _activeSettingsPage = SettingsPage.Home;
@@ -1671,7 +1675,12 @@ public class SettingsUi : WindowMediatorSubscriberBase
         diagnosticsPageLabel = "Diagnostics";
 #endif
 
-        var buttonLabels = new[] { "Home", "Connectivity", "People & Notes", "Appearance", "Theme", "Notifications", "Performance", "Transfers", "Storage", "Sync", "Acknowledgment", diagnosticsPageLabel };
+        var buttonLabels = new[] { "Home", "Connectivity", "People & Notes", "Appearance", "Theme", "Notifications", "Performance", "Transfers", "Storage", "Sync", "Acknowledgment", "Supporter", diagnosticsPageLabel };
+
+        if (_activeSettingsPage == SettingsPage.Supporter && !_apiController.SupporterFeaturesEnabled)
+        {
+            _activeSettingsPage = SettingsPage.Home;
+        }
         var maxTextWidth = 0f;
         foreach (var label in buttonLabels)
         {
@@ -1693,24 +1702,37 @@ public class SettingsUi : WindowMediatorSubscriberBase
             ImGuiHelpers.ScaledDummy(0, 3);
         }
 
-        void SidebarButton(string label, SettingsPage page)
+        void SidebarButton(string label, SettingsPage page, Vector4? accentColor = null)
         {
             var buttonSize = new Vector2(-1, 24f * ImGuiHelpers.GlobalScale);
             var isActive = _activeSettingsPage == page;
             using var buttonPadding = ImRaii.PushStyle(ImGuiStyleVar.FramePadding, new Vector2(sidebarButtonPaddingX, style.FramePadding.Y));
             using var buttonRounding = ImRaii.PushStyle(ImGuiStyleVar.FrameRounding, 5f * ImGuiHelpers.GlobalScale);
+            var pushedColors = 0;
             if (isActive)
             {
-                ImGui.PushStyleColor(ImGuiCol.Button, ImGuiColors.ParsedBlue);
-                ImGui.PushStyleColor(ImGuiCol.ButtonHovered, ImGuiColors.ParsedBlue);
+                var activeColor = accentColor ?? ImGuiColors.ParsedBlue;
+                ImGui.PushStyleColor(ImGuiCol.Button, activeColor);
+                ImGui.PushStyleColor(ImGuiCol.ButtonHovered, activeColor);
+                pushedColors += 2;
+                if (accentColor.HasValue)
+                {
+                    ImGui.PushStyleColor(ImGuiCol.Text, SupporterAccentTextColor);
+                    pushedColors++;
+                }
+            }
+            else if (accentColor.HasValue)
+            {
+                ImGui.PushStyleColor(ImGuiCol.Text, accentColor.Value);
+                pushedColors++;
             }
             if (ImGui.Button(label, buttonSize))
             {
                 _activeSettingsPage = page;
             }
-            if (isActive)
+            if (pushedColors > 0)
             {
-                ImGui.PopStyleColor(2);
+                ImGui.PopStyleColor(pushedColors);
             }
         }
 
@@ -1719,6 +1741,10 @@ public class SettingsUi : WindowMediatorSubscriberBase
         SidebarButton("Connectivity", SettingsPage.Connectivity);
         SidebarButton("People & Notes", SettingsPage.PeopleNotes);
         SidebarButton("Notifications", SettingsPage.Alerts);
+        if (_apiController.SupporterFeaturesEnabled)
+        {
+            SidebarButton("Supporter", SettingsPage.Supporter, SpheneColors.SpheneGold);
+        }
         ImGui.Separator();
 
         SidebarCategory("Appearance");
@@ -1765,6 +1791,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             SettingsPage.Storage => ("Sync & Data", "Storage"),
             SettingsPage.SyncBehavior => ("Sync & Data", "Sync"),
             SettingsPage.Acknowledgment => ("Sync & Data", "Acknowledgment"),
+            SettingsPage.Supporter => ("General", "Supporter"),
             SettingsPage.Debug => ("Advanced", diagnosticsPageLabel),
             _ => ("General", "Home")
         };
@@ -1822,6 +1849,9 @@ public class SettingsUi : WindowMediatorSubscriberBase
                     break;
                 case SettingsPage.Acknowledgment:
                     DrawAcknowledgmentSettings();
+                    break;
+                case SettingsPage.Supporter:
+                    DrawSupporterPage();
                     break;
                 case SettingsPage.Debug:
                     DrawDebug();
@@ -2152,11 +2182,9 @@ public class SettingsUi : WindowMediatorSubscriberBase
         // Ko-fi Button
         if (supporterFeaturesEnabled)
         {
-            var kofiColor = new Vector4(1.0f, 0.37f, 0.23f, 1.0f);
-            var kofiHoverColor = new Vector4(1.0f, 0.50f, 0.30f, 1.0f);
-            ImGui.PushStyleColor(ImGuiCol.Button, kofiColor);
-            ImGui.PushStyleColor(ImGuiCol.ButtonHovered, kofiHoverColor);
-            ImGui.PushStyleColor(ImGuiCol.ButtonActive, kofiHoverColor);
+            ImGui.PushStyleColor(ImGuiCol.Button, SupporterKofiButtonColor);
+            ImGui.PushStyleColor(ImGuiCol.ButtonHovered, SupporterKofiButtonHoverColor);
+            ImGui.PushStyleColor(ImGuiCol.ButtonActive, SupporterKofiButtonHoverColor);
             if (_uiShared.IconTextActionButton(FontAwesomeIcon.MugHot, "Support on Ko-fi"))
             {
                 Util.OpenLink("https://ko-fi.com/sphenedev");
@@ -2438,20 +2466,72 @@ public class SettingsUi : WindowMediatorSubscriberBase
             ImGui.TextColored(ImGuiColors.DalamudRed, _lastImportError);
         }
 
-        if (supporterFeaturesEnabled)
-        {
-            DrawOverviewSupporterSection();
-        }
     }
 
-    private void DrawOverviewSupporterSection()
+    private void DrawSupporterPage()
     {
-        ImGui.Spacing();
-        ImGui.Separator();
-        ImGui.Spacing();
-        UiSharedService.ColorText("Supporter Nameplate", ImGuiColors.ParsedBlue);
-        UiSharedService.ColorTextWrapped("Display a symbol or text next to the nameplates of Sphene supporters. Supporter status is automatically synced from the server via Ko-fi donations.", ImGuiColors.DalamudGrey);
-        ImGui.Spacing();
+        DrawSettingsPageHeader("Supporter", "Supporter perks. Support Sphene on Ko-fi to unlock your own nameplate indicator.");
+
+        if (!_apiController.IsSupporter)
+        {
+            DrawSupporterLockedCard();
+            return;
+        }
+
+        DrawSupporterStatusCard();
+        ImGuiHelpers.ScaledDummy(0, 8);
+        DrawSupporterNameplateSettings();
+    }
+
+    private void DrawSupporterLockedCard()
+    {
+        ImGuiHelpers.ScaledDummy(0, 10);
+        UiSharedService.DrawGrouped(() =>
+        {
+            ImGuiHelpers.ScaledDummy(0, 16);
+            DrawCenteredSupporterIcon(FontAwesomeIcon.Crown, SpheneColors.SpheneGold, 2.4f);
+            ImGuiHelpers.ScaledDummy(0, 10);
+            DrawCenteredSupporterHeadline("Unlock Supporter Perks");
+            ImGuiHelpers.ScaledDummy(0, 8);
+            UiSharedService.ColorTextWrapped("Support Sphene on Ko-fi and your nameplate gets a personal supporter indicator that other Sphene users can see in game.", ImGuiColors.DalamudGrey);
+            ImGuiHelpers.ScaledDummy(0, 12);
+
+            DrawSupporterPerkLine("Personal supporter indicator on your nameplate");
+            DrawSupporterPerkLine("Custom symbol, text or the Sphene icon");
+            DrawSupporterPerkLine("Visible to everyone using Sphene");
+            ImGuiHelpers.ScaledDummy(0, 14);
+
+            const string kofiLabel = "Support on Ko-fi";
+            CenterSupporterCursorX(_uiShared.GetIconTextButtonSize(FontAwesomeIcon.MugHot, kofiLabel));
+            ImGui.PushStyleColor(ImGuiCol.Button, SupporterKofiButtonColor);
+            ImGui.PushStyleColor(ImGuiCol.ButtonHovered, SupporterKofiButtonHoverColor);
+            ImGui.PushStyleColor(ImGuiCol.ButtonActive, SupporterKofiButtonHoverColor);
+            if (_uiShared.IconTextActionButton(FontAwesomeIcon.MugHot, kofiLabel))
+            {
+                Util.OpenLink("https://ko-fi.com/sphenedev");
+            }
+            ImGui.PopStyleColor(3);
+            UiSharedService.AttachToolTip("Opens ko-fi.com/sphenedev");
+            ImGuiHelpers.ScaledDummy(0, 8);
+            UiSharedService.ColorTextWrapped("Include your Discord username or ID in the donation message so your supporter status can be linked.", ImGuiColors.DalamudGrey3);
+            ImGuiHelpers.ScaledDummy(0, 16);
+        }, 8f);
+    }
+
+    private void DrawSupporterStatusCard()
+    {
+        UiSharedService.DrawGrouped(() =>
+        {
+            _uiShared.IconText(FontAwesomeIcon.Crown, SpheneColors.SpheneGold);
+            ImGui.SameLine();
+            _uiShared.BigText("Supporter Status: Active", SpheneColors.SpheneGold);
+            UiSharedService.ColorTextWrapped("Thank you for supporting Sphene! Your nameplate indicator is visible to other users.", ImGuiColors.DalamudGrey);
+        }, 8f);
+    }
+
+    private void DrawSupporterNameplateSettings()
+    {
+        DrawSettingsSectionHeader("Supporter Nameplate", "Display a symbol or text next to the nameplates of Sphene supporters. Supporter status is automatically synced from the server via Ko-fi donations.");
 
         var showNameplate = _configService.Current.ShowSupporterNameplate;
         if (ImGui.Checkbox("Show Supporter Nameplate Indicators", ref showNameplate))
@@ -2460,9 +2540,16 @@ public class SettingsUi : WindowMediatorSubscriberBase
             _configService.Save();
         }
 
-        if (showNameplate)
+        if (!showNameplate)
         {
-            ImGui.Indent();
+            return;
+        }
+
+        ImGuiHelpers.ScaledDummy(0, 4);
+        UiSharedService.DrawGrouped(() =>
+        {
+            UiSharedService.ColorText("Symbol & Label", SpheneColors.LuminousGold);
+            ImGuiHelpers.ScaledDummy(0, 4);
 
             var symbolChar = _configService.Current.SupporterSymbolChar ?? string.Empty;
             ImGui.SetNextItemWidth(ClampSettingsItemWidth(80f));
@@ -2517,6 +2604,13 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 _configService.Save();
             }
             UiSharedService.AttachToolTip("UI Foreground color key for the symbol/text (0-65535). Default: 43 (gold).");
+        }, 6f);
+
+        ImGuiHelpers.ScaledDummy(0, 8);
+        UiSharedService.DrawGrouped(() =>
+        {
+            UiSharedService.ColorText("Sphene Icon", SpheneColors.LuminousGold);
+            ImGuiHelpers.ScaledDummy(0, 4);
 
             var iconEnabled = _configService.Current.SupporterIconEnabled;
             if (ImGui.Checkbox("Show Sphene Icon##supporterIconEnabled", ref iconEnabled))
@@ -2538,23 +2632,47 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 UiSharedService.AttachToolTip("Draws the configured Label Text next to the Sphene icon (overlay, not part of the nameplate).");
                 ImGui.Unindent();
             }
+        }, 6f);
+    }
 
-            ImGui.Unindent();
-        }
+    private static void CenterSupporterCursorX(float contentWidth)
+    {
+        var offset = MathF.Max(0f, (ImGui.GetContentRegionAvail().X - contentWidth) * 0.5f);
+        ImGui.SetCursorPosX(ImGui.GetCursorPosX() + offset);
+    }
 
-        ImGui.Spacing();
-        ImGui.Separator();
-        ImGui.Spacing();
-        if (_apiController.IsSupporter)
+    private void DrawCenteredSupporterIcon(FontAwesomeIcon icon, Vector4 color, float scale)
+    {
+        var iconText = icon.ToIconString();
+        Vector2 iconSize;
+        using (_uiShared.IconFont.Push())
         {
-            UiSharedService.ColorText("Supporter Status: Active", ImGuiColors.ParsedGreen);
-            UiSharedService.ColorTextWrapped("Thank you for supporting Sphene! Your nameplate indicator is visible to other users.", ImGuiColors.DalamudGrey);
+            ImGui.SetWindowFontScale(scale);
+            iconSize = ImGui.CalcTextSize(iconText);
+            ImGui.SetWindowFontScale(1f);
         }
-        else
+        CenterSupporterCursorX(iconSize.X);
+        ImGui.SetWindowFontScale(scale);
+        _uiShared.IconText(icon, color);
+        ImGui.SetWindowFontScale(1f);
+    }
+
+    private void DrawCenteredSupporterHeadline(string text)
+    {
+        float textWidth;
+        using (_uiShared.UidFont.Push())
         {
-            UiSharedService.ColorText("Supporter Status: Inactive", ImGuiColors.DalamudGrey);
-            UiSharedService.ColorTextWrapped("Support Sphene on Ko-fi to get a supporter nameplate indicator. Donate at ko-fi.com/sphenedev and include your Discord username or ID in the donation message.", ImGuiColors.DalamudGrey);
+            textWidth = ImGui.CalcTextSize(text).X;
         }
+        CenterSupporterCursorX(textWidth);
+        _uiShared.BigText(text, SpheneColors.LuminousGold);
+    }
+
+    private void DrawSupporterPerkLine(string text)
+    {
+        _uiShared.IconText(FontAwesomeIcon.CheckCircle, SpheneColors.SpheneGold);
+        ImGui.SameLine();
+        UiSharedService.ColorTextWrapped(text, ImGuiColors.DalamudGrey);
     }
 
     private void DrawExportBackupModal()

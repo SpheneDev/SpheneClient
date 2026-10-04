@@ -20,6 +20,11 @@ public static class UpdateOptionPanel
         SupporterNameplateIndicators
     }
 
+    private static readonly IReadOnlySet<Link> SupporterFeatureLinks = new HashSet<Link>
+    {
+        Link.SupporterNameplateIndicators
+    };
+
     private static readonly ReleaseDefinition[] Releases =
     [
         new("v.1.1.11.1071", [Link.SyncIncomingWithoutRedraw, Link.SyncOutgoingBatching]),
@@ -68,45 +73,61 @@ public static class UpdateOptionPanel
     public static string GetTitle(Link link)
         => LinkTitles.TryGetValue(link, out var title) ? title : "Option";
 
-    public static IReadOnlyList<ReleaseOptionGroup> GetPendingReleaseGroups(SpheneConfigService configService)
+    public static IReadOnlyList<ReleaseOptionGroup> GetPendingReleaseGroups(SpheneConfigService configService, bool supporterFeaturesEnabled)
     {
         var seenTags = GetSeenTags(configService);
         return
         [
             .. Releases
                 .Where(release => !seenTags.Contains(release.Tag))
-                .Select(release => new ReleaseOptionGroup(release.Tag, release.Links))
+                .Select(release => new ReleaseOptionGroup(release.Tag, FilterLinks(release.Links, supporterFeaturesEnabled)))
+                .Where(group => group.Links.Count > 0)
         ];
     }
 
-    public static IReadOnlyList<Link> GetVisibleLinks(SpheneConfigService configService)
+    private static IReadOnlyList<Link> FilterLinks(IReadOnlyList<Link> links, bool supporterFeaturesEnabled)
+    {
+        if (supporterFeaturesEnabled)
+        {
+            return links;
+        }
+
+        return [.. links.Where(link => !SupporterFeatureLinks.Contains(link))];
+    }
+
+    public static IReadOnlyList<Link> GetVisibleLinks(SpheneConfigService configService, bool supporterFeaturesEnabled)
     {
         return
         [
-            .. GetPendingReleaseGroups(configService)
+            .. GetPendingReleaseGroups(configService, supporterFeaturesEnabled)
                 .SelectMany(release => release.Links)
                 .Distinct()
         ];
     }
 
-    public static void DrawByLink(Link link, SpheneConfigService configService, UiSharedService uiShared, SpheneMediator mediator, float outgoingSliderWidth)
+    public static void DrawByLink(Link link, SpheneConfigService configService, UiSharedService uiShared, SpheneMediator mediator, float outgoingSliderWidth, bool supporterFeaturesEnabled)
     {
+        if (!supporterFeaturesEnabled && SupporterFeatureLinks.Contains(link))
+        {
+            return;
+        }
+
         if (LinkDrawers.TryGetValue(link, out var drawer))
         {
             drawer(configService, uiShared, mediator, outgoingSliderWidth);
         }
     }
 
-    public static bool HasUnseenTag(SpheneConfigService configService)
+    public static bool HasUnseenTag(SpheneConfigService configService, bool supporterFeaturesEnabled)
     {
-        return GetPendingReleaseGroups(configService).Count > 0;
+        return GetPendingReleaseGroups(configService, supporterFeaturesEnabled).Count > 0;
     }
 
-    public static void MarkCurrentTagAsSeen(SpheneConfigService configService)
+    public static void MarkCurrentTagAsSeen(SpheneConfigService configService, bool supporterFeaturesEnabled)
     {
         var seenTags = GetSeenTags(configService);
         var latestSeenTag = configService.Current.LastSeenNewOptionsTag;
-        var pendingReleases = GetPendingReleaseGroups(configService);
+        var pendingReleases = GetPendingReleaseGroups(configService, supporterFeaturesEnabled);
 
         foreach (var release in pendingReleases)
         {

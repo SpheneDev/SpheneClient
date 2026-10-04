@@ -54,6 +54,7 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
     private HashSet<string> _supporterNameCache = new(StringComparer.OrdinalIgnoreCase);
     private DateTime _lastCacheRefresh = DateTime.MinValue;
     private DateTime _lastTraceLog = DateTime.MinValue;
+    private string? _lastSupporterSettingsKey;
     private readonly TimeSpan _cacheRefreshInterval = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan TraceInterval = TimeSpan.FromSeconds(5);
 
@@ -76,10 +77,11 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
         _configService = configService;
         _pairManager = pairManager;
         _logger = logger;
-        _namePlateGui.OnDataUpdate += OnNamePlateUpdate;
+        _namePlateGui.OnDataUpdate += OnDataUpdate;
+        _namePlateGui.OnNamePlateUpdate += OnNamePlateTextUpdate;
         _pluginInterface.UiBuilder.Draw += DrawSupporterIcons;
         _iconTexture = LoadIconTexture();
-        _logger.LogDebug("[Nameplate] Service started, subscribed to OnDataUpdate");
+        _logger.LogDebug("[Nameplate] Service started, subscribed to OnDataUpdate + OnNamePlateUpdate");
     }
 
     private ISharedImmediateTexture? LoadIconTexture()
@@ -152,8 +154,10 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
         return _supporterNameCache.Contains(characterName);
     }
 
-    private void OnNamePlateUpdate(INamePlateUpdateContext ctx, IReadOnlyList<INamePlateUpdateHandler> handlers)
+    private void OnDataUpdate(INamePlateUpdateContext ctx, IReadOnlyList<INamePlateUpdateHandler> handlers)
     {
+        RequestRedrawIfSettingsChanged();
+
         if (!_configService.Current.ShowSupporterNameplate || !_apiController.SupporterFeaturesEnabled)
         {
             _iconPositions = [];
@@ -174,9 +178,8 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
             return;
         }
 
-        var symbol = _configService.Current.SupporterSymbolChar ?? string.Empty;
+        var symbolEnabled = !string.IsNullOrEmpty(_configService.Current.SupporterSymbolChar);
         var textEnabled = _configService.Current.SupporterTextEnabled && !string.IsNullOrWhiteSpace(_configService.Current.SupporterLabelText);
-        var symbolEnabled = !string.IsNullOrEmpty(symbol);
         var iconEnabled = _configService.Current.SupporterIconEnabled;
         if (!textEnabled && !symbolEnabled && !iconEnabled)
         {
@@ -185,11 +188,6 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
                 _logger.LogDebug("[Nameplate] Skipped: no supporter indicator configured");
             return;
         }
-
-        var labelText = _configService.Current.SupporterLabelText ?? string.Empty;
-        var position = _configService.Current.SupporterSymbolPosition;
-        var order = _configService.Current.SupporterLabelOrder;
-        var colorKey = _configService.Current.SupporterColorKey;
 
         var playerCount = 0;
         var selfPlatePresent = false;
@@ -232,6 +230,50 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
                     iconDbg = (platePos.HasValue ? "ok " : "fail ") + DescribeNameplateIcon(h);
                 }
             }
+        }
+
+        _iconPositions = iconPos is { Count: > 0 } ? (IReadOnlyList<IconDrawPosition>)iconPos.ToArray() : [];
+
+        if (logThisTick)
+        {
+            _logger.LogDebug("[Nameplate] Tick: handlers={handlers}, players={players}, selfPlate={selfPlate}, matched={matched} [{matchedNames}], icons={icons}, ind=[sym={sym},txt={txt},icon={icon}], iconDbg={iconDbg}, occ={occDbg}, seen=[{seenNames}]",
+                handlers.Count, playerCount, selfPlatePresent, matchedNames?.Count ?? 0,
+                string.Join(", ", matchedNames ?? Enumerable.Empty<string>()),
+                _iconPositions.Count,
+                symbolEnabled, textEnabled, iconEnabled,
+                iconDbg ?? "-",
+                _occDebug ?? "-",
+                string.Join(", ", seenNames ?? Enumerable.Empty<string>()));
+        }
+    }
+
+    private void OnNamePlateTextUpdate(INamePlateUpdateContext ctx, IReadOnlyList<INamePlateUpdateHandler> handlers)
+    {
+        if (!_configService.Current.ShowSupporterNameplate || !_apiController.SupporterFeaturesEnabled)
+            return;
+
+        RefreshSupporterNameCache();
+        if (_supporterNameCache.Count == 0)
+            return;
+
+        var symbol = _configService.Current.SupporterSymbolChar ?? string.Empty;
+        var textEnabled = _configService.Current.SupporterTextEnabled && !string.IsNullOrWhiteSpace(_configService.Current.SupporterLabelText);
+        var symbolEnabled = !string.IsNullOrEmpty(symbol);
+        if (!textEnabled && !symbolEnabled)
+            return;
+
+        var labelText = _configService.Current.SupporterLabelText ?? string.Empty;
+        var position = _configService.Current.SupporterSymbolPosition;
+        var order = _configService.Current.SupporterLabelOrder;
+        var colorKey = _configService.Current.SupporterColorKey;
+
+        for (int i = 0; i < handlers.Count; i++)
+        {
+            var h = handlers[i];
+            if (h.GameObject is not IPlayerCharacter pc)
+                continue;
+            if (!IsSupporter(pc.Name.TextValue))
+                continue;
 
             var original = h.InfoView.Name;
 
@@ -276,24 +318,21 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
             }
 
             h.NameParts.Text = original;
-            if (symbolEnabled || textEnabled)
-            {
-                h.NameParts.TextWrap = (left, right);
-            }
+            h.NameParts.TextWrap = (left, right);
         }
+    }
 
-        _iconPositions = iconPos is { Count: > 0 } ? (IReadOnlyList<IconDrawPosition>)iconPos.ToArray() : [];
+    private void RequestRedrawIfSettingsChanged()
+    {
+        var current = _configService.Current;
+        var key = $"{current.ShowSupporterNameplate}|{current.SupporterSymbolChar}|{current.SupporterTextEnabled}|{current.SupporterLabelText}|{current.SupporterLabelOrder}|{current.SupporterSymbolPosition}|{current.SupporterColorKey}|{current.SupporterIconEnabled}|{current.SupporterIconLabelEnabled}|{_apiController.SupporterFeaturesEnabled}|{_supporterNameCache.Count}";
+        if (key == _lastSupporterSettingsKey)
+            return;
 
-        if (logThisTick)
-        {
-            _logger.LogDebug("[Nameplate] Tick: handlers={handlers}, players={players}, selfPlate={selfPlate}, matched={matched} [{matchedNames}], icons={icons}, iconDbg={iconDbg}, occ={occDbg}, seen=[{seenNames}]",
-                handlers.Count, playerCount, selfPlatePresent, matchedNames?.Count ?? 0,
-                string.Join(", ", matchedNames ?? Enumerable.Empty<string>()),
-                _iconPositions.Count,
-                iconDbg ?? "-",
-                _occDebug ?? "-",
-                string.Join(", ", seenNames ?? Enumerable.Empty<string>()));
-        }
+        var hadPreviousKey = _lastSupporterSettingsKey != null;
+        _lastSupporterSettingsKey = key;
+        if (hadPreviousKey)
+            RequestRedraw();
     }
 
     private unsafe Vector2? GetNameplateIconPosition(INamePlateUpdateHandler handler)
@@ -716,7 +755,8 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
         _disposed = true;
         _iconPositions = [];
         try { _pluginInterface.UiBuilder.Draw -= DrawSupporterIcons; } catch (Exception ex) { _logger.LogDebug(ex, "Failed to unsubscribe from UiBuilder.Draw"); }
-        try { _namePlateGui.OnDataUpdate -= OnNamePlateUpdate; } catch (Exception ex) { _logger.LogDebug(ex, "Failed to unsubscribe from nameplate update"); }
+        try { _namePlateGui.OnDataUpdate -= OnDataUpdate; } catch (Exception ex) { _logger.LogDebug(ex, "Failed to unsubscribe from data update"); }
+        try { _namePlateGui.OnNamePlateUpdate -= OnNamePlateTextUpdate; } catch (Exception ex) { _logger.LogDebug(ex, "Failed to unsubscribe from nameplate update"); }
         try { _namePlateGui.RequestRedraw(); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to request nameplate redraw on dispose"); }
         _iconTexture = null;
     }

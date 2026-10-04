@@ -7,6 +7,7 @@ using Sphene.Services;
 using Sphene.Services.Mediator;
 using Sphene.SpheneConfiguration;
 using Sphene.UI.Components;
+using Sphene.WebAPI;
 using System.Numerics;
 
 namespace Sphene.UI.Panels;
@@ -15,17 +16,19 @@ public class NewOptionsUi : WindowMediatorSubscriberBase
 {
     private readonly SpheneConfigService _configService;
     private readonly UiSharedService _uiShared;
+    private readonly ApiController _apiController;
     private readonly bool _shouldAutoOpen;
     private bool _hasAutoOpened;
     private bool _waitingDelayAfterClose;
     private DateTime _changelogClosedAtUtc;
 
-    public NewOptionsUi(ILogger<NewOptionsUi> logger, SpheneMediator mediator, SpheneConfigService configService, UiSharedService uiShared, PerformanceCollectorService performanceCollectorService)
+    public NewOptionsUi(ILogger<NewOptionsUi> logger, SpheneMediator mediator, SpheneConfigService configService, UiSharedService uiShared, PerformanceCollectorService performanceCollectorService, ApiController apiController)
         : base(logger, mediator, "Sphene - New Options###SpheneNewOptions", performanceCollectorService)
     {
         _configService = configService;
         _uiShared = uiShared;
-        _shouldAutoOpen = UpdateOptionPanel.HasUnseenTag(_configService);
+        _apiController = apiController;
+        _shouldAutoOpen = UpdateOptionPanel.HasUnseenTag(_configService, supporterFeaturesEnabled: true);
         IsOpen = false;
         Flags = ImGuiWindowFlags.NoCollapse;
         SizeConstraints = new WindowSizeConstraints
@@ -36,7 +39,7 @@ public class NewOptionsUi : WindowMediatorSubscriberBase
 
         Mediator.Subscribe<ShowReleaseChangelogMessage>(this, _ =>
         {
-            if (_hasAutoOpened || !_shouldAutoOpen || !UpdateOptionPanel.HasUnseenTag(_configService))
+            if (_hasAutoOpened || !_shouldAutoOpen || !UpdateOptionPanel.HasUnseenTag(_configService, _apiController.SupporterFeaturesEnabled))
             {
                 return;
             }
@@ -47,7 +50,7 @@ public class NewOptionsUi : WindowMediatorSubscriberBase
 
         Mediator.Subscribe<ReleaseChangelogClosedMessage>(this, _ =>
         {
-            if (_hasAutoOpened || !_shouldAutoOpen || !UpdateOptionPanel.HasUnseenTag(_configService))
+            if (_hasAutoOpened || !_shouldAutoOpen || !UpdateOptionPanel.HasUnseenTag(_configService, _apiController.SupporterFeaturesEnabled))
             {
                 return;
             }
@@ -59,7 +62,7 @@ public class NewOptionsUi : WindowMediatorSubscriberBase
 
         Mediator.Subscribe<DelayedFrameworkUpdateMessage>(this, _ =>
         {
-            if (_hasAutoOpened || !_shouldAutoOpen || !UpdateOptionPanel.HasUnseenTag(_configService))
+            if (_hasAutoOpened || !_shouldAutoOpen || !UpdateOptionPanel.HasUnseenTag(_configService, _apiController.SupporterFeaturesEnabled))
             {
                 return;
             }
@@ -94,7 +97,7 @@ public class NewOptionsUi : WindowMediatorSubscriberBase
             return;
         }
 
-        if (!UpdateOptionPanel.HasUnseenTag(_configService))
+        if (!UpdateOptionPanel.HasUnseenTag(_configService, _apiController.SupporterFeaturesEnabled))
         {
             IsOpen = false;
             return;
@@ -114,7 +117,7 @@ public class NewOptionsUi : WindowMediatorSubscriberBase
         var optionsPaneHeight = Math.Max(0f, ImGui.GetContentRegionAvail().Y - footerHeight);
         if (ImGui.BeginChild("NewOptionsPane", new Vector2(-1, optionsPaneHeight), true, ImGuiWindowFlags.NoNav))
         {
-            var pendingReleaseGroups = UpdateOptionPanel.GetPendingReleaseGroups(_configService);
+            var pendingReleaseGroups = UpdateOptionPanel.GetPendingReleaseGroups(_configService, _apiController.SupporterFeaturesEnabled);
             for (var i = 0; i < pendingReleaseGroups.Count; i++)
             {
                 var releaseGroup = pendingReleaseGroups[i];
@@ -124,7 +127,7 @@ public class NewOptionsUi : WindowMediatorSubscriberBase
                 foreach (var link in releaseGroup.Links)
                 {
                     UiSharedService.ColorText(UpdateOptionPanel.GetTitle(link), ImGuiColors.ParsedBlue);
-                    UpdateOptionPanel.DrawByLink(link, _configService, _uiShared, Mediator, 240f);
+                    UpdateOptionPanel.DrawByLink(link, _configService, _uiShared, Mediator, 240f, _apiController.SupporterFeaturesEnabled);
                     ImGuiHelpers.ScaledDummy(0, 6);
                     ImGui.Separator();
                     ImGuiHelpers.ScaledDummy(0, 4);
@@ -147,7 +150,7 @@ public class NewOptionsUi : WindowMediatorSubscriberBase
         ImGuiHelpers.ScaledDummy(0, 4);
         if (ImGui.Button("I reviewed everything, confirm", new Vector2(-1, 0)))
         {
-            UpdateOptionPanel.MarkCurrentTagAsSeen(_configService);
+            UpdateOptionPanel.MarkCurrentTagAsSeen(_configService, _apiController.SupporterFeaturesEnabled);
             IsOpen = false;
         }
     }
