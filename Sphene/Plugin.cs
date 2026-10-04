@@ -164,6 +164,8 @@ public sealed class Plugin : IAsyncDalamudPlugin
             collection.AddSingleton(_partyList);
             collection.AddSingleton(_namePlateGui);
             collection.AddSingleton(_objectTable);
+            collection.AddSingleton(_gameGui);
+            collection.AddSingleton(_textureProvider);
 
             // ShrinkU integration services and windows
             collection.AddSingleton<Microsoft.Extensions.Logging.ILogger>(s => s.GetRequiredService<ILoggerFactory>().CreateLogger("ShrinkU"));

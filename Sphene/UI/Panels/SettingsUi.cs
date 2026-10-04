@@ -2506,6 +2506,27 @@ public class SettingsUi : WindowMediatorSubscriberBase
             }
             UiSharedService.AttachToolTip("UI Foreground color key for the symbol/text (0-65535). Default: 43 (gold).");
 
+            var iconEnabled = _configService.Current.SupporterIconEnabled;
+            if (ImGui.Checkbox("Show Sphene Icon##supporterIconEnabled", ref iconEnabled))
+            {
+                _configService.Current.SupporterIconEnabled = iconEnabled;
+                _configService.Save();
+            }
+            UiSharedService.AttachToolTip("Draws the Sphene icon at the end of the nameplate of supporters.");
+
+            if (iconEnabled)
+            {
+                ImGui.Indent();
+                var iconLabelEnabled = _configService.Current.SupporterIconLabelEnabled;
+                if (ImGui.Checkbox("Show label text next to icon##supporterIconLabelEnabled", ref iconLabelEnabled))
+                {
+                    _configService.Current.SupporterIconLabelEnabled = iconLabelEnabled;
+                    _configService.Save();
+                }
+                UiSharedService.AttachToolTip("Draws the configured Label Text next to the Sphene icon (overlay, not part of the nameplate).");
+                ImGui.Unindent();
+            }
+
             ImGui.Unindent();
         }
 

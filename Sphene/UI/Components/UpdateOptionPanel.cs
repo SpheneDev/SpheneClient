@@ -16,7 +16,8 @@ public static class UpdateOptionPanel
         FilterCharacterLegacyShpkOutgoing,
         MismatchTrackerFilters,
         TransfersUseSpheneCdnDirectDownloads,
-        NotificationSoundsSpheneDefault
+        NotificationSoundsSpheneDefault,
+        SupporterNameplateIndicators
     }
 
     private static readonly ReleaseDefinition[] Releases =
@@ -24,6 +25,7 @@ public static class UpdateOptionPanel
         new("v.1.1.11.1071", [Link.SyncIncomingWithoutRedraw, Link.SyncOutgoingBatching]),
         new("v.1.1.13.0", [Link.ShowTestBuildUpdates, Link.FilterCharacterLegacyShpkOutgoing, Link.MismatchTrackerFilters, Link.TransfersUseSpheneCdnDirectDownloads]),
         new("v.1.1.15", [Link.NotificationSoundsSpheneDefault]),
+        new("v.1.1.16", [Link.SupporterNameplateIndicators]),
     ];
 
     private static readonly IReadOnlyDictionary<Link, string> LinkTitles = new Dictionary<Link, string>
@@ -34,7 +36,8 @@ public static class UpdateOptionPanel
         [Link.FilterCharacterLegacyShpkOutgoing] = "Sync: Filter characterlegacy.shpk in Sync Data (Experimental, Default: Disabled)",
         [Link.MismatchTrackerFilters] = "Diagnostics: Active Mismatch Tracker Filters (Defaults: Equipment Off, Companions Off)",
         [Link.TransfersUseSpheneCdnDirectDownloads] = "Transfers: Use CDN direct downloads (Default: Enabled)",
-        [Link.NotificationSoundsSpheneDefault] = "Notifications: Sphene Default Sound Mode (Default: Sphene Default)"
+        [Link.NotificationSoundsSpheneDefault] = "Notifications: Sphene Default Sound Mode (Default: Sphene Default)",
+        [Link.SupporterNameplateIndicators] = "Supporter: Nameplate Indicators & Sphene Icon (Default: Enabled)"
     };
 
     private static readonly IReadOnlyDictionary<Link, Action<SpheneConfigService, UiSharedService, SpheneMediator, float>> LinkDrawers
@@ -53,7 +56,13 @@ public static class UpdateOptionPanel
         [Link.TransfersUseSpheneCdnDirectDownloads] = (configService, uiShared, _, _) =>
             TransfersOptionBlock.DrawUseSpheneCdnDirectDownloadsOption(configService, uiShared, "UpdateOptionTransfersUseSpheneCdnDirectDownloads"),
         [Link.NotificationSoundsSpheneDefault] = (configService, uiShared, mediator, _) =>
-            NotificationsOptionBlock.DrawSpheneDefaultSoundModeOption(configService, uiShared, mediator, "UpdateOptionNotificationSoundsSpheneDefault")
+            NotificationsOptionBlock.DrawSpheneDefaultSoundModeOption(configService, uiShared, mediator, "UpdateOptionNotificationSoundsSpheneDefault"),
+        [Link.SupporterNameplateIndicators] = (configService, uiShared, _, _) =>
+        {
+            SupporterNameplateOptionBlock.DrawShowSupporterNameplateOption(configService, uiShared, "UpdateOptionShowSupporterNameplate");
+            SupporterNameplateOptionBlock.DrawSupporterIconOverlayOption(configService, uiShared, "UpdateOptionSupporterIconOverlay");
+            SupporterNameplateOptionBlock.DrawSupporterIconLabelOption(configService, uiShared, "UpdateOptionSupporterIconLabel");
+        }
     };
 
     public static string GetTitle(Link link)
