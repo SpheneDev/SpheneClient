@@ -29,6 +29,15 @@ public static class SpheneWindowChrome
     private const float AccentCardShimmerPixelsPerSecond = 55f;
     private const float AccentCardBorderThickness = 1.5f;
 
+    private const int SectionCardGlowRings = 8;
+    private const float SectionCardGlowRingStep = 9f;
+    private const float SectionCardGlowSpeed = 0.9f;
+    private const float SectionCardGlowBaseAlpha = 0.07f;
+    private const int SectionCardMoteCount = 3;
+    private const float SectionCardMoteSpeed = 1.4f;
+    private const float SectionCardMoteAlpha = 0.10f;
+    private const float SectionCardMoteRadius = 1.5f;
+
     private const float ScrollFadeHeight = 22f;
     private const float ScrollFadeMaxAlpha = 0.88f;
     private const float ScrollFadeDeadZone = 4f;
@@ -323,7 +332,8 @@ public static class SpheneWindowChrome
     /// Draws a full-width card container with padded content, a tinted background,
     /// a subtle animated shimmer and a gently pulsing accent border.
     /// </summary>
-    public static void DrawAccentCard(Action content, Vector4? accentColor = null, bool animatedBackdrop = true)
+    public static void DrawAccentCard(Action content, Vector4? accentColor = null,
+        bool animatedBackdrop = true, string? id = null)
     {
         var scale = ImGuiHelpers.GlobalScale;
         var padding = AccentCardPadding * scale;
@@ -333,19 +343,19 @@ public static class SpheneWindowChrome
 
         var drawList = ImGui.GetWindowDrawList();
         var cardMin = ImGui.GetCursorScreenPos();
+        var cardRightX = MathF.Min(cardMin.X + availWidth,
+            ImGui.GetWindowPos().X + ImGui.GetWindowSize().X - 1f * scale - ActiveContentInset);
+        var innerWidth = MathF.Max(60f * scale, cardRightX - cardMin.X - padding * 2f);
         drawList.ChannelsSplit(2);
         drawList.ChannelsSetCurrent(1);
 
         ImGui.SetCursorScreenPos(cardMin + new Vector2(padding, padding));
         using (ImRaii.Group())
         {
-            content();
+            DrawCardContentRegion(innerWidth, id, content);
         }
 
-        var cardMax = new Vector2(
-            MathF.Min(cardMin.X + availWidth,
-                ImGui.GetWindowPos().X + ImGui.GetWindowSize().X - 1f * scale - ActiveContentInset),
-            ImGui.GetItemRectMax().Y + padding);
+        var cardMax = new Vector2(cardRightX, ImGui.GetItemRectMax().Y + padding);
         drawList.ChannelsSetCurrent(0);
 
         var background = new Vector4(accent.X * 0.16f, accent.Y * 0.14f, accent.Z * 0.07f, 0.82f);
@@ -366,8 +376,106 @@ public static class SpheneWindowChrome
         ImGui.Dummy(Vector2.Zero);
     }
 
+    /// <summary>
+    /// Draws a calm full-width section card: a softly tinted background, a thin
+    /// accent border with a gentle pulse and an optional accent title with a
+    /// fading underline. Suited for grouping settings blocks; use
+    /// <see cref="DrawAccentCard"/> for prominent promo/status cards.
+    /// </summary>
+    /// <param name="content">Card content draw calls.</param>
+    /// <param name="title">Optional accent-colored card title.</param>
+    /// <param name="accentColor">Accent color for title, underline and border.</param>
+    /// <param name="description">Optional grey description under the title.</param>
+    /// <param name="animatedBackdrop">Draws the shimmer/glow backdrop inside the card.</param>
+    public static void DrawSectionCard(Action content, string? title = null,
+        Vector4? accentColor = null, string? description = null, bool animatedBackdrop = false,
+        string? id = null)
+    {
+        var scale = ImGuiHelpers.GlobalScale;
+        var padding = AccentCardPadding * scale;
+        var rounding = AccentCardRounding * scale;
+        var availWidth = ImGui.GetContentRegionAvail().X;
+        var accent = accentColor ?? SpheneColors.CrystalBlue;
+
+        var drawList = ImGui.GetWindowDrawList();
+        var cardMin = ImGui.GetCursorScreenPos();
+        var cardRightX = MathF.Min(cardMin.X + availWidth,
+            ImGui.GetWindowPos().X + ImGui.GetWindowSize().X - 1f * scale - ActiveContentInset);
+        var innerWidth = MathF.Max(60f * scale, cardRightX - cardMin.X - padding * 2f);
+        drawList.ChannelsSplit(2);
+        drawList.ChannelsSetCurrent(1);
+
+        ImGui.SetCursorScreenPos(cardMin + new Vector2(padding, padding));
+        using (ImRaii.Group())
+        {
+            DrawCardContentRegion(innerWidth, id ?? title, () =>
+            {
+                if (!string.IsNullOrEmpty(title))
+                {
+                    UiSharedService.ColorText(title, accent);
+                    if (!string.IsNullOrEmpty(description))
+                    {
+                        UiSharedService.ColorTextWrapped(description, ImGuiColors.DalamudGrey);
+                    }
+                    var lineMin = ImGui.GetCursorScreenPos() + new Vector2(0, 2f * scale);
+                    var lineMax = new Vector2(lineMin.X + innerWidth, lineMin.Y + 1f * scale);
+                    var lineCol = ImGui.ColorConvertFloat4ToU32(
+                        new Vector4(accent.X, accent.Y, accent.Z, 0.4f));
+                    drawList.AddRectFilledMultiColor(lineMin, lineMax, lineCol, 0, 0, lineCol);
+                    ImGuiHelpers.ScaledDummy(0, 7);
+                }
+                content();
+            });
+        }
+
+        var cardMax = new Vector2(cardRightX, ImGui.GetItemRectMax().Y + padding);
+        drawList.ChannelsSetCurrent(0);
+
+        var background = new Vector4(accent.X * 0.10f, accent.Y * 0.09f, accent.Z * 0.05f, 0.55f);
+        drawList.AddRectFilled(cardMin, cardMax, ImGui.ColorConvertFloat4ToU32(background), rounding);
+
+        if (animatedBackdrop)
+        {
+            DrawSectionCardBackdrop(drawList, cardMin, cardMax, rounding, accent);
+        }
+
+        var pulse = 0.22f + 0.08f * MathF.Sin((float)ImGui.GetTime() * AccentCardBorderPulseSpeed);
+        var borderColor = new Vector4(accent.X, accent.Y, accent.Z, pulse);
+        drawList.AddRect(cardMin, cardMax, ImGui.ColorConvertFloat4ToU32(borderColor),
+            rounding, ImDrawFlags.RoundCornersAll, AccentCardBorderThickness);
+        drawList.ChannelsMerge();
+
+        ImGui.SetCursorScreenPos(cardMin + new Vector2(0, cardMax.Y - cardMin.Y));
+        ImGui.Dummy(Vector2.Zero);
+    }
+
+    /// <summary>
+    /// Runs <paramref name="content"/> inside a borderless, fixed-width
+    /// single-column table so every widget respects the given content width:
+    /// wrapped text, right-aligned SameLine rows, stretched tables and
+    /// full-width items all stop at the right bound.
+    /// Reusable anywhere a bounded content region is needed.
+    /// </summary>
+    public static void DrawCardContentRegion(float width, string? id, Action content)
+    {
+        var tableId = $"##card-content-{(id ?? "region")}-{(int)ImGui.GetCursorScreenPos().Y}";
+        using (ImRaii.PushStyle(ImGuiStyleVar.CellPadding, Vector2.Zero))
+        {
+            if (!ImGui.BeginTable(tableId, 1, ImGuiTableFlags.None, new Vector2(width, 0f)))
+            {
+                return;
+            }
+        }
+        ImGui.TableNextColumn();
+        ImGui.PushTextWrapPos(width);
+        content();
+        ImGui.PopTextWrapPos();
+        ImGui.EndTable();
+    }
+
     private sealed class ScrollAreaState
     {
+        public string Id = string.Empty;
         public bool Begun;
         public bool ClipPushed;
         public bool Border;
@@ -388,13 +496,16 @@ public static class SpheneWindowChrome
     /// top/bottom edges whenever more content exists in that direction.
     /// <paramref name="noPadding"/> removes the child window padding so content can
     /// reach the edges; inner spacing must then be managed manually.
+    /// <paramref name="contentInset"/> indents content inside a noPadding child;
+    /// negative values use the default <see cref="ScrollAreaContentInset"/>.
     /// </summary>
     public static bool BeginScrollArea(string id, Vector2 size, bool border = false,
         ImGuiWindowFlags windowFlags = ImGuiWindowFlags.None, bool noPadding = false,
-        bool hideTopBorder = false, float topInset = 0f)
+        bool hideTopBorder = false, float topInset = 0f, float contentInset = -1f)
     {
         var state = new ScrollAreaState
         {
+            Id = id,
             Border = border,
             HideTopBorder = hideTopBorder,
             TopInset = topInset,
@@ -409,8 +520,13 @@ public static class SpheneWindowChrome
         if (noPadding)
         {
             ImGui.PopStyleVar();
-            state.ContentInset = ScrollAreaContentInset * ImGuiHelpers.GlobalScale;
-            ImGui.Indent(state.ContentInset);
+            state.ContentInset = contentInset < 0f
+                ? ScrollAreaContentInset * ImGuiHelpers.GlobalScale
+                : contentInset;
+            if (state.ContentInset > 0f)
+            {
+                ImGui.Indent(state.ContentInset);
+            }
         }
         state.Begun = begun;
         if (begun)
@@ -435,7 +551,14 @@ public static class SpheneWindowChrome
             }
             else
             {
-                ImGui.PushClipRect(min + new Vector2(0f, state.TopInset), max, true);
+                // Horizontally content may reach the window's inner edge so
+                // separators/fades can span wider than a padded child. A
+                // non-intersecting rect is required: the child's own clip is
+                // limited to its bounds and would cut anything wider off.
+                var borderSize = MathF.Max(ImGui.GetStyle().WindowBorderSize, 0f);
+                ImGui.PushClipRect(
+                    new Vector2(state.ParentMin.X + borderSize, min.Y + state.TopInset),
+                    new Vector2(state.ParentMax.X - borderSize, max.Y), false);
                 state.ClipPushed = true;
             }
         }
@@ -447,8 +570,10 @@ public static class SpheneWindowChrome
     /// Ends a child opened by <see cref="BeginScrollArea"/> and overlays the scroll fades.
     /// <paramref name="fadeBaseColor"/> should match the background behind the child;
     /// defaults to the window background color.
+    /// <paramref name="edgePaddingX"/>, when non-negative, spans the fades from the
+    /// parent window's inner edge inset by that amount instead of the child bounds.
     /// </summary>
-    public static void EndScrollArea(Vector4? fadeBaseColor = null)
+    public static void EndScrollArea(Vector4? fadeBaseColor = null, float edgePaddingX = -1f)
     {
         var state = ScrollAreaStack.Count > 0 ? ScrollAreaStack.Pop() : new ScrollAreaState();
 
@@ -467,6 +592,20 @@ public static class SpheneWindowChrome
             {
                 ImGui.PopClipRect();
             }
+            ImGui.EndChild();
+
+            // Every ImGui window (including child windows) owns a draw list, and
+            // lists composite parent-first, then children in creation order.
+            // Overlays drawn inside the scroll child would render under any
+            // nested child content (e.g. pair list rows), so a sibling overlay
+            // child created afterwards carries all chrome drawing: it composites
+            // above the whole subtree while staying inside the window z-order.
+            var resumeCursor = ImGui.GetCursorScreenPos();
+            ImGui.SetCursorScreenPos(min);
+            ImGui.BeginChild(state.Id + "##scroll-overlay", max - min, false,
+                ImGuiWindowFlags.NoBackground | ImGuiWindowFlags.NoInputs
+                | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse
+                | ImGuiWindowFlags.NoNav | ImGuiWindowFlags.NoSavedSettings);
             if (state.Border)
             {
                 DrawCornerSpillMasks(min, max, state.ParentMin, state.ParentMax);
@@ -474,17 +613,27 @@ public static class SpheneWindowChrome
                     MathF.Max(ImGui.GetStyle().ChildBorderSize, 1f), openTop: state.HideTopBorder);
             }
             DrawScrollFades(min, max, scrollY, scrollMaxY, state.Border, state.TopInset,
-                state.ParentMin, state.ParentMax, fadeBaseColor);
-            var cornerTolerance = 4f * ImGuiHelpers.GlobalScale;
-            var ownsCorner = state.ParentMax.X - max.X <= cornerTolerance
-                && state.ParentMax.Y - max.Y <= cornerTolerance;
+                state.ParentMin, state.ParentMax, fadeBaseColor, edgePaddingX);
+            var styleVars = ImGui.GetStyle();
+            var cornerReach = MathF.Max(styleVars.WindowBorderSize,
+                    MathF.Max(styleVars.WindowPadding.X, styleVars.WindowPadding.Y))
+                + 4f * ImGuiHelpers.GlobalScale;
+            var ownsCorner = state.ParentMax.X - max.X <= cornerReach
+                && state.ParentMax.Y - max.Y <= cornerReach;
+            RedrawWindowBorder(min, max, state.ParentMin, state.ParentMax, cornerReach);
+            // The grip stamp goes last so its corner triangle covers the
+            // re-stroked border instead of the border cutting through the grip.
             if (!state.Border && ownsCorner)
             {
                 DrawGripCorner(state.ParentMax, state);
             }
-            RedrawWindowBorder(min, max, state.ParentMin, state.ParentMax, cornerTolerance);
+            ImGui.EndChild();
+            ImGui.SetCursorScreenPos(resumeCursor);
         }
-        ImGui.EndChild();
+        else
+        {
+            ImGui.EndChild();
+        }
     }
 
     /// <summary>
@@ -533,7 +682,7 @@ public static class SpheneWindowChrome
 
     private static void DrawScrollFades(Vector2 min, Vector2 max, float scrollY,
         float scrollMaxY, bool border, float topInset, Vector2 parentMin, Vector2 parentMax,
-        Vector4? fadeBaseColor)
+        Vector4? fadeBaseColor, float edgePaddingX = -1f)
     {
         var scale = ImGuiHelpers.GlobalScale;
         // Fade strength: 1 while far from the end, shrinks to 0 as the edge
@@ -560,6 +709,18 @@ public static class SpheneWindowChrome
         inner.Y = MathF.Max(inner.Y, parentMin.Y + outerBorder);
         innerMax.X = MathF.Min(innerMax.X, parentMax.X - outerBorder);
         innerMax.Y = MathF.Min(innerMax.Y, parentMax.Y - outerBorder);
+
+        // A non-negative edge padding anchors the fade to the window's inner
+        // edge so it can span wider or narrower than the child itself.
+        if (edgePaddingX >= 0f)
+        {
+            inner.X = parentMin.X + outerBorder + edgePaddingX;
+            innerMax.X = parentMax.X - outerBorder - edgePaddingX;
+            if (innerMax.X <= inner.X)
+            {
+                return;
+            }
+        }
 
         if (innerMax.X <= inner.X || innerMax.Y <= inner.Y)
             return;
@@ -605,6 +766,33 @@ public static class SpheneWindowChrome
         }
 
         drawList.PopClipRect();
+    }
+
+    /// <summary>
+    /// Draws a separator across the current scroll area spanning from the parent
+    /// window's inner edge, inset by <paramref name="edgePadding"/> per side.
+    /// Falls back to a regular separator outside of a scroll area.
+    /// </summary>
+    public static void ScrollAreaSeparator(float edgePadding)
+    {
+        if (ScrollAreaStack.Count == 0)
+        {
+            ImGui.Separator();
+            return;
+        }
+        var state = ScrollAreaStack.Peek();
+        var style = ImGui.GetStyle();
+        var border = MathF.Max(style.WindowBorderSize, 0f);
+        var spacing = MathF.Max(style.ItemSpacing.Y, 1f);
+        var y = ImGui.GetCursorScreenPos().Y + spacing * 0.5f;
+        var minX = state.ParentMin.X + border + edgePadding;
+        var maxX = state.ParentMax.X - border - edgePadding;
+        if (maxX > minX)
+        {
+            ImGui.GetWindowDrawList().AddLine(new Vector2(minX, y),
+                new Vector2(maxX, y), ImGui.GetColorU32(ImGuiCol.Separator));
+        }
+        ImGui.Dummy(new Vector2(0f, spacing));
     }
 
     private static float SmoothStep(float t) => t * t * (3f - 2f * t);
@@ -938,6 +1126,53 @@ public static class SpheneWindowChrome
             new Vector2(centerX - chevronSize, baseY),
             new Vector2(centerX + chevronSize, baseY),
             new Vector2(centerX, tipY), hintColor);
+    }
+
+    private static void DrawSectionCardBackdrop(ImDrawListPtr drawList, Vector2 min, Vector2 max,
+        float rounding, Vector4 accent)
+    {
+        var width = max.X - min.X;
+        var height = max.Y - min.Y;
+        if (width <= 0 || height <= 0)
+            return;
+
+        var scale = ImGuiHelpers.GlobalScale;
+        var time = (float)ImGui.GetTime();
+        // Clip at the card bounds minus a pixel so the glow hugs the border
+        // instead of leaving a dark gap in front of it.
+        drawList.PushClipRect(min + new Vector2(1f, 1f), max - new Vector2(1f, 1f), true);
+
+        // Breathing bloom anchored at the corner arc center, faked with
+        // concentric alpha rings since ImGui has no radial gradients.
+        // Quadratic falloff keeps the outer edge soft and seamless.
+        var pulse = 0.65f + 0.35f * MathF.Sin(time * SectionCardGlowSpeed);
+        var bloomCenter = max - new Vector2(rounding, rounding);
+        for (var i = SectionCardGlowRings; i >= 1; i--)
+        {
+            var falloff = 1f - (i - 1f) / SectionCardGlowRings;
+            var alpha = SectionCardGlowBaseAlpha * falloff * falloff * pulse;
+            var ringColor = new Vector4(accent.X, accent.Y, accent.Z, alpha);
+            drawList.AddCircleFilled(bloomCenter, i * SectionCardGlowRingStep * scale,
+                ImGui.ColorConvertFloat4ToU32(ringColor));
+        }
+
+        // A few slow-twinkling motes scattered near the top of the card.
+        for (var k = 0; k < SectionCardMoteCount; k++)
+        {
+            var twinkle = MathF.Max(0f, MathF.Sin(time * SectionCardMoteSpeed + k * 2.1f));
+            if (twinkle <= 0.01f)
+            {
+                continue;
+            }
+            var x = min.X + width * (0.12f + 0.7f * ((k + 1f) / (SectionCardMoteCount + 1f)));
+            var y = min.Y + height * (0.16f + 0.08f * MathF.Sin(k * 1.7f));
+            var moteColor = new Vector4(accent.X, accent.Y, accent.Z,
+                SectionCardMoteAlpha * twinkle * twinkle);
+            drawList.AddCircleFilled(new Vector2(x, y), SectionCardMoteRadius * scale,
+                ImGui.ColorConvertFloat4ToU32(moteColor));
+        }
+
+        drawList.PopClipRect();
     }
 
     private static void DrawAccentCardBackdrop(ImDrawListPtr drawList, Vector2 min, Vector2 max,

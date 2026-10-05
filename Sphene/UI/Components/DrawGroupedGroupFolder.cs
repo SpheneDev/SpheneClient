@@ -4,6 +4,7 @@ using Dalamud.Interface.Utility.Raii;
 using Sphene.UI.Handlers;
 using System.Collections.Immutable;
 using System.Numerics;
+using Sphene.UI.Styling;
 using Sphene.UI.Theme;
 
 namespace Sphene.UI.Components;
@@ -65,7 +66,8 @@ public class DrawGroupedGroupFolder : IDrawFolder
             UiSharedService.ColorText("All Syncshells", SpheneCustomTheme.CurrentTheme.CompactAllSyncshellsText);
         }
 
-        ImGui.Separator();
+        SpheneWindowChrome.ScrollAreaSeparator(
+            SpheneCustomTheme.CurrentTheme.CompactPairListSeparatorPadding);
 
         if (_tagHandler.IsTagOpen(_id))
         {

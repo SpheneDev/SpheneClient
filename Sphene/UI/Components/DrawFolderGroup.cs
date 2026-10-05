@@ -11,6 +11,7 @@ using Sphene.Services.Mediator;
 using Sphene.UI.Handlers;
 using Sphene.WebAPI;
 using Sphene.SpheneConfiguration;
+using Sphene.UI.Styling;
 using Sphene.UI.Theme;
 using System.Collections.Immutable;
 using System.Numerics;
@@ -146,7 +147,8 @@ public class DrawFolderGroup : DrawFolderBase
             DrawName(rightSideStart - leftSideEnd);
         }
 
-        ImGui.Separator();
+        SpheneWindowChrome.ScrollAreaSeparator(
+            SpheneCustomTheme.CurrentTheme.CompactPairListSeparatorPadding);
 
         // if opened draw content
         if (_tagHandler.IsTagOpen(_id))
@@ -174,7 +176,8 @@ public class DrawFolderGroup : DrawFolderBase
                 }
             }
 
-            ImGui.Separator();
+            SpheneWindowChrome.ScrollAreaSeparator(
+                SpheneCustomTheme.CurrentTheme.CompactPairListSeparatorPadding);
         }
     }
 

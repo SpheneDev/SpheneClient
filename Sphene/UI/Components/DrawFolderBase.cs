@@ -4,6 +4,7 @@ using Dalamud.Interface.Utility.Raii;
 using Sphene.PlayerData.Pairs;
 using Sphene.UI.Handlers;
 using System.Collections.Immutable;
+using Sphene.UI.Styling;
 using Sphene.UI.Theme;
 
 namespace Sphene.UI.Components;
@@ -69,7 +70,8 @@ public abstract class DrawFolderBase : IDrawFolder
             DrawName(rightSideStart - leftSideEnd);
         }
 
-        ImGui.Separator();
+        SpheneWindowChrome.ScrollAreaSeparator(
+            SpheneCustomTheme.CurrentTheme.CompactPairListSeparatorPadding);
 
         // if opened draw content
         if (_tagHandler.IsTagOpen(_id))
@@ -87,7 +89,8 @@ public abstract class DrawFolderBase : IDrawFolder
                 ImGui.TextUnformatted("No users (online)");
             }
 
-            ImGui.Separator();
+            SpheneWindowChrome.ScrollAreaSeparator(
+                SpheneCustomTheme.CurrentTheme.CompactPairListSeparatorPadding);
         }
     }
 

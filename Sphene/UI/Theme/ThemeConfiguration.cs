@@ -39,6 +39,7 @@ public class ThemeConfiguration
     public Vector2 CompactItemInnerSpacing { get; set; } = new(4.0f, 4.0f);
     public Vector2 CompactCellPadding { get; set; } = new(4.0f, 2.0f);
     public Vector2 CompactChildPadding { get; set; } = new(8.0f, 8.0f);
+    public float CompactPairListSeparatorPadding { get; set; } = 0.0f;
     public float CompactIndentSpacing { get; set; } = 21.0f;
     public float CompactScrollbarSize { get; set; } = 14.0f;
     public float CompactGrabMinSize { get; set; } = 10.0f;

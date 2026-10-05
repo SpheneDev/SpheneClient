@@ -1,5 +1,7 @@
+using Dalamud.Bindings.ImGui;
 using Sphene.SpheneConfiguration;
 using Sphene.Services.Mediator;
+using Sphene.UI.Theme;
 
 namespace Sphene.UI.Components;
 
@@ -20,7 +22,8 @@ public static class UpdateOptionPanel
         SupporterNameplateIndicators,
         SupporterNameplateCustomization,
         SupporterNameplateStyleSync,
-        SupporterServerIcons
+        SupporterServerIcons,
+        PanelPairListSeparatorPadding
     }
 
     private static readonly IReadOnlySet<Link> SupporterFeatureLinks = new HashSet<Link>
@@ -37,6 +40,7 @@ public static class UpdateOptionPanel
         new("v.1.1.13.0", [Link.ShowTestBuildUpdates, Link.FilterCharacterLegacyShpkOutgoing, Link.MismatchTrackerFilters, Link.TransfersUseSpheneCdnDirectDownloads]),
         new("v.1.1.15", [Link.NotificationSoundsSpheneDefault]),
         new("v.1.1.16", [Link.SupporterNameplateIndicators, Link.SupporterNameplateCustomization, Link.SupporterNameplateStyleSync, Link.SupporterServerIcons]),
+        new("v.1.1.17", [Link.PanelPairListSeparatorPadding]),
     ];
 
     private static readonly IReadOnlyDictionary<Link, string> LinkTitles = new Dictionary<Link, string>
@@ -51,7 +55,8 @@ public static class UpdateOptionPanel
         [Link.SupporterNameplateIndicators] = "Supporter: Nameplate Indicators & Sphene Icon (Default: Enabled)",
         [Link.SupporterNameplateCustomization] = "Supporter: Symbol, Label & Color Customization",
         [Link.SupporterNameplateStyleSync] = "Supporter: Your style is shared with other Sphene users",
-        [Link.SupporterServerIcons] = "Supporter: Server-provided & animated icons"
+        [Link.SupporterServerIcons] = "Supporter: Server-provided & animated icons",
+        [Link.PanelPairListSeparatorPadding] = "Panel: Pair List Separator Padding (Default: 0)"
     };
 
     private static readonly IReadOnlyDictionary<Link, Action<SpheneConfigService, UiSharedService, SpheneMediator, float>> LinkDrawers
@@ -88,6 +93,16 @@ public static class UpdateOptionPanel
         [Link.SupporterServerIcons] = (configService, uiShared, _, _) =>
         {
             SupporterNameplateOptionBlock.DrawSupporterServerIconsInfo(configService, uiShared, "UpdateOptionSupporterServerIcons");
+        },
+        [Link.PanelPairListSeparatorPadding] = (_, _, _, _) =>
+        {
+            var theme = SpheneCustomTheme.CurrentTheme;
+            var separatorPadding = theme.CompactPairListSeparatorPadding;
+            if (ImGui.SliderFloat("Pair List Separator Padding##UpdateOptionPanelPairListSeparatorPadding", ref separatorPadding, 0.0f, 20.0f, "%.1f"))
+            {
+                theme.CompactPairListSeparatorPadding = separatorPadding;
+                theme.NotifyThemeChanged();
+            }
         }
     };
 

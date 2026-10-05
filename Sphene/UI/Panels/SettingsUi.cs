@@ -381,6 +381,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
                              "Ask your paired friend to send you the mod in question through other means, acquire the mod yourself or pester the mod creator to allow it to be sent over Sphene.",
             ImGuiColors.DalamudGrey);
 
+        DrawSettingsCard("Blocked Transfers", () =>
+        {
         if (ImGui.BeginTable("TransfersTable", 2, ImGuiTableFlags.SizingStretchProp))
         {
             ImGui.TableSetupColumn("Hash/Filename", ImGuiTableColumnFlags.WidthStretch);
@@ -404,12 +406,15 @@ public class SettingsUi : WindowMediatorSubscriberBase
             }
             ImGui.EndTable();
         }
+        });
     }
 
     private void DrawCurrentTransfers()
     {
         DrawSettingsPageHeader("Transfers", "Control transfer limits, monitor behavior, and transmission visuals.");
 
+        DrawSettingsCard("Transfer Limits", () =>
+        {
         ImGui.AlignTextToFramePadding();
         ImGui.TextUnformatted("Global Receive Limit");
         ImGui.SameLine();
@@ -425,9 +430,10 @@ public class SettingsUi : WindowMediatorSubscriberBase
         TransfersOptionBlock.DrawUseSpheneCdnDirectDownloadsOption(_configService, _uiShared, "TransfersUseSpheneCdnDirectDownloads");
         TransfersOptionBlock.DrawAllowReceivingPenumbraModPackagesOption(_configService, _uiShared, ApiController, "TransfersAllowReceivingPenumbraModPackages");
         TransfersOptionBlock.DrawUseAlternativeTransmissionMethodOption(_configService, _uiShared, "TransfersUseAlternativeTransmissionMethod");
+        });
 
-        DrawSettingsSectionHeader("Transfer Monitor");
-
+        DrawSettingsCard("Transfer Monitor", () =>
+        {
         var showTransferWindow = TransfersOptionBlock.DrawShowSeparateTransmissionMonitorOption(_configService, _uiShared, "TransfersShowSeparateTransmissionMonitor");
         if (!showTransferWindow) ImGui.BeginDisabled();
         ImGui.Indent();
@@ -453,12 +459,12 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
         if (!showUploading) ImGui.EndDisabled();
         if (!showTransferBars) ImGui.EndDisabled();
+        });
 
         if (_apiController.IsConnected)
         {
-            ImGuiHelpers.ScaledDummy(5);
-            ImGui.Separator();
-            ImGuiHelpers.ScaledDummy(10);
+            DrawSettingsCard("Speed Test to Servers", () =>
+            {
             using var tree = ImRaii.TreeNode("Speed Test to Servers");
             if (tree)
             {
@@ -508,11 +514,11 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 }
             }
             ImGuiHelpers.ScaledDummy(10);
+            });
         }
 
-        ImGui.Separator();
-        _uiShared.BigText("Current Transfers");
-
+        DrawSettingsCard("Current Transfers", () =>
+        {
         if (ImGui.BeginTabBar("TransfersTabBar"))
         {
             if (ApiController.ServerState is ServerState.Connected && ImGui.BeginTabItem("Transfers"))
@@ -585,6 +591,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
             ImGui.EndTabBar();
         }
+        });
     }
 
     private Task<List<string>?>? _downloadServersTask = null;
@@ -680,6 +687,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
 #endif
 
         DrawSettingsPageHeader(pageLabel, "Diagnostics and troubleshooting tools for sync, logs, and runtime status.");
+        DrawSettingsCard("Diagnostic Data", () =>
+        {
 #if IS_TEST_BUILD
         if (LastCreatedCharacterData != null && ImGui.TreeNode("Last created character data"))
         {
@@ -710,23 +719,25 @@ public class SettingsUi : WindowMediatorSubscriberBase
         UiSharedService.AttachToolTip("Use this when reporting modifications being rejected from the Network.");
 
         DebugOptionBlock.DrawLogLevelOption(_configService, _uiShared, "DebugLogLevel");
+        });
 
-        ImGuiHelpers.ScaledDummy(5);
-        _uiShared.BigText("Performance Metrics");
-
+        DrawSettingsCard("Performance Metrics", () =>
+        {
         bool logPerformance = DebugOptionBlock.DrawLogNetworkPerformanceMetricsOption(_configService, _uiShared, "DebugLogNetworkPerformanceMetrics");
         DebugOptionBlock.DrawPrintNetworkMetricsActions(_uiShared, logPerformance, () => _performanceCollector.PrintPerformanceStats(), () => _performanceCollector.PrintPerformanceStats(60), "DebugPrintNetworkMetricsActions");
         DebugOptionBlock.DrawDoNotNotifyForModifiedGameFilesOrEnabledLodOption(_configService, _uiShared, "DebugDoNotNotifyForModifiedGameFilesOrEnabledLod");
+        });
 
-        DrawSettingsSectionHeader("Diagnostic Windows", "Open dedicated windows for acknowledgment and status monitoring.");
-        
+        DrawSettingsCard("Diagnostic Windows", () =>
+        {
         DebugOptionBlock.DrawOpenAcknowledgmentMonitorAction(_uiShared, Mediator, "DebugOpenAcknowledgmentMonitor");
         DebugOptionBlock.DrawOpenStatusDebugAction(_uiShared, Mediator, "DebugOpenStatusDebug");
+        }, "Open dedicated windows for acknowledgment and status monitoring.");
 
-        DrawSettingsSectionHeader("Active Mismatch Tracker", "Control which paths and file types are recorded and shown.");
+        DrawSettingsCard("Active Mismatch Tracker", () =>
+        {
         DebugOptionBlock.DrawActiveMismatchTrackerFilterOptions(_configService, _uiShared, "DebugMismatchTrackerFilters");
-        
-
+        }, "Control which paths and file types are recorded and shown.");
     }
 
     private void DrawFileStorageSettings()
@@ -735,7 +746,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
             "Sphene stores downloaded files from paired users to improve loading speed and reduce repeated downloads. Storage is self-managed by size limit.");
 
         _uiShared.DrawFileScanState();
-        DrawSettingsSectionHeader("Monitoring");
+        DrawSettingsCard("Monitoring", () =>
+        {
         ImGui.AlignTextToFramePadding();
         ImGui.TextUnformatted("Monitoring Penumbra Folder: " + (_cacheMonitor.PenumbraWatcher?.Path ?? "Not monitoring"));
         if (string.IsNullOrEmpty(_cacheMonitor.PenumbraWatcher?.Path))
@@ -784,6 +796,10 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 + "Resume monitoring once you finish moving files." + UiSharedService.TooltipSeparator + "Hold CTRL to enable this button.");
         }
 
+        });
+
+        DrawSettingsCard("Storage & Compactor", () =>
+        {
         _uiShared.DrawCacheDirectorySetting();
         _uiShared.DrawHelpText("Configure cache location and size. The storage manages itself by clearing old data beyond the set size.");
         
@@ -840,9 +856,10 @@ public class SettingsUi : WindowMediatorSubscriberBase
             ImGui.TextUnformatted("The file compactor is only available on Windows and NTFS drives.");
         }
         ImGuiHelpers.ScaledDummy(new Vector2(10, 10));
+        });
 
-        DrawSettingsSectionHeader("Storage Validation",
-            "Validation checks local storage integrity and removes invalid files. This can take time and may be CPU and disk intensive.");
+        DrawSettingsCard("Storage Validation", () =>
+        {
         using (ImRaii.Disabled(_validationTask != null && !_validationTask.IsCompleted))
         {
             if (_uiShared.IconTextButton(FontAwesomeIcon.Check, "Start File Storage Validation"))
@@ -879,7 +896,10 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 }
             }
         }
-        DrawSettingsSectionHeader("Clear Local Storage", "Read and accept the disclaimer before running this action.");
+        }, "Validation checks local storage integrity and removes invalid files. This can take time and may be CPU and disk intensive.");
+
+        DrawSettingsCard("Clear Local Storage", () =>
+        {
         ImGui.Indent();
         StorageOptionBlock.DrawReadClearLocalStorageDisclaimerOption(ref _readClearCache, "StorageReadClearLocalStorageDisclaimer");
         ImGui.SameLine();
@@ -905,6 +925,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         if (!_readClearCache)
             ImGui.EndDisabled();
         ImGui.Unindent();
+        }, "Read and accept the disclaimer before running this action.", ImGuiColors.DalamudRed);
     }
 
 
@@ -913,30 +934,35 @@ public class SettingsUi : WindowMediatorSubscriberBase
     {
         DrawSettingsPageHeader("Performance",
             "Configure warning indicators and automatic actions for performance-heavy synced players.");
-        DrawSettingsSectionHeader("Warnings & Indicators");
-        bool showPerformanceIndicator = PerformanceOptionBlock.DrawShowPerformanceIndicatorOption(_playerPerformanceConfigService, _uiShared, "PerformanceShowPerformanceIndicator");
-        bool warnOnExceedingThresholds = PerformanceOptionBlock.DrawWarnOnLoadingInPlayersExceedingThresholdsOption(_playerPerformanceConfigService, _uiShared, "PerformanceWarnOnLoadingInPlayersExceedingThresholds");
-        using (ImRaii.Disabled(!warnOnExceedingThresholds && !showPerformanceIndicator))
+        DrawSettingsCard("Warnings & Indicators", () =>
         {
-            using var indent = ImRaii.PushIndent();
-            PerformanceOptionBlock.DrawWarnIndicateAlsoOnPreferredPermissionsOption(_playerPerformanceConfigService, _uiShared, "PerformanceWarnIndicateAlsoOnPreferredPermissions");
-        }
-        using (ImRaii.Disabled(!showPerformanceIndicator && !warnOnExceedingThresholds))
+            bool showPerformanceIndicator = PerformanceOptionBlock.DrawShowPerformanceIndicatorOption(_playerPerformanceConfigService, _uiShared, "PerformanceShowPerformanceIndicator");
+            bool warnOnExceedingThresholds = PerformanceOptionBlock.DrawWarnOnLoadingInPlayersExceedingThresholdsOption(_playerPerformanceConfigService, _uiShared, "PerformanceWarnOnLoadingInPlayersExceedingThresholds");
+            using (ImRaii.Disabled(!warnOnExceedingThresholds && !showPerformanceIndicator))
+            {
+                using var indent = ImRaii.PushIndent();
+                PerformanceOptionBlock.DrawWarnIndicateAlsoOnPreferredPermissionsOption(_playerPerformanceConfigService, _uiShared, "PerformanceWarnIndicateAlsoOnPreferredPermissions");
+            }
+            using (ImRaii.Disabled(!showPerformanceIndicator && !warnOnExceedingThresholds))
+            {
+                PerformanceOptionBlock.DrawWarningVramThresholdOption(_playerPerformanceConfigService, _uiShared, ClampSettingsItemWidth(100f), "PerformanceWarningVramThreshold");
+                PerformanceOptionBlock.DrawWarningTriangleThresholdOption(_playerPerformanceConfigService, _uiShared, ClampSettingsItemWidth(100f), "PerformanceWarningTriangleThreshold");
+            }
+        });
+        DrawSettingsCard("Auto Pause", () =>
         {
-            PerformanceOptionBlock.DrawWarningVramThresholdOption(_playerPerformanceConfigService, _uiShared, ClampSettingsItemWidth(100f), "PerformanceWarningVramThreshold");
-            PerformanceOptionBlock.DrawWarningTriangleThresholdOption(_playerPerformanceConfigService, _uiShared, ClampSettingsItemWidth(100f), "PerformanceWarningTriangleThreshold");
-        }
-        DrawSettingsSectionHeader("Auto Pause");
-        bool autoPause = PerformanceOptionBlock.DrawAutomaticallyPausePlayersExceedingThresholdsOption(_playerPerformanceConfigService, _uiShared, "PerformanceAutomaticallyPausePlayersExceedingThresholds");
-        using (ImRaii.Disabled(!autoPause))
+            bool autoPause = PerformanceOptionBlock.DrawAutomaticallyPausePlayersExceedingThresholdsOption(_playerPerformanceConfigService, _uiShared, "PerformanceAutomaticallyPausePlayersExceedingThresholds");
+            using (ImRaii.Disabled(!autoPause))
+            {
+                using var indent = ImRaii.PushIndent();
+                PerformanceOptionBlock.DrawAutomaticallyPauseAlsoPreferredPermissionsOption(_playerPerformanceConfigService, _uiShared, "PerformanceAutomaticallyPauseAlsoPreferredPermissions");
+                PerformanceOptionBlock.DrawAutoPauseVramThresholdOption(_playerPerformanceConfigService, _uiShared, ClampSettingsItemWidth(100f), "PerformanceAutoPauseVramThreshold");
+                PerformanceOptionBlock.DrawAutoPauseTriangleThresholdOption(_playerPerformanceConfigService, _uiShared, ClampSettingsItemWidth(100f), "PerformanceAutoPauseTriangleThreshold");
+            }
+        });
+        DrawSettingsCard("Whitelisted UIDs", () =>
         {
-            using var indent = ImRaii.PushIndent();
-            PerformanceOptionBlock.DrawAutomaticallyPauseAlsoPreferredPermissionsOption(_playerPerformanceConfigService, _uiShared, "PerformanceAutomaticallyPauseAlsoPreferredPermissions");
-            PerformanceOptionBlock.DrawAutoPauseVramThresholdOption(_playerPerformanceConfigService, _uiShared, ClampSettingsItemWidth(100f), "PerformanceAutoPauseVramThreshold");
-            PerformanceOptionBlock.DrawAutoPauseTriangleThresholdOption(_playerPerformanceConfigService, _uiShared, ClampSettingsItemWidth(100f), "PerformanceAutoPauseTriangleThreshold");
-        }
-        DrawSettingsSectionHeader("Whitelisted UIDs", "Entries below are ignored for warnings and auto-pause operations.");
-        ImGui.SetNextItemWidth(ClampSettingsItemWidth(220f, 140f));
+            ImGui.SetNextItemWidth(ClampSettingsItemWidth(220f, 140f));
         ImGui.InputText("##ignoreuid", ref _uidToAddForIgnore, 20);
         ImGui.SameLine();
         using (ImRaii.Disabled(string.IsNullOrEmpty(_uidToAddForIgnore)))
@@ -1002,6 +1028,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 _playerPerformanceConfigService.Save();
             }
         }
+        }, "Entries below are ignored for warnings and auto-pause operations.");
     }
 
     private void DrawServerConfiguration()
@@ -1009,7 +1036,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
         DrawSettingsPageHeader("Connectivity", "Manage server connection, account actions, and service-related settings.");
         if (ApiController.ServerAlive)
         {
-            DrawSettingsSectionHeader("Service Actions");
+            DrawSettingsCard("Service Actions", () =>
+            {
             ImGuiHelpers.ScaledDummy(new Vector2(5, 5));
             if (ImGui.Button("Delete all my files"))
             {
@@ -1090,10 +1118,11 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 }
                 ImGui.EndPopup();
             }
-            ImGui.Separator();
+            }, accent: ImGuiColors.DalamudRed);
         }
 
-        _uiShared.BigText("Service & Character Settings");
+        DrawSettingsCard("Service & Character Settings", () =>
+        {
         ImGuiHelpers.ScaledDummy(new Vector2(5, 5));
         ConnectivityOptionBlock.DrawSendStatisticalCensusDataOption(_serverConfigurationManager, _uiShared, "ConnectivitySendStatisticalCensusData");
         ImGuiHelpers.ScaledDummy(new Vector2(10, 10));
@@ -1623,6 +1652,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             }
             ImGui.EndTabBar();
         }
+        });
     }
 
     private int _lastSelectedServerIndex = -1;
@@ -1976,6 +2006,24 @@ public class SettingsUi : WindowMediatorSubscriberBase
             ImGui.Indent(settingsOptionsIndentX);
     }
 
+    /// <summary>
+    /// Wraps a settings block in a section card (see
+    /// <see cref="SpheneWindowChrome.DrawSectionCard"/>). Spans the same
+    /// unindented width as section headers and adds trailing spacing.
+    /// </summary>
+    private void DrawSettingsCard(string title, Action content, string? description = null,
+        Vector4? accent = null)
+    {
+        var settingsOptionsIndentX = GetSettingsOptionsIndentX(_activeSettingsPage);
+        if (_activeSettingsPage != SettingsPage.Home)
+            ImGui.Unindent(settingsOptionsIndentX);
+        SpheneWindowChrome.DrawSectionCard(content, title, accent, description,
+            animatedBackdrop: true);
+        ImGuiHelpers.ScaledDummy(0, 6);
+        if (_activeSettingsPage != SettingsPage.Home)
+            ImGui.Indent(settingsOptionsIndentX);
+    }
+
     private static float GetSettingsOptionsIndentX(SettingsPage page)
         => page switch
         {
@@ -2220,37 +2268,12 @@ public class SettingsUi : WindowMediatorSubscriberBase
     }
 
 
-    private static void DrawPluginGroupContainer(Action drawContents)
-    {
-        var drawList = ImGui.GetWindowDrawList();
-        drawList.ChannelsSplit(2);
-        drawList.ChannelsSetCurrent(1); // Foreground
-
-        ImGui.BeginGroup();
-        drawContents();
-        ImGui.EndGroup();
-
-        var max = ImGui.GetItemRectMax();
-        // Add padding
-        max += new Vector2(5, 5);
-        
-        // Ensure max width respects available content region to fix separator alignment
-        var availMaxX = ImGui.GetWindowPos().X + ImGui.GetWindowContentRegionMax().X + 5; // +5 to account for padding
-        if (max.X < availMaxX) max.X = availMaxX;
-
-        drawList.ChannelsSetCurrent(0); // Background
-
-        drawList.ChannelsMerge();
-
-        // Advance cursor to account for padding
-        ImGui.SetCursorScreenPos(new Vector2(ImGui.GetCursorScreenPos().X, max.Y + 10));
-    }
-
     private void DrawOverview()
     {
         _lastTab = "Overview";
-        
-        // --- Server Connection Section ---
+
+        DrawSettingsCard("Service & Connection", () =>
+        {
         // Discord Button (Right Aligned)
         var supporterFeaturesEnabled = _apiController.SupporterFeaturesEnabled;
         var discordButtonWidth = _uiShared.GetIconTextButtonSize(FontAwesomeIcon.Users, "Join Discord Community");
@@ -2345,18 +2368,17 @@ public class SettingsUi : WindowMediatorSubscriberBase
         }
         
         ImGui.Spacing();
+        });
 
         // --- Plugins Section ---
-        ImGui.Spacing();
 
         string GetPluginStatusLabel(UiSharedService.PluginInstallState state)
         {
             return !state.IsInstalled ? "Missing" : state.IsEnabled ? "Detected" : "Deactivated";
         }
 
-        DrawPluginGroupContainer(() => {
-            UiSharedService.DrawSectionSeparator("Sphene Plugins");
-
+        DrawSettingsCard("Sphene Plugins", () =>
+        {
             // 1. Sphene (Self)
             var assembly = System.Reflection.Assembly.GetExecutingAssembly();
             var version = assembly.GetName().Version;
@@ -2510,13 +2532,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 onDisableAction: async () => await _uiShared.DisablePluginViaReflectionAsync("BypassEmote").ConfigureAwait(false));
         });
 
-        ImGui.Spacing();
-        ImGui.Separator();
-        ImGui.Spacing();
-        UiSharedService.ColorText("Backup & Restore", ImGuiColors.ParsedBlue);
-        UiSharedService.ColorTextWrapped("Export or import all Sphene settings in a single file. Secret keys can be protected with a password.", ImGuiColors.DalamudGrey);
-        ImGui.Spacing();
-
+        DrawSettingsCard("Backup & Restore", () =>
+        {
         if (_uiShared.IconTextButton(FontAwesomeIcon.FileExport, "Export Config Backup"))
         {
             _showExportModal = true;
@@ -2548,7 +2565,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             ImGui.Spacing();
             ImGui.TextColored(ImGuiColors.DalamudRed, _lastImportError);
         }
-
+        }, "Export or import all Sphene settings in a single file. Secret keys can be protected with a password.");
     }
 
     private void DrawSupporterPage()
@@ -3108,85 +3125,97 @@ public class SettingsUi : WindowMediatorSubscriberBase
     {
         DrawSettingsPageHeader("People & Notes", "Manage note import/export and default note popup behavior.");
 
-        var overwriteExistingLabels = _overwriteExistingLabels;
-        if (ImGui.Button("Export Notes"))
+        DrawSettingsCard("Note Transfer", () =>
         {
-            ImGui.SetClipboardText(UiSharedService.GetNotes(
-                _pairManager.DirectPairs.UnionBy(
-                    _pairManager.GroupPairs.SelectMany(p => p.Value),
-                    p => p.UserData,
-                    UserDataComparer.Instance).ToList()));
-        }
-        ImGui.SameLine();
-        if (ImGui.Button("Import Notes"))
-        {
-            _notesSuccessfullyApplied = null;
-            var notes = ImGui.GetClipboardText();
-            _notesSuccessfullyApplied = _uiShared.ApplyNotesFromClipboard(notes, overwriteExistingLabels);
-        }
-        ImGui.SameLine();
-        PeopleNotesOptionBlock.DrawOverwriteExistingLabelsOption(ref overwriteExistingLabels, _uiShared, "PeopleNotesOverwriteExistingLabels");
-        _overwriteExistingLabels = overwriteExistingLabels;
+            var overwriteExistingLabels = _overwriteExistingLabels;
+            if (ImGui.Button("Export Notes"))
+            {
+                ImGui.SetClipboardText(UiSharedService.GetNotes(
+                    _pairManager.DirectPairs.UnionBy(
+                        _pairManager.GroupPairs.SelectMany(p => p.Value),
+                        p => p.UserData,
+                        UserDataComparer.Instance).ToList()));
+            }
+            ImGui.SameLine();
+            if (ImGui.Button("Import Notes"))
+            {
+                _notesSuccessfullyApplied = null;
+                var notes = ImGui.GetClipboardText();
+                _notesSuccessfullyApplied = _uiShared.ApplyNotesFromClipboard(notes, overwriteExistingLabels);
+            }
+            ImGui.SameLine();
+            PeopleNotesOptionBlock.DrawOverwriteExistingLabelsOption(ref overwriteExistingLabels, _uiShared, "PeopleNotesOverwriteExistingLabels");
+            _overwriteExistingLabels = overwriteExistingLabels;
 
-        if (_notesSuccessfullyApplied is not null)
-        {
-            ImGui.Spacing();
-            if (_notesSuccessfullyApplied!.Value)
-                ImGui.TextColored(ImGuiColors.ParsedGreen, "Notes successfully applied.");
-            else
-                ImGui.TextColored(ImGuiColors.DalamudRed, "Failed to apply notes.");
-        }
+            if (_notesSuccessfullyApplied is not null)
+            {
+                ImGui.Spacing();
+                if (_notesSuccessfullyApplied!.Value)
+                    ImGui.TextColored(ImGuiColors.ParsedGreen, "Notes successfully applied.");
+                else
+                    ImGui.TextColored(ImGuiColors.DalamudRed, "Failed to apply notes.");
+            }
+        });
 
-        DrawSettingsSectionHeader("Labels & Popups");
-        PeopleNotesOptionBlock.DrawOpenNotesPopupOnUserAdditionOption(_configService, _uiShared, "PeopleNotesOpenNotesPopupOnUserAddition");
-        PeopleNotesOptionBlock.DrawAutoPopulateNotesUsingPlayerNamesOption(_configService, _uiShared, "PeopleNotesAutoPopulateNotesUsingPlayerNames");
+        DrawSettingsCard("Labels & Popups", () =>
+        {
+            PeopleNotesOptionBlock.DrawOpenNotesPopupOnUserAdditionOption(_configService, _uiShared, "PeopleNotesOpenNotesPopupOnUserAddition");
+            PeopleNotesOptionBlock.DrawAutoPopulateNotesUsingPlayerNamesOption(_configService, _uiShared, "PeopleNotesAutoPopulateNotesUsingPlayerNames");
+        });
     }
 
     private void DrawGeneralUiDisplaySettings()
     {
         DrawSettingsPageHeader("Appearance", "Configure interface behavior, user list presentation, and profile display options.");
 
-        DrawSettingsSectionHeader("Basic Interface");
-        AppearanceOptionBlock.DrawShowSpheneIconOption(_configService, "AppearanceShowSpheneIcon");
-        AppearanceOptionBlock.DrawHideSpheneIconInGposeOption(_configService, "AppearanceHideSpheneIconInGpose");
-        AppearanceOptionBlock.DrawLockSpheneIconPositionOption(_configService, "AppearanceLockSpheneIconPosition");
-        AppearanceOptionBlock.DrawEnableGameRightClickMenusOption(_configService, "AppearanceEnableGameRightClickMenus");
+        DrawSettingsCard("Basic Interface", () =>
+        {
+            AppearanceOptionBlock.DrawShowSpheneIconOption(_configService, "AppearanceShowSpheneIcon");
+            AppearanceOptionBlock.DrawHideSpheneIconInGposeOption(_configService, "AppearanceHideSpheneIconInGpose");
+            AppearanceOptionBlock.DrawLockSpheneIconPositionOption(_configService, "AppearanceLockSpheneIconPosition");
+            AppearanceOptionBlock.DrawEnableGameRightClickMenusOption(_configService, "AppearanceEnableGameRightClickMenus");
+        });
 
         // ShrinkU integration settings moved to Overview page alongside version info
 
-        DrawSettingsSectionHeader("Server Info Bar");
-        var enableDtrEntry = AppearanceOptionBlock.DrawShowStatusInServerInfoBarOption(_configService, "AppearanceShowStatusInServerInfoBar");
-        using (ImRaii.Disabled(!enableDtrEntry))
+        DrawSettingsCard("Server Info Bar", () =>
         {
-            using var indent = ImRaii.PushIndent();
-            AppearanceOptionBlock.DrawShowUidInTooltipOption(_configService, "AppearanceShowUidInTooltip");
-            AppearanceOptionBlock.DrawPreferNotesInTooltipOption(_configService, "AppearancePreferNotesInTooltip");
-            AppearanceOptionBlock.DrawUseStatusColorsOption(_configService, "AppearanceUseStatusColors");
-        }
+            var enableDtrEntry = AppearanceOptionBlock.DrawShowStatusInServerInfoBarOption(_configService, "AppearanceShowStatusInServerInfoBar");
+            using (ImRaii.Disabled(!enableDtrEntry))
+            {
+                using var indent = ImRaii.PushIndent();
+                AppearanceOptionBlock.DrawShowUidInTooltipOption(_configService, "AppearanceShowUidInTooltip");
+                AppearanceOptionBlock.DrawPreferNotesInTooltipOption(_configService, "AppearancePreferNotesInTooltip");
+                AppearanceOptionBlock.DrawUseStatusColorsOption(_configService, "AppearanceUseStatusColors");
+            }
+        });
 
-        DrawSettingsSectionHeader("User List Options");
-        AppearanceOptionBlock.DrawSetVisiblePairsAsFocusTargetsOption(_configService, "AppearanceSetVisiblePairsAsFocusTargets");
-        
-        ImGuiHelpers.ScaledDummy(10);
+        DrawSettingsCard("User List Options", () =>
+        {
+            AppearanceOptionBlock.DrawSetVisiblePairsAsFocusTargetsOption(_configService, "AppearanceSetVisiblePairsAsFocusTargets");
 
-        AppearanceOptionBlock.DrawShowCharacterNameInsteadOfNotesOption(_configService, _uiShared, Mediator, "AppearanceShowCharacterNameInsteadOfNotes");
-        AppearanceOptionBlock.DrawShowVisibleUsersSeparatelyOption(_configService, _uiShared, Mediator, "AppearanceShowVisibleUsersSeparately");
-        AppearanceOptionBlock.DrawShowVisibleSyncshellUsersOnlyInSyncshellsOption(_configService, _uiShared, Mediator, "AppearanceShowVisibleSyncshellUsersOnlyInSyncshells");
-        AppearanceOptionBlock.DrawShowOfflineUsersSeparatelyOption(_configService, _uiShared, Mediator, "AppearanceShowOfflineUsersSeparately");
-        AppearanceOptionBlock.DrawAlsoShowOfflineSyncshellUsersSeparatelyOption(_configService, _uiShared, Mediator, "AppearanceAlsoShowOfflineSyncshellUsersSeparately");
-        ImGuiHelpers.ScaledDummy(10);
-        AppearanceOptionBlock.DrawGroupUpAllSyncshellsInOneFolderOption(_configService, _uiShared, Mediator, "AppearanceGroupUpAllSyncshellsInOneFolder");
-        
+            ImGuiHelpers.ScaledDummy(10);
 
-        DrawSettingsSectionHeader("Profile Settings");
-        var showProfiles = AppearanceOptionBlock.DrawShowSpheneProfilesOnHoverOption(_configService, _uiShared, Mediator, "AppearanceShowSpheneProfilesOnHover");
-        ImGui.Indent();
-        if (!showProfiles) ImGui.BeginDisabled();
-        AppearanceOptionBlock.DrawPopoutProfilesOnTheRightOption(_configService, _uiShared, Mediator, "AppearancePopoutProfilesOnTheRight");
-        AppearanceOptionBlock.DrawHoverDelayOption(_configService, _uiShared, "AppearanceHoverDelay");
-        if (!showProfiles) ImGui.EndDisabled();
-        ImGui.Unindent();
-        AppearanceOptionBlock.DrawShowProfilesMarkedAsNsfwOption(_configService, _uiShared, Mediator, "AppearanceShowProfilesMarkedAsNsfw");
+            AppearanceOptionBlock.DrawShowCharacterNameInsteadOfNotesOption(_configService, _uiShared, Mediator, "AppearanceShowCharacterNameInsteadOfNotes");
+            AppearanceOptionBlock.DrawShowVisibleUsersSeparatelyOption(_configService, _uiShared, Mediator, "AppearanceShowVisibleUsersSeparately");
+            AppearanceOptionBlock.DrawShowVisibleSyncshellUsersOnlyInSyncshellsOption(_configService, _uiShared, Mediator, "AppearanceShowVisibleSyncshellUsersOnlyInSyncshells");
+            AppearanceOptionBlock.DrawShowOfflineUsersSeparatelyOption(_configService, _uiShared, Mediator, "AppearanceShowOfflineUsersSeparately");
+            AppearanceOptionBlock.DrawAlsoShowOfflineSyncshellUsersSeparatelyOption(_configService, _uiShared, Mediator, "AppearanceAlsoShowOfflineSyncshellUsersSeparately");
+            ImGuiHelpers.ScaledDummy(10);
+            AppearanceOptionBlock.DrawGroupUpAllSyncshellsInOneFolderOption(_configService, _uiShared, Mediator, "AppearanceGroupUpAllSyncshellsInOneFolder");
+        });
+
+        DrawSettingsCard("Profile Settings", () =>
+        {
+            var showProfiles = AppearanceOptionBlock.DrawShowSpheneProfilesOnHoverOption(_configService, _uiShared, Mediator, "AppearanceShowSpheneProfilesOnHover");
+            ImGui.Indent();
+            if (!showProfiles) ImGui.BeginDisabled();
+            AppearanceOptionBlock.DrawPopoutProfilesOnTheRightOption(_configService, _uiShared, Mediator, "AppearancePopoutProfilesOnTheRight");
+            AppearanceOptionBlock.DrawHoverDelayOption(_configService, _uiShared, "AppearanceHoverDelay");
+            if (!showProfiles) ImGui.EndDisabled();
+            ImGui.Unindent();
+            AppearanceOptionBlock.DrawShowProfilesMarkedAsNsfwOption(_configService, _uiShared, Mediator, "AppearanceShowProfilesMarkedAsNsfw");
+        });
     }
 
     private static string GetShrinkUAssemblyVersion()
@@ -3207,69 +3236,88 @@ public class SettingsUi : WindowMediatorSubscriberBase
     {
         DrawSettingsPageHeader("Notifications", "Configure where notifications appear and which sync events should trigger them.");
 
-        DrawSettingsSectionHeader("Notification Channels");
-        NotificationsOptionBlock.DrawInfoNotificationDisplayOption(_configService, _uiShared, "NotificationsInfoNotificationDisplay");
-        NotificationsOptionBlock.DrawWarningNotificationDisplayOption(_configService, _uiShared, "NotificationsWarningNotificationDisplay");
-        NotificationsOptionBlock.DrawErrorNotificationDisplayOption(_configService, _uiShared, "NotificationsErrorNotificationDisplay");
-        NotificationsOptionBlock.DrawDisableOptionalPluginWarningsOption(_configService, _uiShared, "NotificationsDisableOptionalPluginWarnings");
-        NotificationsOptionBlock.DrawEnableOnlineNotificationsOption(_configService, "NotificationsEnableOnlineNotifications");
-        NotificationsOptionBlock.DrawOnlyForIndividualPairsOption(_configService, "NotificationsOnlyForIndividualPairs");
-        NotificationsOptionBlock.DrawOnlyForNamedPairsOption(_configService, "NotificationsOnlyForNamedPairs");
-        NotificationsOptionBlock.DrawShowTestBuildUpdatesOption(_configService, _uiShared, "NotificationsShowTestBuildUpdates");
-
-        DrawSettingsSectionHeader("Area-bound Syncshell Notifications");
-        if (NotificationsOptionBlock.DrawEnableAreaBoundSyncshellNotificationsOption(_configService, _uiShared, "NotificationsEnableAreaBoundSyncshellNotifications"))
+        DrawSettingsCard("Notification Channels", () =>
         {
-            ImGui.Indent();
-            NotificationsOptionBlock.DrawAreaBoundNotificationDisplayOption(_configService, _uiShared, "NotificationsAreaBoundNotificationDisplay");
-            ImGui.Unindent();
-        }
-        NotificationsOptionBlock.DrawShowAreaBoundSyncshellWelcomeMessagesOption(_configService, _uiShared, "NotificationsShowAreaBoundSyncshellWelcomeMessages");
-        NotificationsOptionBlock.DrawAutomaticallyShowAreaBoundSyncshellConsentOption(_configService, _uiShared, "NotificationsAutomaticallyShowAreaBoundSyncshellConsent");
+            NotificationsOptionBlock.DrawInfoNotificationDisplayOption(_configService, _uiShared, "NotificationsInfoNotificationDisplay");
+            NotificationsOptionBlock.DrawWarningNotificationDisplayOption(_configService, _uiShared, "NotificationsWarningNotificationDisplay");
+            NotificationsOptionBlock.DrawErrorNotificationDisplayOption(_configService, _uiShared, "NotificationsErrorNotificationDisplay");
+            NotificationsOptionBlock.DrawDisableOptionalPluginWarningsOption(_configService, _uiShared, "NotificationsDisableOptionalPluginWarnings");
+            NotificationsOptionBlock.DrawEnableOnlineNotificationsOption(_configService, "NotificationsEnableOnlineNotifications");
+            NotificationsOptionBlock.DrawOnlyForIndividualPairsOption(_configService, "NotificationsOnlyForIndividualPairs");
+            NotificationsOptionBlock.DrawOnlyForNamedPairsOption(_configService, "NotificationsOnlyForNamedPairs");
+            NotificationsOptionBlock.DrawShowTestBuildUpdatesOption(_configService, _uiShared, "NotificationsShowTestBuildUpdates");
+        });
+
+        DrawSettingsCard("Area-bound Syncshell Notifications", () =>
+        {
+            if (NotificationsOptionBlock.DrawEnableAreaBoundSyncshellNotificationsOption(_configService, _uiShared, "NotificationsEnableAreaBoundSyncshellNotifications"))
+            {
+                ImGui.Indent();
+                NotificationsOptionBlock.DrawAreaBoundNotificationDisplayOption(_configService, _uiShared, "NotificationsAreaBoundNotificationDisplay");
+                ImGui.Unindent();
+            }
+            NotificationsOptionBlock.DrawShowAreaBoundSyncshellWelcomeMessagesOption(_configService, _uiShared, "NotificationsShowAreaBoundSyncshellWelcomeMessages");
+            NotificationsOptionBlock.DrawAutomaticallyShowAreaBoundSyncshellConsentOption(_configService, _uiShared, "NotificationsAutomaticallyShowAreaBoundSyncshellConsent");
+        });
     }
 
     private void DrawAcknowledgmentSettings()
     {
         DrawSettingsPageHeader("Acknowledgment", "Tune acknowledgment notifications, reliability, and batching behavior.");
-        DrawSettingsSectionHeader("Popup Settings");
 
-        var showPopups = AcknowledgmentOptionBlock.DrawShowAcknowledgmentNotificationsOption(_configService, _uiShared, "AcknowledgmentShowAcknowledgmentNotifications");
-        AcknowledgmentOptionBlock.DrawShowWaitingForAcknowledgmentPopupsOption(_configService, _uiShared, "AcknowledgmentShowWaitingForAcknowledgmentPopups");
-
-        if (showPopups)
+        DrawSettingsCard("Popup Settings", () =>
         {
-            ImGui.Indent();
-            AcknowledgmentOptionBlock.DrawAcknowledgmentNotificationLocationOption(_configService, _uiShared, "AcknowledgmentNotificationLocation");
-            ImGui.Unindent();
-        }
+            var showPopups = AcknowledgmentOptionBlock.DrawShowAcknowledgmentNotificationsOption(_configService, _uiShared, "AcknowledgmentShowAcknowledgmentNotifications");
+            AcknowledgmentOptionBlock.DrawShowWaitingForAcknowledgmentPopupsOption(_configService, _uiShared, "AcknowledgmentShowWaitingForAcknowledgmentPopups");
 
-        DrawSettingsSectionHeader("Performance Settings");
-        AcknowledgmentOptionBlock.DrawEnableBatchingOption(_configService, _uiShared, "AcknowledgmentEnableBatching");
-        AcknowledgmentOptionBlock.DrawEnableAutoRetryOption(_configService, _uiShared, "AcknowledgmentEnableAutoRetry");
+            if (showPopups)
+            {
+                ImGui.Indent();
+                AcknowledgmentOptionBlock.DrawAcknowledgmentNotificationLocationOption(_configService, _uiShared, "AcknowledgmentNotificationLocation");
+                ImGui.Unindent();
+            }
+        });
 
-        DrawSettingsSectionHeader("Timeout & Reliability");
-        AcknowledgmentOptionBlock.DrawAcknowledgmentTimeoutOption(_configService, _uiShared, "AcknowledgmentTimeout");
+        DrawSettingsCard("Performance Settings", () =>
+        {
+            AcknowledgmentOptionBlock.DrawEnableBatchingOption(_configService, _uiShared, "AcknowledgmentEnableBatching");
+            AcknowledgmentOptionBlock.DrawEnableAutoRetryOption(_configService, _uiShared, "AcknowledgmentEnableAutoRetry");
+        });
 
-        DrawSettingsSectionHeader("Information");
-        UiSharedService.TextWrapped("The acknowledgment system helps maintain synchronization between connected users. " +
-                          "When disabled, popup notifications will not appear, but the system will continue to function in the background. " +
-                          "This is useful when you have many active connections to prevent notification spam.");
+        DrawSettingsCard("Timeout & Reliability", () =>
+        {
+            AcknowledgmentOptionBlock.DrawAcknowledgmentTimeoutOption(_configService, _uiShared, "AcknowledgmentTimeout");
+        });
 
-        ImGui.Spacing();
-        AcknowledgmentOptionBlock.DrawResetAcknowledgmentSettingsToDefaultsOption(_configService, _uiShared, "AcknowledgmentResetAcknowledgmentSettingsToDefaults");
+        DrawSettingsCard("Information", () =>
+        {
+            UiSharedService.TextWrapped("The acknowledgment system helps maintain synchronization between connected users. " +
+                              "When disabled, popup notifications will not appear, but the system will continue to function in the background. " +
+                              "This is useful when you have many active connections to prevent notification spam.");
+
+            ImGui.Spacing();
+            AcknowledgmentOptionBlock.DrawResetAcknowledgmentSettingsToDefaultsOption(_configService, _uiShared, "AcknowledgmentResetAcknowledgmentSettingsToDefaults");
+        });
     }
 
     private void DrawSyncBehaviorSettings()
     {
         DrawSettingsPageHeader("Sync Behavior", "Control how incoming and outgoing synchronization data is handled.");
-        DrawSettingsSectionHeader("Incoming Sync");
-        SyncBehaviorOptionBlock.DrawIncomingSyncWithoutRedraw(_configService, _uiShared, "SettingsIncomingSyncWithoutRedraw");
 
-        DrawSettingsSectionHeader("Outgoing Sync Batching");
-        SyncBehaviorOptionBlock.DrawOutgoingSyncBatching(_configService, _uiShared, ClampSettingsItemWidth(240f, 160f), "SettingsOutgoingSyncBatching");
+        DrawSettingsCard("Incoming Sync", () =>
+        {
+            SyncBehaviorOptionBlock.DrawIncomingSyncWithoutRedraw(_configService, _uiShared, "SettingsIncomingSyncWithoutRedraw");
+        });
 
-        DrawSettingsSectionHeader("Filter");
-        SyncBehaviorOptionBlock.DrawFilterCharacterLegacyShpkInOutgoingCharacterData(_configService, _uiShared, Mediator, "SettingsFilterCharacterLegacyShpk");
+        DrawSettingsCard("Outgoing Sync Batching", () =>
+        {
+            SyncBehaviorOptionBlock.DrawOutgoingSyncBatching(_configService, _uiShared, ClampSettingsItemWidth(240f, 160f), "SettingsOutgoingSyncBatching");
+        });
+
+        DrawSettingsCard("Filter", () =>
+        {
+            SyncBehaviorOptionBlock.DrawFilterCharacterLegacyShpkInOutgoingCharacterData(_configService, _uiShared, Mediator, "SettingsFilterCharacterLegacyShpk");
+        });
     }
 
     private void UiSharedService_GposeEnd()
@@ -3846,6 +3894,13 @@ public class SettingsUi : WindowMediatorSubscriberBase
         if (ImGui.SliderFloat2("Panel Padding", ref compactWindowPadding, 0.0f, 20.0f, "%.1f"))
         {
             theme.CompactWindowPadding = compactWindowPadding;
+            themeChanged = true;
+        }
+
+        var compactPairListSeparatorPadding = theme.CompactPairListSeparatorPadding;
+        if (ImGui.SliderFloat("Pair List Separator Padding", ref compactPairListSeparatorPadding, 0.0f, 20.0f, "%.1f"))
+        {
+            theme.CompactPairListSeparatorPadding = compactPairListSeparatorPadding;
             themeChanged = true;
         }
         
@@ -5608,9 +5663,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
         var cfg = _configService.Current;
         bool configChanged = false;
 
-        UiSharedService.ColorTextWrapped("Customize notification sounds for each category. Use Game System for in-game SCD sounds, Sphene Default for built-in sounds, or Custom Sound for external WAV/MP3 files.", ImGuiColors.DalamudGrey);
-        ImGui.Spacing();
-
+        DrawSettingsCard("Notification Sounds", () =>
+        {
         void DrawSoundConfig(string label, NotificationSoundConfig soundConfig, string blockId)
         {
             if (ImGui.TreeNodeEx(label, ImGuiTreeNodeFlags.SpanAvailWidth))
@@ -5630,6 +5684,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         DrawSoundConfig("Success Notifications", cfg.SuccessNotificationSound, "SettingsSuccessSound");
         DrawSoundConfig("Area-bound Syncshell Notifications", cfg.AreaBoundNotificationSound, "SettingsAreaBoundSound");
         DrawSoundConfig("File Transfer Notifications", cfg.FileTransferNotificationSound, "SettingsFileTransferSound");
+        }, "Use Game System for in-game SCD sounds, Sphene Default for built-in sounds, or Custom Sound for external WAV/MP3 files.");
 
         if (configChanged)
         {

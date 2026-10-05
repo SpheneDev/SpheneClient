@@ -1666,16 +1666,20 @@ public class CompactUi : WindowMediatorSubscriberBase
                 - footerReserved
                 - (footerReserved > 0f ? style.WindowPadding.Y : 0f));
 
-        // Span edge to edge: place the child at the inner window border, not inside the window padding
-        ImGui.SetCursorPosX(style.WindowBorderSize);
-        if (SpheneWindowChrome.BeginScrollArea("list", new Vector2(windowSize.X - style.WindowBorderSize * 2f, ySize)))
+        // The list content follows the panel window padding like everything
+        // else; fades and separators use their own edge padding instead.
+        var xSize = ImGui.GetContentRegionAvail().X;
+        if (SpheneWindowChrome.BeginScrollArea("list", new Vector2(xSize, ySize),
+                noPadding: true, contentInset: 0f))
         {
             foreach (var item in _drawFolders)
             {
                 item.Draw();
             }
         }
-        SpheneWindowChrome.EndScrollArea();
+        // The fade always spans the window's inner edge; only the separators
+        // get an adjustable padding. WindowPadding must not affect it.
+        SpheneWindowChrome.EndScrollArea(edgePaddingX: 0f);
     }
     
 

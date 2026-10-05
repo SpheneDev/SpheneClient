@@ -6,6 +6,7 @@ using Sphene.PlayerData.Pairs;
 using Sphene.UI.Handlers;
 using Sphene.WebAPI;
 using Sphene.SpheneConfiguration;
+using Sphene.UI.Styling;
 using Sphene.UI.Theme;
 using System.Collections.Immutable;
 using System.Numerics;
@@ -70,7 +71,8 @@ public class DrawFolderTag : DrawFolderBase
             DrawName(rightSideStart - leftSideEnd);
         }
 
-        ImGui.Separator();
+        SpheneWindowChrome.ScrollAreaSeparator(
+            SpheneCustomTheme.CurrentTheme.CompactPairListSeparatorPadding);
 
         // if opened draw content
         if (_tagHandler.IsTagOpen(_id))
@@ -90,7 +92,8 @@ public class DrawFolderTag : DrawFolderBase
                 ImGui.TextUnformatted("No users (online)");
             }
 
-            ImGui.Separator();
+            SpheneWindowChrome.ScrollAreaSeparator(
+                SpheneCustomTheme.CurrentTheme.CompactPairListSeparatorPadding);
         }
     }
 
