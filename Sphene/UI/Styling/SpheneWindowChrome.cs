@@ -556,19 +556,45 @@ public static class SpheneWindowChrome
     public static void DrawCardContentRegion(float width, string? id, Action content)
     {
         var tableId = $"##card-content-{(id ?? "region")}-{(int)ImGui.GetCursorScreenPos().Y}";
-        using (ImRaii.PushStyle(ImGuiStyleVar.CellPadding, Vector2.Zero))
+        CardContentBounds.Push(new Vector2(ImGui.GetCursorScreenPos().X, ImGui.GetCursorScreenPos().X + width));
+        try
         {
-            if (!ImGui.BeginTable(tableId, 1, ImGuiTableFlags.None, new Vector2(width, 0f)))
+            using (ImRaii.PushStyle(ImGuiStyleVar.CellPadding, Vector2.Zero))
             {
-                return;
+                if (!ImGui.BeginTable(tableId, 1, ImGuiTableFlags.None, new Vector2(width, 0f)))
+                {
+                    return;
+                }
             }
+            ImGui.TableNextColumn();
+            ImGui.PushTextWrapPos(width);
+            content();
+            ImGui.PopTextWrapPos();
+            ImGui.EndTable();
         }
-        ImGui.TableNextColumn();
-        ImGui.PushTextWrapPos(width);
-        content();
-        ImGui.PopTextWrapPos();
-        ImGui.EndTable();
+        finally
+        {
+            CardContentBounds.Pop();
+        }
     }
+
+    /// <summary>
+    /// Screen-space right bound of the innermost card content region, or -1
+    /// when not inside one. <c>GetContentRegionAvail</c> measures up to the
+    /// window edge even inside card tables, so controls needing the real
+    /// card bound read this instead.
+    /// </summary>
+    public static float CurrentCardContentRightBound
+        => CardContentBounds.Count > 0 ? CardContentBounds.Peek().Y : -1f;
+
+    /// <summary>
+    /// Screen-space left bound of the innermost card content region, or -1
+    /// when not inside one.
+    /// </summary>
+    public static float CurrentCardContentLeftBound
+        => CardContentBounds.Count > 0 ? CardContentBounds.Peek().X : -1f;
+
+    private static readonly Stack<Vector2> CardContentBounds = new();
 
     private sealed class ScrollAreaState
     {
@@ -672,9 +698,13 @@ public static class SpheneWindowChrome
     /// <paramref name="fadeSpanX"/> sets an explicit horizontal fade span
     /// (min.X, max.X), e.g. a rail reaching the window edge while its child is
     /// inset by padding; takes precedence over <paramref name="edgePaddingX"/>.
+    /// <paramref name="fadeMinY"/> lets the top fade start above the child
+    /// bounds, e.g. docking directly under a title bar accent line.
+    /// <paramref name="bottomInset"/> adds extra spacing below the last item,
+    /// e.g. to match the window padding a padded sibling child keeps.
     /// </summary>
     public static void EndScrollArea(Vector4? fadeBaseColor = null, float edgePaddingX = -1f,
-        Vector2? fadeSpanX = null)
+        Vector2? fadeSpanX = null, float? fadeMinY = null, float bottomInset = 0f)
     {
         var state = ScrollAreaStack.Count > 0 ? ScrollAreaStack.Pop() : new ScrollAreaState();
 
@@ -685,6 +715,10 @@ public static class SpheneWindowChrome
                 ImGui.Unindent(state.ContentInset);
             }
             ImGuiHelpers.ScaledDummy(0, ScrollAreaContentInset);
+            if (bottomInset > 0f)
+            {
+                ImGui.Dummy(new Vector2(0f, bottomInset));
+            }
             var scrollY = ImGui.GetScrollY();
             var scrollMaxY = ImGui.GetScrollMaxY();
             var min = ImGui.GetWindowPos();
@@ -714,7 +748,7 @@ public static class SpheneWindowChrome
                     MathF.Max(ImGui.GetStyle().ChildBorderSize, 1f), openTop: state.HideTopBorder);
             }
             DrawScrollFades(min, max, scrollY, scrollMaxY, state.Border, state.TopInset,
-                state.ParentMin, state.ParentMax, fadeBaseColor, edgePaddingX, fadeSpanX);
+                state.ParentMin, state.ParentMax, fadeBaseColor, edgePaddingX, fadeSpanX, fadeMinY);
             var styleVars = ImGui.GetStyle();
             var cornerReach = MathF.Max(styleVars.WindowBorderSize,
                     MathF.Max(styleVars.WindowPadding.X, styleVars.WindowPadding.Y))
@@ -783,7 +817,8 @@ public static class SpheneWindowChrome
 
     private static void DrawScrollFades(Vector2 min, Vector2 max, float scrollY,
         float scrollMaxY, bool border, float topInset, Vector2 parentMin, Vector2 parentMax,
-        Vector4? fadeBaseColor, float edgePaddingX = -1f, Vector2? fadeSpanX = null)
+        Vector4? fadeBaseColor, float edgePaddingX = -1f, Vector2? fadeSpanX = null,
+        float? fadeMinY = null)
     {
         var scale = ImGuiHelpers.GlobalScale;
         // Fade strength: 1 while far from the end, shrinks to 0 as the edge
@@ -828,6 +863,13 @@ public static class SpheneWindowChrome
             {
                 return;
             }
+        }
+
+        // An explicit top edge lets the fade reach above the child bounds,
+        // e.g. docking under a title bar accent line.
+        if (fadeMinY.HasValue)
+        {
+            inner.Y = Math.Clamp(fadeMinY.Value, parentMin.Y, innerMax.Y);
         }
 
         if (innerMax.X <= inner.X || innerMax.Y <= inner.Y)
@@ -1077,21 +1119,34 @@ public static class SpheneWindowChrome
     }
 
     /// <summary>
-    /// Draws the currently active section label pinned onto the open top edge of
-    /// a frame, centered between its top corner arcs. As the next section's own
-    /// label scrolls up it pushes the pinned one out of the way.
+    /// Draws a sticky section header pinned inside the frame's top edge. The
+    /// first label is pinned from the start; when the next section's own label
+    /// scrolls up it pushes the pinned band out of the way and takes over.
     /// <paramref name="labels"/> must contain each label's current screen-space
-    /// center Y, recorded while drawing the scrolled content.
+    /// center Y plus its accent color, recorded while drawing the scrolled
+    /// content.
+    /// <paramref name="pinCenterY"/> optionally sets the band's resting center
+    /// on screen – pass the natural center of the first label so the band
+    /// overlays it exactly and simply stays put while content scrolls.
     /// </summary>
     public static void DrawPinnedSectionLabel(Vector2 frameMin, Vector2 frameMax,
-        IReadOnlyList<(string Label, float CenterY)> labels, Vector2 surfaceMin, Vector2 surfaceMax)
+        IReadOnlyList<(string Label, float CenterY, Vector4 Accent)> labels,
+        Vector2 surfaceMin, Vector2 surfaceMax, Vector4? baseColor = null,
+        float? pinCenterY = null)
     {
-        var pinY = frameMin.Y;
+        if (labels.Count == 0)
+            return;
+
+        var scale = ImGuiHelpers.GlobalScale;
+        var lineHeight = ImGui.GetTextLineHeight();
+        var bandHeight = lineHeight + 8f * scale;
+        var pinCenter = pinCenterY ?? (frameMin.Y + bandHeight * 0.5f);
+
         var current = -1;
         var next = -1;
         for (var i = 0; i < labels.Count; i++)
         {
-            if (labels[i].CenterY <= pinY)
+            if (labels[i].CenterY <= pinCenter)
             {
                 current = i;
             }
@@ -1102,12 +1157,13 @@ public static class SpheneWindowChrome
             }
         }
         if (current < 0)
-            return;
+        {
+            // The first label is pinned even before it has scrolled past.
+            current = 0;
+            next = labels.Count > 1 ? 1 : -1;
+        }
 
-        var scale = ImGuiHelpers.GlobalScale;
-        var lineHeight = ImGui.GetTextLineHeight();
-        var bandHeight = lineHeight + 8f * scale;
-        var centerY = pinY;
+        var centerY = pinCenter;
         if (next >= 0)
         {
             centerY = MathF.Min(centerY, labels[next].CenterY - (bandHeight + lineHeight) * 0.5f);
@@ -1119,16 +1175,21 @@ public static class SpheneWindowChrome
         var textWidth = ImGui.CalcTextSize(label).X;
         var stripMin = new Vector2(frameMin.X + rounding * 0.5f, centerY - bandHeight * 0.5f);
         var stripMax = new Vector2(frameMax.X - rounding * 0.5f, centerY + bandHeight * 0.5f);
-        var stripBase = WindowSurfaceColorAt(surfaceMin, surfaceMax, centerY);
-        var stripColor = Vector4.Lerp(stripBase, SpheneCustomTheme.CurrentTheme.HeaderBg, 0.35f);
+        var stripBase = baseColor ?? WindowSurfaceColorAt(surfaceMin, surfaceMax, centerY);
+        var stripColor = baseColor.HasValue
+            ? SpheneColors.WithAlpha(baseColor.Value, 1f)
+            : Vector4.Lerp(stripBase, SpheneCustomTheme.CurrentTheme.HeaderBg, 0.35f);
         stripColor.W = MathF.Max(stripColor.W, 0.9f);
-        var bg = ImGui.ColorConvertFloat4ToU32(stripColor);
-        drawList.AddRectFilled(stripMin, stripMax, bg, MathF.Min(rounding * 0.5f, bandHeight * 0.5f));
 
-        ImGui.SetCursorScreenPos(new Vector2(
+        // Clip to the frame so the band slides out cleanly when pushed away
+        drawList.PushClipRect(new Vector2(frameMin.X, frameMin.Y), frameMax, true);
+        drawList.AddRectFilled(stripMin, stripMax, ImGui.ColorConvertFloat4ToU32(stripColor),
+            MathF.Min(rounding * 0.5f, bandHeight * 0.5f));
+        drawList.AddText(new Vector2(
             frameMin.X + (frameMax.X - frameMin.X - textWidth) * 0.5f,
-            centerY - lineHeight * 0.5f));
-        UiSharedService.ColorText(label, SpheneCustomTheme.CurrentTheme.AccentBlue);
+            centerY - lineHeight * 0.5f),
+            ImGui.ColorConvertFloat4ToU32(labels[current].Accent), label);
+        drawList.PopClipRect();
     }
 
     private const float GripAnimSpeed = 8f;

@@ -13,8 +13,7 @@ public static class TransfersOptionBlock
         try
         {
             var downloadSpeedLimit = configService.Current.DownloadSpeedLimitInBytes;
-            ImGui.SetNextItemWidth(itemWidth);
-            if (ImGui.InputInt("###speedlimit", ref downloadSpeedLimit))
+            if (UiSharedService.DrawInputInt("###speedlimit", ref downloadSpeedLimit, preferredWidth: itemWidth))
             {
                 configService.Current.DownloadSpeedLimitInBytes = downloadSpeedLimit;
                 configService.Save();
@@ -58,7 +57,7 @@ public static class TransfersOptionBlock
         try
         {
             var maxParallelDownloads = configService.Current.ParallelDownloads;
-            if (ImGui.SliderInt("Maximum Parallel Data Streams", ref maxParallelDownloads, 1, 10))
+            if (UiSharedService.DrawSliderInt("Maximum Parallel Data Streams", ref maxParallelDownloads, 1, 10))
             {
                 configService.Current.ParallelDownloads = maxParallelDownloads;
                 configService.Save();
@@ -224,7 +223,7 @@ public static class TransfersOptionBlock
         try
         {
             var transferBarWidth = configService.Current.TransferBarsWidth;
-            if (ImGui.SliderInt("Transmission Indicator Width", ref transferBarWidth, 10, 500))
+            if (UiSharedService.DrawSliderInt("Transmission Indicator Width", ref transferBarWidth, 10, 500))
             {
                 configService.Current.TransferBarsWidth = transferBarWidth;
                 configService.Save();
@@ -244,7 +243,7 @@ public static class TransfersOptionBlock
         try
         {
             var transferBarHeight = configService.Current.TransferBarsHeight;
-            if (ImGui.SliderInt("Transmission Indicator Height", ref transferBarHeight, 2, 50))
+            if (UiSharedService.DrawSliderInt("Transmission Indicator Height", ref transferBarHeight, 2, 50))
             {
                 configService.Current.TransferBarsHeight = transferBarHeight;
                 configService.Save();

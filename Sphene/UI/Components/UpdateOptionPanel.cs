@@ -59,46 +59,46 @@ public static class UpdateOptionPanel
         [Link.PanelPairListSeparatorPadding] = "Panel: Pair List Separator Padding (Default: 0)"
     };
 
-    private static readonly IReadOnlyDictionary<Link, Action<SpheneConfigService, UiSharedService, SpheneMediator, float>> LinkDrawers
-        = new Dictionary<Link, Action<SpheneConfigService, UiSharedService, SpheneMediator, float>>
+    private static readonly IReadOnlyDictionary<Link, Action<SpheneConfigService, UiSharedService, SpheneMediator>> LinkDrawers
+        = new Dictionary<Link, Action<SpheneConfigService, UiSharedService, SpheneMediator>>
     {
-        [Link.SyncIncomingWithoutRedraw] = (configService, uiShared, _, _) =>
+        [Link.SyncIncomingWithoutRedraw] = (configService, uiShared, _) =>
             SyncBehaviorOptionBlock.DrawIncomingSyncWithoutRedraw(configService, uiShared, "UpdateOptionSyncIncomingWithoutRedraw"),
-        [Link.SyncOutgoingBatching] = (configService, uiShared, _, outgoingSliderWidth) =>
-            SyncBehaviorOptionBlock.DrawOutgoingSyncBatching(configService, uiShared, outgoingSliderWidth, "UpdateOptionSyncOutgoingBatching"),
-        [Link.ShowTestBuildUpdates] = (configService, uiShared, _, _) =>
+        [Link.SyncOutgoingBatching] = (configService, uiShared, _) =>
+            SyncBehaviorOptionBlock.DrawOutgoingSyncBatching(configService, uiShared, "UpdateOptionSyncOutgoingBatching"),
+        [Link.ShowTestBuildUpdates] = (configService, uiShared, _) =>
             NotificationsOptionBlock.DrawShowTestBuildUpdatesOption(configService, uiShared, "UpdateOptionShowTestBuildUpdates"),
-        [Link.FilterCharacterLegacyShpkOutgoing] = (configService, uiShared, mediator, _) =>
+        [Link.FilterCharacterLegacyShpkOutgoing] = (configService, uiShared, mediator) =>
             SyncBehaviorOptionBlock.DrawFilterCharacterLegacyShpkInOutgoingCharacterData(configService, uiShared, mediator, "UpdateOptionFilterCharacterLegacyShpk"),
-        [Link.MismatchTrackerFilters] = (configService, uiShared, _, _) =>
+        [Link.MismatchTrackerFilters] = (configService, uiShared, _) =>
             DebugOptionBlock.DrawActiveMismatchTrackerFilterOptions(configService, uiShared, "UpdateOptionMismatchTrackerFilters"),
-        [Link.TransfersUseSpheneCdnDirectDownloads] = (configService, uiShared, _, _) =>
+        [Link.TransfersUseSpheneCdnDirectDownloads] = (configService, uiShared, _) =>
             TransfersOptionBlock.DrawUseSpheneCdnDirectDownloadsOption(configService, uiShared, "UpdateOptionTransfersUseSpheneCdnDirectDownloads"),
-        [Link.NotificationSoundsSpheneDefault] = (configService, uiShared, mediator, _) =>
+        [Link.NotificationSoundsSpheneDefault] = (configService, uiShared, mediator) =>
             NotificationsOptionBlock.DrawSpheneDefaultSoundModeOption(configService, uiShared, mediator, "UpdateOptionNotificationSoundsSpheneDefault"),
-        [Link.SupporterNameplateIndicators] = (configService, uiShared, _, _) =>
+        [Link.SupporterNameplateIndicators] = (configService, uiShared, _) =>
         {
             SupporterNameplateOptionBlock.DrawShowSupporterNameplateOption(configService, uiShared, "UpdateOptionShowSupporterNameplate");
             SupporterNameplateOptionBlock.DrawSupporterIconOverlayOption(configService, uiShared, "UpdateOptionSupporterIconOverlay");
             SupporterNameplateOptionBlock.DrawSupporterIconLabelOption(configService, uiShared, "UpdateOptionSupporterIconLabel");
         },
-        [Link.SupporterNameplateCustomization] = (configService, uiShared, _, _) =>
+        [Link.SupporterNameplateCustomization] = (configService, uiShared, _) =>
         {
             SupporterNameplateOptionBlock.DrawSupporterCustomizationInfo(configService, uiShared, "UpdateOptionSupporterCustomization");
         },
-        [Link.SupporterNameplateStyleSync] = (configService, uiShared, _, _) =>
+        [Link.SupporterNameplateStyleSync] = (configService, uiShared, _) =>
         {
             SupporterNameplateOptionBlock.DrawSupporterStyleSyncInfo(configService, uiShared, "UpdateOptionSupporterStyleSync");
         },
-        [Link.SupporterServerIcons] = (configService, uiShared, _, _) =>
+        [Link.SupporterServerIcons] = (configService, uiShared, _) =>
         {
             SupporterNameplateOptionBlock.DrawSupporterServerIconsInfo(configService, uiShared, "UpdateOptionSupporterServerIcons");
         },
-        [Link.PanelPairListSeparatorPadding] = (_, _, _, _) =>
+        [Link.PanelPairListSeparatorPadding] = (_, _, _) =>
         {
             var theme = SpheneCustomTheme.CurrentTheme;
             var separatorPadding = theme.CompactPairListSeparatorPadding;
-            if (ImGui.SliderFloat("Pair List Separator Padding##UpdateOptionPanelPairListSeparatorPadding", ref separatorPadding, 0.0f, 20.0f, "%.1f"))
+            if (UiSharedService.DrawSliderFloat("Pair List Separator Padding##UpdateOptionPanelPairListSeparatorPadding", ref separatorPadding, 0.0f, 20.0f, "%.1f"))
             {
                 theme.CompactPairListSeparatorPadding = separatorPadding;
                 theme.NotifyThemeChanged();
@@ -141,7 +141,7 @@ public static class UpdateOptionPanel
         ];
     }
 
-    public static void DrawByLink(Link link, SpheneConfigService configService, UiSharedService uiShared, SpheneMediator mediator, float outgoingSliderWidth, bool supporterFeaturesEnabled)
+    public static void DrawByLink(Link link, SpheneConfigService configService, UiSharedService uiShared, SpheneMediator mediator, bool supporterFeaturesEnabled)
     {
         if (!supporterFeaturesEnabled && SupporterFeatureLinks.Contains(link))
         {
@@ -150,7 +150,7 @@ public static class UpdateOptionPanel
 
         if (LinkDrawers.TryGetValue(link, out var drawer))
         {
-            drawer(configService, uiShared, mediator, outgoingSliderWidth);
+            drawer(configService, uiShared, mediator);
         }
     }
 

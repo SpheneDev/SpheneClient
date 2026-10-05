@@ -80,7 +80,6 @@ public class SettingsUi : WindowMediatorSubscriberBase
     private bool _deleteFilesPopupModalShown = false;
     private string _lastTab = string.Empty;
 
-    private static readonly Vector4 SupporterAccentTextColor = new(0.13f, 0.10f, 0.02f, 1.0f);
     private bool? _notesSuccessfullyApplied = null;
     private bool _overwriteExistingLabels = false;
     private bool _readClearCache = false;
@@ -115,6 +114,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         Debug
     }
     private SettingsPage _activeSettingsPage = SettingsPage.Home;
+    private int _settingsCardIndex;
     private bool _preferPanelThemeTab = false;
     private bool _preferIconThemeTab = false;
     private bool _preferSoundsThemeTab = false;
@@ -821,9 +821,9 @@ public class SettingsUi : WindowMediatorSubscriberBase
         }
         if (isLinux || !_cacheMonitor.StorageisNTFS) ImGui.BeginDisabled();
         StorageOptionBlock.DrawUseFileCompactorOption(_configService, _uiShared, "StorageUseFileCompactor");
-        ImGui.SameLine();
         if (!_fileCompactor.MassCompactRunning)
         {
+            UiSharedService.SameLineIfFits(_uiShared.GetIconTextButtonSize(FontAwesomeIcon.FileArchive, "Compact all files in storage"));
             if (_uiShared.IconTextButton(FontAwesomeIcon.FileArchive, "Compact all files in storage"))
             {
                 _ = Task.Run(() =>
@@ -834,7 +834,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             }
             UiSharedService.AttachToolTip("This will run compression on all files in your current Sphene Storage." + Environment.NewLine
                 + "You do not need to run this manually if you keep the file compactor enabled.");
-            ImGui.SameLine();
+            UiSharedService.SameLineIfFits(_uiShared.GetIconTextButtonSize(FontAwesomeIcon.File, "Decompact all files in storage"));
             if (_uiShared.IconTextButton(FontAwesomeIcon.File, "Decompact all files in storage"))
             {
                 _ = Task.Run(() =>
@@ -944,8 +944,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
             }
             using (ImRaii.Disabled(!showPerformanceIndicator && !warnOnExceedingThresholds))
             {
-                PerformanceOptionBlock.DrawWarningVramThresholdOption(_playerPerformanceConfigService, _uiShared, ClampSettingsItemWidth(100f), "PerformanceWarningVramThreshold");
-                PerformanceOptionBlock.DrawWarningTriangleThresholdOption(_playerPerformanceConfigService, _uiShared, ClampSettingsItemWidth(100f), "PerformanceWarningTriangleThreshold");
+                PerformanceOptionBlock.DrawWarningVramThresholdOption(_playerPerformanceConfigService, _uiShared, "PerformanceWarningVramThreshold");
+                PerformanceOptionBlock.DrawWarningTriangleThresholdOption(_playerPerformanceConfigService, _uiShared, "PerformanceWarningTriangleThreshold");
             }
         });
         DrawSettingsCard("Auto Pause", () =>
@@ -955,14 +955,17 @@ public class SettingsUi : WindowMediatorSubscriberBase
             {
                 using var indent = ImRaii.PushIndent();
                 PerformanceOptionBlock.DrawAutomaticallyPauseAlsoPreferredPermissionsOption(_playerPerformanceConfigService, _uiShared, "PerformanceAutomaticallyPauseAlsoPreferredPermissions");
-                PerformanceOptionBlock.DrawAutoPauseVramThresholdOption(_playerPerformanceConfigService, _uiShared, ClampSettingsItemWidth(100f), "PerformanceAutoPauseVramThreshold");
-                PerformanceOptionBlock.DrawAutoPauseTriangleThresholdOption(_playerPerformanceConfigService, _uiShared, ClampSettingsItemWidth(100f), "PerformanceAutoPauseTriangleThreshold");
+                PerformanceOptionBlock.DrawAutoPauseVramThresholdOption(_playerPerformanceConfigService, _uiShared, "PerformanceAutoPauseVramThreshold");
+                PerformanceOptionBlock.DrawAutoPauseTriangleThresholdOption(_playerPerformanceConfigService, _uiShared, "PerformanceAutoPauseTriangleThreshold");
             }
         });
         DrawSettingsCard("Whitelisted UIDs", () =>
         {
-            ImGui.SetNextItemWidth(ClampSettingsItemWidth(220f, 140f));
-        ImGui.InputText("##ignoreuid", ref _uidToAddForIgnore, 20);
+            var addUidTrailing = _uiShared.GetIconTextButtonSize(FontAwesomeIcon.Plus, "Add UID/Vanity ID to whitelist")
+                + ImGui.GetStyle().ItemSpacing.X + _uiShared.GetIconSize(FontAwesomeIcon.QuestionCircle).X
+                + ImGui.GetStyle().ItemSpacing.X;
+            ImGui.SetNextItemWidth(UiSharedService.BoundedContentAvailX() - addUidTrailing);
+        UiSharedService.DrawInputText("##ignoreuid", ref _uidToAddForIgnore, 20);
         ImGui.SameLine();
         using (ImRaii.Disabled(string.IsNullOrEmpty(_uidToAddForIgnore)))
         {
@@ -1282,15 +1285,15 @@ public class SettingsUi : WindowMediatorSubscriberBase
                                     _selectedSecretKeyForNewCharacter = initialKey.Key;
                                 }
                                 UiSharedService.ColorText("Secret Key:", ImGuiColors.DalamudWhite);
-                                ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X);
+                                ImGui.SetNextItemWidth(UiSharedService.BoundedContentAvailX());
                                 _uiShared.DrawCombo("##newCharKey", keys,
                                     (w) => w.Value.FriendlyName,
                                     (w) => { _selectedSecretKeyForNewCharacter = w.Key; },
                                     initialKey);
                                 ImGuiHelpers.ScaledDummy(3);
                                 UiSharedService.ColorText("or enter a new key:", ImGuiColors.DalamudGrey);
-                                ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X);
-                                ImGui.InputTextWithHint("##customSecretKeySettings", "enter secret key here", ref _customSecretKeyInput, 255);
+                                ImGui.SetNextItemWidth(UiSharedService.BoundedContentAvailX());
+                                UiSharedService.DrawInputTextWithHint("##customSecretKeySettings", "enter secret key here", ref _customSecretKeyInput, 255);
                                 ImGuiHelpers.ScaledDummy(3);
                             }
                             ImGuiHelpers.ScaledDummy(5);
@@ -1415,8 +1418,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
                         if (_showAdvancedCharacterMode)
                         {
                             var charaName = item.CharacterName;
-                            ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X * 0.45f);
-                            if (ImGui.InputText("##charaName" + i, ref charaName, 64))
+                            ImGui.SetNextItemWidth(UiSharedService.BoundedContentAvailX() * 0.45f);
+                            if (UiSharedService.DrawInputText("##charaName" + i, ref charaName, 64))
                             {
                                 item.CharacterName = charaName;
                                 _serverConfigurationManager.Save();
@@ -1424,7 +1427,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
                             ImGui.SameLine();
 
-                            ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X);
+                            ImGui.SetNextItemWidth(UiSharedService.BoundedContentAvailX());
                             _uiShared.DrawCombo("##world" + item.CharacterName + i, data, (w) => w.Value,
                                 (w) =>
                                 {
@@ -1518,13 +1521,13 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 {
                     using var id = ImRaii.PushId("key" + item.Key);
                     var friendlyName = item.Value.FriendlyName;
-                    if (ImGui.InputText("Secret Key Display Name", ref friendlyName, 255))
+                    if (UiSharedService.DrawInputText("Secret Key Display Name", ref friendlyName, 255))
                     {
                         item.Value.FriendlyName = friendlyName;
                         _serverConfigurationManager.Save();
                     }
                     var key = item.Value.Key;
-                    if (ImGui.InputText("Secret Key", ref key, 64))
+                    if (UiSharedService.DrawInputText("Secret Key", ref key, 64))
                     {
                         item.Value.Key = key;
                         _serverConfigurationManager.Save();
@@ -1584,7 +1587,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                             string.Equals(serverName, "Sphene Server", StringComparison.OrdinalIgnoreCase);
                 var flags = isMain ? ImGuiInputTextFlags.ReadOnly : ImGuiInputTextFlags.None;
 
-                if (ImGui.InputText("Service URI", ref serverUri, 255, flags))
+                if (UiSharedService.DrawInputText("Service URI", ref serverUri, 255, flags))
                 {
                     selectedServer.ServerUri = serverUri;
                 }
@@ -1593,7 +1596,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                     _uiShared.DrawHelpText("You cannot edit the URI of the main service.");
                 }
 
-                if (ImGui.InputText("Service Name", ref serverName, 255, flags))
+                if (UiSharedService.DrawInputText("Service Name", ref serverName, 255, flags))
                 {
                     selectedServer.ServerName = serverName;
                     _serverConfigurationManager.Save();
@@ -1603,7 +1606,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                     _uiShared.DrawHelpText("You cannot edit the name of the main service.");
                 }
 
-                ConnectivityOptionBlock.DrawServerTransportTypeOption(_serverConfigurationManager, _uiShared, ClampSettingsItemWidth(220f, 140f), "ConnectivityServerTransportType");
+                ConnectivityOptionBlock.DrawServerTransportTypeOption(_serverConfigurationManager, _uiShared, "ConnectivityServerTransportType");
 
                 if (_dalamudUtilService.IsWine)
                 {
@@ -1814,57 +1817,112 @@ public class SettingsUi : WindowMediatorSubscriberBase
         ImGui.PopClipRect();
         ImGui.SetCursorScreenPos(sidebarMin);
 
-        var pinnedBandInset = (ImGui.GetTextLineHeight() + 8f * ImGuiHelpers.GlobalScale) * 0.5f
-            + 2f * ImGuiHelpers.GlobalScale;
+        // The pinned band docks directly under the accent line.
+        var pinnedBandHeight = ImGui.GetTextLineHeight() + 8f * ImGuiHelpers.GlobalScale;
+        var pinnedCenterY = railMin.Y + pinnedBandHeight * 0.5f;
+        var pinnedBandBottom = pinnedCenterY + pinnedBandHeight * 0.5f;
         SpheneWindowChrome.BeginScrollArea("settings-sidebar", sidebarSize,
-            topInset: pinnedBandInset);
+            topInset: pinnedBandBottom - sidebarMin.Y);
 
-        var sidebarCategories = new List<(string Label, float CenterY)>();
-        void SidebarCategory(string label)
+        var sidebarCategories = new List<(string Label, float CenterY, Vector4 Accent)>();
+
+        // Per-category accents; dividers blend one category color into the next
+        // like the brand strip seam gradient.
+        var accentGeneral = theme.AccentBlue;
+        var accentAppearance = SpheneColors.EtherealPurple;
+        var accentSync = SpheneColors.NetworkActive;
+        var accentAdvanced = new Vector4(0.93f, 0.68f, 0.38f, 1f);
+
+        void SidebarCategory(string label, Vector4 accent)
         {
             ImGuiHelpers.ScaledDummy(0, 5);
             var text = label.ToUpperInvariant();
-            var availWidth = ImGui.GetContentRegionAvail().X;
-            var textWidth = ImGui.CalcTextSize(text).X;
-            ImGui.SetCursorPosX(ImGui.GetCursorPosX() + MathF.Max(0f, (availWidth - textWidth) * 0.5f));
-            sidebarCategories.Add((text, ImGui.GetCursorScreenPos().Y + ImGui.GetTextLineHeight() * 0.5f));
-            UiSharedService.ColorText(text, SpheneCustomTheme.CurrentTheme.AccentBlue);
-            ImGuiHelpers.ScaledDummy(0, 3);
-        }
-
-        void SidebarButton(string label, SettingsPage page, Vector4? accentColor = null)
-        {
-            var buttonSize = new Vector2(-1, 24f * ImGuiHelpers.GlobalScale);
-            var isActive = _activeSettingsPage == page;
-            using var buttonPadding = ImRaii.PushStyle(ImGuiStyleVar.FramePadding, new Vector2(sidebarButtonPaddingX, style.FramePadding.Y));
-            using var buttonRounding = ImRaii.PushStyle(ImGuiStyleVar.FrameRounding, 5f * ImGuiHelpers.GlobalScale);
-            var pushedColors = 0;
-            if (isActive)
+            var labelTop = ImGui.GetCursorScreenPos().Y;
+            var labelCenter = labelTop + ImGui.GetTextLineHeight() * 0.5f;
+            sidebarCategories.Add((text, labelCenter, accent));
+            // The band owns the first label plus every label whose center has
+            // reached the pin; an approaching label is drawn in-flow so the
+            // band can ride on its top edge while it pushes in.
+            if (sidebarCategories.Count == 1 || labelCenter <= pinnedCenterY)
             {
-                var activeColor = accentColor ?? SpheneCustomTheme.CurrentTheme.AccentBlue;
-                ImGui.PushStyleColor(ImGuiCol.Button, activeColor);
-                ImGui.PushStyleColor(ImGuiCol.ButtonHovered, activeColor);
-                pushedColors += 2;
-                if (accentColor.HasValue)
-                {
-                    ImGui.PushStyleColor(ImGuiCol.Text, SupporterAccentTextColor);
-                    pushedColors++;
-                }
-            }
-            else if (accentColor.HasValue)
-            {
-                ImGui.PushStyleColor(ImGuiCol.Text, accentColor.Value);
-                pushedColors++;
+                ImGui.Dummy(new Vector2(1f, ImGui.GetTextLineHeight()));
             }
             else
             {
-                ImGui.PushStyleColor(ImGuiCol.ButtonHovered, SpheneCustomTheme.CurrentTheme.Hover);
-                ImGui.PushStyleColor(ImGuiCol.ButtonActive, SpheneCustomTheme.CurrentTheme.Active);
+                var availWidth = ImGui.GetContentRegionAvail().X;
+                var textWidth = ImGui.CalcTextSize(text).X;
+                ImGui.SetCursorPosX(ImGui.GetCursorPosX() + MathF.Max(0f, (availWidth - textWidth) * 0.5f));
+                UiSharedService.ColorText(text, accent);
+            }
+            ImGuiHelpers.ScaledDummy(0, 3);
+        }
+
+        void SidebarDivider(Vector4 from, Vector4 to)
+        {
+            ImGuiHelpers.ScaledDummy(0, 5);
+            var drawList = ImGui.GetWindowDrawList();
+            var pos = ImGui.GetCursorScreenPos();
+            var lineHeight = MathF.Max(1f, 1.5f * ImGuiHelpers.GlobalScale);
+            var span = pos.X + ImGui.GetContentRegionAvail().X;
+            var fromCol = ImGui.ColorConvertFloat4ToU32(SpheneColors.WithAlpha(from, 0.4f));
+            var toCol = ImGui.ColorConvertFloat4ToU32(SpheneColors.WithAlpha(to, 0.4f));
+            drawList.AddRectFilledMultiColor(new Vector2(pos.X, pos.Y),
+                new Vector2(span, pos.Y + lineHeight), fromCol, toCol, toCol, fromCol);
+            ImGuiHelpers.ScaledDummy(0, 5);
+        }
+
+        void SidebarButton(string label, SettingsPage page, Vector4 accent, bool special = false)
+        {
+            var scale = ImGuiHelpers.GlobalScale;
+            var buttonSize = new Vector2(-1, 24f * scale);
+            var isActive = _activeSettingsPage == page;
+            using var buttonPadding = ImRaii.PushStyle(ImGuiStyleVar.FramePadding, new Vector2(sidebarButtonPaddingX, style.FramePadding.Y));
+            using var buttonRounding = ImRaii.PushStyle(ImGuiStyleVar.FrameRounding, 5f * scale);
+            var pushedColors = 0;
+            if (isActive)
+            {
+                ImGui.PushStyleColor(ImGuiCol.Button, accent);
+                ImGui.PushStyleColor(ImGuiCol.ButtonHovered, SpheneColors.LerpColor(accent, Vector4.One, 0.15f));
+                ImGui.PushStyleColor(ImGuiCol.Text, SpheneColors.ContrastTextColor(accent));
+                pushedColors += 3;
+            }
+            else
+            {
+                ImGui.PushStyleColor(ImGuiCol.ButtonHovered, SpheneColors.WithAlpha(accent, 0.22f));
+                ImGui.PushStyleColor(ImGuiCol.ButtonActive, SpheneColors.WithAlpha(accent, 0.32f));
                 pushedColors += 2;
+                if (special)
+                {
+                    ImGui.PushStyleColor(ImGuiCol.Text, accent);
+                    pushedColors++;
+                }
             }
             if (ImGui.Button(label, buttonSize))
             {
                 _activeSettingsPage = page;
+            }
+            if (isActive)
+            {
+                // Bright left accent bar + a soft top sheen give the active pill depth
+                var itemMin = ImGui.GetItemRectMin();
+                var itemMax = ImGui.GetItemRectMax();
+                var drawList = ImGui.GetWindowDrawList();
+                var sheenTop = ImGui.ColorConvertFloat4ToU32(new Vector4(1f, 1f, 1f, 0.13f));
+                var sheenBottom = ImGui.ColorConvertFloat4ToU32(new Vector4(1f, 1f, 1f, 0f));
+                drawList.AddRectFilledMultiColor(itemMin, itemMax,
+                    sheenTop, sheenTop, sheenBottom, sheenBottom);
+                // Accent edge hugging the button rounding, fading in over ~35%
+                var accentEdge = SpheneColors.LerpColor(accent, Vector4.One, 0.35f);
+                var edgeCol = ImGui.ColorConvertFloat4ToU32(accentEdge);
+                var fadeCol = ImGui.ColorConvertFloat4ToU32(SpheneColors.WithAlpha(accentEdge, 0f));
+                var buttonRadius = 5f * scale;
+                var fadeWidth = (itemMax.X - itemMin.X) * 0.35f;
+                drawList.AddRectFilled(itemMin, new Vector2(itemMin.X + buttonRadius, itemMax.Y),
+                    edgeCol, buttonRadius, ImDrawFlags.RoundCornersLeft);
+                drawList.AddRectFilledMultiColor(
+                    new Vector2(itemMin.X + buttonRadius, itemMin.Y),
+                    new Vector2(itemMin.X + buttonRadius + fadeWidth, itemMax.Y),
+                    edgeCol, fadeCol, fadeCol, edgeCol);
             }
             if (pushedColors > 0)
             {
@@ -1872,42 +1930,44 @@ public class SettingsUi : WindowMediatorSubscriberBase
             }
         }
 
-        SidebarCategory("General");
-        SidebarButton("Home", SettingsPage.Home);
-        SidebarButton("Connectivity", SettingsPage.Connectivity);
-        SidebarButton("People & Notes", SettingsPage.PeopleNotes);
-        SidebarButton("Notifications", SettingsPage.Alerts);
+        SidebarCategory("General", accentGeneral);
+        SidebarButton("Home", SettingsPage.Home, accentGeneral);
+        SidebarButton("Connectivity", SettingsPage.Connectivity, accentGeneral);
+        SidebarButton("People & Notes", SettingsPage.PeopleNotes, accentGeneral);
+        SidebarButton("Notifications", SettingsPage.Alerts, accentGeneral);
         if (_apiController.SupporterFeaturesEnabled)
         {
-            SidebarButton("Supporter", SettingsPage.Supporter, SpheneColors.SpheneGold);
+            SidebarButton("Supporter", SettingsPage.Supporter, SpheneColors.SpheneGold, special: true);
         }
-        ImGui.Separator();
+        SidebarDivider(accentGeneral, accentAppearance);
 
-        SidebarCategory("Appearance");
-        SidebarButton("Appearance", SettingsPage.Display);
-        SidebarButton("Theme", SettingsPage.Theme);
-        ImGui.Separator();
+        SidebarCategory("Appearance", accentAppearance);
+        SidebarButton("Appearance", SettingsPage.Display, accentAppearance);
+        SidebarButton("Theme", SettingsPage.Theme, accentAppearance);
+        SidebarDivider(accentAppearance, accentSync);
 
-        SidebarCategory("Sync & Data");
-        SidebarButton("Sync", SettingsPage.SyncBehavior);
-        SidebarButton("Acknowledgment", SettingsPage.Acknowledgment);
-        SidebarButton("Transfers", SettingsPage.Transfers);
-        SidebarButton("Storage", SettingsPage.Storage);
-        ImGui.Separator();
+        SidebarCategory("Sync & Data", accentSync);
+        SidebarButton("Sync", SettingsPage.SyncBehavior, accentSync);
+        SidebarButton("Acknowledgment", SettingsPage.Acknowledgment, accentSync);
+        SidebarButton("Transfers", SettingsPage.Transfers, accentSync);
+        SidebarButton("Storage", SettingsPage.Storage, accentSync);
+        SidebarDivider(accentSync, accentAdvanced);
 
-        SidebarCategory("Advanced");
-        SidebarButton("Performance", SettingsPage.Performance);
-        SidebarButton(diagnosticsPageLabel, SettingsPage.Debug);
+        SidebarCategory("Advanced", accentAdvanced);
+        SidebarButton("Performance", SettingsPage.Performance, accentAdvanced);
+        SidebarButton(diagnosticsPageLabel, SettingsPage.Debug, accentAdvanced);
 
         SpheneWindowChrome.EndScrollArea(fadeBaseColor: sidebarBg,
-            fadeSpanX: new Vector2(railMin.X, railMax.X));
+            fadeSpanX: new Vector2(railMin.X, railMax.X), fadeMinY: pinnedBandBottom);
 
-        SpheneWindowChrome.DrawPinnedSectionLabel(sidebarMin, sidebarMin + sidebarSize,
-            sidebarCategories, windowPos, windowPos + windowSize);
+        SpheneWindowChrome.DrawPinnedSectionLabel(
+            new Vector2(sidebarMin.X, railMin.Y), sidebarMin + sidebarSize,
+            sidebarCategories, windowPos, windowPos + windowSize,
+            baseColor: sidebarBg, pinCenterY: pinnedCenterY);
 
-        ImGui.SetCursorScreenPos(contentTopPos + new Vector2(sidebarWidth + ImGui.GetStyle().ItemSpacing.X, 0f));
+        ImGui.SetCursorScreenPos(contentTopPos + new Vector2(sidebarWidth, 0f));
         SpheneWindowChrome.BeginScrollArea("settings-content",
-            new Vector2(available.X - sidebarWidth - ImGui.GetStyle().ItemSpacing.X, available.Y),
+            new Vector2(available.X - sidebarWidth, available.Y),
             windowFlags: ImGuiWindowFlags.NoBackground, noPadding: true);
         ImGuiHelpers.ScaledDummy(0, 8);
         var contentAvail = ImGui.GetContentRegionAvail().X;
@@ -1957,6 +2017,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 contentIndent = ImRaii.PushIndent(settingsOptionsIndentX);
             }
 
+            _settingsCardIndex = 0;
             switch (_activeSettingsPage)
             {
                 case SettingsPage.Home:
@@ -2005,7 +2066,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
         }
 
         SpheneWindowChrome.EndScrollArea(
-            fadeSpanX: new Vector2(railMax.X, windowPos.X + windowSize.X));
+            fadeSpanX: new Vector2(railMax.X, windowPos.X + windowSize.X),
+            fadeMinY: railMin.Y);
     }
 
     private void DrawSettingsPageHeader(string tabKey, string? description = null)
@@ -2047,12 +2109,17 @@ public class SettingsUi : WindowMediatorSubscriberBase
     private void DrawSettingsCard(string title, Action content, string? description = null,
         Vector4? accent = null)
     {
+        // Inter-card spacing leads each card so the last card of a page ends
+        // flush at the shared bottom rule instead of leaving a stray dummy.
+        if (_settingsCardIndex++ > 0)
+        {
+            ImGuiHelpers.ScaledDummy(0, 6);
+        }
         var settingsOptionsIndentX = GetSettingsOptionsIndentX(_activeSettingsPage);
         if (_activeSettingsPage != SettingsPage.Home)
             ImGui.Unindent(settingsOptionsIndentX);
         SpheneWindowChrome.DrawSectionCard(content, title, accent, description,
             animatedBackdrop: true);
-        ImGuiHelpers.ScaledDummy(0, 6);
         if (_activeSettingsPage != SettingsPage.Home)
             ImGui.Indent(settingsOptionsIndentX);
     }
@@ -2184,7 +2251,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         var rowMarginX = SpheneWindowChrome.ScrollAreaContentInset * ImGuiHelpers.GlobalScale;
         
         // Use Avail width for alignment, safer than absolute WindowContentRegionMax in groups/children
-        var availWidth = ImGui.GetContentRegionAvail().X;
+        var availWidth = UiSharedService.BoundedContentAvailX();
         
         var nameColor = !isInstalled
             ? ImGuiColors.DalamudRed
@@ -2354,7 +2421,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             }
             ImGui.SameLine();
             var overrideUrl = _configService.Current.TestServerApiUrl ?? string.Empty;
-            if (ImGui.InputText("##testServerUrl", ref overrideUrl, 50))
+            if (UiSharedService.DrawInputText("##testServerUrl", ref overrideUrl, 50))
             {
                 _configService.Current.TestServerApiUrl = overrideUrl;
                 _configService.Save();
@@ -2602,13 +2669,18 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 new SpheneBrandIcons.StripSegment(SpheneBrandIcons.Brand.Kofi,
                     "Support on Ko-fi", "Support Sphene's development on Ko-fi",
                     () => Util.OpenLink("https://ko-fi.com/sphenedev")),
-            }, ImGui.GetFrameHeight() * 1.5f, ImGui.GetContentRegionAvail().X);
+            }, ImGui.GetFrameHeight() * 1.5f, UiSharedService.BoundedContentAvailX());
         });
     }
 
-    private static void DrawSupporterCard(Action content)
+    private void DrawSupporterCard(Action content)
     {
+        var settingsOptionsIndentX = GetSettingsOptionsIndentX(_activeSettingsPage);
+        if (_activeSettingsPage != SettingsPage.Home)
+            ImGui.Unindent(settingsOptionsIndentX);
         SpheneWindowChrome.DrawAccentCard(content);
+        if (_activeSettingsPage != SettingsPage.Home)
+            ImGui.Indent(settingsOptionsIndentX);
     }
 
     private void DrawSupporterLockedCard()
@@ -2678,7 +2750,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             }
             BeginSupporterRow("Symbol");
             ImGui.SetNextItemWidth(ClampSettingsItemWidth(90f));
-            if (ImGui.Combo("##supporterSymbolPreset", ref presetIndex, SupporterSymbolPresets, SupporterSymbolPresets.Length))
+            if (UiSharedService.DrawLabeledCombo("##supporterSymbolPreset", ref presetIndex, SupporterSymbolPresets, SupporterSymbolPresets.Length))
             {
                 _configService.Current.SupporterSymbolChar = presetIndex == 0 ? string.Empty : SupporterSymbolPresets[presetIndex];
                 _configService.Save();
@@ -2688,7 +2760,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             if (presetIndex > 0)
                 symbolChar = SupporterSymbolPresets[presetIndex];
             ImGui.SetNextItemWidth(ClampSettingsItemWidth(80f));
-            if (ImGui.InputText("##supporterSymbol", ref symbolChar, 4))
+            if (UiSharedService.DrawInputText("##supporterSymbol", ref symbolChar, 4))
             {
                 _configService.Current.SupporterSymbolChar = symbolChar;
                 _configService.Save();
@@ -2713,7 +2785,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 BeginSupporterRow("Label Text", true);
                 var labelText = _configService.Current.SupporterLabelText ?? string.Empty;
                 ImGui.SetNextItemWidth(ClampSettingsItemWidth(200f));
-                if (ImGui.InputText("##supporterLabelText", ref labelText, 30))
+                if (UiSharedService.DrawInputText("##supporterLabelText", ref labelText, 30))
                 {
                     _configService.Current.SupporterLabelText = labelText;
                     _configService.Save();
@@ -2722,7 +2794,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 BeginSupporterRow("Label Order", true);
                 var labelOrder = (int)_configService.Current.SupporterLabelOrder;
                 ImGui.SetNextItemWidth(ClampSettingsItemWidth(200f));
-                if (ImGui.Combo("##supporterLabelOrder", ref labelOrder, "Symbol then Text\0Text then Symbol\0"))
+                if (UiSharedService.DrawLabeledCombo("##supporterLabelOrder", ref labelOrder, "Symbol then Text\0Text then Symbol\0"))
                 {
                     _configService.Current.SupporterLabelOrder = (SupporterLabelOrder)labelOrder;
                     _configService.Save();
@@ -2737,7 +2809,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             BeginSupporterRow("Position");
             var position = (int)_configService.Current.SupporterSymbolPosition;
             ImGui.SetNextItemWidth(ClampSettingsItemWidth(200f));
-            if (ImGui.Combo("##supporterPosition", ref position, "Left\0Right\0Both\0"))
+            if (UiSharedService.DrawLabeledCombo("##supporterPosition", ref position, "Left\0Right\0Both\0"))
             {
                 _configService.Current.SupporterSymbolPosition = (SupporterSymbolPosition)position;
                 _configService.Save();
@@ -2777,7 +2849,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                     BeginSupporterRow("Label Text", true);
                     var iconLabelText = _configService.Current.SupporterIconLabelText ?? string.Empty;
                     ImGui.SetNextItemWidth(ClampSettingsItemWidth(200f));
-                    if (ImGui.InputText("##supporterIconLabelText", ref iconLabelText, 30))
+                    if (UiSharedService.DrawInputText("##supporterIconLabelText", ref iconLabelText, 30))
                     {
                         _configService.Current.SupporterIconLabelText = iconLabelText;
                         _configService.Save();
@@ -2869,7 +2941,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
     {
         var sliderIndex = UiForegroundColorKeyToSliderIndex(colorKey);
         ImGui.SetNextItemWidth(ClampSettingsItemWidth(220f));
-        if (ImGui.SliderInt("Color##" + id, ref sliderIndex, 0, UiForegroundSliderMaxIndex))
+        if (UiSharedService.DrawSliderInt("Color##" + id, ref sliderIndex, 0, UiForegroundSliderMaxIndex))
         {
             apply(UiForegroundSliderIndexToColorKey(sliderIndex));
             _configService.Save();
@@ -2909,7 +2981,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
     private static void CenterSupporterCursorX(float contentWidth)
     {
-        var offset = MathF.Max(0f, (ImGui.GetContentRegionAvail().X - contentWidth) * 0.5f);
+        var offset = MathF.Max(0f, (UiSharedService.BoundedContentAvailX() - contentWidth) * 0.5f);
         ImGui.SetCursorPosX(ImGui.GetCursorPosX() + offset);
     }
 
@@ -2962,7 +3034,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 UiSharedService.ColorTextWrapped("Enter an optional password to protect secret keys. Leave blank for unencrypted export.", ImGuiColors.DalamudGrey);
                 ImGuiHelpers.ScaledDummy(5);
                 ImGui.TextUnformatted("Password (optional):");
-                ImGui.InputText("##exportPassword", ref _exportPassword, 64, ImGuiInputTextFlags.Password);
+                UiSharedService.DrawInputText("##exportPassword", ref _exportPassword, 64, ImGuiInputTextFlags.Password);
                 ImGuiHelpers.ScaledDummy(10);
 
                 var buttonSize = (ImGui.GetWindowContentRegionMax().X - ImGui.GetWindowContentRegionMin().X -
@@ -3048,7 +3120,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                         UiSharedService.ColorTextWrapped("If the backup is password-protected, enter the password below. Otherwise leave blank.", ImGuiColors.DalamudGrey);
                     }
                     ImGui.TextUnformatted("Password (if encrypted):");
-                    ImGui.InputText("##importPassword", ref _importPassword, 64, ImGuiInputTextFlags.Password);
+                    UiSharedService.DrawInputText("##importPassword", ref _importPassword, 64, ImGuiInputTextFlags.Password);
                     ImGuiHelpers.ScaledDummy(10);
 
                     DrawSettingsSectionHeader("Path Options", "Choose whether to restore folder paths from the backup or keep current paths.");
@@ -3200,7 +3272,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             using (ImRaii.Disabled(!theme.EnableWindowBlur))
             {
                 var windowBlurStrength = theme.WindowBlurStrength * 100f;
-                if (ImGui.SliderFloat("Blur Strength##AppearanceWindowBlurStrength", ref windowBlurStrength, 0.0f, 100.0f, "%.0f%%"))
+                if (UiSharedService.DrawSliderFloat("Blur Strength##AppearanceWindowBlurStrength", ref windowBlurStrength, 0.0f, 100.0f, "%.0f%%"))
                 {
                     theme.WindowBlurStrength = windowBlurStrength / 100f;
                     themeChanged = true;
@@ -3218,7 +3290,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             using (ImRaii.Disabled(!theme.CompactEnableWindowBlur))
             {
                 var panelBlurStrength = theme.CompactWindowBlurStrength * 100f;
-                if (ImGui.SliderFloat("Panel Blur Strength##AppearancePanelBlurStrength", ref panelBlurStrength, 0.0f, 100.0f, "%.0f%%"))
+                if (UiSharedService.DrawSliderFloat("Panel Blur Strength##AppearancePanelBlurStrength", ref panelBlurStrength, 0.0f, 100.0f, "%.0f%%"))
                 {
                     theme.CompactWindowBlurStrength = panelBlurStrength / 100f;
                     themeChanged = true;
@@ -3369,7 +3441,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
         DrawSettingsCard("Outgoing Sync Batching", () =>
         {
-            SyncBehaviorOptionBlock.DrawOutgoingSyncBatching(_configService, _uiShared, ClampSettingsItemWidth(240f, 160f), "SettingsOutgoingSyncBatching");
+            SyncBehaviorOptionBlock.DrawOutgoingSyncBatching(_configService, _uiShared, "SettingsOutgoingSyncBatching");
         });
 
         DrawSettingsCard("Filter", () =>
@@ -3414,8 +3486,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
                         if (ImGui.BeginChild("GeneralThemeChild", new Vector2(0, tabContentHeight), true))
                         {
                             DrawGeneralThemeSettings();
-                            ImGui.EndChild();
                         }
+                        ImGui.EndChild();
                     }
                     #pragma warning restore S1066
                     generalTab.Dispose();
@@ -3428,8 +3500,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
                     if (ImGui.BeginChild("IconThemeChild", new Vector2(0, tabContentHeight), true))
                     {
                         DrawIconThemeSettings();
-                        ImGui.EndChild();
                     }
+                    ImGui.EndChild();
                 }
                 #pragma warning restore S1066
                 iconTab.Dispose();
@@ -3442,8 +3514,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
                     if (ImGui.BeginChild("PanelThemeChild", new Vector2(0, tabContentHeight), true))
                     {
                         DrawCompactUIThemeSettings();
-                        ImGui.EndChild();
                     }
+                    ImGui.EndChild();
                 }
                 #pragma warning restore S1066
                 panelTab.Dispose();
@@ -3456,8 +3528,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
                     if (ImGui.BeginChild("SoundsThemeChild", new Vector2(0, tabContentHeight), true))
                     {
                         DrawSoundThemeSettings();
-                        ImGui.EndChild();
                     }
+                    ImGui.EndChild();
                 }
                 #pragma warning restore S1066
                 soundsTab.Dispose();
@@ -3476,49 +3548,49 @@ public class SettingsUi : WindowMediatorSubscriberBase
         
         // Rounding Settings
         var windowRounding = theme.WindowRounding;
-        if (ImGui.SliderFloat("Window Rounding", ref windowRounding, 0.0f, 20.0f, "%.1f"))
+        if (UiSharedService.DrawSliderFloat("Window Rounding", ref windowRounding, 0.0f, 20.0f, "%.1f"))
         {
             theme.WindowRounding = windowRounding;
             themeChanged = true;
         }
         
         var childRounding = theme.ChildRounding;
-        if (ImGui.SliderFloat("Child Rounding", ref childRounding, 0.0f, 20.0f, "%.1f"))
+        if (UiSharedService.DrawSliderFloat("Child Rounding", ref childRounding, 0.0f, 20.0f, "%.1f"))
         {
             theme.ChildRounding = childRounding;
             themeChanged = true;
         }
         
         var popupRounding = theme.PopupRounding;
-        if (ImGui.SliderFloat("Popup Rounding", ref popupRounding, 0.0f, 20.0f, "%.1f"))
+        if (UiSharedService.DrawSliderFloat("Popup Rounding", ref popupRounding, 0.0f, 20.0f, "%.1f"))
         {
             theme.PopupRounding = popupRounding;
             themeChanged = true;
         }
         
         var frameRounding = theme.FrameRounding;
-        if (ImGui.SliderFloat("Frame Rounding", ref frameRounding, 0.0f, 20.0f, "%.1f"))
+        if (UiSharedService.DrawSliderFloat("Frame Rounding", ref frameRounding, 0.0f, 20.0f, "%.1f"))
         {
             theme.FrameRounding = frameRounding;
             themeChanged = true;
         }
         
         var scrollbarRounding = theme.ScrollbarRounding;
-        if (ImGui.SliderFloat("Scrollbar Rounding", ref scrollbarRounding, 0.0f, 20.0f, "%.1f"))
+        if (UiSharedService.DrawSliderFloat("Scrollbar Rounding", ref scrollbarRounding, 0.0f, 20.0f, "%.1f"))
         {
             theme.ScrollbarRounding = scrollbarRounding;
             themeChanged = true;
         }
         
         var grabRounding = theme.GrabRounding;
-        if (ImGui.SliderFloat("Grab Rounding", ref grabRounding, 0.0f, 20.0f, "%.1f"))
+        if (UiSharedService.DrawSliderFloat("Grab Rounding", ref grabRounding, 0.0f, 20.0f, "%.1f"))
         {
             theme.GrabRounding = grabRounding;
             themeChanged = true;
         }
         
         var tabRounding = theme.TabRounding;
-        if (ImGui.SliderFloat("Tab Rounding", ref tabRounding, 0.0f, 20.0f, "%.1f"))
+        if (UiSharedService.DrawSliderFloat("Tab Rounding", ref tabRounding, 0.0f, 20.0f, "%.1f"))
         {
             theme.TabRounding = tabRounding;
             themeChanged = true;
@@ -3528,28 +3600,28 @@ public class SettingsUi : WindowMediatorSubscriberBase
         ImGui.Text("Border Settings");
         
         var windowBorderSize = theme.WindowBorderSize;
-        if (ImGui.SliderFloat("Window Border", ref windowBorderSize, 0.0f, 5.0f, "%.1f"))
+        if (UiSharedService.DrawSliderFloat("Window Border", ref windowBorderSize, 0.0f, 5.0f, "%.1f"))
         {
             theme.WindowBorderSize = windowBorderSize;
             themeChanged = true;
         }
         
         var childBorderSize = theme.ChildBorderSize;
-        if (ImGui.SliderFloat("Child Border", ref childBorderSize, 0.0f, 5.0f, "%.1f"))
+        if (UiSharedService.DrawSliderFloat("Child Border", ref childBorderSize, 0.0f, 5.0f, "%.1f"))
         {
             theme.ChildBorderSize = childBorderSize;
             themeChanged = true;
         }
         
         var popupBorderSize = theme.PopupBorderSize;
-        if (ImGui.SliderFloat("Popup Border", ref popupBorderSize, 0.0f, 5.0f, "%.1f"))
+        if (UiSharedService.DrawSliderFloat("Popup Border", ref popupBorderSize, 0.0f, 5.0f, "%.1f"))
         {
             theme.PopupBorderSize = popupBorderSize;
             themeChanged = true;
         }
         
         var frameBorderSize = theme.FrameBorderSize;
-        if (ImGui.SliderFloat("Frame Border", ref frameBorderSize, 0.0f, 5.0f, "%.1f"))
+        if (UiSharedService.DrawSliderFloat("Frame Border", ref frameBorderSize, 0.0f, 5.0f, "%.1f"))
         {
             theme.FrameBorderSize = frameBorderSize;
             themeChanged = true;
@@ -3568,7 +3640,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         var windowBlurStrength = theme.WindowBlurStrength * 100f;
         using (ImRaii.Disabled(!theme.EnableWindowBlur))
         {
-            if (ImGui.SliderFloat("Blur Strength", ref windowBlurStrength, 0.0f, 100.0f, "%.0f%%"))
+            if (UiSharedService.DrawSliderFloat("Blur Strength", ref windowBlurStrength, 0.0f, 100.0f, "%.0f%%"))
             {
                 theme.WindowBlurStrength = windowBlurStrength / 100f;
                 themeChanged = true;
@@ -3580,49 +3652,49 @@ public class SettingsUi : WindowMediatorSubscriberBase
         ImGui.Text("Spacing & Padding Settings");
         
         var windowPadding = theme.WindowPadding;
-        if (ImGui.SliderFloat2("Window Padding", ref windowPadding, 0.0f, 50.0f, "%.1f"))
+        if (UiSharedService.DrawSliderFloat2("Window Padding", ref windowPadding, 0.0f, 50.0f, "%.1f"))
         {
             theme.WindowPadding = windowPadding;
             themeChanged = true;
         }
         
         var framePadding = theme.FramePadding;
-        if (ImGui.SliderFloat2("Frame Padding", ref framePadding, 0.0f, 20.0f, "%.1f"))
+        if (UiSharedService.DrawSliderFloat2("Frame Padding", ref framePadding, 0.0f, 20.0f, "%.1f"))
         {
             theme.FramePadding = framePadding;
             themeChanged = true;
         }
         
         var itemSpacing = theme.ItemSpacing;
-        if (ImGui.SliderFloat2("Item Spacing", ref itemSpacing, 0.0f, 20.0f, "%.1f"))
+        if (UiSharedService.DrawSliderFloat2("Item Spacing", ref itemSpacing, 0.0f, 20.0f, "%.1f"))
         {
             theme.ItemSpacing = itemSpacing;
             themeChanged = true;
         }
         
         var itemInnerSpacing = theme.ItemInnerSpacing;
-        if (ImGui.SliderFloat2("Item Inner Spacing", ref itemInnerSpacing, 0.0f, 20.0f, "%.1f"))
+        if (UiSharedService.DrawSliderFloat2("Item Inner Spacing", ref itemInnerSpacing, 0.0f, 20.0f, "%.1f"))
         {
             theme.ItemInnerSpacing = itemInnerSpacing;
             themeChanged = true;
         }
         
         var indentSpacing = theme.IndentSpacing;
-        if (ImGui.SliderFloat("Indent Spacing", ref indentSpacing, 0.0f, 50.0f, "%.1f"))
+        if (UiSharedService.DrawSliderFloat("Indent Spacing", ref indentSpacing, 0.0f, 50.0f, "%.1f"))
         {
             theme.IndentSpacing = indentSpacing;
             themeChanged = true;
         }
         
         var scrollbarSize = theme.ScrollbarSize;
-        if (ImGui.SliderFloat("Scrollbar Size", ref scrollbarSize, 5.0f, 30.0f, "%.1f"))
+        if (UiSharedService.DrawSliderFloat("Scrollbar Size", ref scrollbarSize, 5.0f, 30.0f, "%.1f"))
         {
             theme.ScrollbarSize = scrollbarSize;
             themeChanged = true;
         }
         
         var grabMinSize = theme.GrabMinSize;
-        if (ImGui.SliderFloat("Grab Min Size", ref grabMinSize, 5.0f, 30.0f, "%.1f"))
+        if (UiSharedService.DrawSliderFloat("Grab Min Size", ref grabMinSize, 5.0f, 30.0f, "%.1f"))
         {
             theme.GrabMinSize = grabMinSize;
             themeChanged = true;
@@ -3722,14 +3794,14 @@ public class SettingsUi : WindowMediatorSubscriberBase
         ImGui.Separator();
 
         var iconGlobalAlpha = cfg.IconGlobalAlpha;
-        if (ImGui.SliderFloat("Icon Global Opacity", ref iconGlobalAlpha, 0.1f, 1.0f, "%.2f"))
+        if (UiSharedService.DrawSliderFloat("Icon Global Opacity", ref iconGlobalAlpha, 0.1f, 1.0f, "%.2f"))
         {
             cfg.IconGlobalAlpha = iconGlobalAlpha;
             configChanged = true;
         }
 
         var rainbowSpeed = cfg.IconRainbowSpeed;
-        if (ImGui.SliderFloat("Rainbow Cycle Speed", ref rainbowSpeed, 0.1f, 5.0f, "%.2f"))
+        if (UiSharedService.DrawSliderFloat("Rainbow Cycle Speed", ref rainbowSpeed, 0.1f, 5.0f, "%.2f"))
         {
             cfg.IconRainbowSpeed = rainbowSpeed;
             configChanged = true;
@@ -3771,7 +3843,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             var (permColorChanged, permColorNew) = EditPackedColor("Color##perm", cfg.IconPermColor);
             if (permColorChanged) { cfg.IconPermColor = permColorNew; configChanged = true; }
             var permAlpha = cfg.IconPermAlpha;
-            if (ImGui.SliderFloat("Alpha##perm", ref permAlpha, 0.01f, 1.0f, "%.2f")) { cfg.IconPermAlpha = permAlpha; configChanged = true; }
+            if (UiSharedService.DrawSliderFloat("Alpha##perm", ref permAlpha, 0.01f, 1.0f, "%.2f")) { cfg.IconPermAlpha = permAlpha; configChanged = true; }
             var permPulse = cfg.IconPermEffectPulse;
             if (ImGui.Checkbox("Pulse##perm", ref permPulse)) { cfg.IconPermEffectPulse = permPulse; configChanged = true; }
             ImGui.SameLine();
@@ -3784,17 +3856,17 @@ public class SettingsUi : WindowMediatorSubscriberBase
             var permRainbow = cfg.IconPermEffectRainbow;
             if (ImGui.Checkbox("Rainbow##perm", ref permRainbow)) { cfg.IconPermEffectRainbow = permRainbow; configChanged = true; }
             var permPulseMin = cfg.IconPermPulseMinRadius;
-            if (ImGui.SliderFloat("Pulse Min Radius##perm", ref permPulseMin, 0.0f, 1.5f, "%.2f")) { cfg.IconPermPulseMinRadius = permPulseMin; configChanged = true; }
+            if (UiSharedService.DrawSliderFloat("Pulse Min Radius##perm", ref permPulseMin, 0.0f, 1.5f, "%.2f")) { cfg.IconPermPulseMinRadius = permPulseMin; configChanged = true; }
             var permPulseMax = cfg.IconPermPulseMaxRadius;
-            if (ImGui.SliderFloat("Pulse Max Radius##perm", ref permPulseMax, 0.0f, 1.5f, "%.2f")) { cfg.IconPermPulseMaxRadius = permPulseMax; configChanged = true; }
+            if (UiSharedService.DrawSliderFloat("Pulse Max Radius##perm", ref permPulseMax, 0.0f, 1.5f, "%.2f")) { cfg.IconPermPulseMaxRadius = permPulseMax; configChanged = true; }
             var permGlowInt = cfg.IconPermGlowIntensity;
-            if (ImGui.SliderFloat("Glow Intensity##perm", ref permGlowInt, 0.1f, 1.0f, "%.2f")) { cfg.IconPermGlowIntensity = permGlowInt; configChanged = true; }
+            if (UiSharedService.DrawSliderFloat("Glow Intensity##perm", ref permGlowInt, 0.1f, 1.0f, "%.2f")) { cfg.IconPermGlowIntensity = permGlowInt; configChanged = true; }
             var permGlowRad = cfg.IconPermGlowRadius;
-            if (ImGui.SliderFloat("Glow Radius##perm", ref permGlowRad, 0.5f, 2.0f, "%.2f")) { cfg.IconPermGlowRadius = permGlowRad; configChanged = true; }
+            if (UiSharedService.DrawSliderFloat("Glow Radius##perm", ref permGlowRad, 0.5f, 2.0f, "%.2f")) { cfg.IconPermGlowRadius = permGlowRad; configChanged = true; }
             var permBounceInt = cfg.IconPermBounceIntensity;
-            if (ImGui.SliderFloat("Bounce Scale##perm", ref permBounceInt, 0.0f, 0.3f, "%.2f")) { cfg.IconPermBounceIntensity = permBounceInt; configChanged = true; }
+            if (UiSharedService.DrawSliderFloat("Bounce Scale##perm", ref permBounceInt, 0.0f, 0.3f, "%.2f")) { cfg.IconPermBounceIntensity = permBounceInt; configChanged = true; }
             var permBounceSpd = cfg.IconPermBounceSpeed;
-            if (ImGui.SliderFloat("Bounce Speed##perm", ref permBounceSpd, 0.1f, 3.0f, "%.2f")) { cfg.IconPermBounceSpeed = permBounceSpd; configChanged = true; }
+            if (UiSharedService.DrawSliderFloat("Bounce Speed##perm", ref permBounceSpd, 0.1f, 3.0f, "%.2f")) { cfg.IconPermBounceSpeed = permBounceSpd; configChanged = true; }
         }
 
         // Mod Transfer
@@ -3803,7 +3875,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             var (modColorChanged, modColorNew) = EditPackedColor("Color##mod", cfg.IconModTransferColor);
             if (modColorChanged) { cfg.IconModTransferColor = modColorNew; configChanged = true; }
             var modAlpha = cfg.IconModTransferAlpha;
-            if (ImGui.SliderFloat("Alpha##mod", ref modAlpha, 0.01f, 1.0f, "%.2f")) { cfg.IconModTransferAlpha = modAlpha; configChanged = true; }
+            if (UiSharedService.DrawSliderFloat("Alpha##mod", ref modAlpha, 0.01f, 1.0f, "%.2f")) { cfg.IconModTransferAlpha = modAlpha; configChanged = true; }
             var modPulse = cfg.IconModTransferEffectPulse;
             if (ImGui.Checkbox("Pulse##mod", ref modPulse)) { cfg.IconModTransferEffectPulse = modPulse; configChanged = true; }
             ImGui.SameLine();
@@ -3816,23 +3888,23 @@ public class SettingsUi : WindowMediatorSubscriberBase
             var modRainbow = cfg.IconModTransferEffectRainbow;
             if (ImGui.Checkbox("Rainbow##mod", ref modRainbow)) { cfg.IconModTransferEffectRainbow = modRainbow; configChanged = true; }
             var modPulseMin = cfg.IconModTransferPulseMinRadius;
-            if (ImGui.SliderFloat("Pulse Min Radius##mod", ref modPulseMin, 0.0f, 1.5f, "%.2f")) { cfg.IconModTransferPulseMinRadius = modPulseMin; configChanged = true; }
+            if (UiSharedService.DrawSliderFloat("Pulse Min Radius##mod", ref modPulseMin, 0.0f, 1.5f, "%.2f")) { cfg.IconModTransferPulseMinRadius = modPulseMin; configChanged = true; }
             var modPulseMax = cfg.IconModTransferPulseMaxRadius;
-            if (ImGui.SliderFloat("Pulse Max Radius##mod", ref modPulseMax, 0.0f, 1.5f, "%.2f")) { cfg.IconModTransferPulseMaxRadius = modPulseMax; configChanged = true; }
+            if (UiSharedService.DrawSliderFloat("Pulse Max Radius##mod", ref modPulseMax, 0.0f, 1.5f, "%.2f")) { cfg.IconModTransferPulseMaxRadius = modPulseMax; configChanged = true; }
             var modGlowInt = cfg.IconModTransferGlowIntensity;
-            if (ImGui.SliderFloat("Glow Intensity##mod", ref modGlowInt, 0.1f, 1.0f, "%.2f")) { cfg.IconModTransferGlowIntensity = modGlowInt; configChanged = true; }
+            if (UiSharedService.DrawSliderFloat("Glow Intensity##mod", ref modGlowInt, 0.1f, 1.0f, "%.2f")) { cfg.IconModTransferGlowIntensity = modGlowInt; configChanged = true; }
             var modGlowRad = cfg.IconModTransferGlowRadius;
-            if (ImGui.SliderFloat("Glow Radius##mod", ref modGlowRad, 0.5f, 2.0f, "%.2f")) { cfg.IconModTransferGlowRadius = modGlowRad; configChanged = true; }
+            if (UiSharedService.DrawSliderFloat("Glow Radius##mod", ref modGlowRad, 0.5f, 2.0f, "%.2f")) { cfg.IconModTransferGlowRadius = modGlowRad; configChanged = true; }
             var modBounceInt = cfg.IconModTransferBounceIntensity;
-            if (ImGui.SliderFloat("Bounce Scale##mod", ref modBounceInt, 0.0f, 0.3f, "%.2f")) { cfg.IconModTransferBounceIntensity = modBounceInt; configChanged = true; }
+            if (UiSharedService.DrawSliderFloat("Bounce Scale##mod", ref modBounceInt, 0.0f, 0.3f, "%.2f")) { cfg.IconModTransferBounceIntensity = modBounceInt; configChanged = true; }
             var modBounceSpd = cfg.IconModTransferBounceSpeed;
-            if (ImGui.SliderFloat("Bounce Speed##mod", ref modBounceSpd, 0.1f, 3.0f, "%.2f")) { cfg.IconModTransferBounceSpeed = modBounceSpd; configChanged = true; }
+            if (UiSharedService.DrawSliderFloat("Bounce Speed##mod", ref modBounceSpd, 0.1f, 3.0f, "%.2f")) { cfg.IconModTransferBounceSpeed = modBounceSpd; configChanged = true; }
             ImGui.Spacing();
             var modEffectDuration = cfg.IconModTransferEffectDurationSeconds;
-            if (ImGui.SliderInt("Effect Duration##mod", ref modEffectDuration, 0, 300, modEffectDuration == 0 ? "Never" : "%ds")) { cfg.IconModTransferEffectDurationSeconds = modEffectDuration; configChanged = true; }
+            if (UiSharedService.DrawSliderInt("Effect Duration##mod", ref modEffectDuration, 0, 300, modEffectDuration == 0 ? "Never" : "%ds")) { cfg.IconModTransferEffectDurationSeconds = modEffectDuration; configChanged = true; }
             _uiShared.DrawHelpText("How long the pulse/glow/bounce effects last. 0 = never expires until icon is clicked.");
             var modBadgeDuration = cfg.IconModTransferBadgeDurationSeconds;
-            if (ImGui.SliderInt("Badge Duration##mod", ref modBadgeDuration, 0, 300, modBadgeDuration == 0 ? "Never" : "%ds")) { cfg.IconModTransferBadgeDurationSeconds = modBadgeDuration; configChanged = true; }
+            if (UiSharedService.DrawSliderInt("Badge Duration##mod", ref modBadgeDuration, 0, 300, modBadgeDuration == 0 ? "Never" : "%ds")) { cfg.IconModTransferBadgeDurationSeconds = modBadgeDuration; configChanged = true; }
             _uiShared.DrawHelpText("How long the badge dot remains visible. 0 = never expires until icon is clicked. Separate from effect duration.");
         }
 
@@ -3842,7 +3914,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             var (pairColorChanged, pairColorNew) = EditPackedColor("Color##pair", cfg.IconPairRequestColor);
             if (pairColorChanged) { cfg.IconPairRequestColor = pairColorNew; configChanged = true; }
             var pairAlpha = cfg.IconPairRequestAlpha;
-            if (ImGui.SliderFloat("Alpha##pair", ref pairAlpha, 0.01f, 1.0f, "%.2f")) { cfg.IconPairRequestAlpha = pairAlpha; configChanged = true; }
+            if (UiSharedService.DrawSliderFloat("Alpha##pair", ref pairAlpha, 0.01f, 1.0f, "%.2f")) { cfg.IconPairRequestAlpha = pairAlpha; configChanged = true; }
             var pairPulse = cfg.IconPairRequestEffectPulse;
             if (ImGui.Checkbox("Pulse##pair", ref pairPulse)) { cfg.IconPairRequestEffectPulse = pairPulse; configChanged = true; }
             ImGui.SameLine();
@@ -3855,23 +3927,23 @@ public class SettingsUi : WindowMediatorSubscriberBase
             var pairRainbow = cfg.IconPairRequestEffectRainbow;
             if (ImGui.Checkbox("Rainbow##pair", ref pairRainbow)) { cfg.IconPairRequestEffectRainbow = pairRainbow; configChanged = true; }
             var pairPulseMin = cfg.IconPairRequestPulseMinRadius;
-            if (ImGui.SliderFloat("Pulse Min Radius##pair", ref pairPulseMin, 0.0f, 1.5f, "%.2f")) { cfg.IconPairRequestPulseMinRadius = pairPulseMin; configChanged = true; }
+            if (UiSharedService.DrawSliderFloat("Pulse Min Radius##pair", ref pairPulseMin, 0.0f, 1.5f, "%.2f")) { cfg.IconPairRequestPulseMinRadius = pairPulseMin; configChanged = true; }
             var pairPulseMax = cfg.IconPairRequestPulseMaxRadius;
-            if (ImGui.SliderFloat("Pulse Max Radius##pair", ref pairPulseMax, 0.0f, 1.5f, "%.2f")) { cfg.IconPairRequestPulseMaxRadius = pairPulseMax; configChanged = true; }
+            if (UiSharedService.DrawSliderFloat("Pulse Max Radius##pair", ref pairPulseMax, 0.0f, 1.5f, "%.2f")) { cfg.IconPairRequestPulseMaxRadius = pairPulseMax; configChanged = true; }
             var pairGlowInt = cfg.IconPairRequestGlowIntensity;
-            if (ImGui.SliderFloat("Glow Intensity##pair", ref pairGlowInt, 0.1f, 1.0f, "%.2f")) { cfg.IconPairRequestGlowIntensity = pairGlowInt; configChanged = true; }
+            if (UiSharedService.DrawSliderFloat("Glow Intensity##pair", ref pairGlowInt, 0.1f, 1.0f, "%.2f")) { cfg.IconPairRequestGlowIntensity = pairGlowInt; configChanged = true; }
             var pairGlowRad = cfg.IconPairRequestGlowRadius;
-            if (ImGui.SliderFloat("Glow Radius##pair", ref pairGlowRad, 0.5f, 2.0f, "%.2f")) { cfg.IconPairRequestGlowRadius = pairGlowRad; configChanged = true; }
+            if (UiSharedService.DrawSliderFloat("Glow Radius##pair", ref pairGlowRad, 0.5f, 2.0f, "%.2f")) { cfg.IconPairRequestGlowRadius = pairGlowRad; configChanged = true; }
             var pairBounceInt = cfg.IconPairRequestBounceIntensity;
-            if (ImGui.SliderFloat("Bounce Scale##pair", ref pairBounceInt, 0.0f, 0.3f, "%.2f")) { cfg.IconPairRequestBounceIntensity = pairBounceInt; configChanged = true; }
+            if (UiSharedService.DrawSliderFloat("Bounce Scale##pair", ref pairBounceInt, 0.0f, 0.3f, "%.2f")) { cfg.IconPairRequestBounceIntensity = pairBounceInt; configChanged = true; }
             var pairBounceSpd = cfg.IconPairRequestBounceSpeed;
-            if (ImGui.SliderFloat("Bounce Speed##pair", ref pairBounceSpd, 0.1f, 3.0f, "%.2f")) { cfg.IconPairRequestBounceSpeed = pairBounceSpd; configChanged = true; }
+            if (UiSharedService.DrawSliderFloat("Bounce Speed##pair", ref pairBounceSpd, 0.1f, 3.0f, "%.2f")) { cfg.IconPairRequestBounceSpeed = pairBounceSpd; configChanged = true; }
             ImGui.Spacing();
             var pairEffectDuration = cfg.IconPairRequestEffectDurationSeconds;
-            if (ImGui.SliderInt("Effect Duration##pair", ref pairEffectDuration, 0, 300, pairEffectDuration == 0 ? "Never" : "%ds")) { cfg.IconPairRequestEffectDurationSeconds = pairEffectDuration; configChanged = true; }
+            if (UiSharedService.DrawSliderInt("Effect Duration##pair", ref pairEffectDuration, 0, 300, pairEffectDuration == 0 ? "Never" : "%ds")) { cfg.IconPairRequestEffectDurationSeconds = pairEffectDuration; configChanged = true; }
             _uiShared.DrawHelpText("How long the pulse/glow/bounce effects last. 0 = never expires until icon is clicked.");
             var pairBadgeDuration = cfg.IconPairRequestBadgeDurationSeconds;
-            if (ImGui.SliderInt("Badge Duration##pair", ref pairBadgeDuration, 0, 300, pairBadgeDuration == 0 ? "Never" : "%ds")) { cfg.IconPairRequestBadgeDurationSeconds = pairBadgeDuration; configChanged = true; }
+            if (UiSharedService.DrawSliderInt("Badge Duration##pair", ref pairBadgeDuration, 0, 300, pairBadgeDuration == 0 ? "Never" : "%ds")) { cfg.IconPairRequestBadgeDurationSeconds = pairBadgeDuration; configChanged = true; }
             _uiShared.DrawHelpText("How long the badge dot remains visible. 0 = never expires until icon is clicked. Separate from effect duration.");
         }
 
@@ -3881,7 +3953,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             var (notifColorChanged, notifColorNew) = EditPackedColor("Color##notif", cfg.IconNotificationColor);
             if (notifColorChanged) { cfg.IconNotificationColor = notifColorNew; configChanged = true; }
             var notifAlpha = cfg.IconNotificationAlpha;
-            if (ImGui.SliderFloat("Alpha##notif", ref notifAlpha, 0.01f, 1.0f, "%.2f")) { cfg.IconNotificationAlpha = notifAlpha; configChanged = true; }
+            if (UiSharedService.DrawSliderFloat("Alpha##notif", ref notifAlpha, 0.01f, 1.0f, "%.2f")) { cfg.IconNotificationAlpha = notifAlpha; configChanged = true; }
             var notifPulse = cfg.IconNotificationEffectPulse;
             if (ImGui.Checkbox("Pulse##notif", ref notifPulse)) { cfg.IconNotificationEffectPulse = notifPulse; configChanged = true; }
             ImGui.SameLine();
@@ -3894,23 +3966,23 @@ public class SettingsUi : WindowMediatorSubscriberBase
             var notifRainbow = cfg.IconNotificationEffectRainbow;
             if (ImGui.Checkbox("Rainbow##notif", ref notifRainbow)) { cfg.IconNotificationEffectRainbow = notifRainbow; configChanged = true; }
             var notifPulseMin = cfg.IconNotificationPulseMinRadius;
-            if (ImGui.SliderFloat("Pulse Min Radius##notif", ref notifPulseMin, 0.0f, 1.5f, "%.2f")) { cfg.IconNotificationPulseMinRadius = notifPulseMin; configChanged = true; }
+            if (UiSharedService.DrawSliderFloat("Pulse Min Radius##notif", ref notifPulseMin, 0.0f, 1.5f, "%.2f")) { cfg.IconNotificationPulseMinRadius = notifPulseMin; configChanged = true; }
             var notifPulseMax = cfg.IconNotificationPulseMaxRadius;
-            if (ImGui.SliderFloat("Pulse Max Radius##notif", ref notifPulseMax, 0.0f, 1.5f, "%.2f")) { cfg.IconNotificationPulseMaxRadius = notifPulseMax; configChanged = true; }
+            if (UiSharedService.DrawSliderFloat("Pulse Max Radius##notif", ref notifPulseMax, 0.0f, 1.5f, "%.2f")) { cfg.IconNotificationPulseMaxRadius = notifPulseMax; configChanged = true; }
             var notifGlowInt = cfg.IconNotificationGlowIntensity;
-            if (ImGui.SliderFloat("Glow Intensity##notif", ref notifGlowInt, 0.1f, 1.0f, "%.2f")) { cfg.IconNotificationGlowIntensity = notifGlowInt; configChanged = true; }
+            if (UiSharedService.DrawSliderFloat("Glow Intensity##notif", ref notifGlowInt, 0.1f, 1.0f, "%.2f")) { cfg.IconNotificationGlowIntensity = notifGlowInt; configChanged = true; }
             var notifGlowRad = cfg.IconNotificationGlowRadius;
-            if (ImGui.SliderFloat("Glow Radius##notif", ref notifGlowRad, 0.5f, 2.0f, "%.2f")) { cfg.IconNotificationGlowRadius = notifGlowRad; configChanged = true; }
+            if (UiSharedService.DrawSliderFloat("Glow Radius##notif", ref notifGlowRad, 0.5f, 2.0f, "%.2f")) { cfg.IconNotificationGlowRadius = notifGlowRad; configChanged = true; }
             var notifBounceInt = cfg.IconNotificationBounceIntensity;
-            if (ImGui.SliderFloat("Bounce Scale##notif", ref notifBounceInt, 0.0f, 0.3f, "%.2f")) { cfg.IconNotificationBounceIntensity = notifBounceInt; configChanged = true; }
+            if (UiSharedService.DrawSliderFloat("Bounce Scale##notif", ref notifBounceInt, 0.0f, 0.3f, "%.2f")) { cfg.IconNotificationBounceIntensity = notifBounceInt; configChanged = true; }
             var notifBounceSpd = cfg.IconNotificationBounceSpeed;
-            if (ImGui.SliderFloat("Bounce Speed##notif", ref notifBounceSpd, 0.1f, 3.0f, "%.2f")) { cfg.IconNotificationBounceSpeed = notifBounceSpd; configChanged = true; }
+            if (UiSharedService.DrawSliderFloat("Bounce Speed##notif", ref notifBounceSpd, 0.1f, 3.0f, "%.2f")) { cfg.IconNotificationBounceSpeed = notifBounceSpd; configChanged = true; }
             ImGui.Spacing();
             var notifEffectDuration = cfg.IconNotificationEffectDurationSeconds;
-            if (ImGui.SliderInt("Effect Duration##notif", ref notifEffectDuration, 0, 300, notifEffectDuration == 0 ? "Never" : "%ds")) { cfg.IconNotificationEffectDurationSeconds = notifEffectDuration; configChanged = true; }
+            if (UiSharedService.DrawSliderInt("Effect Duration##notif", ref notifEffectDuration, 0, 300, notifEffectDuration == 0 ? "Never" : "%ds")) { cfg.IconNotificationEffectDurationSeconds = notifEffectDuration; configChanged = true; }
             _uiShared.DrawHelpText("How long the pulse/glow/bounce effects last. 0 = never expires until icon is clicked.");
             var notifBadgeDuration = cfg.IconNotificationBadgeDurationSeconds;
-            if (ImGui.SliderInt("Badge Duration##notif", ref notifBadgeDuration, 0, 300, notifBadgeDuration == 0 ? "Never" : "%ds")) { cfg.IconNotificationBadgeDurationSeconds = notifBadgeDuration; configChanged = true; }
+            if (UiSharedService.DrawSliderInt("Badge Duration##notif", ref notifBadgeDuration, 0, 300, notifBadgeDuration == 0 ? "Never" : "%ds")) { cfg.IconNotificationBadgeDurationSeconds = notifBadgeDuration; configChanged = true; }
             _uiShared.DrawHelpText("How long the badge dot remains visible. 0 = never expires until icon is clicked. Separate from effect duration.");
         }
 
@@ -3962,7 +4034,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         // Panel Spacing Settings
         
         var compactItemSpacing = theme.CompactItemSpacing;
-        if (ImGui.SliderFloat2("Panel Item Spacing", ref compactItemSpacing, 0.0f, 20.0f, "%.1f"))
+        if (UiSharedService.DrawSliderFloat2("Panel Item Spacing", ref compactItemSpacing, 0.0f, 20.0f, "%.1f"))
         {
             theme.CompactItemSpacing = compactItemSpacing;
             themeChanged = true;
@@ -3970,14 +4042,14 @@ public class SettingsUi : WindowMediatorSubscriberBase
         
         
         var compactWindowPadding = theme.CompactWindowPadding;
-        if (ImGui.SliderFloat2("Panel Padding", ref compactWindowPadding, 0.0f, 20.0f, "%.1f"))
+        if (UiSharedService.DrawSliderFloat2("Panel Padding", ref compactWindowPadding, 0.0f, 20.0f, "%.1f"))
         {
             theme.CompactWindowPadding = compactWindowPadding;
             themeChanged = true;
         }
 
         var compactPairListSeparatorPadding = theme.CompactPairListSeparatorPadding;
-        if (ImGui.SliderFloat("Pair List Separator Padding", ref compactPairListSeparatorPadding, 0.0f, 20.0f, "%.1f"))
+        if (UiSharedService.DrawSliderFloat("Pair List Separator Padding", ref compactPairListSeparatorPadding, 0.0f, 20.0f, "%.1f"))
         {
             theme.CompactPairListSeparatorPadding = compactPairListSeparatorPadding;
             themeChanged = true;
@@ -3988,14 +4060,14 @@ public class SettingsUi : WindowMediatorSubscriberBase
         ImGui.Separator();
         
         var compactWindowBorderSize = theme.CompactWindowBorderSize;
-        if (ImGui.SliderFloat("Panel Window Border Size", ref compactWindowBorderSize, 0.0f, 5.0f, "%.1f"))
+        if (UiSharedService.DrawSliderFloat("Panel Window Border Size", ref compactWindowBorderSize, 0.0f, 5.0f, "%.1f"))
         {
             theme.CompactWindowBorderSize = compactWindowBorderSize;
             themeChanged = true;
         }
 
         var compactWindowRounding = theme.CompactWindowRounding;
-        if (ImGui.SliderFloat("Corner Rounding", ref compactWindowRounding, 0.0f, 30.0f, "%.1f"))
+        if (UiSharedService.DrawSliderFloat("Corner Rounding", ref compactWindowRounding, 0.0f, 30.0f, "%.1f"))
         {
             theme.CompactWindowRounding = compactWindowRounding;
             themeChanged = true;
@@ -4015,7 +4087,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         var compactWindowBlurStrength = theme.CompactWindowBlurStrength * 100f;
         using (ImRaii.Disabled(!theme.CompactEnableWindowBlur))
         {
-            if (ImGui.SliderFloat("Panel Blur Strength", ref compactWindowBlurStrength, 0.0f, 100.0f, "%.0f%%"))
+            if (UiSharedService.DrawSliderFloat("Panel Blur Strength", ref compactWindowBlurStrength, 0.0f, 100.0f, "%.0f%%"))
             {
                 theme.CompactWindowBlurStrength = compactWindowBlurStrength / 100f;
                 themeChanged = true;
@@ -4083,31 +4155,31 @@ public class SettingsUi : WindowMediatorSubscriberBase
         {
             ImGui.Separator();
             var compactTooltipRounding = theme.CompactTooltipRounding;
-            if (ImGui.SliderFloat("Panel Tooltip Rounding", ref compactTooltipRounding, 0.0f, 30.0f, "%.1f"))
+            if (UiSharedService.DrawSliderFloat("Panel Tooltip Rounding", ref compactTooltipRounding, 0.0f, 30.0f, "%.1f"))
             {
                 theme.CompactTooltipRounding = compactTooltipRounding;
                 themeChanged = true;
             }
             var compactTooltipBorderSize = theme.CompactTooltipBorderSize;
-            if (ImGui.SliderFloat("Panel Tooltip Border Size", ref compactTooltipBorderSize, 0.0f, 5.0f, "%.1f"))
+            if (UiSharedService.DrawSliderFloat("Panel Tooltip Border Size", ref compactTooltipBorderSize, 0.0f, 5.0f, "%.1f"))
             {
                 theme.CompactTooltipBorderSize = compactTooltipBorderSize;
                 themeChanged = true;
             }
             var compactContextMenuRounding = theme.CompactContextMenuRounding;
-            if (ImGui.SliderFloat("Panel Context Menu Rounding", ref compactContextMenuRounding, 0.0f, 30.0f, "%.1f"))
+            if (UiSharedService.DrawSliderFloat("Panel Context Menu Rounding", ref compactContextMenuRounding, 0.0f, 30.0f, "%.1f"))
             {
                 theme.CompactContextMenuRounding = compactContextMenuRounding;
                 themeChanged = true;
             }
             var compactContextMenuBorderSize = theme.CompactContextMenuBorderSize;
-            if (ImGui.SliderFloat("Panel Context Menu Border Size", ref compactContextMenuBorderSize, 0.0f, 5.0f, "%.1f"))
+            if (UiSharedService.DrawSliderFloat("Panel Context Menu Border Size", ref compactContextMenuBorderSize, 0.0f, 5.0f, "%.1f"))
             {
                 theme.CompactContextMenuBorderSize = compactContextMenuBorderSize;
                 themeChanged = true;
             }
             var compactChildPadding = theme.CompactChildPadding;
-            if (ImGui.SliderFloat2("Context Menu Padding", ref compactChildPadding, 0.0f, 20.0f, "%.1f"))
+            if (UiSharedService.DrawSliderFloat2("Context Menu Padding", ref compactChildPadding, 0.0f, 20.0f, "%.1f"))
             {
                 theme.CompactChildPadding = compactChildPadding;
                 themeChanged = true;
@@ -4122,19 +4194,19 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 theme.ButtonStyles[key] = ov;
             }
             var widthDelta = ov.WidthDelta;
-            if (ImGui.DragFloat("Width", ref widthDelta, 0.1f, -100f, 200f))
+            if (UiSharedService.DrawDragFloat("Width", ref widthDelta, 0.1f, -100f, 200f))
             {
                 ov.WidthDelta = widthDelta;
                 theme.NotifyThemeChanged();
             }
             var heightDelta = ov.HeightDelta;
-            if (ImGui.DragFloat("Height", ref heightDelta, 0.1f, -50f, 100f))
+            if (UiSharedService.DrawDragFloat("Height", ref heightDelta, 0.1f, -50f, 100f))
             {
                 ov.HeightDelta = heightDelta;
                 theme.NotifyThemeChanged();
             }
             var iconOffset = ov.IconOffset;
-            if (ImGui.DragFloat2("Icon Offset", ref iconOffset, 0.1f, -50f, 50f))
+            if (UiSharedService.DrawDragFloat2("Icon Offset", ref iconOffset, 0.1f, -50f, 50f))
             {
                 ov.IconOffset = iconOffset;
                 theme.NotifyThemeChanged();
@@ -4190,7 +4262,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 theme.NotifyThemeChanged();
             }
             var effBorderSize = ov.BorderSize ?? theme.CompactFrameBorderSize;
-            if (ImGui.SliderFloat("Border Width", ref effBorderSize, 0f, 5f, "%.1f"))
+            if (UiSharedService.DrawSliderFloat("Border Width", ref effBorderSize, 0f, 5f, "%.1f"))
             {
                 ov.BorderSize = effBorderSize;
                 theme.NotifyThemeChanged();
@@ -4250,7 +4322,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         {
             ImGui.Separator();
             var compactFrameRounding = theme.CompactFrameRounding;
-            if (ImGui.SliderFloat("Rounding for all buttons", ref compactFrameRounding, 0.0f, 30.0f, "%.1f"))
+            if (UiSharedService.DrawSliderFloat("Rounding for all buttons", ref compactFrameRounding, 0.0f, 30.0f, "%.1f"))
             {
                 theme.CompactFrameRounding = compactFrameRounding;
                 themeChanged = true;
@@ -4291,7 +4363,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 }
                 
                 var compactHeaderRounding = theme.CompactHeaderRounding;
-                if (ImGui.SliderFloat("Header Rounding", ref compactHeaderRounding, 0.0f, 30.0f, "%.1f"))
+                if (UiSharedService.DrawSliderFloat("Header Rounding", ref compactHeaderRounding, 0.0f, 30.0f, "%.1f"))
                 {
                     theme.CompactHeaderRounding = compactHeaderRounding;
                     themeChanged = true;
@@ -4339,7 +4411,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
             ImGui.Spacing();
             var uidScale = theme.CompactUidFontScale;
-            if (ImGui.SliderFloat("UID Font Scale", ref uidScale, 0.5f, 2.0f, "%.2f"))
+            if (UiSharedService.DrawSliderFloat("UID Font Scale", ref uidScale, 0.5f, 2.0f, "%.2f"))
             {
                 theme.CompactUidFontScale = uidScale;
                 themeChanged = true;
@@ -4481,14 +4553,14 @@ public class SettingsUi : WindowMediatorSubscriberBase
             if (!theme.SeparateTransmissionBarStyles)
             {
                 var transmissionBarRounding = theme.TransmissionBarRounding;
-                if (ImGui.SliderFloat("Transmission Bar Rounding", ref transmissionBarRounding, 0.0f, 15.0f, "%.1f"))
+                if (UiSharedService.DrawSliderFloat("Transmission Bar Rounding", ref transmissionBarRounding, 0.0f, 15.0f, "%.1f"))
                 {
                     theme.TransmissionBarRounding = transmissionBarRounding;
                     themeChanged = true;
                 }
                 
                 var compactTransmissionBarHeight = theme.CompactTransmissionBarHeight;
-                if (ImGui.SliderFloat("Transmission Bar Height", ref compactTransmissionBarHeight, 2.0f, 30.0f, "%.1f"))
+                if (UiSharedService.DrawSliderFloat("Transmission Bar Height", ref compactTransmissionBarHeight, 2.0f, 30.0f, "%.1f"))
                 {
                     theme.CompactTransmissionBarHeight = compactTransmissionBarHeight;
                     themeChanged = true;
@@ -4541,13 +4613,13 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 ImGui.Text("Upload Bar");
                 ImGui.Separator();
                 var uploadRounding = theme.UploadTransmissionBarRounding;
-                if (ImGui.SliderFloat("Upload Bar Rounding", ref uploadRounding, 0.0f, 15.0f, "%.1f"))
+                if (UiSharedService.DrawSliderFloat("Upload Bar Rounding", ref uploadRounding, 0.0f, 15.0f, "%.1f"))
                 {
                     theme.UploadTransmissionBarRounding = uploadRounding;
                     themeChanged = true;
                 }
                 var uploadHeight = theme.UploadTransmissionBarHeight;
-                if (ImGui.SliderFloat("Upload Bar Height", ref uploadHeight, 2.0f, 30.0f, "%.1f"))
+                if (UiSharedService.DrawSliderFloat("Upload Bar Height", ref uploadHeight, 2.0f, 30.0f, "%.1f"))
                 {
                     theme.UploadTransmissionBarHeight = uploadHeight;
                     themeChanged = true;
@@ -4596,13 +4668,13 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 ImGui.Text("Download Bar");
                 ImGui.Separator();
                 var downloadRounding = theme.DownloadTransmissionBarRounding;
-                if (ImGui.SliderFloat("Download Bar Rounding", ref downloadRounding, 0.0f, 15.0f, "%.1f"))
+                if (UiSharedService.DrawSliderFloat("Download Bar Rounding", ref downloadRounding, 0.0f, 15.0f, "%.1f"))
                 {
                     theme.DownloadTransmissionBarRounding = downloadRounding;
                     themeChanged = true;
                 }
                 var downloadHeight = theme.DownloadTransmissionBarHeight;
-                if (ImGui.SliderFloat("Download Bar Height", ref downloadHeight, 2.0f, 30.0f, "%.1f"))
+                if (UiSharedService.DrawSliderFloat("Download Bar Height", ref downloadHeight, 2.0f, 30.0f, "%.1f"))
                 {
                     theme.DownloadTransmissionBarHeight = downloadHeight;
                     themeChanged = true;
@@ -4647,14 +4719,14 @@ public class SettingsUi : WindowMediatorSubscriberBase
             if (theme.ShowTransmissionPreview)
             {
                 var uploadFill = theme.TransmissionPreviewUploadFill;
-                if (ImGui.SliderFloat("Preview Upload Fill", ref uploadFill, 0.0f, 100.0f, "%.1f%"))
+                if (UiSharedService.DrawSliderFloat("Preview Upload Fill", ref uploadFill, 0.0f, 100.0f, "%.1f%"))
                 {
                     theme.TransmissionPreviewUploadFill = uploadFill;
                     previewChanged = true;
                 }
                 
                 var downloadFill = theme.TransmissionPreviewDownloadFill;
-                if (ImGui.SliderFloat("Preview Download Fill", ref downloadFill, 0.0f, 100.0f, "%.1f%"))
+                if (UiSharedService.DrawSliderFloat("Preview Download Fill", ref downloadFill, 0.0f, 100.0f, "%.1f%"))
                 {
                     theme.TransmissionPreviewDownloadFill = downloadFill;
                     previewChanged = true;
@@ -4682,13 +4754,13 @@ public class SettingsUi : WindowMediatorSubscriberBase
             ImGui.Separator();
             ImGui.Spacing();
             var updateHintHeight = theme.CompactUpdateHintHeight;
-            if (ImGui.SliderFloat("Update Hint Height", ref updateHintHeight, 0.0f, 64.0f, "%.1f"))
+            if (UiSharedService.DrawSliderFloat("Update Hint Height", ref updateHintHeight, 0.0f, 64.0f, "%.1f"))
             {
                 theme.CompactUpdateHintHeight = updateHintHeight;
                 themeChanged = true;
             }
             var updateHintPadding = theme.CompactUpdateHintPaddingY;
-            if (ImGui.SliderFloat("Update Hint Padding", ref updateHintPadding, 0.0f, 24.0f, "%.1f"))
+            if (UiSharedService.DrawSliderFloat("Update Hint Padding", ref updateHintPadding, 0.0f, 24.0f, "%.1f"))
             {
                 theme.CompactUpdateHintPaddingY = updateHintPadding;
                 themeChanged = true;
@@ -5307,7 +5379,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         ImGui.Separator();
         
         ImGui.Text("Theme Name:");
-        ImGui.InputText("##SaveThemeName", ref _saveThemeName, 100);
+        UiSharedService.DrawInputText("##SaveThemeName", ref _saveThemeName, 100);
         
         ImGui.Spacing();
         
@@ -5368,8 +5440,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
         var currentIndex = allThemes.IndexOf(_selectedPresetTheme);
         if (currentIndex == -1) currentIndex = 0;
         
-        ImGui.SetNextItemWidth(ClampSettingsItemWidth(320f, 180f));
-        if (ImGui.Combo("##ThemeSelector", ref currentIndex, allThemes.ToArray(), allThemes.Count))
+        if (UiSharedService.DrawLabeledCombo("##ThemeSelector", ref currentIndex, allThemes.ToArray(), allThemes.Count,
+                preferredWidth: ClampSettingsItemWidth(320f, 180f)))
         {
             var selectedTheme = allThemes[currentIndex];
             
@@ -5623,7 +5695,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 UiSharedService.ColorTextWrapped("Save them as a new theme, keep them temporarily, or discard.", ImGuiColors.DalamudGrey);
                 ImGuiHelpers.ScaledDummy(10f);
                 ImGui.Text("Theme Name:");
-                ImGui.InputText("##NewThemeName", ref _saveThemeName, 100);
+                UiSharedService.DrawInputText("##NewThemeName", ref _saveThemeName, 100);
                 var bottomPadding = 16f * ImGuiHelpers.GlobalScale;
                 var spacingX = ImGui.GetStyle().ItemSpacing.X;
                 var btn1 = "Save as New Theme";

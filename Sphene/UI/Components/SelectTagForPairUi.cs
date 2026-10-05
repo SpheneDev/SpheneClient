@@ -73,8 +73,8 @@ public class SelectTagForPairUi
                     {
                         using (ImRaii.PushId($"groups-pair-{_pair.UserData.UID}-{tag}")) DrawGroupName(_pair, tag);
                     }
-                    ImGui.EndChild();
                 }
+                ImGui.EndChild();
             }
 
             ImGui.Separator();
@@ -84,7 +84,7 @@ public class SelectTagForPairUi
                 HandleAddTag();
             }
             ImGui.SameLine();
-            ImGui.InputTextWithHint("##category_name", "New Group", ref _tagNameToAdd, 40);
+            UiSharedService.DrawInputTextWithHint("##category_name", "New Group", ref _tagNameToAdd, 40);
             if (ImGui.IsKeyDown(ImGuiKey.Enter))
             {
                 HandleAddTag();

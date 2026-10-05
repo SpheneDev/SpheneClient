@@ -36,7 +36,7 @@ public static class SyncBehaviorOptionBlock
         }
     }
 
-    public static void DrawOutgoingSyncBatching(SpheneConfigService configService, UiSharedService uiShared, float sliderWidth = 240f, string blockId = "OutgoingSyncBatching")
+    public static void DrawOutgoingSyncBatching(SpheneConfigService configService, UiSharedService uiShared, string blockId = "OutgoingSyncBatching")
     {
         ImGui.PushID(blockId);
         try
@@ -53,8 +53,7 @@ public static class SyncBehaviorOptionBlock
             var batchSeconds = configService.Current.DutyCombatOutgoingSyncBatchSeconds;
             using (ImRaii.Disabled(!outgoingBatching))
             {
-                ImGui.SetNextItemWidth(sliderWidth);
-                if (ImGui.SliderInt("Outgoing batch window (seconds)", ref batchSeconds, 1, 60))
+                if (UiSharedService.DrawSliderInt("Outgoing batch window (seconds)", ref batchSeconds, 1, 60))
                 {
                     configService.Current.DutyCombatOutgoingSyncBatchSeconds = batchSeconds;
                     configService.Save();

@@ -52,7 +52,7 @@ public class SelectPairForTagUi
             {
             ImGui.TextUnformatted($"Select users for group {_tag}");
 
-            ImGui.InputTextWithHint("##filter", "Filter", ref _filter, 255, ImGuiInputTextFlags.None);
+            UiSharedService.DrawInputTextWithHint("##filter", "Filter", ref _filter, 255, ImGuiInputTextFlags.None);
             foreach (var item in pairs
                 .Where(p => string.IsNullOrEmpty(_filter) || PairName(p).Contains(_filter, StringComparison.OrdinalIgnoreCase))
                 .OrderBy(p => PairName(p), StringComparer.OrdinalIgnoreCase)

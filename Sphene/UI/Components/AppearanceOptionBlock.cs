@@ -346,7 +346,7 @@ public static class AppearanceOptionBlock
         try
         {
             var profileDelay = configService.Current.ProfileDelay;
-            if (ImGui.SliderFloat("Hover Delay", ref profileDelay, 1, 10))
+            if (UiSharedService.DrawSliderFloat("Hover Delay", ref profileDelay, 1, 10))
             {
                 configService.Current.ProfileDelay = profileDelay;
                 configService.Save();

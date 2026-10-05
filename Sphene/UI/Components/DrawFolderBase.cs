@@ -128,7 +128,7 @@ public abstract class DrawFolderBase : IDrawFolder
         var barButtonSize = _uiSharedService.GetIconButtonSize(FontAwesomeIcon.EllipsisV);
         var spacingX = ImGui.GetStyle().ItemSpacing.X;
         // Use container-relative positioning for buttons
-        var containerWidth = ImGui.GetContentRegionAvail().X;
+        var containerWidth = UiSharedService.BoundedContentAvailX();
         var actualWindowEndX = ImGui.GetCursorPosX() + containerWidth;
 
         // Flyout Menu

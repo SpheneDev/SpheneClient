@@ -67,14 +67,13 @@ public static class PerformanceOptionBlock
         }
     }
 
-    public static void DrawWarningVramThresholdOption(PlayerPerformanceConfigService performanceConfigService, UiSharedService uiShared, float itemWidth, string blockId = "WarningVramThreshold")
+    public static void DrawWarningVramThresholdOption(PlayerPerformanceConfigService performanceConfigService, UiSharedService uiShared, string blockId = "WarningVramThreshold")
     {
         ImGui.PushID(blockId);
         try
         {
             var vram = performanceConfigService.Current.VRAMSizeWarningThresholdMiB;
-            ImGui.SetNextItemWidth(itemWidth);
-            if (ImGui.InputInt("Warning VRAM threshold", ref vram))
+            if (UiSharedService.DrawInputInt("Warning VRAM threshold", ref vram))
             {
                 performanceConfigService.Current.VRAMSizeWarningThresholdMiB = vram;
                 performanceConfigService.Save();
@@ -90,14 +89,13 @@ public static class PerformanceOptionBlock
         }
     }
 
-    public static void DrawWarningTriangleThresholdOption(PlayerPerformanceConfigService performanceConfigService, UiSharedService uiShared, float itemWidth, string blockId = "WarningTriangleThreshold")
+    public static void DrawWarningTriangleThresholdOption(PlayerPerformanceConfigService performanceConfigService, UiSharedService uiShared, string blockId = "WarningTriangleThreshold")
     {
         ImGui.PushID(blockId);
         try
         {
             var tris = performanceConfigService.Current.TrisWarningThresholdThousands;
-            ImGui.SetNextItemWidth(itemWidth);
-            if (ImGui.InputInt("Warning Triangle threshold", ref tris))
+            if (UiSharedService.DrawInputInt("Warning Triangle threshold", ref tris))
             {
                 performanceConfigService.Current.TrisWarningThresholdThousands = tris;
                 performanceConfigService.Save();
@@ -157,14 +155,13 @@ public static class PerformanceOptionBlock
         }
     }
 
-    public static void DrawAutoPauseVramThresholdOption(PlayerPerformanceConfigService performanceConfigService, UiSharedService uiShared, float itemWidth, string blockId = "AutoPauseVramThreshold")
+    public static void DrawAutoPauseVramThresholdOption(PlayerPerformanceConfigService performanceConfigService, UiSharedService uiShared, string blockId = "AutoPauseVramThreshold")
     {
         ImGui.PushID(blockId);
         try
         {
             var vramAuto = performanceConfigService.Current.VRAMSizeAutoPauseThresholdMiB;
-            ImGui.SetNextItemWidth(itemWidth);
-            if (ImGui.InputInt("Auto Pause VRAM threshold", ref vramAuto))
+            if (UiSharedService.DrawInputInt("Auto Pause VRAM threshold", ref vramAuto))
             {
                 performanceConfigService.Current.VRAMSizeAutoPauseThresholdMiB = vramAuto;
                 performanceConfigService.Save();
@@ -180,14 +177,13 @@ public static class PerformanceOptionBlock
         }
     }
 
-    public static void DrawAutoPauseTriangleThresholdOption(PlayerPerformanceConfigService performanceConfigService, UiSharedService uiShared, float itemWidth, string blockId = "AutoPauseTriangleThreshold")
+    public static void DrawAutoPauseTriangleThresholdOption(PlayerPerformanceConfigService performanceConfigService, UiSharedService uiShared, string blockId = "AutoPauseTriangleThreshold")
     {
         ImGui.PushID(blockId);
         try
         {
             var trisAuto = performanceConfigService.Current.TrisAutoPauseThresholdThousands;
-            ImGui.SetNextItemWidth(itemWidth);
-            if (ImGui.InputInt("Auto Pause Triangle threshold", ref trisAuto))
+            if (UiSharedService.DrawInputInt("Auto Pause Triangle threshold", ref trisAuto))
             {
                 performanceConfigService.Current.TrisAutoPauseThresholdThousands = trisAuto;
                 performanceConfigService.Save();

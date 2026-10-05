@@ -262,7 +262,7 @@ public class TopTabMenu
     {
         var buttonSize = _uiSharedService.GetIconTextButtonSize(FontAwesomeIcon.UserPlus, "Add");
         ImGui.SetNextItemWidth(availableXWidth - buttonSize - spacingX);
-        ImGui.InputTextWithHint("##otheruid", "Other players UID/Alias", ref _pairToAdd, 20);
+        UiSharedService.DrawInputTextWithHint("##otheruid", "Other players UID/Alias", ref _pairToAdd, 20);
         ImGui.SameLine();
         var alreadyExisting = _pairManager.DirectPairs.Exists(p => string.Equals(p.UserData.UID, _pairToAdd, StringComparison.Ordinal) || string.Equals(p.UserData.Alias, _pairToAdd, StringComparison.Ordinal));
         using (ImRaii.Disabled(alreadyExisting || string.IsNullOrEmpty(_pairToAdd)))
@@ -281,7 +281,7 @@ public class TopTabMenu
         var buttonSize = _uiSharedService.GetIconTextButtonSize(FontAwesomeIcon.Ban, "Clear");
         ImGui.SetNextItemWidth(availableWidth - buttonSize - spacingX);
         string filter = Filter;
-        if (ImGui.InputTextWithHint("##filter", "Filter for UID/notes", ref filter, 255))
+        if (UiSharedService.DrawInputTextWithHint("##filter", "Filter for UID/notes", ref filter, 255))
         {
             Filter = filter;
         }

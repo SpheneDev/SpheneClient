@@ -531,8 +531,9 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
     {
         ColorTextWrapped("Note: The storage folder should be somewhere close to root (i.e. C:\\SpheneStorage) in a new empty folder. DO NOT point this to your game folder. DO NOT point this to your Penumbra folder.", ImGuiColors.DalamudYellow);
         var cacheDirectory = _configService.Current.CacheFolder;
-        ScaledNextItemWidth(350);
-        ImGui.InputText("Storage Folder##cache", ref cacheDirectory, 255, ImGuiInputTextFlags.ReadOnly);
+        var folderIconTrailing = GetIconButtonSize(FontAwesomeIcon.Folder).X + ImGui.GetStyle().ItemSpacing.X;
+        DrawInputText("Storage Folder##cache", ref cacheDirectory, 255,
+            ImGuiInputTextFlags.ReadOnly, folderIconTrailing);
 
         ImGui.SameLine();
         using (ImRaii.Disabled(_cacheMonitor.SpheneWatcher != null))
@@ -618,8 +619,8 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
         }
 
         float maxCacheSize = (float)_configService.Current.MaxLocalCacheInGiB;
-        ScaledNextItemWidth(350);
-        if (ImGui.SliderFloat("Maximum Storage Size in GiB", ref maxCacheSize, 1f, 200f, "%.2f GiB"))
+        var helpIconsTrailing = 2f * (GetIconSize(FontAwesomeIcon.QuestionCircle).X + ImGui.GetStyle().ItemSpacing.X);
+        if (DrawSliderFloat("Maximum Storage Size in GiB", ref maxCacheSize, 1f, 200f, "%.2f GiB", helpIconsTrailing))
         {
             _configService.Current.MaxLocalCacheInGiB = maxCacheSize;
             _configService.Save();
@@ -630,8 +631,11 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
     public void DrawPenumbraModDownloadFolderSetting()
     {
         var downloadFolder = _configService.Current.PenumbraModDownloadFolder;
-        ScaledNextItemWidth(350);
-        ImGui.InputText("Mod Download Folder##download", ref downloadFolder, 255, ImGuiInputTextFlags.ReadOnly);
+        var downloadTrailing = GetIconButtonSize(FontAwesomeIcon.Folder).X + ImGui.GetStyle().ItemSpacing.X
+            + (string.IsNullOrEmpty(downloadFolder) ? 0f
+                : GetIconButtonSize(FontAwesomeIcon.Trash).X + ImGui.GetStyle().ItemSpacing.X);
+        DrawInputText("Mod Download Folder##download", ref downloadFolder, 255,
+            ImGuiInputTextFlags.ReadOnly, downloadTrailing);
 
         ImGui.SameLine();
         ImGui.PushID("penumbraDownloadFolder");
@@ -699,7 +703,8 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
     }
 
     public T? DrawCombo<T>(string comboName, IEnumerable<T> comboItems, Func<T?, string> toName,
-        Action<T?>? onSelected = null, T? initialSelectedItem = default)
+        Action<T?>? onSelected = null, T? initialSelectedItem = default, float trailingWidth = 0f,
+        float preferredWidth = -1f)
     {
         if (!comboItems.Any()) return default;
 
@@ -709,7 +714,10 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
             _selectedComboItems[comboName] = selectedItem;
         }
 
-        if (ImGui.BeginCombo(comboName, selectedItem == null ? "Unset Value" : toName((T?)selectedItem)))
+        var comboId = PrepareLabeledControl(comboName, trailingWidth, preferredWidth);
+
+
+        if (ImGui.BeginCombo(comboId, selectedItem == null ? "Unset Value" : toName((T?)selectedItem)))
         {
             foreach (var item in comboItems)
             {
@@ -726,6 +734,141 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
 
         return (T?)_selectedComboItems[comboName];
     }
+
+    /// <summary>
+    /// Standard compact width for numeric/small value controls
+    /// (InputInt, DragFloat). Sized to sit right after their row label.
+    /// </summary>
+    public static float SettingRowCompactWidth => 140f * ImGuiHelpers.GlobalScale;
+
+    /// <summary>
+    /// Prepares a settings row for a labeled value control: a visible label
+    /// renders grey in the left column and the control docks to the real
+    /// content bound (card edge inside card regions, the window content edge
+    /// otherwise). Controls narrower than ~45% of the row sit right after
+    /// their label instead so no dead space opens up. Returns the id to pass
+    /// to the ImGui widget. Hidden labels ("##id") pass through unchanged;
+    /// mid-line calls only clamp the control width so a trailing label still
+    /// fits inside the bound. <paramref name="preferredWidth"/> replaces
+    /// the pushed item width when callers want a specific control size.
+    /// </summary>
+    private static string PrepareLabeledControl(string label, float trailingWidth = 0f, float preferredWidth = -1f)
+    {
+        var labelSplit = label.IndexOf("##", StringComparison.Ordinal);
+        var text = labelSplit < 0 ? label : label[..labelSplit];
+        if (text.Length == 0)
+        {
+            if (preferredWidth > 0f)
+            {
+                var bound = SpheneWindowChrome.CurrentCardContentRightBound;
+                var width = preferredWidth;
+                if (bound > 0f)
+                {
+                    width = MathF.Min(width, MathF.Max(0f, bound - ImGui.GetCursorScreenPos().X));
+                }
+                ImGui.SetNextItemWidth(width);
+            }
+            return label;
+        }
+
+        var scale = ImGuiHelpers.GlobalScale;
+        var cursor = ImGui.GetCursorScreenPos();
+        var rightBound = SpheneWindowChrome.CurrentCardContentRightBound;
+        var leftBound = SpheneWindowChrome.CurrentCardContentLeftBound;
+        if (rightBound <= 0f)
+        {
+            rightBound = cursor.X + ImGui.GetContentRegionAvail().X;
+        }
+        rightBound -= trailingWidth;
+        if (leftBound <= 0f)
+        {
+            leftBound = ImGui.GetWindowPos().X + ImGui.GetWindowContentRegionMin().X;
+        }
+        var avail = MathF.Max(0f, rightBound - cursor.X);
+        var labelWidth = ImGui.CalcTextSize(text).X;
+        var desiredWidth = preferredWidth > 0f ? preferredWidth : ImGui.CalcItemWidth();
+        var controlWidth = MathF.Max(60f * scale,
+            MathF.Min(desiredWidth, avail - labelWidth - ImGui.GetStyle().ItemInnerSpacing.X));
+
+        if (cursor.X <= leftBound + 1f)
+        {
+            ImGui.AlignTextToFramePadding();
+            var lineY = ImGui.GetCursorScreenPos().Y;
+            ColorText(text, ImGuiColors.DalamudGrey);
+            // Wide controls dock to the right bound; compact controls sit
+            // right after their label so no dead space opens up between them.
+            var controlX = controlWidth >= avail * 0.45f
+                ? rightBound - controlWidth
+                : cursor.X + labelWidth + ImGui.GetStyle().ItemInnerSpacing.X * 2f;
+            ImGui.SetCursorScreenPos(new Vector2(controlX, lineY));
+            ImGui.SetNextItemWidth(controlWidth);
+            return labelSplit < 0 ? "##" + label : label[labelSplit..];
+        }
+
+        // Mid-line: keep the original label so its trailing text still renders
+        // next to the control inside the reserved space.
+        ImGui.SetNextItemWidth(controlWidth);
+        return label;
+    }
+
+    /// <summary>SliderInt with the settings-row convention (label left, control sized to the bound).</summary>
+    public static bool DrawSliderInt(string label, ref int value, int min, int max, string? format = null,
+        float trailingWidth = 0f, float preferredWidth = -1f)
+        => ImGui.SliderInt(PrepareLabeledControl(label, trailingWidth, preferredWidth), ref value, min, max, format ?? "%d");
+
+    /// <summary>SliderFloat with the settings-row convention (label left, control sized to the bound).</summary>
+    public static bool DrawSliderFloat(string label, ref float value, float min, float max, string? format = null,
+        float trailingWidth = 0f, float preferredWidth = -1f)
+        => ImGui.SliderFloat(PrepareLabeledControl(label, trailingWidth, preferredWidth), ref value, min, max, format ?? "%.3f");
+
+    /// <summary>SliderFloat2 with the settings-row convention (label left, control sized to the bound).</summary>
+    public static bool DrawSliderFloat2(string label, ref Vector2 value, float min, float max, string? format = null,
+        float trailingWidth = 0f, float preferredWidth = -1f)
+        => ImGui.SliderFloat2(PrepareLabeledControl(label, trailingWidth, preferredWidth), ref value, min, max, format ?? "%.3f");
+
+    /// <summary>DragFloat with the settings-row convention (label left, compact numeric tier).</summary>
+    public static bool DrawDragFloat(string label, ref float value, float speed, float min, float max,
+        string? format = null, float trailingWidth = 0f, float preferredWidth = -1f)
+        => ImGui.DragFloat(PrepareLabeledControl(label, trailingWidth,
+            preferredWidth > 0f ? preferredWidth : SettingRowCompactWidth), ref value, speed, min, max, format ?? "%.3f");
+
+    /// <summary>DragFloat2 with the settings-row convention (label left, compact numeric tier).</summary>
+    public static bool DrawDragFloat2(string label, ref Vector2 value, float speed, float min, float max,
+        string? format = null, float trailingWidth = 0f, float preferredWidth = -1f)
+        => ImGui.DragFloat2(PrepareLabeledControl(label, trailingWidth,
+            preferredWidth > 0f ? preferredWidth : SettingRowCompactWidth), ref value, speed, min, max, format ?? "%.3f");
+
+    /// <summary>InputInt with the settings-row convention (label left, compact numeric tier).</summary>
+    public static bool DrawInputInt(string label, ref int value, int step = 1, int stepFast = 100,
+        float trailingWidth = 0f, float preferredWidth = -1f)
+        => ImGui.InputInt(PrepareLabeledControl(label, trailingWidth,
+            preferredWidth > 0f ? preferredWidth : SettingRowCompactWidth), ref value, step, stepFast);
+
+    /// <summary>InputText with the settings-row convention (label left, control sized to the bound).</summary>
+    public static bool DrawInputText(string label, ref string value, int maxLength,
+        ImGuiInputTextFlags flags = ImGuiInputTextFlags.None, float trailingWidth = 0f, float preferredWidth = -1f)
+        => ImGui.InputText(PrepareLabeledControl(label, trailingWidth, preferredWidth), ref value, maxLength, flags);
+
+    /// <summary>InputTextWithHint with the settings-row convention (label left, control sized to the bound).</summary>
+    public static bool DrawInputTextWithHint(string label, string hint, ref string value, int maxLength,
+        ImGuiInputTextFlags flags = ImGuiInputTextFlags.None, float trailingWidth = 0f, float preferredWidth = -1f)
+        => ImGui.InputTextWithHint(PrepareLabeledControl(label, trailingWidth, preferredWidth), hint, ref value, maxLength, flags);
+
+    /// <summary>InputTextMultiline with the settings-row convention (label left, control sized to the bound).</summary>
+    public static bool DrawInputTextMultiline(string label, ref string value, int maxLength, Vector2 size,
+        ImGuiInputTextFlags flags = ImGuiInputTextFlags.None, float trailingWidth = 0f, float preferredWidth = -1f)
+        => ImGui.InputTextMultiline(PrepareLabeledControl(label, trailingWidth, preferredWidth), ref value, maxLength, size, flags);
+
+    /// <summary>Combo (index) with the settings-row convention (label left, control sized to the bound).</summary>
+    public static bool DrawLabeledCombo(string label, ref int currentItem, string[] items, int itemsCount,
+        float trailingWidth = 0f, float preferredWidth = -1f)
+        => ImGui.Combo(PrepareLabeledControl(label, trailingWidth, preferredWidth), ref currentItem, items, itemsCount);
+
+    /// <summary>Combo (\0-separated items) with the settings-row convention (label left, control sized to the bound).</summary>
+    public static bool DrawLabeledCombo(string label, ref int currentItem, string itemsSeparatedByZeros,
+        int popupMaxHeightInItems = -1, float trailingWidth = 0f, float preferredWidth = -1f)
+        => ImGui.Combo(PrepareLabeledControl(label, trailingWidth, preferredWidth), ref currentItem, itemsSeparatedByZeros,
+            popupMaxHeightInItems);
 
     public void DrawFileScanState()
     {
@@ -773,9 +916,42 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
 
     public void DrawHelpText(string helpText)
     {
-        ImGui.SameLine();
+        SameLineIfFits(GetIconSize(FontAwesomeIcon.QuestionCircle).X);
         IconText(FontAwesomeIcon.QuestionCircle, ImGui.GetColorU32(ImGuiCol.TextDisabled));
         AttachToolTip(helpText);
+    }
+
+    /// <summary>
+    /// Content width remaining up to the real bound (card edge inside card
+    /// regions, window content edge otherwise). <c>GetContentRegionAvail</c>
+    /// measures past card bounds inside card tables – use this instead.
+    /// </summary>
+    public static float BoundedContentAvailX()
+    {
+        var bound = SpheneWindowChrome.CurrentCardContentRightBound;
+        if (bound > 0f)
+        {
+            return MathF.Max(0f, bound - ImGui.GetCursorScreenPos().X);
+        }
+        return ImGui.GetContentRegionAvail().X;
+    }
+
+    /// <summary>
+    /// SameLine only when the next item of the given width still fits inside
+    /// the real content bound; otherwise stays on the new line so the item is
+    /// never clipped at the card edge. Returns whether SameLine was applied.
+    /// </summary>
+    public static bool SameLineIfFits(float nextItemWidth)
+    {
+        var cursor = ImGui.GetCursorScreenPos();
+        var bound = SpheneWindowChrome.CurrentCardContentRightBound;
+        var rightBound = bound > 0f ? bound : cursor.X + ImGui.GetContentRegionAvail().X;
+        if (cursor.X + ImGui.GetStyle().ItemSpacing.X + nextItemWidth > rightBound)
+        {
+            return false;
+        }
+        ImGui.SameLine();
+        return true;
     }
 
     public void DrawOAuth(ServerStorage selectedServer)

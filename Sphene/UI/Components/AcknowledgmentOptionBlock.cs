@@ -54,7 +54,7 @@ public static class AcknowledgmentOptionBlock
         {
             var notificationLocation = (int)configService.Current.AcknowledgmentNotification;
             var notificationOptions = new[] { "None", "Chat", "Toast", "Both" };
-            if (ImGui.Combo("Notification Location", ref notificationLocation, notificationOptions, notificationOptions.Length))
+            if (UiSharedService.DrawLabeledCombo("Notification Location", ref notificationLocation, notificationOptions, notificationOptions.Length))
             {
                 configService.Current.AcknowledgmentNotification = (NotificationLocation)notificationLocation;
                 configService.Save();
@@ -114,7 +114,7 @@ public static class AcknowledgmentOptionBlock
         try
         {
             var timeoutSeconds = configService.Current.AcknowledgmentTimeoutSeconds;
-            if (ImGui.SliderInt("Acknowledgment Timeout (seconds)", ref timeoutSeconds, 5, 120))
+            if (UiSharedService.DrawSliderInt("Acknowledgment Timeout (seconds)", ref timeoutSeconds, 5, 120))
             {
                 configService.Current.AcknowledgmentTimeoutSeconds = timeoutSeconds;
                 configService.Save();

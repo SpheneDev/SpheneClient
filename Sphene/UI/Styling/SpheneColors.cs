@@ -60,6 +60,36 @@ public static class SpheneColors
     {
         return Vector4.Lerp(from, to, Math.Clamp(t, 0f, 1f));
     }
+
+    /// <summary>
+    /// Picks the more readable text color for a colored background by WCAG
+    /// contrast ratio: white or a darkened shade of the background itself
+    /// (keeps the text hue in harmony with the accent).
+    /// </summary>
+    public static Vector4 ContrastTextColor(Vector4 background)
+    {
+        var dark = LerpColor(background, new Vector4(0.04f, 0.05f, 0.09f, 1f), 0.85f);
+        return ContrastRatio(background, Vector4.One) >= ContrastRatio(background, dark)
+            ? new Vector4(0.96f, 0.98f, 1f, 1f)
+            : dark;
+    }
+
+    /// <summary>WCAG 2.x contrast ratio between two colors (1..21).</summary>
+    public static float ContrastRatio(Vector4 a, Vector4 b)
+    {
+        var la = RelativeLuminance(a) + 0.05f;
+        var lb = RelativeLuminance(b) + 0.05f;
+        return la > lb ? la / lb : lb / la;
+    }
+
+    /// <summary>sRGB relative luminance with linearization per WCAG 2.x.</summary>
+    private static float RelativeLuminance(Vector4 color)
+    {
+        static float Linearize(float c)
+            => c <= 0.03928f ? c / 12.92f : MathF.Pow((c + 0.055f) / 1.055f, 2.4f);
+        return 0.2126f * Linearize(color.X) + 0.7152f * Linearize(color.Y)
+            + 0.0722f * Linearize(color.Z);
+    }
     
     // Get status color based on boolean state with Sphene theming
     public static Vector4 GetSpheneStatusColor(bool isActive)

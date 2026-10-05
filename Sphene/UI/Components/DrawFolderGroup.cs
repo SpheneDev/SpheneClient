@@ -408,7 +408,7 @@ public class DrawFolderGroup : DrawFolderBase
         var individualVFXDisabled = _groupFullInfoDto.GroupUserPermissions.IsDisableVFX();
 
         // Use container-relative positioning for buttons
-        var containerWidth = ImGui.GetContentRegionAvail().X;
+        var containerWidth = UiSharedService.BoundedContentAvailX();
         var actualWindowEndX = ImGui.GetCursorPosX() + containerWidth;
         
         var menuButtonOffset = actualWindowEndX - menuButtonSize.X;

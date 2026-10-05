@@ -302,7 +302,7 @@ public class AcknowledgmentMonitorUI : WindowMediatorSubscriberBase
         
         // Timeout settings
         var defaultTimeout = _config.DefaultTimeoutSeconds;
-        if (ImGui.SliderInt("Default Timeout (s)", ref defaultTimeout, 5, 120))
+        if (UiSharedService.DrawSliderInt("Default Timeout (s)", ref defaultTimeout, 5, 120))
         {
             _config.DefaultTimeoutSeconds = defaultTimeout;
         }
@@ -310,13 +310,13 @@ public class AcknowledgmentMonitorUI : WindowMediatorSubscriberBase
         if (_config.EnableBatching)
         {
             var maxBatchSize = _config.MaxBatchSize;
-            if (ImGui.SliderInt("Max Batch Size", ref maxBatchSize, 1, 50))
+            if (UiSharedService.DrawSliderInt("Max Batch Size", ref maxBatchSize, 1, 50))
             {
                 _config.MaxBatchSize = maxBatchSize;
             }
             
             var batchTimeoutMs = _config.BatchTimeoutMs;
-            if (ImGui.SliderInt("Batch Timeout (ms)", ref batchTimeoutMs, 1000, 30000))
+            if (UiSharedService.DrawSliderInt("Batch Timeout (ms)", ref batchTimeoutMs, 1000, 30000))
             {
                 _config.BatchTimeoutMs = batchTimeoutMs;
             }
@@ -352,19 +352,19 @@ public class AcknowledgmentMonitorUI : WindowMediatorSubscriberBase
             ImGui.Indent();
             
             var highTimeout = _config.HighPriorityTimeoutSeconds;
-            if (ImGui.SliderInt("High Priority Timeout (s)", ref highTimeout, 1, 60))
+            if (UiSharedService.DrawSliderInt("High Priority Timeout (s)", ref highTimeout, 1, 60))
             {
                 _config.HighPriorityTimeoutSeconds = highTimeout;
             }
             
             var mediumTimeout = _config.MediumPriorityTimeoutSeconds;
-            if (ImGui.SliderInt("Medium Priority Timeout (s)", ref mediumTimeout, 5, 120))
+            if (UiSharedService.DrawSliderInt("Medium Priority Timeout (s)", ref mediumTimeout, 5, 120))
             {
                 _config.MediumPriorityTimeoutSeconds = mediumTimeout;
             }
             
             var lowTimeout = _config.LowPriorityTimeoutSeconds;
-            if (ImGui.SliderInt("Low Priority Timeout (s)", ref lowTimeout, 10, 300))
+            if (UiSharedService.DrawSliderInt("Low Priority Timeout (s)", ref lowTimeout, 10, 300))
             {
                 _config.LowPriorityTimeoutSeconds = lowTimeout;
             }
@@ -376,19 +376,19 @@ public class AcknowledgmentMonitorUI : WindowMediatorSubscriberBase
         if (_config.EnableAutoRetry)
         {
             var maxRetries = _config.MaxRetryAttempts;
-            if (ImGui.SliderInt("Max Retry Attempts", ref maxRetries, 0, 10))
+            if (UiSharedService.DrawSliderInt("Max Retry Attempts", ref maxRetries, 0, 10))
             {
                 _config.MaxRetryAttempts = maxRetries;
             }
             
             var baseDelay = _config.BaseRetryDelayMs;
-            if (ImGui.SliderInt("Base Retry Delay (ms)", ref baseDelay, 100, 10000))
+            if (UiSharedService.DrawSliderInt("Base Retry Delay (ms)", ref baseDelay, 100, 10000))
             {
                 _config.BaseRetryDelayMs = baseDelay;
             }
             
             var maxDelay = _config.MaxRetryDelayMs;
-            if (ImGui.SliderInt("Max Retry Delay (ms)", ref maxDelay, 1000, 60000))
+            if (UiSharedService.DrawSliderInt("Max Retry Delay (ms)", ref maxDelay, 1000, 60000))
             {
                 _config.MaxRetryDelayMs = Math.Max(maxDelay, _config.BaseRetryDelayMs);
             }
@@ -396,13 +396,13 @@ public class AcknowledgmentMonitorUI : WindowMediatorSubscriberBase
         
         // Cache settings
         var maxCacheSize = _config.MaxCacheSize;
-        if (ImGui.SliderInt("Max Cache Size", ref maxCacheSize, 100, 10000))
+        if (UiSharedService.DrawSliderInt("Max Cache Size", ref maxCacheSize, 100, 10000))
         {
             _config.MaxCacheSize = maxCacheSize;
         }
         
         var cacheExpiration = _config.CacheExpirationMinutes;
-        if (ImGui.SliderInt("Cache Expiration (min)", ref cacheExpiration, 5, 180))
+        if (UiSharedService.DrawSliderInt("Cache Expiration (min)", ref cacheExpiration, 5, 180))
         {
             _config.CacheExpirationMinutes = cacheExpiration;
         }
@@ -411,7 +411,7 @@ public class AcknowledgmentMonitorUI : WindowMediatorSubscriberBase
         
         // Performance settings
         var maxPending = _config.MaxPendingAcknowledgmentsPerUser;
-        if (ImGui.SliderInt("Max Pending per User", ref maxPending, 10, 1000))
+        if (UiSharedService.DrawSliderInt("Max Pending per User", ref maxPending, 10, 1000))
         {
             _config.MaxPendingAcknowledgmentsPerUser = maxPending;
         }

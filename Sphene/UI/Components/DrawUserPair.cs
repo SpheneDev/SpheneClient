@@ -847,7 +847,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
 
                 var textSize = ImGui.CalcTextSize(meta);
                 var cursorStartX = ImGui.GetCursorPosX();
-                var availableWidth = ImGui.GetContentRegionAvail().X;
+                var availableWidth = UiSharedService.BoundedContentAvailX();
                 ImGui.SetCursorPosX(cursorStartX + Math.Max(0, availableWidth - textSize.X));
                 ImGui.TextColored(ImGuiColors.DalamudGrey2, meta);
                 ImGui.PushTextWrapPos(ImGui.GetFontSize() * 35f);
@@ -985,7 +985,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         var unpairButtonSize = _uiSharedService.GetIconButtonSize(FontAwesomeIcon.Trash);
         var spacingX = ImGui.GetStyle().ItemSpacing.X;
         // Use container-relative positioning for buttons
-        var containerWidth = ImGui.GetContentRegionAvail().X;
+        var containerWidth = UiSharedService.BoundedContentAvailX();
         var actualWindowEndX = ImGui.GetCursorPosX() + containerWidth;
         
         // Adjust button positioning for grouped syncshell folders

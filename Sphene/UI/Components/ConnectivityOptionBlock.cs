@@ -58,12 +58,11 @@ public static class ConnectivityOptionBlock
         }
     }
 
-    public static void DrawServerTransportTypeOption(ServerConfigurationManager serverConfigurationManager, UiSharedService uiShared, float itemWidth, string blockId = "ServerTransportType")
+    public static void DrawServerTransportTypeOption(ServerConfigurationManager serverConfigurationManager, UiSharedService uiShared, string blockId = "ServerTransportType")
     {
         ImGui.PushID(blockId);
         try
         {
-            ImGui.SetNextItemWidth(itemWidth);
             var serverTransport = serverConfigurationManager.GetTransport();
             uiShared.DrawCombo("Server Transport Type", Enum.GetValues<HttpTransportType>().Where(t => t != HttpTransportType.None),
                 v => v.ToString(),

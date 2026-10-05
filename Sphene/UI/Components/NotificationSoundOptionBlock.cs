@@ -28,7 +28,7 @@ public static class NotificationSoundOptionBlock
         }
 
         var outputMode = (int)soundConfig.OutputMode;
-        if (ImGui.Combo("Output Mode##" + blockId, ref outputMode, "Game System\0Sphene Default\0Custom Sound\0"))
+        if (UiSharedService.DrawLabeledCombo("Output Mode##" + blockId, ref outputMode, "Game System\0Sphene Default\0Custom Sound\0"))
         {
             soundConfig.OutputMode = (SoundOutputMode)outputMode;
             changed = true;
@@ -47,7 +47,7 @@ public static class NotificationSoundOptionBlock
 
                 var soundNames = string.Join("\0", registry.Select(s => s.Name)) + "\0";
                 var currentIndex = registry.Select((s, i) => new { s, i }).FirstOrDefault(x => string.Equals(x.s.Name, soundConfig.SelectedGameSoundName, StringComparison.Ordinal))?.i ?? 0;
-                if (ImGui.Combo("Sound##" + blockId, ref currentIndex, soundNames))
+                if (UiSharedService.DrawLabeledCombo("Sound##" + blockId, ref currentIndex, soundNames))
                 {
                     soundConfig.SelectedGameSoundName = registry[currentIndex].Name;
                     changed = true;
@@ -71,7 +71,7 @@ public static class NotificationSoundOptionBlock
 
                 var soundNames = string.Join("\0", registry.Select(s => s.Name)) + "\0";
                 var currentIndex = registry.Select((s, i) => new { s, i }).FirstOrDefault(x => string.Equals(x.s.Name, soundConfig.SelectedSpheneDefaultSound, StringComparison.Ordinal))?.i ?? 0;
-                if (ImGui.Combo("Built-in Sound##" + blockId, ref currentIndex, soundNames))
+                if (UiSharedService.DrawLabeledCombo("Built-in Sound##" + blockId, ref currentIndex, soundNames))
                 {
                     soundConfig.SelectedSpheneDefaultSound = registry[currentIndex].Name;
                     changed = true;
@@ -86,10 +86,10 @@ public static class NotificationSoundOptionBlock
         {
             ImGui.Text("Sound File");
             var customPath = soundConfig.CustomSoundPath;
-            var inputAvailWidth = ImGui.GetContentRegionAvail().X;
+            var inputAvailWidth = UiSharedService.BoundedContentAvailX();
             var browseBtnWidth = ImGui.CalcTextSize("Browse...").X + ImGui.GetStyle().FramePadding.X * 2f;
             ImGui.SetNextItemWidth(inputAvailWidth - browseBtnWidth - ImGui.GetStyle().ItemSpacing.X);
-            if (ImGui.InputText("##CustomSoundPath" + blockId, ref customPath, 256))
+            if (UiSharedService.DrawInputText("##CustomSoundPath" + blockId, ref customPath, 256))
             {
                 soundConfig.CustomSoundPath = customPath;
                 changed = true;
@@ -113,7 +113,7 @@ public static class NotificationSoundOptionBlock
         }
 
         var volume = soundConfig.Volume;
-        if (ImGui.SliderFloat("Volume##" + blockId, ref volume, 0.0f, 1.0f, "%.2f"))
+        if (UiSharedService.DrawSliderFloat("Volume##" + blockId, ref volume, 0.0f, 1.0f, "%.2f"))
         {
             soundConfig.Volume = volume;
             changed = true;
