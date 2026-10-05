@@ -245,6 +245,19 @@ public partial class ApiController
         _spheneHub!.On(nameof(Client_UserPenumbraReceivePreferenceUpdate), act);
     }
 
+    public Task Client_UserSupporterStyleUpdate(UserSupporterStyleDto dto)
+    {
+        Logger.LogDebug("Client_UserSupporterStyleUpdate: {dto}", dto);
+        ExecuteSafely(() => _pairManager.UpdateSupporterStyle(dto));
+        return Task.CompletedTask;
+    }
+
+    public void OnUserSupporterStyleUpdate(Action<UserSupporterStyleDto> act)
+    {
+        if (_initialized) return;
+        _spheneHub!.On(nameof(Client_UserSupporterStyleUpdate), act);
+    }
+
     public Task Client_UserMutualVisibilityUpdate(Sphene.API.Dto.Visibility.MutualVisibilityDto dto)
     {
         Logger.LogDebug("Client_UserMutualVisibilityUpdate: {dto}", dto);

@@ -39,6 +39,18 @@ public static class SupporterNameplateOptionBlock
             configService.Save();
         }
 
-        uiShared.DrawHelpText("Draws the configured Label Text as an overlay next to the Sphene icon.");
+        uiShared.DrawHelpText("Draws the configured icon label text as an overlay next to the Sphene icon.");
+    }
+
+    public static void DrawSupporterCustomizationInfo(SpheneConfigService configService, UiSharedService uiShared, string blockId = "SupporterCustomization")
+    {
+        ImGui.TextWrapped("Customize the supporter nameplate: preset or custom symbols, separate label texts for the nameplate and the Sphene icon, game palette colors for symbol and label, and a free color picker for the icon label.");
+        uiShared.DrawHelpText("Open Settings > Supporter to configure all customization options.");
+    }
+
+    public static void DrawSupporterStyleSyncInfo(SpheneConfigService configService, UiSharedService uiShared, string blockId = "SupporterStyleSync")
+    {
+        ImGui.TextWrapped("Your supporter nameplate style is now shared with other Sphene users: they see your nameplate exactly the way you configured it.");
+        uiShared.DrawHelpText("Configure your personal supporter look in Settings > Supporter.");
     }
 }

@@ -14,6 +14,7 @@ using FFXIVClientStructs.FFXIV.Common.Component.BGCollision;
 using FFXIVClientStructs.FFXIV.Component.GUI;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Sphene.API.Dto.User;
 using Sphene.PlayerData.Pairs;
 using Sphene.SpheneConfiguration;
 using Sphene.SpheneConfiguration.Configurations;
@@ -27,14 +28,21 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
     private const float IconSize = 20f;
     private const float IconGap = 4f;
     private const int MaxNamePlateObjects = 50;
-    private const uint IconLabelColor = 0xFF40BEFF;
     private const float OcclusionProbeHeight = 2.2f;
     private const float OcclusionProbeMargin = 0.6f;
     private const int OccGridCols = 4;
     private const int OccGridRows = 2;
     private const int FullOccMask = (1 << (OccGridCols * OccGridRows)) - 1;
 
-    private readonly record struct IconDrawPosition(Vector2 Anchor, Vector3 TargetWorldPos, Vector3 CharPos, int PlateIndex, nint Owner);
+    private readonly record struct IconDrawPosition(Vector2 Anchor, Vector3 TargetWorldPos, Vector3 CharPos, int PlateIndex, nint Owner, string IconLabel, uint IconLabelColor);
+
+    private readonly record struct ResolvedStyle(
+        bool IndicatorsEnabled,
+        bool SymbolEnabled, string Symbol,
+        bool TextEnabled, string LabelText,
+        SupporterLabelOrder LabelOrder, SupporterSymbolPosition Position,
+        ushort SymbolColorKey, ushort LabelColorKey,
+        bool IconEnabled, bool IconLabelEnabled, string IconLabelText, uint IconLabelColor);
 
     private readonly INamePlateGui _namePlateGui;
     private readonly IObjectTable _objectTable;
@@ -52,6 +60,10 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
     private string? _occDebug;
     private bool _disposed;
     private HashSet<string> _supporterNameCache = new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, SupporterStyleDto> _supporterStyleMap = new(StringComparer.OrdinalIgnoreCase);
+    private string _supporterStyleFingerprint = string.Empty;
+    private string? _lastPublishedStyleKey;
+    private readonly Dictionary<int, string> _appliedPlateNames = new();
     private DateTime _lastCacheRefresh = DateTime.MinValue;
     private DateTime _lastTraceLog = DateTime.MinValue;
     private string? _lastSupporterSettingsKey;
@@ -123,15 +135,19 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
         _lastCacheRefresh = now;
 
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var pair in _pairManager.DirectPairs)
+        var styles = new Dictionary<string, SupporterStyleDto>(StringComparer.OrdinalIgnoreCase);
+        foreach (var pair in _pairManager.PairsWithGroups.Keys)
         {
             if (pair.UserData == null || string.IsNullOrEmpty(pair.UserData.UID))
                 continue;
             if (!pair.UserData.IsSupporter)
                 continue;
             var playerName = pair.PlayerName;
-            if (!string.IsNullOrEmpty(playerName))
-                names.Add(playerName);
+            if (string.IsNullOrEmpty(playerName))
+                continue;
+            names.Add(playerName);
+            if (pair.UserPair?.OtherSupporterStyle != null)
+                styles[playerName] = pair.UserPair.OtherSupporterStyle;
         }
 
         if (_apiController.IsSupporter)
@@ -142,9 +158,14 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
         }
 
         _supporterNameCache = names;
-        _logger.LogDebug("[Nameplate] Cache refreshed: {count} supporter names [{names}], own IsSupporter={isSupporter}, localName={localName}, directPairs={pairs}",
+        _supporterStyleMap = styles;
+        _supporterStyleFingerprint = styles.Count == 0
+            ? string.Empty
+            : string.Join(";", styles.OrderBy(k => k.Key, StringComparer.OrdinalIgnoreCase)
+                .Select(k => $"{k.Key}~{k.Value.IndicatorsEnabled}~{k.Value.SymbolChar}~{k.Value.SymbolPosition}~{k.Value.TextEnabled}~{k.Value.LabelText}~{k.Value.LabelOrder}~{k.Value.SymbolColorKey}~{k.Value.LabelColorKey}~{k.Value.IconEnabled}~{k.Value.IconLabelEnabled}~{k.Value.IconLabelText}~{k.Value.IconLabelColor}"));
+        _logger.LogDebug("[Nameplate] Cache refreshed: {count} supporter names [{names}], own IsSupporter={isSupporter}, localName={localName}, pairs={pairs}",
             names.Count, string.Join(", ", names), _apiController.IsSupporter,
-            _objectTable.LocalPlayer?.Name.TextValue ?? "null", _pairManager.DirectPairs.Count);
+            _objectTable.LocalPlayer?.Name.TextValue ?? "null", _pairManager.PairsWithGroups.Count);
     }
 
     private bool IsSupporter(string characterName)
@@ -154,6 +175,60 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
         return _supporterNameCache.Contains(characterName);
     }
 
+    private ResolvedStyle ResolveStyle(string name, bool isLocalPlayer)
+    {
+        if (!isLocalPlayer && _supporterStyleMap.TryGetValue(name, out var synced))
+            return FromDto(synced);
+        return FromConfig();
+    }
+
+    private ResolvedStyle FromConfig()
+    {
+        var c = _configService.Current;
+        return new ResolvedStyle(
+            c.ShowSupporterNameplate,
+            !string.IsNullOrEmpty(c.SupporterSymbolChar), c.SupporterSymbolChar ?? string.Empty,
+            c.SupporterTextEnabled && !string.IsNullOrWhiteSpace(c.SupporterLabelText), c.SupporterLabelText ?? string.Empty,
+            c.SupporterLabelOrder, c.SupporterSymbolPosition,
+            c.SupporterColorKey, c.SupporterLabelColorKey,
+            c.SupporterIconEnabled, c.SupporterIconLabelEnabled, c.SupporterIconLabelText ?? string.Empty, c.SupporterIconLabelColor);
+    }
+
+    private static ResolvedStyle FromDto(SupporterStyleDto s)
+    {
+        var position = Enum.IsDefined(typeof(SupporterSymbolPosition), s.SymbolPosition)
+            ? (SupporterSymbolPosition)s.SymbolPosition : SupporterSymbolPosition.Left;
+        var order = Enum.IsDefined(typeof(SupporterLabelOrder), s.LabelOrder)
+            ? (SupporterLabelOrder)s.LabelOrder : SupporterLabelOrder.SymbolThenText;
+        return new ResolvedStyle(
+            s.IndicatorsEnabled,
+            !string.IsNullOrEmpty(s.SymbolChar), s.SymbolChar ?? string.Empty,
+            s.TextEnabled && !string.IsNullOrWhiteSpace(s.LabelText), s.LabelText ?? string.Empty,
+            order, position,
+            (ushort)Math.Clamp(s.SymbolColorKey, 0, ushort.MaxValue), (ushort)Math.Clamp(s.LabelColorKey, 0, ushort.MaxValue),
+            s.IconEnabled, s.IconLabelEnabled, s.IconLabelText ?? string.Empty, s.IconLabelColor);
+    }
+
+    private SupporterStyleDto BuildOwnStyle()
+    {
+        var c = _configService.Current;
+        return new SupporterStyleDto
+        {
+            IndicatorsEnabled = c.ShowSupporterNameplate,
+            SymbolChar = c.SupporterSymbolChar ?? string.Empty,
+            SymbolPosition = (int)c.SupporterSymbolPosition,
+            TextEnabled = c.SupporterTextEnabled,
+            LabelText = c.SupporterLabelText ?? string.Empty,
+            LabelOrder = (int)c.SupporterLabelOrder,
+            SymbolColorKey = c.SupporterColorKey,
+            LabelColorKey = c.SupporterLabelColorKey,
+            IconEnabled = c.SupporterIconEnabled,
+            IconLabelEnabled = c.SupporterIconLabelEnabled,
+            IconLabelText = c.SupporterIconLabelText ?? string.Empty,
+            IconLabelColor = c.SupporterIconLabelColor
+        };
+    }
+
     private void OnDataUpdate(INamePlateUpdateContext ctx, IReadOnlyList<INamePlateUpdateHandler> handlers)
     {
         RequestRedrawIfSettingsChanged();
@@ -161,6 +236,7 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
         if (!_configService.Current.ShowSupporterNameplate || !_apiController.SupporterFeaturesEnabled)
         {
             _iconPositions = [];
+            _appliedPlateNames.Clear();
             if (ShouldLogTrace())
                 _logger.LogDebug("[Nameplate] Skipped: ShowSupporterNameplate is disabled");
             return;
@@ -173,22 +249,16 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
         if (_supporterNameCache.Count == 0)
         {
             _iconPositions = [];
+            _appliedPlateNames.Clear();
             if (logThisTick)
                 _logger.LogDebug("[Nameplate] Skipped: supporter cache is empty (handlers={handlers})", handlers.Count);
             return;
         }
 
-        var symbolEnabled = !string.IsNullOrEmpty(_configService.Current.SupporterSymbolChar);
-        var textEnabled = _configService.Current.SupporterTextEnabled && !string.IsNullOrWhiteSpace(_configService.Current.SupporterLabelText);
-        var iconEnabled = _configService.Current.SupporterIconEnabled;
-        if (!textEnabled && !symbolEnabled && !iconEnabled)
-        {
-            _iconPositions = [];
-            if (logThisTick)
-                _logger.LogDebug("[Nameplate] Skipped: no supporter indicator configured");
-            return;
-        }
-
+        var localSymbolEnabled = !string.IsNullOrEmpty(_configService.Current.SupporterSymbolChar);
+        var localTextEnabled = _configService.Current.SupporterTextEnabled && !string.IsNullOrWhiteSpace(_configService.Current.SupporterLabelText);
+        var localIconEnabled = _configService.Current.SupporterIconEnabled;
+        var needsRedraw = false;
         var playerCount = 0;
         var selfPlatePresent = false;
         List<IconDrawPosition>? iconPos = null;
@@ -204,7 +274,8 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
                 continue;
 
             playerCount++;
-            if (pc.Address == localAddr)
+            var isSelf = pc.Address == localAddr;
+            if (isSelf)
                 selfPlatePresent = true;
 
             var name = pc.Name.TextValue;
@@ -212,9 +283,20 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
             if (!IsSupporter(name))
                 continue;
 
+            var style = ResolveStyle(name, isSelf);
+            if (!style.IndicatorsEnabled)
+                continue;
+
             matchedNames?.Add(name);
 
-            if (iconEnabled)
+            if ((style.SymbolEnabled || style.TextEnabled)
+                && (!_appliedPlateNames.TryGetValue(h.NamePlateIndex, out var appliedFor)
+                    || !string.Equals(appliedFor, name, StringComparison.OrdinalIgnoreCase)))
+            {
+                needsRedraw = true;
+            }
+
+            if (style.IconEnabled)
             {
                 var platePos = GetNameplateIconPosition(h);
                 if (platePos.HasValue)
@@ -223,7 +305,9 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
                     iconPos ??= new List<IconDrawPosition>(8);
                     iconPos.Add(new IconDrawPosition(platePos.Value,
                         charPos + Vector3.UnitY * OcclusionProbeHeight, charPos,
-                        h.NamePlateIndex, pc.Address));
+                        h.NamePlateIndex, pc.Address,
+                        style.IconLabelEnabled ? style.IconLabelText : string.Empty,
+                        style.IconLabelColor));
                 }
                 if (logThisTick && iconDbg == null)
                 {
@@ -234,13 +318,16 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
 
         _iconPositions = iconPos is { Count: > 0 } ? (IReadOnlyList<IconDrawPosition>)iconPos.ToArray() : [];
 
+        if (needsRedraw)
+            RequestRedraw();
+
         if (logThisTick)
         {
             _logger.LogDebug("[Nameplate] Tick: handlers={handlers}, players={players}, selfPlate={selfPlate}, matched={matched} [{matchedNames}], icons={icons}, ind=[sym={sym},txt={txt},icon={icon}], iconDbg={iconDbg}, occ={occDbg}, seen=[{seenNames}]",
                 handlers.Count, playerCount, selfPlatePresent, matchedNames?.Count ?? 0,
                 string.Join(", ", matchedNames ?? Enumerable.Empty<string>()),
                 _iconPositions.Count,
-                symbolEnabled, textEnabled, iconEnabled,
+                localSymbolEnabled, localTextEnabled, localIconEnabled,
                 iconDbg ?? "-",
                 _occDebug ?? "-",
                 string.Join(", ", seenNames ?? Enumerable.Empty<string>()));
@@ -256,83 +343,111 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
         if (_supporterNameCache.Count == 0)
             return;
 
-        var symbol = _configService.Current.SupporterSymbolChar ?? string.Empty;
-        var textEnabled = _configService.Current.SupporterTextEnabled && !string.IsNullOrWhiteSpace(_configService.Current.SupporterLabelText);
-        var symbolEnabled = !string.IsNullOrEmpty(symbol);
-        if (!textEnabled && !symbolEnabled)
-            return;
-
-        var labelText = _configService.Current.SupporterLabelText ?? string.Empty;
-        var position = _configService.Current.SupporterSymbolPosition;
-        var order = _configService.Current.SupporterLabelOrder;
-        var colorKey = _configService.Current.SupporterColorKey;
+        var localAddr = _objectTable.LocalPlayer?.Address ?? IntPtr.Zero;
 
         for (int i = 0; i < handlers.Count; i++)
         {
             var h = handlers[i];
             if (h.GameObject is not IPlayerCharacter pc)
                 continue;
-            if (!IsSupporter(pc.Name.TextValue))
+
+            var name = pc.Name.TextValue;
+            if (!IsSupporter(name))
                 continue;
+
+            var style = ResolveStyle(name, pc.Address == localAddr);
+            if (!style.IndicatorsEnabled || (!style.SymbolEnabled && !style.TextEnabled))
+                continue;
+
+            var symbol = style.Symbol;
+            var textEnabled = style.TextEnabled;
+            var symbolEnabled = style.SymbolEnabled;
+            var labelText = style.LabelText;
+            var position = style.Position;
+            var order = style.LabelOrder;
+            var symbolColorKey = style.SymbolColorKey;
+            var labelColorKey = style.LabelColorKey;
 
             var original = h.InfoView.Name;
 
-            string ComposeGroup(bool sym, bool txt)
+            SeStringBuilder AppendSupporterParts(SeStringBuilder builder)
             {
-                if (txt && sym)
+                var first = true;
+                void AddPart(string? partText, ushort partColorKey)
                 {
-                    return order == SupporterLabelOrder.SymbolThenText
-                        ? (symbol + " " + labelText)
-                        : (labelText + " " + symbol);
+                    if (string.IsNullOrEmpty(partText)) return;
+                    if (!first) builder.AddText(" ");
+                    builder.AddUiForeground(partText, partColorKey);
+                    first = false;
                 }
-                if (sym) return symbol;
-                if (txt) return labelText;
-                return string.Empty;
-            }
 
-            var leftGroup = string.Empty;
-            var rightGroup = string.Empty;
-            if (position == SupporterSymbolPosition.Left)
-            {
-                leftGroup = ComposeGroup(symbolEnabled, textEnabled);
-            }
-            else if (position == SupporterSymbolPosition.Right)
-            {
-                rightGroup = ComposeGroup(symbolEnabled, textEnabled);
-            }
-            else
-            {
-                leftGroup = ComposeGroup(symbolEnabled, textEnabled);
-                rightGroup = symbolEnabled ? symbol : string.Empty;
+                if (order == SupporterLabelOrder.SymbolThenText)
+                {
+                    if (symbolEnabled) AddPart(symbol, symbolColorKey);
+                    if (textEnabled) AddPart(labelText, labelColorKey);
+                }
+                else
+                {
+                    if (textEnabled) AddPart(labelText, labelColorKey);
+                    if (symbolEnabled) AddPart(symbol, symbolColorKey);
+                }
+                return builder;
             }
 
             var left = new SeStringBuilder().Build();
             var right = new SeStringBuilder().Build();
-            if (!string.IsNullOrEmpty(leftGroup))
+            if (position == SupporterSymbolPosition.Left)
             {
-                left = new SeStringBuilder().AddUiForeground(leftGroup + " ", colorKey).Build();
+                left = AppendSupporterParts(new SeStringBuilder()).AddText(" ").Build();
             }
-            if (!string.IsNullOrEmpty(rightGroup))
+            else if (position == SupporterSymbolPosition.Right)
             {
-                right = new SeStringBuilder().AddUiForeground(" " + rightGroup, colorKey).Build();
+                right = AppendSupporterParts(new SeStringBuilder().AddText(" ")).Build();
+            }
+            else
+            {
+                left = AppendSupporterParts(new SeStringBuilder()).AddText(" ").Build();
+                if (symbolEnabled)
+                {
+                    right = new SeStringBuilder().AddText(" ").AddUiForeground(symbol, symbolColorKey).Build();
+                }
             }
 
             h.NameParts.Text = original;
             h.NameParts.TextWrap = (left, right);
+            if (h.IsUpdating)
+            {
+                _appliedPlateNames[h.NamePlateIndex] = name;
+            }
         }
     }
 
     private void RequestRedrawIfSettingsChanged()
     {
         var current = _configService.Current;
-        var key = $"{current.ShowSupporterNameplate}|{current.SupporterSymbolChar}|{current.SupporterTextEnabled}|{current.SupporterLabelText}|{current.SupporterLabelOrder}|{current.SupporterSymbolPosition}|{current.SupporterColorKey}|{current.SupporterIconEnabled}|{current.SupporterIconLabelEnabled}|{_apiController.SupporterFeaturesEnabled}|{_supporterNameCache.Count}";
-        if (key == _lastSupporterSettingsKey)
+        var key = $"{current.ShowSupporterNameplate}|{current.SupporterSymbolChar}|{current.SupporterTextEnabled}|{current.SupporterLabelText}|{current.SupporterLabelOrder}|{current.SupporterSymbolPosition}|{current.SupporterColorKey}|{current.SupporterLabelColorKey}|{current.SupporterIconEnabled}|{current.SupporterIconLabelEnabled}|{current.SupporterIconLabelText}|{current.SupporterIconLabelColor}|{_apiController.SupporterFeaturesEnabled}|{string.Join(",", _supporterNameCache.OrderBy(n => n, StringComparer.OrdinalIgnoreCase))}|{_supporterStyleFingerprint}";
+
+        var publishKey = _apiController.IsConnected && _apiController.IsSupporter && _apiController.SupporterFeaturesEnabled
+            ? key
+            : "unavailable";
+        if (!string.Equals(publishKey, _lastPublishedStyleKey, StringComparison.Ordinal))
+        {
+            _lastPublishedStyleKey = publishKey;
+            _ = _apiController.UserUpdateSupporterStyle(
+                _apiController.IsConnected && _apiController.IsSupporter && _apiController.SupporterFeaturesEnabled
+                    ? BuildOwnStyle()
+                    : null);
+        }
+        if (string.Equals(key, _lastSupporterSettingsKey, StringComparison.Ordinal))
             return;
 
         var hadPreviousKey = _lastSupporterSettingsKey != null;
         _lastSupporterSettingsKey = key;
         if (hadPreviousKey)
+        {
+            _appliedPlateNames.Clear();
             RequestRedraw();
+        }
     }
 
     private unsafe Vector2? GetNameplateIconPosition(INamePlateUpdateHandler handler)
@@ -681,10 +796,6 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
         if (icon == null || !icon.TryGetWrap(out var tex, out _) || tex == null)
             return;
 
-        var config = _configService.Current;
-        var label = config.SupporterIconLabelEnabled ? (config.SupporterLabelText ?? string.Empty) : string.Empty;
-        var labelSize = label.Length > 0 ? ImGui.CalcTextSize(label) : Vector2.Zero;
-
         var scale = ImGuiHelpers.GlobalScale;
         var size = new Vector2(IconSize * scale);
         var drawList = ImGui.GetBackgroundDrawList();
@@ -692,6 +803,9 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
         for (int i = 0; i < positions.Count; i++)
         {
             var entry = positions[i];
+            var label = entry.IconLabel;
+            var labelColor = entry.IconLabelColor;
+            var labelSize = label.Length > 0 ? ImGui.CalcTextSize(label) : Vector2.Zero;
             var min = new Vector2(entry.Anchor.X + IconGap * scale, entry.Anchor.Y - size.Y * 0.5f);
             var right = min.X + size.X;
             if (labelSize != Vector2.Zero)
@@ -703,7 +817,7 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
                 continue;
             if (occMask == 0)
             {
-                DrawIconAndLabel(drawList, tex, min, size, label, labelSize, entry.Anchor.Y, scale);
+                DrawIconAndLabel(drawList, tex, min, size, label, labelColor, labelSize, entry.Anchor.Y, scale);
                 continue;
             }
             var cellW = (right - min.X) / OccGridCols;
@@ -717,7 +831,7 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
                         continue;
                     var cellMin = new Vector2(min.X + cellW * col, min.Y + cellH * row);
                     drawList.PushClipRect(cellMin, cellMin + new Vector2(cellW, cellH), true);
-                    DrawIconAndLabel(drawList, tex, min, size, label, labelSize, entry.Anchor.Y, scale);
+                    DrawIconAndLabel(drawList, tex, min, size, label, labelColor, labelSize, entry.Anchor.Y, scale);
                     drawList.PopClipRect();
                 }
             }
@@ -725,14 +839,14 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
     }
 
     private static void DrawIconAndLabel(ImDrawListPtr drawList, IDalamudTextureWrap tex,
-        Vector2 min, Vector2 size, string label, Vector2 labelSize, float anchorY, float scale)
+        Vector2 min, Vector2 size, string label, uint labelColor, Vector2 labelSize, float anchorY, float scale)
     {
         drawList.AddImage(tex.Handle, min, min + size);
         if (labelSize != Vector2.Zero)
         {
             drawList.AddText(
                 new Vector2(min.X + size.X + IconGap * scale, anchorY - labelSize.Y * 0.5f),
-                IconLabelColor,
+                labelColor,
                 label);
         }
     }

@@ -631,6 +631,7 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
         OnUserUpdateSelfPairPermissions(dto => _ = Client_UserUpdateSelfPairPermissions(dto));
         OnUserAckYouUpdate(dto => _ = Client_UserAckYouUpdate(dto));
         OnUserPenumbraReceivePreferenceUpdate(dto => _ = Client_UserPenumbraReceivePreferenceUpdate(dto));
+        OnUserSupporterStyleUpdate(dto => _ = Client_UserSupporterStyleUpdate(dto));
         OnUserMutualVisibilityUpdate(dto => _ = Client_UserMutualVisibilityUpdate(dto));
         OnUserGposeStateUpdate(dto => _ = Client_UserGposeStateUpdate(dto));
         OnUserReceiveUploadStatus(dto => _ = Client_UserReceiveUploadStatus(dto));
@@ -690,6 +691,7 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
         _spheneHub.Remove(nameof(Client_UserUpdateSelfPairPermissions));
         _spheneHub.Remove(nameof(Client_UserAckYouUpdate));
         _spheneHub.Remove(nameof(Client_UserPenumbraReceivePreferenceUpdate));
+        _spheneHub.Remove(nameof(Client_UserSupporterStyleUpdate));
         _spheneHub.Remove(nameof(Client_UserMutualVisibilityUpdate));
         _spheneHub.Remove(nameof(Client_UserGposeStateUpdate));
         _spheneHub.Remove(nameof(Client_UserReceiveUploadStatus));

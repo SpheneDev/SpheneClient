@@ -172,6 +172,20 @@ public partial class ApiController
         await _spheneHub!.InvokeAsync(nameof(UserUpdatePenumbraReceivePreference), allowMods).ConfigureAwait(false);
     }
 
+    public async Task UserUpdateSupporterStyle(SupporterStyleDto? style)
+    {
+        if (!IsConnected) return;
+
+        try
+        {
+            await _spheneHub!.InvokeAsync(nameof(UserUpdateSupporterStyle), style).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Failed to update supporter style");
+        }
+    }
+
     public async Task UserUpdateGposeState(bool isInGpose)
     {
         if (!IsConnected) return;

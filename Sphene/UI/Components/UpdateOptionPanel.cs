@@ -17,12 +17,16 @@ public static class UpdateOptionPanel
         MismatchTrackerFilters,
         TransfersUseSpheneCdnDirectDownloads,
         NotificationSoundsSpheneDefault,
-        SupporterNameplateIndicators
+        SupporterNameplateIndicators,
+        SupporterNameplateCustomization,
+        SupporterNameplateStyleSync
     }
 
     private static readonly IReadOnlySet<Link> SupporterFeatureLinks = new HashSet<Link>
     {
-        Link.SupporterNameplateIndicators
+        Link.SupporterNameplateIndicators,
+        Link.SupporterNameplateCustomization,
+        Link.SupporterNameplateStyleSync
     };
 
     private static readonly ReleaseDefinition[] Releases =
@@ -30,7 +34,7 @@ public static class UpdateOptionPanel
         new("v.1.1.11.1071", [Link.SyncIncomingWithoutRedraw, Link.SyncOutgoingBatching]),
         new("v.1.1.13.0", [Link.ShowTestBuildUpdates, Link.FilterCharacterLegacyShpkOutgoing, Link.MismatchTrackerFilters, Link.TransfersUseSpheneCdnDirectDownloads]),
         new("v.1.1.15", [Link.NotificationSoundsSpheneDefault]),
-        new("v.1.1.16", [Link.SupporterNameplateIndicators]),
+        new("v.1.1.16", [Link.SupporterNameplateIndicators, Link.SupporterNameplateCustomization, Link.SupporterNameplateStyleSync]),
     ];
 
     private static readonly IReadOnlyDictionary<Link, string> LinkTitles = new Dictionary<Link, string>
@@ -42,7 +46,9 @@ public static class UpdateOptionPanel
         [Link.MismatchTrackerFilters] = "Diagnostics: Active Mismatch Tracker Filters (Defaults: Equipment Off, Companions Off)",
         [Link.TransfersUseSpheneCdnDirectDownloads] = "Transfers: Use CDN direct downloads (Default: Enabled)",
         [Link.NotificationSoundsSpheneDefault] = "Notifications: Sphene Default Sound Mode (Default: Sphene Default)",
-        [Link.SupporterNameplateIndicators] = "Supporter: Nameplate Indicators & Sphene Icon (Default: Enabled)"
+        [Link.SupporterNameplateIndicators] = "Supporter: Nameplate Indicators & Sphene Icon (Default: Enabled)",
+        [Link.SupporterNameplateCustomization] = "Supporter: Symbol, Label & Color Customization",
+        [Link.SupporterNameplateStyleSync] = "Supporter: Your style is shared with other Sphene users"
     };
 
     private static readonly IReadOnlyDictionary<Link, Action<SpheneConfigService, UiSharedService, SpheneMediator, float>> LinkDrawers
@@ -67,6 +73,14 @@ public static class UpdateOptionPanel
             SupporterNameplateOptionBlock.DrawShowSupporterNameplateOption(configService, uiShared, "UpdateOptionShowSupporterNameplate");
             SupporterNameplateOptionBlock.DrawSupporterIconOverlayOption(configService, uiShared, "UpdateOptionSupporterIconOverlay");
             SupporterNameplateOptionBlock.DrawSupporterIconLabelOption(configService, uiShared, "UpdateOptionSupporterIconLabel");
+        },
+        [Link.SupporterNameplateCustomization] = (configService, uiShared, _, _) =>
+        {
+            SupporterNameplateOptionBlock.DrawSupporterCustomizationInfo(configService, uiShared, "UpdateOptionSupporterCustomization");
+        },
+        [Link.SupporterNameplateStyleSync] = (configService, uiShared, _, _) =>
+        {
+            SupporterNameplateOptionBlock.DrawSupporterStyleSyncInfo(configService, uiShared, "UpdateOptionSupporterStyleSync");
         }
     };
 

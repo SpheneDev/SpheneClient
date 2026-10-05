@@ -1,4 +1,5 @@
 using Dalamud.Bindings.ImGui;
+using Dalamud.Game.Text.SeStringHandling.Payloads;
 using Dalamud.Interface;
 using Dalamud.Interface.Colors;
 using Dalamud.Interface.ImGuiFileDialog;
@@ -2552,6 +2553,25 @@ public class SettingsUi : WindowMediatorSubscriberBase
             ImGuiHelpers.ScaledDummy(0, 4);
 
             var symbolChar = _configService.Current.SupporterSymbolChar ?? string.Empty;
+            var presetIndex = 0;
+            for (var i = 1; i < SupporterSymbolPresets.Length; i++)
+            {
+                if (string.Equals(symbolChar, SupporterSymbolPresets[i], StringComparison.Ordinal))
+                {
+                    presetIndex = i;
+                    break;
+                }
+            }
+            ImGui.SetNextItemWidth(ClampSettingsItemWidth(120f));
+            if (ImGui.Combo("##supporterSymbolPreset", ref presetIndex, SupporterSymbolPresets, SupporterSymbolPresets.Length))
+            {
+                _configService.Current.SupporterSymbolChar = presetIndex == 0 ? string.Empty : SupporterSymbolPresets[presetIndex];
+                _configService.Save();
+            }
+            UiSharedService.AttachToolTip("Pick a preset symbol or type a custom one in the field next to it. 'None' disables the symbol.");
+            ImGui.SameLine();
+            if (presetIndex > 0)
+                symbolChar = SupporterSymbolPresets[presetIndex];
             ImGui.SetNextItemWidth(ClampSettingsItemWidth(80f));
             if (ImGui.InputText("Symbol##supporterSymbol", ref symbolChar, 4))
             {
@@ -2559,6 +2579,10 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 _configService.Save();
             }
             UiSharedService.AttachToolTip("The symbol to display next to supporter names. Leave empty to disable.");
+
+            DrawSupporterColorKeyPicker("supporterSymbolColor", _configService.Current.SupporterColorKey,
+                key => _configService.Current.SupporterColorKey = key);
+            UiSharedService.AttachToolTip("Game UI foreground color for the symbol. Default: gold (key 43).");
 
             var textEnabled = _configService.Current.SupporterTextEnabled;
             if (ImGui.Checkbox("Show Text Label##supporterTextEnabled", ref textEnabled))
@@ -2584,6 +2608,10 @@ public class SettingsUi : WindowMediatorSubscriberBase
                     _configService.Current.SupporterLabelOrder = (SupporterLabelOrder)labelOrder;
                     _configService.Save();
                 }
+
+                DrawSupporterColorKeyPicker("supporterLabelColor", _configService.Current.SupporterLabelColorKey,
+                    key => _configService.Current.SupporterLabelColorKey = key);
+                UiSharedService.AttachToolTip("Game UI foreground color for the label text. Default: gold (key 43).");
                 ImGui.Unindent();
             }
 
@@ -2593,17 +2621,6 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 _configService.Current.SupporterSymbolPosition = (SupporterSymbolPosition)position;
                 _configService.Save();
             }
-
-            var colorKey = (int)_configService.Current.SupporterColorKey;
-            ImGui.SetNextItemWidth(ClampSettingsItemWidth(80f));
-            if (ImGui.InputInt("Color Key##supporterColorKey", ref colorKey))
-            {
-                if (colorKey < 0) colorKey = 0;
-                if (colorKey > 65535) colorKey = 65535;
-                _configService.Current.SupporterColorKey = (ushort)colorKey;
-                _configService.Save();
-            }
-            UiSharedService.AttachToolTip("UI Foreground color key for the symbol/text (0-65535). Default: 43 (gold).");
         }, 6f);
 
         ImGuiHelpers.ScaledDummy(0, 8);
@@ -2629,10 +2646,80 @@ public class SettingsUi : WindowMediatorSubscriberBase
                     _configService.Current.SupporterIconLabelEnabled = iconLabelEnabled;
                     _configService.Save();
                 }
-                UiSharedService.AttachToolTip("Draws the configured Label Text next to the Sphene icon (overlay, not part of the nameplate).");
+                UiSharedService.AttachToolTip("Draws the configured label text next to the Sphene icon (overlay, not part of the nameplate).");
+
+                if (iconLabelEnabled)
+                {
+                    ImGui.Indent();
+                    var iconLabelText = _configService.Current.SupporterIconLabelText ?? string.Empty;
+                    ImGui.SetNextItemWidth(ClampSettingsItemWidth(150f));
+                    if (ImGui.InputText("Icon Label Text##supporterIconLabelText", ref iconLabelText, 30))
+                    {
+                        _configService.Current.SupporterIconLabelText = iconLabelText;
+                        _configService.Save();
+                    }
+                    UiSharedService.AttachToolTip("Text drawn next to the Sphene icon. Set independently from the nameplate label.");
+
+                    var iconLabelColor = ImGui.ColorConvertU32ToFloat4(_configService.Current.SupporterIconLabelColor);
+                    if (ImGui.ColorEdit4("Icon Label Color##supporterIconLabelColor", ref iconLabelColor))
+                    {
+                        _configService.Current.SupporterIconLabelColor = ImGui.ColorConvertFloat4ToU32(iconLabelColor);
+                        _configService.Save();
+                    }
+                    UiSharedService.AttachToolTip("Custom color for the icon label text (free RGBA picker).");
+                    ImGui.Unindent();
+                }
                 ImGui.Unindent();
             }
         }, 6f);
+    }
+
+    private static readonly string[] SupporterSymbolPresets = ["None", "✦", "★", "☆", "♥", "♡", "◆", "◇"];
+    private const int UiForegroundKeyInlineMax = 77;
+    private const int UiForegroundKeyExtendedStart = 500;
+    private const int UiForegroundKeyExtendedMax = 511;
+    private const int UiForegroundSliderMaxIndex = UiForegroundKeyInlineMax + (UiForegroundKeyExtendedMax - UiForegroundKeyExtendedStart + 1);
+
+    private void DrawSupporterColorKeyPicker(string id, ushort colorKey, Action<ushort> apply)
+    {
+        var sliderIndex = UiForegroundColorKeyToSliderIndex(colorKey);
+        ImGui.SetNextItemWidth(ClampSettingsItemWidth(220f));
+        if (ImGui.SliderInt("Color##" + id, ref sliderIndex, 0, UiForegroundSliderMaxIndex))
+        {
+            apply(UiForegroundSliderIndexToColorKey(sliderIndex));
+            _configService.Save();
+        }
+
+        ImGui.SameLine();
+        Vector4 preview;
+        try
+        {
+            var rgba = new UIForegroundPayload(colorKey).RGBA;
+            preview = new Vector4(((rgba >> 24) & 0xFF) / 255f, ((rgba >> 16) & 0xFF) / 255f, ((rgba >> 8) & 0xFF) / 255f, 1f);
+        }
+        catch
+        {
+            preview = SpheneColors.SpheneGold;
+        }
+        var frameHeight = ImGui.GetFrameHeight();
+        ImGui.ColorButton("##" + id + "_preview", preview,
+            ImGuiColorEditFlags.NoTooltip | ImGuiColorEditFlags.NoDragDrop | ImGuiColorEditFlags.NoBorder,
+            new Vector2(frameHeight, frameHeight));
+    }
+
+    private static int UiForegroundColorKeyToSliderIndex(int actual)
+    {
+        if (actual is >= 0 and <= UiForegroundKeyInlineMax) return actual;
+        if (actual is >= UiForegroundKeyExtendedStart and <= UiForegroundKeyExtendedMax)
+            return UiForegroundKeyInlineMax + 1 + (actual - UiForegroundKeyExtendedStart);
+        return 43;
+    }
+
+    private static ushort UiForegroundSliderIndexToColorKey(int index)
+    {
+        return index <= UiForegroundKeyInlineMax
+            ? (ushort)index
+            : (ushort)(UiForegroundKeyExtendedStart + index - UiForegroundKeyInlineMax - 1);
     }
 
     private static void CenterSupporterCursorX(float contentWidth)

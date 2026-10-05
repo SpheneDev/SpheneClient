@@ -334,6 +334,7 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         {
             _allClientPairs[dto.User].UserPair.IndividualPairStatus = dto.IndividualPairStatus;
             _allClientPairs[dto.User].UserPair.IsOutgoingIndividualPair = dto.IsOutgoingIndividualPair;
+            _allClientPairs[dto.User].UserPair.OtherSupporterStyle = dto.OtherSupporterStyle;
             _allClientPairs[dto.User].UserPair.RemoteClientVersion = dto.RemoteClientVersion;
             _allClientPairs[dto.User].ApplyLastReceivedData();
         }
@@ -853,6 +854,17 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         }
 
         pair.UserPair.OtherAllowsReceivingPenumbraMods = dto.AllowReceivingPenumbraMods;
+        Mediator.Publish(new StructuralRefreshUiMessage());
+    }
+
+    public void UpdateSupporterStyle(UserSupporterStyleDto dto)
+    {
+        if (!_allClientPairs.TryGetValue(dto.User, out var pair))
+        {
+            return;
+        }
+
+        pair.UserPair.OtherSupporterStyle = dto.Style;
         Mediator.Publish(new StructuralRefreshUiMessage());
     }
 
