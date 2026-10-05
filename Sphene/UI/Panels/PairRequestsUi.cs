@@ -45,6 +45,8 @@ public sealed class PairRequestsUi : WindowMediatorSubscriberBase
         });
     }
 
+    protected override bool AppliesOwnThemeScope => true;
+
     public override void PreDraw()
     {
         _themeScope = SpheneCustomTheme.ApplyThemeWithOriginalRadius();

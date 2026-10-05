@@ -308,7 +308,18 @@ public class SettingsUi : WindowMediatorSubscriberBase
         var scale = ImGuiHelpers.GlobalScale;
         var titleBarHeight = (ImGui.GetFrameHeight() + 16f * scale) / scale;
         SpheneWindowChrome.UpdateCollapse(this, "settingsUi", titleBarHeight);
+        // Native resize grip and border ticks must stay invisible; the chrome
+        // helper draws its own themed grip. Hit testing is unaffected.
+        ImGui.PushStyleColor(ImGuiCol.ResizeGrip, Vector4.Zero);
+        ImGui.PushStyleColor(ImGuiCol.ResizeGripHovered, Vector4.Zero);
+        ImGui.PushStyleColor(ImGuiCol.ResizeGripActive, Vector4.Zero);
         base.PreDraw();
+    }
+
+    public override void PostDraw()
+    {
+        ImGui.PopStyleColor(3);
+        base.PostDraw();
     }
 
     protected override void DrawInternal()
@@ -3831,10 +3842,10 @@ public class SettingsUi : WindowMediatorSubscriberBase
         }
         
         
-        var compactChildPadding = theme.CompactChildPadding;
-        if (ImGui.SliderFloat2("Panel Padding", ref compactChildPadding, 0.0f, 20.0f, "%.1f"))
+        var compactWindowPadding = theme.CompactWindowPadding;
+        if (ImGui.SliderFloat2("Panel Padding", ref compactWindowPadding, 0.0f, 20.0f, "%.1f"))
         {
-            theme.CompactChildPadding = compactChildPadding;
+            theme.CompactWindowPadding = compactWindowPadding;
             themeChanged = true;
         }
         
@@ -3903,10 +3914,10 @@ public class SettingsUi : WindowMediatorSubscriberBase
             theme.CompactBorder = compactBorder;
             themeChanged = true;
         }
-        var separator = theme.Separator;
+        var separator = theme.CompactSeparator;
         if (ImGui.ColorEdit4("Separator", ref separator))
         {
-            theme.Separator = separator;
+            theme.CompactSeparator = separator;
             themeChanged = true;
         }
 
@@ -3940,6 +3951,12 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 theme.CompactContextMenuBorderSize = compactContextMenuBorderSize;
                 themeChanged = true;
             }
+            var compactChildPadding = theme.CompactChildPadding;
+            if (ImGui.SliderFloat2("Context Menu Padding", ref compactChildPadding, 0.0f, 20.0f, "%.1f"))
+            {
+                theme.CompactChildPadding = compactChildPadding;
+                themeChanged = true;
+            }
             ImGui.Spacing();
             ImGui.Text("Context Menu Button Style");
             ImGui.Separator();
@@ -3968,7 +3985,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 theme.NotifyThemeChanged();
             }
             ImGui.Separator();
-            var effBtn = ov.Button ?? theme.Button;
+            var effBtn = ov.Button ?? theme.CompactButton;
             if (ImGui.ColorEdit4("Button", ref effBtn))
             {
                 ov.Button = effBtn;
@@ -3980,44 +3997,44 @@ public class SettingsUi : WindowMediatorSubscriberBase
             ImGui.PopFont();
             if (genHoverActive)
             {
-                var tup = ButtonStyleManagerUI.DeriveHoverActive(ov.Button ?? theme.Button);
+                var tup = ButtonStyleManagerUI.DeriveHoverActive(ov.Button ?? theme.CompactButton);
                 ov.ButtonHovered = tup.Hover;
                 ov.ButtonActive = tup.Active;
                 theme.NotifyThemeChanged();
             }
             if (ImGui.IsItemHovered())
                 UiSharedService.AttachToolTip("Generate Hover/Active colors from current Button color.");
-            var effBtnH = ov.ButtonHovered ?? theme.ButtonHovered;
+            var effBtnH = ov.ButtonHovered ?? theme.CompactButtonHovered;
             if (ImGui.ColorEdit4("Button Hovered", ref effBtnH))
             {
                 ov.ButtonHovered = effBtnH;
                 theme.NotifyThemeChanged();
             }
-            var effBtnA = ov.ButtonActive ?? theme.ButtonActive;
+            var effBtnA = ov.ButtonActive ?? theme.CompactButtonActive;
             if (ImGui.ColorEdit4("Button Active", ref effBtnA))
             {
                 ov.ButtonActive = effBtnA;
                 theme.NotifyThemeChanged();
             }
-            var effIcon = ov.Icon ?? theme.TextPrimary;
+            var effIcon = ov.Icon ?? theme.CompactText;
             if (ImGui.ColorEdit4("Icon", ref effIcon))
             {
                 ov.Icon = effIcon;
                 theme.NotifyThemeChanged();
             }
-            var effTxt = ov.Text ?? theme.TextPrimary;
+            var effTxt = ov.Text ?? theme.CompactText;
             if (ImGui.ColorEdit4("Text", ref effTxt))
             {
                 ov.Text = effTxt;
                 theme.NotifyThemeChanged();
             }
-            var effBorder = ov.Border ?? theme.Border;
+            var effBorder = ov.Border ?? theme.CompactBorder;
             if (ImGui.ColorEdit4("Border", ref effBorder))
             {
                 ov.Border = effBorder;
                 theme.NotifyThemeChanged();
             }
-            var effBorderSize = ov.BorderSize ?? theme.FrameBorderSize;
+            var effBorderSize = ov.BorderSize ?? theme.CompactFrameBorderSize;
             if (ImGui.SliderFloat("Border Width", ref effBorderSize, 0f, 5f, "%.1f"))
             {
                 ov.BorderSize = effBorderSize;

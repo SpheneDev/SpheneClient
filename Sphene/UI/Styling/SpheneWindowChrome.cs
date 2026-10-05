@@ -218,7 +218,7 @@ public static class SpheneWindowChrome
 
         WindowSurfaceGradient(out var topColor, out var bottomColor);
         DrawVerticalFade(drawList, min + inset, max - inset, topColor, bottomColor,
-            innerRounding, roundTop: true, roundBottom: true);
+            innerRounding, innerRounding, innerRounding, innerRounding);
     }
 
     private static void WindowSurfaceGradient(out Vector4 topColor, out Vector4 bottomColor)
@@ -435,7 +435,7 @@ public static class SpheneWindowChrome
             }
             else
             {
-                ImGui.PushClipRect(min + new Vector2(0f, state.TopInset), max, false);
+                ImGui.PushClipRect(min + new Vector2(0f, state.TopInset), max, true);
                 state.ClipPushed = true;
             }
         }
@@ -482,8 +482,37 @@ public static class SpheneWindowChrome
             {
                 DrawGripCorner(state.ParentMax, state);
             }
+            RedrawWindowBorder(min, max, state.ParentMin, state.ParentMax, cornerTolerance);
         }
         ImGui.EndChild();
+    }
+
+    /// <summary>
+    /// Re-strokes the parent window border when a scroll area reaches a window
+    /// edge. Fades and overlays draw after ImGui's own border pass, so a fresh
+    /// stroke on top keeps the border visually dominant at every edge.
+    /// </summary>
+    private static void RedrawWindowBorder(Vector2 min, Vector2 max,
+        Vector2 parentMin, Vector2 parentMax, float tolerance)
+    {
+        var style = ImGui.GetStyle();
+        var borderSize = MathF.Max(style.WindowBorderSize, 0f);
+        if (borderSize <= 0f)
+            return;
+        var reach = borderSize + tolerance;
+        var touchesEdge = min.X <= parentMin.X + reach
+            || min.Y <= parentMin.Y + reach
+            || parentMax.X - max.X <= reach
+            || parentMax.Y - max.Y <= reach;
+        if (!touchesEdge)
+            return;
+        // Window draw list keeps this in the window's z-order so overlapping
+        // windows cover it; the explicit clip reaches past the child bounds.
+        ImGui.PushClipRect(parentMin, parentMax, false);
+        ImGui.GetWindowDrawList().AddRect(parentMin, parentMax,
+            ImGui.GetColorU32(ImGuiCol.Border), style.WindowRounding,
+            ImDrawFlags.None, borderSize);
+        ImGui.PopClipRect();
     }
 
     private static void GetScrollInsets(bool border, out float insetX, out float insetY)
@@ -506,19 +535,20 @@ public static class SpheneWindowChrome
         float scrollMaxY, bool border, float topInset, Vector2 parentMin, Vector2 parentMax,
         Vector4? fadeBaseColor)
     {
-        var canScrollUp = scrollY > ScrollFadeDeadZone;
-        var canScrollDown = scrollMaxY - scrollY > ScrollFadeDeadZone;
-        if (!canScrollUp && !canScrollDown)
+        var scale = ImGuiHelpers.GlobalScale;
+        // Fade strength: 1 while far from the end, shrinks to 0 as the edge
+        // approaches so the band narrows and its opaque lip dissolves softly.
+        var fadeRange = ScrollFadeHeight * scale;
+        var upStrength = Math.Clamp(scrollY / fadeRange, 0f, 1f);
+        var downStrength = Math.Clamp((scrollMaxY - scrollY) / fadeRange, 0f, 1f);
+        if (upStrength <= 0f && downStrength <= 0f)
             return;
 
         var drawList = ImGui.GetWindowDrawList();
-        var scale = ImGuiHelpers.GlobalScale;
         var style = ImGui.GetStyle();
         var fadeHeight = MathF.Min(ScrollFadeHeight * scale, (max.Y - min.Y) * 0.3f);
         var baseColor = fadeBaseColor ?? style.Colors[(int)ImGuiCol.WindowBg];
-        var opaqueColor = new Vector4(baseColor.X, baseColor.Y, baseColor.Z, ScrollFadeMaxAlpha);
         var transparentColor = new Vector4(baseColor.X, baseColor.Y, baseColor.Z, 0f);
-        var hintColor = ImGui.ColorConvertFloat4ToU32(new Vector4(1f, 1f, 1f, ScrollHintChevronAlpha));
         var chevronSize = ScrollHintChevronSize * scale;
 
         var edgeInset = border ? style.ChildBorderSize + 1f * scale : 0f;
@@ -534,41 +564,77 @@ public static class SpheneWindowChrome
         if (innerMax.X <= inner.X || innerMax.Y <= inner.Y)
             return;
         var centerX = inner.X + (innerMax.X - inner.X) * 0.5f;
-        var cornerRadius = border ? MathF.Max(0f, style.ChildRounding - edgeInset) : 0f;
+        var childRadius = border ? MathF.Max(0f, style.ChildRounding - edgeInset) : 0f;
+        var windowRadius = MathF.Max(0f, style.WindowRounding - outerBorder);
+
+        // A fade reaching the window's inner edge must hug the window's corner
+        // arcs so it never paints over the border or outside the silhouette.
+        var edgeTol = 1.5f * scale;
+        var touchTop = inner.Y <= parentMin.Y + outerBorder + edgeTol;
+        var touchBottom = innerMax.Y >= parentMax.Y - outerBorder - edgeTol;
+        var touchLeft = inner.X <= parentMin.X + outerBorder + edgeTol;
+        var touchRight = innerMax.X >= parentMax.X - outerBorder - edgeTol;
+
+        var childTopRadius = border && topInset <= 0f ? childRadius : 0f;
+        var childBottomRadius = border ? childRadius : 0f;
+        var topLeftRadius = MathF.Max(childTopRadius, touchTop && touchLeft ? windowRadius : 0f);
+        var topRightRadius = MathF.Max(childTopRadius, touchTop && touchRight ? windowRadius : 0f);
+        var bottomLeftRadius = MathF.Max(childBottomRadius, touchBottom && touchLeft ? windowRadius : 0f);
+        var bottomRightRadius = MathF.Max(childBottomRadius, touchBottom && touchRight ? windowRadius : 0f);
 
         drawList.PushClipRect(inner, innerMax, border);
 
-        if (canScrollUp)
+        if (upStrength > 0f)
         {
-            DrawVerticalFade(drawList, inner, new Vector2(innerMax.X, inner.Y + fadeHeight),
-                opaqueColor, transparentColor, cornerRadius, roundTop: border && topInset <= 0f, roundBottom: false);
-            DrawScrollHintPill(drawList, centerX, inner.Y, chevronSize, hintColor, pointsUp: true);
+            var height = fadeHeight * SmoothStep(upStrength);
+            var opaque = FadeLip(baseColor, upStrength);
+            var hint = ImGui.ColorConvertFloat4ToU32(new Vector4(1f, 1f, 1f, ScrollHintChevronAlpha * upStrength));
+            DrawVerticalFade(drawList, inner, new Vector2(innerMax.X, inner.Y + height),
+                opaque, transparentColor, topLeftRadius, topRightRadius, 0f, 0f);
+            DrawScrollHintPill(drawList, centerX, inner.Y, chevronSize, hint, pointsUp: true);
         }
 
-        if (canScrollDown)
+        if (downStrength > 0f)
         {
-            DrawVerticalFade(drawList, new Vector2(inner.X, innerMax.Y - fadeHeight), innerMax,
-                transparentColor, opaqueColor, cornerRadius, roundTop: false, roundBottom: border);
-            DrawScrollHintPill(drawList, centerX, innerMax.Y, chevronSize, hintColor, pointsUp: false);
+            var height = fadeHeight * SmoothStep(downStrength);
+            var opaque = FadeLip(baseColor, downStrength);
+            var hint = ImGui.ColorConvertFloat4ToU32(new Vector4(1f, 1f, 1f, ScrollHintChevronAlpha * downStrength));
+            DrawVerticalFade(drawList, new Vector2(inner.X, innerMax.Y - height), innerMax,
+                transparentColor, opaque, 0f, 0f, bottomLeftRadius, bottomRightRadius);
+            DrawScrollHintPill(drawList, centerX, innerMax.Y, chevronSize, hint, pointsUp: false);
         }
 
         drawList.PopClipRect();
     }
 
+    private static float SmoothStep(float t) => t * t * (3f - 2f * t);
+
     /// <summary>
-    /// Fills a vertical gradient band. When a corner zone is rounded, the band is
-    /// drawn as horizontal strips whose inset follows the circle so the fade hugs
-    /// the child rounding instead of stopping short of it.
+    /// Opaque lip color for a scroll fade. Stays fully solid until the last
+    /// third of the shrink range, then dissolves so the band disappears
+    /// without a hard pop at the scroll boundary.
+    /// </summary>
+    private static Vector4 FadeLip(Vector4 baseColor, float strength)
+    {
+        var alpha = ScrollFadeMaxAlpha * Math.Clamp(strength / 0.35f, 0f, 1f);
+        return new Vector4(baseColor.X, baseColor.Y, baseColor.Z, alpha);
+    }
+
+    /// <summary>
+    /// Fills a vertical gradient band. Corners with a radius are drawn as
+    /// horizontal strips whose per-side inset follows the circle so the fade
+    /// hugs the rounding instead of stopping short of it or painting past it.
     /// </summary>
     private static void DrawVerticalFade(ImDrawListPtr drawList, Vector2 min, Vector2 max,
-        Vector4 topColor, Vector4 bottomColor, float cornerRadius, bool roundTop, bool roundBottom)
+        Vector4 topColor, Vector4 bottomColor,
+        float topLeftRadius, float topRightRadius, float bottomLeftRadius, float bottomRightRadius)
     {
         var height = max.Y - min.Y;
         if (height <= 0f || max.X - min.X <= 0f)
             return;
 
-        var topZone = roundTop ? MathF.Min(cornerRadius, height * 0.5f) : 0f;
-        var bottomZone = roundBottom ? MathF.Min(cornerRadius, height - topZone) : 0f;
+        var topZone = MathF.Min(MathF.Max(topLeftRadius, topRightRadius), height * 0.5f);
+        var bottomZone = MathF.Min(MathF.Max(bottomLeftRadius, bottomRightRadius), height - topZone);
         var midMaxY = max.Y - bottomZone;
         var topSegments = Math.Clamp((int)MathF.Ceiling(topZone), 4, 48);
         var bottomSegments = Math.Clamp((int)MathF.Ceiling(bottomZone), 4, 48);
@@ -577,32 +643,34 @@ public static class SpheneWindowChrome
         {
             var y0 = min.Y + topZone * i / topSegments;
             var y1 = min.Y + topZone * (i + 1) / topSegments;
+            var d = (y0 + y1) * 0.5f - min.Y;
             FadeStrip(drawList, min, max, y0, y1,
-                CircleInsetX(cornerRadius, (y0 + y1) * 0.5f - min.Y), topColor, bottomColor);
+                CircleInsetX(topLeftRadius, d), CircleInsetX(topRightRadius, d), topColor, bottomColor);
         }
         if (midMaxY > min.Y + topZone)
         {
-            FadeStrip(drawList, min, max, min.Y + topZone, midMaxY, 0f, topColor, bottomColor);
+            FadeStrip(drawList, min, max, min.Y + topZone, midMaxY, 0f, 0f, topColor, bottomColor);
         }
         for (var i = 0; i < bottomSegments && bottomZone > 0f; i++)
         {
             var y0 = midMaxY + bottomZone * i / bottomSegments;
             var y1 = midMaxY + bottomZone * (i + 1) / bottomSegments;
+            var d = max.Y - (y0 + y1) * 0.5f;
             FadeStrip(drawList, min, max, y0, y1,
-                CircleInsetX(cornerRadius, max.Y - (y0 + y1) * 0.5f), topColor, bottomColor);
+                CircleInsetX(bottomLeftRadius, d), CircleInsetX(bottomRightRadius, d), topColor, bottomColor);
         }
     }
 
     private static void FadeStrip(ImDrawListPtr drawList, Vector2 min, Vector2 max,
-        float y0, float y1, float inset, Vector4 topColor, Vector4 bottomColor)
+        float y0, float y1, float insetLeft, float insetRight, Vector4 topColor, Vector4 bottomColor)
     {
         var height = max.Y - min.Y;
         var c0 = ImGui.ColorConvertFloat4ToU32(
             Vector4.Lerp(topColor, bottomColor, (y0 - min.Y) / height));
         var c1 = ImGui.ColorConvertFloat4ToU32(
             Vector4.Lerp(topColor, bottomColor, (y1 - min.Y) / height));
-        drawList.AddRectFilledMultiColor(new Vector2(min.X + inset, y0),
-            new Vector2(max.X - inset, y1), c0, c0, c1, c1);
+        drawList.AddRectFilledMultiColor(new Vector2(min.X + insetLeft, y0),
+            new Vector2(max.X - insetRight, y1), c0, c0, c1, c1);
     }
 
     private static float CircleInsetX(float radius, float distanceFromEdge)
@@ -768,13 +836,13 @@ public static class SpheneWindowChrome
 
     /// <summary>
     /// Stamps the window's bottom-right corner with a background triangle on the
-    /// foreground draw list so the native resize grip is fully hidden, then draws a
-    /// themed grip on top with hover/active feedback. The real ImGui resize hit test
-    /// stays functional underneath.
+    /// window draw list so the native resize grip is fully hidden, then draws a
+    /// themed grip on top with hover/active feedback. The real ImGui resize hit
+    /// test stays functional underneath.
     /// </summary>
     private static void DrawGripCorner(Vector2 corner, ScrollAreaState state)
     {
-        var drawList = ImGui.GetForegroundDrawList();
+        var drawList = ImGui.GetWindowDrawList();
         var scale = ImGuiHelpers.GlobalScale;
         var style = ImGui.GetStyle();
         var gripSize = ImGui.GetFontSize() * ScrollFadeResizeGripScale;
@@ -802,8 +870,10 @@ public static class SpheneWindowChrome
         var t = state.GripAnim;
 
         var normal = style.Colors[(int)ImGuiCol.ResizeGrip];
-        var hover = style.Colors[(int)ImGuiCol.ResizeGripHovered];
-        var active = style.Colors[(int)ImGuiCol.ResizeGripActive];
+        // Hover/active are derived instead of read: scopes may hide the native
+        // variants (alpha 0) to suppress ImGui's border-resize ticks.
+        var hover = GripHighlight(normal, 0.18f);
+        var active = GripHighlight(normal, 0.34f);
         var background = style.Colors[(int)ImGuiCol.WindowBg];
 
         drawList.PushClipRect(corner - new Vector2(stampSize, stampSize) - new Vector2(1f, 1f),
@@ -833,6 +903,15 @@ public static class SpheneWindowChrome
             corner + new Vector2(-b, -cornerSize), color);
 
         drawList.PopClipRect();
+    }
+
+    private static Vector4 GripHighlight(Vector4 baseColor, float lift)
+    {
+        return new Vector4(
+            MathF.Min(baseColor.X + lift, 1f),
+            MathF.Min(baseColor.Y + lift, 1f),
+            MathF.Min(baseColor.Z + lift, 1f),
+            baseColor.W);
     }
 
     private static void DrawScrollHintPill(ImDrawListPtr drawList, float centerX, float edgeY,

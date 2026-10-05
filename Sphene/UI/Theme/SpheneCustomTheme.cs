@@ -455,6 +455,8 @@ public static class SpheneCustomTheme
     
     private sealed class OriginalRadiusThemeScope : IDisposable
     {
+        private static Vector4 TransparentCopy(Vector4 color) => new(color.X, color.Y, color.Z, 0f);
+
         private int _colorsPushed = 0;
         private int _stylesPushed = 0;
         private bool _disposed;
@@ -471,20 +473,20 @@ public static class SpheneCustomTheme
             PushColor(ImGuiCol.ChildBg, SpheneCustomTheme.CurrentTheme.CompactChildBg);
             PushColor(ImGuiCol.PopupBg, SpheneCustomTheme.CurrentTheme.CompactPopupBg);
             PushColor(ImGuiCol.Border, SpheneCustomTheme.CurrentTheme.CompactBorder);
-            PushColor(ImGuiCol.BorderShadow, SpheneCustomTheme.CurrentTheme.BorderShadow);
-            
+            PushColor(ImGuiCol.BorderShadow, SpheneCustomTheme.CurrentTheme.CompactBorderShadow);
+
             // Title bar - using CompactUI specific title colors
             PushColor(ImGuiCol.TitleBg, SpheneCustomTheme.CurrentTheme.CompactTitleBg);
             PushColor(ImGuiCol.TitleBgActive, SpheneCustomTheme.CurrentTheme.CompactTitleBgActive);
-            PushColor(ImGuiCol.TitleBgCollapsed, SpheneCustomTheme.CurrentTheme.TitleBgCollapsed);
-            
+            PushColor(ImGuiCol.TitleBgCollapsed, SpheneCustomTheme.CurrentTheme.CompactTitleBgCollapsed);
+
             // Menu Bar
-            PushColor(ImGuiCol.MenuBarBg, SpheneCustomTheme.CurrentTheme.MenuBarBg);
-            
+            PushColor(ImGuiCol.MenuBarBg, SpheneCustomTheme.CurrentTheme.CompactMenuBarBg);
+
             // Text - using CompactUI specific text colors
             PushColor(ImGuiCol.Text, SpheneCustomTheme.CurrentTheme.CompactText);
             PushColor(ImGuiCol.TextDisabled, SpheneCustomTheme.CurrentTheme.CompactTextSecondary);
-            PushColor(ImGuiCol.TextSelectedBg, SpheneCustomTheme.CurrentTheme.TextSelectedBg);
+            PushColor(ImGuiCol.TextSelectedBg, SpheneCustomTheme.CurrentTheme.CompactTextSelectedBg);
             
             // Buttons - using CompactUI specific button colors
             PushColor(ImGuiCol.Button, SpheneCustomTheme.CurrentTheme.CompactButton);
@@ -502,52 +504,55 @@ public static class SpheneCustomTheme
             PushColor(ImGuiCol.FrameBgActive, SpheneCustomTheme.CurrentTheme.CompactActive);
             
             // Scrollbars
-            PushColor(ImGuiCol.ScrollbarBg, SpheneCustomTheme.CurrentTheme.ScrollbarBg);
+            PushColor(ImGuiCol.ScrollbarBg, SpheneCustomTheme.CurrentTheme.CompactScrollbarBg);
             PushColor(ImGuiCol.ScrollbarGrab, SpheneCustomTheme.CurrentTheme.CompactAccent);
             PushColor(ImGuiCol.ScrollbarGrabHovered, SpheneCustomTheme.CurrentTheme.CompactHover);
             PushColor(ImGuiCol.ScrollbarGrabActive, SpheneCustomTheme.CurrentTheme.CompactActive);
-            
+
             // Check marks - using CompactUI accent
             PushColor(ImGuiCol.CheckMark, SpheneCustomTheme.CurrentTheme.CompactAccent);
-            
+
             // Sliders
             PushColor(ImGuiCol.SliderGrab, SpheneCustomTheme.CurrentTheme.CompactAccent);
             PushColor(ImGuiCol.SliderGrabActive, SpheneCustomTheme.CurrentTheme.CompactActive);
-            
+
             // Separators
-            PushColor(ImGuiCol.Separator, SpheneCustomTheme.CurrentTheme.Separator);
-            PushColor(ImGuiCol.SeparatorHovered, SpheneCustomTheme.CurrentTheme.SeparatorHovered);
-            PushColor(ImGuiCol.SeparatorActive, SpheneCustomTheme.CurrentTheme.SeparatorActive);
-            
-            // Resize grip
+            PushColor(ImGuiCol.Separator, SpheneCustomTheme.CurrentTheme.CompactSeparator);
+            // Hover/active stay transparent: these colors also drive ImGui's
+            // native border-resize ticks which must not show on the panel.
+            PushColor(ImGuiCol.SeparatorHovered, TransparentCopy(SpheneCustomTheme.CurrentTheme.CompactSeparatorHovered));
+            PushColor(ImGuiCol.SeparatorActive, TransparentCopy(SpheneCustomTheme.CurrentTheme.CompactSeparatorActive));
+
+            // Resize grip: base color stays themed so the custom corner grip can
+            // read it; hover/active stay transparent to hide the native ticks.
             PushColor(ImGuiCol.ResizeGrip, SpheneCustomTheme.CurrentTheme.CompactAccent);
-            PushColor(ImGuiCol.ResizeGripHovered, SpheneCustomTheme.CurrentTheme.CompactHover);
-            PushColor(ImGuiCol.ResizeGripActive, SpheneCustomTheme.CurrentTheme.CompactActive);
-            
+            PushColor(ImGuiCol.ResizeGripHovered, TransparentCopy(SpheneCustomTheme.CurrentTheme.CompactHover));
+            PushColor(ImGuiCol.ResizeGripActive, TransparentCopy(SpheneCustomTheme.CurrentTheme.CompactActive));
+
             // Tabs
-            PushColor(ImGuiCol.Tab, SpheneCustomTheme.CurrentTheme.Tab);
+            PushColor(ImGuiCol.Tab, SpheneCustomTheme.CurrentTheme.CompactTab);
             PushColor(ImGuiCol.TabHovered, SpheneCustomTheme.CurrentTheme.CompactHover);
             PushColor(ImGuiCol.TabActive, SpheneCustomTheme.CurrentTheme.CompactAccent);
-            PushColor(ImGuiCol.TabUnfocused, SpheneCustomTheme.CurrentTheme.TabUnfocused);
-            PushColor(ImGuiCol.TabUnfocusedActive, SpheneCustomTheme.CurrentTheme.TabUnfocusedActive);
-            
+            PushColor(ImGuiCol.TabUnfocused, SpheneCustomTheme.CurrentTheme.CompactTabUnfocused);
+            PushColor(ImGuiCol.TabUnfocusedActive, SpheneCustomTheme.CurrentTheme.CompactTabUnfocusedActive);
+
             // Table
-            PushColor(ImGuiCol.TableHeaderBg, SpheneCustomTheme.CurrentTheme.TableHeaderBg);
+            PushColor(ImGuiCol.TableHeaderBg, SpheneCustomTheme.CurrentTheme.CompactTableHeaderBg);
             PushColor(ImGuiCol.TableBorderStrong, SpheneCustomTheme.CurrentTheme.CompactBorder);
             PushColor(ImGuiCol.TableBorderLight, SpheneCustomTheme.CurrentTheme.CompactBorder);
-            PushColor(ImGuiCol.TableRowBg, SpheneCustomTheme.CurrentTheme.TableRowBg);
-            PushColor(ImGuiCol.TableRowBgAlt, SpheneCustomTheme.CurrentTheme.TableRowBgAlt);
-            
+            PushColor(ImGuiCol.TableRowBg, SpheneCustomTheme.CurrentTheme.CompactTableRowBg);
+            PushColor(ImGuiCol.TableRowBgAlt, SpheneCustomTheme.CurrentTheme.CompactTableRowBgAlt);
+
             // Drag Drop
-            PushColor(ImGuiCol.DragDropTarget, SpheneCustomTheme.CurrentTheme.DragDropTarget);
-            
+            PushColor(ImGuiCol.DragDropTarget, SpheneCustomTheme.CurrentTheme.CompactDragDropTarget);
+
             // Navigation
             PushColor(ImGuiCol.NavHighlight, SpheneCustomTheme.CurrentTheme.CompactAccent);
-            PushColor(ImGuiCol.NavWindowingHighlight, SpheneCustomTheme.CurrentTheme.NavWindowingHighlight);
-            PushColor(ImGuiCol.NavWindowingDimBg, SpheneCustomTheme.CurrentTheme.NavWindowingDimBg);
-            
+            PushColor(ImGuiCol.NavWindowingHighlight, SpheneCustomTheme.CurrentTheme.CompactNavWindowingHighlight);
+            PushColor(ImGuiCol.NavWindowingDimBg, SpheneCustomTheme.CurrentTheme.CompactNavWindowingDimBg);
+
             // Modal
-            PushColor(ImGuiCol.ModalWindowDimBg, SpheneCustomTheme.CurrentTheme.ModalWindowDimBg);
+            PushColor(ImGuiCol.ModalWindowDimBg, SpheneCustomTheme.CurrentTheme.CompactModalWindowDimBg);
             
             // Note: Tooltips use WindowRounding, so we apply CompactTooltipRounding to WindowRounding
             // We no longer use Math.Max here - let window rounding be independent from tooltip rounding
@@ -555,18 +560,17 @@ public static class SpheneCustomTheme
             PushStyleVar(ImGuiStyleVar.ChildRounding, SpheneCustomTheme.CurrentTheme.CompactChildRounding);
             PushStyleVar(ImGuiStyleVar.FrameRounding, SpheneCustomTheme.CurrentTheme.CompactFrameRounding);
             // PopupRounding is used for other popup elements (not tooltips)
-            PushStyleVar(ImGuiStyleVar.PopupRounding, SpheneCustomTheme.CurrentTheme.CompactWindowRounding);
+            PushStyleVar(ImGuiStyleVar.PopupRounding, SpheneCustomTheme.CurrentTheme.CompactPopupRounding);
             PushStyleVar(ImGuiStyleVar.ScrollbarRounding, SpheneCustomTheme.CurrentTheme.CompactScrollbarRounding);
             PushStyleVar(ImGuiStyleVar.GrabRounding, SpheneCustomTheme.CurrentTheme.CompactGrabRounding);
             PushStyleVar(ImGuiStyleVar.TabRounding, SpheneCustomTheme.CurrentTheme.CompactTabRounding);
             
             PushStyleVar(ImGuiStyleVar.WindowBorderSize, SpheneCustomTheme.CurrentTheme.CompactWindowBorderSize);
             PushStyleVar(ImGuiStyleVar.ChildBorderSize, SpheneCustomTheme.CurrentTheme.CompactChildBorderSize);
-            // Use CompactUI-specific tooltip border size for popups (tooltips use popup styling)
-            PushStyleVar(ImGuiStyleVar.PopupBorderSize, SpheneCustomTheme.CurrentTheme.CompactTooltipBorderSize);
+            PushStyleVar(ImGuiStyleVar.PopupBorderSize, SpheneCustomTheme.CurrentTheme.CompactPopupBorderSize);
             PushStyleVar(ImGuiStyleVar.FrameBorderSize, SpheneCustomTheme.CurrentTheme.CompactFrameBorderSize);
             
-            PushStyleVar(ImGuiStyleVar.WindowPadding, SpheneCustomTheme.CurrentTheme.CompactChildPadding);
+            PushStyleVar(ImGuiStyleVar.WindowPadding, SpheneCustomTheme.CurrentTheme.CompactWindowPadding);
             PushStyleVar(ImGuiStyleVar.FramePadding, SpheneCustomTheme.CurrentTheme.CompactFramePadding);
             PushStyleVar(ImGuiStyleVar.ItemSpacing, SpheneCustomTheme.CurrentTheme.CompactItemSpacing);
             PushStyleVar(ImGuiStyleVar.ItemInnerSpacing, SpheneCustomTheme.CurrentTheme.CompactItemInnerSpacing);
@@ -624,11 +628,18 @@ public static class SpheneCustomTheme
             // we push our values on top of any existing values to ensure they take precedence.
             PushStyleVar(ImGuiStyleVar.PopupRounding, SpheneCustomTheme.CurrentTheme.CompactContextMenuRounding);
             PushStyleVar(ImGuiStyleVar.PopupBorderSize, SpheneCustomTheme.CurrentTheme.CompactContextMenuBorderSize);
-            
+            PushStyleVar(ImGuiStyleVar.WindowPadding, SpheneCustomTheme.CurrentTheme.CompactChildPadding);
+
             // Also apply frame rounding for menu items within the context menu
             PushStyleVar(ImGuiStyleVar.FrameRounding, SpheneCustomTheme.CurrentTheme.CompactFrameRounding);
         }
-        
+
+        private void PushStyleVar(ImGuiStyleVar styleVar, Vector2 value)
+        {
+            ImGui.PushStyleVar(styleVar, value);
+            _stylesPushed++;
+        }
+
         private void PushStyleVar(ImGuiStyleVar styleVar, float value)
         {
             ImGui.PushStyleVar(styleVar, value);

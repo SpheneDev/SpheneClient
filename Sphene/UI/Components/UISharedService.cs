@@ -1911,7 +1911,7 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
     {
         // Draw label first
         ImGui.AlignTextToFramePadding();
-        using var textColor = ImRaii.PushColor(ImGuiCol.Text, ImGui.ColorConvertFloat4ToU32(SpheneCustomTheme.CurrentTheme.TextPrimary));
+        using var textColor = ImRaii.PushColor(ImGuiCol.Text, ImGui.ColorConvertFloat4ToU32(SpheneCustomTheme.CurrentTheme.CompactText));
         ImGui.TextUnformatted(label);
         
         // Use theme-configured size and call the main implementation
@@ -1970,7 +1970,7 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
     public static void DrawTransmissionBar(string label, float progress, string? overlay = null, bool? isUpload = null)
     {
         ImGui.AlignTextToFramePadding();
-        using var textColor = ImRaii.PushColor(ImGuiCol.Text, ImGui.ColorConvertFloat4ToU32(SpheneCustomTheme.CurrentTheme.TextPrimary));
+        using var textColor = ImRaii.PushColor(ImGuiCol.Text, ImGui.ColorConvertFloat4ToU32(SpheneCustomTheme.CurrentTheme.CompactText));
         ImGui.TextUnformatted(label);
         var theme = SpheneCustomTheme.CurrentTheme;
         var width = theme.AutoTransmissionBarWidth ? Math.Max(50.0f, ImGui.GetContentRegionAvail().X) : theme.CompactTransmissionBarWidth;
@@ -2040,7 +2040,7 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
         var border = theme.SeparateTransmissionBarStyles && isUpload.HasValue
             ? (isUpload.Value ? theme.UploadTransmissionBarBorder : theme.DownloadTransmissionBarBorder)
             : theme.CompactTransmissionBarBorder;
-        drawList.AddRect(pos, endPos, ImGui.ColorConvertFloat4ToU32(border), borderRadius, ImDrawFlags.RoundCornersAll, theme.FrameBorderSize);
+        drawList.AddRect(pos, endPos, ImGui.ColorConvertFloat4ToU32(border), borderRadius, ImDrawFlags.RoundCornersAll, theme.CompactFrameBorderSize);
 
         if (!string.IsNullOrEmpty(overlay))
         {

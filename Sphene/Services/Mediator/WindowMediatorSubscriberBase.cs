@@ -38,8 +38,20 @@ public abstract class WindowMediatorSubscriberBase : Window, IMediatorSubscriber
         GC.SuppressFinalize(this);
     }
 
+    /// <summary>
+    /// Windows that push their own theme scope in <see cref="Window.PreDraw"/>
+    /// (e.g. CompactUI) must not have the general window theme layered on top
+    /// during <see cref="DrawInternal"/>.
+    /// </summary>
+    protected virtual bool AppliesOwnThemeScope => false;
+
     public override void Draw()
     {
+        if (AppliesOwnThemeScope)
+        {
+            _performanceCollectorService.LogPerformance(this, $"Draw", DrawInternal);
+            return;
+        }
         using var themeScope = SpheneCustomTheme.ApplyThemeForWindow();
         _performanceCollectorService.LogPerformance(this, $"Draw", DrawInternal);
     }

@@ -277,6 +277,27 @@ public class ThemeConfiguration
     public Vector4 CompactVisibleText { get; set; } = new(0.6f, 0.9f, 0.6f, 1.0f); // Light green for "Visible" text
     public Vector4 CompactPairsText { get; set; } = new(0.8f, 0.8f, 1.0f, 1.0f); // Light blue for "Pairs" text
     
+    // CompactUI-only overrides for colors that normally come from the general theme.
+    // Defaults mirror the general-theme values so the default look stays identical.
+    public Vector4 CompactBorderShadow { get; set; } = new(0.0f, 0.0f, 0.0f, 0.0f);
+    public Vector4 CompactTitleBgCollapsed { get; set; } = new(0.0f, 0.0f, 0.0f, 0.51f);
+    public Vector4 CompactMenuBarBg { get; set; } = new(0.14f, 0.14f, 0.14f, 1.0f);
+    public Vector4 CompactTextSelectedBg { get; set; } = new(0.26f, 0.59f, 0.98f, 0.35f);
+    public Vector4 CompactScrollbarBg { get; set; } = new(0.02f, 0.02f, 0.02f, 0.53f);
+    public Vector4 CompactSeparator { get; set; } = new(0.43f, 0.43f, 0.50f, 0.50f);
+    public Vector4 CompactSeparatorHovered { get; set; } = new(0.10f, 0.40f, 0.75f, 0.78f);
+    public Vector4 CompactSeparatorActive { get; set; } = new(0.10f, 0.40f, 0.75f, 1.00f);
+    public Vector4 CompactTab { get; set; } = new(0.18f, 0.35f, 0.58f, 0.86f);
+    public Vector4 CompactTabUnfocused { get; set; } = new(0.07f, 0.10f, 0.15f, 0.97f);
+    public Vector4 CompactTabUnfocusedActive { get; set; } = new(0.14f, 0.26f, 0.42f, 1.0f);
+    public Vector4 CompactTableHeaderBg { get; set; } = new(0.19f, 0.19f, 0.20f, 1.0f);
+    public Vector4 CompactTableRowBg { get; set; } = new(0.0f, 0.0f, 0.0f, 0.0f);
+    public Vector4 CompactTableRowBgAlt { get; set; } = new(1.0f, 1.0f, 1.0f, 0.06f);
+    public Vector4 CompactDragDropTarget { get; set; } = new(1.0f, 1.0f, 0.0f, 0.90f);
+    public Vector4 CompactNavWindowingHighlight { get; set; } = new(1.0f, 1.0f, 1.0f, 0.70f);
+    public Vector4 CompactNavWindowingDimBg { get; set; } = new(0.80f, 0.80f, 0.80f, 0.20f);
+    public Vector4 CompactModalWindowDimBg { get; set; } = new(0.80f, 0.80f, 0.80f, 0.35f);
+
     // CompactUI Header Settings
     public bool CompactShowImGuiHeader { get; set; } = false; // Show ImGui header instead of custom header
     
