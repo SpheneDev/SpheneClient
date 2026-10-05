@@ -126,6 +126,12 @@ public class ThemeConfiguration
     [JsonIgnore]
     public float TransmissionPreviewDownloadFill { get; set; } = 40.0f; // 0-100%
     
+    // Window Background Blur (Dalamud blur-behind, main viewport only)
+    public bool EnableWindowBlur { get; set; } = true;
+    public float WindowBlurStrength { get; set; } = 0.05f;
+    public bool CompactEnableWindowBlur { get; set; } = true;
+    public float CompactWindowBlurStrength { get; set; } = 0.05f;
+
     // Border Settings
     public float WindowBorderSize { get; set; } = 0f;
     public float ChildBorderSize { get; set; } = 0f;

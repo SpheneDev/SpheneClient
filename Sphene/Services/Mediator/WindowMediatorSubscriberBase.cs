@@ -1,4 +1,5 @@
 using Dalamud.Interface.Windowing;
+using Sphene.UI.Styling;
 using Sphene.UI.Theme;
 using Microsoft.Extensions.Logging;
 using System;
@@ -53,6 +54,7 @@ public abstract class WindowMediatorSubscriberBase : Window, IMediatorSubscriber
             return;
         }
         using var themeScope = SpheneCustomTheme.ApplyThemeForWindow();
+        SpheneWindowChrome.DrawThemedWindowBlur();
         _performanceCollectorService.LogPerformance(this, $"Draw", DrawInternal);
     }
 

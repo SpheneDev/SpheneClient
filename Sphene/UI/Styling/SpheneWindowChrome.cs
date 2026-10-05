@@ -5,6 +5,7 @@ using Dalamud.Interface.Utility;
 using Dalamud.Interface.Utility.Raii;
 using Dalamud.Interface.Windowing;
 using Sphene.UI.Components;
+using Sphene.UI.Theme;
 using System.Numerics;
 
 namespace Sphene.UI.Styling;
@@ -52,6 +53,10 @@ public static class SpheneWindowChrome
     private const float ScrollHintBounceSpeed = 2.2f;
     private const float ScrollFadeResizeGripScale = 1.35f;
 
+    private const float WindowBlurMaxStrength = 14f;
+    private const float WindowBlurNoiseOpacity = 0f;
+    private static readonly Vector4 WindowBlurTint = new(0.02f, 0.02f, 0.03f, 0.08f);
+
     /// <summary>
     /// Standard horizontal inner spacing for scroll areas created with noPadding.
     /// Applied automatically as a left indent; edge-bleed elements must respect the
@@ -62,7 +67,8 @@ public static class SpheneWindowChrome
     private static float ActiveContentInset =>
         ScrollAreaStack.Count > 0 ? ScrollAreaStack.Peek().ContentInset : 0f;
 
-    public sealed record TitleBarButton(FontAwesomeIcon Icon, string Tooltip, Action OnClick, string? StyleKey = null);
+    public sealed record TitleBarButton(FontAwesomeIcon Icon, string Tooltip, Action OnClick,
+        string? StyleKey = null, SpheneBrandIcons.Brand? BrandIcon = null);
 
     private sealed class FoldState
     {
@@ -180,7 +186,12 @@ public static class SpheneWindowChrome
                 fold.Collapsed ? FontAwesomeIcon.ChevronDown : FontAwesomeIcon.ChevronUp,
                 fold.Collapsed ? "Expand" : "Collapse",
                 () => ToggleFold(windowName));
-            rightButtons = rightButtons == null ? [toggle] : [toggle, .. rightButtons];
+            var buttons = rightButtons?.ToList() ?? [];
+            // Keep leading brand-icon buttons grouped on the far left, collapse after them
+            var insertAt = 0;
+            while (insertAt < buttons.Count && buttons[insertAt].BrandIcon.HasValue) insertAt++;
+            buttons.Insert(insertAt, toggle);
+            rightButtons = buttons;
         }
 
         var scale = ImGuiHelpers.GlobalScale;
@@ -192,7 +203,7 @@ public static class SpheneWindowChrome
         var windowWidth = ImGui.GetWindowSize().X;
         var min = windowPos;
         var max = new Vector2(windowPos.X + windowWidth, windowPos.Y + headerHeight);
-        var accent = accentColor ?? SpheneColors.CrystalBlue;
+        var accent = accentColor ?? SpheneCustomTheme.CurrentTheme.AccentCyan;
 
         ImGui.PushClipRect(min, windowPos + ImGui.GetWindowSize(), false);
         DrawWindowSurface(drawList, windowPos, windowPos + ImGui.GetWindowSize(), style.WindowRounding);
@@ -233,9 +244,10 @@ public static class SpheneWindowChrome
     private static void WindowSurfaceGradient(out Vector4 topColor, out Vector4 bottomColor)
     {
         var bg = ImGui.GetStyle().Colors[(int)ImGuiCol.WindowBg];
+        var topAlpha = MathF.Min(bg.W * 1.05f, 1f);
         topColor = new Vector4(MathF.Min(bg.X * 1.3f, 1f), MathF.Min(bg.Y * 1.3f, 1f),
-            MathF.Min(bg.Z * 1.35f, 1f), 1f);
-        bottomColor = new Vector4(bg.X * 0.8f, bg.Y * 0.8f, bg.Z * 0.85f, 1f);
+            MathF.Min(bg.Z * 1.35f, 1f), topAlpha);
+        bottomColor = new Vector4(bg.X * 0.8f, bg.Y * 0.8f, bg.Z * 0.85f, bg.W);
     }
 
     /// <summary>Evaluates the window surface gradient color at a screen-space Y.</summary>
@@ -253,7 +265,7 @@ public static class SpheneWindowChrome
         float windowBottom, float windowRounding, Vector4 accent)
     {
         var background = ImGui.ColorConvertFloat4ToU32(
-            SpheneColors.WithAlpha(SpheneColors.BackgroundMid, TitleBarBackgroundAlpha));
+            SpheneColors.WithAlpha(SpheneCustomTheme.CurrentTheme.PrimaryDark, TitleBarBackgroundAlpha));
         var corners = max.Y >= windowBottom - windowRounding
             ? ImDrawFlags.RoundCornersAll
             : ImDrawFlags.RoundCornersTop;
@@ -290,7 +302,7 @@ public static class SpheneWindowChrome
             uiShared.IconText(leadingIcon.Value, accent);
             ImGui.SameLine(0, 8f * scale);
         }
-        UiSharedService.ColorText(title, SpheneColors.TextPrimary);
+        UiSharedService.ColorText(title, SpheneCustomTheme.CurrentTheme.TextPrimary);
     }
 
     private static void DrawTitleBarRight(Vector2 min, Vector2 max, float buttonSize,
@@ -302,9 +314,25 @@ public static class SpheneWindowChrome
 
         if (rightButtons != null)
         {
-            for (var i = rightButtons.Count - 1; i >= 0; i--)
+            var i = rightButtons.Count - 1;
+            while (i >= 0)
             {
                 var button = rightButtons[i];
+                if (button.BrandIcon.HasValue)
+                {
+                    // Consecutive brand buttons form one joined strip
+                    var runStart = i;
+                    while (runStart - 1 >= 0 && rightButtons[runStart - 1].BrandIcon.HasValue) runStart--;
+                    var runCount = i - runStart + 1;
+                    var stripHeight = max.Y - min.Y - TitleBarAccentLineHeight;
+                    var segWidth = stripHeight * 1.15f;
+                    x -= segWidth * runCount;
+                    DrawBrandButtonStrip(uiShared, rightButtons, runStart, runCount,
+                        new Vector2(x, min.Y), segWidth, stripHeight);
+                    i = runStart - 1;
+                    x -= TitleBarButtonSpacing * scale;
+                    continue;
+                }
                 x -= buttonSize;
                 ImGui.SetCursorScreenPos(new Vector2(x, buttonY));
                 if (uiShared.IconButton(button.Icon, null, null, null, buttonSize, button.StyleKey))
@@ -316,6 +344,7 @@ public static class SpheneWindowChrome
                     UiSharedService.AttachToolTip(button.Tooltip);
                 }
                 x -= TitleBarButtonSpacing * scale;
+                i--;
             }
         }
 
@@ -326,6 +355,27 @@ public static class SpheneWindowChrome
             ImGui.SetCursorScreenPos(new Vector2(x, min.Y + (max.Y - min.Y - textHeight) * 0.5f));
             UiSharedService.ColorText(trailingText, ImGuiColors.DalamudGrey3);
         }
+    }
+
+    /// <summary>
+    /// Draws a run of brand-icon title bar buttons as one joined strip spanning
+    /// the full bar height minus the accent line, using the shared
+    /// <see cref="SpheneBrandIcons.BrandStrip"/> renderer (seam color blend,
+    /// alpha-faded edges, white glyphs).
+    /// </summary>
+    private static void DrawBrandButtonStrip(UiSharedService uiShared,
+        IReadOnlyList<TitleBarButton> buttons, int start, int count,
+        Vector2 pos, float segWidth, float height)
+    {
+        var segments = new SpheneBrandIcons.StripSegment[count];
+        for (var k = 0; k < count; k++)
+        {
+            var button = buttons[start + k];
+            segments[k] = new SpheneBrandIcons.StripSegment(
+                button.BrandIcon!.Value, Tooltip: button.Tooltip, OnClick: button.OnClick);
+        }
+        ImGui.SetCursorScreenPos(pos);
+        SpheneBrandIcons.BrandStrip(uiShared, $"titlebar{start}", segments, height, segWidth * count);
     }
 
     /// <summary>
@@ -395,7 +445,7 @@ public static class SpheneWindowChrome
         var padding = AccentCardPadding * scale;
         var rounding = AccentCardRounding * scale;
         var availWidth = ImGui.GetContentRegionAvail().X;
-        var accent = accentColor ?? SpheneColors.CrystalBlue;
+        var accent = accentColor ?? SpheneCustomTheme.CurrentTheme.AccentCyan;
 
         var drawList = ImGui.GetWindowDrawList();
         var cardMin = ImGui.GetCursorScreenPos();
@@ -431,7 +481,10 @@ public static class SpheneWindowChrome
         var cardMax = new Vector2(cardRightX, ImGui.GetItemRectMax().Y + padding);
         drawList.ChannelsSetCurrent(0);
 
-        var background = new Vector4(accent.X * 0.10f, accent.Y * 0.09f, accent.Z * 0.05f, 0.55f);
+        var accentTint = new Vector4(accent.X * 0.10f, accent.Y * 0.09f, accent.Z * 0.05f, 0.55f);
+        var secondary = SpheneCustomTheme.CurrentTheme.SecondaryDark;
+        var background = Vector4.Lerp(accentTint,
+            new Vector4(secondary.X, secondary.Y, secondary.Z, 0.55f), secondary.W * 0.5f);
         drawList.AddRectFilled(cardMin, cardMax, ImGui.ColorConvertFloat4ToU32(background), rounding);
 
         if (animatedBackdrop)
@@ -447,6 +500,46 @@ public static class SpheneWindowChrome
 
         ImGui.SetCursorScreenPos(cardMin + new Vector2(0, cardMax.Y - cardMin.Y));
         ImGui.Dummy(Vector2.Zero);
+    }
+
+    /// <summary>
+    /// Prepends Dalamud's blur-behind effect to the current window draw list so
+    /// the scene behind the window shows through frosted. Must be called inside
+    /// the window (after ImGui.Begin). Only takes effect on the main viewport;
+    /// <paramref name="strengthFactor"/> is the user-facing [0,1] blur amount.
+    /// </summary>
+    public static void DrawWindowBlur(float strengthFactor, Vector4? tintColor = null,
+        float noiseOpacity = WindowBlurNoiseOpacity)
+    {
+        if (strengthFactor <= 0f)
+        {
+            return;
+        }
+        if (ImGui.GetWindowViewport().ID != ImGui.GetMainViewport().ID)
+        {
+            return;
+        }
+
+        var pos = ImGui.GetWindowPos();
+        ImGuiHelpers.PrependBlurBehind(
+            ImGui.GetWindowDrawList(),
+            pos,
+            pos + ImGui.GetWindowSize(),
+            Math.Clamp(strengthFactor, 0f, 1f) * WindowBlurMaxStrength,
+            ImGui.GetStyle().WindowRounding,
+            tintColor: tintColor ?? WindowBlurTint,
+            luminosityColor: Vector4.Zero,
+            noiseOpacity: noiseOpacity);
+    }
+
+    /// <summary>
+    /// Applies the general window blur theme setting for the current window.
+    /// Convenience wrapper around <see cref="DrawWindowBlur"/>.
+    /// </summary>
+    public static void DrawThemedWindowBlur()
+    {
+        var theme = SpheneCustomTheme.CurrentTheme;
+        DrawWindowBlur(theme.EnableWindowBlur ? theme.WindowBlurStrength : 0f);
     }
 
     /// <summary>
@@ -1011,13 +1104,16 @@ public static class SpheneWindowChrome
         var textWidth = ImGui.CalcTextSize(label).X;
         var stripMin = new Vector2(frameMin.X + rounding * 0.5f, centerY - bandHeight * 0.5f);
         var stripMax = new Vector2(frameMax.X - rounding * 0.5f, centerY + bandHeight * 0.5f);
-        var bg = ImGui.ColorConvertFloat4ToU32(WindowSurfaceColorAt(surfaceMin, surfaceMax, centerY));
+        var stripBase = WindowSurfaceColorAt(surfaceMin, surfaceMax, centerY);
+        var stripColor = Vector4.Lerp(stripBase, SpheneCustomTheme.CurrentTheme.HeaderBg, 0.35f);
+        stripColor.W = MathF.Max(stripColor.W, 0.9f);
+        var bg = ImGui.ColorConvertFloat4ToU32(stripColor);
         drawList.AddRectFilled(stripMin, stripMax, bg, MathF.Min(rounding * 0.5f, bandHeight * 0.5f));
 
         ImGui.SetCursorScreenPos(new Vector2(
             frameMin.X + (frameMax.X - frameMin.X - textWidth) * 0.5f,
             centerY - lineHeight * 0.5f));
-        UiSharedService.ColorText(label, ImGuiColors.ParsedBlue);
+        UiSharedService.ColorText(label, SpheneCustomTheme.CurrentTheme.AccentBlue);
     }
 
     private const float GripAnimSpeed = 8f;

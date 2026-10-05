@@ -79,8 +79,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
     private bool _deleteAccountPopupModalShown = false;
     private bool _deleteFilesPopupModalShown = false;
     private string _lastTab = string.Empty;
-    private static readonly Vector4 SupporterKofiButtonColor = new(1.0f, 0.37f, 0.23f, 1.0f);
-    private static readonly Vector4 SupporterKofiButtonHoverColor = new(1.0f, 0.50f, 0.30f, 1.0f);
+
     private static readonly Vector4 SupporterAccentTextColor = new(0.13f, 0.10f, 0.02f, 1.0f);
     private bool? _notesSuccessfullyApplied = null;
     private bool _overwriteExistingLabels = false;
@@ -1743,6 +1742,10 @@ public class SettingsUi : WindowMediatorSubscriberBase
             leadingIcon: FontAwesomeIcon.Cog,
             rightButtons:
             [
+                new SpheneWindowChrome.TitleBarButton(FontAwesomeIcon.None, "Join the Sphene Discord",
+                    () => Util.OpenLink("https://discord.gg/GbnwsP2XsF"), BrandIcon: SpheneBrandIcons.Brand.Discord),
+                new SpheneWindowChrome.TitleBarButton(FontAwesomeIcon.None, "Support Sphene on Ko-fi",
+                    () => Util.OpenLink("https://ko-fi.com/sphenedev"), BrandIcon: SpheneBrandIcons.Brand.Kofi),
                 new SpheneWindowChrome.TitleBarButton(FontAwesomeIcon.Times, "Close", () => IsOpen = false),
             ],
             trailingText: versionText,
@@ -1803,7 +1806,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             var textWidth = ImGui.CalcTextSize(text).X;
             ImGui.SetCursorPosX(ImGui.GetCursorPosX() + MathF.Max(0f, (availWidth - textWidth) * 0.5f));
             sidebarCategories.Add((text, ImGui.GetCursorScreenPos().Y + ImGui.GetTextLineHeight() * 0.5f));
-            UiSharedService.ColorText(text, ImGuiColors.ParsedBlue);
+            UiSharedService.ColorText(text, SpheneCustomTheme.CurrentTheme.AccentBlue);
             ImGuiHelpers.ScaledDummy(0, 3);
         }
 
@@ -1816,7 +1819,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             var pushedColors = 0;
             if (isActive)
             {
-                var activeColor = accentColor ?? ImGuiColors.ParsedBlue;
+                var activeColor = accentColor ?? SpheneCustomTheme.CurrentTheme.AccentBlue;
                 ImGui.PushStyleColor(ImGuiCol.Button, activeColor);
                 ImGui.PushStyleColor(ImGuiCol.ButtonHovered, activeColor);
                 pushedColors += 2;
@@ -1830,6 +1833,12 @@ public class SettingsUi : WindowMediatorSubscriberBase
             {
                 ImGui.PushStyleColor(ImGuiCol.Text, accentColor.Value);
                 pushedColors++;
+            }
+            else
+            {
+                ImGui.PushStyleColor(ImGuiCol.ButtonHovered, SpheneCustomTheme.CurrentTheme.Hover);
+                ImGui.PushStyleColor(ImGuiCol.ButtonActive, SpheneCustomTheme.CurrentTheme.Active);
+                pushedColors += 2;
             }
             if (ImGui.Button(label, buttonSize))
             {
@@ -2274,38 +2283,6 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
         DrawSettingsCard("Service & Connection", () =>
         {
-        // Discord Button (Right Aligned)
-        var supporterFeaturesEnabled = _apiController.SupporterFeaturesEnabled;
-        var discordButtonWidth = _uiShared.GetIconTextButtonSize(FontAwesomeIcon.Users, "Join Discord Community");
-        var kofiButtonWidth = supporterFeaturesEnabled ? _uiShared.GetIconTextButtonSize(FontAwesomeIcon.MugHot, "Support on Ko-fi") : 0f;
-        var buttonGap = supporterFeaturesEnabled ? ImGui.GetStyle().ItemSpacing.X : 0f;
-        var cursorX = ImGui.GetCursorPosX();
-        var rightMargin = SpheneWindowChrome.ScrollAreaContentInset * ImGuiHelpers.GlobalScale;
-        var rightAlignX = cursorX + ImGui.GetContentRegionAvail().X
-            - discordButtonWidth - kofiButtonWidth - buttonGap - rightMargin;
-        ImGui.SameLine(MathF.Max(cursorX, rightAlignX));
-
-        // Ko-fi Button
-        if (supporterFeaturesEnabled)
-        {
-            ImGui.PushStyleColor(ImGuiCol.Button, SupporterKofiButtonColor);
-            ImGui.PushStyleColor(ImGuiCol.ButtonHovered, SupporterKofiButtonHoverColor);
-            ImGui.PushStyleColor(ImGuiCol.ButtonActive, SupporterKofiButtonHoverColor);
-            if (_uiShared.IconTextActionButton(FontAwesomeIcon.MugHot, "Support on Ko-fi"))
-            {
-                Util.OpenLink("https://ko-fi.com/sphenedev");
-            }
-            ImGui.PopStyleColor(3);
-            UiSharedService.AttachToolTip("Support Sphene's development on Ko-fi");
-            ImGui.SameLine();
-        }
-        
-        if (_uiShared.IconTextActionButton(FontAwesomeIcon.Users, "Join Discord Community"))
-        {
-            Util.OpenLink("https://discord.gg/GbnwsP2XsF");
-        }
-        UiSharedService.AttachToolTip("Get support, updates, and connect with other users");
-        
         var currentServer = _serverConfigurationManager.CurrentServer;
         if (currentServer == null)
         {
@@ -2575,12 +2552,34 @@ public class SettingsUi : WindowMediatorSubscriberBase
         if (!_apiController.IsSupporter)
         {
             DrawSupporterLockedCard();
-            return;
+        }
+        else
+        {
+            DrawSupporterStatusCard();
+            ImGuiHelpers.ScaledDummy(0, 8);
+            DrawSupporterNameplateSettings();
         }
 
-        DrawSupporterStatusCard();
         ImGuiHelpers.ScaledDummy(0, 8);
-        DrawSupporterNameplateSettings();
+        DrawSupporterLinksCard();
+    }
+
+    private void DrawSupporterLinksCard()
+    {
+        DrawSupporterCard(() =>
+        {
+            UiSharedService.ColorText("Community & Support", SpheneColors.LuminousGold);
+            ImGuiHelpers.ScaledDummy(0, 6);
+            SpheneBrandIcons.BrandStrip(_uiShared, "supporterLinks", new[]
+            {
+                new SpheneBrandIcons.StripSegment(SpheneBrandIcons.Brand.Discord,
+                    "Join Discord", "Get support, updates, and connect with other users",
+                    () => Util.OpenLink("https://discord.gg/GbnwsP2XsF")),
+                new SpheneBrandIcons.StripSegment(SpheneBrandIcons.Brand.Kofi,
+                    "Support on Ko-fi", "Support Sphene's development on Ko-fi",
+                    () => Util.OpenLink("https://ko-fi.com/sphenedev")),
+            }, ImGui.GetFrameHeight() * 1.5f, ImGui.GetContentRegionAvail().X);
+        });
     }
 
     private static void DrawSupporterCard(Action content)
@@ -2604,19 +2603,6 @@ public class SettingsUi : WindowMediatorSubscriberBase
             DrawSupporterPerkLine("Personal supporter indicator on your nameplate");
             DrawSupporterPerkLine("Custom symbol, text or the Sphene icon");
             DrawSupporterPerkLine("Visible to everyone using Sphene");
-            ImGuiHelpers.ScaledDummy(0, 14);
-
-            const string kofiLabel = "Support on Ko-fi";
-            CenterSupporterCursorX(_uiShared.GetIconTextButtonSize(FontAwesomeIcon.MugHot, kofiLabel));
-            ImGui.PushStyleColor(ImGuiCol.Button, SupporterKofiButtonColor);
-            ImGui.PushStyleColor(ImGuiCol.ButtonHovered, SupporterKofiButtonHoverColor);
-            ImGui.PushStyleColor(ImGuiCol.ButtonActive, SupporterKofiButtonHoverColor);
-            if (_uiShared.IconTextActionButton(FontAwesomeIcon.MugHot, kofiLabel))
-            {
-                Util.OpenLink("https://ko-fi.com/sphenedev");
-            }
-            ImGui.PopStyleColor(3);
-            UiSharedService.AttachToolTip("Opens ko-fi.com/sphenedev");
             ImGuiHelpers.ScaledDummy(0, 8);
             UiSharedService.ColorTextWrapped("Include your Discord username or ID in the donation message so your supporter status can be linked.", ImGuiColors.DalamudGrey3);
             ImGuiHelpers.ScaledDummy(0, 8);
@@ -3176,6 +3162,54 @@ public class SettingsUi : WindowMediatorSubscriberBase
             AppearanceOptionBlock.DrawEnableGameRightClickMenusOption(_configService, "AppearanceEnableGameRightClickMenus");
         });
 
+        DrawSettingsCard("Window Effects", () =>
+        {
+            var theme = SpheneCustomTheme.CurrentTheme;
+            var themeChanged = false;
+
+            var enableWindowBlur = theme.EnableWindowBlur;
+            if (ImGui.Checkbox("Background Blur", ref enableWindowBlur))
+            {
+                theme.EnableWindowBlur = enableWindowBlur;
+                themeChanged = true;
+            }
+            using (ImRaii.Disabled(!theme.EnableWindowBlur))
+            {
+                var windowBlurStrength = theme.WindowBlurStrength * 100f;
+                if (ImGui.SliderFloat("Blur Strength##AppearanceWindowBlurStrength", ref windowBlurStrength, 0.0f, 100.0f, "%.0f%%"))
+                {
+                    theme.WindowBlurStrength = windowBlurStrength / 100f;
+                    themeChanged = true;
+                }
+            }
+
+            ImGuiHelpers.ScaledDummy(6);
+
+            var enablePanelBlur = theme.CompactEnableWindowBlur;
+            if (ImGui.Checkbox("Panel Background Blur", ref enablePanelBlur))
+            {
+                theme.CompactEnableWindowBlur = enablePanelBlur;
+                themeChanged = true;
+            }
+            using (ImRaii.Disabled(!theme.CompactEnableWindowBlur))
+            {
+                var panelBlurStrength = theme.CompactWindowBlurStrength * 100f;
+                if (ImGui.SliderFloat("Panel Blur Strength##AppearancePanelBlurStrength", ref panelBlurStrength, 0.0f, 100.0f, "%.0f%%"))
+                {
+                    theme.CompactWindowBlurStrength = panelBlurStrength / 100f;
+                    themeChanged = true;
+                }
+            }
+
+            UiSharedService.ColorTextWrapped("Blurs the game scene behind Sphene windows. Changes apply to your active theme and are saved with it.", ImGuiColors.DalamudGrey);
+
+            if (themeChanged)
+            {
+                theme.NotifyThemeChanged();
+                _hasUnsavedThemeChanges = true;
+            }
+        }, "Softly blurs the game behind windows and the main panel.");
+
         // ShrinkU integration settings moved to Overview page alongside version info
 
         DrawSettingsCard("Server Info Bar", () =>
@@ -3496,7 +3530,28 @@ public class SettingsUi : WindowMediatorSubscriberBase
             theme.FrameBorderSize = frameBorderSize;
             themeChanged = true;
         }
-        
+
+        ImGui.Separator();
+        ImGui.Text("Window Effects");
+
+        var enableWindowBlur = theme.EnableWindowBlur;
+        if (ImGui.Checkbox("Background Blur", ref enableWindowBlur))
+        {
+            theme.EnableWindowBlur = enableWindowBlur;
+            themeChanged = true;
+        }
+
+        var windowBlurStrength = theme.WindowBlurStrength * 100f;
+        using (ImRaii.Disabled(!theme.EnableWindowBlur))
+        {
+            if (ImGui.SliderFloat("Blur Strength", ref windowBlurStrength, 0.0f, 100.0f, "%.0f%%"))
+            {
+                theme.WindowBlurStrength = windowBlurStrength / 100f;
+                themeChanged = true;
+            }
+        }
+        UiSharedService.ColorTextWrapped("Blurs the game and windows behind Sphene windows (main game window only). Lower the Window Background alpha for a stronger glass effect.", ImGuiColors.DalamudGrey);
+
         ImGui.Separator();
         ImGui.Text("Spacing & Padding Settings");
         
@@ -3920,6 +3975,27 @@ public class SettingsUi : WindowMediatorSubscriberBase
         {
             theme.CompactWindowRounding = compactWindowRounding;
             themeChanged = true;
+        }
+
+        ImGui.Spacing();
+        ImGui.Text("Panel Window Effects");
+        ImGui.Separator();
+
+        var compactEnableWindowBlur = theme.CompactEnableWindowBlur;
+        if (ImGui.Checkbox("Panel Background Blur", ref compactEnableWindowBlur))
+        {
+            theme.CompactEnableWindowBlur = compactEnableWindowBlur;
+            themeChanged = true;
+        }
+
+        var compactWindowBlurStrength = theme.CompactWindowBlurStrength * 100f;
+        using (ImRaii.Disabled(!theme.CompactEnableWindowBlur))
+        {
+            if (ImGui.SliderFloat("Panel Blur Strength", ref compactWindowBlurStrength, 0.0f, 100.0f, "%.0f%%"))
+            {
+                theme.CompactWindowBlurStrength = compactWindowBlurStrength / 100f;
+                themeChanged = true;
+            }
         }
 
         ImGui.Spacing();

@@ -981,7 +981,10 @@ public class CompactUi : WindowMediatorSubscriberBase
     protected override void DrawInternal()
     {
         // Theme is already applied in PreDraw, no need to apply it again here
-        
+
+        var theme = SpheneCustomTheme.CurrentTheme;
+        SpheneWindowChrome.DrawWindowBlur(theme.CompactEnableWindowBlur ? theme.CompactWindowBlurStrength : 0f);
+
         // Draw Halloween background first (behind all content)
         DrawHalloweenBackground();
         
