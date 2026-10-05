@@ -1742,14 +1742,18 @@ public class SettingsUi : WindowMediatorSubscriberBase
         var sidebarButtonInnerWidth = maxTextWidth + (sidebarButtonPaddingX * 2f);
         var sidebarWidth = sidebarButtonInnerWidth + (style.WindowPadding.X * 2f) + (2f * ImGuiHelpers.GlobalScale);
 
-        var sidebarInsetY = style.WindowPadding.Y;
+        var sidebarInsetY = style.WindowPadding.Y + 6f * ImGuiHelpers.GlobalScale;
         var contentTopPos = contentOrigin;
-        ImGui.SetCursorScreenPos(contentTopPos + new Vector2(0f, sidebarInsetY));
+        var sidebarMin = contentTopPos + new Vector2(0f, sidebarInsetY);
+        var sidebarSize = new Vector2(sidebarWidth, MathF.Max(0f, available.Y - sidebarInsetY * 2f));
+        ImGui.SetCursorScreenPos(sidebarMin);
 
-        SpheneWindowChrome.BeginScrollArea("settings-sidebar",
-            new Vector2(sidebarWidth, MathF.Max(0f, available.Y - sidebarInsetY * 2f)),
-            border: true, hideTopBorder: true);
+        var pinnedBandInset = (ImGui.GetTextLineHeight() + 8f * ImGuiHelpers.GlobalScale) * 0.5f
+            + 2f * ImGuiHelpers.GlobalScale;
+        SpheneWindowChrome.BeginScrollArea("settings-sidebar", sidebarSize,
+            border: true, hideTopBorder: true, topInset: pinnedBandInset);
 
+        var sidebarCategories = new List<(string Label, float CenterY)>();
         void SidebarCategory(string label)
         {
             ImGuiHelpers.ScaledDummy(0, 5);
@@ -1757,6 +1761,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             var availWidth = ImGui.GetContentRegionAvail().X;
             var textWidth = ImGui.CalcTextSize(text).X;
             ImGui.SetCursorPosX(ImGui.GetCursorPosX() + MathF.Max(0f, (availWidth - textWidth) * 0.5f));
+            sidebarCategories.Add((text, ImGui.GetCursorScreenPos().Y + ImGui.GetTextLineHeight() * 0.5f));
             UiSharedService.ColorText(text, ImGuiColors.ParsedBlue);
             ImGuiHelpers.ScaledDummy(0, 3);
         }
@@ -1823,6 +1828,9 @@ public class SettingsUi : WindowMediatorSubscriberBase
         SidebarButton(diagnosticsPageLabel, SettingsPage.Debug);
 
         SpheneWindowChrome.EndScrollArea();
+
+        SpheneWindowChrome.DrawPinnedSectionLabel(sidebarMin, sidebarMin + sidebarSize,
+            sidebarCategories, windowPos, windowPos + windowSize);
 
         ImGui.SetCursorScreenPos(contentTopPos + new Vector2(sidebarWidth + ImGui.GetStyle().ItemSpacing.X, 0f));
         SpheneWindowChrome.BeginScrollArea("settings-content",

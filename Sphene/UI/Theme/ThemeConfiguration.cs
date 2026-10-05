@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Reflection;
 using System.Text.Json.Serialization;
 
 namespace Sphene.UI.Theme;
@@ -6,12 +7,12 @@ namespace Sphene.UI.Theme;
 public class ThemeConfiguration
 {
     // General Theme Settings
-    public float WindowRounding { get; set; } = 8.0f;
+    public float WindowRounding { get; set; } = 10.0f;
     public float ChildRounding { get; set; } = 8.0f;
-    public float PopupRounding { get; set; } = 8.0f;
-    public float FrameRounding { get; set; } = 6.0f;
-    public float ScrollbarRounding { get; set; } = 6.0f;
-    public float GrabRounding { get; set; } = 6.0f;
+    public float PopupRounding { get; set; } = 20.0f;
+    public float FrameRounding { get; set; } = 8.0f;
+    public float ScrollbarRounding { get; set; } = 4.0f;
+    public float GrabRounding { get; set; } = 4.0f;
     public float TabRounding { get; set; } = 6.0f;
     
     // CompactUI Specific Settings
@@ -66,6 +67,7 @@ public class ThemeConfiguration
     
     // Update Hint Preview/Control
     [JsonIgnore]
+    [ThemeRuntime]
     public bool ForceShowUpdateHint { get; set; } = false;
     public Vector4 CompactUpdateHintColor { get; set; } = new(1.0f, 0.8f, 0.2f, 1.0f);
     public float CompactUpdateHintHeight { get; set; } = 24.0f;
@@ -124,10 +126,10 @@ public class ThemeConfiguration
     public float TransmissionPreviewDownloadFill { get; set; } = 40.0f; // 0-100%
     
     // Border Settings
-    public float WindowBorderSize { get; set; } = 1.5f;
-    public float ChildBorderSize { get; set; } = 1.5f;
+    public float WindowBorderSize { get; set; } = 0f;
+    public float ChildBorderSize { get; set; } = 0f;
     public float PopupBorderSize { get; set; } = 1.5f;
-    public float FrameBorderSize { get; set; } = 1.0f;
+    public float FrameBorderSize { get; set; } = 0.0f;
     
     // Scrollbar Settings
     public float ScrollbarSize { get; set; } = 16.0f;
@@ -361,353 +363,49 @@ public class ThemeConfiguration
     {
         ThemeChanged?.Invoke();
     }
-    
+
+    private static readonly PropertyInfo[] ThemeProperties = typeof(ThemeConfiguration)
+        .GetProperties(BindingFlags.Public | BindingFlags.Instance)
+        .Where(p => p.CanRead && p.CanWrite)
+        .ToArray();
+
+    /// <summary>
+    /// Copies every theme property from <paramref name="source"/> into this instance.
+    /// Properties marked with <see cref="ThemeRuntimeAttribute"/> are skipped, and
+    /// <see cref="ButtonStyles"/> is deep-copied so presets are never shared by reference.
+    /// </summary>
+    public void ApplyFrom(ThemeConfiguration source) => ApplyFrom(source, includeRuntime: false);
+
+    private void ApplyFrom(ThemeConfiguration source, bool includeRuntime)
+    {
+        foreach (var prop in ThemeProperties)
+        {
+            if (!includeRuntime && prop.GetCustomAttribute<ThemeRuntimeAttribute>() is not null) continue;
+
+            if (prop.PropertyType == typeof(Dictionary<string, ButtonStyleOverride>))
+            {
+                var dict = (Dictionary<string, ButtonStyleOverride>?)prop.GetValue(source);
+                prop.SetValue(this, dict?.ToDictionary(kv => kv.Key, kv => kv.Value.Clone(), StringComparer.Ordinal)
+                    ?? new Dictionary<string, ButtonStyleOverride>(StringComparer.Ordinal));
+                continue;
+            }
+
+            prop.SetValue(this, prop.GetValue(source));
+        }
+    }
+
     // Create a copy of the current configuration
     public ThemeConfiguration Clone()
     {
-        return new ThemeConfiguration
-        {
-            WindowRounding = WindowRounding,
-            ChildRounding = ChildRounding,
-            PopupRounding = PopupRounding,
-            FrameRounding = FrameRounding,
-            ScrollbarRounding = ScrollbarRounding,
-            GrabRounding = GrabRounding,
-            TabRounding = TabRounding,
-            CompactWindowRounding = CompactWindowRounding,
-            CompactChildRounding = CompactChildRounding,
-            CompactPopupRounding = CompactPopupRounding,
-            CompactFrameRounding = CompactFrameRounding,
-            CompactScrollbarRounding = CompactScrollbarRounding,
-            CompactGrabRounding = CompactGrabRounding,
-            CompactTabRounding = CompactTabRounding,
-            CompactHeaderRounding = CompactHeaderRounding,
-            WindowPadding = WindowPadding,
-            FramePadding = FramePadding,
-            ItemSpacing = ItemSpacing,
-            ItemInnerSpacing = ItemInnerSpacing,
-            IndentSpacing = IndentSpacing,
-            CompactWindowPadding = CompactWindowPadding,
-            CompactFramePadding = CompactFramePadding,
-            CompactItemSpacing = CompactItemSpacing,
-            CompactItemInnerSpacing = CompactItemInnerSpacing,
-            CompactCellPadding = CompactCellPadding,
-            CompactChildPadding = CompactChildPadding,
-            CompactIndentSpacing = CompactIndentSpacing,
-            CompactScrollbarSize = CompactScrollbarSize,
-            CompactGrabMinSize = CompactGrabMinSize,
-            CompactButtonTextAlign = CompactButtonTextAlign,
-            CompactSelectableTextAlign = CompactSelectableTextAlign,
-            WindowBorderSize = WindowBorderSize,
-            ChildBorderSize = ChildBorderSize,
-            PopupBorderSize = PopupBorderSize,
-            FrameBorderSize = FrameBorderSize,
-            CompactWindowBorderSize = CompactWindowBorderSize,
-            CompactChildBorderSize = CompactChildBorderSize,
-            CompactPopupBorderSize = CompactPopupBorderSize,
-            CompactFrameBorderSize = CompactFrameBorderSize,
-            CompactTooltipRounding = CompactTooltipRounding,
-            CompactTooltipBorderSize = CompactTooltipBorderSize,
-            CompactContextMenuRounding = CompactContextMenuRounding,
-            CompactContextMenuBorderSize = CompactContextMenuBorderSize,
-            
-            // CompactUI Progress Bar Settings
-            ProgressBarRounding = ProgressBarRounding,
-            CompactProgressBarHeight = CompactProgressBarHeight,
-            CompactProgressBarWidth = CompactProgressBarWidth,
-            CompactProgressBarBackground = CompactProgressBarBackground,
-            CompactProgressBarForeground = CompactProgressBarForeground,
-            CompactProgressBarBorder = CompactProgressBarBorder,
-            ProgressBarUseGradient = ProgressBarUseGradient,
-            ProgressBarGradientStart = ProgressBarGradientStart,
-            ProgressBarGradientEnd = ProgressBarGradientEnd,
-            
-            // Update Hint Controls
-            ForceShowUpdateHint = ForceShowUpdateHint,
-            CompactUpdateHintColor = CompactUpdateHintColor,
-            CompactUpdateHintHeight = CompactUpdateHintHeight,
-            CompactUpdateHintPaddingY = CompactUpdateHintPaddingY,
-            
-            // CompactUI Transmission Progress Bar Settings
-            TransmissionBarRounding = TransmissionBarRounding,
-            CompactTransmissionBarHeight = CompactTransmissionBarHeight,
-            CompactTransmissionBarWidth = CompactTransmissionBarWidth,
-            AutoTransmissionBarWidth = AutoTransmissionBarWidth,
-            CompactTransmissionBarBackground = CompactTransmissionBarBackground,
-            CompactTransmissionBarForeground = CompactTransmissionBarForeground,
-            CompactTransmissionBarBorder = CompactTransmissionBarBorder,
-            TransmissionUseGradient = TransmissionUseGradient,
-            TransmissionGradientStart = TransmissionGradientStart,
-            TransmissionGradientEnd = TransmissionGradientEnd,
-            
-            SeparateTransmissionBarStyles = SeparateTransmissionBarStyles,
-            UploadTransmissionBarRounding = UploadTransmissionBarRounding,
-            UploadTransmissionBarHeight = UploadTransmissionBarHeight,
-            UploadTransmissionBarBackground = UploadTransmissionBarBackground,
-            UploadTransmissionBarForeground = UploadTransmissionBarForeground,
-            UploadTransmissionBarBorder = UploadTransmissionBarBorder,
-            UploadTransmissionGradientStart = UploadTransmissionGradientStart,
-            UploadTransmissionGradientEnd = UploadTransmissionGradientEnd,
-            DownloadTransmissionBarRounding = DownloadTransmissionBarRounding,
-            DownloadTransmissionBarHeight = DownloadTransmissionBarHeight,
-            DownloadTransmissionBarBackground = DownloadTransmissionBarBackground,
-            DownloadTransmissionBarForeground = DownloadTransmissionBarForeground,
-            DownloadTransmissionBarBorder = DownloadTransmissionBarBorder,
-            DownloadTransmissionGradientStart = DownloadTransmissionGradientStart,
-            DownloadTransmissionGradientEnd = DownloadTransmissionGradientEnd,
-            
-            // Transmission Preview Controls
-            ShowTransmissionPreview = ShowTransmissionPreview,
-            TransmissionPreviewUploadFill = TransmissionPreviewUploadFill,
-            TransmissionPreviewDownloadFill = TransmissionPreviewDownloadFill,
-            
-            ScrollbarSize = ScrollbarSize,
-            GrabMinSize = GrabMinSize,
-            
-            // Basic Color Settings
-            PrimaryDark = PrimaryDark,
-            SecondaryDark = SecondaryDark,
-            AccentBlue = AccentBlue,
-            AccentCyan = AccentCyan,
-            TextPrimary = TextPrimary,
-            TextSecondary = TextSecondary,
-            Border = Border,
-            Hover = Hover,
-            Active = Active,
-            HeaderBg = HeaderBg,
-            
-            // Extended ImGui Color Settings
-            WindowBg = WindowBg,
-            ChildBg = ChildBg,
-            PopupBg = PopupBg,
-            BorderShadow = BorderShadow,
-            
-            // Frame Colors
-            FrameBg = FrameBg,
-            FrameBgHovered = FrameBgHovered,
-            FrameBgActive = FrameBgActive,
-            
-            // Title Bar Colors
-            TitleBg = TitleBg,
-            TitleBgActive = TitleBgActive,
-            TitleBgCollapsed = TitleBgCollapsed,
-            
-            // Menu Colors
-            MenuBarBg = MenuBarBg,
-            
-            // Scrollbar Colors
-            ScrollbarBg = ScrollbarBg,
-            ScrollbarGrab = ScrollbarGrab,
-            ScrollbarGrabHovered = ScrollbarGrabHovered,
-            ScrollbarGrabActive = ScrollbarGrabActive,
-            
-            // Check Mark Colors
-            CheckMark = CheckMark,
-            
-            // Slider Colors
-            SliderGrab = SliderGrab,
-            SliderGrabActive = SliderGrabActive,
-            
-            // Button Colors
-            Button = Button,
-            ButtonHovered = ButtonHovered,
-            ButtonActive = ButtonActive,
-            
-            // Header Colors
-            Header = Header,
-            HeaderHovered = HeaderHovered,
-            HeaderActive = HeaderActive,
-            
-            // Separator Colors
-            Separator = Separator,
-            SeparatorHovered = SeparatorHovered,
-            SeparatorActive = SeparatorActive,
-            
-            // Resize Grip Colors
-            ResizeGrip = ResizeGrip,
-            ResizeGripHovered = ResizeGripHovered,
-            ResizeGripActive = ResizeGripActive,
-            
-            // Tab Colors
-            Tab = Tab,
-            TabHovered = TabHovered,
-            TabActive = TabActive,
-            TabUnfocused = TabUnfocused,
-            TabUnfocusedActive = TabUnfocusedActive,
-            
-            // Table Colors
-            TableHeaderBg = TableHeaderBg,
-            TableBorderStrong = TableBorderStrong,
-            TableBorderLight = TableBorderLight,
-            TableRowBg = TableRowBg,
-            TableRowBgAlt = TableRowBgAlt,
-            
-            // Text Colors
-            TextDisabled = TextDisabled,
-            TextSelectedBg = TextSelectedBg,
-            
-            // Drag Drop Colors
-            DragDropTarget = DragDropTarget,
-            
-            // Navigation Colors
-            NavHighlight = NavHighlight,
-            NavWindowingHighlight = NavWindowingHighlight,
-            NavWindowingDimBg = NavWindowingDimBg,
-            
-            // Modal Colors
-            ModalWindowDimBg = ModalWindowDimBg,
-            
-            // CompactUI Specific Colors
-            CompactWindowBg = CompactWindowBg,
-            CompactChildBg = CompactChildBg,
-            CompactPopupBg = CompactPopupBg,
-            CompactTitleBg = CompactTitleBg,
-            CompactTitleBgActive = CompactTitleBgActive,
-            CompactFrameBg = CompactFrameBg,
-            CompactButton = CompactButton,
-            CompactButtonHovered = CompactButtonHovered,
-            CompactButtonActive = CompactButtonActive,
-            CompactHeaderBg = CompactHeaderBg,
-            CompactControlPanelBg = CompactControlPanelBg,
-            CompactBorder = CompactBorder,
-            CompactText = CompactText,
-            CompactTextSecondary = CompactTextSecondary,
-            CompactAccent = CompactAccent,
-            CompactHover = CompactHover,
-            CompactActive = CompactActive,
-            CompactHeaderText = CompactHeaderText,
-            CompactUidFontScale = CompactUidFontScale,
-            CompactUidColor = CompactUidColor,
-            CompactServerStatusConnected = CompactServerStatusConnected,
-            CompactServerStatusWarning = CompactServerStatusWarning,
-            CompactServerStatusError = CompactServerStatusError,
-            CompactActionButton = CompactActionButton,
-            CompactActionButtonHovered = CompactActionButtonHovered,
-            CompactActionButtonActive = CompactActionButtonActive,
-            CompactSyncshellButton = CompactSyncshellButton,
-            CompactSyncshellButtonHovered = CompactSyncshellButtonHovered,
-            CompactSyncshellButtonActive = CompactSyncshellButtonActive,
-            CompactPanelTitleText = CompactPanelTitleText,
-            CompactConnectedText = CompactConnectedText,
-            CompactAllSyncshellsText = CompactAllSyncshellsText,
-            CompactOfflinePausedText = CompactOfflinePausedText,
-            CompactOfflineSyncshellText = CompactOfflineSyncshellText,
-            CompactVisibleText = CompactVisibleText,
-            CompactPairsText = CompactPairsText,
-            CompactShowImGuiHeader = CompactShowImGuiHeader
-            ,
-            ButtonStyles = ButtonStyles.ToDictionary(kv => kv.Key, kv => new ButtonStyleOverride
-            {
-                WidthDelta = kv.Value.WidthDelta,
-                HeightDelta = kv.Value.HeightDelta,
-                IconOffset = kv.Value.IconOffset,
-                Button = kv.Value.Button,
-                ButtonHovered = kv.Value.ButtonHovered,
-                ButtonActive = kv.Value.ButtonActive,
-                Text = kv.Value.Text,
-                Icon = kv.Value.Icon,
-                Border = kv.Value.Border,
-                BorderSize = kv.Value.BorderSize
-            }, StringComparer.Ordinal),
-
-            // Icon theme settings
-            IconGlobalAlpha = IconGlobalAlpha,
-            IconRainbowSpeed = IconRainbowSpeed,
-            IconShowModTransferBadge = IconShowModTransferBadge,
-            IconShowPairRequestBadge = IconShowPairRequestBadge,
-            IconShowNotificationBadge = IconShowNotificationBadge,
-            IconPermColor = IconPermColor,
-            IconPermAlpha = IconPermAlpha,
-            IconPermEffectPulse = IconPermEffectPulse,
-            IconPermEffectGlow = IconPermEffectGlow,
-            IconPermEffectBounce = IconPermEffectBounce,
-            IconPermEffectRainbow = IconPermEffectRainbow,
-            IconPermPulseMinRadius = IconPermPulseMinRadius,
-            IconPermPulseMaxRadius = IconPermPulseMaxRadius,
-            IconPermGlowIntensity = IconPermGlowIntensity,
-            IconPermGlowRadius = IconPermGlowRadius,
-            IconPermBounceIntensity = IconPermBounceIntensity,
-            IconPermBounceSpeed = IconPermBounceSpeed,
-            IconModTransferColor = IconModTransferColor,
-            IconModTransferAlpha = IconModTransferAlpha,
-            IconModTransferEffectPulse = IconModTransferEffectPulse,
-            IconModTransferEffectGlow = IconModTransferEffectGlow,
-            IconModTransferEffectBounce = IconModTransferEffectBounce,
-            IconModTransferEffectRainbow = IconModTransferEffectRainbow,
-            IconModTransferPulseMinRadius = IconModTransferPulseMinRadius,
-            IconModTransferPulseMaxRadius = IconModTransferPulseMaxRadius,
-            IconModTransferGlowIntensity = IconModTransferGlowIntensity,
-            IconModTransferGlowRadius = IconModTransferGlowRadius,
-            IconModTransferBounceIntensity = IconModTransferBounceIntensity,
-            IconModTransferBounceSpeed = IconModTransferBounceSpeed,
-            IconPairRequestColor = IconPairRequestColor,
-            IconPairRequestAlpha = IconPairRequestAlpha,
-            IconPairRequestEffectPulse = IconPairRequestEffectPulse,
-            IconPairRequestEffectGlow = IconPairRequestEffectGlow,
-            IconPairRequestEffectBounce = IconPairRequestEffectBounce,
-            IconPairRequestEffectRainbow = IconPairRequestEffectRainbow,
-            IconPairRequestPulseMinRadius = IconPairRequestPulseMinRadius,
-            IconPairRequestPulseMaxRadius = IconPairRequestPulseMaxRadius,
-            IconPairRequestGlowIntensity = IconPairRequestGlowIntensity,
-            IconPairRequestGlowRadius = IconPairRequestGlowRadius,
-            IconPairRequestBounceIntensity = IconPairRequestBounceIntensity,
-            IconPairRequestBounceSpeed = IconPairRequestBounceSpeed,
-            IconNotificationColor = IconNotificationColor,
-            IconNotificationAlpha = IconNotificationAlpha,
-            IconNotificationEffectPulse = IconNotificationEffectPulse,
-            IconNotificationEffectGlow = IconNotificationEffectGlow,
-            IconNotificationEffectBounce = IconNotificationEffectBounce,
-            IconNotificationEffectRainbow = IconNotificationEffectRainbow,
-            IconNotificationPulseMinRadius = IconNotificationPulseMinRadius,
-            IconNotificationPulseMaxRadius = IconNotificationPulseMaxRadius,
-            IconNotificationGlowIntensity = IconNotificationGlowIntensity,
-            IconNotificationGlowRadius = IconNotificationGlowRadius,
-            IconNotificationBounceIntensity = IconNotificationBounceIntensity,
-            IconNotificationBounceSpeed = IconNotificationBounceSpeed,
-            IconModTransferEffectDurationSeconds = IconModTransferEffectDurationSeconds,
-            IconPairRequestEffectDurationSeconds = IconPairRequestEffectDurationSeconds,
-            IconNotificationEffectDurationSeconds = IconNotificationEffectDurationSeconds,
-            IconModTransferBadgeDurationSeconds = IconModTransferBadgeDurationSeconds,
-            IconPairRequestBadgeDurationSeconds = IconPairRequestBadgeDurationSeconds,
-            IconNotificationBadgeDurationSeconds = IconNotificationBadgeDurationSeconds
-        };
+        var clone = new ThemeConfiguration();
+        clone.ApplyFrom(this, includeRuntime: true);
+        return clone;
     }
-    
-    // Reset to default values
+
+    // Reset to the property-declared default values
     public void ResetToDefaults()
     {
-        WindowRounding = 8.0f;
-        ChildRounding = 8.0f;
-        PopupRounding = 8.0f;
-        FrameRounding = 6.0f;
-        ScrollbarRounding = 6.0f;
-        GrabRounding = 6.0f;
-        TabRounding = 6.0f;
-        CompactWindowRounding = 12.0f;
-        CompactChildRounding = 12.0f;
-        CompactPopupRounding = 12.0f;
-        WindowPadding = new Vector2(16.0f, 12.0f);
-        FramePadding = new Vector2(6.0f, 3.0f);
-        ItemSpacing = new Vector2(6.0f, 4.0f);
-        ItemInnerSpacing = new Vector2(4.0f, 3.0f);
-        IndentSpacing = 20.0f;
-        WindowBorderSize = 1.5f;
-        ChildBorderSize = 1.5f;
-        PopupBorderSize = 1.5f;
-        FrameBorderSize = 1.0f;
-        ScrollbarSize = 16.0f;
-        GrabMinSize = 12.0f;
-        PrimaryDark = new Vector4(0.1f, 0.1f, 0.15f, 0.8f);
-        SecondaryDark = new Vector4(0.15f, 0.15f, 0.2f, 0.8f);
-        AccentBlue = new Vector4(0.2f, 0.4f, 0.8f, 1.0f);
-        AccentCyan = new Vector4(0.3f, 0.6f, 0.9f, 1.0f);
-        TextPrimary = new Vector4(0.9f, 0.9f, 0.9f, 1.0f);
-        TextSecondary = new Vector4(0.7f, 0.7f, 0.7f, 1.0f);
-        Border = new Vector4(0.3f, 0.3f, 0.4f, 1.0f);
-        Hover = new Vector4(0.25f, 0.45f, 0.85f, 1.0f);
-        Active = new Vector4(0.3f, 0.5f, 0.9f, 1.0f);
-        HeaderBg = new Vector4(0.2f, 0.4f, 0.8f, 0.3f);
-        
+        ApplyFrom(new ThemeConfiguration());
         NotifyThemeChanged();
     }
 }

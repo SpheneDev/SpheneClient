@@ -187,7 +187,8 @@ public static class SpheneWindowChrome
 
         ImGui.PushClipRect(min, windowPos + ImGui.GetWindowSize(), false);
         DrawWindowSurface(drawList, windowPos, windowPos + ImGui.GetWindowSize(), style.WindowRounding);
-        DrawTitleBarBackground(drawList, min, max, style.WindowRounding, accent);
+        DrawTitleBarBackground(drawList, min, max, windowPos.Y + ImGui.GetWindowSize().Y,
+            style.WindowRounding, accent);
         DrawTitleBarDragRegion(windowName, min, windowWidth, headerHeight);
         DrawTitleBarLeft(min, headerHeight, title, uiShared, leadingIcon, accent);
         DrawTitleBarRight(min, max, frameHeight, uiShared, rightButtons, trailingText, scale);
@@ -206,18 +207,17 @@ public static class SpheneWindowChrome
         float windowRounding)
     {
         var style = ImGui.GetStyle();
-        var borderSize = MathF.Max(style.WindowBorderSize, 1f);
-        var borderColor = ImGui.GetColorU32(ImGuiCol.Border);
-
-        drawList.AddRectFilled(min, max, borderColor, windowRounding);
+        var borderSize = MathF.Max(style.WindowBorderSize, 0f);
+        if (borderSize > 0f)
+        {
+            drawList.AddRectFilled(min, max, ImGui.GetColorU32(ImGuiCol.Border), windowRounding);
+        }
 
         var inset = new Vector2(borderSize, borderSize);
-        var innerMin = min + inset;
-        var innerMax = max - inset;
         var innerRounding = MathF.Max(0f, windowRounding - borderSize);
 
         WindowSurfaceGradient(out var topColor, out var bottomColor);
-        DrawVerticalFade(drawList, innerMin, innerMax, topColor, bottomColor,
+        DrawVerticalFade(drawList, min + inset, max - inset, topColor, bottomColor,
             innerRounding, roundTop: true, roundBottom: true);
     }
 
@@ -232,7 +232,7 @@ public static class SpheneWindowChrome
     /// <summary>Evaluates the window surface gradient color at a screen-space Y.</summary>
     private static Vector4 WindowSurfaceColorAt(Vector2 parentMin, Vector2 parentMax, float y)
     {
-        var borderSize = MathF.Max(ImGui.GetStyle().WindowBorderSize, 1f);
+        var borderSize = MathF.Max(ImGui.GetStyle().WindowBorderSize, 0f);
         var top = parentMin.Y + borderSize;
         var bottom = parentMax.Y - borderSize;
         var t = Math.Clamp((y - top) / MathF.Max(bottom - top, 1f), 0f, 1f);
@@ -241,15 +241,20 @@ public static class SpheneWindowChrome
     }
 
     private static void DrawTitleBarBackground(ImDrawListPtr drawList, Vector2 min, Vector2 max,
-        float windowRounding, Vector4 accent)
+        float windowBottom, float windowRounding, Vector4 accent)
     {
         var background = ImGui.ColorConvertFloat4ToU32(
             SpheneColors.WithAlpha(SpheneColors.BackgroundMid, TitleBarBackgroundAlpha));
-        drawList.AddRectFilled(min, max, background, windowRounding, ImDrawFlags.RoundCornersTop);
+        var corners = max.Y >= windowBottom - windowRounding
+            ? ImDrawFlags.RoundCornersAll
+            : ImDrawFlags.RoundCornersTop;
+        drawList.AddRectFilled(min, max, background, windowRounding, corners);
 
         var accentLine = ImGui.ColorConvertFloat4ToU32(SpheneColors.WithAlpha(accent, TitleBarAccentLineAlpha));
-        var lineMin = new Vector2(min.X, max.Y - TitleBarAccentLineHeight);
-        drawList.AddRectFilled(lineMin, max, accentLine);
+        var cornerInset = Math.Clamp(max.Y + windowRounding - windowBottom, 0f, windowRounding);
+        var lineMin = new Vector2(min.X + cornerInset, max.Y - TitleBarAccentLineHeight);
+        var lineMax = new Vector2(max.X - cornerInset, max.Y);
+        drawList.AddRectFilled(lineMin, lineMax, accentLine);
     }
 
     private static void DrawTitleBarDragRegion(string windowName, Vector2 min, float width, float height)
@@ -372,6 +377,7 @@ public static class SpheneWindowChrome
         public Vector2 ParentMax;
         public float ContentInset;
         public bool HideTopBorder;
+        public float TopInset;
     }
 
     private static readonly Stack<ScrollAreaState> ScrollAreaStack = new();
@@ -385,12 +391,13 @@ public static class SpheneWindowChrome
     /// </summary>
     public static bool BeginScrollArea(string id, Vector2 size, bool border = false,
         ImGuiWindowFlags windowFlags = ImGuiWindowFlags.None, bool noPadding = false,
-        bool hideTopBorder = false)
+        bool hideTopBorder = false, float topInset = 0f)
     {
         var state = new ScrollAreaState
         {
             Border = border,
             HideTopBorder = hideTopBorder,
+            TopInset = topInset,
             ParentMin = ImGui.GetWindowPos(),
             ParentMax = ImGui.GetWindowPos() + ImGui.GetWindowSize(),
         };
@@ -408,13 +415,17 @@ public static class SpheneWindowChrome
         state.Begun = begun;
         if (begun)
         {
+            if (state.TopInset > 0f && ImGui.GetScrollY() <= ScrollFadeDeadZone)
+            {
+                state.TopInset = 0f;
+            }
             var min = ImGui.GetWindowPos();
             var max = min + ImGui.GetWindowSize();
             GetScrollInsets(border, out _, out var insetY);
             if (border)
             {
                 var clipX = 1f * ImGuiHelpers.GlobalScale;
-                var inner = min + new Vector2(clipX, insetY);
+                var inner = min + new Vector2(clipX, insetY + state.TopInset);
                 var innerMax = max - new Vector2(clipX, insetY);
                 if (innerMax.X > inner.X && innerMax.Y > inner.Y)
                 {
@@ -424,7 +435,7 @@ public static class SpheneWindowChrome
             }
             else
             {
-                ImGui.PushClipRect(min, max, false);
+                ImGui.PushClipRect(min + new Vector2(0f, state.TopInset), max, false);
                 state.ClipPushed = true;
             }
         }
@@ -462,7 +473,8 @@ public static class SpheneWindowChrome
                 DrawRoundedFrame(min, max, ImGui.GetStyle().ChildRounding,
                     MathF.Max(ImGui.GetStyle().ChildBorderSize, 1f), openTop: state.HideTopBorder);
             }
-            DrawScrollFades(min, max, scrollY, scrollMaxY, state.Border, fadeBaseColor);
+            DrawScrollFades(min, max, scrollY, scrollMaxY, state.Border, state.TopInset,
+                state.ParentMin, state.ParentMax, fadeBaseColor);
             var cornerTolerance = 4f * ImGuiHelpers.GlobalScale;
             var ownsCorner = state.ParentMax.X - max.X <= cornerTolerance
                 && state.ParentMax.Y - max.Y <= cornerTolerance;
@@ -491,7 +503,8 @@ public static class SpheneWindowChrome
     }
 
     private static void DrawScrollFades(Vector2 min, Vector2 max, float scrollY,
-        float scrollMaxY, bool border, Vector4? fadeBaseColor)
+        float scrollMaxY, bool border, float topInset, Vector2 parentMin, Vector2 parentMax,
+        Vector4? fadeBaseColor)
     {
         var canScrollUp = scrollY > ScrollFadeDeadZone;
         var canScrollDown = scrollMaxY - scrollY > ScrollFadeDeadZone;
@@ -509,21 +522,26 @@ public static class SpheneWindowChrome
         var chevronSize = ScrollHintChevronSize * scale;
 
         var edgeInset = border ? style.ChildBorderSize + 1f * scale : 0f;
-        var inner = min + new Vector2(edgeInset, edgeInset);
+        var inner = min + new Vector2(edgeInset, edgeInset + topInset);
         var innerMax = max - new Vector2(edgeInset, edgeInset);
+
+        var outerBorder = MathF.Max(style.WindowBorderSize, 0f);
+        inner.X = MathF.Max(inner.X, parentMin.X + outerBorder);
+        inner.Y = MathF.Max(inner.Y, parentMin.Y + outerBorder);
+        innerMax.X = MathF.Min(innerMax.X, parentMax.X - outerBorder);
+        innerMax.Y = MathF.Min(innerMax.Y, parentMax.Y - outerBorder);
+
         if (innerMax.X <= inner.X || innerMax.Y <= inner.Y)
             return;
         var centerX = inner.X + (innerMax.X - inner.X) * 0.5f;
         var cornerRadius = border ? MathF.Max(0f, style.ChildRounding - edgeInset) : 0f;
 
-        var clipMin = border ? inner : min;
-        var clipMax = border ? innerMax : max;
-        drawList.PushClipRect(clipMin, clipMax, border);
+        drawList.PushClipRect(inner, innerMax, border);
 
         if (canScrollUp)
         {
             DrawVerticalFade(drawList, inner, new Vector2(innerMax.X, inner.Y + fadeHeight),
-                opaqueColor, transparentColor, cornerRadius, roundTop: border, roundBottom: false);
+                opaqueColor, transparentColor, cornerRadius, roundTop: border && topInset <= 0f, roundBottom: false);
             DrawScrollHintPill(drawList, centerX, inner.Y, chevronSize, hintColor, pointsUp: true);
         }
 
@@ -692,6 +710,58 @@ public static class SpheneWindowChrome
                 center + new Vector2(MathF.Cos(t0), MathF.Sin(t0)) * inner,
                 color);
         }
+    }
+
+    /// <summary>
+    /// Draws the currently active section label pinned onto the open top edge of
+    /// a frame, centered between its top corner arcs. As the next section's own
+    /// label scrolls up it pushes the pinned one out of the way.
+    /// <paramref name="labels"/> must contain each label's current screen-space
+    /// center Y, recorded while drawing the scrolled content.
+    /// </summary>
+    public static void DrawPinnedSectionLabel(Vector2 frameMin, Vector2 frameMax,
+        IReadOnlyList<(string Label, float CenterY)> labels, Vector2 surfaceMin, Vector2 surfaceMax)
+    {
+        var pinY = frameMin.Y;
+        var current = -1;
+        var next = -1;
+        for (var i = 0; i < labels.Count; i++)
+        {
+            if (labels[i].CenterY <= pinY)
+            {
+                current = i;
+            }
+            else
+            {
+                next = i;
+                break;
+            }
+        }
+        if (current < 0)
+            return;
+
+        var scale = ImGuiHelpers.GlobalScale;
+        var lineHeight = ImGui.GetTextLineHeight();
+        var bandHeight = lineHeight + 8f * scale;
+        var centerY = pinY;
+        if (next >= 0)
+        {
+            centerY = MathF.Min(centerY, labels[next].CenterY - (bandHeight + lineHeight) * 0.5f);
+        }
+
+        var drawList = ImGui.GetWindowDrawList();
+        var rounding = MathF.Max(ImGui.GetStyle().ChildRounding, 2f);
+        var label = labels[current].Label;
+        var textWidth = ImGui.CalcTextSize(label).X;
+        var stripMin = new Vector2(frameMin.X + rounding * 0.5f, centerY - bandHeight * 0.5f);
+        var stripMax = new Vector2(frameMax.X - rounding * 0.5f, centerY + bandHeight * 0.5f);
+        var bg = ImGui.ColorConvertFloat4ToU32(WindowSurfaceColorAt(surfaceMin, surfaceMax, centerY));
+        drawList.AddRectFilled(stripMin, stripMax, bg, MathF.Min(rounding * 0.5f, bandHeight * 0.5f));
+
+        ImGui.SetCursorScreenPos(new Vector2(
+            frameMin.X + (frameMax.X - frameMin.X - textWidth) * 0.5f,
+            centerY - lineHeight * 0.5f));
+        UiSharedService.ColorText(label, ImGuiColors.ParsedBlue);
     }
 
     private const float GripAnimSpeed = 8f;
