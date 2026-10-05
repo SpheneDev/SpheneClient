@@ -186,6 +186,36 @@ public partial class ApiController
         }
     }
 
+    public async Task<List<SupporterIconInfoDto>> SupporterGetIcons()
+    {
+        if (!IsConnected) return [];
+
+        try
+        {
+            return await _spheneHub!.InvokeAsync<List<SupporterIconInfoDto>>(nameof(SupporterGetIcons)).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Failed to retrieve supporter icon catalog");
+            return [];
+        }
+    }
+
+    public async Task<byte[]?> SupporterGetIconFile(string iconId)
+    {
+        if (!IsConnected) return null;
+
+        try
+        {
+            return await _spheneHub!.InvokeAsync<byte[]?>(nameof(SupporterGetIconFile), iconId).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Failed to download supporter icon {iconId}", iconId);
+            return null;
+        }
+    }
+
     public async Task UserUpdateGposeState(bool isInGpose)
     {
         if (!IsConnected) return;

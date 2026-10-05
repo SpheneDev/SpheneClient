@@ -68,6 +68,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
     private readonly UiSharedService _uiShared;
     private readonly ShrinkUHostService _shrinkUHostService;
     private readonly ChangelogService _changelogService;
+    private readonly SupporterIconService _supporterIconService;
     private readonly GameSoundManager _gameSoundManager;
     private readonly FileDialogManager _fileDialogManager;
     private readonly string _shrinkUVersion;
@@ -147,6 +148,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         ShrinkUHostService shrinkUHostService,
         DalamudUtilService dalamudUtilService, HttpClient httpClient,
         ChangelogService changelogService,
+        SupporterIconService supporterIconService,
         GameSoundManager gameSoundManager,
         FileDialogManager fileDialogManager,
         ConfigBackupService configBackupService,
@@ -169,6 +171,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         _uiShared = uiShared;
         _shrinkUHostService = shrinkUHostService;
         _changelogService = changelogService;
+        _supporterIconService = supporterIconService;
         _gameSoundManager = gameSoundManager;
         _fileDialogManager = fileDialogManager;
         _configBackupService = configBackupService;
@@ -176,6 +179,9 @@ public class SettingsUi : WindowMediatorSubscriberBase
         _shrinkUVersion = GetShrinkUAssemblyVersion();
         AllowClickthrough = false;
         AllowPinning = false;
+        Flags |= ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoCollapse
+            | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse
+            | ImGuiWindowFlags.NoBackground;
         _validationProgress = new Progress<(int, int, FileCacheEntity)>(v => _currentProgress = v);
 
         SizeConstraints = new WindowSizeConstraints()
@@ -297,8 +303,27 @@ public class SettingsUi : WindowMediatorSubscriberBase
         return !string.Equals(currentJson, originalJson, StringComparison.Ordinal);
     }
 
+    public override void PreDraw()
+    {
+        var scale = ImGuiHelpers.GlobalScale;
+        var titleBarHeight = (ImGui.GetFrameHeight() + 16f * scale) / scale;
+        SpheneWindowChrome.UpdateCollapse(this, "settingsUi", titleBarHeight);
+        base.PreDraw();
+    }
+
     protected override void DrawInternal()
     {
+        DrawSettingsTitleBar();
+
+        var foldAmount = SpheneWindowChrome.GetCollapseAmount("settingsUi");
+        if (foldAmount >= 1f)
+        {
+            return;
+        }
+
+        using var contentFade = ImRaii.PushStyle(ImGuiStyleVar.Alpha,
+            ImGui.GetStyle().Alpha * (1f - MathF.Min(1f, foldAmount * 1.4f)), foldAmount > 0f);
+
         var settingsPos = ImGui.GetWindowPos();
         var settingsSize = ImGui.GetWindowSize();
         var themePageActive = _activeSettingsPage == SettingsPage.Theme;
@@ -1665,9 +1690,32 @@ public class SettingsUi : WindowMediatorSubscriberBase
         return (true, failedConversions.Count != 0, sb.ToString());
     }
 
+    private void DrawSettingsTitleBar()
+    {
+        var version = Assembly.GetExecutingAssembly().GetName().Version;
+        var versionText = version == null ? null : $"v{version.Major}.{version.Minor}.{version.Build}.{version.Revision}";
+
+        SpheneWindowChrome.DrawTitleBar(
+            "settingsUi",
+            "Network Configuration",
+            _uiShared,
+            leadingIcon: FontAwesomeIcon.Cog,
+            rightButtons:
+            [
+                new SpheneWindowChrome.TitleBarButton(FontAwesomeIcon.Times, "Close", () => IsOpen = false),
+            ],
+            trailingText: versionText,
+            collapsible: true);
+    }
+
     private void DrawSettingsContent()
     {
-        var available = ImGui.GetContentRegionAvail();
+        var windowPos = ImGui.GetWindowPos();
+        var windowSize = ImGui.GetWindowSize();
+        var contentOrigin = ImGui.GetCursorScreenPos();
+        var available = new Vector2(
+            windowPos.X + windowSize.X - contentOrigin.X,
+            windowPos.Y + windowSize.Y - contentOrigin.Y);
 
         string diagnosticsPageLabel;
 #if IS_TEST_BUILD
@@ -1694,12 +1742,22 @@ public class SettingsUi : WindowMediatorSubscriberBase
         var sidebarButtonInnerWidth = maxTextWidth + (sidebarButtonPaddingX * 2f);
         var sidebarWidth = sidebarButtonInnerWidth + (style.WindowPadding.X * 2f) + (2f * ImGuiHelpers.GlobalScale);
 
-        ImGui.BeginChild("settings-sidebar", new Vector2(sidebarWidth, available.Y), true);
+        var sidebarInsetY = style.WindowPadding.Y;
+        var contentTopPos = contentOrigin;
+        ImGui.SetCursorScreenPos(contentTopPos + new Vector2(0f, sidebarInsetY));
+
+        SpheneWindowChrome.BeginScrollArea("settings-sidebar",
+            new Vector2(sidebarWidth, MathF.Max(0f, available.Y - sidebarInsetY * 2f)),
+            border: true, hideTopBorder: true);
 
         void SidebarCategory(string label)
         {
             ImGuiHelpers.ScaledDummy(0, 5);
-            UiSharedService.ColorText(label.ToUpperInvariant(), ImGuiColors.ParsedBlue);
+            var text = label.ToUpperInvariant();
+            var availWidth = ImGui.GetContentRegionAvail().X;
+            var textWidth = ImGui.CalcTextSize(text).X;
+            ImGui.SetCursorPosX(ImGui.GetCursorPosX() + MathF.Max(0f, (availWidth - textWidth) * 0.5f));
+            UiSharedService.ColorText(text, ImGuiColors.ParsedBlue);
             ImGuiHelpers.ScaledDummy(0, 3);
         }
 
@@ -1764,13 +1822,15 @@ public class SettingsUi : WindowMediatorSubscriberBase
         SidebarButton("Performance", SettingsPage.Performance);
         SidebarButton(diagnosticsPageLabel, SettingsPage.Debug);
 
-        ImGui.EndChild();
+        SpheneWindowChrome.EndScrollArea();
 
-        ImGui.SameLine();
-        ImGui.BeginChild("settings-content", new Vector2(available.X - sidebarWidth - ImGui.GetStyle().ItemSpacing.X, available.Y), false);
+        ImGui.SetCursorScreenPos(contentTopPos + new Vector2(sidebarWidth + ImGui.GetStyle().ItemSpacing.X, 0f));
+        SpheneWindowChrome.BeginScrollArea("settings-content",
+            new Vector2(available.X - sidebarWidth - ImGui.GetStyle().ItemSpacing.X, available.Y),
+            windowFlags: ImGuiWindowFlags.NoBackground, noPadding: true);
+        ImGuiHelpers.ScaledDummy(0, 8);
         var contentAvail = ImGui.GetContentRegionAvail().X;
-        var scrollbarReserve = ImGui.GetStyle().ScrollbarSize + 10f * ImGuiHelpers.GlobalScale;
-        var safeContentWidth = MathF.Max(220f * ImGuiHelpers.GlobalScale, contentAvail - scrollbarReserve);
+        var safeContentWidth = MathF.Max(220f * ImGuiHelpers.GlobalScale, contentAvail);
         var maxPageWidth = MathF.Min(safeContentWidth, 1040f * ImGuiHelpers.GlobalScale);
         var pageStartX = ImGui.GetCursorPosX();
         if (contentAvail > maxPageWidth)
@@ -1799,14 +1859,14 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
         using (var pageGroup = ImRaii.Group())
         {
-            ImGui.PushTextWrapPos(pageStartX + maxPageWidth - 6f * ImGuiHelpers.GlobalScale);
+            ImGui.PushTextWrapPos(pageStartX + maxPageWidth
+                - SpheneWindowChrome.ScrollAreaContentInset * ImGuiHelpers.GlobalScale);
             ImGui.PushItemWidth(MathF.Min(360f * ImGuiHelpers.GlobalScale, maxPageWidth * 0.6f));
             UiSharedService.ColorText(pageInfo.Item1, ImGuiColors.DalamudGrey);
             ImGui.SameLine();
             UiSharedService.ColorText("•", ImGuiColors.DalamudGrey3);
             ImGui.SameLine();
             ImGui.TextUnformatted(pageInfo.Item2);
-            ImGui.Separator();
             ImGuiHelpers.ScaledDummy(0, 4);
 
             var settingsOptionsIndentX = GetSettingsOptionsIndentX(_activeSettingsPage);
@@ -1863,7 +1923,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             ImGui.PopTextWrapPos();
         }
 
-        ImGui.EndChild();
+        SpheneWindowChrome.EndScrollArea();
     }
 
     private void DrawSettingsPageHeader(string tabKey, string? description = null)
@@ -1887,8 +1947,6 @@ public class SettingsUi : WindowMediatorSubscriberBase
         if (_activeSettingsPage != SettingsPage.Home)
             ImGui.Unindent(settingsOptionsIndentX);
         ImGuiHelpers.ScaledDummy(0, 4);
-        ImGui.Separator();
-        ImGuiHelpers.ScaledDummy(0, 5);
         UiSharedService.ColorText(title, ImGuiColors.ParsedBlue);
         if (!string.IsNullOrWhiteSpace(description))
         {
@@ -2023,6 +2081,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         using var id = ImRaii.PushId("PluginRow_" + name);
         var startPos = ImGui.GetCursorScreenPos();
         var rowHeight = 28f * ImGuiHelpers.GlobalScale;
+        var rowMarginX = SpheneWindowChrome.ScrollAreaContentInset * ImGuiHelpers.GlobalScale;
         
         // Use Avail width for alignment, safer than absolute WindowContentRegionMax in groups/children
         var availWidth = ImGui.GetContentRegionAvail().X;
@@ -2036,7 +2095,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         var textHeight = ImGui.GetTextLineHeight();
         var textY = startPos.Y + (rowHeight - textHeight) / 2;
         
-        ImGui.SetCursorScreenPos(new Vector2(startPos.X + 10, textY));
+        ImGui.SetCursorScreenPos(new Vector2(startPos.X + rowMarginX, textY));
         ImGui.TextColored(nameColor, name);
         if (ImGui.IsItemHovered()) ImGui.SetTooltip(description);
         
@@ -2070,7 +2129,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             var btnY = startPos.Y + (rowHeight - btnHeight) / 2;
             
             var minBtnX = startPos.X + 200;
-            var targetBtnX = startPos.X + availWidth - btnSize.X - 10;
+            var targetBtnX = startPos.X + availWidth - btnSize.X - rowMarginX;
             
             if (targetBtnX < minBtnX) targetBtnX = minBtnX;
             
@@ -2114,7 +2173,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 var toggleHeight = ImGui.GetFrameHeight();
                 var toggleWidth = toggleHeight * 1.8f;
                 var toggleY = startPos.Y + (rowHeight - toggleHeight) / 2;
-                var toggleTargetX = startPos.X + availWidth - toggleWidth - 10;
+                var toggleTargetX = startPos.X + availWidth - toggleWidth - rowMarginX;
                 if (toggleTargetX < minBtnX) toggleTargetX = minBtnX;
 
                 ImGui.SetCursorScreenPos(new Vector2(toggleTargetX, toggleY));
@@ -2178,7 +2237,11 @@ public class SettingsUi : WindowMediatorSubscriberBase
         var discordButtonWidth = _uiShared.GetIconTextButtonSize(FontAwesomeIcon.Users, "Join Discord Community");
         var kofiButtonWidth = supporterFeaturesEnabled ? _uiShared.GetIconTextButtonSize(FontAwesomeIcon.MugHot, "Support on Ko-fi") : 0f;
         var buttonGap = supporterFeaturesEnabled ? ImGui.GetStyle().ItemSpacing.X : 0f;
-        ImGui.SameLine(ImGui.GetContentRegionAvail().X - discordButtonWidth - kofiButtonWidth - buttonGap);
+        var cursorX = ImGui.GetCursorPosX();
+        var rightMargin = SpheneWindowChrome.ScrollAreaContentInset * ImGuiHelpers.GlobalScale;
+        var rightAlignX = cursorX + ImGui.GetContentRegionAvail().X
+            - discordButtonWidth - kofiButtonWidth - buttonGap - rightMargin;
+        ImGui.SameLine(MathF.Max(cursorX, rightAlignX));
 
         // Ko-fi Button
         if (supporterFeaturesEnabled)
@@ -2484,12 +2547,17 @@ public class SettingsUi : WindowMediatorSubscriberBase
         DrawSupporterNameplateSettings();
     }
 
+    private static void DrawSupporterCard(Action content)
+    {
+        SpheneWindowChrome.DrawAccentCard(content);
+    }
+
     private void DrawSupporterLockedCard()
     {
         ImGuiHelpers.ScaledDummy(0, 10);
-        UiSharedService.DrawGrouped(() =>
+        DrawSupporterCard(() =>
         {
-            ImGuiHelpers.ScaledDummy(0, 16);
+            ImGuiHelpers.ScaledDummy(0, 8);
             DrawCenteredSupporterIcon(FontAwesomeIcon.Crown, SpheneColors.SpheneGold, 2.4f);
             ImGuiHelpers.ScaledDummy(0, 10);
             DrawCenteredSupporterHeadline("Unlock Supporter Perks");
@@ -2515,19 +2583,19 @@ public class SettingsUi : WindowMediatorSubscriberBase
             UiSharedService.AttachToolTip("Opens ko-fi.com/sphenedev");
             ImGuiHelpers.ScaledDummy(0, 8);
             UiSharedService.ColorTextWrapped("Include your Discord username or ID in the donation message so your supporter status can be linked.", ImGuiColors.DalamudGrey3);
-            ImGuiHelpers.ScaledDummy(0, 16);
-        }, 8f);
+            ImGuiHelpers.ScaledDummy(0, 8);
+        });
     }
 
     private void DrawSupporterStatusCard()
     {
-        UiSharedService.DrawGrouped(() =>
+        DrawSupporterCard(() =>
         {
             _uiShared.IconText(FontAwesomeIcon.Crown, SpheneColors.SpheneGold);
             ImGui.SameLine();
             _uiShared.BigText("Supporter Status: Active", SpheneColors.SpheneGold);
             UiSharedService.ColorTextWrapped("Thank you for supporting Sphene! Your nameplate indicator is visible to other users.", ImGuiColors.DalamudGrey);
-        }, 8f);
+        });
     }
 
     private void DrawSupporterNameplateSettings()
@@ -2547,10 +2615,10 @@ public class SettingsUi : WindowMediatorSubscriberBase
         }
 
         ImGuiHelpers.ScaledDummy(0, 4);
-        UiSharedService.DrawGrouped(() =>
+        DrawSupporterCard(() =>
         {
             UiSharedService.ColorText("Symbol & Label", SpheneColors.LuminousGold);
-            ImGuiHelpers.ScaledDummy(0, 4);
+            ImGuiHelpers.ScaledDummy(0, 6);
 
             var symbolChar = _configService.Current.SupporterSymbolChar ?? string.Empty;
             var presetIndex = 0;
@@ -2562,7 +2630,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
                     break;
                 }
             }
-            ImGui.SetNextItemWidth(ClampSettingsItemWidth(120f));
+            BeginSupporterRow("Symbol");
+            ImGui.SetNextItemWidth(ClampSettingsItemWidth(90f));
             if (ImGui.Combo("##supporterSymbolPreset", ref presetIndex, SupporterSymbolPresets, SupporterSymbolPresets.Length))
             {
                 _configService.Current.SupporterSymbolChar = presetIndex == 0 ? string.Empty : SupporterSymbolPresets[presetIndex];
@@ -2573,19 +2642,21 @@ public class SettingsUi : WindowMediatorSubscriberBase
             if (presetIndex > 0)
                 symbolChar = SupporterSymbolPresets[presetIndex];
             ImGui.SetNextItemWidth(ClampSettingsItemWidth(80f));
-            if (ImGui.InputText("Symbol##supporterSymbol", ref symbolChar, 4))
+            if (ImGui.InputText("##supporterSymbol", ref symbolChar, 4))
             {
                 _configService.Current.SupporterSymbolChar = symbolChar;
                 _configService.Save();
             }
             UiSharedService.AttachToolTip("The symbol to display next to supporter names. Leave empty to disable.");
 
+            BeginSupporterRow("Symbol Color");
             DrawSupporterColorKeyPicker("supporterSymbolColor", _configService.Current.SupporterColorKey,
                 key => _configService.Current.SupporterColorKey = key);
             UiSharedService.AttachToolTip("Game UI foreground color for the symbol. Default: gold (key 43).");
 
+            BeginSupporterRow("Text Label");
             var textEnabled = _configService.Current.SupporterTextEnabled;
-            if (ImGui.Checkbox("Show Text Label##supporterTextEnabled", ref textEnabled))
+            if (ImGui.Checkbox("Enabled##supporterTextEnabled", ref textEnabled))
             {
                 _configService.Current.SupporterTextEnabled = textEnabled;
                 _configService.Save();
@@ -2593,44 +2664,49 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
             if (textEnabled)
             {
-                ImGui.Indent();
+                BeginSupporterRow("Label Text", true);
                 var labelText = _configService.Current.SupporterLabelText ?? string.Empty;
-                ImGui.SetNextItemWidth(ClampSettingsItemWidth(150f));
-                if (ImGui.InputText("Label Text##supporterLabelText", ref labelText, 30))
+                ImGui.SetNextItemWidth(ClampSettingsItemWidth(200f));
+                if (ImGui.InputText("##supporterLabelText", ref labelText, 30))
                 {
                     _configService.Current.SupporterLabelText = labelText;
                     _configService.Save();
                 }
 
+                BeginSupporterRow("Label Order", true);
                 var labelOrder = (int)_configService.Current.SupporterLabelOrder;
-                if (ImGui.Combo("Label Order##supporterLabelOrder", ref labelOrder, "Symbol then Text\0Text then Symbol\0"))
+                ImGui.SetNextItemWidth(ClampSettingsItemWidth(200f));
+                if (ImGui.Combo("##supporterLabelOrder", ref labelOrder, "Symbol then Text\0Text then Symbol\0"))
                 {
                     _configService.Current.SupporterLabelOrder = (SupporterLabelOrder)labelOrder;
                     _configService.Save();
                 }
 
+                BeginSupporterRow("Label Color", true);
                 DrawSupporterColorKeyPicker("supporterLabelColor", _configService.Current.SupporterLabelColorKey,
                     key => _configService.Current.SupporterLabelColorKey = key);
                 UiSharedService.AttachToolTip("Game UI foreground color for the label text. Default: gold (key 43).");
-                ImGui.Unindent();
             }
 
+            BeginSupporterRow("Position");
             var position = (int)_configService.Current.SupporterSymbolPosition;
-            if (ImGui.Combo("Position##supporterPosition", ref position, "Left\0Right\0Both\0"))
+            ImGui.SetNextItemWidth(ClampSettingsItemWidth(200f));
+            if (ImGui.Combo("##supporterPosition", ref position, "Left\0Right\0Both\0"))
             {
                 _configService.Current.SupporterSymbolPosition = (SupporterSymbolPosition)position;
                 _configService.Save();
             }
-        }, 6f);
+        });
 
         ImGuiHelpers.ScaledDummy(0, 8);
-        UiSharedService.DrawGrouped(() =>
+        DrawSupporterCard(() =>
         {
             UiSharedService.ColorText("Sphene Icon", SpheneColors.LuminousGold);
-            ImGuiHelpers.ScaledDummy(0, 4);
+            ImGuiHelpers.ScaledDummy(0, 6);
 
+            BeginSupporterRow("Icon");
             var iconEnabled = _configService.Current.SupporterIconEnabled;
-            if (ImGui.Checkbox("Show Sphene Icon##supporterIconEnabled", ref iconEnabled))
+            if (ImGui.Checkbox("Enabled##supporterIconEnabled", ref iconEnabled))
             {
                 _configService.Current.SupporterIconEnabled = iconEnabled;
                 _configService.Save();
@@ -2639,9 +2715,11 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
             if (iconEnabled)
             {
-                ImGui.Indent();
+                DrawSupporterIconPicker();
+
+                BeginSupporterRow("Icon Label", true);
                 var iconLabelEnabled = _configService.Current.SupporterIconLabelEnabled;
-                if (ImGui.Checkbox("Show label text next to icon##supporterIconLabelEnabled", ref iconLabelEnabled))
+                if (ImGui.Checkbox("Enabled##supporterIconLabelEnabled", ref iconLabelEnabled))
                 {
                     _configService.Current.SupporterIconLabelEnabled = iconLabelEnabled;
                     _configService.Save();
@@ -2650,30 +2728,91 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
                 if (iconLabelEnabled)
                 {
-                    ImGui.Indent();
+                    BeginSupporterRow("Label Text", true);
                     var iconLabelText = _configService.Current.SupporterIconLabelText ?? string.Empty;
-                    ImGui.SetNextItemWidth(ClampSettingsItemWidth(150f));
-                    if (ImGui.InputText("Icon Label Text##supporterIconLabelText", ref iconLabelText, 30))
+                    ImGui.SetNextItemWidth(ClampSettingsItemWidth(200f));
+                    if (ImGui.InputText("##supporterIconLabelText", ref iconLabelText, 30))
                     {
                         _configService.Current.SupporterIconLabelText = iconLabelText;
                         _configService.Save();
                     }
                     UiSharedService.AttachToolTip("Text drawn next to the Sphene icon. Set independently from the nameplate label.");
 
+                    BeginSupporterRow("Label Color", true);
                     var iconLabelColor = ImGui.ColorConvertU32ToFloat4(_configService.Current.SupporterIconLabelColor);
-                    if (ImGui.ColorEdit4("Icon Label Color##supporterIconLabelColor", ref iconLabelColor))
+                    ImGui.SetNextItemWidth(ClampSettingsItemWidth(200f));
+                    if (ImGui.ColorEdit4("##supporterIconLabelColor", ref iconLabelColor))
                     {
                         _configService.Current.SupporterIconLabelColor = ImGui.ColorConvertFloat4ToU32(iconLabelColor);
                         _configService.Save();
                     }
                     UiSharedService.AttachToolTip("Custom color for the icon label text (free RGBA picker).");
-                    ImGui.Unindent();
                 }
-                ImGui.Unindent();
             }
-        }, 6f);
+        });
     }
 
+    private static void BeginSupporterRow(string label, bool indented = false)
+    {
+        ImGui.AlignTextToFramePadding();
+        if (indented)
+        {
+            UiSharedService.ColorText("  " + label, ImGuiColors.DalamudGrey3);
+        }
+        else
+        {
+            UiSharedService.ColorText(label, ImGuiColors.DalamudGrey);
+        }
+        ImGui.SameLine(SupporterRowLabelColumn * ImGuiHelpers.GlobalScale);
+    }
+
+    private void DrawSupporterIconPicker()
+    {
+        var catalog = _supporterIconService.GetCatalog();
+        var currentId = _configService.Current.SupporterIconId ?? string.Empty;
+
+        BeginSupporterRow("Icon Image", true);
+        var previewLabel = currentId.Length == 0 ? "Default (Sphene Icon)" : currentId;
+        ImGui.SetNextItemWidth(ClampSettingsItemWidth(220f));
+        if (ImGui.BeginCombo("##supporterIconPicker", previewLabel))
+        {
+            if (ImGui.Selectable("Default (Sphene Icon)", currentId.Length == 0))
+            {
+                _configService.Current.SupporterIconId = string.Empty;
+                _configService.Save();
+            }
+            for (var i = 0; i < catalog.Count; i++)
+            {
+                var iconInfo = catalog[i];
+                var label = iconInfo.Animated ? iconInfo.Name + " (animated)" : iconInfo.Name;
+                if (ImGui.Selectable(label + "##" + iconInfo.Id, string.Equals(currentId, iconInfo.Id, StringComparison.OrdinalIgnoreCase)))
+                {
+                    _configService.Current.SupporterIconId = iconInfo.Id;
+                    _configService.Save();
+                }
+            }
+            ImGui.EndCombo();
+        }
+        UiSharedService.AttachToolTip(catalog.Count == 0
+            ? "No custom icons available on this server. The server admin can add PNG, GIF or WebP files to the supporter icon folder."
+            : "Pick a server-provided icon. Animated icons play on the nameplate.");
+
+        var previewIcon = _supporterIconService.GetIcon(currentId);
+        if (previewIcon != null)
+        {
+            ImGui.SameLine();
+            var previewHeight = ImGui.GetTextLineHeightWithSpacing() * 1.6f;
+            var (handle, uv0, uv1) = previewIcon.GetFrame(ImGui.GetTime());
+            ImGui.Image(handle, previewIcon.AspectSize(previewHeight), uv0, uv1);
+        }
+        else if (currentId.Length > 0 && !_supporterIconService.IsIconKnown(currentId))
+        {
+            ImGui.SameLine();
+            UiSharedService.ColorText("(not on server)", ImGuiColors.DalamudOrange);
+        }
+    }
+
+    private const float SupporterRowLabelColumn = 110f;
     private static readonly string[] SupporterSymbolPresets = ["None", "✦", "★", "☆", "♥", "♡", "◆", "◇"];
     private const int UiForegroundKeyInlineMax = 77;
     private const int UiForegroundKeyExtendedStart = 500;

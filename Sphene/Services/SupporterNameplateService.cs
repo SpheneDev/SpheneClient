@@ -34,7 +34,7 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
     private const int OccGridRows = 2;
     private const int FullOccMask = (1 << (OccGridCols * OccGridRows)) - 1;
 
-    private readonly record struct IconDrawPosition(Vector2 Anchor, Vector3 TargetWorldPos, Vector3 CharPos, int PlateIndex, nint Owner, string IconLabel, uint IconLabelColor);
+    private readonly record struct IconDrawPosition(Vector2 Anchor, Vector3 TargetWorldPos, Vector3 CharPos, int PlateIndex, nint Owner, string IconLabel, uint IconLabelColor, string IconId);
 
     private readonly record struct ResolvedStyle(
         bool IndicatorsEnabled,
@@ -42,13 +42,14 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
         bool TextEnabled, string LabelText,
         SupporterLabelOrder LabelOrder, SupporterSymbolPosition Position,
         ushort SymbolColorKey, ushort LabelColorKey,
-        bool IconEnabled, bool IconLabelEnabled, string IconLabelText, uint IconLabelColor);
+        bool IconEnabled, string IconId, bool IconLabelEnabled, string IconLabelText, uint IconLabelColor);
 
     private readonly INamePlateGui _namePlateGui;
     private readonly IObjectTable _objectTable;
     private readonly IGameGui _gameGui;
     private readonly IDalamudPluginInterface _pluginInterface;
     private readonly ITextureProvider _textureProvider;
+    private readonly SupporterIconService _iconService;
     private readonly ApiController _apiController;
     private readonly SpheneConfigService _configService;
     private readonly PairManager _pairManager;
@@ -75,6 +76,7 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
         IGameGui gameGui,
         IDalamudPluginInterface pluginInterface,
         ITextureProvider textureProvider,
+        SupporterIconService iconService,
         ApiController apiController,
         SpheneConfigService configService,
         PairManager pairManager,
@@ -85,6 +87,7 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
         _gameGui = gameGui;
         _pluginInterface = pluginInterface;
         _textureProvider = textureProvider;
+        _iconService = iconService;
         _apiController = apiController;
         _configService = configService;
         _pairManager = pairManager;
@@ -162,7 +165,7 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
         _supporterStyleFingerprint = styles.Count == 0
             ? string.Empty
             : string.Join(";", styles.OrderBy(k => k.Key, StringComparer.OrdinalIgnoreCase)
-                .Select(k => $"{k.Key}~{k.Value.IndicatorsEnabled}~{k.Value.SymbolChar}~{k.Value.SymbolPosition}~{k.Value.TextEnabled}~{k.Value.LabelText}~{k.Value.LabelOrder}~{k.Value.SymbolColorKey}~{k.Value.LabelColorKey}~{k.Value.IconEnabled}~{k.Value.IconLabelEnabled}~{k.Value.IconLabelText}~{k.Value.IconLabelColor}"));
+                .Select(k => $"{k.Key}~{k.Value.IndicatorsEnabled}~{k.Value.SymbolChar}~{k.Value.SymbolPosition}~{k.Value.TextEnabled}~{k.Value.LabelText}~{k.Value.LabelOrder}~{k.Value.SymbolColorKey}~{k.Value.LabelColorKey}~{k.Value.IconEnabled}~{k.Value.IconId}~{k.Value.IconLabelEnabled}~{k.Value.IconLabelText}~{k.Value.IconLabelColor}"));
         _logger.LogDebug("[Nameplate] Cache refreshed: {count} supporter names [{names}], own IsSupporter={isSupporter}, localName={localName}, pairs={pairs}",
             names.Count, string.Join(", ", names), _apiController.IsSupporter,
             _objectTable.LocalPlayer?.Name.TextValue ?? "null", _pairManager.PairsWithGroups.Count);
@@ -191,7 +194,8 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
             c.SupporterTextEnabled && !string.IsNullOrWhiteSpace(c.SupporterLabelText), c.SupporterLabelText ?? string.Empty,
             c.SupporterLabelOrder, c.SupporterSymbolPosition,
             c.SupporterColorKey, c.SupporterLabelColorKey,
-            c.SupporterIconEnabled, c.SupporterIconLabelEnabled, c.SupporterIconLabelText ?? string.Empty, c.SupporterIconLabelColor);
+            c.SupporterIconEnabled, c.SupporterIconId ?? string.Empty,
+            c.SupporterIconLabelEnabled, c.SupporterIconLabelText ?? string.Empty, c.SupporterIconLabelColor);
     }
 
     private static ResolvedStyle FromDto(SupporterStyleDto s)
@@ -206,7 +210,8 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
             s.TextEnabled && !string.IsNullOrWhiteSpace(s.LabelText), s.LabelText ?? string.Empty,
             order, position,
             (ushort)Math.Clamp(s.SymbolColorKey, 0, ushort.MaxValue), (ushort)Math.Clamp(s.LabelColorKey, 0, ushort.MaxValue),
-            s.IconEnabled, s.IconLabelEnabled, s.IconLabelText ?? string.Empty, s.IconLabelColor);
+            s.IconEnabled, s.IconId ?? string.Empty,
+            s.IconLabelEnabled, s.IconLabelText ?? string.Empty, s.IconLabelColor);
     }
 
     private SupporterStyleDto BuildOwnStyle()
@@ -223,6 +228,7 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
             SymbolColorKey = c.SupporterColorKey,
             LabelColorKey = c.SupporterLabelColorKey,
             IconEnabled = c.SupporterIconEnabled,
+            IconId = c.SupporterIconId ?? string.Empty,
             IconLabelEnabled = c.SupporterIconLabelEnabled,
             IconLabelText = c.SupporterIconLabelText ?? string.Empty,
             IconLabelColor = c.SupporterIconLabelColor
@@ -307,7 +313,7 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
                         charPos + Vector3.UnitY * OcclusionProbeHeight, charPos,
                         h.NamePlateIndex, pc.Address,
                         style.IconLabelEnabled ? style.IconLabelText : string.Empty,
-                        style.IconLabelColor));
+                        style.IconLabelColor, style.IconId));
                 }
                 if (logThisTick && iconDbg == null)
                 {
@@ -425,7 +431,7 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
     private void RequestRedrawIfSettingsChanged()
     {
         var current = _configService.Current;
-        var key = $"{current.ShowSupporterNameplate}|{current.SupporterSymbolChar}|{current.SupporterTextEnabled}|{current.SupporterLabelText}|{current.SupporterLabelOrder}|{current.SupporterSymbolPosition}|{current.SupporterColorKey}|{current.SupporterLabelColorKey}|{current.SupporterIconEnabled}|{current.SupporterIconLabelEnabled}|{current.SupporterIconLabelText}|{current.SupporterIconLabelColor}|{_apiController.SupporterFeaturesEnabled}|{string.Join(",", _supporterNameCache.OrderBy(n => n, StringComparer.OrdinalIgnoreCase))}|{_supporterStyleFingerprint}";
+        var key = $"{current.ShowSupporterNameplate}|{current.SupporterSymbolChar}|{current.SupporterTextEnabled}|{current.SupporterLabelText}|{current.SupporterLabelOrder}|{current.SupporterSymbolPosition}|{current.SupporterColorKey}|{current.SupporterLabelColorKey}|{current.SupporterIconEnabled}|{current.SupporterIconId}|{current.SupporterIconLabelEnabled}|{current.SupporterIconLabelText}|{current.SupporterIconLabelColor}|{_apiController.SupporterFeaturesEnabled}|{string.Join(",", _supporterNameCache.OrderBy(n => n, StringComparer.OrdinalIgnoreCase))}|{_supporterStyleFingerprint}";
 
         var publishKey = _apiController.IsConnected && _apiController.IsSupporter && _apiController.SupporterFeaturesEnabled
             ? key
@@ -793,16 +799,34 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
         if (positions.Count == 0)
             return;
         var icon = _iconTexture;
-        if (icon == null || !icon.TryGetWrap(out var tex, out _) || tex == null)
-            return;
+        IDalamudTextureWrap? defaultTex = null;
+        var hasDefaultIcon = icon != null && icon.TryGetWrap(out defaultTex, out _) && defaultTex != null;
 
         var scale = ImGuiHelpers.GlobalScale;
-        var size = new Vector2(IconSize * scale);
+        var baseHeight = IconSize * scale;
+        var now = ImGui.GetTime();
         var drawList = ImGui.GetBackgroundDrawList();
         RefreshNamePlateLayer();
         for (int i = 0; i < positions.Count; i++)
         {
             var entry = positions[i];
+            ImTextureID handle;
+            Vector2 uv0, uv1, size;
+            var animated = _iconService.GetIcon(entry.IconId);
+            if (animated != null)
+            {
+                (handle, uv0, uv1) = animated.GetFrame(now);
+                size = animated.AspectSize(baseHeight);
+            }
+            else
+            {
+                if (!hasDefaultIcon)
+                    continue;
+                handle = defaultTex.Handle;
+                uv0 = Vector2.Zero;
+                uv1 = Vector2.One;
+                size = new Vector2(baseHeight);
+            }
             var label = entry.IconLabel;
             var labelColor = entry.IconLabelColor;
             var labelSize = label.Length > 0 ? ImGui.CalcTextSize(label) : Vector2.Zero;
@@ -817,7 +841,7 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
                 continue;
             if (occMask == 0)
             {
-                DrawIconAndLabel(drawList, tex, min, size, label, labelColor, labelSize, entry.Anchor.Y, scale);
+                DrawIconAndLabel(drawList, handle, uv0, uv1, min, size, label, labelColor, labelSize, entry.Anchor.Y, scale);
                 continue;
             }
             var cellW = (right - min.X) / OccGridCols;
@@ -831,17 +855,17 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
                         continue;
                     var cellMin = new Vector2(min.X + cellW * col, min.Y + cellH * row);
                     drawList.PushClipRect(cellMin, cellMin + new Vector2(cellW, cellH), true);
-                    DrawIconAndLabel(drawList, tex, min, size, label, labelColor, labelSize, entry.Anchor.Y, scale);
+                    DrawIconAndLabel(drawList, handle, uv0, uv1, min, size, label, labelColor, labelSize, entry.Anchor.Y, scale);
                     drawList.PopClipRect();
                 }
             }
         }
     }
 
-    private static void DrawIconAndLabel(ImDrawListPtr drawList, IDalamudTextureWrap tex,
-        Vector2 min, Vector2 size, string label, uint labelColor, Vector2 labelSize, float anchorY, float scale)
+    private static void DrawIconAndLabel(ImDrawListPtr drawList, ImTextureID texHandle,
+        Vector2 uv0, Vector2 uv1, Vector2 min, Vector2 size, string label, uint labelColor, Vector2 labelSize, float anchorY, float scale)
     {
-        drawList.AddImage(tex.Handle, min, min + size);
+        drawList.AddImage(texHandle, min, min + size, uv0, uv1);
         if (labelSize != Vector2.Zero)
         {
             drawList.AddText(

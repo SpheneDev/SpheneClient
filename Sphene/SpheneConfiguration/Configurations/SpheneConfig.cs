@@ -247,6 +247,7 @@ public class SpheneConfig : ISpheneConfiguration
     public ushort SupporterColorKey { get; set; } = 43;
     public ushort SupporterLabelColorKey { get; set; } = 43;
     public bool SupporterIconEnabled { get; set; } = true;
+    public string SupporterIconId { get; set; } = string.Empty;
     public bool SupporterIconLabelEnabled { get; set; } = false;
     public string SupporterIconLabelText { get; set; } = "[Supporter]";
     public uint SupporterIconLabelColor { get; set; } = 0xFF40BEFFu;

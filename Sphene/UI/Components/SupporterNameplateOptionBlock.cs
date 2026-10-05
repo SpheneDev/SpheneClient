@@ -53,4 +53,10 @@ public static class SupporterNameplateOptionBlock
         ImGui.TextWrapped("Your supporter nameplate style is now shared with other Sphene users: they see your nameplate exactly the way you configured it.");
         uiShared.DrawHelpText("Configure your personal supporter look in Settings > Supporter.");
     }
+
+    public static void DrawSupporterServerIconsInfo(SpheneConfigService configService, UiSharedService uiShared, string blockId = "SupporterServerIcons")
+    {
+        ImGui.TextWrapped("Servers can now provide custom supporter icons, including animated ones. Pick your favorite in the supporter settings and other users will see it on your nameplate.");
+        uiShared.DrawHelpText("Open Settings > Supporter to choose an icon provided by your server.");
+    }
 }

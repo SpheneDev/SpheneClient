@@ -538,6 +538,7 @@ public sealed class Plugin : IAsyncDalamudPlugin
             });
             collection.AddSingleton<IconUpdateService>();
             collection.AddSingleton<HalloweenEasterEggService>();
+            collection.AddSingleton<SupporterIconService>();
             collection.AddSingleton<SupporterNameplateService>();
             
             collection.AddScoped((s) => new UiService(s.GetRequiredService<ILogger<UiService>>(), _pluginInterface.UiBuilder, s.GetRequiredService<SpheneConfigService>(),
