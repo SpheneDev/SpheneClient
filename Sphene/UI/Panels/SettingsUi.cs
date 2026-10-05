@@ -1786,16 +1786,38 @@ public class SettingsUi : WindowMediatorSubscriberBase
         var sidebarButtonInnerWidth = maxTextWidth + (sidebarButtonPaddingX * 2f);
         var sidebarWidth = sidebarButtonInnerWidth + (style.WindowPadding.X * 2f) + (2f * ImGuiHelpers.GlobalScale);
 
-        var sidebarInsetY = style.WindowPadding.Y + 6f * ImGuiHelpers.GlobalScale;
+        // The sidebar is a rail: slightly lighter than the window surface,
+        // spanning from below the title bar to the bottom window edge.
         var contentTopPos = contentOrigin;
-        var sidebarMin = contentTopPos + new Vector2(0f, sidebarInsetY);
-        var sidebarSize = new Vector2(sidebarWidth, MathF.Max(0f, available.Y - sidebarInsetY * 2f));
+        var railMin = new Vector2(windowPos.X, windowPos.Y + SpheneWindowChrome.TitleBarHeight);
+        var railMax = new Vector2(contentTopPos.X + sidebarWidth, windowPos.Y + windowSize.Y);
+        // Center the sidebar child inside the rail so the button padding reads
+        // symmetric (left rail extension + window padding vs right padding).
+        var sidebarMin = new Vector2(
+            railMin.X + MathF.Max(0f, railMax.X - railMin.X - sidebarWidth) * 0.5f,
+            contentTopPos.Y);
+        var sidebarSize = new Vector2(sidebarWidth, MathF.Max(0f, available.Y));
+        var theme = SpheneCustomTheme.CurrentTheme;
+        var sidebarBg = SpheneColors.LerpColor(theme.WindowBg, Vector4.One, 0.07f);
+        sidebarBg = SpheneColors.WithAlpha(sidebarBg, MathF.Min(1f, theme.WindowBg.W + 0.08f));
+        var outerBorder = MathF.Max(style.WindowBorderSize, 0f);
+        var railRadius = MathF.Max(0f, style.WindowRounding - outerBorder);
+        var windowDrawList = ImGui.GetWindowDrawList();
+        // Escape the inner content clip so the rail reaches the window edges
+        // like the title bar does; the bottom-left corner hugs the window arc.
+        ImGui.PushClipRect(windowPos, windowPos + windowSize, false);
+        windowDrawList.AddRectFilled(railMin, railMax, SpheneColors.ToImGuiColor(sidebarBg),
+            railRadius, ImDrawFlags.RoundCornersBottomLeft);
+        windowDrawList.AddLine(new Vector2(railMax.X - 0.5f, railMin.Y),
+            new Vector2(railMax.X - 0.5f, railMax.Y),
+            SpheneColors.ToImGuiColor(SpheneColors.WithAlpha(Vector4.One, 0.06f)));
+        ImGui.PopClipRect();
         ImGui.SetCursorScreenPos(sidebarMin);
 
         var pinnedBandInset = (ImGui.GetTextLineHeight() + 8f * ImGuiHelpers.GlobalScale) * 0.5f
             + 2f * ImGuiHelpers.GlobalScale;
         SpheneWindowChrome.BeginScrollArea("settings-sidebar", sidebarSize,
-            border: true, hideTopBorder: true, topInset: pinnedBandInset);
+            topInset: pinnedBandInset);
 
         var sidebarCategories = new List<(string Label, float CenterY)>();
         void SidebarCategory(string label)
@@ -1877,7 +1899,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
         SidebarButton("Performance", SettingsPage.Performance);
         SidebarButton(diagnosticsPageLabel, SettingsPage.Debug);
 
-        SpheneWindowChrome.EndScrollArea();
+        SpheneWindowChrome.EndScrollArea(fadeBaseColor: sidebarBg,
+            fadeSpanX: new Vector2(railMin.X, railMax.X));
 
         SpheneWindowChrome.DrawPinnedSectionLabel(sidebarMin, sidebarMin + sidebarSize,
             sidebarCategories, windowPos, windowPos + windowSize);
@@ -1981,7 +2004,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
             ImGui.PopTextWrapPos();
         }
 
-        SpheneWindowChrome.EndScrollArea();
+        SpheneWindowChrome.EndScrollArea(
+            fadeSpanX: new Vector2(railMax.X, windowPos.X + windowSize.X));
     }
 
     private void DrawSettingsPageHeader(string tabKey, string? description = null)

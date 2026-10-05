@@ -64,6 +64,10 @@ public static class SpheneWindowChrome
     /// </summary>
     public const float ScrollAreaContentInset = 10f;
 
+    /// <summary>Total height of the custom title bar including its accent line.</summary>
+    public static float TitleBarHeight =>
+        ImGui.GetFrameHeight() + TitleBarPaddingY * 2f * ImGuiHelpers.GlobalScale;
+
     private static float ActiveContentInset =>
         ScrollAreaStack.Count > 0 ? ScrollAreaStack.Peek().ContentInset : 0f;
 
@@ -665,8 +669,12 @@ public static class SpheneWindowChrome
     /// defaults to the window background color.
     /// <paramref name="edgePaddingX"/>, when non-negative, spans the fades from the
     /// parent window's inner edge inset by that amount instead of the child bounds.
+    /// <paramref name="fadeSpanX"/> sets an explicit horizontal fade span
+    /// (min.X, max.X), e.g. a rail reaching the window edge while its child is
+    /// inset by padding; takes precedence over <paramref name="edgePaddingX"/>.
     /// </summary>
-    public static void EndScrollArea(Vector4? fadeBaseColor = null, float edgePaddingX = -1f)
+    public static void EndScrollArea(Vector4? fadeBaseColor = null, float edgePaddingX = -1f,
+        Vector2? fadeSpanX = null)
     {
         var state = ScrollAreaStack.Count > 0 ? ScrollAreaStack.Pop() : new ScrollAreaState();
 
@@ -706,7 +714,7 @@ public static class SpheneWindowChrome
                     MathF.Max(ImGui.GetStyle().ChildBorderSize, 1f), openTop: state.HideTopBorder);
             }
             DrawScrollFades(min, max, scrollY, scrollMaxY, state.Border, state.TopInset,
-                state.ParentMin, state.ParentMax, fadeBaseColor, edgePaddingX);
+                state.ParentMin, state.ParentMax, fadeBaseColor, edgePaddingX, fadeSpanX);
             var styleVars = ImGui.GetStyle();
             var cornerReach = MathF.Max(styleVars.WindowBorderSize,
                     MathF.Max(styleVars.WindowPadding.X, styleVars.WindowPadding.Y))
@@ -775,7 +783,7 @@ public static class SpheneWindowChrome
 
     private static void DrawScrollFades(Vector2 min, Vector2 max, float scrollY,
         float scrollMaxY, bool border, float topInset, Vector2 parentMin, Vector2 parentMax,
-        Vector4? fadeBaseColor, float edgePaddingX = -1f)
+        Vector4? fadeBaseColor, float edgePaddingX = -1f, Vector2? fadeSpanX = null)
     {
         var scale = ImGuiHelpers.GlobalScale;
         // Fade strength: 1 while far from the end, shrinks to 0 as the edge
@@ -803,9 +811,16 @@ public static class SpheneWindowChrome
         innerMax.X = MathF.Min(innerMax.X, parentMax.X - outerBorder);
         innerMax.Y = MathF.Min(innerMax.Y, parentMax.Y - outerBorder);
 
+        // An explicit fade span overrides the child bounds (e.g. a rail that
+        // reaches the window edge while its child is inset by padding).
+        if (fadeSpanX.HasValue)
+        {
+            inner.X = Math.Clamp(fadeSpanX.Value.X, parentMin.X, innerMax.X);
+            innerMax.X = Math.Clamp(fadeSpanX.Value.Y, inner.X, parentMax.X);
+        }
         // A non-negative edge padding anchors the fade to the window's inner
         // edge so it can span wider or narrower than the child itself.
-        if (edgePaddingX >= 0f)
+        else if (edgePaddingX >= 0f)
         {
             inner.X = parentMin.X + outerBorder + edgePaddingX;
             innerMax.X = parentMax.X - outerBorder - edgePaddingX;
