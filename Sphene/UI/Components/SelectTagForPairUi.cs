@@ -8,6 +8,7 @@ using Sphene.UI.Handlers;
 using Sphene.UI.Theme;
 
 using System.Numerics;
+using Sphene.UI.Styling;
 
 namespace Sphene.UI.Components;
 
@@ -58,7 +59,7 @@ public class SelectTagForPairUi
             _show = false;
         }
 
-        if (ImGui.BeginPopup(popupName))
+        if (SpheneWindowChrome.BeginStyledPopup(popupName))
         {
             using (SpheneCustomTheme.ApplyContextMenuTheme())
             {
@@ -66,7 +67,7 @@ public class SelectTagForPairUi
                 var childHeight = tags.Count != 0 ? tags.Count * 25 : 1;
                 var childSize = new Vector2(0, childHeight > 100 ? 100 : childHeight) * ImGuiHelpers.GlobalScale;
 
-                ImGui.TextUnformatted($"Select the groups you want {name} to be in.");
+                UiSharedService.Text($"Select the groups you want {name} to be in.");
                 if (ImGui.BeginChild(name + "##listGroups", childSize))
                 {
                     foreach (var tag in tags)
@@ -77,8 +78,8 @@ public class SelectTagForPairUi
                 ImGui.EndChild();
             }
 
-            ImGui.Separator();
-            ImGui.TextUnformatted($"Create a new group for {name}.");
+            UiSharedService.DrawSeparator();
+            UiSharedService.Text($"Create a new group for {name}.");
             if (_uiSharedService.IconButton(FontAwesomeIcon.Plus))
             {
                 HandleAddTag();
@@ -89,7 +90,7 @@ public class SelectTagForPairUi
             {
                 HandleAddTag();
             }
-            ImGui.EndPopup();
+            SpheneWindowChrome.EndStyledPopup();
         }
     }
 
@@ -107,7 +108,7 @@ public class SelectTagForPairUi
     {
         var hasTagBefore = _tagHandler.HasTag(pair.UserData.UID, name);
         var hasTag = hasTagBefore;
-        if (ImGui.Checkbox(name, ref hasTag))
+        if (UiSharedService.DrawToggleChip(name, ref hasTag))
         {
             if (hasTag)
             {

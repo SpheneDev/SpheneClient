@@ -24,6 +24,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Numerics;
+using Sphene.UI.Styling;
 
 namespace Sphene.UI.Components;
 
@@ -1227,7 +1228,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
 
         using (SpheneCustomTheme.ApplyContextMenuTheme())
         {
-            if (ImGui.BeginPopup("User Flyout Menu"))
+            if (SpheneWindowChrome.BeginStyledPopup("User Flyout Menu"))
             {
                 using (ImRaii.PushId($"buttons-{_pair.UserData.UID}"))
                 {
@@ -1240,7 +1241,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
                         _menuWidth = ImGui.GetWindowContentRegionMax().X - ImGui.GetWindowContentRegionMin().X;
                     }
                 }
-                ImGui.EndPopup();
+                SpheneWindowChrome.EndStyledPopup();
             }
         }
 

@@ -53,7 +53,7 @@ public static class StorageOptionBlock
         ImGui.PushID(blockId);
         try
         {
-            UiSharedService.DrawToggle("##readClearCache", ref readClearCache);
+            UiSharedService.DrawToggle("I understand and accept the risks", ref readClearCache);
         }
         finally
         {

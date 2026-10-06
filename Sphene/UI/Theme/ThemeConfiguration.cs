@@ -9,7 +9,7 @@ public class ThemeConfiguration
     // General Theme Settings
     public float WindowRounding { get; set; } = 10.0f;
     public float ChildRounding { get; set; } = 8.0f;
-    public float PopupRounding { get; set; } = 20.0f;
+    public float PopupRounding { get; set; } = 8.0f;
     public float FrameRounding { get; set; } = 8.0f;
     public float ScrollbarRounding { get; set; } = 4.0f;
     public float GrabRounding { get; set; } = 4.0f;

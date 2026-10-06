@@ -115,10 +115,26 @@ public class SettingsUi : WindowMediatorSubscriberBase
     }
     private SettingsPage _activeSettingsPage = SettingsPage.Home;
     private int _settingsCardIndex;
-    private bool _preferPanelThemeTab = false;
-    private bool _preferIconThemeTab = false;
-    private bool _preferSoundsThemeTab = false;
+    private string? _preferThemeTab = null;
     private bool _preferButtonStylesTab = false;
+
+    private static readonly string[] GeneralThemeNavLabels =
+    [
+        "Rounding", "Borders", "Effects", "Spacing",
+        "Basic", "Window", "Frame & Input", "Button & Header",
+        "Menu & Navigation", "Scrollbar & Slider", "Table & Tab"
+    ];
+    private static readonly string[] GeneralThemeSectionTitles =
+    [
+        "Window Rounding", "Border Sizes", "Window Effects", "Spacing & Padding",
+        "Basic Colors", "Window Colors", "Frame & Input Colors",
+        "Button & Header Colors", "Menu & Navigation Colors",
+        "Scrollbar & Slider Colors", "Table & Tab Colors"
+    ];
+    private int _generalSectionActive;
+    private int _generalScrollRequest = -1;
+    private float? _generalScrollTarget;
+    private readonly float[] _generalSectionTops = new float[GeneralThemeNavLabels.Length];
     private readonly ConfigBackupService _configBackupService;
     private readonly ShrinkUConfigService _shrinkUConfigService;
     private bool _showExportModal = false;
@@ -323,6 +339,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
     protected override void DrawInternal()
     {
+        SpheneDesignLint.BeginFrame();
         DrawSettingsTitleBar();
 
         var foldAmount = SpheneWindowChrome.GetCollapseAmount("settingsUi");
@@ -369,6 +386,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         // Draw backup/restore modals
         DrawExportBackupModal();
         DrawImportBackupModal();
+        SpheneDesignLint.DrawOverlay();
     }
     
 
@@ -379,9 +397,10 @@ public class SettingsUi : WindowMediatorSubscriberBase
                              "If you see file paths from your drive here, then those files were not allowed to be uploaded. If you see hashes, those files were not allowed to be downloaded. " +
                              "Ask your paired friend to send you the mod in question through other means, acquire the mod yourself or pester the mod creator to allow it to be sent over Sphene.",
             ImGuiColors.DalamudGrey);
+        ImGuiHelpers.ScaledDummy(0, 6);
+        UiSharedService.ColorText("Blocked Transfers", ImGuiColors.ParsedBlue);
+        ImGuiHelpers.ScaledDummy(0, 4);
 
-        DrawSettingsCard("Blocked Transfers", () =>
-        {
         if (ImGui.BeginTable("TransfersTable", 2, ImGuiTableFlags.SizingStretchProp))
         {
             ImGui.TableSetupColumn("Hash/Filename", ImGuiTableColumnFlags.WidthStretch);
@@ -394,18 +413,17 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 ImGui.TableNextColumn();
                 if (item is UploadFileTransfer transfer)
                 {
-                    ImGui.TextUnformatted(transfer.LocalFile);
+                    UiSharedService.Text(transfer.LocalFile);
                 }
                 else
                 {
-                    ImGui.TextUnformatted(item.Hash);
+                    UiSharedService.Text(item.Hash);
                 }
                 ImGui.TableNextColumn();
-                ImGui.TextUnformatted(item.ForbiddenBy);
+                UiSharedService.Text(item.ForbiddenBy);
             }
             ImGui.EndTable();
         }
-        });
     }
 
     private void DrawCurrentTransfers()
@@ -415,15 +433,14 @@ public class SettingsUi : WindowMediatorSubscriberBase
         DrawSettingsCard("Transfer Limits", () =>
         {
         ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("Global Receive Limit");
+        UiSharedService.Text("Global Receive Limit");
         ImGui.SameLine();
         TransfersOptionBlock.DrawGlobalReceiveLimitValueOption(_configService, Mediator, ClampSettingsItemWidth(100f), "TransfersGlobalReceiveLimitValue");
         ImGui.SameLine();
-        ImGui.SetNextItemWidth(ClampSettingsItemWidth(100f));
-        TransfersOptionBlock.DrawGlobalReceiveLimitSpeedUnitOption(_configService, _uiShared, Mediator, "TransfersGlobalReceiveLimitSpeedUnit");
-        ImGui.SameLine();
         ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("0 = No limit/infinite");
+        UiSharedService.ColorText("0 = No limit/infinite", ImGuiColors.DalamudGrey3);
+        ImGui.SameLine();
+        TransfersOptionBlock.DrawGlobalReceiveLimitSpeedUnitOption(_configService, _uiShared, Mediator, "TransfersGlobalReceiveLimitSpeedUnit");
 
         TransfersOptionBlock.DrawMaximumParallelDataStreamsOption(_configService, "TransfersMaximumParallelDataStreams");
         TransfersOptionBlock.DrawUseSpheneCdnDirectDownloadsOption(_configService, _uiShared, "TransfersUseSpheneCdnDirectDownloads");
@@ -434,30 +451,31 @@ public class SettingsUi : WindowMediatorSubscriberBase
         DrawSettingsCard("Transfer Monitor", () =>
         {
         var showTransferWindow = TransfersOptionBlock.DrawShowSeparateTransmissionMonitorOption(_configService, _uiShared, "TransfersShowSeparateTransmissionMonitor");
-        if (!showTransferWindow) ImGui.BeginDisabled();
-        ImGui.Indent();
-        TransfersOptionBlock.DrawEditTransmissionMonitorPositionOption(_uiShared, "TransfersEditTransmissionMonitorPosition");
-        ImGui.Unindent();
-        if (!showTransferWindow) ImGui.EndDisabled();
+        using (ImRaii.Disabled(!showTransferWindow))
+        {
+            ImGui.Indent();
+            TransfersOptionBlock.DrawEditTransmissionMonitorPositionOption(_uiShared, "TransfersEditTransmissionMonitorPosition");
+            ImGui.Unindent();
+        }
 
         var showTransferBars = TransfersOptionBlock.DrawShowTransmissionIndicatorsBelowPlayersOption(_configService, _uiShared, "TransfersShowTransmissionIndicatorsBelowPlayers");
 
-        if (!showTransferBars) ImGui.BeginDisabled();
-        ImGui.Indent();
-        TransfersOptionBlock.DrawShowTransmissionTextOption(_configService, _uiShared, "TransfersShowTransmissionText");
-        TransfersOptionBlock.DrawTransmissionIndicatorWidthOption(_configService, _uiShared, "TransfersTransmissionIndicatorWidth");
-        TransfersOptionBlock.DrawTransmissionIndicatorHeightOption(_configService, _uiShared, "TransfersTransmissionIndicatorHeight");
-        var showUploading = TransfersOptionBlock.DrawShowTransmittingTextBelowPlayersOption(_configService, _uiShared, "TransfersShowTransmittingTextBelowPlayers");
+        using (ImRaii.Disabled(!showTransferBars))
+        {
+            ImGui.Indent();
+            TransfersOptionBlock.DrawShowTransmissionTextOption(_configService, _uiShared, "TransfersShowTransmissionText");
+            TransfersOptionBlock.DrawTransmissionIndicatorWidthOption(_configService, _uiShared, "TransfersTransmissionIndicatorWidth");
+            TransfersOptionBlock.DrawTransmissionIndicatorHeightOption(_configService, _uiShared, "TransfersTransmissionIndicatorHeight");
+            var showUploading = TransfersOptionBlock.DrawShowTransmittingTextBelowPlayersOption(_configService, _uiShared, "TransfersShowTransmittingTextBelowPlayers");
+            ImGui.Unindent();
 
-        ImGui.Unindent();
-        if (!showUploading) ImGui.BeginDisabled();
-        ImGui.Indent();
-        TransfersOptionBlock.DrawLargeFontForTransmittingTextOption(_configService, _uiShared, "TransfersLargeFontForTransmittingText");
-
-        ImGui.Unindent();
-
-        if (!showUploading) ImGui.EndDisabled();
-        if (!showTransferBars) ImGui.EndDisabled();
+            using (ImRaii.Disabled(!showUploading))
+            {
+                ImGui.Indent();
+                TransfersOptionBlock.DrawLargeFontForTransmittingTextOption(_configService, _uiShared, "TransfersLargeFontForTransmittingText");
+                ImGui.Unindent();
+            }
+        }
         });
 
         if (_apiController.IsConnected)
@@ -518,12 +536,20 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
         DrawSettingsCard("Current Transfers", () =>
         {
-        if (ImGui.BeginTabBar("TransfersTabBar",
-            ImGuiTabBarFlags.NoTabListScrollingButtons | ImGuiTabBarFlags.FittingPolicyResizeDown))
+        var transferTabs = new List<string>(2);
+        if (ApiController.ServerState is ServerState.Connected)
         {
-            if (ApiController.ServerState is ServerState.Connected && ImGui.BeginTabItem("Transfers"))
+            transferTabs.Add("Transfers");
+        }
+        transferTabs.Add("Blocked Transfers");
+        var transferTab = SpheneWindowChrome.DrawTabStrip("TransfersTabs", transferTabs,
+            scrollIntoViewOnChange: true);
+        ImGuiHelpers.ScaledDummy(0, 4);
+        switch (transferTabs[transferTab])
+        {
+            case "Transfers":
             {
-                ImGui.TextUnformatted("Uploads");
+                UiSharedService.Text("Uploads");
                 if (ImGui.BeginTable("UploadsTable", 3, ImGuiTableFlags.SizingStretchProp))
                 {
                     ImGui.TableSetupColumn("File", ImGuiTableColumnFlags.WidthStretch);
@@ -535,19 +561,19 @@ public class SettingsUi : WindowMediatorSubscriberBase
                         var color = UiSharedService.UploadColor((transfer.Transferred, transfer.Total));
                         var col = ImRaii.PushColor(ImGuiCol.Text, color);
                         ImGui.TableNextColumn();
-                        ImGui.TextUnformatted(transfer.Hash);
+                        UiSharedService.Text(transfer.Hash);
                         ImGui.TableNextColumn();
-                        ImGui.TextUnformatted(UiSharedService.ByteToString(transfer.Transferred));
+                        UiSharedService.Text(UiSharedService.ByteToString(transfer.Transferred));
                         ImGui.TableNextColumn();
-                        ImGui.TextUnformatted(UiSharedService.ByteToString(transfer.Total));
+                        UiSharedService.Text(UiSharedService.ByteToString(transfer.Total));
                         col.Dispose();
                         ImGui.TableNextRow();
                     }
 
                     ImGui.EndTable();
                 }
-                ImGui.Separator();
-                ImGui.TextUnformatted("Downloads");
+                UiSharedService.DrawSeparator();
+                UiSharedService.Text("Downloads");
                 if (ImGui.BeginTable("DownloadsTable", 4, ImGuiTableFlags.SizingStretchProp))
                 {
                     ImGui.TableSetupColumn("User", ImGuiTableColumnFlags.WidthFixed, 100);
@@ -563,14 +589,14 @@ public class SettingsUi : WindowMediatorSubscriberBase
                         {
                             var color = UiSharedService.UploadColor((entry.Value.TransferredBytes, entry.Value.TotalBytes));
                             ImGui.TableNextColumn();
-                            ImGui.TextUnformatted(userName);
+                            UiSharedService.Text(userName);
                             ImGui.TableNextColumn();
-                            ImGui.TextUnformatted(entry.Key);
+                            UiSharedService.Text(entry.Key);
                             var col = ImRaii.PushColor(ImGuiCol.Text, color);
                             ImGui.TableNextColumn();
-                            ImGui.TextUnformatted(entry.Value.TransferredFiles + "/" + entry.Value.TotalFiles);
+                            UiSharedService.Text(entry.Value.TransferredFiles + "/" + entry.Value.TotalFiles);
                             ImGui.TableNextColumn();
-                            ImGui.TextUnformatted(UiSharedService.ByteToString(entry.Value.TransferredBytes) + "/" + UiSharedService.ByteToString(entry.Value.TotalBytes));
+                            UiSharedService.Text(UiSharedService.ByteToString(entry.Value.TransferredBytes) + "/" + UiSharedService.ByteToString(entry.Value.TotalBytes));
                             ImGui.TableNextColumn();
                             col.Dispose();
                             ImGui.TableNextRow();
@@ -579,17 +605,12 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
                     ImGui.EndTable();
                 }
-
-                ImGui.EndTabItem();
             }
+            break;
 
-            if (ImGui.BeginTabItem("Blocked Transfers"))
-            {
+            case "Blocked Transfers":
                 DrawBlockedTransfers();
-                ImGui.EndTabItem();
-            }
-
-            ImGui.EndTabBar();
+                break;
         }
         });
     }
@@ -699,7 +720,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             }
             foreach (var l in lastCreatedJson.Split('\n'))
             {
-                ImGui.TextUnformatted($"{l}");
+                UiSharedService.Text($"{l}");
             }
 
             ImGui.TreePop();
@@ -738,6 +759,36 @@ public class SettingsUi : WindowMediatorSubscriberBase
         {
         DebugOptionBlock.DrawActiveMismatchTrackerFilterOptions(_configService, _uiShared, "DebugMismatchTrackerFilters");
         }, "Control which paths and file types are recorded and shown.");
+
+        DrawSettingsCard("Design Lint", () =>
+        {
+        var lintEnabled = SpheneDesignLint.Enabled;
+        if (UiSharedService.DrawToggle("Highlight layout violations##designLintEnabled", ref lintEnabled))
+        {
+            SpheneDesignLint.Enabled = lintEnabled;
+        }
+        UiSharedService.AttachToolTip("When enabled, shared UI controls are checked against the card bounds every " +
+            "frame. Controls that overshoot the card edge get a red outline and are listed below.");
+
+        if (SpheneDesignLint.Enabled)
+        {
+            var violations = SpheneDesignLint.Violations;
+            if (violations.Count == 0)
+            {
+                UiSharedService.ColorText("No layout violations detected this frame.", ImGuiColors.DalamudGrey3);
+            }
+            else
+            {
+                UiSharedService.ColorText($"{violations.Count} violation(s) this frame:", ImGuiColors.DalamudYellow);
+                for (var i = 0; i < violations.Count; i++)
+                {
+                    var violation = violations[i];
+                    UiSharedService.ColorTextWrapped(
+                        $"• {violation.Context} — {violation.Rule}: {violation.Detail}", ImGuiColors.DalamudGrey3);
+                }
+            }
+        }
+        }, "Runtime checks that flag controls poking past the shared card edge.");
     }
 
     private void DrawFileStorageSettings()
@@ -749,7 +800,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         DrawSettingsCard("Monitoring", () =>
         {
         ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("Monitoring Penumbra Folder: " + (_cacheMonitor.PenumbraWatcher?.Path ?? "Not monitoring"));
+        UiSharedService.Text("Monitoring Penumbra Folder: " + (_cacheMonitor.PenumbraWatcher?.Path ?? "Not monitoring"));
         if (string.IsNullOrEmpty(_cacheMonitor.PenumbraWatcher?.Path))
         {
             ImGui.SameLine();
@@ -761,7 +812,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         }
 
         ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("Monitoring Sphene Storage Folder: " + (_cacheMonitor.SpheneWatcher?.Path ?? "Not monitoring"));
+        UiSharedService.Text("Monitoring Sphene Storage Folder: " + (_cacheMonitor.SpheneWatcher?.Path ?? "Not monitoring"));
         if (string.IsNullOrEmpty(_cacheMonitor.SpheneWatcher?.Path))
         {
             ImGui.SameLine();
@@ -809,19 +860,20 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
         ImGui.AlignTextToFramePadding();
         if (_cacheMonitor.FileCacheSize >= 0)
-            ImGui.TextUnformatted($"Currently utilized local storage: {UiSharedService.ByteToString(_cacheMonitor.FileCacheSize)}");
+            UiSharedService.Text($"Currently utilized local storage: {UiSharedService.ByteToString(_cacheMonitor.FileCacheSize)}");
         else
-            ImGui.TextUnformatted($"Currently utilized local storage: Calculating...");
-        ImGui.TextUnformatted($"Remaining space free on drive: {UiSharedService.ByteToString(_cacheMonitor.FileCacheDriveFree)}");
+            UiSharedService.Text($"Currently utilized local storage: Calculating...");
+        UiSharedService.Text($"Remaining space free on drive: {UiSharedService.ByteToString(_cacheMonitor.FileCacheDriveFree)}");
         bool useFileCompactor = _configService.Current.UseCompactor;
         bool isLinux = _dalamudUtilService.IsWine;
         if (!useFileCompactor && !isLinux)
         {
             UiSharedService.ColorTextWrapped("Hint: Consider enabling the File Compactor to reduce disk usage.", ImGuiColors.DalamudYellow);
         }
-        if (isLinux || !_cacheMonitor.StorageisNTFS) ImGui.BeginDisabled();
+        using (ImRaii.Disabled(isLinux || !_cacheMonitor.StorageisNTFS))
+        {
         StorageOptionBlock.DrawUseFileCompactorOption(_configService, _uiShared, "StorageUseFileCompactor", "StorageCompactorPopup");
-        if (ImGui.BeginPopup("StorageCompactorPopup"))
+        if (SpheneWindowChrome.BeginStyledPopup("StorageCompactorPopup"))
         {
             if (!_fileCompactor.MassCompactRunning)
             {
@@ -849,12 +901,12 @@ public class SettingsUi : WindowMediatorSubscriberBase
             {
                 UiSharedService.ColorText($"File compactor currently running ({_fileCompactor.Progress})", ImGuiColors.DalamudYellow);
             }
-            ImGui.EndPopup();
+            SpheneWindowChrome.EndStyledPopup();
+        }
         }
         if (isLinux || !_cacheMonitor.StorageisNTFS)
         {
-            ImGui.EndDisabled();
-            ImGui.TextUnformatted("The file compactor is only available on Windows and NTFS drives.");
+            UiSharedService.Text("The file compactor is only available on Windows and NTFS drives.");
         }
         ImGuiHelpers.ScaledDummy(new Vector2(10, 10));
         });
@@ -902,14 +954,33 @@ public class SettingsUi : WindowMediatorSubscriberBase
         DrawSettingsCard("Clear Local Storage", () =>
         {
         ImGui.Indent();
+        UiSharedService.ColorTextWrapped("Clearing the local storage forces a re-download of all synced data:" + Environment.NewLine
+            + "- It puts the file servers of your connected services under extra strain." + Environment.NewLine
+            + "- It is not a step to try to fix sync issues." + Environment.NewLine
+            + "- It can make the situation of not getting other players data worse in situations of heavy file server load.",
+            ImGuiColors.DalamudGrey);
+        ImGuiHelpers.ScaledDummy(0, 6);
+
         StorageOptionBlock.DrawReadClearLocalStorageDisclaimerOption(ref _readClearCache, "StorageReadClearLocalStorageDisclaimer");
-        ImGui.SameLine();
-        UiSharedService.TextWrapped("I understand that: " + Environment.NewLine + "- By clearing the local storage I put the file servers of my connected service under extra strain by having to redownload all data."
-            + Environment.NewLine + "- This is not a step to try to fix sync issues."
-            + Environment.NewLine + "- This can make the situation of not getting other players data worse in situations of heavy file server load.");
-        if (!_readClearCache)
-            ImGui.BeginDisabled();
-        if (_uiShared.IconTextButton(FontAwesomeIcon.Trash, "Clear local storage") && UiSharedService.CtrlPressed() && _readClearCache)
+
+        ImGuiHelpers.ScaledDummy(0, 2);
+        bool clearPressed;
+        using (ImRaii.Disabled(!_readClearCache))
+        {
+            using (ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.DalamudRed))
+            {
+                clearPressed = _uiShared.IconTextButton(FontAwesomeIcon.Trash, "Clear local storage");
+            }
+            UiSharedService.AttachToolTip("You normally do not need to do this. THIS IS NOT SOMETHING YOU SHOULD BE DOING TO TRY TO FIX SYNC ISSUES." + Environment.NewLine
+                + "This will solely remove all downloaded data from all players and will require you to re-download everything again." + Environment.NewLine
+                + "Sphenes storage is self-clearing and will not surpass the limit you have set it to." + Environment.NewLine
+                + "If you still think you need to do this hold CTRL while pressing the button.");
+        }
+        if (UiSharedService.SameLineIfFits(ImGui.CalcTextSize("Hold CTRL while clicking to confirm.").X))
+        {
+            UiSharedService.ColorText("Hold CTRL while clicking to confirm.", ImGuiColors.DalamudGrey3);
+        }
+        if (clearPressed && UiSharedService.CtrlPressed() && _readClearCache)
         {
             _ = Task.Run(() =>
             {
@@ -919,12 +990,6 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 }
             });
         }
-        UiSharedService.AttachToolTip("You normally do not need to do this. THIS IS NOT SOMETHING YOU SHOULD BE DOING TO TRY TO FIX SYNC ISSUES." + Environment.NewLine
-            + "This will solely remove all downloaded data from all players and will require you to re-download everything again." + Environment.NewLine
-            + "Sphenes storage is self-clearing and will not surpass the limit you have set it to." + Environment.NewLine
-            + "If you still think you need to do this hold CTRL while pressing the button.");
-        if (!_readClearCache)
-            ImGui.EndDisabled();
         ImGui.Unindent();
         }, "Read and accept the disclaimer before running this action.", ImGuiColors.DalamudRed);
     }
@@ -1016,7 +1081,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                         }
                     }
                     
-                    if (ImGui.Selectable(displayText + "##" + i, shouldBeSelected))
+                    if (UiSharedService.DrawSelectable(displayText + "##" + i, shouldBeSelected))
                     {
                         _selectedEntry = i;
                     }
@@ -1043,79 +1108,70 @@ public class SettingsUi : WindowMediatorSubscriberBase
             DrawSettingsCard("Service Actions", () =>
             {
             ImGuiHelpers.ScaledDummy(new Vector2(5, 5));
-            if (ImGui.Button("Delete all my files"))
+            if (UiSharedService.DrawButton("Delete all my files"))
             {
                 _deleteFilesPopupModalShown = true;
                 ImGui.OpenPopup("Delete all your files?");
             }
 
-            _uiShared.DrawHelpText("Completely deletes all your uploaded files on the service.");
+            ImGui.SameLine();
+            if (UiSharedService.DrawButton("Delete account"))
+            {
+                _deleteAccountPopupModalShown = true;
+                ImGui.OpenPopup("Delete your account?");
+            }
+            _uiShared.DrawHelpText("Deletes all your uploaded files on the service, or your account and all uploaded data.");
 
             if (ImGui.BeginPopupModal("Delete all your files?", ref _deleteFilesPopupModalShown, UiSharedService.PopupWindowFlags))
             {
                 using (SpheneCustomTheme.ApplyContextMenuTheme())
                 {
+                using var cardBound = SpheneWindowChrome.SuppressCardBound();
                 UiSharedService.TextWrapped(
                     "All your own uploaded files on the service will be deleted.\nThis operation cannot be undone.");
-                ImGui.TextUnformatted("Are you sure you want to continue?");
-                ImGui.Separator();
-                ImGui.Spacing();
+                UiSharedService.Text("Are you sure you want to continue?");
+                UiSharedService.DrawSeparator();
+                UiSharedService.DrawSpacing();
 
-                var buttonSize = (ImGui.GetWindowContentRegionMax().X - ImGui.GetWindowContentRegionMin().X -
-                                 ImGui.GetStyle().ItemSpacing.X) / 2;
-
-                if (ImGui.Button("Delete everything", new Vector2(buttonSize, 0)))
+                switch (UiSharedService.DrawDialogButtons("deleteFiles", "Delete everything",
+                    "Cancel##cancelDelete", confirmDanger: true))
                 {
-                    _ = Task.Run(_fileTransferManager.DeleteAllFiles);
-                    _deleteFilesPopupModalShown = false;
-                }
-
-                ImGui.SameLine();
-
-                if (ImGui.Button("Cancel##cancelDelete", new Vector2(buttonSize, 0)))
-                {
-                    _deleteFilesPopupModalShown = false;
+                    case 1:
+                        _ = Task.Run(_fileTransferManager.DeleteAllFiles);
+                        _deleteFilesPopupModalShown = false;
+                        break;
+                    case 2:
+                        _deleteFilesPopupModalShown = false;
+                        break;
                 }
 
                 UiSharedService.SetScaledWindowSize(325);
                 }
                 ImGui.EndPopup();
             }
-            ImGui.SameLine();
-            if (ImGui.Button("Delete account"))
-            {
-                _deleteAccountPopupModalShown = true;
-                ImGui.OpenPopup("Delete your account?");
-            }
-
-            _uiShared.DrawHelpText("Completely deletes your account and all uploaded files to the service.");
-
             if (ImGui.BeginPopupModal("Delete your account?", ref _deleteAccountPopupModalShown, UiSharedService.PopupWindowFlags))
             {
                 using (SpheneCustomTheme.ApplyContextMenuTheme())
                 {
+                using var cardBound = SpheneWindowChrome.SuppressCardBound();
                 UiSharedService.TextWrapped(
                     "Your account and all associated files and data on the service will be deleted.");
                 UiSharedService.TextWrapped("Your UID will be removed from all pairing lists.");
-                ImGui.TextUnformatted("Are you sure you want to continue?");
-                ImGui.Separator();
-                ImGui.Spacing();
+                UiSharedService.Text("Are you sure you want to continue?");
+                UiSharedService.DrawSeparator();
+                UiSharedService.DrawSpacing();
 
-                var buttonSize = (ImGui.GetWindowContentRegionMax().X - ImGui.GetWindowContentRegionMin().X -
-                                  ImGui.GetStyle().ItemSpacing.X) / 2;
-
-                if (ImGui.Button("Delete account", new Vector2(buttonSize, 0)))
+                switch (UiSharedService.DrawDialogButtons("deleteAccount", "Delete account",
+                    "Cancel##cancelDelete", confirmDanger: true))
                 {
-                    _ = Task.Run(ApiController.UserDelete);
-                    _deleteAccountPopupModalShown = false;
-                    Mediator.Publish(new SwitchToIntroUiMessage());
-                }
-
-                ImGui.SameLine();
-
-                if (ImGui.Button("Cancel##cancelDelete", new Vector2(buttonSize, 0)))
-                {
-                    _deleteAccountPopupModalShown = false;
+                    case 1:
+                        _ = Task.Run(ApiController.UserDelete);
+                        _deleteAccountPopupModalShown = false;
+                        Mediator.Publish(new SwitchToIntroUiMessage());
+                        break;
+                    case 2:
+                        _deleteAccountPopupModalShown = false;
+                        break;
                 }
 
                 UiSharedService.SetScaledWindowSize(325);
@@ -1150,11 +1206,20 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
         bool useOauth = selectedServer.UseOAuth2;
 
-        if (ImGui.BeginTabBar("serverTabBar",
-            ImGuiTabBarFlags.NoTabListScrollingButtons | ImGuiTabBarFlags.FittingPolicyResizeDown))
+        var serverTabs = new List<string>(5) { "Overview", "Character Management" };
+        if (!useOauth)
+        {
+            serverTabs.Add("Secret Keys");
+        }
+        serverTabs.Add("Service Configuration");
+        serverTabs.Add("Permission Settings");
+        var serverTab = SpheneWindowChrome.DrawTabStrip("serverTabs", serverTabs,
+            scrollIntoViewOnChange: true);
+        ImGuiHelpers.ScaledDummy(0, 4);
+        switch (serverTabs[serverTab])
         {
             // Overview tab: quick status and actions
-            if (ImGui.BeginTabItem("Overview"))
+            case "Overview":
             {
                 _uiShared.BigText("Network Overview");
                 UiSharedService.TextWrapped($"Service: {selectedServer.ServerName}");
@@ -1163,7 +1228,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 ImGuiHelpers.ScaledDummy(5f);
                 if (_apiController.IsConnected)
                 {
-                    if (ImGui.Button("Disconnect from Service") && _serverConfigurationManager.CurrentServer != null)
+                    if (UiSharedService.DrawButton("Disconnect from Service") && _serverConfigurationManager.CurrentServer != null)
                     {
                         _serverConfigurationManager.CurrentServer.FullPause = true;
                         _serverConfigurationManager.Save();
@@ -1173,7 +1238,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 }
                 else
                 {
-                    if (ImGui.Button("Connect to Service") && _serverConfigurationManager.CurrentServer != null)
+                    if (UiSharedService.DrawButton("Connect to Service") && _serverConfigurationManager.CurrentServer != null)
                     {
                         _serverConfigurationManager.CurrentServer.FullPause = false;
                         _serverConfigurationManager.Save();
@@ -1182,10 +1247,10 @@ public class SettingsUi : WindowMediatorSubscriberBase
                     _uiShared.DrawHelpText("Establish a connection to the selected service.");
                 }
 
-                ImGui.EndTabItem();
             }
+            break;
 
-            if (ImGui.BeginTabItem("Character Management"))
+            case "Character Management":
             {
                 // Primary authentication & character linking
                 if (selectedServer.SecretKeys.Any() || useOauth)
@@ -1242,7 +1307,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                             }
                         }
                     }
-                    ImGui.Separator();
+                    UiSharedService.DrawSeparator();
                     string youName = _dalamudUtilService.GetPlayerName();
                     uint youWorld = _dalamudUtilService.GetHomeWorldId();
                     ulong youCid = _dalamudUtilService.GetCID();
@@ -1323,7 +1388,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                             }
                         }
                         ImGuiHelpers.ScaledDummy(5);
-                        ImGui.Separator();
+                        UiSharedService.DrawSeparator();
                         ImGuiHelpers.ScaledDummy(5);
                     }
                     if (selectedServer.Authentications.Any())
@@ -1489,13 +1554,13 @@ public class SettingsUi : WindowMediatorSubscriberBase
                         if (item != sortedAuths[^1])
                         {
                             ImGuiHelpers.ScaledDummy(5);
-                            ImGui.Separator();
+                            UiSharedService.DrawSeparator();
                             ImGuiHelpers.ScaledDummy(5);
                         }
                     }
 
                     if (selectedServer.Authentications.Any())
-                        ImGui.Separator();
+                        UiSharedService.DrawSeparator();
 
                     bool currentCidKnown = selectedServer.Authentications.Any(c => c.LastSeenCID != null && c.LastSeenCID != 0 && c.LastSeenCID == youCid);
 
@@ -1510,11 +1575,11 @@ public class SettingsUi : WindowMediatorSubscriberBase
                     UiSharedService.ColorTextWrapped("Please go to the 'Secret Keys' tab to add authentication keys.", ImGuiColors.DalamudYellow);
                 }
 
-                ImGui.EndTabItem();
             }
+            break;
 
             // Secret Key management in separate tab (non-OAuth only)
-            if (!useOauth && ImGui.BeginTabItem("Secret Keys"))
+            case "Secret Keys":
             {
                 _uiShared.BigText("Secret Key Management");
                 UiSharedService.ColorTextWrapped("Secret keys are used to authenticate your characters with the Sphene service. Each character must be assigned to a secret key.", ImGuiColors.DalamudYellow);
@@ -1540,11 +1605,11 @@ public class SettingsUi : WindowMediatorSubscriberBase
                     var charactersUsingKey = selectedServer.Authentications.Where(a => a.SecretKeyIdx == item.Key).ToList();
                     if (charactersUsingKey.Any())
                     {
-                        ImGui.TextUnformatted("Used by characters:");
+                        UiSharedService.Text("Used by characters:");
                         ImGui.Indent();
                         foreach (var auth in charactersUsingKey)
                         {
-                            ImGui.TextUnformatted($"• {auth.CharacterName}@{_dalamudUtilService.WorldData.Value[(ushort)auth.WorldId]}");
+                            UiSharedService.Text($"• {auth.CharacterName}@{_dalamudUtilService.WorldData.Value[(ushort)auth.WorldId]}");
                         }
                         ImGui.Unindent();
                     }
@@ -1564,10 +1629,10 @@ public class SettingsUi : WindowMediatorSubscriberBase
                     }
 
                     if (item.Key != selectedServer.SecretKeys.Keys.LastOrDefault())
-                        ImGui.Separator();
+                        UiSharedService.DrawSeparator();
                 }
 
-                ImGui.Separator();
+                UiSharedService.DrawSeparator();
                 if (_uiShared.IconTextButton(FontAwesomeIcon.Plus, "Add new Secret Key"))
                 {
                     selectedServer.SecretKeys.Add(selectedServer.SecretKeys.Any() ? selectedServer.SecretKeys.Max(p => p.Key) + 1 : 0, new SecretKey()
@@ -1577,10 +1642,10 @@ public class SettingsUi : WindowMediatorSubscriberBase
                     _serverConfigurationManager.Save();
                 }
 
-                ImGui.EndTabItem();
             }
+            break;
 
-            if (ImGui.BeginTabItem("Service Configuration"))
+            case "Service Configuration":
             {
                 var serverName = selectedServer.ServerName;
                 var serverUri = selectedServer.ServerUri;
@@ -1625,10 +1690,10 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
                 ConnectivityOptionBlock.DrawUseDiscordOAuthOption(selectedServer, useOauth, _serverConfigurationManager, _uiShared, "ConnectivityUseDiscordOAuth");
 
-                ImGui.EndTabItem();
             }
+            break;
 
-            if (ImGui.BeginTabItem("Permission Settings"))
+            case "Permission Settings":
             {
                 _uiShared.BigText("Default Permission Settings");
                 if (selectedServer == _serverConfigurationManager.CurrentServer && _apiController.IsConnected)
@@ -1653,9 +1718,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
                         "You need to connect to this service to change the default permissions since they are stored on the service.", ImGuiColors.DalamudYellow);
                 }
 
-                ImGui.EndTabItem();
             }
-            ImGui.EndTabBar();
+            break;
         }
         });
     }
@@ -1900,7 +1964,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                     pushedColors++;
                 }
             }
-            if (ImGui.Button(label, buttonSize))
+            if (UiSharedService.DrawButton(label, buttonSize))
             {
                 _activeSettingsPage = page;
             }
@@ -2010,7 +2074,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             ImGui.SameLine();
             UiSharedService.ColorText("•", ImGuiColors.DalamudGrey3);
             ImGui.SameLine();
-            ImGui.TextUnformatted(pageInfo.Item2);
+            UiSharedService.Text(pageInfo.Item2);
             ImGuiHelpers.ScaledDummy(0, 4);
 
             var settingsOptionsIndentX = GetSettingsOptionsIndentX(_activeSettingsPage);
@@ -2310,10 +2374,10 @@ public class SettingsUi : WindowMediatorSubscriberBase
         }
 
         ImGui.SetCursorScreenPos(new Vector2(startPos.X + rowMarginX, textY));
-        ImGui.TextColored(nameColor, name);
+        UiSharedService.ColorText(name, nameColor);
 
         ImGui.SameLine();
-        ImGui.TextColored(ImGuiColors.DalamudGrey, $"({statusOrVersion})");
+        UiSharedService.ColorText($"({statusOrVersion})", ImGuiColors.DalamudGrey);
 
         // Row hit zone: clicking anywhere on the label area triggers the row's
         // primary action; hovering shows the plugin description.
@@ -2346,7 +2410,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
             if (showSettings)
             {
-                if (ImGui.Button(displayText, new Vector2(btnSize.X, btnHeight)))
+                if (UiSharedService.DrawButton(displayText, new Vector2(btnSize.X, btnHeight)))
                 {
                     onOpenSettings!.Invoke();
                 }
@@ -2355,7 +2419,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             {
                 using (ImRaii.Disabled(disableInstall || isInstalling))
                 {
-                    if (ImGui.Button(displayText, new Vector2(btnSize.X, btnHeight)))
+                    if (UiSharedService.DrawButton(displayText, new Vector2(btnSize.X, btnHeight)))
                     {
                         StartPluginInstall(name, onInstallAction!);
                     }
@@ -2372,9 +2436,9 @@ public class SettingsUi : WindowMediatorSubscriberBase
                         rectMin.Y + (rectMax.Y - rectMin.Y) * 0.5f);
                     DrawRotatingSpinner(center, radius, thickness);
                 }
-                else if (!disableInstall && ImGui.IsItemHovered())
+                else if (!disableInstall)
                 {
-                    ImGui.SetTooltip("Adds repository. Install via Plugin Installer.");
+                    UiSharedService.AttachToolTip("Adds repository. Install via Plugin Installer.");
                 }
             }
             else if (showToggle)
@@ -2394,10 +2458,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                         _ = onDisableAction!.Invoke();
                     }
                 }
-                if (ImGui.IsItemHovered())
-                {
-                    ImGui.SetTooltip("Enable or disable plugin.");
-                }
+                UiSharedService.AttachToolTip("Enable or disable plugin.");
             }
         }
         
@@ -2415,12 +2476,12 @@ public class SettingsUi : WindowMediatorSubscriberBase
         var currentServer = _serverConfigurationManager.CurrentServer;
         if (currentServer == null)
         {
-            ImGui.TextColored(ImGuiColors.DalamudRed, "No server configured");
-            ImGui.TextUnformatted("Configure a service under Connectivity to get started.");
+            UiSharedService.ColorText("No server configured", ImGuiColors.DalamudRed);
+            UiSharedService.Text("Configure a service under Connectivity to get started.");
         }
         else
         {
-            ImGui.TextUnformatted("Current Service:");
+            UiSharedService.Text("Current Service:");
             ImGui.SameLine();
             var displayName = currentServer.ServerName;
 #if IS_TEST_BUILD
@@ -2429,9 +2490,9 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 displayName = "Test Server";
             }
 #endif
-            ImGui.TextColored(ImGuiColors.ParsedGreen, displayName);
+            UiSharedService.ColorText(displayName, ImGuiColors.ParsedGreen);
 
-            ImGui.TextUnformatted("Connection State:");
+            UiSharedService.Text("Connection State:");
             ImGui.SameLine();
             var connectionState = _apiController.ServerState.ToString();
             var stateColor = _apiController.ServerState switch
@@ -2441,7 +2502,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 WebAPI.SignalR.Utils.ServerState.Reconnecting => ImGuiColors.DalamudYellow,
                 _ => ImGuiColors.DalamudRed
             };
-            ImGui.TextColored(stateColor, connectionState);
+            UiSharedService.ColorText(connectionState, stateColor);
 
 #if IS_TEST_BUILD
             var useOverride = _configService.Current.UseTestServerOverride;
@@ -2458,7 +2519,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 _configService.Save();
             }
 
-            if (ImGui.BeginPopup("TestServerUrlPopup"))
+            if (SpheneWindowChrome.BeginStyledPopup("TestServerUrlPopup"))
             {
                 UiSharedService.ColorText("Test Server Address", ImGuiColors.DalamudGrey);
                 var overrideUrl = _configService.Current.TestServerApiUrl ?? string.Empty;
@@ -2469,7 +2530,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                     _configService.Save();
                 }
                 UiSharedService.AttachToolTip("Websocket URL, e.g. ws://host:port. Applies while typing.");
-                ImGui.EndPopup();
+                SpheneWindowChrome.EndStyledPopup();
             }
 #else
             if (_configService.Current.UseTestServerOverride)
@@ -2480,7 +2541,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
 #endif
         }
         
-        ImGui.Spacing();
+        UiSharedService.DrawSpacing();
         });
 
         // --- Plugins Section ---
@@ -2670,13 +2731,13 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
         if (!string.IsNullOrEmpty(_lastImportSuccess))
         {
-            ImGui.Spacing();
-            ImGui.TextColored(ImGuiColors.ParsedGreen, _lastImportSuccess);
+            UiSharedService.DrawSpacing();
+            UiSharedService.ColorText(_lastImportSuccess, ImGuiColors.ParsedGreen);
         }
         if (!string.IsNullOrEmpty(_lastImportError))
         {
-            ImGui.Spacing();
-            ImGui.TextColored(ImGuiColors.DalamudRed, _lastImportError);
+            UiSharedService.DrawSpacing();
+            UiSharedService.ColorText(_lastImportError, ImGuiColors.DalamudRed);
         }
         }, "Export or import all Sphene settings in a single file. Secret keys can be protected with a password.");
     }
@@ -2783,36 +2844,9 @@ public class SettingsUi : WindowMediatorSubscriberBase
             UiSharedService.ColorText("Symbol & Label", SpheneColors.LuminousGold);
             ImGuiHelpers.ScaledDummy(0, 6);
 
-            var symbolChar = _configService.Current.SupporterSymbolChar ?? string.Empty;
-            var presetIndex = 0;
-            for (var i = 1; i < SupporterSymbolPresets.Length; i++)
-            {
-                if (string.Equals(symbolChar, SupporterSymbolPresets[i], StringComparison.Ordinal))
-                {
-                    presetIndex = i;
-                    break;
-                }
-            }
-            BeginSupporterRow("Symbol");
-            if (UiSharedService.DrawLabeledCombo("##supporterSymbolPreset", ref presetIndex, SupporterSymbolPresets, SupporterSymbolPresets.Length,
-                    preferredWidth: ClampSettingsItemWidth(90f)))
-            {
-                _configService.Current.SupporterSymbolChar = presetIndex == 0 ? string.Empty : SupporterSymbolPresets[presetIndex];
-                _configService.Save();
-            }
-            UiSharedService.AttachToolTip("Pick a preset symbol or type a custom one in the field next to it. 'None' disables the symbol.");
+            BeginSupporterRow("Symbol & Color");
+            DrawSupporterSymbolPicker("supporterSymbol");
             ImGui.SameLine();
-            if (presetIndex > 0)
-                symbolChar = SupporterSymbolPresets[presetIndex];
-            if (UiSharedService.DrawInputText("##supporterSymbol", ref symbolChar, 4,
-                    preferredWidth: UiSharedService.FillRowControlWidth()))
-            {
-                _configService.Current.SupporterSymbolChar = symbolChar;
-                _configService.Save();
-            }
-            UiSharedService.AttachToolTip("The symbol to display next to supporter names. Leave empty to disable.");
-
-            BeginSupporterRow("Symbol Color");
             DrawSupporterColorKeyPicker("supporterSymbolColor", _configService.Current.SupporterColorKey,
                 key => _configService.Current.SupporterColorKey = key);
             UiSharedService.AttachToolTip("Game UI foreground color for the symbol. Default: gold (key 43).");
@@ -2829,7 +2863,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 BeginSupporterRow("Label Text", true);
                 var labelText = _configService.Current.SupporterLabelText ?? string.Empty;
                 if (UiSharedService.DrawInputText("##supporterLabelText", ref labelText, 30,
-                        preferredWidth: UiSharedService.FillRowControlWidth()))
+                        dockRight: true))
                 {
                     _configService.Current.SupporterLabelText = labelText;
                     _configService.Save();
@@ -2877,37 +2911,51 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 DrawSupporterIconPicker();
 
                 var iconLabelEnabled = _configService.Current.SupporterIconLabelEnabled;
-                if (UiSharedService.DrawToggle("Icon Label##supporterIconLabelEnabled", ref iconLabelEnabled, indented: true))
+                if (UiSharedService.DrawToggle("Icon Label##supporterIconLabelEnabled", ref iconLabelEnabled,
+                    indented: true, menuPopupId: iconLabelEnabled ? "SupporterIconLabelMenu" : null))
                 {
                     _configService.Current.SupporterIconLabelEnabled = iconLabelEnabled;
                     _configService.Save();
                 }
                 UiSharedService.AttachToolTip("Draws the configured label text next to the Sphene icon (overlay, not part of the nameplate).");
 
-                if (iconLabelEnabled)
+                if (iconLabelEnabled && SpheneWindowChrome.BeginStyledPopup("SupporterIconLabelMenu"))
                 {
-                    BeginSupporterRow("Label Text", true);
+                    // Popups live outside card bounds — lay out with manual
+                    // label text + hidden-label controls instead of the
+                    // right-docking labeled wrappers.
                     var iconLabelText = _configService.Current.SupporterIconLabelText ?? string.Empty;
-                    if (UiSharedService.DrawInputText("##supporterIconLabelText", ref iconLabelText, 30,
-                            preferredWidth: UiSharedService.FillRowControlWidth()))
+                    ImGui.AlignTextToFramePadding();
+                    UiSharedService.ColorText("Label Text", ImGuiColors.DalamudGrey);
+                    ImGui.SameLine();
+                    ImGui.SetNextItemWidth(150f * ImGuiHelpers.GlobalScale);
+                    if (UiSharedService.DrawInputText("##supporterIconLabelText", ref iconLabelText, 30))
                     {
                         _configService.Current.SupporterIconLabelText = iconLabelText;
                         _configService.Save();
                     }
                     UiSharedService.AttachToolTip("Text drawn next to the Sphene icon. Set independently from the nameplate label.");
 
-                    BeginSupporterRow("Label Color", true);
+                    ImGui.AlignTextToFramePadding();
+                    UiSharedService.ColorText("Label Color", ImGuiColors.DalamudGrey);
+                    ImGui.SameLine();
                     var iconLabelColor = ImGui.ColorConvertU32ToFloat4(_configService.Current.SupporterIconLabelColor);
-                    ImGui.SetNextItemWidth(UiSharedService.FillRowControlWidth());
-                    using (UiSharedService.PushValueControlStyle())
+                    if (UiSharedService.DrawColorSwatchButton("##supporterIconLabelColor", iconLabelColor))
                     {
-                        if (ImGui.ColorEdit4("##supporterIconLabelColor", ref iconLabelColor))
+                        ImGui.OpenPopup("supporterIconLabelColorPicker");
+                    }
+                    UiSharedService.AttachToolTip("Custom color for the icon label text (free RGBA picker).");
+                    if (SpheneWindowChrome.BeginStyledPopup("supporterIconLabelColorPicker"))
+                    {
+                        if (ImGui.ColorPicker4("##supporterIconLabelColorPicker", ref iconLabelColor,
+                            ImGuiColorEditFlags.AlphaBar | ImGuiColorEditFlags.NoLabel))
                         {
                             _configService.Current.SupporterIconLabelColor = ImGui.ColorConvertFloat4ToU32(iconLabelColor);
                             _configService.Save();
                         }
-                        UiSharedService.AttachToolTip("Custom color for the icon label text (free RGBA picker).");
+                        SpheneWindowChrome.EndStyledPopup();
                     }
+                    SpheneWindowChrome.EndStyledPopup();
                 }
             }
         });
@@ -2946,7 +2994,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         {
             if (ImGui.BeginCombo("##supporterIconPicker", previewLabel))
             {
-                if (ImGui.Selectable("Default (Sphene Icon)", currentId.Length == 0))
+                if (UiSharedService.DrawSelectable("Default (Sphene Icon)", currentId.Length == 0))
                 {
                     _configService.Current.SupporterIconId = string.Empty;
                     _configService.Save();
@@ -2955,7 +3003,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 {
                     var iconInfo = catalog[i];
                     var label = iconInfo.Animated ? iconInfo.Name + " (animated)" : iconInfo.Name;
-                    if (ImGui.Selectable(label + "##" + iconInfo.Id, string.Equals(currentId, iconInfo.Id, StringComparison.OrdinalIgnoreCase)))
+                    if (UiSharedService.DrawSelectable(label + "##" + iconInfo.Id, string.Equals(currentId, iconInfo.Id, StringComparison.OrdinalIgnoreCase)))
                     {
                         _configService.Current.SupporterIconId = iconInfo.Id;
                         _configService.Save();
@@ -2986,44 +3034,215 @@ public class SettingsUi : WindowMediatorSubscriberBase
     private const int UiForegroundKeyInlineMax = 77;
     private const int UiForegroundKeyExtendedStart = 500;
     private const int UiForegroundKeyExtendedMax = 511;
-    private const int UiForegroundSliderMaxIndex = UiForegroundKeyInlineMax + (UiForegroundKeyExtendedMax - UiForegroundKeyExtendedStart + 1);
+    private const int UiForegroundPaletteMaxIndex = UiForegroundKeyInlineMax + (UiForegroundKeyExtendedMax - UiForegroundKeyExtendedStart + 1);
 
     private void DrawSupporterColorKeyPicker(string id, ushort colorKey, Action<ushort> apply)
     {
-        var sliderIndex = UiForegroundColorKeyToSliderIndex(colorKey);
-        if (UiSharedService.DrawSliderInt("Color##" + id, ref sliderIndex, 0, UiForegroundSliderMaxIndex,
-            trailingWidth: ImGui.GetFrameHeight() + ImGui.GetStyle().ItemSpacing.X))
-        {
-            apply(UiForegroundSliderIndexToColorKey(sliderIndex));
-            _configService.Save();
-        }
+        var preview = ResolveUiForegroundColor(colorKey);
+        var swatchSize = SpheneDesign.SwatchSize;
+        var popupId = "##" + id + "_palette";
 
-        ImGui.SameLine();
-        Vector4 preview;
+        // Dock the swatch flush with the shared control edge (bound minus the
+        // help column so it aligns with every other value control on the page).
+        UiSharedService.DockControlToRightEdge(swatchSize);
+
+        if (UiSharedService.DrawColorSwatchButton(popupId + "_btn", preview))
+        {
+            ImGui.OpenPopup(popupId);
+        }
+        UiSharedService.AttachToolTip(
+            $"Game UI foreground color (key {colorKey}). Click to choose a color.");
+
+        if (SpheneWindowChrome.BeginStyledPopup(popupId))
+        {
+            const int columns = 8;
+            var cell = ImGui.GetFrameHeight() + 2f * ImGuiHelpers.GlobalScale;
+            var palette = SortedUiForegroundKeys();
+            for (var i = 0; i < palette.Count; i++)
+            {
+                var key = palette[i];
+                if (i % columns != 0)
+                {
+                    ImGui.SameLine(0, SpheneDesign.Gap);
+                }
+                using var swatchId = ImRaii.PushId("sw" + i);
+                if (UiSharedService.DrawColorSwatchButton("swatch",
+                    ResolveUiForegroundColor(key), cell, key == colorKey))
+                {
+                    apply(key);
+                    _configService.Save();
+                    ImGui.CloseCurrentPopup();
+                }
+                UiSharedService.AttachToolTip($"Key {key}");
+            }
+            SpheneWindowChrome.EndStyledPopup();
+        }
+    }
+
+    private static List<ushort>? _sortedUiForegroundKeys;
+
+    /// <summary>
+    /// The UI-foreground color keys in palette order: greys first (light to
+    /// dark), then hues red to magenta, saturated to muted inside one hue.
+    /// Keys resolving to an identical color value appear only once.
+    /// </summary>
+    private static List<ushort> SortedUiForegroundKeys()
+    {
+        if (_sortedUiForegroundKeys != null)
+        {
+            return _sortedUiForegroundKeys;
+        }
+        var seen = new HashSet<uint>();
+        var entries = new List<(ushort Key, int HueBucket, float L, float S, float H)>();
+        for (var i = 0; i <= UiForegroundPaletteMaxIndex; i++)
+        {
+            var key = UiForegroundPaletteIndexToColorKey(i);
+            var color = ResolveUiForegroundColor(key);
+            if (!seen.Add(ImGui.ColorConvertFloat4ToU32(color)))
+            {
+                continue;
+            }
+            RgbaToHsl(color, out var h, out var s, out var l);
+            entries.Add((key, (int)(h / HueBucketDegrees), l, s, h));
+        }
+        // Greys first (light to dark), then one hue family after another; each
+        // family runs as a light-to-dark gradient so neighbours flow visually.
+        entries.Sort(static (a, b) =>
+        {
+            var greyA = a.S < 0.08f;
+            var greyB = b.S < 0.08f;
+            if (greyA != greyB)
+            {
+                return greyA ? -1 : 1;
+            }
+            if (greyA)
+            {
+                return b.L.CompareTo(a.L);
+            }
+            var bucket = a.HueBucket.CompareTo(b.HueBucket);
+            if (bucket != 0)
+            {
+                return bucket;
+            }
+            var light = b.L.CompareTo(a.L);
+            if (light != 0)
+            {
+                return light;
+            }
+            var sat = b.S.CompareTo(a.S);
+            return sat != 0 ? sat : a.H.CompareTo(b.H);
+        });
+        _sortedUiForegroundKeys = entries.ConvertAll(static e => e.Key);
+        return _sortedUiForegroundKeys;
+    }
+
+    private const float HueBucketDegrees = 24f;
+
+    private static void RgbaToHsl(Vector4 c, out float h, out float s, out float l)
+    {
+        var max = MathF.Max(c.X, MathF.Max(c.Y, c.Z));
+        var min = MathF.Min(c.X, MathF.Min(c.Y, c.Z));
+        var d = max - min;
+        l = (max + min) * 0.5f;
+        if (d <= 0f)
+        {
+            h = 0f;
+            s = 0f;
+            return;
+        }
+        s = d / (1f - MathF.Abs(2f * l - 1f));
+        if (c.X >= c.Y && c.X >= c.Z)
+        {
+            h = (c.Y - c.Z) / d % 6f;
+        }
+        else if (c.Y >= c.Z)
+        {
+            h = (c.Z - c.X) / d + 2f;
+        }
+        else
+        {
+            h = (c.X - c.Y) / d + 4f;
+        }
+        h = (h * 60f + 360f) % 360f;
+    }
+
+    private void DrawSupporterSymbolPicker(string id)
+    {
+        var symbolChar = _configService.Current.SupporterSymbolChar ?? string.Empty;
+        var popupId = "##" + id + "_palette";
+        var scale = ImGuiHelpers.GlobalScale;
+        var cell = ImGui.GetFrameHeight();
+        var buttonSize = SpheneDesign.SwatchSize;
+
+        // Reserve the color swatch slot that follows on the same row so both
+        // controls end flush at the shared right edge together.
+        UiSharedService.DockControlToRightEdge(buttonSize,
+            SpheneDesign.Gap + SpheneDesign.SwatchSize);
+        if (UiSharedService.DrawGlyphSwatchButton(popupId + "_btn",
+                symbolChar.Length > 0 ? symbolChar : "–", buttonSize))
+        {
+            ImGui.OpenPopup(popupId);
+        }
+        UiSharedService.AttachToolTip(
+            "Symbol next to supporter names. Click to pick a preset or type a custom one.");
+
+        if (SpheneWindowChrome.BeginStyledPopup(popupId))
+        {
+            const int columns = 4;
+            var cellSize = cell + 6f * scale;
+            for (var i = 0; i < SupporterSymbolPresets.Length; i++)
+            {
+                if (i % columns != 0)
+                {
+                    ImGui.SameLine(0, SpheneDesign.Gap);
+                }
+                var preset = SupporterSymbolPresets[i];
+                var isCurrent = i == 0
+                    ? symbolChar.Length == 0
+                    : string.Equals(symbolChar, preset, StringComparison.Ordinal);
+                using var swatchId = ImRaii.PushId("sym" + i);
+                if (UiSharedService.DrawGlyphSwatchButton("symSwatch",
+                        i == 0 ? "–" : preset, cellSize, isCurrent))
+                {
+                    _configService.Current.SupporterSymbolChar = i == 0 ? string.Empty : preset;
+                    _configService.Save();
+                    ImGui.CloseCurrentPopup();
+                }
+                UiSharedService.AttachToolTip(i == 0 ? "None" : preset);
+            }
+            ImGuiHelpers.ScaledDummy(0, 4);
+            ImGui.AlignTextToFramePadding();
+            UiSharedService.ColorText("Custom", ImGuiColors.DalamudGrey);
+            ImGui.SameLine();
+            ImGui.SetNextItemWidth(90f * scale);
+            var custom = symbolChar;
+            if (UiSharedService.DrawInputText("##supporterCustomSymbol", ref custom, 4,
+                    ImGuiInputTextFlags.EnterReturnsTrue))
+            {
+                _configService.Current.SupporterSymbolChar = custom;
+                _configService.Save();
+                ImGui.CloseCurrentPopup();
+            }
+            UiSharedService.AttachToolTip("Type any short symbol; Enter applies it.");
+            SpheneWindowChrome.EndStyledPopup();
+        }
+    }
+
+    private static Vector4 ResolveUiForegroundColor(ushort colorKey)
+    {
         try
         {
             var rgba = new UIForegroundPayload(colorKey).RGBA;
-            preview = new Vector4(((rgba >> 24) & 0xFF) / 255f, ((rgba >> 16) & 0xFF) / 255f, ((rgba >> 8) & 0xFF) / 255f, 1f);
+            return new Vector4(((rgba >> 24) & 0xFF) / 255f,
+                ((rgba >> 16) & 0xFF) / 255f, ((rgba >> 8) & 0xFF) / 255f, 1f);
         }
         catch
         {
-            preview = SpheneColors.SpheneGold;
+            return SpheneColors.SpheneGold;
         }
-        var frameHeight = ImGui.GetFrameHeight();
-        ImGui.ColorButton("##" + id + "_preview", preview,
-            ImGuiColorEditFlags.NoTooltip | ImGuiColorEditFlags.NoDragDrop | ImGuiColorEditFlags.NoBorder,
-            new Vector2(frameHeight, frameHeight));
     }
 
-    private static int UiForegroundColorKeyToSliderIndex(int actual)
-    {
-        if (actual is >= 0 and <= UiForegroundKeyInlineMax) return actual;
-        if (actual is >= UiForegroundKeyExtendedStart and <= UiForegroundKeyExtendedMax)
-            return UiForegroundKeyInlineMax + 1 + (actual - UiForegroundKeyExtendedStart);
-        return 43;
-    }
-
-    private static ushort UiForegroundSliderIndexToColorKey(int index)
+    private static ushort UiForegroundPaletteIndexToColorKey(int index)
     {
         return index <= UiForegroundKeyInlineMax
             ? (ushort)index
@@ -3082,16 +3301,15 @@ public class SettingsUi : WindowMediatorSubscriberBase
         {
             using (SpheneCustomTheme.ApplyContextMenuTheme())
             {
+                using var cardBound = SpheneWindowChrome.SuppressCardBound();
                 UiSharedService.ColorTextWrapped("Enter an optional password to protect secret keys. Leave blank for unencrypted export.", ImGuiColors.DalamudGrey);
                 ImGuiHelpers.ScaledDummy(5);
-                ImGui.TextUnformatted("Password (optional):");
+                UiSharedService.Text("Password (optional):");
                 UiSharedService.DrawInputText("##exportPassword", ref _exportPassword, 64, ImGuiInputTextFlags.Password);
                 ImGuiHelpers.ScaledDummy(10);
 
-                var buttonSize = (ImGui.GetWindowContentRegionMax().X - ImGui.GetWindowContentRegionMin().X -
-                                  ImGui.GetStyle().ItemSpacing.X) / 2;
-
-                if (ImGui.Button("Export", new Vector2(buttonSize, 0)))
+                var exportClicked = UiSharedService.DrawDialogButtons("exportBackup", "Export", "Cancel");
+                if (exportClicked == 1)
                 {
                     var defaultFileName = $"sphene-backup-{DateTime.Now:yyyyMMdd-HHmmss}.json";
                     _fileDialogManager.SaveFileDialog("Export Config Backup", ".json", defaultFileName, "json", (success, path) =>
@@ -3113,8 +3331,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                     });
                 }
 
-                ImGui.SameLine();
-                if (ImGui.Button("Cancel", new Vector2(buttonSize, 0)))
+                if (exportClicked == 2)
                 {
                     _showExportModal = false;
                 }
@@ -3135,11 +3352,12 @@ public class SettingsUi : WindowMediatorSubscriberBase
         {
             using (SpheneCustomTheme.ApplyContextMenuTheme())
             {
+                using var cardBound = SpheneWindowChrome.SuppressCardBound();
                 if (string.IsNullOrEmpty(_importFilePath))
                 {
                     UiSharedService.ColorTextWrapped("Select a backup file to restore all settings.", ImGuiColors.DalamudGrey);
                     ImGuiHelpers.ScaledDummy(5);
-                    if (ImGui.Button("Select Backup File", new Vector2(0, 0)))
+                    if (UiSharedService.DrawButton("Select Backup File", new Vector2(0, 0)))
                     {
                         _fileDialogManager.OpenFileDialog("Import Config Backup", ".json", (success, path) =>
                         {
@@ -3170,7 +3388,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                     {
                         UiSharedService.ColorTextWrapped("If the backup is password-protected, enter the password below. Otherwise leave blank.", ImGuiColors.DalamudGrey);
                     }
-                    ImGui.TextUnformatted("Password (if encrypted):");
+                    UiSharedService.Text("Password (if encrypted):");
                     UiSharedService.DrawInputText("##importPassword", ref _importPassword, 64, ImGuiInputTextFlags.Password);
                     ImGuiHelpers.ScaledDummy(10);
 
@@ -3179,7 +3397,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                     var currentCache = _configService.Current.CacheFolder;
                     if (!string.IsNullOrEmpty(_backupCachePath))
                     {
-                        ImGui.Checkbox($"Restore Cache Folder from backup: {_backupCachePath}", ref _importRestoreCachePath);
+                        UiSharedService.DrawToggleChip($"Restore Cache Folder from backup: {_backupCachePath}", ref _importRestoreCachePath);
                         if (!_importRestoreCachePath)
                         {
                             ImGui.Indent();
@@ -3198,7 +3416,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                     var currentShrinkU = _shrinkUConfigService?.Current?.BackupFolderPath ?? "Not configured";
                     if (!string.IsNullOrEmpty(_backupShrinkUPath))
                     {
-                        ImGui.Checkbox($"Restore ShrinkU Backup Folder from backup: {_backupShrinkUPath}", ref _importRestoreShrinkUPath);
+                        UiSharedService.DrawToggleChip($"Restore ShrinkU Backup Folder from backup: {_backupShrinkUPath}", ref _importRestoreShrinkUPath);
                         if (!_importRestoreShrinkUPath)
                         {
                             ImGui.Indent();
@@ -3214,10 +3432,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
                     ImGuiHelpers.ScaledDummy(10);
 
-                    var buttonSize = (ImGui.GetWindowContentRegionMax().X - ImGui.GetWindowContentRegionMin().X -
-                                      ImGui.GetStyle().ItemSpacing.X) / 2;
-
-                    if (ImGui.Button("Import", new Vector2(buttonSize, 0)))
+                    var importClicked = UiSharedService.DrawDialogButtons("importBackup", "Import", "Cancel");
+                    if (importClicked == 1)
                     {
                         try
                         {
@@ -3242,9 +3458,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                         }
                         _showImportModal = false;
                     }
-
-                    ImGui.SameLine();
-                    if (ImGui.Button("Cancel", new Vector2(buttonSize, 0)))
+                    else if (importClicked == 2)
                     {
                         _showImportModal = false;
                     }
@@ -3261,7 +3475,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         DrawSettingsCard("Note Transfer", () =>
         {
             var overwriteExistingLabels = _overwriteExistingLabels;
-            if (ImGui.Button("Export Notes"))
+            if (UiSharedService.DrawButton("Export Notes"))
             {
                 ImGui.SetClipboardText(UiSharedService.GetNotes(
                     _pairManager.DirectPairs.UnionBy(
@@ -3270,7 +3484,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                         UserDataComparer.Instance).ToList()));
             }
             ImGui.SameLine();
-            if (ImGui.Button("Import Notes"))
+            if (UiSharedService.DrawButton("Import Notes"))
             {
                 _notesSuccessfullyApplied = null;
                 var notes = ImGui.GetClipboardText();
@@ -3282,11 +3496,11 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
             if (_notesSuccessfullyApplied is not null)
             {
-                ImGui.Spacing();
+                UiSharedService.DrawSpacing();
                 if (_notesSuccessfullyApplied!.Value)
-                    ImGui.TextColored(ImGuiColors.ParsedGreen, "Notes successfully applied.");
+                    UiSharedService.ColorText("Notes successfully applied.", ImGuiColors.ParsedGreen);
                 else
-                    ImGui.TextColored(ImGuiColors.DalamudRed, "Failed to apply notes.");
+                    UiSharedService.ColorText("Failed to apply notes.", ImGuiColors.DalamudRed);
             }
         });
 
@@ -3390,10 +3604,11 @@ public class SettingsUi : WindowMediatorSubscriberBase
         {
             var showProfiles = AppearanceOptionBlock.DrawShowSpheneProfilesOnHoverOption(_configService, _uiShared, Mediator, "AppearanceShowSpheneProfilesOnHover");
             ImGui.Indent();
-            if (!showProfiles) ImGui.BeginDisabled();
-            AppearanceOptionBlock.DrawPopoutProfilesOnTheRightOption(_configService, _uiShared, Mediator, "AppearancePopoutProfilesOnTheRight");
-            AppearanceOptionBlock.DrawHoverDelayOption(_configService, _uiShared, "AppearanceHoverDelay");
-            if (!showProfiles) ImGui.EndDisabled();
+            using (ImRaii.Disabled(!showProfiles))
+            {
+                AppearanceOptionBlock.DrawPopoutProfilesOnTheRightOption(_configService, _uiShared, Mediator, "AppearancePopoutProfilesOnTheRight");
+                AppearanceOptionBlock.DrawHoverDelayOption(_configService, _uiShared, "AppearanceHoverDelay");
+            }
             ImGui.Unindent();
             AppearanceOptionBlock.DrawShowProfilesMarkedAsNsfwOption(_configService, _uiShared, Mediator, "AppearanceShowProfilesMarkedAsNsfw");
         });
@@ -3476,7 +3691,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                               "When disabled, popup notifications will not appear, but the system will continue to function in the background. " +
                               "This is useful when you have many active connections to prevent notification spam.");
 
-            ImGui.Spacing();
+            UiSharedService.DrawSpacing();
             AcknowledgmentOptionBlock.DrawResetAcknowledgmentSettingsToDefaultsOption(_configService, _uiShared, "AcknowledgmentResetAcknowledgmentSettingsToDefaults");
         });
     }
@@ -3521,88 +3736,77 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
         DrawSettingsCard("Theme Editor", () =>
         {
-        using (var themeTabBar = ImRaii.TabBar("ThemeTabBar",
-            ImGuiTabBarFlags.NoTabListScrollingButtons | ImGuiTabBarFlags.FittingPolicyResizeDown))
-        {
-            if (themeTabBar)
+            var tabLabels = new List<string>(4);
+            if (ApiController.IsAdmin)
             {
-                var tabPadding = new Vector2(12f, 10f);
-
-                if (ApiController.IsAdmin)
-                {
-                    #pragma warning disable S1066
-                    var generalTab = ImRaii.TabItem("General Theme", ImGuiTabItemFlags.None);
-                    if (generalTab)
-                    {
-                        if (SpheneWindowChrome.BeginFillToBottomScrollArea("GeneralThemeChild", contentPadding: tabPadding))
-                        {
-                            using var controlStyle = UiSharedService.PushValueControlStyle();
-                            DrawGeneralThemeSettings();
-                        }
-                        SpheneWindowChrome.EndScrollArea();
-                    }
-                    #pragma warning restore S1066
-                    generalTab.Dispose();
-                }
-
-                #pragma warning disable S1066
-                var iconTab = ImRaii.TabItem("Icon Theme", _preferIconThemeTab ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None);
-                if (iconTab)
-                {
-                    if (SpheneWindowChrome.BeginFillToBottomScrollArea("IconThemeChild", contentPadding: tabPadding))
-                    {
-                        using var controlStyle = UiSharedService.PushValueControlStyle();
-                        DrawIconThemeSettings();
-                    }
-                    SpheneWindowChrome.EndScrollArea();
-                }
-                #pragma warning restore S1066
-                iconTab.Dispose();
-                _preferIconThemeTab = false;
-
-                #pragma warning disable S1066
-                var panelTab = ImRaii.TabItem("Panel Theme", _preferPanelThemeTab ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None);
-                if (panelTab)
-                {
-                    if (SpheneWindowChrome.BeginFillToBottomScrollArea("PanelThemeChild", contentPadding: tabPadding))
-                    {
-                        using var controlStyle = UiSharedService.PushValueControlStyle();
-                        DrawCompactUIThemeSettings();
-                    }
-                    SpheneWindowChrome.EndScrollArea();
-                }
-                #pragma warning restore S1066
-                panelTab.Dispose();
-                _preferPanelThemeTab = false;
-
-                #pragma warning disable S1066
-                var soundsTab = ImRaii.TabItem("Sounds", _preferSoundsThemeTab ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None);
-                if (soundsTab)
-                {
-                    if (SpheneWindowChrome.BeginFillToBottomScrollArea("SoundsThemeChild", contentPadding: tabPadding))
-                    {
-                        using var controlStyle = UiSharedService.PushValueControlStyle();
-                        DrawSoundThemeSettings();
-                    }
-                    SpheneWindowChrome.EndScrollArea();
-                }
-                #pragma warning restore S1066
-                soundsTab.Dispose();
-                _preferSoundsThemeTab = false;
+                tabLabels.Add("General Theme");
             }
-        }
+            tabLabels.Add("Icon Theme");
+            tabLabels.Add("Panel Theme");
+            tabLabels.Add("Sounds");
+
+            var preferredIndex = _preferThemeTab != null
+                ? tabLabels.IndexOf(_preferThemeTab)
+                : -1;
+            _preferThemeTab = null;
+            var selectedTab = SpheneWindowChrome.DrawTabStrip("ThemeEditorTabs", tabLabels, preferredIndex);
+            ImGuiHelpers.ScaledDummy(0, 4);
+
+            var tabPadding = new Vector2(12f, 10f);
+            if (SpheneWindowChrome.BeginFillToBottomScrollArea($"ThemeTabContent##{selectedTab}", contentPadding: tabPadding))
+            {
+                using var controlStyle = UiSharedService.PushValueControlStyle();
+                switch (tabLabels[selectedTab])
+                {
+                    case "General Theme": DrawGeneralThemeSettings(); break;
+                    case "Icon Theme": DrawIconThemeSettings(); break;
+                    case "Panel Theme": DrawCompactUIThemeSettings(); break;
+                    case "Sounds": DrawSoundThemeSettings(); break;
+                }
+            }
+            SpheneWindowChrome.EndScrollArea();
         });
     }
 
     private void DrawGeneralThemeSettings()
     {
         var theme = SpheneCustomTheme.CurrentTheme;
-        bool themeChanged = false;
-        
-        ImGui.Text("General Window Radius Settings");
-        ImGui.Separator();
-        
-        // Rounding Settings
+        var themeChanged = false;
+
+        int navClicked;
+        using (ImRaii.Group())
+        {
+            navClicked = SpheneWindowChrome.DrawVerticalTabNav("GeneralThemeNav",
+                GeneralThemeNavLabels, _generalSectionActive);
+        }
+        if (navClicked >= 0)
+        {
+            _generalScrollRequest = navClicked;
+            _generalSectionActive = navClicked;
+        }
+        ImGui.SameLine(0, ImGui.GetStyle().ItemSpacing.X + 6f * ImGuiHelpers.GlobalScale);
+        // The enclosing ThemeTabContent scroll area appends its own
+        // ScrollAreaContentInset spacer after this child — without reserving
+        // for it the parent gains a sliver of scroll range and the wheel
+        // chaining pushes the whole nav column up when scrolling to bottom.
+        var sectionsBottomReserve = ImGui.GetStyle().ItemSpacing.Y
+            + SpheneWindowChrome.ScrollAreaContentInset * ImGuiHelpers.GlobalScale;
+        if (SpheneWindowChrome.BeginFillToBottomScrollArea("GeneralThemeSections",
+            sectionsBottomReserve, border: false, contentPadding: Vector2.Zero))
+        {
+            DrawGeneralThemeSections(theme, ref themeChanged);
+        }
+        SpheneWindowChrome.EndScrollArea();
+
+        if (themeChanged)
+        {
+            theme.NotifyThemeChanged();
+            _hasUnsavedThemeChanges = true;
+        }
+    }
+
+    private static void DrawRoundingSection(ThemeConfiguration theme, ref bool themeChanged)
+    {
         var windowRounding = theme.WindowRounding;
         if (UiSharedService.DrawSliderFloat("Window Rounding", ref windowRounding, 0.0f, 20.0f, "%.1f"))
         {
@@ -3651,10 +3855,10 @@ public class SettingsUi : WindowMediatorSubscriberBase
             theme.TabRounding = tabRounding;
             themeChanged = true;
         }
-        
-        ImGui.Separator();
-        ImGui.Text("Border Settings");
-        
+    }
+
+    private static void DrawBorderSection(ThemeConfiguration theme, ref bool themeChanged)
+    {
         var windowBorderSize = theme.WindowBorderSize;
         if (UiSharedService.DrawSliderFloat("Window Border", ref windowBorderSize, 0.0f, 5.0f, "%.1f"))
         {
@@ -3682,10 +3886,10 @@ public class SettingsUi : WindowMediatorSubscriberBase
             theme.FrameBorderSize = frameBorderSize;
             themeChanged = true;
         }
+    }
 
-        ImGui.Separator();
-        ImGui.Text("Window Effects");
-
+    private static void DrawWindowEffectsSection(ThemeConfiguration theme, ref bool themeChanged)
+    {
         var enableWindowBlur = theme.EnableWindowBlur;
         if (UiSharedService.DrawToggle("Background Blur", ref enableWindowBlur))
         {
@@ -3703,10 +3907,10 @@ public class SettingsUi : WindowMediatorSubscriberBase
             }
         }
         UiSharedService.ColorTextWrapped("Blurs the game and windows behind Sphene windows (main game window only). Lower the Window Background alpha for a stronger glass effect.", ImGuiColors.DalamudGrey);
+    }
 
-        ImGui.Separator();
-        ImGui.Text("Spacing & Padding Settings");
-        
+    private static void DrawSpacingSection(ThemeConfiguration theme, ref bool themeChanged)
+    {
         var windowPadding = theme.WindowPadding;
         if (UiSharedService.DrawSliderFloat2("Window Padding", ref windowPadding, 0.0f, 50.0f, "%.1f"))
         {
@@ -3755,77 +3959,89 @@ public class SettingsUi : WindowMediatorSubscriberBase
             theme.GrabMinSize = grabMinSize;
             themeChanged = true;
         }
-        
-        // Apply changes in real-time
-        if (themeChanged)
+    }
+
+    /// <summary>
+    /// Draws all general theme sections stacked inside the sections scroll
+    /// child and keeps the left nav in sync: a queued nav click eases the
+    /// scroll toward that section (wheel input cancels), otherwise the scroll
+    /// position picks the highlighted nav entry. Section tops are recorded
+    /// relative to the first section so any padding cancels out.
+    /// </summary>
+    private void DrawGeneralThemeSections(ThemeConfiguration theme, ref bool themeChanged)
+    {
+        if (_generalScrollRequest >= 0 && _generalScrollRequest < _generalSectionTops.Length)
         {
-            theme.NotifyThemeChanged();
-            _hasUnsavedThemeChanges = true;
+            _generalScrollTarget = MathF.Max(0f,
+                _generalSectionTops[_generalScrollRequest] - _generalSectionTops[0]);
         }
-        
-        ImGui.Separator();
-        ImGui.Text("General Theme Colors");
-        ImGui.Separator();
-        
-        if (ImGui.BeginTabBar("GeneralColorTabBar",
-            ImGuiTabBarFlags.NoTabListScrollingButtons | ImGuiTabBarFlags.FittingPolicyResizeDown))
+        _generalScrollRequest = -1;
+
+        if (_generalScrollTarget.HasValue)
         {
-            if (ImGui.BeginTabItem("Basic Colors"))
+            var target = _generalScrollTarget.Value;
+            var io = ImGui.GetIO();
+            if (ImGui.IsWindowHovered() && MathF.Abs(io.MouseWheel) > 0f)
             {
-                DrawBasicColors(theme, ref themeChanged);
-                ImGui.EndTabItem();
+                _generalScrollTarget = null;
             }
-            
-            if (ImGui.BeginTabItem("Window Colors"))
+            else
             {
-                DrawWindowColors(theme, ref themeChanged);
-                ImGui.EndTabItem();
+                var next = ImGui.GetScrollY()
+                    + (target - ImGui.GetScrollY()) * MathF.Min(1f, io.DeltaTime * 12f);
+                if (MathF.Abs(next - target) < 1f)
+                {
+                    ImGui.SetScrollY(target);
+                    _generalScrollTarget = null;
+                }
+                else
+                {
+                    ImGui.SetScrollY(next);
+                }
             }
-            
-            if (ImGui.BeginTabItem("Frame & Input Colors"))
-            {
-                DrawFrameInputColors(theme, ref themeChanged);
-                ImGui.EndTabItem();
-            }
-            
-            if (ImGui.BeginTabItem("Button & Header Colors"))
-            {
-                DrawButtonHeaderColors(theme, ref themeChanged);
-                ImGui.EndTabItem();
-            }
-            
-            if (ImGui.BeginTabItem("Menu & Navigation Colors"))
-            {
-                DrawMenuNavigationColors(theme, ref themeChanged);
-                ImGui.EndTabItem();
-            }
-            
-            if (ImGui.BeginTabItem("Scrollbar & Slider Colors"))
-            {
-                DrawScrollbarSliderColors(theme, ref themeChanged);
-                ImGui.EndTabItem();
-            }
-            
-            if (ImGui.BeginTabItem("Table & Tab Colors"))
-            {
-                DrawTableTabColors(theme, ref themeChanged);
-                ImGui.EndTabItem();
-            }
-            
-            // Moved Button Styles to Panel Theme tab
-            
-            ImGui.EndTabBar();
         }
-        
-        // Apply changes in real-time
-        if (themeChanged)
+
+        for (var i = 0; i < GeneralThemeSectionTitles.Length; i++)
         {
-            theme.NotifyThemeChanged();
-            _hasUnsavedThemeChanges = true;
+            if (i > 0)
+            {
+                ImGuiHelpers.ScaledDummy(0, 10);
+            }
+            _generalSectionTops[i] = ImGui.GetCursorPos().Y;
+            UiSharedService.Text(GeneralThemeSectionTitles[i]);
+            UiSharedService.DrawSeparator();
+            switch (i)
+            {
+                case 0: DrawRoundingSection(theme, ref themeChanged); break;
+                case 1: DrawBorderSection(theme, ref themeChanged); break;
+                case 2: DrawWindowEffectsSection(theme, ref themeChanged); break;
+                case 3: DrawSpacingSection(theme, ref themeChanged); break;
+                case 4: DrawBasicColors(theme, ref themeChanged); break;
+                case 5: DrawWindowColors(theme, ref themeChanged); break;
+                case 6: DrawFrameInputColors(theme, ref themeChanged); break;
+                case 7: DrawButtonHeaderColors(theme, ref themeChanged); break;
+                case 8: DrawMenuNavigationColors(theme, ref themeChanged); break;
+                case 9: DrawScrollbarSliderColors(theme, ref themeChanged); break;
+                case 10: DrawTableTabColors(theme, ref themeChanged); break;
+            }
+        }
+
+        if (!_generalScrollTarget.HasValue)
+        {
+            var scrollY = ImGui.GetScrollY();
+            var threshold = ImGui.GetTextLineHeightWithSpacing();
+            var active = 0;
+            for (var i = 1; i < _generalSectionTops.Length; i++)
+            {
+                if (_generalSectionTops[i] - _generalSectionTops[0] - threshold <= scrollY)
+                {
+                    active = i;
+                }
+            }
+            _generalSectionActive = active;
         }
     }
-    
-    
+
 
     private void DrawIconThemeSettings()
     {
@@ -3834,21 +4050,21 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
         UiSharedService.ColorTextWrapped("Customize the Sphene floating icon pulse colors, ring sizes, and which notifications appear as badges.", ImGuiColors.DalamudGrey);
         UiSharedService.ColorTextWrapped("Changes apply immediately to the icon. Use the test buttons below to preview each effect.", ImGuiColors.DalamudYellow);
-        ImGui.Spacing();
+        UiSharedService.DrawSpacing();
 
         // Helper to edit packed uint color as Vector4
         (bool Changed, uint NewValue) EditPackedColor(string label, uint packedColor)
         {
             var vec = ImGui.ColorConvertU32ToFloat4(packedColor);
-            if (ImGui.ColorEdit4(label, ref vec))
+            if (UiSharedService.DrawColorEdit(label, ref vec))
             {
                 return (true, ImGui.ColorConvertFloat4ToU32(vec));
             }
             return (false, packedColor);
         }
 
-        ImGui.Text("Global Visual Settings");
-        ImGui.Separator();
+        UiSharedService.Text("Global Visual Settings");
+        UiSharedService.DrawSeparator();
 
         var iconGlobalAlpha = cfg.IconGlobalAlpha;
         if (UiSharedService.DrawSliderFloat("Icon Global Opacity", ref iconGlobalAlpha, 0.1f, 1.0f, "%.2f"))
@@ -3864,9 +4080,9 @@ public class SettingsUi : WindowMediatorSubscriberBase
             configChanged = true;
         }
 
-        ImGui.Spacing();
-        ImGui.Text("Badge Visibility");
-        ImGui.Separator();
+        UiSharedService.DrawSpacing();
+        UiSharedService.Text("Badge Visibility");
+        UiSharedService.DrawSeparator();
 
         var showMod = cfg.IconShowModTransferBadge;
         if (UiSharedService.DrawToggle("Show Mod Transfer Badges", ref showMod))
@@ -3889,29 +4105,29 @@ public class SettingsUi : WindowMediatorSubscriberBase
             configChanged = true;
         }
 
-        ImGui.Spacing();
-        ImGui.Text("Per-Event Configuration");
-        ImGui.Separator();
+        UiSharedService.DrawSpacing();
+        UiSharedService.Text("Per-Event Configuration");
+        UiSharedService.DrawSeparator();
         ImGui.TextWrapped("Each event type can have its own color, alpha, and effects. Multiple effects can be combined.");
 
         // Permanent (Background)
-        if (ImGui.CollapsingHeader("Permanent (Background)"))
+        if (_uiShared.DrawCollapsibleSection("Permanent (Background)"))
         {
             var (permColorChanged, permColorNew) = EditPackedColor("Color##perm", cfg.IconPermColor);
             if (permColorChanged) { cfg.IconPermColor = permColorNew; configChanged = true; }
             var permAlpha = cfg.IconPermAlpha;
             if (UiSharedService.DrawSliderFloat("Alpha##perm", ref permAlpha, 0.01f, 1.0f, "%.2f")) { cfg.IconPermAlpha = permAlpha; configChanged = true; }
             var permPulse = cfg.IconPermEffectPulse;
-            if (ImGui.Checkbox("Pulse##perm", ref permPulse)) { cfg.IconPermEffectPulse = permPulse; configChanged = true; }
+            if (UiSharedService.DrawToggleChip("Pulse##perm", ref permPulse)) { cfg.IconPermEffectPulse = permPulse; configChanged = true; }
             ImGui.SameLine();
             var permGlow = cfg.IconPermEffectGlow;
-            if (ImGui.Checkbox("Glow##perm", ref permGlow)) { cfg.IconPermEffectGlow = permGlow; configChanged = true; }
+            if (UiSharedService.DrawToggleChip("Glow##perm", ref permGlow)) { cfg.IconPermEffectGlow = permGlow; configChanged = true; }
             ImGui.SameLine();
             var permBounce = cfg.IconPermEffectBounce;
-            if (ImGui.Checkbox("Bounce##perm", ref permBounce)) { cfg.IconPermEffectBounce = permBounce; configChanged = true; }
+            if (UiSharedService.DrawToggleChip("Bounce##perm", ref permBounce)) { cfg.IconPermEffectBounce = permBounce; configChanged = true; }
             ImGui.SameLine();
             var permRainbow = cfg.IconPermEffectRainbow;
-            if (ImGui.Checkbox("Rainbow##perm", ref permRainbow)) { cfg.IconPermEffectRainbow = permRainbow; configChanged = true; }
+            if (UiSharedService.DrawToggleChip("Rainbow##perm", ref permRainbow)) { cfg.IconPermEffectRainbow = permRainbow; configChanged = true; }
             var permPulseMin = cfg.IconPermPulseMinRadius;
             if (UiSharedService.DrawSliderFloat("Pulse Min Radius##perm", ref permPulseMin, 0.0f, 1.5f, "%.2f")) { cfg.IconPermPulseMinRadius = permPulseMin; configChanged = true; }
             var permPulseMax = cfg.IconPermPulseMaxRadius;
@@ -3927,23 +4143,23 @@ public class SettingsUi : WindowMediatorSubscriberBase
         }
 
         // Mod Transfer
-        if (ImGui.CollapsingHeader("Mod Transfer"))
+        if (_uiShared.DrawCollapsibleSection("Mod Transfer"))
         {
             var (modColorChanged, modColorNew) = EditPackedColor("Color##mod", cfg.IconModTransferColor);
             if (modColorChanged) { cfg.IconModTransferColor = modColorNew; configChanged = true; }
             var modAlpha = cfg.IconModTransferAlpha;
             if (UiSharedService.DrawSliderFloat("Alpha##mod", ref modAlpha, 0.01f, 1.0f, "%.2f")) { cfg.IconModTransferAlpha = modAlpha; configChanged = true; }
             var modPulse = cfg.IconModTransferEffectPulse;
-            if (ImGui.Checkbox("Pulse##mod", ref modPulse)) { cfg.IconModTransferEffectPulse = modPulse; configChanged = true; }
+            if (UiSharedService.DrawToggleChip("Pulse##mod", ref modPulse)) { cfg.IconModTransferEffectPulse = modPulse; configChanged = true; }
             ImGui.SameLine();
             var modGlow = cfg.IconModTransferEffectGlow;
-            if (ImGui.Checkbox("Glow##mod", ref modGlow)) { cfg.IconModTransferEffectGlow = modGlow; configChanged = true; }
+            if (UiSharedService.DrawToggleChip("Glow##mod", ref modGlow)) { cfg.IconModTransferEffectGlow = modGlow; configChanged = true; }
             ImGui.SameLine();
             var modBounce = cfg.IconModTransferEffectBounce;
-            if (ImGui.Checkbox("Bounce##mod", ref modBounce)) { cfg.IconModTransferEffectBounce = modBounce; configChanged = true; }
+            if (UiSharedService.DrawToggleChip("Bounce##mod", ref modBounce)) { cfg.IconModTransferEffectBounce = modBounce; configChanged = true; }
             ImGui.SameLine();
             var modRainbow = cfg.IconModTransferEffectRainbow;
-            if (ImGui.Checkbox("Rainbow##mod", ref modRainbow)) { cfg.IconModTransferEffectRainbow = modRainbow; configChanged = true; }
+            if (UiSharedService.DrawToggleChip("Rainbow##mod", ref modRainbow)) { cfg.IconModTransferEffectRainbow = modRainbow; configChanged = true; }
             var modPulseMin = cfg.IconModTransferPulseMinRadius;
             if (UiSharedService.DrawSliderFloat("Pulse Min Radius##mod", ref modPulseMin, 0.0f, 1.5f, "%.2f")) { cfg.IconModTransferPulseMinRadius = modPulseMin; configChanged = true; }
             var modPulseMax = cfg.IconModTransferPulseMaxRadius;
@@ -3956,7 +4172,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             if (UiSharedService.DrawSliderFloat("Bounce Scale##mod", ref modBounceInt, 0.0f, 0.3f, "%.2f")) { cfg.IconModTransferBounceIntensity = modBounceInt; configChanged = true; }
             var modBounceSpd = cfg.IconModTransferBounceSpeed;
             if (UiSharedService.DrawSliderFloat("Bounce Speed##mod", ref modBounceSpd, 0.1f, 3.0f, "%.2f")) { cfg.IconModTransferBounceSpeed = modBounceSpd; configChanged = true; }
-            ImGui.Spacing();
+            UiSharedService.DrawSpacing();
             var modEffectDuration = cfg.IconModTransferEffectDurationSeconds;
             if (UiSharedService.DrawSliderInt("Effect Duration##mod", ref modEffectDuration, 0, 300, modEffectDuration == 0 ? "Never" : "%ds")) { cfg.IconModTransferEffectDurationSeconds = modEffectDuration; configChanged = true; }
             _uiShared.DrawHelpText("How long the pulse/glow/bounce effects last. 0 = never expires until icon is clicked.");
@@ -3966,23 +4182,23 @@ public class SettingsUi : WindowMediatorSubscriberBase
         }
 
         // Pair Request
-        if (ImGui.CollapsingHeader("Pair Request"))
+        if (_uiShared.DrawCollapsibleSection("Pair Request"))
         {
             var (pairColorChanged, pairColorNew) = EditPackedColor("Color##pair", cfg.IconPairRequestColor);
             if (pairColorChanged) { cfg.IconPairRequestColor = pairColorNew; configChanged = true; }
             var pairAlpha = cfg.IconPairRequestAlpha;
             if (UiSharedService.DrawSliderFloat("Alpha##pair", ref pairAlpha, 0.01f, 1.0f, "%.2f")) { cfg.IconPairRequestAlpha = pairAlpha; configChanged = true; }
             var pairPulse = cfg.IconPairRequestEffectPulse;
-            if (ImGui.Checkbox("Pulse##pair", ref pairPulse)) { cfg.IconPairRequestEffectPulse = pairPulse; configChanged = true; }
+            if (UiSharedService.DrawToggleChip("Pulse##pair", ref pairPulse)) { cfg.IconPairRequestEffectPulse = pairPulse; configChanged = true; }
             ImGui.SameLine();
             var pairGlow = cfg.IconPairRequestEffectGlow;
-            if (ImGui.Checkbox("Glow##pair", ref pairGlow)) { cfg.IconPairRequestEffectGlow = pairGlow; configChanged = true; }
+            if (UiSharedService.DrawToggleChip("Glow##pair", ref pairGlow)) { cfg.IconPairRequestEffectGlow = pairGlow; configChanged = true; }
             ImGui.SameLine();
             var pairBounce = cfg.IconPairRequestEffectBounce;
-            if (ImGui.Checkbox("Bounce##pair", ref pairBounce)) { cfg.IconPairRequestEffectBounce = pairBounce; configChanged = true; }
+            if (UiSharedService.DrawToggleChip("Bounce##pair", ref pairBounce)) { cfg.IconPairRequestEffectBounce = pairBounce; configChanged = true; }
             ImGui.SameLine();
             var pairRainbow = cfg.IconPairRequestEffectRainbow;
-            if (ImGui.Checkbox("Rainbow##pair", ref pairRainbow)) { cfg.IconPairRequestEffectRainbow = pairRainbow; configChanged = true; }
+            if (UiSharedService.DrawToggleChip("Rainbow##pair", ref pairRainbow)) { cfg.IconPairRequestEffectRainbow = pairRainbow; configChanged = true; }
             var pairPulseMin = cfg.IconPairRequestPulseMinRadius;
             if (UiSharedService.DrawSliderFloat("Pulse Min Radius##pair", ref pairPulseMin, 0.0f, 1.5f, "%.2f")) { cfg.IconPairRequestPulseMinRadius = pairPulseMin; configChanged = true; }
             var pairPulseMax = cfg.IconPairRequestPulseMaxRadius;
@@ -3995,7 +4211,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             if (UiSharedService.DrawSliderFloat("Bounce Scale##pair", ref pairBounceInt, 0.0f, 0.3f, "%.2f")) { cfg.IconPairRequestBounceIntensity = pairBounceInt; configChanged = true; }
             var pairBounceSpd = cfg.IconPairRequestBounceSpeed;
             if (UiSharedService.DrawSliderFloat("Bounce Speed##pair", ref pairBounceSpd, 0.1f, 3.0f, "%.2f")) { cfg.IconPairRequestBounceSpeed = pairBounceSpd; configChanged = true; }
-            ImGui.Spacing();
+            UiSharedService.DrawSpacing();
             var pairEffectDuration = cfg.IconPairRequestEffectDurationSeconds;
             if (UiSharedService.DrawSliderInt("Effect Duration##pair", ref pairEffectDuration, 0, 300, pairEffectDuration == 0 ? "Never" : "%ds")) { cfg.IconPairRequestEffectDurationSeconds = pairEffectDuration; configChanged = true; }
             _uiShared.DrawHelpText("How long the pulse/glow/bounce effects last. 0 = never expires until icon is clicked.");
@@ -4005,23 +4221,23 @@ public class SettingsUi : WindowMediatorSubscriberBase
         }
 
         // Notification
-        if (ImGui.CollapsingHeader("Notification"))
+        if (_uiShared.DrawCollapsibleSection("Notification"))
         {
             var (notifColorChanged, notifColorNew) = EditPackedColor("Color##notif", cfg.IconNotificationColor);
             if (notifColorChanged) { cfg.IconNotificationColor = notifColorNew; configChanged = true; }
             var notifAlpha = cfg.IconNotificationAlpha;
             if (UiSharedService.DrawSliderFloat("Alpha##notif", ref notifAlpha, 0.01f, 1.0f, "%.2f")) { cfg.IconNotificationAlpha = notifAlpha; configChanged = true; }
             var notifPulse = cfg.IconNotificationEffectPulse;
-            if (ImGui.Checkbox("Pulse##notif", ref notifPulse)) { cfg.IconNotificationEffectPulse = notifPulse; configChanged = true; }
+            if (UiSharedService.DrawToggleChip("Pulse##notif", ref notifPulse)) { cfg.IconNotificationEffectPulse = notifPulse; configChanged = true; }
             ImGui.SameLine();
             var notifGlow = cfg.IconNotificationEffectGlow;
-            if (ImGui.Checkbox("Glow##notif", ref notifGlow)) { cfg.IconNotificationEffectGlow = notifGlow; configChanged = true; }
+            if (UiSharedService.DrawToggleChip("Glow##notif", ref notifGlow)) { cfg.IconNotificationEffectGlow = notifGlow; configChanged = true; }
             ImGui.SameLine();
             var notifBounce = cfg.IconNotificationEffectBounce;
-            if (ImGui.Checkbox("Bounce##notif", ref notifBounce)) { cfg.IconNotificationEffectBounce = notifBounce; configChanged = true; }
+            if (UiSharedService.DrawToggleChip("Bounce##notif", ref notifBounce)) { cfg.IconNotificationEffectBounce = notifBounce; configChanged = true; }
             ImGui.SameLine();
             var notifRainbow = cfg.IconNotificationEffectRainbow;
-            if (ImGui.Checkbox("Rainbow##notif", ref notifRainbow)) { cfg.IconNotificationEffectRainbow = notifRainbow; configChanged = true; }
+            if (UiSharedService.DrawToggleChip("Rainbow##notif", ref notifRainbow)) { cfg.IconNotificationEffectRainbow = notifRainbow; configChanged = true; }
             var notifPulseMin = cfg.IconNotificationPulseMinRadius;
             if (UiSharedService.DrawSliderFloat("Pulse Min Radius##notif", ref notifPulseMin, 0.0f, 1.5f, "%.2f")) { cfg.IconNotificationPulseMinRadius = notifPulseMin; configChanged = true; }
             var notifPulseMax = cfg.IconNotificationPulseMaxRadius;
@@ -4034,7 +4250,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             if (UiSharedService.DrawSliderFloat("Bounce Scale##notif", ref notifBounceInt, 0.0f, 0.3f, "%.2f")) { cfg.IconNotificationBounceIntensity = notifBounceInt; configChanged = true; }
             var notifBounceSpd = cfg.IconNotificationBounceSpeed;
             if (UiSharedService.DrawSliderFloat("Bounce Speed##notif", ref notifBounceSpd, 0.1f, 3.0f, "%.2f")) { cfg.IconNotificationBounceSpeed = notifBounceSpd; configChanged = true; }
-            ImGui.Spacing();
+            UiSharedService.DrawSpacing();
             var notifEffectDuration = cfg.IconNotificationEffectDurationSeconds;
             if (UiSharedService.DrawSliderInt("Effect Duration##notif", ref notifEffectDuration, 0, 300, notifEffectDuration == 0 ? "Never" : "%ds")) { cfg.IconNotificationEffectDurationSeconds = notifEffectDuration; configChanged = true; }
             _uiShared.DrawHelpText("How long the pulse/glow/bounce effects last. 0 = never expires until icon is clicked.");
@@ -4043,21 +4259,21 @@ public class SettingsUi : WindowMediatorSubscriberBase
             _uiShared.DrawHelpText("How long the badge dot remains visible. 0 = never expires until icon is clicked. Separate from effect duration.");
         }
 
-        ImGui.Spacing();
-        ImGui.Text("Live Preview (Test Buttons)");
-        ImGui.Separator();
+        UiSharedService.DrawSpacing();
+        UiSharedService.Text("Live Preview (Test Buttons)");
+        UiSharedService.DrawSeparator();
 
-        if (ImGui.Button("Test Mod Transfer"))
+        if (UiSharedService.DrawButton("Test Mod Transfer"))
         {
             Mediator.Publish(new TestIconEventMessage(TestIconEventType.ModTransferAvailable, "Test Mod Transfer"));
         }
         ImGui.SameLine();
-        if (ImGui.Button("Test Pair Request"))
+        if (UiSharedService.DrawButton("Test Pair Request"))
         {
             Mediator.Publish(new TestIconEventMessage(TestIconEventType.PairRequest, "Test Pair Request"));
         }
         ImGui.SameLine();
-        if (ImGui.Button("Test Notification"))
+        if (UiSharedService.DrawButton("Test Notification"))
         {
             Mediator.Publish(new TestIconEventMessage(TestIconEventType.Notification, "Test Notification"));
         }
@@ -4076,17 +4292,17 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
         UiSharedService.ColorTextWrapped("Customize how the Panel looks and feels.", ImGuiColors.DalamudGrey);
         UiSharedService.ColorTextWrapped("Panel will be opened automaticly and you can see changes immediately.", ImGuiColors.DalamudYellow);
-        ImGui.Spacing();
+        UiSharedService.DrawSpacing();
         
         
-        ImGui.Spacing();
+        UiSharedService.DrawSpacing();
                 
-        if (ImGui.CollapsingHeader("Control Panel Layout", ImGuiTreeNodeFlags.None))
+        if (_uiShared.DrawCollapsibleSection("Control Panel Layout"))
         {
                 
-        ImGui.Spacing();
-        ImGui.Text("Panel Spacing & Sizing");
-        ImGui.Separator();
+        UiSharedService.DrawSpacing();
+        UiSharedService.Text("Panel Spacing & Sizing");
+        UiSharedService.DrawSeparator();
         
         // Panel Spacing Settings
         
@@ -4112,9 +4328,9 @@ public class SettingsUi : WindowMediatorSubscriberBase
             themeChanged = true;
         }
         
-        ImGui.Spacing();
-        ImGui.Text("Panel Border and Rounding");
-        ImGui.Separator();
+        UiSharedService.DrawSpacing();
+        UiSharedService.Text("Panel Border and Rounding");
+        UiSharedService.DrawSeparator();
         
         var compactWindowBorderSize = theme.CompactWindowBorderSize;
         if (UiSharedService.DrawSliderFloat("Panel Window Border Size", ref compactWindowBorderSize, 0.0f, 5.0f, "%.1f"))
@@ -4130,9 +4346,9 @@ public class SettingsUi : WindowMediatorSubscriberBase
             themeChanged = true;
         }
 
-        ImGui.Spacing();
-        ImGui.Text("Panel Window Effects");
-        ImGui.Separator();
+        UiSharedService.DrawSpacing();
+        UiSharedService.Text("Panel Window Effects");
+        UiSharedService.DrawSeparator();
 
         var compactEnableWindowBlur = theme.CompactEnableWindowBlur;
         if (UiSharedService.DrawToggle("Panel Background Blur", ref compactEnableWindowBlur))
@@ -4151,55 +4367,55 @@ public class SettingsUi : WindowMediatorSubscriberBase
             }
         }
 
-        ImGui.Spacing();
-        ImGui.Text("Panel Backgrounds");
-        ImGui.Separator();
+        UiSharedService.DrawSpacing();
+        UiSharedService.Text("Panel Backgrounds");
+        UiSharedService.DrawSeparator();
         var compactWindowBg = theme.CompactWindowBg;
-        if (ImGui.ColorEdit4("Panel Background", ref compactWindowBg))
+        if (UiSharedService.DrawColorEdit("Panel Background", ref compactWindowBg))
         {
             theme.CompactWindowBg = compactWindowBg;
             themeChanged = true;
         }
         var compactFrameBg = theme.CompactFrameBg;
-        if (ImGui.ColorEdit4("Control Background", ref compactFrameBg))
+        if (UiSharedService.DrawColorEdit("Control Background", ref compactFrameBg))
         {
             theme.CompactFrameBg = compactFrameBg;
             themeChanged = true;
         }
         var compactControlPanelBg = theme.CompactControlPanelBg;
-        if (ImGui.ColorEdit4("Control Panel UID Section", ref compactControlPanelBg))
+        if (UiSharedService.DrawColorEdit("Control Panel UID Section", ref compactControlPanelBg))
         {
             theme.CompactControlPanelBg = compactControlPanelBg;
             themeChanged = true;
         }
 
-        ImGui.Spacing();
-        ImGui.Text("General Text");
-        ImGui.Separator();
+        UiSharedService.DrawSpacing();
+        UiSharedService.Text("General Text");
+        UiSharedService.DrawSeparator();
         var compactText = theme.CompactText;
-        if (ImGui.ColorEdit4("Text", ref compactText))
+        if (UiSharedService.DrawColorEdit("Text", ref compactText))
         {
             theme.CompactText = compactText;
             themeChanged = true;
         }
         var compactTextSecondary = theme.CompactTextSecondary;
-        if (ImGui.ColorEdit4("Text (Secondary)", ref compactTextSecondary))
+        if (UiSharedService.DrawColorEdit("Text (Secondary)", ref compactTextSecondary))
         {
             theme.CompactTextSecondary = compactTextSecondary;
             themeChanged = true;
         }
 
-        ImGui.Spacing();
-        ImGui.Text("Accents & Borders");
-        ImGui.Separator();
+        UiSharedService.DrawSpacing();
+        UiSharedService.Text("Accents & Borders");
+        UiSharedService.DrawSeparator();
         var compactBorder = theme.CompactBorder;
-        if (ImGui.ColorEdit4("Border", ref compactBorder))
+        if (UiSharedService.DrawColorEdit("Border", ref compactBorder))
         {
             theme.CompactBorder = compactBorder;
             themeChanged = true;
         }
         var separator = theme.CompactSeparator;
-        if (ImGui.ColorEdit4("Separator", ref separator))
+        if (UiSharedService.DrawColorEdit("Separator", ref separator))
         {
             theme.CompactSeparator = separator;
             themeChanged = true;
@@ -4207,10 +4423,10 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
         }
 
-        ImGui.Spacing();
-        if (ImGui.CollapsingHeader("Context & Tooltip", ImGuiTreeNodeFlags.None))
+        UiSharedService.DrawSpacing();
+        if (_uiShared.DrawCollapsibleSection("Context & Tooltip"))
         {
-            ImGui.Separator();
+            UiSharedService.DrawSeparator();
             var compactTooltipRounding = theme.CompactTooltipRounding;
             if (UiSharedService.DrawSliderFloat("Panel Tooltip Rounding", ref compactTooltipRounding, 0.0f, 30.0f, "%.1f"))
             {
@@ -4241,9 +4457,9 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 theme.CompactChildPadding = compactChildPadding;
                 themeChanged = true;
             }
-            ImGui.Spacing();
-            ImGui.Text("Context Menu Button Style");
-            ImGui.Separator();
+            UiSharedService.DrawSpacing();
+            UiSharedService.Text("Context Menu Button Style");
+            UiSharedService.DrawSeparator();
             var key = Sphene.UI.Theme.ButtonStyleKeys.ContextMenu_Item;
             if (!theme.ButtonStyles.TryGetValue(key, out var ov))
             {
@@ -4268,17 +4484,15 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 ov.IconOffset = iconOffset;
                 theme.NotifyThemeChanged();
             }
-            ImGui.Separator();
+            UiSharedService.DrawSeparator();
             var effBtn = ov.Button ?? theme.CompactButton;
-            if (ImGui.ColorEdit4("Button", ref effBtn))
+            if (UiSharedService.DrawColorEdit("Button", ref effBtn))
             {
                 ov.Button = effBtn;
                 theme.NotifyThemeChanged();
             }
             ImGui.SameLine();
-            ImGui.PushFont(UiBuilder.IconFont);
-            var genHoverActive = ImGui.SmallButton(FontAwesomeIcon.Magic.ToIconString());
-            ImGui.PopFont();
+            var genHoverActive = _uiShared.IconButton(FontAwesomeIcon.Magic);
             if (genHoverActive)
             {
                 var tup = ButtonStyleManagerUI.DeriveHoverActive(ov.Button ?? theme.CompactButton);
@@ -4289,31 +4503,31 @@ public class SettingsUi : WindowMediatorSubscriberBase
             if (ImGui.IsItemHovered())
                 UiSharedService.AttachToolTip("Generate Hover/Active colors from current Button color.");
             var effBtnH = ov.ButtonHovered ?? theme.CompactButtonHovered;
-            if (ImGui.ColorEdit4("Button Hovered", ref effBtnH))
+            if (UiSharedService.DrawColorEdit("Button Hovered", ref effBtnH))
             {
                 ov.ButtonHovered = effBtnH;
                 theme.NotifyThemeChanged();
             }
             var effBtnA = ov.ButtonActive ?? theme.CompactButtonActive;
-            if (ImGui.ColorEdit4("Button Active", ref effBtnA))
+            if (UiSharedService.DrawColorEdit("Button Active", ref effBtnA))
             {
                 ov.ButtonActive = effBtnA;
                 theme.NotifyThemeChanged();
             }
             var effIcon = ov.Icon ?? theme.CompactText;
-            if (ImGui.ColorEdit4("Icon", ref effIcon))
+            if (UiSharedService.DrawColorEdit("Icon", ref effIcon))
             {
                 ov.Icon = effIcon;
                 theme.NotifyThemeChanged();
             }
             var effTxt = ov.Text ?? theme.CompactText;
-            if (ImGui.ColorEdit4("Text", ref effTxt))
+            if (UiSharedService.DrawColorEdit("Text", ref effTxt))
             {
                 ov.Text = effTxt;
                 theme.NotifyThemeChanged();
             }
             var effBorder = ov.Border ?? theme.CompactBorder;
-            if (ImGui.ColorEdit4("Border", ref effBorder))
+            if (UiSharedService.DrawColorEdit("Border", ref effBorder))
             {
                 ov.Border = effBorder;
                 theme.NotifyThemeChanged();
@@ -4338,10 +4552,10 @@ public class SettingsUi : WindowMediatorSubscriberBase
             var tooltipHeadingPos = start;
             var contextHeadingPos = new Vector2(start.X + tooltipPreviewWidth + spacingX, start.Y);
             ImGui.SetCursorScreenPos(tooltipHeadingPos);
-            ImGui.TextUnformatted("Tooltip Preview");
+            UiSharedService.Text("Tooltip Preview");
             var headingH = ImGui.GetTextLineHeight();
             ImGui.SetCursorScreenPos(contextHeadingPos);
-            ImGui.TextUnformatted("Context Menu Preview");
+            UiSharedService.Text("Context Menu Preview");
             var tooltipStart = new Vector2(tooltipHeadingPos.X, tooltipHeadingPos.Y + headingH + spacingY);
             var contextStart = new Vector2(contextHeadingPos.X, contextHeadingPos.Y + headingH + spacingY);
             var tooltipEnd = new Vector2(tooltipStart.X + tooltipPreviewWidth, tooltipStart.Y + previewHeight);
@@ -4355,7 +4569,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, padding);
             if (ImGui.BeginChild("##tooltip-preview", new Vector2(desiredMenuWidth + padding.X * 2.0f, previewHeight - tooltipBorder * 2.0f), false, ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse | ImGuiWindowFlags.NoBackground))
             {
-                ImGui.TextUnformatted("Tooltip text");
+                UiSharedService.Text("Tooltip text");
             }
             ImGui.EndChild();
             ImGui.PopStyleVar();
@@ -4363,7 +4577,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, padding);
             if (ImGui.BeginChild("##context-preview", new Vector2(desiredMenuWidth + padding.X * 2.0f, previewHeight - contextBorder * 2.0f), false, ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse | ImGuiWindowFlags.NoBackground))
             {
-                ImGui.TextUnformatted("Common Pair Functions");
+                UiSharedService.Text("Common Pair Functions");
                 _uiShared.IconTextActionButton(FontAwesomeIcon.User, "Open Profile", menuWidth, ButtonStyleKeys.ContextMenu_Item);
                 _uiShared.IconTextActionButton(FontAwesomeIcon.Sync, "Reload last data", menuWidth, ButtonStyleKeys.ContextMenu_Item);
                 _uiShared.IconTextActionButton(FontAwesomeIcon.PlayCircle, "Cycle pause state", menuWidth, ButtonStyleKeys.ContextMenu_Item);
@@ -4372,12 +4586,12 @@ public class SettingsUi : WindowMediatorSubscriberBase
             ImGui.PopStyleVar();
             ImGui.SetCursorScreenPos(new Vector2(start.X, MathF.Max(contextEnd.Y, tooltipEnd.Y)));
         }
-        ImGui.Spacing();
+        UiSharedService.DrawSpacing();
 
         if (_preferButtonStylesTab) ImGui.SetNextItemOpen(true, ImGuiCond.Always);
-        if (ImGui.CollapsingHeader("Button Styles", ImGuiTreeNodeFlags.None))
+        if (_uiShared.DrawCollapsibleSection("Button Styles"))
         {
-            ImGui.Separator();
+            UiSharedService.DrawSeparator();
             var compactFrameRounding = theme.CompactFrameRounding;
             if (UiSharedService.DrawSliderFloat("Rounding for all buttons", ref compactFrameRounding, 0.0f, 30.0f, "%.1f"))
             {
@@ -4387,13 +4601,13 @@ public class SettingsUi : WindowMediatorSubscriberBase
             ButtonStyleManagerUI.Draw();
             _preferButtonStylesTab = false;
         }
-        ImGui.Spacing();
-        ImGui.Separator();
-        ImGui.Spacing();
+        UiSharedService.DrawSpacing();
+        UiSharedService.DrawSeparator();
+        UiSharedService.DrawSpacing();
         
-        if (ImGui.CollapsingHeader("Header", ImGuiTreeNodeFlags.None))
+        if (_uiShared.DrawCollapsibleSection("Header"))
         {
-            ImGui.Separator();
+            UiSharedService.DrawSeparator();
 
             var compactShowImGuiHeader = theme.CompactShowImGuiHeader;
             if (UiSharedService.DrawToggle("Show Window Header", ref compactShowImGuiHeader))
@@ -4406,14 +4620,14 @@ public class SettingsUi : WindowMediatorSubscriberBase
             if (!theme.CompactShowImGuiHeader)
             {
                 var headerBg = theme.CompactHeaderBg;
-                if (ImGui.ColorEdit4("Header Background", ref headerBg))
+                if (UiSharedService.DrawColorEdit("Header Background", ref headerBg))
                 {
                     theme.CompactHeaderBg = headerBg;
                     themeChanged = true;
                 }
 
                 var titleText = theme.CompactPanelTitleText;
-                if (ImGui.ColorEdit4("Title Text", ref titleText))
+                if (UiSharedService.DrawColorEdit("Title Text", ref titleText))
                 {
                     theme.CompactPanelTitleText = titleText;
                     themeChanged = true;
@@ -4429,20 +4643,20 @@ public class SettingsUi : WindowMediatorSubscriberBase
             if (theme.CompactShowImGuiHeader)
             {
                 var compactTitleBg = theme.CompactTitleBg;
-                if (ImGui.ColorEdit4("Window Header Background", ref compactTitleBg))
+                if (UiSharedService.DrawColorEdit("Window Header Background", ref compactTitleBg))
                 {
                     theme.CompactTitleBg = compactTitleBg;
                     themeChanged = true;
                 }
                 var compactTitleBgActive = theme.CompactTitleBgActive;
-                if (ImGui.ColorEdit4("Window Header Background (Active)", ref compactTitleBgActive))
+                if (UiSharedService.DrawColorEdit("Window Header Background (Active)", ref compactTitleBgActive))
                 {
                     theme.CompactTitleBgActive = compactTitleBgActive;
                     themeChanged = true;
                 }
             }
             var sectionHeaderText = theme.CompactHeaderText;
-            if (ImGui.ColorEdit4("Section Header Text", ref sectionHeaderText))
+            if (UiSharedService.DrawColorEdit("Section Header Text", ref sectionHeaderText))
             {
                 theme.CompactHeaderText = sectionHeaderText;
                 themeChanged = true;
@@ -4451,118 +4665,118 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
 
 
-            ImGui.Spacing();
+            UiSharedService.DrawSpacing();
         }
 
-        ImGui.Spacing();
-        if (ImGui.CollapsingHeader("Regulator ID", ImGuiTreeNodeFlags.None))
+        UiSharedService.DrawSpacing();
+        if (_uiShared.DrawCollapsibleSection("Regulator ID"))
         {
-            ImGui.Separator();
+            UiSharedService.DrawSeparator();
 
             var uidColor = theme.CompactUidColor;
-            if (ImGui.ColorEdit4("UID Text", ref uidColor))
+            if (UiSharedService.DrawColorEdit("UID Text", ref uidColor))
             {
                 theme.CompactUidColor = uidColor;
                 themeChanged = true;
             }
 
-            ImGui.Spacing();
+            UiSharedService.DrawSpacing();
             var uidScale = theme.CompactUidFontScale;
             if (UiSharedService.DrawSliderFloat("UID Font Scale", ref uidScale, 0.5f, 2.0f, "%.2f"))
             {
                 theme.CompactUidFontScale = uidScale;
                 themeChanged = true;
             }
-            ImGui.Spacing();
+            UiSharedService.DrawSpacing();
         }
 
         
 
-        ImGui.Spacing();
-        if (ImGui.CollapsingHeader("Connected Status", ImGuiTreeNodeFlags.None))
+        UiSharedService.DrawSpacing();
+        if (_uiShared.DrawCollapsibleSection("Connected Status"))
         {
-            ImGui.Separator();
+            UiSharedService.DrawSeparator();
 
             var statusConnected = theme.CompactServerStatusConnected;
-            if (ImGui.ColorEdit4("Connected", ref statusConnected))
+            if (UiSharedService.DrawColorEdit("Connected", ref statusConnected))
             {
                 theme.CompactServerStatusConnected = statusConnected;
                 themeChanged = true;
             }
 
             var statusWarning = theme.CompactServerStatusWarning;
-            if (ImGui.ColorEdit4("Warning", ref statusWarning))
+            if (UiSharedService.DrawColorEdit("Warning", ref statusWarning))
             {
                 theme.CompactServerStatusWarning = statusWarning;
                 themeChanged = true;
             }
 
             var statusError = theme.CompactServerStatusError;
-            if (ImGui.ColorEdit4("Error", ref statusError))
+            if (UiSharedService.DrawColorEdit("Error", ref statusError))
             {
                 theme.CompactServerStatusError = statusError;
                 themeChanged = true;
             }
 
-            ImGui.Spacing();
+            UiSharedService.DrawSpacing();
         }
 
         
 
         
-        ImGui.Spacing();
+        UiSharedService.DrawSpacing();
 
-        if (ImGui.CollapsingHeader("Connected Pairs", ImGuiTreeNodeFlags.None))
+        if (_uiShared.DrawCollapsibleSection("Connected Pairs"))
         {
-            ImGui.Separator();
+            UiSharedService.DrawSeparator();
 
             var connectedText = theme.CompactConnectedText;
-            if (ImGui.ColorEdit4("Online Count Text", ref connectedText))
+            if (UiSharedService.DrawColorEdit("Online Count Text", ref connectedText))
             {
                 theme.CompactConnectedText = connectedText;
                 themeChanged = true;
             }
 
             var allSyncshellsText = theme.CompactAllSyncshellsText;
-            if (ImGui.ColorEdit4("All Syncshells Text", ref allSyncshellsText))
+            if (UiSharedService.DrawColorEdit("All Syncshells Text", ref allSyncshellsText))
             {
                 theme.CompactAllSyncshellsText = allSyncshellsText;
                 themeChanged = true;
             }
 
             var offlinePausedText = theme.CompactOfflinePausedText;
-            if (ImGui.ColorEdit4("Offline / Paused Text", ref offlinePausedText))
+            if (UiSharedService.DrawColorEdit("Offline / Paused Text", ref offlinePausedText))
             {
                 theme.CompactOfflinePausedText = offlinePausedText;
                 themeChanged = true;
             }
 
             var offlineSyncshellText = theme.CompactOfflineSyncshellText;
-            if (ImGui.ColorEdit4("Offline Syncshell Users Text", ref offlineSyncshellText))
+            if (UiSharedService.DrawColorEdit("Offline Syncshell Users Text", ref offlineSyncshellText))
             {
                 theme.CompactOfflineSyncshellText = offlineSyncshellText;
                 themeChanged = true;
             }
 
             var visibleText = theme.CompactVisibleText;
-            if (ImGui.ColorEdit4("Visible Users Text", ref visibleText))
+            if (UiSharedService.DrawColorEdit("Visible Users Text", ref visibleText))
             {
                 theme.CompactVisibleText = visibleText;
                 themeChanged = true;
             }
 
             var pairsText = theme.CompactPairsText;
-            if (ImGui.ColorEdit4("Pairs Label Text", ref pairsText))
+            if (UiSharedService.DrawColorEdit("Pairs Label Text", ref pairsText))
             {
                 theme.CompactPairsText = pairsText;
                 themeChanged = true;
             }
 
-            ImGui.Spacing();
+            UiSharedService.DrawSpacing();
         }
         
-        ImGui.Spacing();
-        var ptbOpen = ImGui.CollapsingHeader("Player Transmission Bars", ImGuiTreeNodeFlags.None);
+        UiSharedService.DrawSpacing();
+        var ptbOpen = _uiShared.DrawCollapsibleSection("Player Transmission Bars");
         if (ptbOpen != theme.ShowTransmissionPreview)
         {
             theme.ShowTransmissionPreview = ptbOpen;
@@ -4572,7 +4786,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         }
         if (ptbOpen)
         {
-            ImGui.Separator();
+            UiSharedService.DrawSeparator();
         
             var prevSeparate = theme.SeparateTransmissionBarStyles;
             var separateBars = theme.SeparateTransmissionBarStyles;
@@ -4624,21 +4838,21 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 }
                 
                 var compactTransmissionBarBackground = theme.CompactTransmissionBarBackground;
-                if (ImGui.ColorEdit4("Transmission Bar Background", ref compactTransmissionBarBackground))
+                if (UiSharedService.DrawColorEdit("Transmission Bar Background", ref compactTransmissionBarBackground))
                 {
                     theme.CompactTransmissionBarBackground = compactTransmissionBarBackground;
                     themeChanged = true;
                 }
                 
                 var compactTransmissionBarForeground = theme.CompactTransmissionBarForeground;
-                if (ImGui.ColorEdit4("Transmission Bar Foreground", ref compactTransmissionBarForeground))
+                if (UiSharedService.DrawColorEdit("Transmission Bar Foreground", ref compactTransmissionBarForeground))
                 {
                     theme.CompactTransmissionBarForeground = compactTransmissionBarForeground;
                     themeChanged = true;
                 }
                 
                 var compactTransmissionBarBorder = theme.CompactTransmissionBarBorder;
-                if (ImGui.ColorEdit4("Transmission Bar Border", ref compactTransmissionBarBorder))
+                if (UiSharedService.DrawColorEdit("Transmission Bar Border", ref compactTransmissionBarBorder))
                 {
                     theme.CompactTransmissionBarBorder = compactTransmissionBarBorder;
                     themeChanged = true;
@@ -4652,13 +4866,13 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 if (theme.TransmissionUseGradient)
                 {
                     var tGradStart = theme.TransmissionGradientStart;
-                    if (ImGui.ColorEdit4("Gradient Start", ref tGradStart))
+                    if (UiSharedService.DrawColorEdit("Gradient Start", ref tGradStart))
                     {
                         theme.TransmissionGradientStart = tGradStart;
                         themeChanged = true;
                     }
                     var tGradEnd = theme.TransmissionGradientEnd;
-                    if (ImGui.ColorEdit4("Gradient End", ref tGradEnd))
+                    if (UiSharedService.DrawColorEdit("Gradient End", ref tGradEnd))
                     {
                         theme.TransmissionGradientEnd = tGradEnd;
                         themeChanged = true;
@@ -4667,8 +4881,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
             }
             else
             {
-                ImGui.Text("Upload Bar");
-                ImGui.Separator();
+                UiSharedService.Text("Upload Bar");
+                UiSharedService.DrawSeparator();
                 var uploadRounding = theme.UploadTransmissionBarRounding;
                 if (UiSharedService.DrawSliderFloat("Upload Bar Rounding", ref uploadRounding, 0.0f, 15.0f, "%.1f"))
                 {
@@ -4682,19 +4896,19 @@ public class SettingsUi : WindowMediatorSubscriberBase
                     themeChanged = true;
                 }
                 var uploadBg = theme.UploadTransmissionBarBackground;
-                if (ImGui.ColorEdit4("Upload Bar Background", ref uploadBg))
+                if (UiSharedService.DrawColorEdit("Upload Bar Background", ref uploadBg))
                 {
                     theme.UploadTransmissionBarBackground = uploadBg;
                     themeChanged = true;
                 }
                 var uploadFg = theme.UploadTransmissionBarForeground;
-                if (ImGui.ColorEdit4("Upload Bar Foreground", ref uploadFg))
+                if (UiSharedService.DrawColorEdit("Upload Bar Foreground", ref uploadFg))
                 {
                     theme.UploadTransmissionBarForeground = uploadFg;
                     themeChanged = true;
                 }
                 var uploadBorder = theme.UploadTransmissionBarBorder;
-                if (ImGui.ColorEdit4("Upload Bar Border", ref uploadBorder))
+                if (UiSharedService.DrawColorEdit("Upload Bar Border", ref uploadBorder))
                 {
                     theme.UploadTransmissionBarBorder = uploadBorder;
                     themeChanged = true;
@@ -4708,22 +4922,22 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 if (theme.TransmissionUseGradient)
                 {
                     var upGradStart = theme.UploadTransmissionGradientStart;
-                    if (ImGui.ColorEdit4("Upload Gradient Start", ref upGradStart))
+                    if (UiSharedService.DrawColorEdit("Upload Gradient Start", ref upGradStart))
                     {
                         theme.UploadTransmissionGradientStart = upGradStart;
                         themeChanged = true;
                     }
                     var upGradEnd = theme.UploadTransmissionGradientEnd;
-                    if (ImGui.ColorEdit4("Upload Gradient End", ref upGradEnd))
+                    if (UiSharedService.DrawColorEdit("Upload Gradient End", ref upGradEnd))
                     {
                         theme.UploadTransmissionGradientEnd = upGradEnd;
                         themeChanged = true;
                     }
                 }
                 
-                ImGui.Spacing();
-                ImGui.Text("Download Bar");
-                ImGui.Separator();
+                UiSharedService.DrawSpacing();
+                UiSharedService.Text("Download Bar");
+                UiSharedService.DrawSeparator();
                 var downloadRounding = theme.DownloadTransmissionBarRounding;
                 if (UiSharedService.DrawSliderFloat("Download Bar Rounding", ref downloadRounding, 0.0f, 15.0f, "%.1f"))
                 {
@@ -4737,19 +4951,19 @@ public class SettingsUi : WindowMediatorSubscriberBase
                     themeChanged = true;
                 }
                 var downloadBg = theme.DownloadTransmissionBarBackground;
-                if (ImGui.ColorEdit4("Download Bar Background", ref downloadBg))
+                if (UiSharedService.DrawColorEdit("Download Bar Background", ref downloadBg))
                 {
                     theme.DownloadTransmissionBarBackground = downloadBg;
                     themeChanged = true;
                 }
                 var downloadFg = theme.DownloadTransmissionBarForeground;
-                if (ImGui.ColorEdit4("Download Bar Foreground", ref downloadFg))
+                if (UiSharedService.DrawColorEdit("Download Bar Foreground", ref downloadFg))
                 {
                     theme.DownloadTransmissionBarForeground = downloadFg;
                     themeChanged = true;
                 }
                 var downloadBorder = theme.DownloadTransmissionBarBorder;
-                if (ImGui.ColorEdit4("Download Bar Border", ref downloadBorder))
+                if (UiSharedService.DrawColorEdit("Download Bar Border", ref downloadBorder))
                 {
                     theme.DownloadTransmissionBarBorder = downloadBorder;
                     themeChanged = true;
@@ -4757,13 +4971,13 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 if (theme.TransmissionUseGradient)
                 {
                     var downGradStart = theme.DownloadTransmissionGradientStart;
-                    if (ImGui.ColorEdit4("Download Gradient Start", ref downGradStart))
+                    if (UiSharedService.DrawColorEdit("Download Gradient Start", ref downGradStart))
                     {
                         theme.DownloadTransmissionGradientStart = downGradStart;
                         themeChanged = true;
                     }
                     var downGradEnd = theme.DownloadTransmissionGradientEnd;
-                    if (ImGui.ColorEdit4("Download Gradient End", ref downGradEnd))
+                    if (UiSharedService.DrawColorEdit("Download Gradient End", ref downGradEnd))
                     {
                         theme.DownloadTransmissionGradientEnd = downGradEnd;
                         themeChanged = true;
@@ -4771,7 +4985,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 }
             }
         
-            ImGui.Spacing();
+            UiSharedService.DrawSpacing();
             bool previewChanged = false;
             if (theme.ShowTransmissionPreview)
             {
@@ -4796,9 +5010,9 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 _suppressUnsavedForPreview = false;
             }
         }
-        ImGui.Spacing();
+        UiSharedService.DrawSpacing();
 
-        var uhOpen = ImGui.CollapsingHeader("Update Hint", ImGuiTreeNodeFlags.None);
+        var uhOpen = _uiShared.DrawCollapsibleSection("Update Hint");
         if (uhOpen != theme.ForceShowUpdateHint)
         {
             theme.ForceShowUpdateHint = uhOpen;
@@ -4808,8 +5022,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
         }
         if (uhOpen)
         {
-            ImGui.Separator();
-            ImGui.Spacing();
+            UiSharedService.DrawSeparator();
+            UiSharedService.DrawSpacing();
             var updateHintHeight = theme.CompactUpdateHintHeight;
             if (UiSharedService.DrawSliderFloat("Update Hint Height", ref updateHintHeight, 0.0f, 64.0f, "%.1f"))
             {
@@ -4823,12 +5037,12 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 themeChanged = true;
             }
             var updateHintColor = theme.CompactUpdateHintColor;
-            if (ImGui.ColorEdit4("Update Hint Color", ref updateHintColor))
+            if (UiSharedService.DrawColorEdit("Update Hint Color", ref updateHintColor))
             {
                 theme.CompactUpdateHintColor = updateHintColor;
                 themeChanged = true;
             }
-            ImGui.Spacing();
+            UiSharedService.DrawSpacing();
         }
         
         // Apply changes in real-time
@@ -4849,7 +5063,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
     {
         _activeSettingsPage = SettingsPage.Theme;
         IsOpen = true;
-        _preferPanelThemeTab = true;
+        _preferThemeTab = "Panel Theme";
         _preferButtonStylesTab = true;
         ButtonStyleManagerUI.SelectButtonKey(msg.ButtonStyleKey);
     }
@@ -4859,14 +5073,14 @@ public class SettingsUi : WindowMediatorSubscriberBase
     private void DrawBasicColors(ThemeConfiguration theme, ref bool themeChanged)
     {
         UiSharedService.ColorTextWrapped("Basic colors form the foundation of your theme. These colors are used throughout the interface for primary elements.", ImGuiColors.DalamudGrey);
-        ImGui.Spacing();
+        UiSharedService.DrawSpacing();
         
         // Primary Colors
-        ImGui.Text("Primary Colors");
-        ImGui.Separator();
+        UiSharedService.Text("Primary Colors");
+        UiSharedService.DrawSeparator();
         
         var primaryDark = theme.PrimaryDark;
-        if (ImGui.ColorEdit4("Primary Dark", ref primaryDark))
+        if (UiSharedService.DrawColorEdit("Primary Dark", ref primaryDark))
         {
             theme.PrimaryDark = primaryDark;
             themeChanged = true;
@@ -4874,21 +5088,21 @@ public class SettingsUi : WindowMediatorSubscriberBase
         _uiShared.DrawHelpText("Main dark color used for backgrounds and primary interface elements.");
         
         var secondaryDark = theme.SecondaryDark;
-        if (ImGui.ColorEdit4("Secondary Dark", ref secondaryDark))
+        if (UiSharedService.DrawColorEdit("Secondary Dark", ref secondaryDark))
         {
             theme.SecondaryDark = secondaryDark;
             themeChanged = true;
         }
         _uiShared.DrawHelpText("Secondary dark color used for contrast and supporting interface elements.");
         
-        ImGui.Spacing();
+        UiSharedService.DrawSpacing();
         
         // Accent Colors
-        ImGui.Text("Accent Colors");
-        ImGui.Separator();
+        UiSharedService.Text("Accent Colors");
+        UiSharedService.DrawSeparator();
         
         var accentBlue = theme.AccentBlue;
-        if (ImGui.ColorEdit4("Accent Blue", ref accentBlue))
+        if (UiSharedService.DrawColorEdit("Accent Blue", ref accentBlue))
         {
             theme.AccentBlue = accentBlue;
             themeChanged = true;
@@ -4896,21 +5110,21 @@ public class SettingsUi : WindowMediatorSubscriberBase
         _uiShared.DrawHelpText("Blue accent color used for highlights, links, and important interactive elements.");
         
         var accentCyan = theme.AccentCyan;
-        if (ImGui.ColorEdit4("Accent Cyan", ref accentCyan))
+        if (UiSharedService.DrawColorEdit("Accent Cyan", ref accentCyan))
         {
             theme.AccentCyan = accentCyan;
             themeChanged = true;
         }
         _uiShared.DrawHelpText("Cyan accent color used for secondary highlights and status indicators.");
         
-        ImGui.Spacing();
+        UiSharedService.DrawSpacing();
         
         // Text Colors
-        ImGui.Text("Text Colors");
-        ImGui.Separator();
+        UiSharedService.Text("Text Colors");
+        UiSharedService.DrawSeparator();
         
         var textPrimary = theme.TextPrimary;
-        if (ImGui.ColorEdit4("Text Primary", ref textPrimary))
+        if (UiSharedService.DrawColorEdit("Text Primary", ref textPrimary))
         {
             theme.TextPrimary = textPrimary;
             themeChanged = true;
@@ -4918,7 +5132,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         _uiShared.DrawHelpText("Primary text color used for most readable text throughout the interface.");
         
         var textSecondary = theme.TextSecondary;
-        if (ImGui.ColorEdit4("Text Secondary", ref textSecondary))
+        if (UiSharedService.DrawColorEdit("Text Secondary", ref textSecondary))
         {
             theme.TextSecondary = textSecondary;
             themeChanged = true;
@@ -4926,7 +5140,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         _uiShared.DrawHelpText("Secondary text color used for less important text and descriptions.");
         
         var textDisabled = theme.TextDisabled;
-        if (ImGui.ColorEdit4("Text Disabled", ref textDisabled))
+        if (UiSharedService.DrawColorEdit("Text Disabled", ref textDisabled))
         {
             theme.TextDisabled = textDisabled;
             themeChanged = true;
@@ -4934,21 +5148,21 @@ public class SettingsUi : WindowMediatorSubscriberBase
         _uiShared.DrawHelpText("Text color for disabled or inactive elements that cannot be interacted with.");
         
         var textSelectedBg = theme.TextSelectedBg;
-        if (ImGui.ColorEdit4("Text Selected Background", ref textSelectedBg))
+        if (UiSharedService.DrawColorEdit("Text Selected Background", ref textSelectedBg))
         {
             theme.TextSelectedBg = textSelectedBg;
             themeChanged = true;
         }
         _uiShared.DrawHelpText("Background color for selected text and highlighted text areas.");
         
-        ImGui.Spacing();
+        UiSharedService.DrawSpacing();
         
         // Interactive Colors
-        ImGui.Text("Interactive Colors");
-        ImGui.Separator();
+        UiSharedService.Text("Interactive Colors");
+        UiSharedService.DrawSeparator();
         
         var border = theme.Border;
-        if (ImGui.ColorEdit4("Border", ref border))
+        if (UiSharedService.DrawColorEdit("Border", ref border))
         {
             theme.Border = border;
             themeChanged = true;
@@ -4956,7 +5170,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         _uiShared.DrawHelpText("Color used for borders around windows, frames, and input fields.");
         
         var hover = theme.Hover;
-        if (ImGui.ColorEdit4("Hover", ref hover))
+        if (UiSharedService.DrawColorEdit("Hover", ref hover))
         {
             theme.Hover = hover;
             themeChanged = true;
@@ -4964,7 +5178,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         _uiShared.DrawHelpText("Color used when hovering over interactive elements like buttons and menu items.");
         
         var active = theme.Active;
-        if (ImGui.ColorEdit4("Active", ref active))
+        if (UiSharedService.DrawColorEdit("Active", ref active))
         {
             theme.Active = active;
             themeChanged = true;
@@ -4975,13 +5189,13 @@ public class SettingsUi : WindowMediatorSubscriberBase
     private void DrawWindowColors(ThemeConfiguration theme, ref bool themeChanged)
     {
         UiSharedService.ColorTextWrapped("Window colors control the appearance of different window types and their backgrounds.", ImGuiColors.DalamudGrey);
-        ImGui.Spacing();
+        UiSharedService.DrawSpacing();
         
-        ImGui.Text("Window Colors");
-        ImGui.Separator();
+        UiSharedService.Text("Window Colors");
+        UiSharedService.DrawSeparator();
         
         var windowBg = theme.WindowBg;
-        if (ImGui.ColorEdit4("Window Background", ref windowBg))
+        if (UiSharedService.DrawColorEdit("Window Background", ref windowBg))
         {
             theme.WindowBg = windowBg;
             themeChanged = true;
@@ -4989,7 +5203,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         _uiShared.DrawHelpText("Main background color for all windows and dialogs.");
         
         var childBg = theme.ChildBg;
-        if (ImGui.ColorEdit4("Child Background", ref childBg))
+        if (UiSharedService.DrawColorEdit("Child Background", ref childBg))
         {
             theme.ChildBg = childBg;
             themeChanged = true;
@@ -4997,19 +5211,19 @@ public class SettingsUi : WindowMediatorSubscriberBase
         _uiShared.DrawHelpText("Background color for child windows and nested content areas.");
         
         var popupBg = theme.PopupBg;
-        if (ImGui.ColorEdit4("Popup Background", ref popupBg))
+        if (UiSharedService.DrawColorEdit("Popup Background", ref popupBg))
         {
             theme.PopupBg = popupBg;
             themeChanged = true;
         }
         _uiShared.DrawHelpText("Background color for popup windows, tooltips, and context menus.");
         
-        ImGui.Spacing();
-        ImGui.Text("Title Bar Colors");
-        ImGui.Separator();
+        UiSharedService.DrawSpacing();
+        UiSharedService.Text("Title Bar Colors");
+        UiSharedService.DrawSeparator();
         
         var titleBg = theme.TitleBg;
-        if (ImGui.ColorEdit4("Title Background", ref titleBg))
+        if (UiSharedService.DrawColorEdit("Title Background", ref titleBg))
         {
             theme.TitleBg = titleBg;
             themeChanged = true;
@@ -5017,7 +5231,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         _uiShared.DrawHelpText("Background color for inactive window title bars.");
         
         var titleBgActive = theme.TitleBgActive;
-        if (ImGui.ColorEdit4("Title Background Active", ref titleBgActive))
+        if (UiSharedService.DrawColorEdit("Title Background Active", ref titleBgActive))
         {
             theme.TitleBgActive = titleBgActive;
             themeChanged = true;
@@ -5025,19 +5239,19 @@ public class SettingsUi : WindowMediatorSubscriberBase
         _uiShared.DrawHelpText("Background color for active (focused) window title bars.");
         
         var titleBgCollapsed = theme.TitleBgCollapsed;
-        if (ImGui.ColorEdit4("Title Background Collapsed", ref titleBgCollapsed))
+        if (UiSharedService.DrawColorEdit("Title Background Collapsed", ref titleBgCollapsed))
         {
             theme.TitleBgCollapsed = titleBgCollapsed;
             themeChanged = true;
         }
         _uiShared.DrawHelpText("Background color for collapsed window title bars.");
         
-        ImGui.Spacing();
-        ImGui.Text("Modal & Overlay Colors");
-        ImGui.Separator();
+        UiSharedService.DrawSpacing();
+        UiSharedService.Text("Modal & Overlay Colors");
+        UiSharedService.DrawSeparator();
         
         var modalWindowDimBg = theme.ModalWindowDimBg;
-        if (ImGui.ColorEdit4("Modal Window Dim Background", ref modalWindowDimBg))
+        if (UiSharedService.DrawColorEdit("Modal Window Dim Background", ref modalWindowDimBg))
         {
             theme.ModalWindowDimBg = modalWindowDimBg;
             themeChanged = true;
@@ -5048,13 +5262,13 @@ public class SettingsUi : WindowMediatorSubscriberBase
     private void DrawFrameInputColors(ThemeConfiguration theme, ref bool themeChanged)
     {
         UiSharedService.ColorTextWrapped("Frame and input colors control the appearance of input fields, checkboxes, and interactive elements.", ImGuiColors.DalamudGrey);
-        ImGui.Spacing();
+        UiSharedService.DrawSpacing();
         
-        ImGui.Text("Frame & Input Colors");
-        ImGui.Separator();
+        UiSharedService.Text("Frame & Input Colors");
+        UiSharedService.DrawSeparator();
         
         var frameBg = theme.FrameBg;
-        if (ImGui.ColorEdit4("Frame Background", ref frameBg))
+        if (UiSharedService.DrawColorEdit("Frame Background", ref frameBg))
         {
             theme.FrameBg = frameBg;
             themeChanged = true;
@@ -5062,7 +5276,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         _uiShared.DrawHelpText("Background color for input fields, sliders, and other frame elements.");
         
         var frameBgHovered = theme.FrameBgHovered;
-        if (ImGui.ColorEdit4("Frame Background Hovered", ref frameBgHovered))
+        if (UiSharedService.DrawColorEdit("Frame Background Hovered", ref frameBgHovered))
         {
             theme.FrameBgHovered = frameBgHovered;
             themeChanged = true;
@@ -5070,31 +5284,31 @@ public class SettingsUi : WindowMediatorSubscriberBase
         _uiShared.DrawHelpText("Background color for frame elements when hovered over.");
         
         var frameBgActive = theme.FrameBgActive;
-        if (ImGui.ColorEdit4("Frame Background Active", ref frameBgActive))
+        if (UiSharedService.DrawColorEdit("Frame Background Active", ref frameBgActive))
         {
             theme.FrameBgActive = frameBgActive;
             themeChanged = true;
         }
         _uiShared.DrawHelpText("Background color for frame elements when actively being used.");
         
-        ImGui.Spacing();
-        ImGui.Text("Interactive Elements");
-        ImGui.Separator();
+        UiSharedService.DrawSpacing();
+        UiSharedService.Text("Interactive Elements");
+        UiSharedService.DrawSeparator();
         
         var checkMark = theme.CheckMark;
-        if (ImGui.ColorEdit4("Check Mark", ref checkMark))
+        if (UiSharedService.DrawColorEdit("Check Mark", ref checkMark))
         {
             theme.CheckMark = checkMark;
             themeChanged = true;
         }
         _uiShared.DrawHelpText("Color for checkmarks in checkboxes and radio buttons.");
         
-        ImGui.Spacing();
-        ImGui.Text("Window Controls");
-        ImGui.Separator();
+        UiSharedService.DrawSpacing();
+        UiSharedService.Text("Window Controls");
+        UiSharedService.DrawSeparator();
         
         var resizeGrip = theme.ResizeGrip;
-        if (ImGui.ColorEdit4("Resize Grip", ref resizeGrip))
+        if (UiSharedService.DrawColorEdit("Resize Grip", ref resizeGrip))
         {
             theme.ResizeGrip = resizeGrip;
             themeChanged = true;
@@ -5102,7 +5316,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         _uiShared.DrawHelpText("Color for the resize grip in the bottom-right corner of windows.");
         
         var resizeGripHovered = theme.ResizeGripHovered;
-        if (ImGui.ColorEdit4("Resize Grip Hovered", ref resizeGripHovered))
+        if (UiSharedService.DrawColorEdit("Resize Grip Hovered", ref resizeGripHovered))
         {
             theme.ResizeGripHovered = resizeGripHovered;
             themeChanged = true;
@@ -5110,7 +5324,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         _uiShared.DrawHelpText("Color for the resize grip when hovered over.");
         
         var resizeGripActive = theme.ResizeGripActive;
-        if (ImGui.ColorEdit4("Resize Grip Active", ref resizeGripActive))
+        if (UiSharedService.DrawColorEdit("Resize Grip Active", ref resizeGripActive))
         {
             theme.ResizeGripActive = resizeGripActive;
             themeChanged = true;
@@ -5121,13 +5335,13 @@ public class SettingsUi : WindowMediatorSubscriberBase
     private void DrawButtonHeaderColors(ThemeConfiguration theme, ref bool themeChanged)
     {
         UiSharedService.ColorTextWrapped("Button and header colors control the appearance of clickable elements and section headers.", ImGuiColors.DalamudGrey);
-        ImGui.Spacing();
+        UiSharedService.DrawSpacing();
         
-        ImGui.Text("Button Colors");
-        ImGui.Separator();
+        UiSharedService.Text("Button Colors");
+        UiSharedService.DrawSeparator();
         
         var button = theme.Button;
-        if (ImGui.ColorEdit4("Button", ref button))
+        if (UiSharedService.DrawColorEdit("Button", ref button))
         {
             theme.Button = button;
             themeChanged = true;
@@ -5135,7 +5349,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         _uiShared.DrawHelpText("Default background color for buttons.");
         
         var buttonHovered = theme.ButtonHovered;
-        if (ImGui.ColorEdit4("Button Hovered", ref buttonHovered))
+        if (UiSharedService.DrawColorEdit("Button Hovered", ref buttonHovered))
         {
             theme.ButtonHovered = buttonHovered;
             themeChanged = true;
@@ -5143,19 +5357,19 @@ public class SettingsUi : WindowMediatorSubscriberBase
         _uiShared.DrawHelpText("Background color for buttons when hovered over.");
         
         var buttonActive = theme.ButtonActive;
-        if (ImGui.ColorEdit4("Button Active", ref buttonActive))
+        if (UiSharedService.DrawColorEdit("Button Active", ref buttonActive))
         {
             theme.ButtonActive = buttonActive;
             themeChanged = true;
         }
         _uiShared.DrawHelpText("Background color for buttons when clicked or pressed.");
         
-        ImGui.Spacing();
-        ImGui.Text("Header Colors");
-        ImGui.Separator();
+        UiSharedService.DrawSpacing();
+        UiSharedService.Text("Header Colors");
+        UiSharedService.DrawSeparator();
         
         var headerBg = theme.HeaderBg;
-        if (ImGui.ColorEdit4("Header Background", ref headerBg))
+        if (UiSharedService.DrawColorEdit("Header Background", ref headerBg))
         {
             theme.HeaderBg = headerBg;
             themeChanged = true;
@@ -5163,7 +5377,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         _uiShared.DrawHelpText("Background color for collapsible headers and section titles.");
         
         var headerHovered = theme.HeaderHovered;
-        if (ImGui.ColorEdit4("Header Hovered", ref headerHovered))
+        if (UiSharedService.DrawColorEdit("Header Hovered", ref headerHovered))
         {
             theme.HeaderHovered = headerHovered;
             themeChanged = true;
@@ -5171,19 +5385,19 @@ public class SettingsUi : WindowMediatorSubscriberBase
         _uiShared.DrawHelpText("Background color for headers when hovered over.");
         
         var headerActive = theme.HeaderActive;
-        if (ImGui.ColorEdit4("Header Active", ref headerActive))
+        if (UiSharedService.DrawColorEdit("Header Active", ref headerActive))
         {
             theme.HeaderActive = headerActive;
             themeChanged = true;
         }
         _uiShared.DrawHelpText("Background color for headers when clicked or active.");
         
-        ImGui.Spacing();
-        ImGui.Text("Separators");
-        ImGui.Separator();
+        UiSharedService.DrawSpacing();
+        UiSharedService.Text("Separators");
+        UiSharedService.DrawSeparator();
         
         var separator = theme.Separator;
-        if (ImGui.ColorEdit4("Separator", ref separator))
+        if (UiSharedService.DrawColorEdit("Separator", ref separator))
         {
             theme.Separator = separator;
             themeChanged = true;
@@ -5191,7 +5405,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         _uiShared.DrawHelpText("Color for separator lines that divide sections.");
         
         var separatorHovered = theme.SeparatorHovered;
-        if (ImGui.ColorEdit4("Separator Hovered", ref separatorHovered))
+        if (UiSharedService.DrawColorEdit("Separator Hovered", ref separatorHovered))
         {
             theme.SeparatorHovered = separatorHovered;
             themeChanged = true;
@@ -5199,7 +5413,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         _uiShared.DrawHelpText("Color for separator lines when hovered over.");
         
         var separatorActive = theme.SeparatorActive;
-        if (ImGui.ColorEdit4("Separator Active", ref separatorActive))
+        if (UiSharedService.DrawColorEdit("Separator Active", ref separatorActive))
         {
             theme.SeparatorActive = separatorActive;
             themeChanged = true;
@@ -5210,25 +5424,25 @@ public class SettingsUi : WindowMediatorSubscriberBase
     private void DrawMenuNavigationColors(ThemeConfiguration theme, ref bool themeChanged)
     {
         UiSharedService.ColorTextWrapped("Menu and navigation colors control the appearance of menu bars, navigation highlights, and drag-drop interactions.", ImGuiColors.DalamudGrey);
-        ImGui.Spacing();
+        UiSharedService.DrawSpacing();
         
-        ImGui.Text("Menu Colors");
-        ImGui.Separator();
+        UiSharedService.Text("Menu Colors");
+        UiSharedService.DrawSeparator();
         
         var menuBarBg = theme.MenuBarBg;
-        if (ImGui.ColorEdit4("Menu Bar Background", ref menuBarBg))
+        if (UiSharedService.DrawColorEdit("Menu Bar Background", ref menuBarBg))
         {
             theme.MenuBarBg = menuBarBg;
             themeChanged = true;
         }
         _uiShared.DrawHelpText("Background color for menu bars at the top of windows.");
         
-        ImGui.Spacing();
-        ImGui.Text("Navigation Colors");
-        ImGui.Separator();
+        UiSharedService.DrawSpacing();
+        UiSharedService.Text("Navigation Colors");
+        UiSharedService.DrawSeparator();
         
         var navHighlight = theme.NavHighlight;
-        if (ImGui.ColorEdit4("Navigation Highlight", ref navHighlight))
+        if (UiSharedService.DrawColorEdit("Navigation Highlight", ref navHighlight))
         {
             theme.NavHighlight = navHighlight;
             themeChanged = true;
@@ -5236,7 +5450,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         _uiShared.DrawHelpText("Color for highlighting the currently focused navigation element.");
         
         var navWindowingHighlight = theme.NavWindowingHighlight;
-        if (ImGui.ColorEdit4("Navigation Windowing Highlight", ref navWindowingHighlight))
+        if (UiSharedService.DrawColorEdit("Navigation Windowing Highlight", ref navWindowingHighlight))
         {
             theme.NavWindowingHighlight = navWindowingHighlight;
             themeChanged = true;
@@ -5244,19 +5458,19 @@ public class SettingsUi : WindowMediatorSubscriberBase
         _uiShared.DrawHelpText("Color for highlighting windows during navigation mode.");
         
         var navWindowingDimBg = theme.NavWindowingDimBg;
-        if (ImGui.ColorEdit4("Navigation Windowing Dim Background", ref navWindowingDimBg))
+        if (UiSharedService.DrawColorEdit("Navigation Windowing Dim Background", ref navWindowingDimBg))
         {
             theme.NavWindowingDimBg = navWindowingDimBg;
             themeChanged = true;
         }
         _uiShared.DrawHelpText("Background dimming color during window navigation mode.");
         
-        ImGui.Spacing();
-        ImGui.Text("Drag & Drop Colors");
-        ImGui.Separator();
+        UiSharedService.DrawSpacing();
+        UiSharedService.Text("Drag & Drop Colors");
+        UiSharedService.DrawSeparator();
         
         var dragDropTarget = theme.DragDropTarget;
-        if (ImGui.ColorEdit4("Drag Drop Target", ref dragDropTarget))
+        if (UiSharedService.DrawColorEdit("Drag Drop Target", ref dragDropTarget))
         {
             theme.DragDropTarget = dragDropTarget;
             themeChanged = true;
@@ -5267,13 +5481,13 @@ public class SettingsUi : WindowMediatorSubscriberBase
     private void DrawScrollbarSliderColors(ThemeConfiguration theme, ref bool themeChanged)
     {
         UiSharedService.ColorTextWrapped("Scrollbar and slider colors control the appearance of scrollbars and slider controls throughout the interface.", ImGuiColors.DalamudGrey);
-        ImGui.Spacing();
+        UiSharedService.DrawSpacing();
         
-        ImGui.Text("Scrollbar Colors");
-        ImGui.Separator();
+        UiSharedService.Text("Scrollbar Colors");
+        UiSharedService.DrawSeparator();
         
         var scrollbarBg = theme.ScrollbarBg;
-        if (ImGui.ColorEdit4("Scrollbar Background", ref scrollbarBg))
+        if (UiSharedService.DrawColorEdit("Scrollbar Background", ref scrollbarBg))
         {
             theme.ScrollbarBg = scrollbarBg;
             themeChanged = true;
@@ -5281,7 +5495,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         _uiShared.DrawHelpText("Background color for the scrollbar track.");
         
         var scrollbarGrab = theme.ScrollbarGrab;
-        if (ImGui.ColorEdit4("Scrollbar Grab", ref scrollbarGrab))
+        if (UiSharedService.DrawColorEdit("Scrollbar Grab", ref scrollbarGrab))
         {
             theme.ScrollbarGrab = scrollbarGrab;
             themeChanged = true;
@@ -5289,7 +5503,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         _uiShared.DrawHelpText("Color for the scrollbar handle that you can drag.");
         
         var scrollbarGrabHovered = theme.ScrollbarGrabHovered;
-        if (ImGui.ColorEdit4("Scrollbar Grab Hovered", ref scrollbarGrabHovered))
+        if (UiSharedService.DrawColorEdit("Scrollbar Grab Hovered", ref scrollbarGrabHovered))
         {
             theme.ScrollbarGrabHovered = scrollbarGrabHovered;
             themeChanged = true;
@@ -5297,19 +5511,19 @@ public class SettingsUi : WindowMediatorSubscriberBase
         _uiShared.DrawHelpText("Color for the scrollbar handle when hovered over.");
         
         var scrollbarGrabActive = theme.ScrollbarGrabActive;
-        if (ImGui.ColorEdit4("Scrollbar Grab Active", ref scrollbarGrabActive))
+        if (UiSharedService.DrawColorEdit("Scrollbar Grab Active", ref scrollbarGrabActive))
         {
             theme.ScrollbarGrabActive = scrollbarGrabActive;
             themeChanged = true;
         }
         _uiShared.DrawHelpText("Color for the scrollbar handle when being dragged.");
         
-        ImGui.Spacing();
-        ImGui.Text("Slider Colors");
-        ImGui.Separator();
+        UiSharedService.DrawSpacing();
+        UiSharedService.Text("Slider Colors");
+        UiSharedService.DrawSeparator();
         
         var sliderGrab = theme.SliderGrab;
-        if (ImGui.ColorEdit4("Slider Grab", ref sliderGrab))
+        if (UiSharedService.DrawColorEdit("Slider Grab", ref sliderGrab))
         {
             theme.SliderGrab = sliderGrab;
             themeChanged = true;
@@ -5317,7 +5531,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         _uiShared.DrawHelpText("Color for slider handles and knobs.");
         
         var sliderGrabActive = theme.SliderGrabActive;
-        if (ImGui.ColorEdit4("Slider Grab Active", ref sliderGrabActive))
+        if (UiSharedService.DrawColorEdit("Slider Grab Active", ref sliderGrabActive))
         {
             theme.SliderGrabActive = sliderGrabActive;
             themeChanged = true;
@@ -5328,13 +5542,13 @@ public class SettingsUi : WindowMediatorSubscriberBase
     private void DrawTableTabColors(ThemeConfiguration theme, ref bool themeChanged)
     {
         UiSharedService.ColorTextWrapped("Table and tab colors control the appearance of data tables and tab navigation elements.", ImGuiColors.DalamudGrey);
-        ImGui.Spacing();
+        UiSharedService.DrawSpacing();
         
-        ImGui.Text("Table Colors");
-        ImGui.Separator();
+        UiSharedService.Text("Table Colors");
+        UiSharedService.DrawSeparator();
         
         var tableHeaderBg = theme.TableHeaderBg;
-        if (ImGui.ColorEdit4("Table Header Background", ref tableHeaderBg))
+        if (UiSharedService.DrawColorEdit("Table Header Background", ref tableHeaderBg))
         {
             theme.TableHeaderBg = tableHeaderBg;
             themeChanged = true;
@@ -5342,7 +5556,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         _uiShared.DrawHelpText("Background color for table headers and column titles.");
         
         var tableBorderStrong = theme.TableBorderStrong;
-        if (ImGui.ColorEdit4("Table Border Strong", ref tableBorderStrong))
+        if (UiSharedService.DrawColorEdit("Table Border Strong", ref tableBorderStrong))
         {
             theme.TableBorderStrong = tableBorderStrong;
             themeChanged = true;
@@ -5350,7 +5564,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         _uiShared.DrawHelpText("Color for strong table borders (outer borders and major divisions).");
         
         var tableBorderLight = theme.TableBorderLight;
-        if (ImGui.ColorEdit4("Table Border Light", ref tableBorderLight))
+        if (UiSharedService.DrawColorEdit("Table Border Light", ref tableBorderLight))
         {
             theme.TableBorderLight = tableBorderLight;
             themeChanged = true;
@@ -5358,7 +5572,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         _uiShared.DrawHelpText("Color for light table borders (inner cell borders).");
         
         var tableRowBg = theme.TableRowBg;
-        if (ImGui.ColorEdit4("Table Row Background", ref tableRowBg))
+        if (UiSharedService.DrawColorEdit("Table Row Background", ref tableRowBg))
         {
             theme.TableRowBg = tableRowBg;
             themeChanged = true;
@@ -5366,19 +5580,19 @@ public class SettingsUi : WindowMediatorSubscriberBase
         _uiShared.DrawHelpText("Background color for table rows.");
         
         var tableRowBgAlt = theme.TableRowBgAlt;
-        if (ImGui.ColorEdit4("Table Row Background Alt", ref tableRowBgAlt))
+        if (UiSharedService.DrawColorEdit("Table Row Background Alt", ref tableRowBgAlt))
         {
             theme.TableRowBgAlt = tableRowBgAlt;
             themeChanged = true;
         }
         _uiShared.DrawHelpText("Alternating background color for table rows (zebra striping).");
         
-        ImGui.Spacing();
-        ImGui.Text("Tab Colors");
-        ImGui.Separator();
+        UiSharedService.DrawSpacing();
+        UiSharedService.Text("Tab Colors");
+        UiSharedService.DrawSeparator();
         
         var tab = theme.Tab;
-        if (ImGui.ColorEdit4("Tab", ref tab))
+        if (UiSharedService.DrawColorEdit("Tab", ref tab))
         {
             theme.Tab = tab;
             themeChanged = true;
@@ -5386,7 +5600,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         _uiShared.DrawHelpText("Default background color for inactive tabs.");
         
         var tabHovered = theme.TabHovered;
-        if (ImGui.ColorEdit4("Tab Hovered", ref tabHovered))
+        if (UiSharedService.DrawColorEdit("Tab Hovered", ref tabHovered))
         {
             theme.TabHovered = tabHovered;
             themeChanged = true;
@@ -5394,7 +5608,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         _uiShared.DrawHelpText("Background color for tabs when hovered over.");
         
         var tabActive = theme.TabActive;
-        if (ImGui.ColorEdit4("Tab Active", ref tabActive))
+        if (UiSharedService.DrawColorEdit("Tab Active", ref tabActive))
         {
             theme.TabActive = tabActive;
             themeChanged = true;
@@ -5402,7 +5616,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         _uiShared.DrawHelpText("Background color for the currently active tab.");
         
         var tabUnfocused = theme.TabUnfocused;
-        if (ImGui.ColorEdit4("Tab Unfocused", ref tabUnfocused))
+        if (UiSharedService.DrawColorEdit("Tab Unfocused", ref tabUnfocused))
         {
             theme.TabUnfocused = tabUnfocused;
             themeChanged = true;
@@ -5410,7 +5624,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         _uiShared.DrawHelpText("Background color for tabs when the window is not focused.");
         
         var tabUnfocusedActive = theme.TabUnfocusedActive;
-        if (ImGui.ColorEdit4("Tab Unfocused Active", ref tabUnfocusedActive))
+        if (UiSharedService.DrawColorEdit("Tab Unfocused Active", ref tabUnfocusedActive))
         {
             theme.TabUnfocusedActive = tabUnfocusedActive;
             themeChanged = true;
@@ -5432,15 +5646,15 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
     private void DrawSaveThemePopup()
     {
-        ImGui.Text("Save Current Theme");
-        ImGui.Separator();
+        UiSharedService.Text("Save Current Theme");
+        UiSharedService.DrawSeparator();
         
-        ImGui.Text("Theme Name:");
+        UiSharedService.Text("Theme Name:");
         UiSharedService.DrawInputText("##SaveThemeName", ref _saveThemeName, 100);
         
-        ImGui.Spacing();
+        UiSharedService.DrawSpacing();
         
-        if (ImGui.Button("Save") && !string.IsNullOrWhiteSpace(_saveThemeName))
+        if (UiSharedService.DrawButton("Save") && !string.IsNullOrWhiteSpace(_saveThemeName))
         {
             _ = Task.Run(async () =>
             {
@@ -5455,7 +5669,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         
         ImGui.SameLine();
         
-        if (ImGui.Button("Cancel"))
+        if (UiSharedService.DrawButton("Cancel"))
         {
             _saveThemeName = "";
             ImGui.CloseCurrentPopup();
@@ -5523,68 +5737,67 @@ public class SettingsUi : WindowMediatorSubscriberBase
         }
         
         UiSharedService.SameLineIfFits(ImGui.CalcTextSize("Reset to Default Sphene Theme").X + ImGui.GetStyle().FramePadding.X * 2f);
-        if (ImGui.Button("Reset to Default Sphene Theme"))
+        if (UiSharedService.DrawButton("Reset to Default Sphene Theme"))
         {
             _selectedPresetTheme = "Default Sphene";
             ApplySelectedPresetTheme("Default Sphene", builtInThemes);
         }
         
         // Theme Management Actions
-        ImGui.Spacing();
+        UiSharedService.DrawSpacing();
 
-        if (ImGui.Button("New Theme"))
+        if (UiSharedService.DrawButton("New Theme"))
         {
             _saveThemeName = "";
             ImGui.OpenPopup("SaveThemePopup");
         }
 
         ImGui.SameLine();
-        if (!_hasUnsavedThemeChanges) ImGui.BeginDisabled();
-        if (ImGui.Button("Save Theme Changes"))
+        using (ImRaii.Disabled(!_hasUnsavedThemeChanges))
         {
-            if (!string.IsNullOrEmpty(_currentThemeName) && !builtInThemes.Contains(_currentThemeName, StringComparer.Ordinal))
+            if (UiSharedService.DrawButton("Save Theme Changes"))
             {
-                _ = Task.Run(async () =>
+                if (!string.IsNullOrEmpty(_currentThemeName) && !builtInThemes.Contains(_currentThemeName, StringComparer.Ordinal))
                 {
-                    var success = await ThemeManager.SaveTheme(SpheneCustomTheme.CurrentTheme, _currentThemeName).ConfigureAwait(false);
-                    if (success)
+                    _ = Task.Run(async () =>
                     {
-                        _hasUnsavedThemeChanges = false;
-                    }
-                });
-            }
-            else
-            {
-                ImGui.OpenPopup("SaveThemePopup");
+                        var success = await ThemeManager.SaveTheme(SpheneCustomTheme.CurrentTheme, _currentThemeName).ConfigureAwait(false);
+                        if (success)
+                        {
+                            _hasUnsavedThemeChanges = false;
+                        }
+                    });
+                }
+                else
+                {
+                    ImGui.OpenPopup("SaveThemePopup");
+                }
             }
         }
-        if (!_hasUnsavedThemeChanges) ImGui.EndDisabled();
 
         ImGui.SameLine();
-        if (!_hasUnsavedThemeChanges) ImGui.BeginDisabled();
-        if (ImGui.Button("Reset Theme Changes"))
+        using (ImRaii.Disabled(!_hasUnsavedThemeChanges))
         {
-            if (_originalThemeState != null)
+            if (UiSharedService.DrawButton("Reset Theme Changes"))
             {
-                ThemePropertyCopier.Copy(_originalThemeState, SpheneCustomTheme.CurrentTheme);
+                if (_originalThemeState != null)
+                {
+                    ThemePropertyCopier.Copy(_originalThemeState, SpheneCustomTheme.CurrentTheme);
+                }
+                else
+                {
+                    SpheneCustomTheme.CurrentTheme.ResetToDefaults();
+                }
+                SpheneCustomTheme.CurrentTheme.NotifyThemeChanged();
+                _hasUnsavedThemeChanges = false;
             }
-            else
-            {
-                SpheneCustomTheme.CurrentTheme.ResetToDefaults();
-            }
-            SpheneCustomTheme.CurrentTheme.NotifyThemeChanged();
-            _hasUnsavedThemeChanges = false;
         }
-        if (!_hasUnsavedThemeChanges) ImGui.EndDisabled();
         
         // Save Theme Popup
-        if (ImGui.BeginPopup("SaveThemePopup"))
+        if (SpheneWindowChrome.BeginStyledPopup("SaveThemePopup"))
         {
-            using (SpheneCustomTheme.ApplyContextMenuTheme())
-            {
-                DrawSaveThemePopup();
-            }
-            ImGui.EndPopup();
+            DrawSaveThemePopup();
+            SpheneWindowChrome.EndStyledPopup();
         }
     }
 
@@ -5742,6 +5955,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         {
             using (SpheneCustomTheme.ApplyContextMenuTheme())
             {
+                using var cardBound = SpheneWindowChrome.SuppressCardBound();
                 _uiShared.IconText(FontAwesomeIcon.ExclamationTriangle, ImGuiColors.DalamudYellow);
                 ImGui.SameLine();
                 _uiShared.BigText("Unsaved Theme Changes");
@@ -5750,7 +5964,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 ImGuiHelpers.ScaledDummy(4f);
                 UiSharedService.ColorTextWrapped("Save them as a new theme, keep them temporarily, or discard.", ImGuiColors.DalamudGrey);
                 ImGuiHelpers.ScaledDummy(10f);
-                ImGui.Text("Theme Name:");
+                UiSharedService.Text("Theme Name:");
                 UiSharedService.DrawInputText("##NewThemeName", ref _saveThemeName, 100);
                 var bottomPadding = 16f * ImGuiHelpers.GlobalScale;
                 var spacingX = ImGui.GetStyle().ItemSpacing.X;
@@ -5768,7 +5982,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 var offsetY = System.Math.Max(0f, availY - buttonHeight - bottomPadding);
                 ImGui.Dummy(new System.Numerics.Vector2(1, offsetY));
                 ImGui.SetCursorPosX(ImGui.GetCursorPosX() + startX);
-                if (ImGui.Button(btn1) && !string.IsNullOrWhiteSpace(_saveThemeName))
+                if (UiSharedService.DrawButton(btn1) && !string.IsNullOrWhiteSpace(_saveThemeName))
                 {
                     var themeNameToSave = _saveThemeName;
                     _ = Task.Run(async () =>
@@ -5787,7 +6001,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                     IsOpen = false;
                 }
                 ImGui.SameLine(0, spacingX);
-                if (ImGui.Button(btn2))
+                if (UiSharedService.DrawButton(btn2))
                 {
                     var builtInThemes = ThemePresets.BuiltInThemes.Keys.ToList();
                     var themeToReload = string.IsNullOrEmpty(_currentThemeName) ? ThemeManager.GetSelectedTheme() : _currentThemeName;
@@ -5800,7 +6014,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                     IsOpen = false;
                 }
                 ImGui.SameLine(0, spacingX);
-                if (ImGui.Button(btn3))
+                if (UiSharedService.DrawButton(btn3))
                 {
                     _hasUnsavedThemeChanges = false;
                     _showThemeSavePrompt = false;
@@ -5822,6 +6036,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         {
             using (SpheneCustomTheme.ApplyContextMenuTheme())
             {
+                using var cardBound = SpheneWindowChrome.SuppressCardBound();
                 _uiShared.IconText(FontAwesomeIcon.ExclamationTriangle, ImGuiColors.DalamudYellow);
                 ImGui.SameLine();
                 _uiShared.BigText("Unsaved Custom Theme Changes");
@@ -5844,7 +6059,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 var offY = System.Math.Max(0f, aY - bH - bottomPadding2);
                 ImGui.Dummy(new System.Numerics.Vector2(1, offY));
                 ImGui.SetCursorPosX(ImGui.GetCursorPosX() + sX);
-                if (ImGui.Button(lbl1))
+                if (UiSharedService.DrawButton(lbl1))
                 {
                     if (!string.IsNullOrEmpty(_currentThemeName))
                     {
@@ -5862,7 +6077,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                     IsOpen = false;
                 }
                 ImGui.SameLine(0, spacingX2);
-                if (ImGui.Button(lbl2))
+                if (UiSharedService.DrawButton(lbl2))
                 {
                     var builtInThemes = ThemePresets.BuiltInThemes.Keys.ToList();
                     var themeToReload = string.IsNullOrEmpty(_currentThemeName) ? ThemeManager.GetSelectedTheme() : _currentThemeName;
@@ -5875,7 +6090,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                     IsOpen = false;
                 }
                 ImGui.SameLine(0, spacingX2);
-                if (ImGui.Button(lbl3))
+                if (UiSharedService.DrawButton(lbl3))
                 {
                     _hasUnsavedThemeChanges = false;
                     _showUnsavedCustomThemePrompt = false;
@@ -5891,8 +6106,9 @@ public class SettingsUi : WindowMediatorSubscriberBase
         var cfg = _configService.Current;
         bool configChanged = false;
 
-        DrawSettingsCard("Notification Sounds", () =>
-        {
+        UiSharedService.ColorTextWrapped("Use Game System for in-game SCD sounds, Sphene Default for built-in sounds, or Custom Sound for external WAV/MP3 files.", ImGuiColors.DalamudGrey);
+        ImGuiHelpers.ScaledDummy(0, 4);
+
         void DrawSoundConfig(string label, NotificationSoundConfig soundConfig, string blockId)
         {
             if (ImGui.TreeNodeEx(label, ImGuiTreeNodeFlags.SpanAvailWidth))
@@ -5912,7 +6128,6 @@ public class SettingsUi : WindowMediatorSubscriberBase
         DrawSoundConfig("Success Notifications", cfg.SuccessNotificationSound, "SettingsSuccessSound");
         DrawSoundConfig("Area-bound Syncshell Notifications", cfg.AreaBoundNotificationSound, "SettingsAreaBoundSound");
         DrawSoundConfig("File Transfer Notifications", cfg.FileTransferNotificationSound, "SettingsFileTransferSound");
-        }, "Use Game System for in-game SCD sounds, Sphene Default for built-in sounds, or Custom Sound for external WAV/MP3 files.");
 
         if (configChanged)
         {

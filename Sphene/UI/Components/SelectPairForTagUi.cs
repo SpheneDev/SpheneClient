@@ -50,7 +50,7 @@ public class SelectPairForTagUi
         {
             using (SpheneCustomTheme.ApplyContextMenuTheme())
             {
-            ImGui.TextUnformatted($"Select users for group {_tag}");
+            UiSharedService.Text($"Select users for group {_tag}");
 
             UiSharedService.DrawInputTextWithHint("##filter", "Filter", ref _filter, 255, ImGuiInputTextFlags.None);
             foreach (var item in pairs
@@ -59,7 +59,7 @@ public class SelectPairForTagUi
                 .ToList())
             {
                 var isInGroup = _peopleInGroup.Contains(item.UserData.UID);
-                if (ImGui.Checkbox(PairName(item), ref isInGroup))
+                if (UiSharedService.DrawToggleChip(PairName(item), ref isInGroup))
                 {
                     if (isInGroup)
                     {

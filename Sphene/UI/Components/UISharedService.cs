@@ -272,6 +272,31 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
         TextWrapped(text, wrapPos);
     }
 
+    /// <summary>Plain text in the themed text color — replaces raw ImGui.Text/TextUnformatted.</summary>
+    public static void Text(string text) => ImGui.TextUnformatted(text);
+
+    /// <summary>One themed vertical gap — replaces raw ImGui.Spacing().</summary>
+    public static void DrawSpacing() => ImGui.Spacing();
+
+    /// <summary>
+    /// Thin horizontal divider spanning the bounded content width, drawn in the
+    /// design border color — replaces raw ImGui.Separator() inside settings
+    /// content so dividers follow the same token everywhere.
+    /// </summary>
+    public static void DrawSeparator()
+    {
+        var scale = ImGuiHelpers.GlobalScale;
+        var cursor = ImGui.GetCursorScreenPos();
+        var width = BoundedContentAvailX();
+        var thickness = MathF.Max(1f, scale);
+        var gap = SpheneDesign.Gap * 0.5f;
+        var y = cursor.Y + gap;
+        ImGui.GetWindowDrawList().AddLine(
+            new Vector2(cursor.X, y), new Vector2(cursor.X + width, y),
+            ImGui.ColorConvertFloat4ToU32(SpheneDesign.Border with { W = 0.35f }), thickness);
+        ImGui.Dummy(new Vector2(width, gap * 2f + thickness));
+    }
+
     public static bool CtrlPressed() => (GetKeyState(0xA2) & 0x8000) != 0 || (GetKeyState(0xA3) & 0x8000) != 0;
 
     public static void DrawGrouped(Action imguiDrawAction, float rounding = 5f, float? expectedWidth = null)
@@ -531,73 +556,67 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
     {
         ColorTextWrapped("Note: The storage folder should be somewhere close to root (i.e. C:\\SpheneStorage) in a new empty folder. DO NOT point this to your game folder. DO NOT point this to your Penumbra folder.", ImGuiColors.DalamudYellow);
         var cacheDirectory = _configService.Current.CacheFolder;
-        // Reserve the help column too so the folder button aligns with the
-        // buttons on rows that also draw a help icon.
-        var folderIconTrailing = GetIconButtonSize(FontAwesomeIcon.Folder).X + ImGui.GetStyle().ItemSpacing.X
-            + ImGui.GetTextLineHeight() + ImGui.GetStyle().ItemSpacing.X;
-        DrawInputText("Storage Folder##cache", ref cacheDirectory, 255,
-            ImGuiInputTextFlags.ReadOnly, folderIconTrailing);
-
-        ImGui.SameLine();
-        using (ImRaii.Disabled(_cacheMonitor.SpheneWatcher != null))
+        var monitoringActive = _cacheMonitor.SpheneWatcher != null;
+        var (_, cacheBrowsePressed) = DrawInputTextWithButtons("Storage Folder##cache",
+            ref cacheDirectory, 255, ImGuiInputTextFlags.ReadOnly,
+            buttons: new InputButtonSpec(FontAwesomeIcon.Folder,
+                monitoringActive
+                    ? "Stop the Monitoring before changing the Storage folder. As long as monitoring is active, you cannot change the Storage folder location."
+                    : "Pick the Sphene storage folder.",
+                Enabled: !monitoringActive));
+        if (cacheBrowsePressed == 0)
         {
-            if (IconButton(FontAwesomeIcon.Folder))
+            FileDialogManager.OpenFolderDialog("Pick Sphene Storage Folder", (success, path) =>
             {
-                FileDialogManager.OpenFolderDialog("Pick Sphene Storage Folder", (success, path) =>
-                {
-                    if (!success) return;
+                if (!success) return;
 
-                    _isOneDrive = path.Contains("onedrive", StringComparison.OrdinalIgnoreCase);
-                    _isPenumbraDirectory = string.Equals(path.ToLowerInvariant(), _ipcManager.Penumbra.ModDirectory?.ToLowerInvariant(), StringComparison.Ordinal);
-                    var files = Directory.GetFiles(path, "*", SearchOption.AllDirectories);
-                    _cacheDirectoryHasOtherFilesThanCache = false;
-                    var backupsRoot = Path.Combine(path, "texture_backups");
-                    foreach (var file in files)
+                _isOneDrive = path.Contains("onedrive", StringComparison.OrdinalIgnoreCase);
+                _isPenumbraDirectory = string.Equals(path.ToLowerInvariant(), _ipcManager.Penumbra.ModDirectory?.ToLowerInvariant(), StringComparison.Ordinal);
+                var files = Directory.GetFiles(path, "*", SearchOption.AllDirectories);
+                _cacheDirectoryHasOtherFilesThanCache = false;
+                var backupsRoot = Path.Combine(path, "texture_backups");
+                foreach (var file in files)
+                {
+                    if (!string.IsNullOrEmpty(backupsRoot) && file.StartsWith(backupsRoot, StringComparison.OrdinalIgnoreCase))
                     {
-                        if (!string.IsNullOrEmpty(backupsRoot) && file.StartsWith(backupsRoot, StringComparison.OrdinalIgnoreCase))
-                        {
-                            Logger.LogDebug("Ignoring backup file under texture_backups: {file}", file);
-                            continue;
-                        }
-                        var fileName = Path.GetFileNameWithoutExtension(file);
-                        if (fileName.Length != 40 && !string.Equals(fileName, "desktop", StringComparison.OrdinalIgnoreCase))
-                        {
-                            _cacheDirectoryHasOtherFilesThanCache = true;
-                            Logger.LogWarning("Found illegal file in {path}: {file}", path, file);
-                            break;
-                        }
+                        Logger.LogDebug("Ignoring backup file under texture_backups: {file}", file);
+                        continue;
                     }
-                    var dirs = Directory.GetDirectories(path);
-                    var invalidDirs = dirs.Where(dir => !Path.GetFileName(dir).Equals("texture_backups", StringComparison.OrdinalIgnoreCase)).ToArray();
-                    if (invalidDirs.Any())
+                    var fileName = Path.GetFileNameWithoutExtension(file);
+                    if (fileName.Length != 40 && !string.Equals(fileName, "desktop", StringComparison.OrdinalIgnoreCase))
                     {
                         _cacheDirectoryHasOtherFilesThanCache = true;
-                        Logger.LogWarning("Found folders in {path} not belonging to Sphene: {dirs}", path, string.Join(", ", invalidDirs));
+                        Logger.LogWarning("Found illegal file in {path}: {file}", path, file);
+                        break;
                     }
+                }
+                var dirs = Directory.GetDirectories(path);
+                var invalidDirs = dirs.Where(dir => !Path.GetFileName(dir).Equals("texture_backups", StringComparison.OrdinalIgnoreCase)).ToArray();
+                if (invalidDirs.Any())
+                {
+                    _cacheDirectoryHasOtherFilesThanCache = true;
+                    Logger.LogWarning("Found folders in {path} not belonging to Sphene: {dirs}", path, string.Join(", ", invalidDirs));
+                }
 
-                    _isDirectoryWritable = IsDirectoryWritable(path);
-                    _cacheDirectoryIsValidPath = PathRegex().IsMatch(path);
+                _isDirectoryWritable = IsDirectoryWritable(path);
+                _cacheDirectoryIsValidPath = PathRegex().IsMatch(path);
 
-                    if (!string.IsNullOrEmpty(path)
-                        && Directory.Exists(path)
-                        && _isDirectoryWritable
-                        && !_isPenumbraDirectory
-                        && !_isOneDrive
-                        && !_cacheDirectoryHasOtherFilesThanCache
-                        && _cacheDirectoryIsValidPath)
-                    {
-                        _configService.Current.CacheFolder = path;
-                        _configService.Save();
-                        _cacheMonitor.StartSpheneWatcher(path);
-                        _cacheMonitor.InvokeScan();
-                    }
-                }, _dalamudUtil.IsWine ? @"Z:\" : @"C:\");
-            }
+                if (!string.IsNullOrEmpty(path)
+                    && Directory.Exists(path)
+                    && _isDirectoryWritable
+                    && !_isPenumbraDirectory
+                    && !_isOneDrive
+                    && !_cacheDirectoryHasOtherFilesThanCache
+                    && _cacheDirectoryIsValidPath)
+                {
+                    _configService.Current.CacheFolder = path;
+                    _configService.Save();
+                    _cacheMonitor.StartSpheneWatcher(path);
+                    _cacheMonitor.InvokeScan();
+                }
+            }, _dalamudUtil.IsWine ? @"Z:\" : @"C:\");
         }
-        if (_cacheMonitor.SpheneWatcher != null)
-        {
-            AttachToolTip("Stop the Monitoring before changing the Storage folder. As long as monitoring is active, you cannot change the Storage folder location.");
-        }
+        DrawHelpText("Folder where Sphene stores all synced mod files. Pick an empty folder close to the drive root.");
 
         if (_isPenumbraDirectory)
         {
@@ -633,17 +652,17 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
     public void DrawPenumbraModDownloadFolderSetting()
     {
         var downloadFolder = _configService.Current.PenumbraModDownloadFolder;
-        // Includes the help column so the trailing icons end before the pinned ? icon.
-        var downloadTrailing = GetIconButtonSize(FontAwesomeIcon.Folder).X + ImGui.GetStyle().ItemSpacing.X
-            + ImGui.GetTextLineHeight() + ImGui.GetStyle().ItemSpacing.X
-            + (string.IsNullOrEmpty(downloadFolder) ? 0f
-                : GetIconButtonSize(FontAwesomeIcon.Trash).X + ImGui.GetStyle().ItemSpacing.X);
-        DrawInputText("Mod Download Folder##download", ref downloadFolder, 255,
-            ImGuiInputTextFlags.ReadOnly, downloadTrailing);
+        var caps = string.IsNullOrEmpty(downloadFolder)
+            ? new[] { new InputButtonSpec(FontAwesomeIcon.Folder, "Pick the mod download folder.") }
+            : new[]
+            {
+                new InputButtonSpec(FontAwesomeIcon.Folder, "Pick the mod download folder."),
+                new InputButtonSpec(FontAwesomeIcon.Trash, "Reset to default (use Cache folder)"),
+            };
+        var (_, downloadPressed) = DrawInputTextWithButtons("Mod Download Folder##download",
+            ref downloadFolder, 255, ImGuiInputTextFlags.ReadOnly, buttons: caps);
 
-        ImGui.SameLine();
-        ImGui.PushID("penumbraDownloadFolder");
-        if (IconButton(FontAwesomeIcon.Folder))
+        if (downloadPressed == 0)
         {
             FileDialogManager.OpenFolderDialog("Pick Mod Download Folder", (success, path) =>
             {
@@ -666,19 +685,12 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
                 }
             }, _dalamudUtil.IsWine ? @"Z:\" : @"C:\");
         }
-        ImGui.PopID();
-        
-        // Add a clear button to reset to default (empty)
-        if (!string.IsNullOrEmpty(downloadFolder))
+        else if (downloadPressed == 1)
         {
-            ImGui.SameLine();
-            if (IconButton(FontAwesomeIcon.Trash))
-            {
-                _configService.Current.PenumbraModDownloadFolder = string.Empty;
-                _configService.Save();
-            }
-            AttachToolTip("Reset to default (use Cache folder)");
+            _configService.Current.PenumbraModDownloadFolder = string.Empty;
+            _configService.Save();
         }
+        DrawHelpText("Optional: Select a folder where downloaded mod files (PMP) will be stored. If left empty, the default cache folder will be used.");
 
         if (_isDownloadFolderPenumbra)
         {
@@ -702,8 +714,6 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
         {
             ColorTextWrapped("No folder selected. Using default Sphene Storage folder.", ImGuiColors.HealerGreen);
         }
-
-        DrawHelpText("Optional: Select a folder where downloaded mod files (PMP) will be stored. If left empty, the default cache folder will be used.");
     }
 
     public T? DrawCombo<T>(string comboName, IEnumerable<T> comboItems, Func<T?, string> toName,
@@ -718,11 +728,13 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
             _selectedComboItems[comboName] = selectedItem;
         }
 
+        var autoDock = preferredWidth <= 0f;
         if (preferredWidth <= 0f)
         {
             preferredWidth = ComboFitWidth(comboItems.Select(toName));
         }
-        var comboId = PrepareLabeledControl(comboName, trailingWidth, preferredWidth, dockRight: true);
+        var comboId = PrepareLabeledControl(comboName, trailingWidth, preferredWidth,
+            dockRight: autoDock);
 
         using var style = PushValueControlStyle();
         if (ImGui.BeginCombo(comboId, selectedItem == null ? "Unset Value" : toName((T?)selectedItem)))
@@ -740,6 +752,7 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
             ImGui.EndCombo();
         }
 
+        SpheneDesignLint.CheckItemWithinBound(comboName);
         return (T?)_selectedComboItems[comboName];
     }
 
@@ -764,21 +777,55 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
     /// </summary>
     private static string PrepareLabeledControl(string label, float trailingWidth = 0f, float preferredWidth = -1f,
         bool dockRight = false)
+        => PrepareLabeledControl(label, trailingWidth, preferredWidth, dockRight, out _);
+
+    /// <summary>
+    /// Same as <see cref="PrepareLabeledControl(string, float, float, bool)"/>
+    /// but also reports the width applied via SetNextItemWidth — composite
+    /// controls (input + attached button) need it to subdivide their frame.
+    /// </summary>
+    private static string PrepareLabeledControl(string label, float trailingWidth, float preferredWidth,
+        bool dockRight, out float controlWidth)
     {
+        controlWidth = 0f;
         var labelSplit = label.IndexOf("##", StringComparison.Ordinal);
         var text = labelSplit < 0 ? label : label[..labelSplit];
         if (text.Length == 0)
         {
-            if (preferredWidth > 0f)
+            var hiddenPos = ImGui.GetCursorScreenPos();
+            var hiddenBound = SpheneWindowChrome.CurrentCardContentRightBound;
+            if (hiddenBound > 0f)
             {
-                var bound = SpheneWindowChrome.CurrentCardContentRightBound;
-                var width = preferredWidth;
-                if (bound > 0f)
+                // The help column reserve also applies to hidden-label
+                // controls so they dock flush with labeled rows.
+                hiddenBound -= MathF.Max(trailingWidth, SpheneDesign.TrailingIconReserve);
+            }
+            if (preferredWidth <= 0f && dockRight && hiddenBound > 0f)
+            {
+                // No explicit width: dock a standard-tier control to the
+                // shared edge like the visible-label rows do.
+                var autoWidth = MathF.Max(60f * ImGuiHelpers.GlobalScale,
+                    MathF.Min(ImGui.CalcItemWidth(), (hiddenBound - hiddenPos.X) * 0.5f));
+                if (hiddenBound - autoWidth > hiddenPos.X)
                 {
-                    width = MathF.Min(width,
-                        MathF.Max(0f, bound - trailingWidth - ImGui.GetCursorScreenPos().X));
+                    ImGui.SetCursorScreenPos(new Vector2(hiddenBound - autoWidth, hiddenPos.Y));
+                }
+                ImGui.SetNextItemWidth(autoWidth);
+                controlWidth = autoWidth;
+            }
+            else if (preferredWidth > 0f)
+            {
+                var width = preferredWidth;
+                if (hiddenBound > 0f)
+                {
+                    width = MathF.Min(width, MathF.Max(0f, hiddenBound - hiddenPos.X));
+                    if (dockRight && hiddenBound - width > hiddenPos.X)
+                    {
+                        ImGui.SetCursorScreenPos(new Vector2(hiddenBound - width, hiddenPos.Y));
+                    }
                 }
                 ImGui.SetNextItemWidth(width);
+                controlWidth = width;
             }
             return label;
         }
@@ -793,8 +840,7 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
         }
         // Reserve the same help-icon column the toggles use so every value
         // control ends flush with the switch edge instead of overshooting it.
-        rightBound -= MathF.Max(trailingWidth,
-            ImGui.GetTextLineHeight() + ImGui.GetStyle().ItemSpacing.X);
+        rightBound -= MathF.Max(trailingWidth, SpheneDesign.TrailingIconReserve);
         if (leftBound <= 0f)
         {
             leftBound = ImGui.GetWindowPos().X + ImGui.GetWindowContentRegionMin().X;
@@ -806,7 +852,7 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
         var desiredWidth = preferredWidth > 0f
             ? preferredWidth
             : MathF.Min(ImGui.CalcItemWidth(), avail * 0.5f);
-        var controlWidth = MathF.Max(60f * scale,
+        controlWidth = MathF.Max(60f * scale,
             MathF.Min(desiredWidth, avail - labelWidth - ImGui.GetStyle().ItemInnerSpacing.X));
 
         // Line start also covers indented sub-rows: when the previous item sits
@@ -907,15 +953,14 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
     public static IDisposable PushValueControlStyle()
     {
         var frameHeight = ImGui.GetFrameHeight();
-        var scale = ImGuiHelpers.GlobalScale;
         var accent = SpheneCustomTheme.Colors.AccentBlue;
         var frameBg = ImGui.ColorConvertU32ToFloat4(ImGui.GetColorU32(ImGuiCol.FrameBg));
-        ImGui.PushStyleVar(ImGuiStyleVar.FrameRounding, frameHeight * 0.35f);
-        ImGui.PushStyleVar(ImGuiStyleVar.GrabRounding, frameHeight * 0.35f);
-        ImGui.PushStyleVar(ImGuiStyleVar.GrabMinSize, frameHeight * 0.5f);
-        ImGui.PushStyleVar(ImGuiStyleVar.FrameBorderSize, 1f);
-        ImGui.PushStyleVar(ImGuiStyleVar.PopupRounding, 8f * scale);
-        ImGui.PushStyleVar(ImGuiStyleVar.PopupBorderSize, 1f);
+        ImGui.PushStyleVar(ImGuiStyleVar.FrameRounding, SpheneDesign.ControlRadius);
+        ImGui.PushStyleVar(ImGuiStyleVar.GrabRounding, SpheneDesign.ControlRadius);
+        ImGui.PushStyleVar(ImGuiStyleVar.GrabMinSize, frameHeight * SpheneDesign.GrabMinSizeFactor);
+        ImGui.PushStyleVar(ImGuiStyleVar.FrameBorderSize, SpheneDesign.ControlBorderSize);
+        ImGui.PushStyleVar(ImGuiStyleVar.PopupRounding, SpheneDesign.PopupRounding);
+        ImGui.PushStyleVar(ImGuiStyleVar.PopupBorderSize, SpheneDesign.PopupBorderSize);
         var border = ImGui.ColorConvertU32ToFloat4(ImGui.GetColorU32(ImGuiCol.Border));
         ImGui.PushStyleColor(ImGuiCol.Border, border with { W = MathF.Max(border.W, 0.35f) });
         ImGui.PushStyleColor(ImGuiCol.SliderGrab, accent with { W = 0.9f });
@@ -947,7 +992,7 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
         {
             rightBound = cursor.X + ImGui.GetContentRegionAvail().X;
         }
-        var helpReserve = MathF.Max(ImGui.GetTextLineHeight() + ImGui.GetStyle().ItemSpacing.X, trailingWidth);
+        var helpReserve = MathF.Max(SpheneDesign.TrailingIconReserve, trailingWidth);
         var frameHeight = ImGui.GetFrameHeight();
         var rowEndX = rightBound - helpReserve;
 
@@ -1024,6 +1069,7 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
                 indented ? ImGuiColors.DalamudGrey3 : ImGuiColors.DalamudGrey);
         }
 
+        SpheneDesignLint.CheckItemWithinBound(label);
         return toggled;
     }
 
@@ -1032,7 +1078,9 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
         float trailingWidth = 0f, float preferredWidth = -1f)
     {
         using var style = PushValueControlStyle();
-        return ImGui.SliderInt(PrepareLabeledControl(label, trailingWidth, preferredWidth), ref value, min, max, format ?? "%d");
+        var changed = ImGui.SliderInt(PrepareLabeledControl(label, trailingWidth, preferredWidth), ref value, min, max, format ?? "%d");
+        SpheneDesignLint.CheckItemWithinBound(label);
+        return changed;
     }
 
     /// <summary>SliderFloat with the settings-row convention (label left, control sized to the bound).</summary>
@@ -1040,7 +1088,9 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
         float trailingWidth = 0f, float preferredWidth = -1f)
     {
         using var style = PushValueControlStyle();
-        return ImGui.SliderFloat(PrepareLabeledControl(label, trailingWidth, preferredWidth), ref value, min, max, format ?? "%.3f");
+        var changed = ImGui.SliderFloat(PrepareLabeledControl(label, trailingWidth, preferredWidth), ref value, min, max, format ?? "%.3f");
+        SpheneDesignLint.CheckItemWithinBound(label);
+        return changed;
     }
 
     /// <summary>SliderFloat2 with the settings-row convention (label left, control sized to the bound).</summary>
@@ -1048,7 +1098,9 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
         float trailingWidth = 0f, float preferredWidth = -1f)
     {
         using var style = PushValueControlStyle();
-        return ImGui.SliderFloat2(PrepareLabeledControl(label, trailingWidth, preferredWidth), ref value, min, max, format ?? "%.3f");
+        var changed = ImGui.SliderFloat2(PrepareLabeledControl(label, trailingWidth, preferredWidth), ref value, min, max, format ?? "%.3f");
+        SpheneDesignLint.CheckItemWithinBound(label);
+        return changed;
     }
 
     /// <summary>DragFloat with the settings-row convention (label left, compact numeric tier).</summary>
@@ -1056,8 +1108,10 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
         string? format = null, float trailingWidth = 0f, float preferredWidth = -1f)
     {
         using var style = PushValueControlStyle();
-        return ImGui.DragFloat(PrepareLabeledControl(label, trailingWidth,
+        var changed = ImGui.DragFloat(PrepareLabeledControl(label, trailingWidth,
             preferredWidth > 0f ? preferredWidth : SettingRowCompactWidth), ref value, speed, min, max, format ?? "%.3f");
+        SpheneDesignLint.CheckItemWithinBound(label);
+        return changed;
     }
 
     /// <summary>DragFloat2 with the settings-row convention (label left, compact numeric tier).</summary>
@@ -1065,8 +1119,10 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
         string? format = null, float trailingWidth = 0f, float preferredWidth = -1f)
     {
         using var style = PushValueControlStyle();
-        return ImGui.DragFloat2(PrepareLabeledControl(label, trailingWidth,
+        var changed = ImGui.DragFloat2(PrepareLabeledControl(label, trailingWidth,
             preferredWidth > 0f ? preferredWidth : SettingRowCompactWidth), ref value, speed, min, max, format ?? "%.3f");
+        SpheneDesignLint.CheckItemWithinBound(label);
+        return changed;
     }
 
     /// <summary>InputInt with the settings-row convention (label left, compact numeric tier).</summary>
@@ -1074,16 +1130,21 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
         float trailingWidth = 0f, float preferredWidth = -1f)
     {
         using var style = PushValueControlStyle();
-        return ImGui.InputInt(PrepareLabeledControl(label, trailingWidth,
+        var changed = ImGui.InputInt(PrepareLabeledControl(label, trailingWidth,
             preferredWidth > 0f ? preferredWidth : SettingRowCompactWidth), ref value, step, stepFast);
+        SpheneDesignLint.CheckItemWithinBound(label);
+        return changed;
     }
 
     /// <summary>InputText with the settings-row convention (label left, control sized to the bound).</summary>
     public static bool DrawInputText(string label, ref string value, int maxLength,
-        ImGuiInputTextFlags flags = ImGuiInputTextFlags.None, float trailingWidth = 0f, float preferredWidth = -1f)
+        ImGuiInputTextFlags flags = ImGuiInputTextFlags.None, float trailingWidth = 0f,
+        float preferredWidth = -1f, bool dockRight = false)
     {
         using var style = PushValueControlStyle();
-        return ImGui.InputText(PrepareLabeledControl(label, trailingWidth, preferredWidth), ref value, maxLength, flags);
+        var changed = ImGui.InputText(PrepareLabeledControl(label, trailingWidth, preferredWidth, dockRight), ref value, maxLength, flags);
+        SpheneDesignLint.CheckItemWithinBound(label);
+        return changed;
     }
 
     /// <summary>InputTextWithHint with the settings-row convention (label left, control sized to the bound).</summary>
@@ -1091,7 +1152,9 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
         ImGuiInputTextFlags flags = ImGuiInputTextFlags.None, float trailingWidth = 0f, float preferredWidth = -1f)
     {
         using var style = PushValueControlStyle();
-        return ImGui.InputTextWithHint(PrepareLabeledControl(label, trailingWidth, preferredWidth), hint, ref value, maxLength, flags);
+        var changed = ImGui.InputTextWithHint(PrepareLabeledControl(label, trailingWidth, preferredWidth), hint, ref value, maxLength, flags);
+        SpheneDesignLint.CheckItemWithinBound(label);
+        return changed;
     }
 
     /// <summary>InputTextMultiline with the settings-row convention (label left, control sized to the bound).</summary>
@@ -1099,7 +1162,153 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
         ImGuiInputTextFlags flags = ImGuiInputTextFlags.None, float trailingWidth = 0f, float preferredWidth = -1f)
     {
         using var style = PushValueControlStyle();
-        return ImGui.InputTextMultiline(PrepareLabeledControl(label, trailingWidth, preferredWidth), ref value, maxLength, size, flags);
+        var changed = ImGui.InputTextMultiline(PrepareLabeledControl(label, trailingWidth, preferredWidth), ref value, maxLength, size, flags);
+        SpheneDesignLint.CheckItemWithinBound(label);
+        return changed;
+    }
+
+    /// <summary>
+    /// One action cap fused to the right edge of an input — an icon glyph, or
+    /// <paramref name="Text"/> for labeled caps (e.g. "Browse").
+    /// </summary>
+    public readonly record struct InputButtonSpec(FontAwesomeIcon Icon = FontAwesomeIcon.None,
+        string? Tooltip = null, bool Enabled = true, string? Label = null);
+
+    /// <summary>
+    /// Text input with action buttons fused into its right edge: one rounded
+    /// frame encloses the field and every cap (input-group look). The composite
+    /// keeps the control width a plain <see cref="DrawInputText"/> would occupy,
+    /// so the buttons live inside the field's footprint instead of extending
+    /// the row. Returns whether the text changed and which cap was pressed
+    /// (-1 = none).
+    /// </summary>
+    public (bool Changed, int PressedButton) DrawInputTextWithButtons(
+        string label, ref string value, int maxLength,
+        ImGuiInputTextFlags flags = ImGuiInputTextFlags.None,
+        float trailingWidth = 0f, float preferredWidth = -1f,
+        params InputButtonSpec[] buttons)
+    {
+        var scale = ImGuiHelpers.GlobalScale;
+        var id = PrepareLabeledControl(label, trailingWidth, preferredWidth,
+            dockRight: true, out var controlWidth);
+        var height = ImGui.GetFrameHeight();
+        var framePadX = ImGui.GetStyle().FramePadding.X;
+
+        var capWidths = new float[buttons.Length];
+        var capsWidth = 0f;
+        for (var i = 0; i < buttons.Length; i++)
+        {
+            var b = buttons[i];
+            capWidths[i] = b.Label is { Length: > 0 } t
+                ? ImGui.CalcTextSize(t).X + framePadX * 2f
+                : height;
+            capsWidth += capWidths[i];
+        }
+        if (controlWidth <= 0f)
+        {
+            controlWidth = MathF.Min(ImGui.CalcItemWidth(), BoundedContentAvailX());
+        }
+        var fieldWidth = MathF.Max(60f * scale, controlWidth - capsWidth);
+
+        var pos = ImGui.GetCursorScreenPos();
+        var radius = SpheneDesign.ControlRadius;
+        var drawList = ImGui.GetWindowDrawList();
+        var size = new Vector2(controlWidth, height);
+
+        drawList.AddRectFilled(pos, pos + size,
+            ImGui.ColorConvertFloat4ToU32(SpheneDesign.FrameBg), radius);
+
+        // The field renders with a stripped frame so the composite frame
+        // stays the only visible border.
+        ImGui.SetNextItemWidth(fieldWidth);
+        bool fieldChanged;
+        using (ImRaii.PushStyle(ImGuiStyleVar.FrameBorderSize, 0f))
+        using (ImRaii.PushColor(ImGuiCol.FrameBg, Vector4.Zero)
+            .Push(ImGuiCol.FrameBgHovered, Vector4.Zero)
+            .Push(ImGuiCol.FrameBgActive, Vector4.Zero))
+        {
+            fieldChanged = ImGui.InputText(id, ref value, maxLength, flags);
+        }
+        var fieldActive = ImGui.IsItemActive();
+
+        var pressedButton = -1;
+        var anyCapHovered = false;
+        var cursorX = pos.X + fieldWidth;
+        for (var i = 0; i < buttons.Length; i++)
+        {
+            var b = buttons[i];
+            var capPos = new Vector2(cursorX, pos.Y);
+            var capSize = new Vector2(capWidths[i], height);
+            var isLast = i == buttons.Length - 1;
+            cursorX += capWidths[i];
+
+            bool capPressed;
+            ImGui.SetCursorScreenPos(capPos);
+            if (b.Enabled)
+            {
+                capPressed = ImGui.InvisibleButton($"##cap{i}{id}", capSize);
+            }
+            else
+            {
+                ImGui.Dummy(capSize);
+                capPressed = false;
+            }
+            var capHovered = ImGui.IsItemHovered();
+            if (capPressed)
+            {
+                pressedButton = i;
+            }
+            if (b.Tooltip != null)
+            {
+                AttachToolTip(b.Tooltip);
+            }
+            anyCapHovered |= capHovered && b.Enabled;
+
+            var capBg = !b.Enabled
+                ? Vector4.Zero
+                : capHovered
+                    ? SpheneDesign.FrameBgHover
+                    : new Vector4(1f, 1f, 1f, 0.05f);
+            if (capBg.W > 0f)
+            {
+                drawList.AddRectFilled(capPos + new Vector2(0f, 1f),
+                    capPos + capSize - new Vector2(0f, 1f),
+                    ImGui.ColorConvertFloat4ToU32(capBg), isLast ? radius : 0f,
+                    isLast ? ImDrawFlags.RoundCornersRight : ImDrawFlags.None);
+            }
+            drawList.AddLine(new Vector2(capPos.X, pos.Y + 3f * scale),
+                new Vector2(capPos.X, pos.Y + height - 3f * scale),
+                ImGui.ColorConvertFloat4ToU32(SpheneDesign.Border with { W = 0.3f }),
+                MathF.Max(1f, scale));
+
+            var glyphColor = !b.Enabled
+                ? SpheneDesign.TextMuted with { W = 0.45f }
+                : capHovered ? SpheneDesign.Accent : SpheneDesign.TextSecondary;
+            var glyphColorU32 = ImGui.ColorConvertFloat4ToU32(glyphColor);
+            if (b.Label is { Length: > 0 } capText)
+            {
+                var gs = ImGui.CalcTextSize(capText);
+                drawList.AddText(capPos + (capSize - gs) * 0.5f, glyphColorU32, capText);
+            }
+            else
+            {
+                var glyph = b.Icon.ToIconString();
+                using (IconFont.Push())
+                {
+                    var gs = ImGui.CalcTextSize(glyph);
+                    drawList.AddText(capPos + (capSize - gs) * 0.5f, glyphColorU32, glyph);
+                }
+            }
+        }
+
+        var borderColor = fieldActive || anyCapHovered
+            ? SpheneDesign.Accent with { W = 0.75f }
+            : SpheneDesign.Border with { W = 0.28f };
+        drawList.AddRect(pos, pos + size, ImGui.ColorConvertFloat4ToU32(borderColor),
+            radius, ImDrawFlags.None, MathF.Max(1f, scale));
+
+        SpheneDesignLint.CheckItemWithinBound(label);
+        return (fieldChanged, pressedButton);
     }
 
     /// <summary>Combo (index) with the settings-row convention (label left, control sized to the bound).</summary>
@@ -1107,9 +1316,11 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
         float trailingWidth = 0f, float preferredWidth = -1f)
     {
         using var style = PushValueControlStyle();
-        return ImGui.Combo(PrepareLabeledControl(label, trailingWidth,
-            preferredWidth > 0f ? preferredWidth : ComboFitWidth(items.Take(itemsCount)), dockRight: true),
-            ref currentItem, items, itemsCount);
+        var changed = ImGui.Combo(PrepareLabeledControl(label, trailingWidth,
+            preferredWidth > 0f ? preferredWidth : ComboFitWidth(items.Take(itemsCount)),
+            dockRight: preferredWidth <= 0f), ref currentItem, items, itemsCount);
+        SpheneDesignLint.CheckItemWithinBound(label);
+        return changed;
     }
 
     /// <summary>Combo (\0-separated items) with the settings-row convention (label left, control sized to the bound).</summary>
@@ -1117,10 +1328,12 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
         int popupMaxHeightInItems = -1, float trailingWidth = 0f, float preferredWidth = -1f)
     {
         using var style = PushValueControlStyle();
-        return ImGui.Combo(PrepareLabeledControl(label, trailingWidth,
+        var changed = ImGui.Combo(PrepareLabeledControl(label, trailingWidth,
             preferredWidth > 0f ? preferredWidth : ComboFitWidth(itemsSeparatedByZeros.Split('\0', StringSplitOptions.RemoveEmptyEntries)),
-            dockRight: true), ref currentItem, itemsSeparatedByZeros,
+            dockRight: preferredWidth <= 0f), ref currentItem, itemsSeparatedByZeros,
             popupMaxHeightInItems);
+        SpheneDesignLint.CheckItemWithinBound(label);
+        return changed;
     }
 
     public void DrawFileScanState()
@@ -1181,18 +1394,33 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
             bound = ImGui.GetCursorScreenPos().X + ImGui.GetContentRegionAvail().X;
         }
         var targetX = bound - iconW;
-        var lastEndX = ImGui.GetItemRectMax().X;
-        if (targetX > lastEndX + 1f)
+        var lastMax = ImGui.GetItemRectMax();
+        if (targetX > lastMax.X + 1f)
         {
             // Pin to the reserved right column so every help icon sits flush
             // behind the row's control or switch.
-            ImGui.SameLine(0f, targetX - lastEndX);
+            ImGui.SameLine(0f, targetX - lastMax.X);
         }
         else
         {
             SameLineIfFits(iconW);
         }
-        IconText(FontAwesomeIcon.QuestionCircle, ImGui.GetColorU32(ImGuiCol.TextDisabled));
+        // The glyph is painted through the draw list, centered inside the
+        // row's frame box — IconText would render at the line's text base
+        // offset, which differs per row type (toggle rows end in a text item,
+        // composite rows in a cap button). A Dummy registers the frame box as
+        // the item so hover and the tooltip cover exactly the glyph.
+        var cursor = ImGui.GetCursorScreenPos();
+        var frameH = SpheneDesign.ControlHeight;
+        var glyph = FontAwesomeIcon.QuestionCircle.ToIconString();
+        using (IconFont.Push())
+        {
+            var glyphSize = ImGui.CalcTextSize(glyph);
+            ImGui.GetWindowDrawList().AddText(new Vector2(cursor.X,
+                cursor.Y + (frameH - glyphSize.Y) * 0.5f),
+                ImGui.GetColorU32(ImGuiCol.TextDisabled), glyph);
+        }
+        ImGui.Dummy(new Vector2(iconW, frameH));
         AttachToolTip(helpText);
     }
 
@@ -1219,7 +1447,310 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
     public static float FillRowControlWidth(float extraTrailing = 0f)
     {
         return MathF.Max(0f, BoundedContentAvailX()
-            - ImGui.GetTextLineHeight() - ImGui.GetStyle().ItemSpacing.X - extraTrailing);
+            - SpheneDesign.TrailingIconReserve - extraTrailing);
+    }
+
+    /// <summary>
+    /// Moves the cursor so a hidden-label control of <paramref name="width"/>
+    /// ends flush at the shared control edge (bound minus the trailing icon
+    /// column and <paramref name="extraTrailing"/> for items that follow on
+    /// the same row).
+    /// </summary>
+    public static void DockControlToRightEdge(float width, float extraTrailing = 0f)
+    {
+        var reserve = SpheneDesign.TrailingIconReserve + extraTrailing;
+        ImGui.SetCursorPosX(ImGui.GetCursorPosX()
+            + MathF.Max(0f, BoundedContentAvailX() - reserve - width));
+    }
+
+    /// <summary>
+    /// Color picker in the settings-row convention: grey label left, a right-
+    /// docked <see cref="DrawColorSwatchButton"/> that opens a
+    /// <see cref="SpheneWindowChrome.BeginStyledPopup"/> hosting ImGui's full
+    /// ColorPicker4 — the picker popup gets the themed rounding/border instead
+    /// of the raw ColorEdit4 chrome.
+    /// </summary>
+    public static bool DrawColorEdit(string label, ref Vector4 color, float trailingWidth = 0f)
+    {
+        var swatchSize = SpheneDesign.SwatchSize;
+        var id = PrepareLabeledControl(label, trailingWidth, swatchSize, dockRight: true);
+        var pickerPopupId = id + "_picker";
+        if (DrawColorSwatchButton(id, color))
+        {
+            ImGui.OpenPopup(pickerPopupId);
+        }
+        AttachToolTip("Click to pick a color.");
+        var changed = false;
+        if (SpheneWindowChrome.BeginStyledPopup(pickerPopupId))
+        {
+            changed = ImGui.ColorPicker4("##picker" + id, ref color,
+                ImGuiColorEditFlags.AlphaBar | ImGuiColorEditFlags.NoLabel);
+            SpheneWindowChrome.EndStyledPopup();
+        }
+        SpheneDesignLint.CheckItemWithinBound(label);
+        return changed;
+    }
+
+    /// <summary>
+    /// Design-system push button: <see cref="PushValueControlStyle"/> rounding
+    /// plus a shared hover/active treatment. <paramref name="danger"/> tints the
+    /// button red for destructive actions. Use instead of raw ImGui.Button.
+    /// </summary>
+    public static bool DrawButton(string label, Vector2 size = default, bool danger = false)
+    {
+        using var style = PushValueControlStyle();
+        using var tint = ImRaii.PushColor(ImGuiCol.Button,
+                SpheneDesign.Danger with { W = 0.55f }, danger)
+            .Push(ImGuiCol.ButtonHovered, SpheneDesign.Danger with { W = 0.8f }, danger)
+            .Push(ImGuiCol.ButtonActive, SpheneDesign.Danger with { W = 0.95f }, danger);
+        var clicked = ImGui.Button(label, size);
+        SpheneDesignLint.CheckItemWithinBound(label);
+        return clicked;
+    }
+
+    /// <summary>
+    /// Square icon-only button in the swatch language — frame fill, border,
+    /// centered FontAwesome glyph. Use for compact actions next to value
+    /// controls; pair with <see cref="AttachToolTip"/> for the description.
+    /// </summary>
+    public static bool DrawIconButton(string id, FontAwesomeIcon icon,
+        bool enabled = true, float? size = null)
+    {
+        var side = size ?? SpheneDesign.ControlHeight;
+        var pos = ImGui.GetCursorScreenPos();
+        bool clicked;
+        using (ImRaii.Disabled(!enabled))
+        {
+            clicked = ImGui.InvisibleButton(id, new Vector2(side, side));
+        }
+        var hovered = enabled && ImGui.IsItemHovered();
+        var pressed = enabled && ImGui.IsItemActive();
+        var fill = pressed ? SpheneDesign.FrameBgActive
+            : hovered ? SpheneDesign.FrameBgHover
+            : SpheneDesign.FrameBg;
+        var accent = SpheneDesign.Accent;
+        var border = pressed || hovered
+            ? accent with { W = SpheneDesign.SwatchBorderAlphaHover }
+            : SpheneDesign.Border with { W = SpheneDesign.SwatchBorderAlpha };
+        var radius = SpheneDesign.ControlRadius;
+        var max = pos + new Vector2(side, side);
+        var drawList = ImGui.GetWindowDrawList();
+        drawList.AddRectFilled(pos, max, ImGui.ColorConvertFloat4ToU32(fill), radius);
+        drawList.AddRect(pos, max, ImGui.ColorConvertFloat4ToU32(border), radius,
+            ImDrawFlags.RoundCornersAll, SpheneDesign.ControlBorderSize);
+        var glyph = icon.ToIconString();
+        ImGui.PushFont(UiBuilder.IconFont);
+        var glyphSize = ImGui.CalcTextSize(glyph);
+        var glyphColor = enabled ? SpheneDesign.TextPrimary : SpheneDesign.TextMuted;
+        drawList.AddText(new Vector2(pos.X + (side - glyphSize.X) * 0.5f,
+            pos.Y + (side - glyphSize.Y) * 0.5f),
+            ImGui.ColorConvertFloat4ToU32(glyphColor), glyph);
+        ImGui.PopFont();
+        SpheneDesignLint.CheckItemWithinBound(id);
+        return clicked;
+    }
+
+    /// <summary>
+    /// Confirm/cancel pair split across the bounded content width — the modal
+    /// dialog pattern. Returns which button was clicked.
+    /// </summary>
+    public static int DrawDialogButtons(string id, string confirmLabel, string cancelLabel,
+        bool confirmDanger = false)
+    {
+        var spacing = SpheneDesign.Gap;
+        var buttonWidth = (BoundedContentAvailX() - spacing) * 0.5f;
+        var size = new Vector2(buttonWidth, 0f);
+        var clicked = 0;
+        if (DrawButton(confirmLabel + "##" + id, size, confirmDanger))
+        {
+            clicked = 1;
+        }
+        ImGui.SameLine();
+        if (DrawButton(cancelLabel + "##" + id, size))
+        {
+            clicked = 2;
+        }
+        return clicked;
+    }
+
+    /// <summary>
+    /// Compact pill toggle for inline groups (several toggles sharing one row
+    /// via SameLine): accent fill + accent text while on, frame fill + muted
+    /// text while off. Use instead of raw ImGui.Checkbox in grouped rows.
+    /// </summary>
+    public static bool DrawToggleChip(string label, ref bool value)
+    {
+        var scale = ImGuiHelpers.GlobalScale;
+        var accent = SpheneDesign.Accent;
+        var idSplit = label.IndexOf("##", StringComparison.Ordinal);
+        var text = idSplit < 0 ? label : label[..idSplit];
+        var height = ImGui.GetFrameHeight();
+        var width = ImGui.CalcTextSize(text).X + height * 0.9f;
+        var pos = ImGui.GetCursorScreenPos();
+        var clicked = ImGui.InvisibleButton(label, new Vector2(width, height));
+        var hovered = ImGui.IsItemHovered();
+        if (clicked)
+        {
+            value = !value;
+        }
+        var frameBg = SpheneDesign.FrameBg;
+        var fill = value
+            ? accent with { W = 0.85f }
+            : hovered
+                ? Vector4.Lerp(frameBg, accent, 0.15f)
+                : frameBg;
+        var border = value
+            ? accent with { W = SpheneDesign.SwatchBorderAlphaSelected }
+            : hovered
+                ? accent with { W = SpheneDesign.SwatchBorderAlphaHover }
+                : new Vector4(1f, 1f, 1f, SpheneDesign.SwatchBorderAlpha);
+        var max = pos + new Vector2(width, height);
+        var drawList = ImGui.GetWindowDrawList();
+        drawList.AddRectFilled(pos, max, ImGui.ColorConvertFloat4ToU32(fill), height * 0.5f);
+        drawList.AddRect(pos, max, ImGui.ColorConvertFloat4ToU32(border), height * 0.5f,
+            ImDrawFlags.None, 1f * scale);
+        var textSize = ImGui.CalcTextSize(text);
+        var textColor = value ? new Vector4(1f, 1f, 1f, 1f) : SpheneDesign.TextSecondary;
+        drawList.AddText(new Vector2(pos.X + (width - textSize.X) * 0.5f,
+            pos.Y + (height - textSize.Y) * 0.5f), ImGui.ColorConvertFloat4ToU32(textColor), text);
+        SpheneDesignLint.CheckItemWithinBound(label);
+        return clicked;
+    }
+
+    /// <summary>
+    /// Selectable list row in the value-control language — use instead of raw
+    /// ImGui.Selectable inside settings content.
+    /// </summary>
+    public static bool DrawSelectable(string label, bool selected,
+        ImGuiSelectableFlags flags = ImGuiSelectableFlags.None, Vector2 size = default)
+    {
+        using var style = PushValueControlStyle();
+        var clicked = ImGui.Selectable(label, selected, flags, size);
+        SpheneDesignLint.CheckItemWithinBound(label);
+        return clicked;
+    }
+
+    /// <summary>
+    /// Collapsible sub-section header in the design language: chevron + label,
+    /// accent text while hovered, hover row tint, open state persisted in the
+    /// window storage. Replaces ImGui.CollapsingHeader — returns whether the
+    /// section is open; draw the section content inside the if-block.
+    /// </summary>
+    public bool DrawCollapsibleSection(string label, bool defaultOpen = false)
+    {
+        var storage = ImGui.GetStateStorage();
+        var storageId = ImGui.GetID("collapsible##" + label);
+        var open = storage.GetInt(storageId, defaultOpen ? 1 : 0) != 0;
+
+        var scale = ImGuiHelpers.GlobalScale;
+        var cursor = ImGui.GetCursorScreenPos();
+        var height = ImGui.GetFrameHeight();
+        var width = BoundedContentAvailX();
+        var pressed = ImGui.InvisibleButton("##sectionToggle" + label, new Vector2(width, height));
+        var hovered = ImGui.IsItemHovered();
+        if (pressed)
+        {
+            open = !open;
+            storage.SetInt(storageId, open ? 1 : 0);
+        }
+
+        var drawList = ImGui.GetWindowDrawList();
+        if (hovered)
+        {
+            var tint = SpheneDesign.Accent with { W = 0.08f * ImGui.GetStyle().Alpha };
+            drawList.AddRectFilled(cursor, cursor + new Vector2(width, height),
+                ImGui.ColorConvertFloat4ToU32(tint), SpheneDesign.SwatchRadius(height));
+        }
+
+        ImGui.SetCursorScreenPos(cursor + new Vector2(2f * scale,
+            (height - ImGui.GetTextLineHeight()) * 0.5f));
+        IconText(open ? FontAwesomeIcon.ChevronDown : FontAwesomeIcon.ChevronRight,
+            hovered ? SpheneDesign.Accent : SpheneDesign.TextMuted);
+        ImGui.SameLine(0f, SpheneDesign.Gap * 0.5f);
+        ColorText(label, open ? SpheneDesign.TextPrimary : SpheneDesign.TextSecondary);
+
+        SpheneDesignLint.CheckItemWithinBound(label);
+        return open;
+    }
+
+    /// <summary>
+    /// Rounded color swatch button in the value-control language: filled with
+    /// the color, subtle border that brightens on hover and turns accent when
+    /// <paramref name="selected"/>. Never opens a picker — the caller owns the
+    /// click (returns true) and decides what to show (popup, palette…).
+    /// </summary>
+    public static bool DrawColorSwatchButton(string id, Vector4 color, float size = -1f,
+        bool selected = false)
+    {
+        var scale = ImGuiHelpers.GlobalScale;
+        if (size < 0f)
+        {
+            size = SpheneDesign.SwatchSize;
+        }
+        var pos = ImGui.GetCursorScreenPos();
+        var clicked = ImGui.InvisibleButton(id, new Vector2(size, size));
+        var hovered = ImGui.IsItemHovered();
+        var fill = hovered
+            ? new Vector4(MathF.Min(1f, color.X * SpheneDesign.SwatchHoverBrighten + SpheneDesign.SwatchHoverBrightenAdd),
+                MathF.Min(1f, color.Y * SpheneDesign.SwatchHoverBrighten + SpheneDesign.SwatchHoverBrightenAdd),
+                MathF.Min(1f, color.Z * SpheneDesign.SwatchHoverBrighten + SpheneDesign.SwatchHoverBrightenAdd), color.W)
+            : color;
+        var rounding = SpheneDesign.SwatchRadius(size);
+        var accent = SpheneCustomTheme.Colors.AccentBlue;
+        var border = selected
+            ? new Vector4(accent.X, accent.Y, accent.Z, SpheneDesign.SwatchBorderAlphaSelected)
+            : hovered
+                ? new Vector4(accent.X, accent.Y, accent.Z, SpheneDesign.SwatchBorderAlphaHover)
+                : new Vector4(1f, 1f, 1f, SpheneDesign.SwatchBorderAlpha);
+        var max = pos + new Vector2(size, size);
+        var drawList = ImGui.GetWindowDrawList();
+        drawList.AddRectFilled(pos, max, ImGui.ColorConvertFloat4ToU32(fill), rounding);
+        drawList.AddRect(pos, max, ImGui.ColorConvertFloat4ToU32(border), rounding,
+            ImDrawFlags.None, selected ? SpheneDesign.SwatchSelectedThickness * scale : 1f * scale);
+        SpheneDesignLint.CheckItemWithinBound(id);
+        return clicked;
+    }
+
+    /// <summary>
+    /// Same swatch button as <see cref="DrawColorSwatchButton"/> but renders a
+    /// short glyph (symbol, letter) centered instead of a color fill — used for
+    /// palette pickers whose entries are characters rather than colors.
+    /// </summary>
+    public static bool DrawGlyphSwatchButton(string id, string glyph, float size = -1f,
+        bool selected = false)
+    {
+        var scale = ImGuiHelpers.GlobalScale;
+        if (size < 0f)
+        {
+            size = SpheneDesign.SwatchSize;
+        }
+        var pos = ImGui.GetCursorScreenPos();
+        var clicked = ImGui.InvisibleButton(id, new Vector2(size, size));
+        var hovered = ImGui.IsItemHovered();
+        var style = ImGui.GetStyle();
+        var fill = hovered
+            ? style.Colors[(int)ImGuiCol.FrameBgHovered]
+            : style.Colors[(int)ImGuiCol.FrameBg];
+        var accent = SpheneCustomTheme.Colors.AccentBlue;
+        var border = selected
+            ? new Vector4(accent.X, accent.Y, accent.Z, SpheneDesign.SwatchBorderAlphaSelected)
+            : hovered
+                ? new Vector4(accent.X, accent.Y, accent.Z, SpheneDesign.SwatchBorderAlphaHover)
+                : new Vector4(1f, 1f, 1f, SpheneDesign.SwatchBorderAlpha);
+        var max = pos + new Vector2(size, size);
+        var rounding = SpheneDesign.SwatchRadius(size);
+        var drawList = ImGui.GetWindowDrawList();
+        drawList.AddRectFilled(pos, max, ImGui.ColorConvertFloat4ToU32(fill), rounding);
+        drawList.AddRect(pos, max, ImGui.ColorConvertFloat4ToU32(border), rounding,
+            ImDrawFlags.None, selected ? SpheneDesign.SwatchSelectedThickness * scale : 1f * scale);
+        if (glyph.Length > 0)
+        {
+            var textSize = ImGui.CalcTextSize(glyph);
+            drawList.AddText(new Vector2(pos.X + (size - textSize.X) * 0.5f,
+                pos.Y + (size - textSize.Y) * 0.5f), ImGui.GetColorU32(ImGuiCol.Text), glyph);
+        }
+        SpheneDesignLint.CheckItemWithinBound(id);
+        return clicked;
     }
 
     /// <summary>
@@ -1232,7 +1763,11 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
         var cursor = ImGui.GetCursorScreenPos();
         var bound = SpheneWindowChrome.CurrentCardContentRightBound;
         var rightBound = bound > 0f ? bound : cursor.X + ImGui.GetContentRegionAvail().X;
-        if (cursor.X + ImGui.GetStyle().ItemSpacing.X + nextItemWidth > rightBound)
+        // SameLine continues at the previous item's right edge, not at the
+        // line start — measuring from the cursor would always claim a full
+        // line of room and let items render past the bound.
+        var itemStartX = MathF.Max(cursor.X, ImGui.GetItemRectMax().X);
+        if (itemStartX + ImGui.GetStyle().ItemSpacing.X + nextItemWidth > rightBound)
         {
             return false;
         }

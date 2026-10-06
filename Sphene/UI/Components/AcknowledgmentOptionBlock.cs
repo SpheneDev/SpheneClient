@@ -133,7 +133,7 @@ public static class AcknowledgmentOptionBlock
         ImGui.PushID(blockId);
         try
         {
-            if (ImGui.Button("Reset Acknowledgment Settings to Defaults"))
+            if (UiSharedService.DrawButton("Reset Acknowledgment Settings to Defaults"))
             {
                 configService.Current.ShowAcknowledgmentPopups = false;
                 configService.Current.ShowWaitingForAcknowledgmentPopups = false;

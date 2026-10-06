@@ -424,11 +424,11 @@ public class DrawFolderGroup : DrawFolderBase
         }
         using (SpheneCustomTheme.ApplyContextMenuTheme())
         {
-            if (ImGui.BeginPopup("User Flyout Menu"))
+            if (SpheneWindowChrome.BeginStyledPopup("User Flyout Menu"))
             {
                 using (ImRaii.PushId($"buttons-{_id}")) DrawMenu(_menuWidth);
                 _menuWidth = ImGui.GetWindowContentRegionMax().X - ImGui.GetWindowContentRegionMin().X;
-                ImGui.EndPopup();
+                SpheneWindowChrome.EndStyledPopup();
             }
             else
             {

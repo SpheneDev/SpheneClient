@@ -14,6 +14,7 @@ using System.Numerics;
 using Sphene.UI.Panels;
 using Sphene.UI.CharaDataHub;
 using Sphene.UI.Syncshell;
+using Sphene.UI.Styling;
 
 namespace Sphene.UI.Components;
 
@@ -601,7 +602,7 @@ public class TopTabMenu
                     FontAwesomeIcon enableIcon, FontAwesomeIcon disableIcon,
         Func<UserPermissions, UserPermissions> actEnable, Func<UserPermissions, UserPermissions> actDisable)
     {
-        if (ImGui.BeginPopup(popupTitle))
+        if (SpheneWindowChrome.BeginStyledPopup(popupTitle))
         {
             using (SpheneCustomTheme.ApplyContextMenuTheme())
             {
@@ -633,7 +634,7 @@ public class TopTabMenu
                     ImGui.CloseCurrentPopup();
                 }
             }
-            ImGui.EndPopup();
+            SpheneWindowChrome.EndStyledPopup();
         }
     }
     private void PopupSyncshellSetting(string popupTitle, string enableText, string disableText,
@@ -641,7 +642,7 @@ public class TopTabMenu
         Func<GroupUserPreferredPermissions, GroupUserPreferredPermissions> actEnable,
         Func<GroupUserPreferredPermissions, GroupUserPreferredPermissions> actDisable)
     {
-        if (ImGui.BeginPopup(popupTitle))
+        if (SpheneWindowChrome.BeginStyledPopup(popupTitle))
         {
             using (SpheneCustomTheme.ApplyContextMenuTheme())
             {
@@ -673,7 +674,7 @@ public class TopTabMenu
                     ImGui.CloseCurrentPopup();
                 }
             }
-            ImGui.EndPopup();
+            SpheneWindowChrome.EndStyledPopup();
         }
     }
 }

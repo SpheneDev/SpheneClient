@@ -84,31 +84,30 @@ public static class NotificationSoundOptionBlock
         }
         else if (soundConfig.OutputMode == SoundOutputMode.CustomSound)
         {
-            ImGui.Text("Sound File");
             var customPath = soundConfig.CustomSoundPath;
-            var inputAvailWidth = UiSharedService.BoundedContentAvailX();
-            var browseBtnWidth = ImGui.CalcTextSize("Browse...").X + ImGui.GetStyle().FramePadding.X * 2f;
-            ImGui.SetNextItemWidth(inputAvailWidth - browseBtnWidth - ImGui.GetStyle().ItemSpacing.X);
-            if (UiSharedService.DrawInputText("##CustomSoundPath" + blockId, ref customPath, 256))
+            var caps = fileDialogManager == null
+                ? Array.Empty<UiSharedService.InputButtonSpec>()
+                : new[] { new UiSharedService.InputButtonSpec(Label: "Browse",
+                    Tooltip: "Browse for a sound file.") };
+            var (pathChanged, browsePressed) = uiShared.DrawInputTextWithButtons(
+                "Sound File##CustomSoundPath" + blockId, ref customPath, 256,
+                buttons: caps);
+            if (pathChanged)
             {
                 soundConfig.CustomSoundPath = customPath;
                 changed = true;
             }
 
-            if (fileDialogManager != null)
+            if (browsePressed == 0 && fileDialogManager != null)
             {
-                ImGui.SameLine();
-                if (ImGui.Button("Browse...##" + blockId))
+                fileDialogManager.OpenFileDialog("Select Sound File", ".wav,.mp3", (success, file) =>
                 {
-                    fileDialogManager.OpenFileDialog("Select Sound File", ".wav,.mp3", (success, file) =>
+                    if (success && !string.IsNullOrWhiteSpace(file))
                     {
-                        if (success && !string.IsNullOrWhiteSpace(file))
-                        {
-                            soundConfig.CustomSoundPath = file;
-                            configService.Save();
-                        }
-                    });
-                }
+                        soundConfig.CustomSoundPath = file;
+                        configService.Save();
+                    }
+                });
             }
         }
 
@@ -119,7 +118,7 @@ public static class NotificationSoundOptionBlock
             changed = true;
         }
 
-        if (onTestSound != null && ImGui.Button("Test Sound##" + blockId))
+        if (onTestSound != null && UiSharedService.DrawButton("Test Sound##" + blockId))
         {
             onTestSound(soundConfig);
         }

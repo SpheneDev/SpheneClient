@@ -555,7 +555,9 @@ public static class SpheneWindowChrome
     /// </summary>
     public static void DrawCardContentRegion(float width, string? id, Action content)
     {
-        var tableId = $"##card-content-{(id ?? "region")}-{(int)ImGui.GetCursorScreenPos().Y}";
+        // Window-space Y stays constant while scrolling — screen Y would mint a
+        // new table instance per scroll position and thrash its measurement.
+        var tableId = $"##card-content-{(id ?? "region")}-{(int)ImGui.GetCursorPos().Y}";
         CardContentBounds.Push(new Vector2(ImGui.GetCursorScreenPos().X, ImGui.GetCursorScreenPos().X + width));
         try
         {
@@ -611,6 +613,29 @@ public static class SpheneWindowChrome
 
     private static readonly Stack<Vector2> CardContentBounds = new();
 
+    /// <summary>
+    /// Sentinel bound entry meaning "no active card". Pushed while a separate
+    /// window (styled popup, modal) is drawn so helpers dock against that
+    /// window's own content region instead of the stale card edge behind it.
+    /// </summary>
+    private static readonly Vector2 NoCardBound = new(-1f, -1f);
+
+    private sealed class CardBoundSuppression : IDisposable
+    {
+        public void Dispose() => CardContentBounds.Pop();
+    }
+
+    /// <summary>
+    /// Suppresses the active card content bound until disposed — use while
+    /// drawing modal/popup windows so right-docked helpers measure against the
+    /// popup window rather than the card rendered underneath it.
+    /// </summary>
+    public static IDisposable SuppressCardBound()
+    {
+        CardContentBounds.Push(NoCardBound);
+        return new CardBoundSuppression();
+    }
+
     private sealed class ScrollAreaState
     {
         public string Id = string.Empty;
@@ -625,9 +650,46 @@ public static class SpheneWindowChrome
         public bool HideTopBorder;
         public float TopInset;
         public bool BoundsPushed;
+        public int Depth;
     }
 
     private static readonly Stack<ScrollAreaState> ScrollAreaStack = new();
+
+    private static readonly Stack<IDisposable> StyledPopupThemeStack = new();
+
+    /// <summary>
+    /// <see cref="ImGui.BeginPopup"/> wrapped in the design-system popup theme:
+    /// the configured rounding, border and padding (<see cref="SpheneDesign"/>)
+    /// are pushed before the popup window is created, so the popup frame itself
+    /// is styled — a scope pushed after Begin would only affect its content.
+    /// Pair with <see cref="EndStyledPopup"/>.
+    /// </summary>
+    public static bool BeginStyledPopup(string id)
+    {
+        var themeScope = SpheneCustomTheme.ApplyContextMenuTheme();
+        if (!ImGui.BeginPopup(id))
+        {
+            themeScope.Dispose();
+            return false;
+        }
+        StyledPopupThemeStack.Push(themeScope);
+        CardContentBounds.Push(NoCardBound);
+        return true;
+    }
+
+    /// <summary>Ends a popup opened via <see cref="BeginStyledPopup"/>.</summary>
+    public static void EndStyledPopup()
+    {
+        ImGui.EndPopup();
+        if (CardContentBounds.Count > 0)
+        {
+            CardContentBounds.Pop();
+        }
+        if (StyledPopupThemeStack.Count > 0)
+        {
+            StyledPopupThemeStack.Pop().Dispose();
+        }
+    }
 
     /// <summary>
     /// Begins a child region without a visible scrollbar. Wheel scrolling still works.
@@ -653,6 +715,7 @@ public static class SpheneWindowChrome
             TopInset = topInset,
             ParentMin = ImGui.GetWindowPos(),
             ParentMax = ImGui.GetWindowPos() + ImGui.GetWindowSize(),
+            Depth = ScrollAreaStack.Count,
         };
         if (noPadding || contentPadding.HasValue)
         {
@@ -755,6 +818,167 @@ public static class SpheneWindowChrome
             border, windowFlags, contentPadding: contentPadding);
 
     /// <summary>
+    /// Draws a segmented tab strip: a row of rounded pill buttons sharing the
+    /// accent language of the cards and slide switches. The selection persists
+    /// in the window's state storage keyed by <paramref name="id"/> — pass
+    /// <paramref name="preferredIndex"/> ≥ 0 to force-select a tab once (e.g.
+    /// programmatic navigation). Unlike a real ImGui tab bar the strip never
+    /// reacts to the mouse wheel and never emits overflow scroll buttons;
+    /// buttons that do not fit wrap to the next line. Returns the active tab
+    /// index — the caller renders that tab's content. With
+    /// <paramref name="scrollIntoViewOnChange"/> a tab switch scrolls the
+    /// strip to the top of the view so the new (often shorter) content does
+    /// not leave the user staring at the dead space below the previous
+    /// scroll position.
+    /// </summary>
+    public static int DrawTabStrip(string id, IReadOnlyList<string> labels,
+        int preferredIndex = -1, bool scrollIntoViewOnChange = false)
+    {
+        if (labels.Count == 0)
+        {
+            return -1;
+        }
+
+        var scale = ImGuiHelpers.GlobalScale;
+        var style = ImGui.GetStyle();
+        var selected = TabStripSelection(id, labels.Count, preferredIndex);
+        var previous = selected;
+        var padX = style.FramePadding.X + 8f * scale;
+
+        using var frameStyle = ImRaii.PushStyle(ImGuiStyleVar.FrameRounding,
+                ImGui.GetFrameHeight() * 0.5f)
+            .Push(ImGuiStyleVar.FrameBorderSize, 1f * scale);
+
+        for (var i = 0; i < labels.Count; i++)
+        {
+            var width = ImGui.CalcTextSize(labels[i]).X + padX * 2f;
+            if (i > 0)
+            {
+                UiSharedService.SameLineIfFits(width);
+            }
+            if (TabStripButton(id, i, labels[i], i == selected,
+                new Vector2(width, 0f)))
+            {
+                selected = i;
+            }
+        }
+
+        if (scrollIntoViewOnChange && selected != previous)
+        {
+            ImGui.SetScrollHereY(0f);
+        }
+        ImGui.GetStateStorage().SetInt(ImGui.GetID(id), selected);
+        return selected;
+    }
+
+    /// <summary>
+    /// <see cref="DrawTabStrip"/> variant for many or long labels: the buttons
+    /// stack as a fixed-width left column (sized to the longest label). Call
+    /// <see cref="ImGui.SameLine"/> after it and render the tab content to the
+    /// right of the column.
+    /// </summary>
+    public static int DrawVerticalTabStrip(string id, IReadOnlyList<string> labels,
+        int preferredIndex = -1)
+    {
+        if (labels.Count == 0)
+        {
+            return -1;
+        }
+
+        var selected = TabStripSelection(id, labels.Count, preferredIndex);
+        var clicked = DrawVerticalNavColumn(id, labels, selected);
+        if (clicked >= 0)
+        {
+            selected = clicked;
+        }
+
+        ImGui.GetStateStorage().SetInt(ImGui.GetID(id), selected);
+        return selected;
+    }
+
+    /// <summary>
+    /// Controlled <see cref="DrawVerticalTabStrip"/> variant for scrollspy-style
+    /// navigation: <paramref name="activeIndex"/> selects the highlighted entry
+    /// (driven externally, e.g. the scroll position over a stacked section
+    /// list) and the return value is the clicked index or -1. Nothing is
+    /// persisted — the caller owns the active state and applies the scroll.
+    /// </summary>
+    public static int DrawVerticalTabNav(string id, IReadOnlyList<string> labels,
+        int activeIndex)
+    {
+        if (labels.Count == 0)
+        {
+            return -1;
+        }
+
+        return DrawVerticalNavColumn(id, labels,
+            Math.Clamp(activeIndex, 0, labels.Count - 1));
+    }
+
+    private static int DrawVerticalNavColumn(string id, IReadOnlyList<string> labels,
+        int activeIndex)
+    {
+        var scale = ImGuiHelpers.GlobalScale;
+        var padX = ImGui.GetStyle().FramePadding.X + 8f * scale;
+        var width = 0f;
+        for (var i = 0; i < labels.Count; i++)
+        {
+            width = MathF.Max(width, ImGui.CalcTextSize(labels[i]).X);
+        }
+        width += padX * 2f;
+
+        var clicked = -1;
+        using var frameStyle = ImRaii.PushStyle(ImGuiStyleVar.FrameRounding,
+                AccentCardRounding * scale)
+            .Push(ImGuiStyleVar.FrameBorderSize, 1f * scale);
+
+        for (var i = 0; i < labels.Count; i++)
+        {
+            if (TabStripButton(id, i, labels[i], i == activeIndex,
+                new Vector2(width, 0f)))
+            {
+                clicked = i;
+            }
+        }
+
+        return clicked;
+    }
+
+    private static int TabStripSelection(string id, int count, int preferredIndex)
+        => Math.Clamp(
+            preferredIndex >= 0 && preferredIndex < count
+                ? preferredIndex
+                : ImGui.GetStateStorage().GetInt(ImGui.GetID(id), 0),
+            0, count - 1);
+
+    private static bool TabStripButton(string id, int index, string label, bool isActive,
+        Vector2 size)
+    {
+        var accent = SpheneCustomTheme.CurrentTheme.AccentCyan;
+        var textDim = ImGui.GetStyle().Colors[(int)ImGuiCol.TextDisabled];
+        var textActive = new Vector4(
+            accent.X + (1f - accent.X) * 0.55f,
+            accent.Y + (1f - accent.Y) * 0.55f,
+            accent.Z + (1f - accent.Z) * 0.55f, 1f);
+
+        using var colors = ImRaii.PushColor(ImGuiCol.Button, isActive
+                ? new Vector4(accent.X, accent.Y, accent.Z, 0.30f)
+                : new Vector4(1f, 1f, 1f, 0.05f))
+            .Push(ImGuiCol.ButtonHovered, isActive
+                ? new Vector4(accent.X, accent.Y, accent.Z, 0.42f)
+                : new Vector4(1f, 1f, 1f, 0.12f))
+            .Push(ImGuiCol.ButtonActive, isActive
+                ? new Vector4(accent.X, accent.Y, accent.Z, 0.52f)
+                : new Vector4(1f, 1f, 1f, 0.18f))
+            .Push(ImGuiCol.Border, isActive
+                ? new Vector4(accent.X, accent.Y, accent.Z, 0.80f)
+                : new Vector4(1f, 1f, 1f, 0.14f))
+            .Push(ImGuiCol.Text, isActive ? textActive : textDim);
+
+        return ImGui.Button($"{label}##{id}{index}", size);
+    }
+
+    /// <summary>
     /// Ends a child opened by <see cref="BeginScrollArea"/> and overlays the scroll fades.
     /// <paramref name="fadeBaseColor"/> should match the background behind the child;
     /// defaults to the window background color.
@@ -838,7 +1062,11 @@ public static class SpheneWindowChrome
             var cornerReach = MathF.Max(styleVars.WindowBorderSize,
                     MathF.Max(styleVars.WindowPadding.X, styleVars.WindowPadding.Y))
                 + 4f * ImGuiHelpers.GlobalScale;
-            var ownsCorner = state.ParentMax.X - max.X <= cornerReach
+            // Only the outermost scroll area (a direct window child) may own
+            // the frame corner: nested areas reach their parent child's edge,
+            // whose "corner" sits mid-window and is not a resize affordance.
+            var ownsCorner = state.Depth == 0
+                && state.ParentMax.X - max.X <= cornerReach
                 && state.ParentMax.Y - max.Y <= cornerReach;
             RedrawWindowBorder(min, max, state.ParentMin, state.ParentMax, cornerReach);
             // The grip stamp goes last so its corner triangle covers the

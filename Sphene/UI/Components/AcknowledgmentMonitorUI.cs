@@ -20,19 +20,21 @@ public class AcknowledgmentMonitorUI : WindowMediatorSubscriberBase
     private readonly EnhancedAcknowledgmentManager _acknowledgmentManager;
     private readonly SessionAcknowledgmentManager _sessionAcknowledgmentManager;
     private readonly ApiController _apiController;
+    private readonly UiSharedService _uiShared;
     private AcknowledgmentConfiguration _config;
     private AcknowledgmentMetrics _metrics;
     private bool _showAdvancedSettings = false;
     private bool _showMetricsDetails = false;
     private bool _showSessionDetails = false;
     
-    public AcknowledgmentMonitorUI(ILogger<AcknowledgmentMonitorUI> logger, EnhancedAcknowledgmentManager acknowledgmentManager, 
-        SessionAcknowledgmentManager sessionAcknowledgmentManager, SpheneMediator mediator, PerformanceCollectorService performanceCollectorService, ApiController apiController)
+    public AcknowledgmentMonitorUI(ILogger<AcknowledgmentMonitorUI> logger, EnhancedAcknowledgmentManager acknowledgmentManager,
+        SessionAcknowledgmentManager sessionAcknowledgmentManager, SpheneMediator mediator, PerformanceCollectorService performanceCollectorService, ApiController apiController, UiSharedService uiSharedService)
         : base(logger, mediator, "Acknowledgment Monitor###SpheneAckMonitor", performanceCollectorService)
     {
         _acknowledgmentManager = acknowledgmentManager;
         _sessionAcknowledgmentManager = sessionAcknowledgmentManager;
         _apiController = apiController;
+        _uiShared = uiSharedService;
         _config = _acknowledgmentManager.GetConfiguration();
         _metrics = _acknowledgmentManager.GetMetrics();
         
@@ -58,13 +60,13 @@ public class AcknowledgmentMonitorUI : WindowMediatorSubscriberBase
         // Refresh metrics
         _metrics = _acknowledgmentManager.GetMetrics();
         
-        if (ImGui.CollapsingHeader("Acknowledgment System Monitor"))
+        if (_uiShared.DrawCollapsibleSection("Acknowledgment System Monitor"))
         {
             UiSharedService.TextWrapped("Monitor and configure acknowledgment batching, retries, and sessions.");
             DrawMetricsOverview();
-            ImGui.Separator();
+            UiSharedService.DrawSeparator();
             DrawSessionInformation();
-            ImGui.Separator();
+            UiSharedService.DrawSeparator();
             
             // Only show configuration to admin users
             if (_apiController.IsAdmin)
@@ -74,13 +76,13 @@ public class AcknowledgmentMonitorUI : WindowMediatorSubscriberBase
             
             if (_showMetricsDetails)
             {
-                ImGui.Separator();
+                UiSharedService.DrawSeparator();
                 DrawDetailedMetrics();
             }
             
             if (_showSessionDetails)
             {
-                ImGui.Separator();
+                UiSharedService.DrawSeparator();
                 DrawSessionDetails();
             }
         }
@@ -128,7 +130,7 @@ public class AcknowledgmentMonitorUI : WindowMediatorSubscriberBase
         }
         
         // Show/hide detailed metrics button
-        if (ImGui.Button(_showMetricsDetails ? "Hide Details" : "Show Details"))
+        if (UiSharedService.DrawButton(_showMetricsDetails ? "Hide Details" : "Show Details"))
         {
             _showMetricsDetails = !_showMetricsDetails;
         }
@@ -149,7 +151,7 @@ public class AcknowledgmentMonitorUI : WindowMediatorSubscriberBase
         
         // Show/hide session details button
         ImGui.SameLine();
-        if (ImGui.Button(_showSessionDetails ? "Hide Session Details" : "Show Session Details"))
+        if (UiSharedService.DrawButton(_showSessionDetails ? "Hide Session Details" : "Show Session Details"))
         {
             _showSessionDetails = !_showSessionDetails;
         }
@@ -185,7 +187,7 @@ public class AcknowledgmentMonitorUI : WindowMediatorSubscriberBase
             ImGui.TextColored(ImGuiColors.ParsedGreen, "No pending acknowledgments in current session.");
         }
 
-        ImGui.Separator();
+        UiSharedService.DrawSeparator();
         ImGui.Text("Pending Acknowledgments");
         if (pendingAcks.Count == 0)
         {
@@ -215,7 +217,7 @@ public class AcknowledgmentMonitorUI : WindowMediatorSubscriberBase
                     ImGui.TableNextColumn();
                     
                     ImGui.PushID($"ack_clear_{userKey}");
-                    if (ImGui.Button("Clear"))
+                    if (UiSharedService.DrawButton("Clear"))
                     {
                         var removed = _sessionAcknowledgmentManager.RemovePendingAcknowledgment(new Sphene.API.Data.UserData(userKey), ackId);
                         if (removed)
@@ -227,7 +229,7 @@ public class AcknowledgmentMonitorUI : WindowMediatorSubscriberBase
                     
                     ImGui.SameLine();
                     ImGui.PushID($"ack_timeout_{userKey}");
-                    if (ImGui.Button("Mark Timeout"))
+                    if (UiSharedService.DrawButton("Mark Timeout"))
                     {
                         _sessionAcknowledgmentManager.ProcessTimeoutAcknowledgment(ackId);
                     }
@@ -254,7 +256,7 @@ public class AcknowledgmentMonitorUI : WindowMediatorSubscriberBase
             }
         }
         
-        ImGui.Spacing();
+        UiSharedService.DrawSpacing();
         
         // Priority breakdown
         if (_metrics.PriorityCounts.Any())
@@ -284,7 +286,7 @@ public class AcknowledgmentMonitorUI : WindowMediatorSubscriberBase
         
         // Basic settings
         var enableBatching = _config.EnableBatching;
-        if (ImGui.Checkbox("Enable Batching", ref enableBatching))
+        if (UiSharedService.DrawToggleChip("Enable Batching", ref enableBatching))
         {
             _config.EnableBatching = enableBatching;
         }
@@ -292,7 +294,7 @@ public class AcknowledgmentMonitorUI : WindowMediatorSubscriberBase
         
         ImGui.SameLine();
         var enableAutoRetry = _config.EnableAutoRetry;
-        if (ImGui.Checkbox("Auto Retry", ref enableAutoRetry))
+        if (UiSharedService.DrawToggleChip("Auto Retry", ref enableAutoRetry))
         {
             _config.EnableAutoRetry = enableAutoRetry;
         }
@@ -323,7 +325,7 @@ public class AcknowledgmentMonitorUI : WindowMediatorSubscriberBase
         }
         
         // Advanced settings toggle
-        if (ImGui.Button(_showAdvancedSettings ? "Hide Advanced" : "Show Advanced"))
+        if (UiSharedService.DrawButton(_showAdvancedSettings ? "Hide Advanced" : "Show Advanced"))
         {
             _showAdvancedSettings = !_showAdvancedSettings;
         }
@@ -337,12 +339,12 @@ public class AcknowledgmentMonitorUI : WindowMediatorSubscriberBase
     // Draws the advanced settings section
     private void DrawAdvancedSettings()
     {
-        ImGui.Separator();
+        UiSharedService.DrawSeparator();
         ImGui.Text("Advanced Settings");
         
         // Priority system
         var enablePriority = _config.EnablePrioritySystem;
-        if (ImGui.Checkbox("Enable Priority System", ref enablePriority))
+        if (UiSharedService.DrawToggleChip("Enable Priority System", ref enablePriority))
         {
             _config.EnablePrioritySystem = enablePriority;
         }
@@ -417,14 +419,14 @@ public class AcknowledgmentMonitorUI : WindowMediatorSubscriberBase
         }
         
         var enableMetrics = _config.EnableMetrics;
-        if (ImGui.Checkbox("Enable Metrics Collection", ref enableMetrics))
+        if (UiSharedService.DrawToggleChip("Enable Metrics Collection", ref enableMetrics))
         {
             _config.EnableMetrics = enableMetrics;
         }
         
         // Reset to defaults button
-        ImGui.Spacing();
-        if (ImGui.Button("Reset to Defaults"))
+        UiSharedService.DrawSpacing();
+        if (UiSharedService.DrawButton("Reset to Defaults"))
         {
             _config = new AcknowledgmentConfiguration();
         }

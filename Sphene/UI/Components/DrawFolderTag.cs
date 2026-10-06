@@ -234,10 +234,10 @@ public class DrawFolderTag : DrawFolderBase
             }
             using (SpheneCustomTheme.ApplyContextMenuTheme())
             {
-                if (ImGui.BeginPopup("User Flyout Menu"))
+                if (SpheneWindowChrome.BeginStyledPopup("User Flyout Menu"))
                 {
                     using (ImRaii.PushId($"buttons-{_id}")) DrawMenu(200f); // Use fixed width for menu
-                    ImGui.EndPopup();
+                    SpheneWindowChrome.EndStyledPopup();
                 }
             }
         }
