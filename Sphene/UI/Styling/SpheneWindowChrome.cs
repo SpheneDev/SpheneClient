@@ -594,6 +594,21 @@ public static class SpheneWindowChrome
     public static float CurrentCardContentLeftBound
         => CardContentBounds.Count > 0 ? CardContentBounds.Peek().X : -1f;
 
+    /// <summary>
+    /// Content width that aligns with the section cards of the current page:
+    /// remaining width clamped to the window edge minus the active scroll-area
+    /// inset and border. Use for elements outside cards (e.g. a tab bar) that
+    /// must share the cards' left and right edges.
+    /// </summary>
+    public static float CardAlignedAvailX()
+    {
+        var scale = ImGuiHelpers.GlobalScale;
+        var cursorX = ImGui.GetCursorScreenPos().X;
+        var rightEdge = MathF.Min(cursorX + ImGui.GetContentRegionAvail().X,
+            ImGui.GetWindowPos().X + ImGui.GetWindowSize().X - 1f * scale - ActiveContentInset);
+        return MathF.Max(60f * scale, rightEdge - cursorX);
+    }
+
     private static readonly Stack<Vector2> CardContentBounds = new();
 
     private sealed class ScrollAreaState
@@ -609,6 +624,7 @@ public static class SpheneWindowChrome
         public float ContentInset;
         public bool HideTopBorder;
         public float TopInset;
+        public bool BoundsPushed;
     }
 
     private static readonly Stack<ScrollAreaState> ScrollAreaStack = new();
@@ -621,10 +637,13 @@ public static class SpheneWindowChrome
     /// reach the edges; inner spacing must then be managed manually.
     /// <paramref name="contentInset"/> indents content inside a noPadding child;
     /// negative values use the default <see cref="ScrollAreaContentInset"/>.
+    /// <paramref name="contentPadding"/> overrides the child's WindowPadding
+    /// (unscaled, multiplied by GlobalScale) without the noPadding behavior.
     /// </summary>
     public static bool BeginScrollArea(string id, Vector2 size, bool border = false,
         ImGuiWindowFlags windowFlags = ImGuiWindowFlags.None, bool noPadding = false,
-        bool hideTopBorder = false, float topInset = 0f, float contentInset = -1f)
+        bool hideTopBorder = false, float topInset = 0f, float contentInset = -1f,
+        Vector2? contentPadding = null)
     {
         var state = new ScrollAreaState
         {
@@ -635,14 +654,18 @@ public static class SpheneWindowChrome
             ParentMin = ImGui.GetWindowPos(),
             ParentMax = ImGui.GetWindowPos() + ImGui.GetWindowSize(),
         };
-        if (noPadding)
+        if (noPadding || contentPadding.HasValue)
         {
-            ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, Vector2.Zero);
+            ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding,
+                noPadding ? Vector2.Zero : contentPadding!.Value * ImGuiHelpers.GlobalScale);
         }
         var begun = ImGui.BeginChild(id, size, false, windowFlags | ImGuiWindowFlags.NoScrollbar);
-        if (noPadding)
+        if (noPadding || contentPadding.HasValue)
         {
             ImGui.PopStyleVar();
+        }
+        if (noPadding)
+        {
             state.ContentInset = contentInset < 0f
                 ? ScrollAreaContentInset * ImGuiHelpers.GlobalScale
                 : contentInset;
@@ -684,10 +707,52 @@ public static class SpheneWindowChrome
                     new Vector2(state.ParentMax.X - borderSize, max.Y), false);
                 state.ClipPushed = true;
             }
+            // The child's own content edge is a bound too: labeled controls and
+            // toggle rows inside a scroll area dock to its padded inner edge,
+            // not to a wider enclosing card/region bound.
+            var contentX = ImGui.GetCursorScreenPos().X;
+            CardContentBounds.Push(new Vector2(contentX, contentX + ImGui.GetContentRegionAvail().X));
+            state.BoundsPushed = true;
         }
         ScrollAreaStack.Push(state);
         return begun;
     }
+
+    /// <summary>
+    /// Remaining height for a scroll child that must reach the bottom edge of
+    /// the visible region without overflowing into page scroll. Measures the
+    /// remaining content height and subtracts the trailing chrome that still
+    /// lands below the child: the enclosing card's bottom padding
+    /// (<see cref="AccentCardPadding"/>), the bottom spacer the page's own
+    /// <see cref="EndScrollArea"/> appends (<see cref="ScrollAreaContentInset"/>)
+    /// and the inter-item spacing around it.
+    /// <paramref name="bottomReserve"/> overrides the computed reserve for
+    /// callers outside cards or with additional trailing elements.
+    /// </summary>
+    public static float FillToViewBottomHeight(float bottomReserve = -1f)
+    {
+        var scale = ImGuiHelpers.GlobalScale;
+        if (bottomReserve < 0f)
+        {
+            bottomReserve = AccentCardPadding * scale
+                + ScrollAreaContentInset * scale
+                + ImGui.GetStyle().ItemSpacing.Y * 2f
+                + 1f * scale;
+        }
+        var minHeight = ImGui.GetTextLineHeightWithSpacing() * 2f;
+        return MathF.Max(minHeight, ImGui.GetContentRegionAvail().Y - bottomReserve);
+    }
+
+    /// <summary>
+    /// <see cref="BeginScrollArea"/> variant whose height fills the rest of the
+    /// view: the enclosing card closes flush at the page bottom instead of
+    /// poking past it and forcing a few pixels of outer scroll.
+    /// </summary>
+    public static bool BeginFillToBottomScrollArea(string id, float bottomReserve = -1f,
+        bool border = false, Vector2? contentPadding = null,
+        ImGuiWindowFlags windowFlags = ImGuiWindowFlags.None)
+        => BeginScrollArea(id, new Vector2(0f, FillToViewBottomHeight(bottomReserve)),
+            border, windowFlags, contentPadding: contentPadding);
 
     /// <summary>
     /// Ends a child opened by <see cref="BeginScrollArea"/> and overlays the scroll fades.
@@ -710,6 +775,10 @@ public static class SpheneWindowChrome
 
         if (state.Begun)
         {
+            if (state.BoundsPushed)
+            {
+                CardContentBounds.Pop();
+            }
             if (state.ContentInset > 0f)
             {
                 ImGui.Unindent(state.ContentInset);
@@ -721,6 +790,7 @@ public static class SpheneWindowChrome
             }
             var scrollY = ImGui.GetScrollY();
             var scrollMaxY = ImGui.GetScrollMaxY();
+            var childHovered = ImGui.IsWindowHovered();
             var min = ImGui.GetWindowPos();
             var max = min + ImGui.GetWindowSize();
             if (state.ClipPushed)
@@ -728,6 +798,21 @@ public static class SpheneWindowChrome
                 ImGui.PopClipRect();
             }
             ImGui.EndChild();
+
+            // Nested scroll chaining: once this child cannot scroll further in
+            // the wheel direction ImGui still consumes the input. Forward the
+            // delta to the parent window so scrolling continues seamlessly.
+            if (childHovered)
+            {
+                var wheel = ImGui.GetIO().MouseWheel;
+                var atTop = scrollY <= 0.5f;
+                var atBottom = scrollY >= scrollMaxY - 0.5f;
+                if (MathF.Abs(wheel) > 0.001f && ((wheel < 0f && atBottom) || (wheel > 0f && atTop)))
+                {
+                    ImGui.SetScrollY(ImGui.GetScrollY()
+                        - wheel * ImGui.GetTextLineHeightWithSpacing() * 4f);
+                }
+            }
 
             // Every ImGui window (including child windows) owns a draw list, and
             // lists composite parent-first, then children in creation order.
@@ -821,6 +906,11 @@ public static class SpheneWindowChrome
         float? fadeMinY = null)
     {
         var scale = ImGuiHelpers.GlobalScale;
+        // A child whose scrollable range is shorter than a line of text has
+        // no meaningful "more content" to hint at; the fade lip would only
+        // read as a stray shadow at the edge.
+        if (scrollMaxY <= ImGui.GetTextLineHeightWithSpacing())
+            return;
         // Fade strength: 1 while far from the end, shrinks to 0 as the edge
         // approaches so the band narrows and its opaque lip dissolves softly.
         var fadeRange = ScrollFadeHeight * scale;

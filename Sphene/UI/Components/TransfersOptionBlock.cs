@@ -75,7 +75,7 @@ public static class TransfersOptionBlock
         try
         {
             var useSpheneCdn = configService.Current.UseSpheneCdnDirectDownloads;
-            if (ImGui.Checkbox("Use CDN direct downloads", ref useSpheneCdn))
+            if (UiSharedService.DrawToggle("Use CDN direct downloads", ref useSpheneCdn))
             {
                 configService.Current.UseSpheneCdnDirectDownloads = useSpheneCdn;
                 configService.Save();
@@ -99,7 +99,7 @@ public static class TransfersOptionBlock
         try
         {
             var allowPenumbraMods = configService.Current.AllowReceivingPenumbraMods;
-            if (ImGui.Checkbox("Allow receiving Penumbra mod packages", ref allowPenumbraMods))
+            if (UiSharedService.DrawToggle("Allow receiving Penumbra mod packages", ref allowPenumbraMods))
             {
                 configService.Current.AllowReceivingPenumbraMods = allowPenumbraMods;
                 configService.Save();
@@ -120,7 +120,7 @@ public static class TransfersOptionBlock
         try
         {
             var useAlternativeUpload = configService.Current.UseAlternativeFileUpload;
-            if (ImGui.Checkbox("Use Alternative Transmission Method", ref useAlternativeUpload))
+            if (UiSharedService.DrawToggle("Use Alternative Transmission Method", ref useAlternativeUpload))
             {
                 configService.Current.UseAlternativeFileUpload = useAlternativeUpload;
                 configService.Save();
@@ -140,7 +140,7 @@ public static class TransfersOptionBlock
         try
         {
             var showTransferWindow = configService.Current.ShowTransferWindow;
-            if (ImGui.Checkbox("Show separate transmission monitor", ref showTransferWindow))
+            if (UiSharedService.DrawToggle("Show separate transmission monitor", ref showTransferWindow))
             {
                 configService.Current.ShowTransferWindow = showTransferWindow;
                 configService.Save();
@@ -165,7 +165,7 @@ public static class TransfersOptionBlock
         try
         {
             var editTransferWindowPosition = uiShared.EditTrackerPosition;
-            if (ImGui.Checkbox("Edit Transmission Monitor position", ref editTransferWindowPosition))
+            if (UiSharedService.DrawToggle("Edit Transmission Monitor position", ref editTransferWindowPosition))
             {
                 uiShared.EditTrackerPosition = editTransferWindowPosition;
             }
@@ -182,7 +182,7 @@ public static class TransfersOptionBlock
         try
         {
             var showTransferBars = configService.Current.ShowTransferBars;
-            if (ImGui.Checkbox("Show transmission indicators below players", ref showTransferBars))
+            if (UiSharedService.DrawToggle("Show transmission indicators below players", ref showTransferBars))
             {
                 configService.Current.ShowTransferBars = showTransferBars;
                 configService.Save();
@@ -203,7 +203,7 @@ public static class TransfersOptionBlock
         try
         {
             var transferBarShowText = configService.Current.TransferBarsShowText;
-            if (ImGui.Checkbox("Show Transmission Text", ref transferBarShowText))
+            if (UiSharedService.DrawToggle("Show Transmission Text", ref transferBarShowText))
             {
                 configService.Current.TransferBarsShowText = transferBarShowText;
                 configService.Save();
@@ -263,7 +263,7 @@ public static class TransfersOptionBlock
         try
         {
             var showUploading = configService.Current.ShowUploading;
-            if (ImGui.Checkbox("Show 'Transmitting' text below players that are currently transmitting", ref showUploading))
+            if (UiSharedService.DrawToggle("Show 'Transmitting' text below players that are currently transmitting", ref showUploading))
             {
                 configService.Current.ShowUploading = showUploading;
                 configService.Save();
@@ -284,7 +284,7 @@ public static class TransfersOptionBlock
         try
         {
             var showUploadingBigText = configService.Current.ShowUploadingBigText;
-            if (ImGui.Checkbox("Large font for 'Transmitting' text", ref showUploadingBigText))
+            if (UiSharedService.DrawToggle("Large font for 'Transmitting' text", ref showUploadingBigText))
             {
                 configService.Current.ShowUploadingBigText = showUploadingBigText;
                 configService.Save();

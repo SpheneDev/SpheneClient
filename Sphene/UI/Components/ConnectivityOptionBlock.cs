@@ -18,7 +18,7 @@ public static class ConnectivityOptionBlock
         try
         {
             var sendCensus = serverConfigurationManager.SendCensusData;
-            if (ImGui.Checkbox("Send Statistical Census Data", ref sendCensus))
+            if (UiSharedService.DrawToggle("Send Statistical Census Data", ref sendCensus))
             {
                 serverConfigurationManager.SendCensusData = sendCensus;
             }
@@ -44,7 +44,7 @@ public static class ConnectivityOptionBlock
         try
         {
             var isAutoLogin = authentication.AutoLogin;
-            if (ImGui.Checkbox("Automatically login to Sphene", ref isAutoLogin))
+            if (UiSharedService.DrawToggle("Automatically login to Sphene", ref isAutoLogin))
             {
                 authentication.AutoLogin = isAutoLogin;
                 serverConfigurationManager.Save();
@@ -85,7 +85,7 @@ public static class ConnectivityOptionBlock
         try
         {
             var forceWebSockets = selectedServer.ForceWebSockets;
-            if (ImGui.Checkbox("[wine only] Force WebSockets", ref forceWebSockets))
+            if (UiSharedService.DrawToggle("[wine only] Force WebSockets", ref forceWebSockets))
             {
                 selectedServer.ForceWebSockets = forceWebSockets;
                 serverConfigurationManager.Save();
@@ -108,7 +108,7 @@ public static class ConnectivityOptionBlock
         ImGui.PushID(blockId);
         try
         {
-            if (ImGui.Checkbox("Use Discord OAuth2 Authentication", ref useOauth))
+            if (UiSharedService.DrawToggle("Use Discord OAuth2 Authentication", ref useOauth))
             {
                 selectedServer.UseOAuth2 = useOauth;
                 serverConfigurationManager.Save();
@@ -147,7 +147,7 @@ public static class ConnectivityOptionBlock
         try
         {
             var individualIsSticky = permissions.IndividualIsSticky;
-            if (ImGui.Checkbox("Individually set permissions become preferred permissions", ref individualIsSticky))
+            if (UiSharedService.DrawToggle("Individually set permissions become preferred permissions", ref individualIsSticky))
             {
                 permissions.IndividualIsSticky = individualIsSticky;
                 _ = apiController.UserUpdateDefaultPermissions(permissions);
@@ -174,7 +174,7 @@ public static class ConnectivityOptionBlock
         try
         {
             var disableIndividualSounds = permissions.DisableIndividualSounds;
-            if (ImGui.Checkbox("Disable individual pair sounds", ref disableIndividualSounds))
+            if (UiSharedService.DrawToggle("Disable individual pair sounds", ref disableIndividualSounds))
             {
                 permissions.DisableIndividualSounds = disableIndividualSounds;
                 _ = apiController.UserUpdateDefaultPermissions(permissions);
@@ -194,7 +194,7 @@ public static class ConnectivityOptionBlock
         try
         {
             var disableIndividualAnimations = permissions.DisableIndividualAnimations;
-            if (ImGui.Checkbox("Disable individual pair animations", ref disableIndividualAnimations))
+            if (UiSharedService.DrawToggle("Disable individual pair animations", ref disableIndividualAnimations))
             {
                 permissions.DisableIndividualAnimations = disableIndividualAnimations;
                 _ = apiController.UserUpdateDefaultPermissions(permissions);
@@ -214,7 +214,7 @@ public static class ConnectivityOptionBlock
         try
         {
             var disableIndividualVfx = permissions.DisableIndividualVFX;
-            if (ImGui.Checkbox("Disable individual pair VFX", ref disableIndividualVfx))
+            if (UiSharedService.DrawToggle("Disable individual pair VFX", ref disableIndividualVfx))
             {
                 permissions.DisableIndividualVFX = disableIndividualVfx;
                 _ = apiController.UserUpdateDefaultPermissions(permissions);
@@ -234,7 +234,7 @@ public static class ConnectivityOptionBlock
         try
         {
             var disableGroupSounds = permissions.DisableGroupSounds;
-            if (ImGui.Checkbox("Disable Syncshell pair sounds", ref disableGroupSounds))
+            if (UiSharedService.DrawToggle("Disable Syncshell pair sounds", ref disableGroupSounds))
             {
                 permissions.DisableGroupSounds = disableGroupSounds;
                 _ = apiController.UserUpdateDefaultPermissions(permissions);
@@ -254,7 +254,7 @@ public static class ConnectivityOptionBlock
         try
         {
             var disableGroupAnimations = permissions.DisableGroupAnimations;
-            if (ImGui.Checkbox("Disable Syncshell pair animations", ref disableGroupAnimations))
+            if (UiSharedService.DrawToggle("Disable Syncshell pair animations", ref disableGroupAnimations))
             {
                 permissions.DisableGroupAnimations = disableGroupAnimations;
                 _ = apiController.UserUpdateDefaultPermissions(permissions);
@@ -274,7 +274,7 @@ public static class ConnectivityOptionBlock
         try
         {
             var disableGroupVfx = permissions.DisableGroupVFX;
-            if (ImGui.Checkbox("Disable Syncshell pair VFX", ref disableGroupVfx))
+            if (UiSharedService.DrawToggle("Disable Syncshell pair VFX", ref disableGroupVfx))
             {
                 permissions.DisableGroupVFX = disableGroupVfx;
                 _ = apiController.UserUpdateDefaultPermissions(permissions);

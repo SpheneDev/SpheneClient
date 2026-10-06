@@ -50,7 +50,7 @@ public static class NotificationsOptionBlock
     public static void DrawDisableOptionalPluginWarningsOption(SpheneConfigService configService, UiSharedService uiShared, string blockId = "DisableOptionalPluginWarnings")
     {
         var disableOptionalPluginWarnings = configService.Current.DisableOptionalPluginWarnings;
-        if (ImGui.Checkbox("Disable optional plugin warnings##" + blockId, ref disableOptionalPluginWarnings))
+        if (UiSharedService.DrawToggle("Disable optional plugin warnings##" + blockId, ref disableOptionalPluginWarnings))
         {
             configService.Current.DisableOptionalPluginWarnings = disableOptionalPluginWarnings;
             configService.Save();
@@ -62,7 +62,7 @@ public static class NotificationsOptionBlock
     public static void DrawEnableOnlineNotificationsOption(SpheneConfigService configService, string blockId = "EnableOnlineNotifications")
     {
         var onlineNotifs = configService.Current.ShowOnlineNotifications;
-        if (ImGui.Checkbox("Enable online notifications##" + blockId, ref onlineNotifs))
+        if (UiSharedService.DrawToggle("Enable online notifications##" + blockId, ref onlineNotifs))
         {
             configService.Current.ShowOnlineNotifications = onlineNotifs;
             configService.Save();
@@ -72,7 +72,7 @@ public static class NotificationsOptionBlock
     public static void DrawOnlyForIndividualPairsOption(SpheneConfigService configService, string blockId = "OnlyForIndividualPairs")
     {
         var onlineNotifsPairsOnly = configService.Current.ShowOnlineNotificationsOnlyForIndividualPairs;
-        if (ImGui.Checkbox("Only for individual pairs##" + blockId, ref onlineNotifsPairsOnly))
+        if (UiSharedService.DrawToggle("Only for individual pairs##" + blockId, ref onlineNotifsPairsOnly))
         {
             configService.Current.ShowOnlineNotificationsOnlyForIndividualPairs = onlineNotifsPairsOnly;
             configService.Save();
@@ -82,7 +82,7 @@ public static class NotificationsOptionBlock
     public static void DrawOnlyForNamedPairsOption(SpheneConfigService configService, string blockId = "OnlyForNamedPairs")
     {
         var onlineNotifsNamedOnly = configService.Current.ShowOnlineNotificationsOnlyForNamedPairs;
-        if (ImGui.Checkbox("Only for named pairs##" + blockId, ref onlineNotifsNamedOnly))
+        if (UiSharedService.DrawToggle("Only for named pairs##" + blockId, ref onlineNotifsNamedOnly))
         {
             configService.Current.ShowOnlineNotificationsOnlyForNamedPairs = onlineNotifsNamedOnly;
             configService.Save();
@@ -92,7 +92,7 @@ public static class NotificationsOptionBlock
     public static void DrawShowTestBuildUpdatesOption(SpheneConfigService configService, UiSharedService uiShared, string blockId = "ShowTestBuildUpdates")
     {
         var showTestBuildUpdates = configService.Current.ShowTestBuildUpdates;
-        if (ImGui.Checkbox("Show testbuild update hints##" + blockId, ref showTestBuildUpdates))
+        if (UiSharedService.DrawToggle("Show testbuild update hints##" + blockId, ref showTestBuildUpdates))
         {
             configService.Current.ShowTestBuildUpdates = showTestBuildUpdates;
             configService.Save();
@@ -104,7 +104,7 @@ public static class NotificationsOptionBlock
     public static bool DrawEnableAreaBoundSyncshellNotificationsOption(SpheneConfigService configService, UiSharedService uiShared, string blockId = "EnableAreaBoundSyncshellNotifications")
     {
         var areaBoundNotifs = configService.Current.ShowAreaBoundSyncshellNotifications;
-        if (ImGui.Checkbox("Enable area-bound syncshell notifications##" + blockId, ref areaBoundNotifs))
+        if (UiSharedService.DrawToggle("Enable area-bound syncshell notifications##" + blockId, ref areaBoundNotifs))
         {
             configService.Current.ShowAreaBoundSyncshellNotifications = areaBoundNotifs;
             configService.Save();
@@ -129,7 +129,7 @@ public static class NotificationsOptionBlock
     public static void DrawShowAreaBoundSyncshellWelcomeMessagesOption(SpheneConfigService configService, UiSharedService uiShared, string blockId = "ShowAreaBoundSyncshellWelcomeMessages")
     {
         var showWelcomeMessages = configService.Current.ShowAreaBoundSyncshellWelcomeMessages;
-        if (ImGui.Checkbox("Show area-bound syncshell welcome messages##" + blockId, ref showWelcomeMessages))
+        if (UiSharedService.DrawToggle("Show area-bound syncshell welcome messages##" + blockId, ref showWelcomeMessages))
         {
             configService.Current.ShowAreaBoundSyncshellWelcomeMessages = showWelcomeMessages;
             configService.Save();
@@ -141,7 +141,7 @@ public static class NotificationsOptionBlock
     public static void DrawAutomaticallyShowAreaBoundSyncshellConsentOption(SpheneConfigService configService, UiSharedService uiShared, string blockId = "AutomaticallyShowAreaBoundSyncshellConsent")
     {
         var autoShowConsent = configService.Current.AutoShowAreaBoundSyncshellConsent;
-        if (ImGui.Checkbox("Automatically show area-bound syncshell consent##" + blockId, ref autoShowConsent))
+        if (UiSharedService.DrawToggle("Automatically show area-bound syncshell consent##" + blockId, ref autoShowConsent))
         {
             configService.Current.AutoShowAreaBoundSyncshellConsent = autoShowConsent;
             configService.Save();

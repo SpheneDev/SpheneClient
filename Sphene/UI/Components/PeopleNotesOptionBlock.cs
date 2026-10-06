@@ -10,7 +10,7 @@ public static class PeopleNotesOptionBlock
         ImGui.PushID(blockId);
         try
         {
-            ImGui.Checkbox("Overwrite existing labels", ref overwriteExistingLabels);
+            UiSharedService.DrawToggle("Overwrite existing labels", ref overwriteExistingLabels);
             uiShared.DrawHelpText("When enabled, importing notes replaces existing labels for matching users. When disabled, only empty labels are filled.");
         }
         finally
@@ -25,7 +25,7 @@ public static class PeopleNotesOptionBlock
         try
         {
             var openPopupOnAddition = configService.Current.OpenPopupOnAdd;
-            if (ImGui.Checkbox("Open Notes Popup on user addition", ref openPopupOnAddition))
+            if (UiSharedService.DrawToggle("Open Notes Popup on user addition", ref openPopupOnAddition))
             {
                 configService.Current.OpenPopupOnAdd = openPopupOnAddition;
                 configService.Save();
@@ -45,7 +45,7 @@ public static class PeopleNotesOptionBlock
         try
         {
             var autoPopulateNotes = configService.Current.AutoPopulateEmptyNotesFromCharaName;
-            if (ImGui.Checkbox("Automatically populate notes using player names", ref autoPopulateNotes))
+            if (UiSharedService.DrawToggle("Automatically populate notes using player names", ref autoPopulateNotes))
             {
                 configService.Current.AutoPopulateEmptyNotesFromCharaName = autoPopulateNotes;
                 configService.Save();

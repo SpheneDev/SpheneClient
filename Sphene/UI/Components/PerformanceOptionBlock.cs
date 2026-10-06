@@ -11,7 +11,7 @@ public static class PerformanceOptionBlock
         try
         {
             var showPerformanceIndicator = performanceConfigService.Current.ShowPerformanceIndicator;
-            if (ImGui.Checkbox("Show performance indicator", ref showPerformanceIndicator))
+            if (UiSharedService.DrawToggle("Show performance indicator", ref showPerformanceIndicator))
             {
                 performanceConfigService.Current.ShowPerformanceIndicator = showPerformanceIndicator;
                 performanceConfigService.Save();
@@ -32,7 +32,7 @@ public static class PerformanceOptionBlock
         try
         {
             var warnOnExceedingThresholds = performanceConfigService.Current.WarnOnExceedingThresholds;
-            if (ImGui.Checkbox("Warn on loading in players exceeding performance thresholds", ref warnOnExceedingThresholds))
+            if (UiSharedService.DrawToggle("Warn on loading in players exceeding performance thresholds", ref warnOnExceedingThresholds))
             {
                 performanceConfigService.Current.WarnOnExceedingThresholds = warnOnExceedingThresholds;
                 performanceConfigService.Save();
@@ -53,7 +53,7 @@ public static class PerformanceOptionBlock
         try
         {
             var warnOnPref = performanceConfigService.Current.WarnOnPreferredPermissionsExceedingThresholds;
-            if (ImGui.Checkbox("Warn/Indicate also on players with preferred permissions", ref warnOnPref))
+            if (UiSharedService.DrawToggle("Warn/Indicate also on players with preferred permissions", ref warnOnPref))
             {
                 performanceConfigService.Current.WarnOnPreferredPermissionsExceedingThresholds = warnOnPref;
                 performanceConfigService.Save();
@@ -117,7 +117,7 @@ public static class PerformanceOptionBlock
         try
         {
             var autoPause = performanceConfigService.Current.AutoPausePlayersExceedingThresholds;
-            if (ImGui.Checkbox("Automatically pause players exceeding thresholds", ref autoPause))
+            if (UiSharedService.DrawToggle("Automatically pause players exceeding thresholds", ref autoPause))
             {
                 performanceConfigService.Current.AutoPausePlayersExceedingThresholds = autoPause;
                 performanceConfigService.Save();
@@ -140,7 +140,7 @@ public static class PerformanceOptionBlock
         try
         {
             var autoPauseEveryone = performanceConfigService.Current.AutoPausePlayersWithPreferredPermissionsExceedingThresholds;
-            if (ImGui.Checkbox("Automatically pause also players with preferred permissions", ref autoPauseEveryone))
+            if (UiSharedService.DrawToggle("Automatically pause also players with preferred permissions", ref autoPauseEveryone))
             {
                 performanceConfigService.Current.AutoPausePlayersWithPreferredPermissionsExceedingThresholds = autoPauseEveryone;
                 performanceConfigService.Save();

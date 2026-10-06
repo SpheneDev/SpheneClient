@@ -21,7 +21,7 @@ public static class NotificationSoundOptionBlock
         var changed = false;
 
         var enabled = soundConfig.Enabled;
-        if (ImGui.Checkbox("Enabled##" + blockId, ref enabled))
+        if (UiSharedService.DrawToggle("Enabled##" + blockId, ref enabled))
         {
             soundConfig.Enabled = enabled;
             changed = true;

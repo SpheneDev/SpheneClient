@@ -14,7 +14,7 @@ public static class SyncBehaviorOptionBlock
         try
         {
             var dutyCombatNoRedraw = configService.Current.EnableDutyCombatSyncWithoutRedraw;
-            if (ImGui.Checkbox("Allow sync in duties/combat without redraw", ref dutyCombatNoRedraw))
+            if (UiSharedService.DrawToggle("Allow sync in duties/combat without redraw", ref dutyCombatNoRedraw))
             {
                 configService.Current.EnableDutyCombatSyncWithoutRedraw = dutyCombatNoRedraw;
                 configService.Save();
@@ -42,7 +42,7 @@ public static class SyncBehaviorOptionBlock
         try
         {
             var outgoingBatching = configService.Current.EnableDutyCombatOutgoingSyncBatching;
-            if (ImGui.Checkbox("Batch outgoing sync updates in duties/combat", ref outgoingBatching))
+            if (UiSharedService.DrawToggle("Batch outgoing sync updates in duties/combat", ref outgoingBatching))
             {
                 configService.Current.EnableDutyCombatOutgoingSyncBatching = outgoingBatching;
                 configService.Save();
@@ -83,7 +83,7 @@ public static class SyncBehaviorOptionBlock
         try
         {
             var enabled = configService.Current.FilterCharacterLegacyShpkInOutgoingCharacterData;
-            if (ImGui.Checkbox("Filter characterlegacy.shpk in sync data", ref enabled))
+            if (UiSharedService.DrawToggle("Filter characterlegacy.shpk in sync data", ref enabled))
             {
                 configService.Current.FilterCharacterLegacyShpkInOutgoingCharacterData = enabled;
                 configService.Save();

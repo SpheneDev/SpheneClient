@@ -518,7 +518,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
         DrawSettingsCard("Current Transfers", () =>
         {
-        if (ImGui.BeginTabBar("TransfersTabBar"))
+        if (ImGui.BeginTabBar("TransfersTabBar",
+            ImGuiTabBarFlags.NoTabListScrollingButtons | ImGuiTabBarFlags.FittingPolicyResizeDown))
         {
             if (ApiController.ServerState is ServerState.Connected && ImGui.BeginTabItem("Transfers"))
             {
@@ -800,8 +801,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         DrawSettingsCard("Storage & Compactor", () =>
         {
         _uiShared.DrawCacheDirectorySetting();
-        _uiShared.DrawHelpText("Configure cache location and size. The storage manages itself by clearing old data beyond the set size.");
-        
+
         ImGuiHelpers.ScaledDummy(5);
         _uiShared.DrawPenumbraModDownloadFolderSetting();
 
@@ -820,34 +820,36 @@ public class SettingsUi : WindowMediatorSubscriberBase
             UiSharedService.ColorTextWrapped("Hint: Consider enabling the File Compactor to reduce disk usage.", ImGuiColors.DalamudYellow);
         }
         if (isLinux || !_cacheMonitor.StorageisNTFS) ImGui.BeginDisabled();
-        StorageOptionBlock.DrawUseFileCompactorOption(_configService, _uiShared, "StorageUseFileCompactor");
-        if (!_fileCompactor.MassCompactRunning)
+        StorageOptionBlock.DrawUseFileCompactorOption(_configService, _uiShared, "StorageUseFileCompactor", "StorageCompactorPopup");
+        if (ImGui.BeginPopup("StorageCompactorPopup"))
         {
-            UiSharedService.SameLineIfFits(_uiShared.GetIconTextButtonSize(FontAwesomeIcon.FileArchive, "Compact all files in storage"));
-            if (_uiShared.IconTextButton(FontAwesomeIcon.FileArchive, "Compact all files in storage"))
+            if (!_fileCompactor.MassCompactRunning)
             {
-                _ = Task.Run(() =>
+                if (_uiShared.IconTextButton(FontAwesomeIcon.FileArchive, "Compact all files in storage"))
                 {
-                    _fileCompactor.CompactStorage(compress: true);
-                    _cacheMonitor.RecalculateFileCacheSize(CancellationToken.None);
-                });
+                    _ = Task.Run(() =>
+                    {
+                        _fileCompactor.CompactStorage(compress: true);
+                        _cacheMonitor.RecalculateFileCacheSize(CancellationToken.None);
+                    });
+                }
+                UiSharedService.AttachToolTip("This will run compression on all files in your current Sphene Storage." + Environment.NewLine
+                    + "You do not need to run this manually if you keep the file compactor enabled.");
+                if (_uiShared.IconTextButton(FontAwesomeIcon.File, "Decompact all files in storage"))
+                {
+                    _ = Task.Run(() =>
+                    {
+                        _fileCompactor.CompactStorage(compress: false);
+                        _cacheMonitor.RecalculateFileCacheSize(CancellationToken.None);
+                    });
+                }
+                UiSharedService.AttachToolTip("This will run decompression on all files in your current Sphene Storage.");
             }
-            UiSharedService.AttachToolTip("This will run compression on all files in your current Sphene Storage." + Environment.NewLine
-                + "You do not need to run this manually if you keep the file compactor enabled.");
-            UiSharedService.SameLineIfFits(_uiShared.GetIconTextButtonSize(FontAwesomeIcon.File, "Decompact all files in storage"));
-            if (_uiShared.IconTextButton(FontAwesomeIcon.File, "Decompact all files in storage"))
+            else
             {
-                _ = Task.Run(() =>
-                {
-                    _fileCompactor.CompactStorage(compress: false);
-                    _cacheMonitor.RecalculateFileCacheSize(CancellationToken.None);
-                });
+                UiSharedService.ColorText($"File compactor currently running ({_fileCompactor.Progress})", ImGuiColors.DalamudYellow);
             }
-            UiSharedService.AttachToolTip("This will run decompression on all files in your current Sphene Storage.");
-        }
-        else
-        {
-            UiSharedService.ColorText($"File compactor currently running ({_fileCompactor.Progress})", ImGuiColors.DalamudYellow);
+            ImGui.EndPopup();
         }
         if (isLinux || !_cacheMonitor.StorageisNTFS)
         {
@@ -1148,7 +1150,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
         bool useOauth = selectedServer.UseOAuth2;
 
-        if (ImGui.BeginTabBar("serverTabBar"))
+        if (ImGui.BeginTabBar("serverTabBar",
+            ImGuiTabBarFlags.NoTabListScrollingButtons | ImGuiTabBarFlags.FittingPolicyResizeDown))
         {
             // Overview tab: quick status and actions
             if (ImGui.BeginTabItem("Overview"))
@@ -1325,7 +1328,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                     }
                     if (selectedServer.Authentications.Any())
                     {
-                        ImGui.Checkbox("Edit Mode", ref _showAdvancedCharacterMode);
+                        UiSharedService.DrawToggle("Edit Mode", ref _showAdvancedCharacterMode);
                         UiSharedService.AttachToolTip("When enabled, character names and homeworlds become editable and the stored CID is visible in the tooltip.");
                         ImGuiHelpers.ScaledDummy(3);
                         ImGuiHelpers.ScaledDummy(1);
@@ -2231,14 +2234,14 @@ public class SettingsUi : WindowMediatorSubscriberBase
             value = !value;
         }
 
-        var drawList = ImGui.GetWindowDrawList();
-        var radius = height * 0.5f;
-        var bgColor = ImGui.GetColorU32(ImGuiCol.FrameBg);
-        drawList.AddRectFilled(position, new Vector2(position.X + width, position.Y + height), bgColor, height * 0.5f);
-
-        var circleX = value ? position.X + width - radius : position.X + radius;
-        var circleColor = ImGui.GetColorU32(ImGuiCol.CheckMark);
-        drawList.AddCircleFilled(new Vector2(circleX, position.Y + radius), radius - 1.0f, circleColor);
+        // Same proportions as UiSharedService.DrawToggle: the track is drawn at
+        // 70% of the frame height, centered inside the full-height hit box.
+        var trackHeight = MathF.Round(height * 0.7f);
+        var trackMin = new Vector2(position.X + (width - trackHeight * 1.8f) * 0.5f,
+            position.Y + (height - trackHeight) * 0.5f);
+        var animT = UiSharedService.GetToggleAnimValue(ImGui.GetID(id), value);
+        UiSharedService.DrawSwitchVisual(ImGui.GetWindowDrawList(), trackMin,
+            trackMin + new Vector2(trackHeight * 1.8f, trackHeight), animT, ImGui.GetStyle().Alpha);
 
         return value;
     }
@@ -2261,46 +2264,85 @@ public class SettingsUi : WindowMediatorSubscriberBase
         
         var textHeight = ImGui.GetTextLineHeight();
         var textY = startPos.Y + (rowHeight - textHeight) / 2;
-        
-        ImGui.SetCursorScreenPos(new Vector2(startPos.X + rowMarginX, textY));
-        ImGui.TextColored(nameColor, name);
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip(description);
-        
-        ImGui.SameLine();
-        ImGui.TextColored(ImGuiColors.DalamudGrey, $"({statusOrVersion})");
-        
+
         bool showSettings = isInstalled && isEnabled && onOpenSettings != null;
         bool showInstall = !isInstalled && onInstallAction != null;
         bool showToggle = isInstalled && onEnableAction != null && onDisableAction != null;
         bool isInstalling = showInstall && IsPluginInstallInProgress && string.Equals(InstallingPluginName, name, StringComparison.Ordinal);
         bool disableInstall = showInstall && IsPluginInstallInProgress && !isInstalling;
 
+        // Resolve the right-edge control position up front so the row hit zone
+        // can cover everything left of it.
+        var minBtnX = startPos.X + 200;
+        var controlX = startPos.X + availWidth - rowMarginX;
+        var btnText = showSettings ? (settingsLabel ?? "Settings") : (isInstalling ? "Installing..." : "Install");
+        var displayText = btnText;
+        var spinnerSize = 0f;
+        var spinnerAreaWidth = 0f;
+        if (isInstalling)
+        {
+            spinnerSize = ImGui.GetTextLineHeight();
+            var spaceWidth = Math.Max(1e-3f, ImGui.CalcTextSize(" ").X);
+            spinnerAreaWidth = spinnerSize + ImGui.GetStyle().ItemInnerSpacing.X;
+            var spaces = Math.Max(2, (int)MathF.Ceiling(spinnerAreaWidth / spaceWidth));
+            displayText = new string(' ', spaces) + btnText;
+        }
+        if (showSettings || showInstall)
+        {
+            var btnSize = ImGui.CalcTextSize(displayText) + new Vector2(20, 0);
+            controlX = MathF.Max(minBtnX, startPos.X + availWidth - btnSize.X - rowMarginX);
+        }
+        else if (showToggle)
+        {
+            var toggleWidth = ImGui.GetFrameHeight() * 1.8f;
+            controlX = MathF.Max(minBtnX, startPos.X + availWidth - toggleWidth - rowMarginX);
+        }
+
+        // Subtle hover tint across the whole row.
+        var rowMin = startPos;
+        var rowMax = new Vector2(startPos.X + availWidth, startPos.Y + rowHeight);
+        var rowHovered = ImGui.IsMouseHoveringRect(rowMin, rowMax) && ImGui.IsWindowHovered();
+        if (rowHovered)
+        {
+            var tint = SpheneCustomTheme.Colors.AccentBlue with { W = 0.06f * ImGui.GetStyle().Alpha };
+            ImGui.GetWindowDrawList().AddRectFilled(rowMin, rowMax,
+                ImGui.ColorConvertFloat4ToU32(tint), 4f * ImGuiHelpers.GlobalScale, ImDrawFlags.RoundCornersAll);
+        }
+
+        ImGui.SetCursorScreenPos(new Vector2(startPos.X + rowMarginX, textY));
+        ImGui.TextColored(nameColor, name);
+
+        ImGui.SameLine();
+        ImGui.TextColored(ImGuiColors.DalamudGrey, $"({statusOrVersion})");
+
+        // Row hit zone: clicking anywhere on the label area triggers the row's
+        // primary action; hovering shows the plugin description.
+        ImGui.SetCursorScreenPos(startPos);
+        var rowHitWidth = MathF.Max(0f, controlX - startPos.X - ImGui.GetStyle().ItemSpacing.X);
+        var rowClicked = ImGui.InvisibleButton("##rowhit", new Vector2(rowHitWidth, rowHeight));
+        UiSharedService.AttachToolTip(description);
+        if (rowClicked)
+        {
+            if (showToggle)
+            {
+                _ = isEnabled ? onDisableAction!.Invoke() : onEnableAction!.Invoke();
+            }
+            else if (showInstall && !isInstalling && !disableInstall)
+            {
+                StartPluginInstall(name, onInstallAction!);
+            }
+            else if (showSettings)
+            {
+                onOpenSettings!.Invoke();
+            }
+        }
+
         if (showSettings || showInstall || showToggle)
         {
-            var btnText = showSettings ? (settingsLabel ?? "Settings") : (isInstalling ? "Installing..." : "Install");
-            var displayText = btnText;
-            var spinnerSize = 0f;
-            var spinnerAreaWidth = 0f;
-
-            if (isInstalling)
-            {
-                spinnerSize = ImGui.GetTextLineHeight();
-                var spaceWidth = Math.Max(1e-3f, ImGui.CalcTextSize(" ").X);
-                spinnerAreaWidth = spinnerSize + ImGui.GetStyle().ItemInnerSpacing.X;
-                var spaces = Math.Max(2, (int)MathF.Ceiling(spinnerAreaWidth / spaceWidth));
-                displayText = new string(' ', spaces) + btnText;
-            }
-
             var btnSize = ImGui.CalcTextSize(displayText) + new Vector2(20, 0);
             var btnHeight = 22f * ImGuiHelpers.GlobalScale;
             var btnY = startPos.Y + (rowHeight - btnHeight) / 2;
-            
-            var minBtnX = startPos.X + 200;
-            var targetBtnX = startPos.X + availWidth - btnSize.X - rowMarginX;
-            
-            if (targetBtnX < minBtnX) targetBtnX = minBtnX;
-            
-            ImGui.SetCursorScreenPos(new Vector2(targetBtnX, btnY));
+            ImGui.SetCursorScreenPos(new Vector2(controlX, btnY));
 
             if (showSettings)
             {
@@ -2338,12 +2380,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
             else if (showToggle)
             {
                 var toggleHeight = ImGui.GetFrameHeight();
-                var toggleWidth = toggleHeight * 1.8f;
                 var toggleY = startPos.Y + (rowHeight - toggleHeight) / 2;
-                var toggleTargetX = startPos.X + availWidth - toggleWidth - rowMarginX;
-                if (toggleTargetX < minBtnX) toggleTargetX = minBtnX;
-
-                ImGui.SetCursorScreenPos(new Vector2(toggleTargetX, toggleY));
+                ImGui.SetCursorScreenPos(new Vector2(controlX, toggleY));
                 var toggled = DrawToggleSwitch("EnabledToggle", isEnabled);
                 if (toggled != isEnabled)
                 {
@@ -2407,24 +2445,31 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
 #if IS_TEST_BUILD
             var useOverride = _configService.Current.UseTestServerOverride;
-            if (ImGui.Checkbox("Use test server override", ref useOverride))
+            if (UiSharedService.DrawToggle("Connect to Test Server", ref useOverride, menuPopupId: "TestServerUrlPopup"))
             {
                 _configService.Current.UseTestServerOverride = useOverride;
                 _configService.Save();
                 _ = _uiShared.ApiController.CreateConnectionsAsync();
             }
-            UiSharedService.AttachToolTip("When enabled, the client ignores the configured service and connects to the test server URL below. Toggling this setting switches between the main and test server and triggers an immediate reconnect. Only available in Dev/Test builds (disabled on release builds).");
+            UiSharedService.AttachToolTip("When enabled, the client ignores the configured service and connects to the test server address. Toggling this setting switches between the main and test server and triggers an immediate reconnect. The address can be changed via the menu button left of the switch. Only available in Dev/Test builds (disabled on release builds).");
             if (string.IsNullOrWhiteSpace(_configService.Current.TestServerApiUrl))
             {
                 _configService.Current.TestServerApiUrl = "ws://test.sphene.online:6000";
                 _configService.Save();
             }
-            ImGui.SameLine();
-            var overrideUrl = _configService.Current.TestServerApiUrl ?? string.Empty;
-            if (UiSharedService.DrawInputText("##testServerUrl", ref overrideUrl, 50))
+
+            if (ImGui.BeginPopup("TestServerUrlPopup"))
             {
-                _configService.Current.TestServerApiUrl = overrideUrl;
-                _configService.Save();
+                UiSharedService.ColorText("Test Server Address", ImGuiColors.DalamudGrey);
+                var overrideUrl = _configService.Current.TestServerApiUrl ?? string.Empty;
+                ImGui.SetNextItemWidth(300f * ImGuiHelpers.GlobalScale);
+                if (UiSharedService.DrawInputText("##testServerUrl", ref overrideUrl, 200))
+                {
+                    _configService.Current.TestServerApiUrl = overrideUrl;
+                    _configService.Save();
+                }
+                UiSharedService.AttachToolTip("Websocket URL, e.g. ws://host:port. Applies while typing.");
+                ImGui.EndPopup();
             }
 #else
             if (_configService.Current.UseTestServerOverride)
@@ -2721,7 +2766,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         DrawSettingsSectionHeader("Supporter Nameplate", "Display a symbol or text next to the nameplates of Sphene supporters. Supporter status is automatically synced from the server via Ko-fi donations.");
 
         var showNameplate = _configService.Current.ShowSupporterNameplate;
-        if (ImGui.Checkbox("Show Supporter Nameplate Indicators", ref showNameplate))
+        if (UiSharedService.DrawToggle("Show Supporter Nameplate Indicators", ref showNameplate))
         {
             _configService.Current.ShowSupporterNameplate = showNameplate;
             _configService.Save();
@@ -2749,8 +2794,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 }
             }
             BeginSupporterRow("Symbol");
-            ImGui.SetNextItemWidth(ClampSettingsItemWidth(90f));
-            if (UiSharedService.DrawLabeledCombo("##supporterSymbolPreset", ref presetIndex, SupporterSymbolPresets, SupporterSymbolPresets.Length))
+            if (UiSharedService.DrawLabeledCombo("##supporterSymbolPreset", ref presetIndex, SupporterSymbolPresets, SupporterSymbolPresets.Length,
+                    preferredWidth: ClampSettingsItemWidth(90f)))
             {
                 _configService.Current.SupporterSymbolChar = presetIndex == 0 ? string.Empty : SupporterSymbolPresets[presetIndex];
                 _configService.Save();
@@ -2759,8 +2804,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
             ImGui.SameLine();
             if (presetIndex > 0)
                 symbolChar = SupporterSymbolPresets[presetIndex];
-            ImGui.SetNextItemWidth(ClampSettingsItemWidth(80f));
-            if (UiSharedService.DrawInputText("##supporterSymbol", ref symbolChar, 4))
+            if (UiSharedService.DrawInputText("##supporterSymbol", ref symbolChar, 4,
+                    preferredWidth: UiSharedService.FillRowControlWidth()))
             {
                 _configService.Current.SupporterSymbolChar = symbolChar;
                 _configService.Save();
@@ -2772,9 +2817,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 key => _configService.Current.SupporterColorKey = key);
             UiSharedService.AttachToolTip("Game UI foreground color for the symbol. Default: gold (key 43).");
 
-            BeginSupporterRow("Text Label");
             var textEnabled = _configService.Current.SupporterTextEnabled;
-            if (ImGui.Checkbox("Enabled##supporterTextEnabled", ref textEnabled))
+            if (UiSharedService.DrawToggle("Text Label##supporterTextEnabled", ref textEnabled))
             {
                 _configService.Current.SupporterTextEnabled = textEnabled;
                 _configService.Save();
@@ -2784,8 +2828,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
             {
                 BeginSupporterRow("Label Text", true);
                 var labelText = _configService.Current.SupporterLabelText ?? string.Empty;
-                ImGui.SetNextItemWidth(ClampSettingsItemWidth(200f));
-                if (UiSharedService.DrawInputText("##supporterLabelText", ref labelText, 30))
+                if (UiSharedService.DrawInputText("##supporterLabelText", ref labelText, 30,
+                        preferredWidth: UiSharedService.FillRowControlWidth()))
                 {
                     _configService.Current.SupporterLabelText = labelText;
                     _configService.Save();
@@ -2793,7 +2837,6 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
                 BeginSupporterRow("Label Order", true);
                 var labelOrder = (int)_configService.Current.SupporterLabelOrder;
-                ImGui.SetNextItemWidth(ClampSettingsItemWidth(200f));
                 if (UiSharedService.DrawLabeledCombo("##supporterLabelOrder", ref labelOrder, "Symbol then Text\0Text then Symbol\0"))
                 {
                     _configService.Current.SupporterLabelOrder = (SupporterLabelOrder)labelOrder;
@@ -2808,7 +2851,6 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
             BeginSupporterRow("Position");
             var position = (int)_configService.Current.SupporterSymbolPosition;
-            ImGui.SetNextItemWidth(ClampSettingsItemWidth(200f));
             if (UiSharedService.DrawLabeledCombo("##supporterPosition", ref position, "Left\0Right\0Both\0"))
             {
                 _configService.Current.SupporterSymbolPosition = (SupporterSymbolPosition)position;
@@ -2822,9 +2864,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
             UiSharedService.ColorText("Sphene Icon", SpheneColors.LuminousGold);
             ImGuiHelpers.ScaledDummy(0, 6);
 
-            BeginSupporterRow("Icon");
             var iconEnabled = _configService.Current.SupporterIconEnabled;
-            if (ImGui.Checkbox("Enabled##supporterIconEnabled", ref iconEnabled))
+            if (UiSharedService.DrawToggle("Icon##supporterIconEnabled", ref iconEnabled))
             {
                 _configService.Current.SupporterIconEnabled = iconEnabled;
                 _configService.Save();
@@ -2835,9 +2876,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
             {
                 DrawSupporterIconPicker();
 
-                BeginSupporterRow("Icon Label", true);
                 var iconLabelEnabled = _configService.Current.SupporterIconLabelEnabled;
-                if (ImGui.Checkbox("Enabled##supporterIconLabelEnabled", ref iconLabelEnabled))
+                if (UiSharedService.DrawToggle("Icon Label##supporterIconLabelEnabled", ref iconLabelEnabled, indented: true))
                 {
                     _configService.Current.SupporterIconLabelEnabled = iconLabelEnabled;
                     _configService.Save();
@@ -2848,8 +2888,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 {
                     BeginSupporterRow("Label Text", true);
                     var iconLabelText = _configService.Current.SupporterIconLabelText ?? string.Empty;
-                    ImGui.SetNextItemWidth(ClampSettingsItemWidth(200f));
-                    if (UiSharedService.DrawInputText("##supporterIconLabelText", ref iconLabelText, 30))
+                    if (UiSharedService.DrawInputText("##supporterIconLabelText", ref iconLabelText, 30,
+                            preferredWidth: UiSharedService.FillRowControlWidth()))
                     {
                         _configService.Current.SupporterIconLabelText = iconLabelText;
                         _configService.Save();
@@ -2858,13 +2898,16 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
                     BeginSupporterRow("Label Color", true);
                     var iconLabelColor = ImGui.ColorConvertU32ToFloat4(_configService.Current.SupporterIconLabelColor);
-                    ImGui.SetNextItemWidth(ClampSettingsItemWidth(200f));
-                    if (ImGui.ColorEdit4("##supporterIconLabelColor", ref iconLabelColor))
+                    ImGui.SetNextItemWidth(UiSharedService.FillRowControlWidth());
+                    using (UiSharedService.PushValueControlStyle())
                     {
-                        _configService.Current.SupporterIconLabelColor = ImGui.ColorConvertFloat4ToU32(iconLabelColor);
-                        _configService.Save();
+                        if (ImGui.ColorEdit4("##supporterIconLabelColor", ref iconLabelColor))
+                        {
+                            _configService.Current.SupporterIconLabelColor = ImGui.ColorConvertFloat4ToU32(iconLabelColor);
+                            _configService.Save();
+                        }
+                        UiSharedService.AttachToolTip("Custom color for the icon label text (free RGBA picker).");
                     }
-                    UiSharedService.AttachToolTip("Custom color for the icon label text (free RGBA picker).");
                 }
             }
         });
@@ -2891,35 +2934,43 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
         BeginSupporterRow("Icon Image", true);
         var previewLabel = currentId.Length == 0 ? "Default (Sphene Icon)" : currentId;
-        ImGui.SetNextItemWidth(ClampSettingsItemWidth(220f));
-        if (ImGui.BeginCombo("##supporterIconPicker", previewLabel))
+        var previewIcon = _supporterIconService.GetIcon(currentId);
+        var previewHeight = ImGui.GetTextLineHeightWithSpacing() * 1.6f;
+        var trailingWidth = previewIcon != null
+            ? previewIcon.AspectSize(previewHeight).X + ImGui.GetStyle().ItemSpacing.X
+            : currentId.Length > 0
+                ? ImGui.CalcTextSize("(not on server)").X + ImGui.GetStyle().ItemSpacing.X
+                : 0f;
+        ImGui.SetNextItemWidth(MathF.Max(60f, UiSharedService.FillRowControlWidth(trailingWidth)));
+        using (var controlStyle = UiSharedService.PushValueControlStyle())
         {
-            if (ImGui.Selectable("Default (Sphene Icon)", currentId.Length == 0))
+            if (ImGui.BeginCombo("##supporterIconPicker", previewLabel))
             {
-                _configService.Current.SupporterIconId = string.Empty;
-                _configService.Save();
-            }
-            for (var i = 0; i < catalog.Count; i++)
-            {
-                var iconInfo = catalog[i];
-                var label = iconInfo.Animated ? iconInfo.Name + " (animated)" : iconInfo.Name;
-                if (ImGui.Selectable(label + "##" + iconInfo.Id, string.Equals(currentId, iconInfo.Id, StringComparison.OrdinalIgnoreCase)))
+                if (ImGui.Selectable("Default (Sphene Icon)", currentId.Length == 0))
                 {
-                    _configService.Current.SupporterIconId = iconInfo.Id;
+                    _configService.Current.SupporterIconId = string.Empty;
                     _configService.Save();
                 }
+                for (var i = 0; i < catalog.Count; i++)
+                {
+                    var iconInfo = catalog[i];
+                    var label = iconInfo.Animated ? iconInfo.Name + " (animated)" : iconInfo.Name;
+                    if (ImGui.Selectable(label + "##" + iconInfo.Id, string.Equals(currentId, iconInfo.Id, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        _configService.Current.SupporterIconId = iconInfo.Id;
+                        _configService.Save();
+                    }
+                }
+                ImGui.EndCombo();
             }
-            ImGui.EndCombo();
         }
         UiSharedService.AttachToolTip(catalog.Count == 0
             ? "No custom icons available on this server. The server admin can add PNG, GIF or WebP files to the supporter icon folder."
             : "Pick a server-provided icon. Animated icons play on the nameplate.");
 
-        var previewIcon = _supporterIconService.GetIcon(currentId);
         if (previewIcon != null)
         {
             ImGui.SameLine();
-            var previewHeight = ImGui.GetTextLineHeightWithSpacing() * 1.6f;
             var (handle, uv0, uv1) = previewIcon.GetFrame(ImGui.GetTime());
             ImGui.Image(handle, previewIcon.AspectSize(previewHeight), uv0, uv1);
         }
@@ -2940,8 +2991,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
     private void DrawSupporterColorKeyPicker(string id, ushort colorKey, Action<ushort> apply)
     {
         var sliderIndex = UiForegroundColorKeyToSliderIndex(colorKey);
-        ImGui.SetNextItemWidth(ClampSettingsItemWidth(220f));
-        if (UiSharedService.DrawSliderInt("Color##" + id, ref sliderIndex, 0, UiForegroundSliderMaxIndex))
+        if (UiSharedService.DrawSliderInt("Color##" + id, ref sliderIndex, 0, UiForegroundSliderMaxIndex,
+            trailingWidth: ImGui.GetFrameHeight() + ImGui.GetStyle().ItemSpacing.X))
         {
             apply(UiForegroundSliderIndexToColorKey(sliderIndex));
             _configService.Save();
@@ -3264,7 +3315,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             var themeChanged = false;
 
             var enableWindowBlur = theme.EnableWindowBlur;
-            if (ImGui.Checkbox("Background Blur", ref enableWindowBlur))
+            if (UiSharedService.DrawToggle("Background Blur", ref enableWindowBlur))
             {
                 theme.EnableWindowBlur = enableWindowBlur;
                 themeChanged = true;
@@ -3282,7 +3333,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             ImGuiHelpers.ScaledDummy(6);
 
             var enablePanelBlur = theme.CompactEnableWindowBlur;
-            if (ImGui.Checkbox("Panel Background Blur", ref enablePanelBlur))
+            if (UiSharedService.DrawToggle("Panel Background Blur", ref enablePanelBlur))
             {
                 theme.CompactEnableWindowBlur = enablePanelBlur;
                 themeChanged = true;
@@ -3464,18 +3515,18 @@ public class SettingsUi : WindowMediatorSubscriberBase
     private void DrawThemeSettings()
     {
         DrawSettingsPageHeader("Theme", "Customize colors and styling for Sphene UI elements.");
-        
-        // Theme Selector
-        DrawThemeSelector();
-        
-        DrawSettingsSectionHeader("Theme Editor");
-        
-        using (var themeTabBar = ImRaii.TabBar("ThemeTabBar"))
+
+        DrawSettingsCard("Themes", DrawThemeSelector,
+            "Select from built-in themes or your custom saved themes. Changes apply immediately.");
+
+        DrawSettingsCard("Theme Editor", () =>
+        {
+        using (var themeTabBar = ImRaii.TabBar("ThemeTabBar",
+            ImGuiTabBarFlags.NoTabListScrollingButtons | ImGuiTabBarFlags.FittingPolicyResizeDown))
         {
             if (themeTabBar)
             {
-                var availableRegion = ImGui.GetContentRegionAvail();
-                var tabContentHeight = availableRegion.Y;
+                var tabPadding = new Vector2(12f, 10f);
 
                 if (ApiController.IsAdmin)
                 {
@@ -3483,11 +3534,12 @@ public class SettingsUi : WindowMediatorSubscriberBase
                     var generalTab = ImRaii.TabItem("General Theme", ImGuiTabItemFlags.None);
                     if (generalTab)
                     {
-                        if (ImGui.BeginChild("GeneralThemeChild", new Vector2(0, tabContentHeight), true))
+                        if (SpheneWindowChrome.BeginFillToBottomScrollArea("GeneralThemeChild", contentPadding: tabPadding))
                         {
+                            using var controlStyle = UiSharedService.PushValueControlStyle();
                             DrawGeneralThemeSettings();
                         }
-                        ImGui.EndChild();
+                        SpheneWindowChrome.EndScrollArea();
                     }
                     #pragma warning restore S1066
                     generalTab.Dispose();
@@ -3497,11 +3549,12 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 var iconTab = ImRaii.TabItem("Icon Theme", _preferIconThemeTab ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None);
                 if (iconTab)
                 {
-                    if (ImGui.BeginChild("IconThemeChild", new Vector2(0, tabContentHeight), true))
+                    if (SpheneWindowChrome.BeginFillToBottomScrollArea("IconThemeChild", contentPadding: tabPadding))
                     {
+                        using var controlStyle = UiSharedService.PushValueControlStyle();
                         DrawIconThemeSettings();
                     }
-                    ImGui.EndChild();
+                    SpheneWindowChrome.EndScrollArea();
                 }
                 #pragma warning restore S1066
                 iconTab.Dispose();
@@ -3511,11 +3564,12 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 var panelTab = ImRaii.TabItem("Panel Theme", _preferPanelThemeTab ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None);
                 if (panelTab)
                 {
-                    if (ImGui.BeginChild("PanelThemeChild", new Vector2(0, tabContentHeight), true))
+                    if (SpheneWindowChrome.BeginFillToBottomScrollArea("PanelThemeChild", contentPadding: tabPadding))
                     {
+                        using var controlStyle = UiSharedService.PushValueControlStyle();
                         DrawCompactUIThemeSettings();
                     }
-                    ImGui.EndChild();
+                    SpheneWindowChrome.EndScrollArea();
                 }
                 #pragma warning restore S1066
                 panelTab.Dispose();
@@ -3525,17 +3579,19 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 var soundsTab = ImRaii.TabItem("Sounds", _preferSoundsThemeTab ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None);
                 if (soundsTab)
                 {
-                    if (ImGui.BeginChild("SoundsThemeChild", new Vector2(0, tabContentHeight), true))
+                    if (SpheneWindowChrome.BeginFillToBottomScrollArea("SoundsThemeChild", contentPadding: tabPadding))
                     {
+                        using var controlStyle = UiSharedService.PushValueControlStyle();
                         DrawSoundThemeSettings();
                     }
-                    ImGui.EndChild();
+                    SpheneWindowChrome.EndScrollArea();
                 }
                 #pragma warning restore S1066
                 soundsTab.Dispose();
                 _preferSoundsThemeTab = false;
             }
         }
+        });
     }
 
     private void DrawGeneralThemeSettings()
@@ -3631,7 +3687,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         ImGui.Text("Window Effects");
 
         var enableWindowBlur = theme.EnableWindowBlur;
-        if (ImGui.Checkbox("Background Blur", ref enableWindowBlur))
+        if (UiSharedService.DrawToggle("Background Blur", ref enableWindowBlur))
         {
             theme.EnableWindowBlur = enableWindowBlur;
             themeChanged = true;
@@ -3711,7 +3767,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
         ImGui.Text("General Theme Colors");
         ImGui.Separator();
         
-        if (ImGui.BeginTabBar("GeneralColorTabBar"))
+        if (ImGui.BeginTabBar("GeneralColorTabBar",
+            ImGuiTabBarFlags.NoTabListScrollingButtons | ImGuiTabBarFlags.FittingPolicyResizeDown))
         {
             if (ImGui.BeginTabItem("Basic Colors"))
             {
@@ -3812,21 +3869,21 @@ public class SettingsUi : WindowMediatorSubscriberBase
         ImGui.Separator();
 
         var showMod = cfg.IconShowModTransferBadge;
-        if (ImGui.Checkbox("Show Mod Transfer Badges", ref showMod))
+        if (UiSharedService.DrawToggle("Show Mod Transfer Badges", ref showMod))
         {
             cfg.IconShowModTransferBadge = showMod;
             configChanged = true;
         }
 
         var showPair = cfg.IconShowPairRequestBadge;
-        if (ImGui.Checkbox("Show Pair Request Badges", ref showPair))
+        if (UiSharedService.DrawToggle("Show Pair Request Badges", ref showPair))
         {
             cfg.IconShowPairRequestBadge = showPair;
             configChanged = true;
         }
 
         var showNotif = cfg.IconShowNotificationBadge;
-        if (ImGui.Checkbox("Show Notification Badges", ref showNotif))
+        if (UiSharedService.DrawToggle("Show Notification Badges", ref showNotif))
         {
             cfg.IconShowNotificationBadge = showNotif;
             configChanged = true;
@@ -4078,7 +4135,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         ImGui.Separator();
 
         var compactEnableWindowBlur = theme.CompactEnableWindowBlur;
-        if (ImGui.Checkbox("Panel Background Blur", ref compactEnableWindowBlur))
+        if (UiSharedService.DrawToggle("Panel Background Blur", ref compactEnableWindowBlur))
         {
             theme.CompactEnableWindowBlur = compactEnableWindowBlur;
             themeChanged = true;
@@ -4339,7 +4396,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             ImGui.Separator();
 
             var compactShowImGuiHeader = theme.CompactShowImGuiHeader;
-            if (ImGui.Checkbox("Show Window Header", ref compactShowImGuiHeader))
+            if (UiSharedService.DrawToggle("Show Window Header", ref compactShowImGuiHeader))
             {
                 theme.CompactShowImGuiHeader = compactShowImGuiHeader;
                 themeChanged = true;
@@ -4519,7 +4576,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         
             var prevSeparate = theme.SeparateTransmissionBarStyles;
             var separateBars = theme.SeparateTransmissionBarStyles;
-            if (ImGui.Checkbox("Separate Upload/Download Settings", ref separateBars))
+            if (UiSharedService.DrawToggle("Separate Upload/Download Settings", ref separateBars))
             {
                 theme.SeparateTransmissionBarStyles = separateBars;
                 themeChanged = true;
@@ -4544,7 +4601,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             }
         
             var autoTransmissionWidth = theme.AutoTransmissionBarWidth;
-            if (ImGui.Checkbox("Auto Transmission Width (fit content)", ref autoTransmissionWidth))
+            if (UiSharedService.DrawToggle("Auto Transmission Width (fit content)", ref autoTransmissionWidth))
             {
                 theme.AutoTransmissionBarWidth = autoTransmissionWidth;
                 themeChanged = true;
@@ -4587,7 +4644,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                     themeChanged = true;
                 }
                 var useTransGrad = theme.TransmissionUseGradient;
-                if (ImGui.Checkbox("Use Gradient Fill", ref useTransGrad))
+                if (UiSharedService.DrawToggle("Use Gradient Fill", ref useTransGrad))
                 {
                     theme.TransmissionUseGradient = useTransGrad;
                     themeChanged = true;
@@ -4643,7 +4700,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                     themeChanged = true;
                 }
                 var useTransGrad = theme.TransmissionUseGradient;
-                if (ImGui.Checkbox("Use Gradient Fill (Upload/Download)", ref useTransGrad))
+                if (UiSharedService.DrawToggle("Use Gradient Fill (Upload/Download)", ref useTransGrad))
                 {
                     theme.TransmissionUseGradient = useTransGrad;
                     themeChanged = true;
@@ -5411,10 +5468,6 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
     private void DrawThemeSelector()
     {
-        ImGui.Text("Themes");
-        ImGui.SameLine();
-        _uiShared.DrawHelpText("Select from built-in themes or your custom saved themes. Changes apply immediately.");
-        
         // Get all available themes (built-in + custom)
         var builtInThemes = ThemePresets.BuiltInThemes.Keys.ToList();
         var customThemes = ThemeManager.GetAvailableThemes();
@@ -5440,8 +5493,11 @@ public class SettingsUi : WindowMediatorSubscriberBase
         var currentIndex = allThemes.IndexOf(_selectedPresetTheme);
         if (currentIndex == -1) currentIndex = 0;
         
+        var selectorButtonSpacing = ImGui.GetStyle().ItemSpacing.X;
+        var themeSelectorTrailing = _uiShared.GetIconButtonSize(FontAwesomeIcon.Trash).X + selectorButtonSpacing
+            + ImGui.CalcTextSize("Reset to Default Sphene Theme").X + ImGui.GetStyle().FramePadding.X * 2f + selectorButtonSpacing;
         if (UiSharedService.DrawLabeledCombo("##ThemeSelector", ref currentIndex, allThemes.ToArray(), allThemes.Count,
-                preferredWidth: ClampSettingsItemWidth(320f, 180f)))
+                trailingWidth: themeSelectorTrailing, preferredWidth: ClampSettingsItemWidth(320f, 180f)))
         {
             var selectedTheme = allThemes[currentIndex];
             
@@ -5452,7 +5508,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             ApplySelectedPresetTheme(selectedTheme, builtInThemes);
         }
         
-        ImGui.SameLine();
+        UiSharedService.SameLineIfFits(_uiShared.GetIconButtonSize(FontAwesomeIcon.Trash).X);
         var canDelete = !string.IsNullOrEmpty(_selectedPresetTheme) && !builtInThemes.Contains(_selectedPresetTheme, StringComparer.Ordinal) && !_selectedPresetTheme.StartsWith("---", StringComparison.Ordinal);
         using (ImRaii.Disabled(!canDelete || !UiSharedService.CtrlPressed()))
         {
@@ -5466,7 +5522,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 : "Only custom themes can be deleted");
         }
         
-        ImGui.SameLine();
+        UiSharedService.SameLineIfFits(ImGui.CalcTextSize("Reset to Default Sphene Theme").X + ImGui.GetStyle().FramePadding.X * 2f);
         if (ImGui.Button("Reset to Default Sphene Theme"))
         {
             _selectedPresetTheme = "Default Sphene";

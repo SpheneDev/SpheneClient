@@ -11,7 +11,7 @@ public static class StorageOptionBlock
         try
         {
             var deleteAfterInstall = configService.Current.DeletePenumbraModAfterInstall;
-            if (ImGui.Checkbox("Delete downloaded mods after successful install", ref deleteAfterInstall))
+            if (UiSharedService.DrawToggle("Delete downloaded mods after successful install", ref deleteAfterInstall))
             {
                 configService.Current.DeletePenumbraModAfterInstall = deleteAfterInstall;
                 configService.Save();
@@ -25,13 +25,14 @@ public static class StorageOptionBlock
         }
     }
 
-    public static bool DrawUseFileCompactorOption(SpheneConfigService configService, UiSharedService uiShared, string blockId = "UseFileCompactor")
+    public static bool DrawUseFileCompactorOption(SpheneConfigService configService, UiSharedService uiShared, string blockId = "UseFileCompactor",
+        string? menuPopupId = null)
     {
         ImGui.PushID(blockId);
         try
         {
             var useFileCompactor = configService.Current.UseCompactor;
-            if (ImGui.Checkbox("Use file compactor", ref useFileCompactor))
+            if (UiSharedService.DrawToggle("Use file compactor", ref useFileCompactor, menuPopupId: menuPopupId))
             {
                 configService.Current.UseCompactor = useFileCompactor;
                 configService.Save();
@@ -52,7 +53,7 @@ public static class StorageOptionBlock
         ImGui.PushID(blockId);
         try
         {
-            ImGui.Checkbox("##readClearCache", ref readClearCache);
+            UiSharedService.DrawToggle("##readClearCache", ref readClearCache);
         }
         finally
         {

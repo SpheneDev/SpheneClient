@@ -531,7 +531,10 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
     {
         ColorTextWrapped("Note: The storage folder should be somewhere close to root (i.e. C:\\SpheneStorage) in a new empty folder. DO NOT point this to your game folder. DO NOT point this to your Penumbra folder.", ImGuiColors.DalamudYellow);
         var cacheDirectory = _configService.Current.CacheFolder;
-        var folderIconTrailing = GetIconButtonSize(FontAwesomeIcon.Folder).X + ImGui.GetStyle().ItemSpacing.X;
+        // Reserve the help column too so the folder button aligns with the
+        // buttons on rows that also draw a help icon.
+        var folderIconTrailing = GetIconButtonSize(FontAwesomeIcon.Folder).X + ImGui.GetStyle().ItemSpacing.X
+            + ImGui.GetTextLineHeight() + ImGui.GetStyle().ItemSpacing.X;
         DrawInputText("Storage Folder##cache", ref cacheDirectory, 255,
             ImGuiInputTextFlags.ReadOnly, folderIconTrailing);
 
@@ -619,8 +622,7 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
         }
 
         float maxCacheSize = (float)_configService.Current.MaxLocalCacheInGiB;
-        var helpIconsTrailing = 2f * (GetIconSize(FontAwesomeIcon.QuestionCircle).X + ImGui.GetStyle().ItemSpacing.X);
-        if (DrawSliderFloat("Maximum Storage Size in GiB", ref maxCacheSize, 1f, 200f, "%.2f GiB", helpIconsTrailing))
+        if (DrawSliderFloat("Maximum Storage Size in GiB", ref maxCacheSize, 1f, 200f, "%.2f GiB"))
         {
             _configService.Current.MaxLocalCacheInGiB = maxCacheSize;
             _configService.Save();
@@ -631,7 +633,9 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
     public void DrawPenumbraModDownloadFolderSetting()
     {
         var downloadFolder = _configService.Current.PenumbraModDownloadFolder;
+        // Includes the help column so the trailing icons end before the pinned ? icon.
         var downloadTrailing = GetIconButtonSize(FontAwesomeIcon.Folder).X + ImGui.GetStyle().ItemSpacing.X
+            + ImGui.GetTextLineHeight() + ImGui.GetStyle().ItemSpacing.X
             + (string.IsNullOrEmpty(downloadFolder) ? 0f
                 : GetIconButtonSize(FontAwesomeIcon.Trash).X + ImGui.GetStyle().ItemSpacing.X);
         DrawInputText("Mod Download Folder##download", ref downloadFolder, 255,
@@ -714,9 +718,13 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
             _selectedComboItems[comboName] = selectedItem;
         }
 
-        var comboId = PrepareLabeledControl(comboName, trailingWidth, preferredWidth);
+        if (preferredWidth <= 0f)
+        {
+            preferredWidth = ComboFitWidth(comboItems.Select(toName));
+        }
+        var comboId = PrepareLabeledControl(comboName, trailingWidth, preferredWidth, dockRight: true);
 
-
+        using var style = PushValueControlStyle();
         if (ImGui.BeginCombo(comboId, selectedItem == null ? "Unset Value" : toName((T?)selectedItem)))
         {
             foreach (var item in comboItems)
@@ -745,14 +753,17 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
     /// Prepares a settings row for a labeled value control: a visible label
     /// renders grey in the left column and the control docks to the real
     /// content bound (card edge inside card regions, the window content edge
-    /// otherwise). Controls narrower than ~45% of the row sit right after
-    /// their label instead so no dead space opens up. Returns the id to pass
+    /// otherwise). Standard-tier controls always dock to the bound; only
+    /// controls with an explicit <paramref name="preferredWidth"/> narrower
+    /// than ~45% of the row sit right after their label so no dead space
+    /// opens up. Returns the id to pass
     /// to the ImGui widget. Hidden labels ("##id") pass through unchanged;
     /// mid-line calls only clamp the control width so a trailing label still
     /// fits inside the bound. <paramref name="preferredWidth"/> replaces
     /// the pushed item width when callers want a specific control size.
     /// </summary>
-    private static string PrepareLabeledControl(string label, float trailingWidth = 0f, float preferredWidth = -1f)
+    private static string PrepareLabeledControl(string label, float trailingWidth = 0f, float preferredWidth = -1f,
+        bool dockRight = false)
     {
         var labelSplit = label.IndexOf("##", StringComparison.Ordinal);
         var text = labelSplit < 0 ? label : label[..labelSplit];
@@ -764,7 +775,8 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
                 var width = preferredWidth;
                 if (bound > 0f)
                 {
-                    width = MathF.Min(width, MathF.Max(0f, bound - ImGui.GetCursorScreenPos().X));
+                    width = MathF.Min(width,
+                        MathF.Max(0f, bound - trailingWidth - ImGui.GetCursorScreenPos().X));
                 }
                 ImGui.SetNextItemWidth(width);
             }
@@ -779,25 +791,37 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
         {
             rightBound = cursor.X + ImGui.GetContentRegionAvail().X;
         }
-        rightBound -= trailingWidth;
+        // Reserve the same help-icon column the toggles use so every value
+        // control ends flush with the switch edge instead of overshooting it.
+        rightBound -= MathF.Max(trailingWidth,
+            ImGui.GetTextLineHeight() + ImGui.GetStyle().ItemSpacing.X);
         if (leftBound <= 0f)
         {
             leftBound = ImGui.GetWindowPos().X + ImGui.GetWindowContentRegionMin().X;
         }
         var avail = MathF.Max(0f, rightBound - cursor.X);
         var labelWidth = ImGui.CalcTextSize(text).X;
-        var desiredWidth = preferredWidth > 0f ? preferredWidth : ImGui.CalcItemWidth();
+        // Standard tier never exceeds half the row so labels stay readable and
+        // controls do not sprawl across the card.
+        var desiredWidth = preferredWidth > 0f
+            ? preferredWidth
+            : MathF.Min(ImGui.CalcItemWidth(), avail * 0.5f);
         var controlWidth = MathF.Max(60f * scale,
             MathF.Min(desiredWidth, avail - labelWidth - ImGui.GetStyle().ItemInnerSpacing.X));
 
-        if (cursor.X <= leftBound + 1f)
+        // Line start also covers indented sub-rows: when the previous item sits
+        // on a line above the cursor nothing was drawn on this row yet.
+        var isLineStart = cursor.X <= leftBound + 1f
+            || ImGui.GetItemRectMin().Y < cursor.Y - 1f;
+        if (isLineStart)
         {
             ImGui.AlignTextToFramePadding();
             var lineY = ImGui.GetCursorScreenPos().Y;
             ColorText(text, ImGuiColors.DalamudGrey);
-            // Wide controls dock to the right bound; compact controls sit
-            // right after their label so no dead space opens up between them.
-            var controlX = controlWidth >= avail * 0.45f
+            // Standard-tier controls always dock to the right bound. Only
+            // compact controls with an explicit preferred width sit right
+            // after their label so no dead space opens up between them.
+            var controlX = dockRight || preferredWidth <= 0f || controlWidth >= avail * 0.45f
                 ? rightBound - controlWidth
                 : cursor.X + labelWidth + ImGui.GetStyle().ItemInnerSpacing.X * 2f;
             ImGui.SetCursorScreenPos(new Vector2(controlX, lineY));
@@ -811,64 +835,293 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
         return label;
     }
 
+    /// <summary>Content-fit width for a combo: longest item text plus frame and arrow.</summary>
+    private static float ComboFitWidth(IEnumerable<string> itemTexts)
+    {
+        var fitContent = 0f;
+        foreach (var itemText in itemTexts)
+        {
+            fitContent = MathF.Max(fitContent, ImGui.CalcTextSize(itemText).X);
+        }
+        var minWidth = SettingRowCompactWidth;
+        var maxWidth = MathF.Max(minWidth, ImGui.CalcItemWidth());
+        return Math.Clamp(
+            fitContent + ImGui.GetStyle().FramePadding.X * 2f + ImGui.GetFrameHeight()
+                + ImGui.GetStyle().ItemInnerSpacing.X,
+            minWidth, maxWidth);
+    }
+
+    private static readonly ConcurrentDictionary<uint, float> _toggleAnimStates = new();
+    private const float ToggleAnimDuration = 0.15f;
+
+    /// <summary>Advances the slide-toggle animation (0 = off, 1 = on) for the given item id.</summary>
+    public static float GetToggleAnimValue(uint animKey, bool isOn)
+    {
+        var target = isOn ? 1f : 0f;
+        var t = _toggleAnimStates.GetOrAdd(animKey, target);
+        if (MathF.Abs(t - target) > 0.001f)
+        {
+            t = Math.Clamp(t + (target > t ? 1f : -1f) * ImGui.GetIO().DeltaTime / ToggleAnimDuration, 0f, 1f);
+            _toggleAnimStates[animKey] = t;
+        }
+        return t;
+    }
+
+    /// <summary>Draws the slide-toggle track and knob into the given rect.</summary>
+    public static void DrawSwitchVisual(ImDrawListPtr drawList, Vector2 trackMin, Vector2 trackMax, float animT, float alpha = 1f)
+    {
+        var trackHeight = trackMax.Y - trackMin.Y;
+        var trackWidth = trackMax.X - trackMin.X;
+        var offTrack = ImGui.ColorConvertU32ToFloat4(ImGui.GetColorU32(ImGuiCol.FrameBg));
+        var trackColor = Vector4.Lerp(offTrack, SpheneCustomTheme.Colors.AccentBlue, animT);
+        trackColor.W *= alpha;
+        drawList.AddRectFilled(trackMin, trackMax, ImGui.ColorConvertFloat4ToU32(trackColor),
+            trackHeight * 0.5f, ImDrawFlags.RoundCornersAll);
+        var knobRadius = trackHeight * 0.5f - 2f * ImGuiHelpers.GlobalScale;
+        var knobX = trackMin.X + trackHeight * 0.5f + animT * (trackWidth - trackHeight);
+        drawList.AddCircleFilled(new Vector2(knobX, trackMin.Y + trackHeight * 0.5f), knobRadius,
+            ImGui.ColorConvertFloat4ToU32(new Vector4(1f, 1f, 1f, 0.95f * alpha)));
+    }
+
+    private sealed class MultiPopScope(int styleVars, int styleColors) : IDisposable
+    {
+        public void Dispose()
+        {
+            if (styleVars > 0)
+            {
+                ImGui.PopStyleVar(styleVars);
+            }
+            if (styleColors > 0)
+            {
+                ImGui.PopStyleColor(styleColors);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Pushes the modern value-control styling shared by the <c>Draw*</c> row
+    /// wrappers: rounded frames, a knob-shaped accent grab, a subtle outline and
+    /// accent-tinted hover/active states, plus rounded combo popups. Matches the
+    /// slide-switch aesthetic so all value controls read as one control family.
+    /// </summary>
+    public static IDisposable PushValueControlStyle()
+    {
+        var frameHeight = ImGui.GetFrameHeight();
+        var scale = ImGuiHelpers.GlobalScale;
+        var accent = SpheneCustomTheme.Colors.AccentBlue;
+        var frameBg = ImGui.ColorConvertU32ToFloat4(ImGui.GetColorU32(ImGuiCol.FrameBg));
+        ImGui.PushStyleVar(ImGuiStyleVar.FrameRounding, frameHeight * 0.35f);
+        ImGui.PushStyleVar(ImGuiStyleVar.GrabRounding, frameHeight * 0.35f);
+        ImGui.PushStyleVar(ImGuiStyleVar.GrabMinSize, frameHeight * 0.5f);
+        ImGui.PushStyleVar(ImGuiStyleVar.FrameBorderSize, 1f);
+        ImGui.PushStyleVar(ImGuiStyleVar.PopupRounding, 8f * scale);
+        ImGui.PushStyleVar(ImGuiStyleVar.PopupBorderSize, 1f);
+        var border = ImGui.ColorConvertU32ToFloat4(ImGui.GetColorU32(ImGuiCol.Border));
+        ImGui.PushStyleColor(ImGuiCol.Border, border with { W = MathF.Max(border.W, 0.35f) });
+        ImGui.PushStyleColor(ImGuiCol.SliderGrab, accent with { W = 0.9f });
+        ImGui.PushStyleColor(ImGuiCol.SliderGrabActive, accent);
+        ImGui.PushStyleColor(ImGuiCol.CheckMark, accent);
+        ImGui.PushStyleColor(ImGuiCol.FrameBgHovered, Vector4.Lerp(frameBg, accent, 0.12f));
+        ImGui.PushStyleColor(ImGuiCol.FrameBgActive, Vector4.Lerp(frameBg, accent, 0.2f));
+        ImGui.PushStyleColor(ImGuiCol.HeaderHovered, accent with { W = 0.25f });
+        ImGui.PushStyleColor(ImGuiCol.HeaderActive, accent with { W = 0.4f });
+        return new MultiPopScope(6, 8);
+    }
+
+    /// <summary>
+    /// Drop-in replacement for <c>ImGui.Checkbox</c> on settings rows: draws the
+    /// label on the left and an animated slide toggle docked to the row's right
+    /// bound. The whole row is clickable and tinted while hovered. A trailing
+    /// icon column is reserved so a following <see cref="DrawHelpText"/> marker
+    /// still fits on the same line. Returns true when the value changed.
+    /// </summary>
+    public static bool DrawToggle(string label, ref bool value, bool indented = false, float trailingWidth = 0f,
+        string? menuPopupId = null)
+    {
+        var idSplit = label.IndexOf("##", StringComparison.Ordinal);
+        var text = (idSplit < 0 ? label : label[..idSplit]);
+        var scale = ImGuiHelpers.GlobalScale;
+        var cursor = ImGui.GetCursorScreenPos();
+        var rightBound = SpheneWindowChrome.CurrentCardContentRightBound;
+        if (rightBound <= 0f)
+        {
+            rightBound = cursor.X + ImGui.GetContentRegionAvail().X;
+        }
+        var helpReserve = MathF.Max(ImGui.GetTextLineHeight() + ImGui.GetStyle().ItemSpacing.X, trailingWidth);
+        var frameHeight = ImGui.GetFrameHeight();
+        var rowEndX = rightBound - helpReserve;
+
+        var trackHeight = MathF.Round(frameHeight * 0.7f);
+        var trackWidth = trackHeight * 1.8f;
+        var trackMin = new Vector2(rowEndX - trackWidth, cursor.Y + (frameHeight - trackHeight) * 0.5f);
+        var trackMax = trackMin + new Vector2(trackWidth, trackHeight);
+
+        var menuSize = menuPopupId != null ? frameHeight : 0f;
+        var innerGap = ImGui.GetStyle().ItemInnerSpacing.X;
+        var menuMin = new Vector2(trackMin.X - innerGap - menuSize, cursor.Y);
+        var buttonEndX = menuPopupId != null ? menuMin.X - innerGap : rowEndX;
+        var buttonWidth = MathF.Max(buttonEndX - cursor.X, frameHeight);
+
+        var toggled = ImGui.InvisibleButton(label, new Vector2(buttonWidth, frameHeight));
+        if (menuPopupId != null)
+        {
+            ImGui.SetItemAllowOverlap();
+        }
+        if (toggled)
+        {
+            value = !value;
+        }
+        var hovered = ImGui.IsItemHovered();
+        var alpha = ImGui.GetStyle().Alpha;
+
+        var animKey = ImGui.GetID(label);
+        var t = GetToggleAnimValue(animKey, value);
+
+        var drawList = ImGui.GetWindowDrawList();
+        if (hovered)
+        {
+            var tint = SpheneCustomTheme.Colors.AccentBlue with { W = 0.07f * alpha };
+            drawList.AddRectFilled(
+                new Vector2(cursor.X - 2f * scale, cursor.Y),
+                new Vector2(rightBound, cursor.Y + frameHeight),
+                ImGui.ColorConvertFloat4ToU32(tint), 4f * scale, ImDrawFlags.RoundCornersAll);
+        }
+
+        if (menuPopupId != null)
+        {
+            ImGui.SetCursorScreenPos(menuMin);
+            var menuClicked = ImGui.InvisibleButton(label + "##menu", new Vector2(menuSize, frameHeight));
+            var menuHovered = ImGui.IsItemHovered();
+            if (menuHovered)
+            {
+                var menuTint = SpheneCustomTheme.Colors.AccentBlue with { W = 0.16f * alpha };
+                drawList.AddRectFilled(menuMin, menuMin + new Vector2(menuSize, frameHeight),
+                    ImGui.ColorConvertFloat4ToU32(menuTint), 4f * scale, ImDrawFlags.RoundCornersAll);
+            }
+            var dotRadius = MathF.Max(1f, 1.5f * scale);
+            var dotSpacing = menuSize * 0.22f;
+            var dotX = menuMin.X + menuSize * 0.5f;
+            var dotY = menuMin.Y + frameHeight * 0.5f;
+            var dotColor = ImGui.GetColorU32(menuHovered ? ImGuiCol.Text : ImGuiCol.TextDisabled);
+            for (var i = -1; i <= 1; i++)
+            {
+                drawList.AddCircleFilled(new Vector2(dotX, dotY + i * dotSpacing), dotRadius, dotColor);
+            }
+            if (menuClicked)
+            {
+                ImGui.OpenPopup(menuPopupId);
+            }
+            AttachToolTip("More options");
+        }
+
+        DrawSwitchVisual(drawList, trackMin, trackMax, t, alpha);
+
+        if (text.Length > 0)
+        {
+            ImGui.SetCursorScreenPos(cursor);
+            ImGui.AlignTextToFramePadding();
+            ColorText(indented ? "  " + text : text,
+                indented ? ImGuiColors.DalamudGrey3 : ImGuiColors.DalamudGrey);
+        }
+
+        return toggled;
+    }
+
     /// <summary>SliderInt with the settings-row convention (label left, control sized to the bound).</summary>
     public static bool DrawSliderInt(string label, ref int value, int min, int max, string? format = null,
         float trailingWidth = 0f, float preferredWidth = -1f)
-        => ImGui.SliderInt(PrepareLabeledControl(label, trailingWidth, preferredWidth), ref value, min, max, format ?? "%d");
+    {
+        using var style = PushValueControlStyle();
+        return ImGui.SliderInt(PrepareLabeledControl(label, trailingWidth, preferredWidth), ref value, min, max, format ?? "%d");
+    }
 
     /// <summary>SliderFloat with the settings-row convention (label left, control sized to the bound).</summary>
     public static bool DrawSliderFloat(string label, ref float value, float min, float max, string? format = null,
         float trailingWidth = 0f, float preferredWidth = -1f)
-        => ImGui.SliderFloat(PrepareLabeledControl(label, trailingWidth, preferredWidth), ref value, min, max, format ?? "%.3f");
+    {
+        using var style = PushValueControlStyle();
+        return ImGui.SliderFloat(PrepareLabeledControl(label, trailingWidth, preferredWidth), ref value, min, max, format ?? "%.3f");
+    }
 
     /// <summary>SliderFloat2 with the settings-row convention (label left, control sized to the bound).</summary>
     public static bool DrawSliderFloat2(string label, ref Vector2 value, float min, float max, string? format = null,
         float trailingWidth = 0f, float preferredWidth = -1f)
-        => ImGui.SliderFloat2(PrepareLabeledControl(label, trailingWidth, preferredWidth), ref value, min, max, format ?? "%.3f");
+    {
+        using var style = PushValueControlStyle();
+        return ImGui.SliderFloat2(PrepareLabeledControl(label, trailingWidth, preferredWidth), ref value, min, max, format ?? "%.3f");
+    }
 
     /// <summary>DragFloat with the settings-row convention (label left, compact numeric tier).</summary>
     public static bool DrawDragFloat(string label, ref float value, float speed, float min, float max,
         string? format = null, float trailingWidth = 0f, float preferredWidth = -1f)
-        => ImGui.DragFloat(PrepareLabeledControl(label, trailingWidth,
+    {
+        using var style = PushValueControlStyle();
+        return ImGui.DragFloat(PrepareLabeledControl(label, trailingWidth,
             preferredWidth > 0f ? preferredWidth : SettingRowCompactWidth), ref value, speed, min, max, format ?? "%.3f");
+    }
 
     /// <summary>DragFloat2 with the settings-row convention (label left, compact numeric tier).</summary>
     public static bool DrawDragFloat2(string label, ref Vector2 value, float speed, float min, float max,
         string? format = null, float trailingWidth = 0f, float preferredWidth = -1f)
-        => ImGui.DragFloat2(PrepareLabeledControl(label, trailingWidth,
+    {
+        using var style = PushValueControlStyle();
+        return ImGui.DragFloat2(PrepareLabeledControl(label, trailingWidth,
             preferredWidth > 0f ? preferredWidth : SettingRowCompactWidth), ref value, speed, min, max, format ?? "%.3f");
+    }
 
     /// <summary>InputInt with the settings-row convention (label left, compact numeric tier).</summary>
     public static bool DrawInputInt(string label, ref int value, int step = 1, int stepFast = 100,
         float trailingWidth = 0f, float preferredWidth = -1f)
-        => ImGui.InputInt(PrepareLabeledControl(label, trailingWidth,
+    {
+        using var style = PushValueControlStyle();
+        return ImGui.InputInt(PrepareLabeledControl(label, trailingWidth,
             preferredWidth > 0f ? preferredWidth : SettingRowCompactWidth), ref value, step, stepFast);
+    }
 
     /// <summary>InputText with the settings-row convention (label left, control sized to the bound).</summary>
     public static bool DrawInputText(string label, ref string value, int maxLength,
         ImGuiInputTextFlags flags = ImGuiInputTextFlags.None, float trailingWidth = 0f, float preferredWidth = -1f)
-        => ImGui.InputText(PrepareLabeledControl(label, trailingWidth, preferredWidth), ref value, maxLength, flags);
+    {
+        using var style = PushValueControlStyle();
+        return ImGui.InputText(PrepareLabeledControl(label, trailingWidth, preferredWidth), ref value, maxLength, flags);
+    }
 
     /// <summary>InputTextWithHint with the settings-row convention (label left, control sized to the bound).</summary>
     public static bool DrawInputTextWithHint(string label, string hint, ref string value, int maxLength,
         ImGuiInputTextFlags flags = ImGuiInputTextFlags.None, float trailingWidth = 0f, float preferredWidth = -1f)
-        => ImGui.InputTextWithHint(PrepareLabeledControl(label, trailingWidth, preferredWidth), hint, ref value, maxLength, flags);
+    {
+        using var style = PushValueControlStyle();
+        return ImGui.InputTextWithHint(PrepareLabeledControl(label, trailingWidth, preferredWidth), hint, ref value, maxLength, flags);
+    }
 
     /// <summary>InputTextMultiline with the settings-row convention (label left, control sized to the bound).</summary>
     public static bool DrawInputTextMultiline(string label, ref string value, int maxLength, Vector2 size,
         ImGuiInputTextFlags flags = ImGuiInputTextFlags.None, float trailingWidth = 0f, float preferredWidth = -1f)
-        => ImGui.InputTextMultiline(PrepareLabeledControl(label, trailingWidth, preferredWidth), ref value, maxLength, size, flags);
+    {
+        using var style = PushValueControlStyle();
+        return ImGui.InputTextMultiline(PrepareLabeledControl(label, trailingWidth, preferredWidth), ref value, maxLength, size, flags);
+    }
 
     /// <summary>Combo (index) with the settings-row convention (label left, control sized to the bound).</summary>
     public static bool DrawLabeledCombo(string label, ref int currentItem, string[] items, int itemsCount,
         float trailingWidth = 0f, float preferredWidth = -1f)
-        => ImGui.Combo(PrepareLabeledControl(label, trailingWidth, preferredWidth), ref currentItem, items, itemsCount);
+    {
+        using var style = PushValueControlStyle();
+        return ImGui.Combo(PrepareLabeledControl(label, trailingWidth,
+            preferredWidth > 0f ? preferredWidth : ComboFitWidth(items.Take(itemsCount)), dockRight: true),
+            ref currentItem, items, itemsCount);
+    }
 
     /// <summary>Combo (\0-separated items) with the settings-row convention (label left, control sized to the bound).</summary>
     public static bool DrawLabeledCombo(string label, ref int currentItem, string itemsSeparatedByZeros,
         int popupMaxHeightInItems = -1, float trailingWidth = 0f, float preferredWidth = -1f)
-        => ImGui.Combo(PrepareLabeledControl(label, trailingWidth, preferredWidth), ref currentItem, itemsSeparatedByZeros,
+    {
+        using var style = PushValueControlStyle();
+        return ImGui.Combo(PrepareLabeledControl(label, trailingWidth,
+            preferredWidth > 0f ? preferredWidth : ComboFitWidth(itemsSeparatedByZeros.Split('\0', StringSplitOptions.RemoveEmptyEntries)),
+            dockRight: true), ref currentItem, itemsSeparatedByZeros,
             popupMaxHeightInItems);
+    }
 
     public void DrawFileScanState()
     {
@@ -914,9 +1167,31 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
         }
     }
 
+    /// <summary>
+    /// Draws a ? help marker in the reserved right column of the current row
+    /// (same line as the previous item when it fits, right-aligned on the next
+    /// line otherwise) so all help icons share one flush column.
+    /// </summary>
     public void DrawHelpText(string helpText)
     {
-        SameLineIfFits(GetIconSize(FontAwesomeIcon.QuestionCircle).X);
+        var iconW = GetIconSize(FontAwesomeIcon.QuestionCircle).X;
+        var bound = SpheneWindowChrome.CurrentCardContentRightBound;
+        if (bound <= 0f)
+        {
+            bound = ImGui.GetCursorScreenPos().X + ImGui.GetContentRegionAvail().X;
+        }
+        var targetX = bound - iconW;
+        var lastEndX = ImGui.GetItemRectMax().X;
+        if (targetX > lastEndX + 1f)
+        {
+            // Pin to the reserved right column so every help icon sits flush
+            // behind the row's control or switch.
+            ImGui.SameLine(0f, targetX - lastEndX);
+        }
+        else
+        {
+            SameLineIfFits(iconW);
+        }
         IconText(FontAwesomeIcon.QuestionCircle, ImGui.GetColorU32(ImGuiCol.TextDisabled));
         AttachToolTip(helpText);
     }
@@ -934,6 +1209,17 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
             return MathF.Max(0f, bound - ImGui.GetCursorScreenPos().X);
         }
         return ImGui.GetContentRegionAvail().X;
+    }
+
+    /// <summary>
+    /// Remaining row width up to the shared control edge: the card bound minus
+    /// the trailing icon column that labeled controls and toggles reserve,
+    /// minus optional extra trailing content drawn via SameLine.
+    /// </summary>
+    public static float FillRowControlWidth(float extraTrailing = 0f)
+    {
+        return MathF.Max(0f, BoundedContentAvailX()
+            - ImGui.GetTextLineHeight() - ImGui.GetStyle().ItemSpacing.X - extraTrailing);
     }
 
     /// <summary>
@@ -1707,27 +1993,30 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
             if (string.Equals(_serverConfigurationManager.CurrentServer?.ServerName, comboEntries[i], StringComparison.OrdinalIgnoreCase))
                 comboEntries[i] += " [Current]";
         }
-        if (ImGui.BeginCombo("Select Service", comboEntries[_serverSelectionIndex]))
+        using (var controlStyle = PushValueControlStyle())
         {
-            for (int i = 0; i < comboEntries.Length; i++)
+            if (ImGui.BeginCombo("Select Service", comboEntries[_serverSelectionIndex]))
             {
-                bool isSelected = _serverSelectionIndex == i;
-                if (ImGui.Selectable(comboEntries[i], isSelected))
+                for (int i = 0; i < comboEntries.Length; i++)
                 {
-                    _serverSelectionIndex = i;
-                    if (selectOnChange)
+                    bool isSelected = _serverSelectionIndex == i;
+                    if (ImGui.Selectable(comboEntries[i], isSelected))
                     {
-                        _serverConfigurationManager.SelectServer(i);
+                        _serverSelectionIndex = i;
+                        if (selectOnChange)
+                        {
+                            _serverConfigurationManager.SelectServer(i);
+                        }
+                    }
+
+                    if (isSelected)
+                    {
+                        ImGui.SetItemDefaultFocus();
                     }
                 }
 
-                if (isSelected)
-                {
-                    ImGui.SetItemDefaultFocus();
-                }
+                ImGui.EndCombo();
             }
-
-            ImGui.EndCombo();
         }
 
         if (showConnect)

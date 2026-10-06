@@ -13,7 +13,7 @@ public static class AppearanceOptionBlock
         try
         {
             var showSpheneIcon = configService.Current.ShowSpheneIcon;
-            if (ImGui.Checkbox("Show Sphene Icon", ref showSpheneIcon))
+            if (UiSharedService.DrawToggle("Show Sphene Icon", ref showSpheneIcon))
             {
                 configService.Current.ShowSpheneIcon = showSpheneIcon;
                 configService.Save();
@@ -31,7 +31,7 @@ public static class AppearanceOptionBlock
         try
         {
             var hideInGpose = configService.Current.HideSpheneIconInGpose;
-            if (ImGui.Checkbox("Hide Sphene Icon in GPose", ref hideInGpose))
+            if (UiSharedService.DrawToggle("Hide Sphene Icon in GPose", ref hideInGpose))
             {
                 configService.Current.HideSpheneIconInGpose = hideInGpose;
                 configService.Save();
@@ -49,7 +49,7 @@ public static class AppearanceOptionBlock
         try
         {
             var lockSpheneIcon = configService.Current.LockSpheneIcon;
-            if (ImGui.Checkbox("Lock Sphene Icon position", ref lockSpheneIcon))
+            if (UiSharedService.DrawToggle("Lock Sphene Icon position", ref lockSpheneIcon))
             {
                 configService.Current.LockSpheneIcon = lockSpheneIcon;
                 configService.Save();
@@ -67,7 +67,7 @@ public static class AppearanceOptionBlock
         try
         {
             var enableRightClickMenu = configService.Current.EnableRightClickMenus;
-            if (ImGui.Checkbox("Enable game right-click menus", ref enableRightClickMenu))
+            if (UiSharedService.DrawToggle("Enable game right-click menus", ref enableRightClickMenu))
             {
                 configService.Current.EnableRightClickMenus = enableRightClickMenu;
                 configService.Save();
@@ -85,7 +85,7 @@ public static class AppearanceOptionBlock
         try
         {
             var enableDtrEntry = configService.Current.EnableDtrEntry;
-            if (ImGui.Checkbox("Show status in Server Info Bar", ref enableDtrEntry))
+            if (UiSharedService.DrawToggle("Show status in Server Info Bar", ref enableDtrEntry))
             {
                 configService.Current.EnableDtrEntry = enableDtrEntry;
                 configService.Save();
@@ -105,7 +105,7 @@ public static class AppearanceOptionBlock
         try
         {
             var showUidInDtrTooltip = configService.Current.ShowUidInDtrTooltip;
-            if (ImGui.Checkbox("Show UID in tooltip", ref showUidInDtrTooltip))
+            if (UiSharedService.DrawToggle("Show UID in tooltip", ref showUidInDtrTooltip))
             {
                 configService.Current.ShowUidInDtrTooltip = showUidInDtrTooltip;
                 configService.Save();
@@ -123,7 +123,7 @@ public static class AppearanceOptionBlock
         try
         {
             var preferNoteInDtrTooltip = configService.Current.PreferNoteInDtrTooltip;
-            if (ImGui.Checkbox("Prefer notes in tooltip", ref preferNoteInDtrTooltip))
+            if (UiSharedService.DrawToggle("Prefer notes in tooltip", ref preferNoteInDtrTooltip))
             {
                 configService.Current.PreferNoteInDtrTooltip = preferNoteInDtrTooltip;
                 configService.Save();
@@ -141,7 +141,7 @@ public static class AppearanceOptionBlock
         try
         {
             var useColorsInDtr = configService.Current.UseColorsInDtr;
-            if (ImGui.Checkbox("Use status colors", ref useColorsInDtr))
+            if (UiSharedService.DrawToggle("Use status colors", ref useColorsInDtr))
             {
                 configService.Current.UseColorsInDtr = useColorsInDtr;
                 configService.Save();
@@ -159,7 +159,7 @@ public static class AppearanceOptionBlock
         try
         {
             var useFocusTarget = configService.Current.UseFocusTarget;
-            if (ImGui.Checkbox("Set visible pairs as focus targets when clicking the eye", ref useFocusTarget))
+            if (UiSharedService.DrawToggle("Set visible pairs as focus targets when clicking the eye", ref useFocusTarget))
             {
                 configService.Current.UseFocusTarget = useFocusTarget;
                 configService.Save();
@@ -177,7 +177,7 @@ public static class AppearanceOptionBlock
         try
         {
             var showNameInsteadOfNotes = configService.Current.ShowCharacterNameInsteadOfNotesForVisible;
-            if (ImGui.Checkbox("Show character name instead of notes", ref showNameInsteadOfNotes))
+            if (UiSharedService.DrawToggle("Show character name instead of notes", ref showNameInsteadOfNotes))
             {
                 configService.Current.ShowCharacterNameInsteadOfNotesForVisible = showNameInsteadOfNotes;
                 configService.Save();
@@ -198,7 +198,7 @@ public static class AppearanceOptionBlock
         try
         {
             var showVisibleSeparate = configService.Current.ShowVisibleUsersSeparately;
-            if (ImGui.Checkbox("Show visible users separately", ref showVisibleSeparate))
+            if (UiSharedService.DrawToggle("Show visible users separately", ref showVisibleSeparate))
             {
                 configService.Current.ShowVisibleUsersSeparately = showVisibleSeparate;
                 configService.Save();
@@ -219,7 +219,7 @@ public static class AppearanceOptionBlock
         try
         {
             var showVisibleSyncshellUsersOnlyInSyncshells = configService.Current.ShowVisibleSyncshellUsersOnlyInSyncshells;
-            if (ImGui.Checkbox("Show visible Syncshell users only in Syncshells", ref showVisibleSyncshellUsersOnlyInSyncshells))
+            if (UiSharedService.DrawToggle("Show visible Syncshell users only in Syncshells", ref showVisibleSyncshellUsersOnlyInSyncshells))
             {
                 configService.Current.ShowVisibleSyncshellUsersOnlyInSyncshells = showVisibleSyncshellUsersOnlyInSyncshells;
                 configService.Save();
@@ -240,7 +240,7 @@ public static class AppearanceOptionBlock
         try
         {
             var showOfflineSeparate = configService.Current.ShowOfflineUsersSeparately;
-            if (ImGui.Checkbox("Show offline users separately", ref showOfflineSeparate))
+            if (UiSharedService.DrawToggle("Show offline users separately", ref showOfflineSeparate))
             {
                 configService.Current.ShowOfflineUsersSeparately = showOfflineSeparate;
                 configService.Save();
@@ -261,7 +261,7 @@ public static class AppearanceOptionBlock
         try
         {
             var showSyncshellOfflineSeparate = configService.Current.ShowSyncshellOfflineUsersSeparately;
-            if (ImGui.Checkbox("Also show offline Syncshell users separately", ref showSyncshellOfflineSeparate))
+            if (UiSharedService.DrawToggle("Also show offline Syncshell users separately", ref showSyncshellOfflineSeparate))
             {
                 configService.Current.ShowSyncshellOfflineUsersSeparately = showSyncshellOfflineSeparate;
                 configService.Save();
@@ -282,7 +282,7 @@ public static class AppearanceOptionBlock
         try
         {
             var groupUpSyncshells = configService.Current.GroupUpSyncshells;
-            if (ImGui.Checkbox("Group up all syncshells in one folder", ref groupUpSyncshells))
+            if (UiSharedService.DrawToggle("Group up all syncshells in one folder", ref groupUpSyncshells))
             {
                 configService.Current.GroupUpSyncshells = groupUpSyncshells;
                 configService.Save();
@@ -303,7 +303,7 @@ public static class AppearanceOptionBlock
         try
         {
             var showProfiles = configService.Current.ProfilesShow;
-            if (ImGui.Checkbox("Show Sphene Profiles on Hover", ref showProfiles))
+            if (UiSharedService.DrawToggle("Show Sphene Profiles on Hover", ref showProfiles))
             {
                 mediator.Publish(new ClearProfileDataMessage());
                 configService.Current.ProfilesShow = showProfiles;
@@ -325,7 +325,7 @@ public static class AppearanceOptionBlock
         try
         {
             var profileOnRight = configService.Current.ProfilePopoutRight;
-            if (ImGui.Checkbox("Popout profiles on the right", ref profileOnRight))
+            if (UiSharedService.DrawToggle("Popout profiles on the right", ref profileOnRight))
             {
                 configService.Current.ProfilePopoutRight = profileOnRight;
                 configService.Save();
@@ -366,7 +366,7 @@ public static class AppearanceOptionBlock
         try
         {
             var showNsfwProfiles = configService.Current.ProfilesAllowNsfw;
-            if (ImGui.Checkbox("Show profiles marked as NSFW", ref showNsfwProfiles))
+            if (UiSharedService.DrawToggle("Show profiles marked as NSFW", ref showNsfwProfiles))
             {
                 mediator.Publish(new ClearProfileDataMessage());
                 configService.Current.ProfilesAllowNsfw = showNsfwProfiles;

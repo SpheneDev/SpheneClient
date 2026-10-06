@@ -12,7 +12,7 @@ public static class AcknowledgmentOptionBlock
         try
         {
             var showPopups = configService.Current.ShowAcknowledgmentPopups;
-            if (ImGui.Checkbox("Show Acknowledgment Notifications", ref showPopups))
+            if (UiSharedService.DrawToggle("Show Acknowledgment Notifications", ref showPopups))
             {
                 configService.Current.ShowAcknowledgmentPopups = showPopups;
                 configService.Save();
@@ -33,7 +33,7 @@ public static class AcknowledgmentOptionBlock
         try
         {
             var showWaitingPopups = configService.Current.ShowWaitingForAcknowledgmentPopups;
-            if (ImGui.Checkbox("Show 'Waiting for Acknowledgment' Popups", ref showWaitingPopups))
+            if (UiSharedService.DrawToggle("Show 'Waiting for Acknowledgment' Popups", ref showWaitingPopups))
             {
                 configService.Current.ShowWaitingForAcknowledgmentPopups = showWaitingPopups;
                 configService.Save();
@@ -74,7 +74,7 @@ public static class AcknowledgmentOptionBlock
         try
         {
             var enableBatching = configService.Current.EnableAcknowledgmentBatching;
-            if (ImGui.Checkbox("Enable Batching", ref enableBatching))
+            if (UiSharedService.DrawToggle("Enable Batching", ref enableBatching))
             {
                 configService.Current.EnableAcknowledgmentBatching = enableBatching;
                 configService.Save();
@@ -94,7 +94,7 @@ public static class AcknowledgmentOptionBlock
         try
         {
             var enableAutoRetry = configService.Current.EnableAcknowledgmentAutoRetry;
-            if (ImGui.Checkbox("Enable Auto Retry", ref enableAutoRetry))
+            if (UiSharedService.DrawToggle("Enable Auto Retry", ref enableAutoRetry))
             {
                 configService.Current.EnableAcknowledgmentAutoRetry = enableAutoRetry;
                 configService.Save();

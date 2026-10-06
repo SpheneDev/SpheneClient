@@ -23,7 +23,7 @@ public static class DebugOptionBlock
     public static bool DrawLogNetworkPerformanceMetricsOption(SpheneConfigService configService, UiSharedService uiShared, string blockId = "LogNetworkPerformanceMetrics")
     {
         var logPerformance = configService.Current.LogPerformance;
-        if (ImGui.Checkbox("Log Network Performance Metrics##" + blockId, ref logPerformance))
+        if (UiSharedService.DrawToggle("Log Network Performance Metrics##" + blockId, ref logPerformance))
         {
             configService.Current.LogPerformance = logPerformance;
             configService.Save();
@@ -50,7 +50,7 @@ public static class DebugOptionBlock
     public static void DrawDoNotNotifyForModifiedGameFilesOrEnabledLodOption(SpheneConfigService configService, UiSharedService uiShared, string blockId = "DoNotNotifyForModifiedGameFilesOrEnabledLod")
     {
         var stopWhining = configService.Current.DebugStopWhining;
-        if (ImGui.Checkbox("Do not notify for modified game files or enabled LOD##" + blockId, ref stopWhining))
+        if (UiSharedService.DrawToggle("Do not notify for modified game files or enabled LOD##" + blockId, ref stopWhining))
         {
             configService.Current.DebugStopWhining = stopWhining;
             configService.Save();
@@ -65,35 +65,35 @@ public static class DebugOptionBlock
         try
         {
             var trackEquipmentPaths = configService.Current.MismatchTrackerTrackEquipmentPaths;
-            if (ImGui.Checkbox("Track equipment paths (chara/weapon, chara/equipment, chara/accessory)", ref trackEquipmentPaths))
+            if (UiSharedService.DrawToggle("Track equipment paths (chara/weapon, chara/equipment, chara/accessory)", ref trackEquipmentPaths))
             {
                 configService.Current.MismatchTrackerTrackEquipmentPaths = trackEquipmentPaths;
                 configService.Save();
             }
 
             var trackCompanions = configService.Current.MismatchTrackerTrackMinionMountAndPetPaths;
-            if (ImGui.Checkbox("Track minion/mount and pet paths", ref trackCompanions))
+            if (UiSharedService.DrawToggle("Track minion/mount and pet paths", ref trackCompanions))
             {
                 configService.Current.MismatchTrackerTrackMinionMountAndPetPaths = trackCompanions;
                 configService.Save();
             }
 
             var trackPhyb = configService.Current.MismatchTrackerTrackPhybFiles;
-            if (ImGui.Checkbox("Track .phyb files", ref trackPhyb))
+            if (UiSharedService.DrawToggle("Track .phyb files", ref trackPhyb))
             {
                 configService.Current.MismatchTrackerTrackPhybFiles = trackPhyb;
                 configService.Save();
             }
 
             var trackSkp = configService.Current.MismatchTrackerTrackSkpFiles;
-            if (ImGui.Checkbox("Track .skp files", ref trackSkp))
+            if (UiSharedService.DrawToggle("Track .skp files", ref trackSkp))
             {
                 configService.Current.MismatchTrackerTrackSkpFiles = trackSkp;
                 configService.Save();
             }
 
             var trackPbd = configService.Current.MismatchTrackerTrackPbdFiles;
-            if (ImGui.Checkbox("Track .pbd files", ref trackPbd))
+            if (UiSharedService.DrawToggle("Track .pbd files", ref trackPbd))
             {
                 configService.Current.MismatchTrackerTrackPbdFiles = trackPbd;
                 configService.Save();
