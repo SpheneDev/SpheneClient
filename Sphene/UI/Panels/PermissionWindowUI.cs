@@ -9,23 +9,21 @@ using Sphene.Services.Mediator;
 using Sphene.Utils;
 using Sphene.WebAPI;
 using Microsoft.Extensions.Logging;
+using Sphene.UI.Design;
+using System.Numerics;
 
 namespace Sphene.UI.Panels;
 
 public class PermissionWindowUI : WindowMediatorSubscriberBase
 {
     public Pair Pair { get; init; }
-
-    private readonly UiSharedService _uiSharedService;
     private readonly ApiController _apiController;
     private UserPermissions _ownPermissions;
 
-    public PermissionWindowUI(ILogger<PermissionWindowUI> logger, Pair pair, SpheneMediator mediator, UiSharedService uiSharedService,
-        ApiController apiController, PerformanceCollectorService performanceCollectorService)
+    public PermissionWindowUI(ILogger<PermissionWindowUI> logger, Pair pair, SpheneMediator mediator, ApiController apiController, PerformanceCollectorService performanceCollectorService)
         : base(logger, mediator, "Permissions for " + pair.UserData.AliasOrUID + "###SphenePermissions" + pair.UserData.UID, performanceCollectorService)
     {
         Pair = pair;
-        _uiSharedService = uiSharedService;
         _apiController = apiController;
         _ownPermissions = pair.UserPair.OwnPermissions.DeepClone();
         Flags = ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoResize;
@@ -39,6 +37,16 @@ public class PermissionWindowUI : WindowMediatorSubscriberBase
 
     protected override void DrawInternal()
     {
+        if (SpheneUI.Layout.BeginScrollArea("permissions-content", ImGui.GetContentRegionAvail(),
+                contentPadding: Vector2.Zero))
+        {
+            DrawPermissionsContent();
+        }
+        SpheneUI.Layout.EndScrollArea();
+    }
+
+    private void DrawPermissionsContent()
+    {
         var sticky = _ownPermissions.IsSticky();
         var paused = _ownPermissions.IsPaused();
         var disableSounds = _ownPermissions.IsDisableSounds();
@@ -48,23 +56,22 @@ public class PermissionWindowUI : WindowMediatorSubscriberBase
         var style = ImGui.GetStyle();
         var indentSize = ImGui.GetFrameHeight() + style.ItemSpacing.X;
 
-        _uiSharedService.BigText("Permissions for " + Pair.UserData.AliasOrUID);
-        ImGuiHelpers.ScaledDummy(1f);
+        SpheneUI.Text.PageHeader("Permissions for " + Pair.UserData.AliasOrUID);
 
-        if (ImGui.Checkbox("Preferred Permissions", ref sticky))
+        if (SpheneUI.Controls.Toggle("Preferred Permissions", ref sticky))
         {
             _ownPermissions.SetSticky(sticky);
         }
-        _uiSharedService.DrawHelpText("Preferred Permissions, when enabled, will exclude this user from any permission changes on any syncshells you share with this user.");
+        SpheneUI.Controls.HelpText("Preferred Permissions, when enabled, will exclude this user from any permission changes on any syncshells you share with this user.");
 
         ImGuiHelpers.ScaledDummy(1f);
 
 
-        if (ImGui.Checkbox("Pause Sync", ref paused))
+        if (SpheneUI.Controls.Toggle("Pause Sync", ref paused))
         {
             _ownPermissions.SetPaused(paused);
         }
-        _uiSharedService.DrawHelpText("Pausing will completely cease any sync with this user." + UiSharedService.TooltipSeparator
+        SpheneUI.Controls.HelpText("Pausing will completely cease any sync with this user." + SpheneUI.TooltipSeparator
             + "Note: this is bidirectional, either user pausing will cease sync completely.");
         var otherPerms = Pair.UserPair.OtherPermissions;
 
@@ -76,80 +83,76 @@ public class PermissionWindowUI : WindowMediatorSubscriberBase
 
         using (ImRaii.PushIndent(indentSize, false))
         {
-            _uiSharedService.BooleanToColoredIcon(!otherIsPaused, false);
+            SpheneUI.Icons.BoolIcon(!otherIsPaused, false);
             ImGui.SameLine();
             ImGui.AlignTextToFramePadding();
-            ImGui.Text(Pair.UserData.AliasOrUID + " has " + (!otherIsPaused ? "not " : string.Empty) + "paused you");
+            SpheneUI.Text.Plain(Pair.UserData.AliasOrUID + " has " + (!otherIsPaused ? "not " : string.Empty) + "paused you");
         }
 
-        ImGuiHelpers.ScaledDummy(0.5f);
-        ImGui.Separator();
-        ImGuiHelpers.ScaledDummy(0.5f);
+        SpheneUI.Layout.SectionSeparator("Sync Permissions");
 
-        if (ImGui.Checkbox("Disable Sounds", ref disableSounds))
+        if (SpheneUI.Controls.Toggle("Disable Sounds", ref disableSounds))
         {
             _ownPermissions.SetDisableSounds(disableSounds);
         }
-        _uiSharedService.DrawHelpText("Disabling sounds will remove all sounds synced with this user on both sides." + UiSharedService.TooltipSeparator
+        SpheneUI.Controls.HelpText("Disabling sounds will remove all sounds synced with this user on both sides." + SpheneUI.TooltipSeparator
             + "Note: this is bidirectional, either user disabling sound sync will stop sound sync on both sides.");
         using (ImRaii.PushIndent(indentSize, false))
         {
-            _uiSharedService.BooleanToColoredIcon(!otherDisableSounds, false);
+            SpheneUI.Icons.BoolIcon(!otherDisableSounds, false);
             ImGui.SameLine();
             ImGui.AlignTextToFramePadding();
-            ImGui.Text(Pair.UserData.AliasOrUID + " has " + (!otherDisableSounds ? "not " : string.Empty) + "disabled sound sync with you");
+            SpheneUI.Text.Plain(Pair.UserData.AliasOrUID + " has " + (!otherDisableSounds ? "not " : string.Empty) + "disabled sound sync with you");
         }
 
-        if (ImGui.Checkbox("Disable Animations", ref disableAnimations))
+        if (SpheneUI.Controls.Toggle("Disable Animations", ref disableAnimations))
         {
             _ownPermissions.SetDisableAnimations(disableAnimations);
         }
-        _uiSharedService.DrawHelpText("Disabling sounds will remove all animations synced with this user on both sides." + UiSharedService.TooltipSeparator
+        SpheneUI.Controls.HelpText("Disabling sounds will remove all animations synced with this user on both sides." + SpheneUI.TooltipSeparator
             + "Note: this is bidirectional, either user disabling animation sync will stop animation sync on both sides.");
         using (ImRaii.PushIndent(indentSize, false))
         {
-            _uiSharedService.BooleanToColoredIcon(!otherDisableAnimations, false);
+            SpheneUI.Icons.BoolIcon(!otherDisableAnimations, false);
             ImGui.SameLine();
             ImGui.AlignTextToFramePadding();
-            ImGui.Text(Pair.UserData.AliasOrUID + " has " + (!otherDisableAnimations ? "not " : string.Empty) + "disabled animation sync with you");
+            SpheneUI.Text.Plain(Pair.UserData.AliasOrUID + " has " + (!otherDisableAnimations ? "not " : string.Empty) + "disabled animation sync with you");
         }
 
-        if (ImGui.Checkbox("Disable VFX", ref disableVfx))
+        if (SpheneUI.Controls.Toggle("Disable VFX", ref disableVfx))
         {
             _ownPermissions.SetDisableVFX(disableVfx);
         }
-        _uiSharedService.DrawHelpText("Disabling sounds will remove all VFX synced with this user on both sides." + UiSharedService.TooltipSeparator
+        SpheneUI.Controls.HelpText("Disabling sounds will remove all VFX synced with this user on both sides." + SpheneUI.TooltipSeparator
             + "Note: this is bidirectional, either user disabling VFX sync will stop VFX sync on both sides.");
         using (ImRaii.PushIndent(indentSize, false))
         {
-            _uiSharedService.BooleanToColoredIcon(!otherDisableVFX, false);
+            SpheneUI.Icons.BoolIcon(!otherDisableVFX, false);
             ImGui.SameLine();
             ImGui.AlignTextToFramePadding();
-            ImGui.Text(Pair.UserData.AliasOrUID + " has " + (!otherDisableVFX ? "not " : string.Empty) + "disabled VFX sync with you");
+            SpheneUI.Text.Plain(Pair.UserData.AliasOrUID + " has " + (!otherDisableVFX ? "not " : string.Empty) + "disabled VFX sync with you");
         }
 
-        if (ImGui.Checkbox("Disable VFX in Duty", ref disableVfxInDuty))
+        if (SpheneUI.Controls.Toggle("Disable VFX in Duty", ref disableVfxInDuty))
         {
             _ownPermissions.SetDisableVFXInDuty(disableVfxInDuty);
         }
-        _uiSharedService.DrawHelpText("When enabled, VFX files from this user will be removed while you are in duty." + UiSharedService.TooltipSeparator
+        SpheneUI.Controls.HelpText("When enabled, VFX files from this user will be removed while you are in duty." + SpheneUI.TooltipSeparator
             + "Note: this is bidirectional, either user enabling this will stop duty VFX sync on both sides.");
         using (ImRaii.PushIndent(indentSize, false))
         {
-            _uiSharedService.BooleanToColoredIcon(!otherDisableVfxInDuty, false);
+            SpheneUI.Icons.BoolIcon(!otherDisableVfxInDuty, false);
             ImGui.SameLine();
             ImGui.AlignTextToFramePadding();
-            ImGui.Text(Pair.UserData.AliasOrUID + " has " + (!otherDisableVfxInDuty ? "not " : string.Empty) + "disabled VFX sync in duty with you");
+            SpheneUI.Text.Plain(Pair.UserData.AliasOrUID + " has " + (!otherDisableVfxInDuty ? "not " : string.Empty) + "disabled VFX sync in duty with you");
         }
 
-        ImGuiHelpers.ScaledDummy(0.5f);
-        ImGui.Separator();
-        ImGuiHelpers.ScaledDummy(0.5f);
+        SpheneUI.Layout.Separator();
 
         bool hasChanges = _ownPermissions != Pair.UserPair.OwnPermissions;
 
         using (ImRaii.Disabled(!hasChanges))
-            if (_uiSharedService.IconTextButton(Dalamud.Interface.FontAwesomeIcon.Save, "Save"))
+            if (SpheneUI.Icons.TextButton(Dalamud.Interface.FontAwesomeIcon.Save, "Save"))
             {
                 _ = _apiController.SetBulkPermissions(new(
                     new(StringComparer.Ordinal)
@@ -159,23 +162,23 @@ public class PermissionWindowUI : WindowMediatorSubscriberBase
                     new(StringComparer.Ordinal)
                 ));
             }
-        UiSharedService.AttachToolTip("Save and apply all changes");
+        SpheneUI.AttachTooltip("Save and apply all changes");
 
-        var rightSideButtons = _uiSharedService.GetIconTextButtonSize(Dalamud.Interface.FontAwesomeIcon.Undo, "Revert") +
-            _uiSharedService.GetIconTextButtonSize(Dalamud.Interface.FontAwesomeIcon.ArrowsSpin, "Reset to Default");
+        var rightSideButtons = SpheneUI.Icons.TextButtonWidth(Dalamud.Interface.FontAwesomeIcon.Undo, "Revert") +
+            SpheneUI.Icons.TextButtonWidth(Dalamud.Interface.FontAwesomeIcon.ArrowsSpin, "Reset to Default");
         var availableWidth = ImGui.GetWindowContentRegionMax().X - ImGui.GetWindowContentRegionMin().X;
 
         ImGui.SameLine(availableWidth - rightSideButtons);
 
         using (ImRaii.Disabled(!hasChanges))
-            if (_uiSharedService.IconTextButton(Dalamud.Interface.FontAwesomeIcon.Undo, "Revert"))
+            if (SpheneUI.Icons.TextButton(Dalamud.Interface.FontAwesomeIcon.Undo, "Revert"))
             {
                 _ownPermissions = Pair.UserPair.OwnPermissions.DeepClone();
             }
-        UiSharedService.AttachToolTip("Revert all changes");
+        SpheneUI.AttachTooltip("Revert all changes");
 
         ImGui.SameLine();
-        if (_uiSharedService.IconTextButton(Dalamud.Interface.FontAwesomeIcon.ArrowsSpin, "Reset to Default"))
+        if (SpheneUI.Icons.TextButton(Dalamud.Interface.FontAwesomeIcon.ArrowsSpin, "Reset to Default"))
         {
             var defaultPermissions = _apiController.DefaultPermissions!;
             _ownPermissions.SetSticky(Pair.IsDirectlyPaired || defaultPermissions.IndividualIsSticky);
@@ -192,7 +195,7 @@ public class PermissionWindowUI : WindowMediatorSubscriberBase
                 new(StringComparer.Ordinal)
             ));
         }
-        UiSharedService.AttachToolTip("This will set all permissions to your defined default permissions in the Sphene Settings");
+        SpheneUI.AttachTooltip("This will set all permissions to your defined default permissions in the Sphene Settings");
 
         var ySize = ImGui.GetCursorPosY() + style.FramePadding.Y * ImGuiHelpers.GlobalScale + style.FrameBorderSize;
         ImGui.SetWindowSize(new(400, ySize));

@@ -2,6 +2,7 @@ using Dalamud.Bindings.ImGui;
 using Sphene.SpheneConfiguration;
 using Sphene.SpheneConfiguration.Models;
 using Sphene.Services.Mediator;
+using Sphene.UI.Design;
 
 namespace Sphene.UI.Components;
 
@@ -13,7 +14,7 @@ public static class TransfersOptionBlock
         try
         {
             var downloadSpeedLimit = configService.Current.DownloadSpeedLimitInBytes;
-            if (UiSharedService.DrawInputInt("###speedlimit", ref downloadSpeedLimit, preferredWidth: itemWidth))
+            if (SpheneUI.Controls.InputInt("###speedlimit", ref downloadSpeedLimit, preferredWidth: itemWidth))
             {
                 configService.Current.DownloadSpeedLimitInBytes = downloadSpeedLimit;
                 configService.Save();
@@ -31,7 +32,7 @@ public static class TransfersOptionBlock
         ImGui.PushID(blockId);
         try
         {
-            uiShared.DrawCombo("###speed", [DownloadSpeeds.Bps, DownloadSpeeds.KBps, DownloadSpeeds.MBps],
+            SpheneUI.Controls.Combo("###speed", [DownloadSpeeds.Bps, DownloadSpeeds.KBps, DownloadSpeeds.MBps],
                 s => s switch
                 {
                     DownloadSpeeds.Bps => "Byte/s",
@@ -57,7 +58,7 @@ public static class TransfersOptionBlock
         try
         {
             var maxParallelDownloads = configService.Current.ParallelDownloads;
-            if (UiSharedService.DrawSliderInt("Maximum Parallel Data Streams", ref maxParallelDownloads, 1, 10))
+            if (SpheneUI.Controls.SliderInt("Maximum Parallel Data Streams", ref maxParallelDownloads, 1, 10))
             {
                 configService.Current.ParallelDownloads = maxParallelDownloads;
                 configService.Save();
@@ -75,16 +76,16 @@ public static class TransfersOptionBlock
         try
         {
             var useSpheneCdn = configService.Current.UseSpheneCdnDirectDownloads;
-            if (UiSharedService.DrawToggle("Use CDN direct downloads", ref useSpheneCdn))
+            if (SpheneUI.Controls.Toggle("Use CDN direct downloads", ref useSpheneCdn))
             {
                 configService.Current.UseSpheneCdnDirectDownloads = useSpheneCdn;
                 configService.Save();
             }
 
-            uiShared.DrawHelpText("When enabled, Sphene downloads files directly from the CDN https://sphene.cloud when possible and falls back to the file server if needed."
-                                  + UiSharedService.TooltipSeparator
+            SpheneUI.Controls.HelpText("When enabled, Sphene downloads files directly from the CDN https://sphene.cloud when possible and falls back to the file server if needed."
+                                  + SpheneUI.TooltipSeparator
                                   + "This is usually faster because Global Receive Limit / Download Speed Limit does not apply to CDN direct downloads."
-                                  + UiSharedService.TooltipSeparator
+                                  + SpheneUI.TooltipSeparator
                                   + "When disabled, Sphene always uses the legacy file server download flow.");
         }
         finally
@@ -99,14 +100,14 @@ public static class TransfersOptionBlock
         try
         {
             var allowPenumbraMods = configService.Current.AllowReceivingPenumbraMods;
-            if (UiSharedService.DrawToggle("Allow receiving Penumbra mod packages", ref allowPenumbraMods))
+            if (SpheneUI.Controls.Toggle("Allow receiving Penumbra mod packages", ref allowPenumbraMods))
             {
                 configService.Current.AllowReceivingPenumbraMods = allowPenumbraMods;
                 configService.Save();
                 _ = apiController.UserUpdatePenumbraReceivePreference(allowPenumbraMods);
             }
 
-            uiShared.DrawHelpText("When disabled, incoming Penumbra mod packages are ignored and no install popups are shown.");
+            SpheneUI.Controls.HelpText("When disabled, incoming Penumbra mod packages are ignored and no install popups are shown.");
         }
         finally
         {
@@ -120,13 +121,13 @@ public static class TransfersOptionBlock
         try
         {
             var useAlternativeUpload = configService.Current.UseAlternativeFileUpload;
-            if (UiSharedService.DrawToggle("Use Alternative Transmission Method", ref useAlternativeUpload))
+            if (SpheneUI.Controls.Toggle("Use Alternative Transmission Method", ref useAlternativeUpload))
             {
                 configService.Current.UseAlternativeFileUpload = useAlternativeUpload;
                 configService.Save();
             }
 
-            uiShared.DrawHelpText("Attempts a single-shot transmission instead of streaming. Not usually required; enable only if you encounter transfer issues.");
+            SpheneUI.Controls.HelpText("Attempts a single-shot transmission instead of streaming. Not usually required; enable only if you encounter transfer issues.");
         }
         finally
         {
@@ -140,13 +141,13 @@ public static class TransfersOptionBlock
         try
         {
             var showTransferWindow = configService.Current.ShowTransferWindow;
-            if (UiSharedService.DrawToggle("Show separate transmission monitor", ref showTransferWindow))
+            if (SpheneUI.Controls.Toggle("Show separate transmission monitor", ref showTransferWindow))
             {
                 configService.Current.ShowTransferWindow = showTransferWindow;
                 configService.Save();
             }
 
-            uiShared.DrawHelpText($"The transmission monitor displays current progress of active data streams.{Environment.NewLine}{Environment.NewLine}" +
+            SpheneUI.Controls.HelpText($"The transmission monitor displays current progress of active data streams.{Environment.NewLine}{Environment.NewLine}" +
                 $"Status indicators:{Environment.NewLine}W = Waiting for Slot (see Maximum Parallel Data Streams){Environment.NewLine}" +
                 $"Q = Queued on Network Node, awaiting signal{Environment.NewLine}" +
                 $"P = Processing transmission (receiving data){Environment.NewLine}" +
@@ -165,7 +166,7 @@ public static class TransfersOptionBlock
         try
         {
             var editTransferWindowPosition = uiShared.EditTrackerPosition;
-            if (UiSharedService.DrawToggle("Edit Transmission Monitor position", ref editTransferWindowPosition))
+            if (SpheneUI.Controls.Toggle("Edit Transmission Monitor position", ref editTransferWindowPosition))
             {
                 uiShared.EditTrackerPosition = editTransferWindowPosition;
             }
@@ -182,13 +183,13 @@ public static class TransfersOptionBlock
         try
         {
             var showTransferBars = configService.Current.ShowTransferBars;
-            if (UiSharedService.DrawToggle("Show transmission indicators below players", ref showTransferBars))
+            if (SpheneUI.Controls.Toggle("Show transmission indicators below players", ref showTransferBars))
             {
                 configService.Current.ShowTransferBars = showTransferBars;
                 configService.Save();
             }
 
-            uiShared.DrawHelpText("This will render a progress indicator during data reception at the feet of the connected player.");
+            SpheneUI.Controls.HelpText("This will render a progress indicator during data reception at the feet of the connected player.");
             return showTransferBars;
         }
         finally
@@ -203,13 +204,13 @@ public static class TransfersOptionBlock
         try
         {
             var transferBarShowText = configService.Current.TransferBarsShowText;
-            if (UiSharedService.DrawToggle("Show Transmission Text", ref transferBarShowText))
+            if (SpheneUI.Controls.Toggle("Show Transmission Text", ref transferBarShowText))
             {
                 configService.Current.TransferBarsShowText = transferBarShowText;
                 configService.Save();
             }
 
-            uiShared.DrawHelpText("Shows transmission text (amount of MiB received) in the progress indicators");
+            SpheneUI.Controls.HelpText("Shows transmission text (amount of MiB received) in the progress indicators");
         }
         finally
         {
@@ -223,13 +224,13 @@ public static class TransfersOptionBlock
         try
         {
             var transferBarWidth = configService.Current.TransferBarsWidth;
-            if (UiSharedService.DrawSliderInt("Transmission Indicator Width", ref transferBarWidth, 10, 500))
+            if (SpheneUI.Controls.SliderInt("Transmission Indicator Width", ref transferBarWidth, 10, 500))
             {
                 configService.Current.TransferBarsWidth = transferBarWidth;
                 configService.Save();
             }
 
-            uiShared.DrawHelpText("Width of the displayed transmission indicators (will never be less wide than the displayed text)");
+            SpheneUI.Controls.HelpText("Width of the displayed transmission indicators (will never be less wide than the displayed text)");
         }
         finally
         {
@@ -243,13 +244,13 @@ public static class TransfersOptionBlock
         try
         {
             var transferBarHeight = configService.Current.TransferBarsHeight;
-            if (UiSharedService.DrawSliderInt("Transmission Indicator Height", ref transferBarHeight, 2, 50))
+            if (SpheneUI.Controls.SliderInt("Transmission Indicator Height", ref transferBarHeight, 2, 50))
             {
                 configService.Current.TransferBarsHeight = transferBarHeight;
                 configService.Save();
             }
 
-            uiShared.DrawHelpText("Height of the displayed transmission indicators (will never be less tall than the displayed text)");
+            SpheneUI.Controls.HelpText("Height of the displayed transmission indicators (will never be less tall than the displayed text)");
         }
         finally
         {
@@ -263,13 +264,13 @@ public static class TransfersOptionBlock
         try
         {
             var showUploading = configService.Current.ShowUploading;
-            if (UiSharedService.DrawToggle("Show 'Transmitting' text below players that are currently transmitting", ref showUploading))
+            if (SpheneUI.Controls.Toggle("Show 'Transmitting' text below players that are currently transmitting", ref showUploading))
             {
                 configService.Current.ShowUploading = showUploading;
                 configService.Save();
             }
 
-            uiShared.DrawHelpText("This will render a 'Transmitting' text at the feet of the player that is in progress of transmitting data.");
+            SpheneUI.Controls.HelpText("This will render a 'Transmitting' text at the feet of the player that is in progress of transmitting data.");
             return showUploading;
         }
         finally
@@ -284,13 +285,13 @@ public static class TransfersOptionBlock
         try
         {
             var showUploadingBigText = configService.Current.ShowUploadingBigText;
-            if (UiSharedService.DrawToggle("Large font for 'Transmitting' text", ref showUploadingBigText))
+            if (SpheneUI.Controls.Toggle("Large font for 'Transmitting' text", ref showUploadingBigText))
             {
                 configService.Current.ShowUploadingBigText = showUploadingBigText;
                 configService.Save();
             }
 
-            uiShared.DrawHelpText("This will render an 'Transferring' text in a larger font.");
+            SpheneUI.Controls.HelpText("This will render an 'Transferring' text in a larger font.");
         }
         finally
         {

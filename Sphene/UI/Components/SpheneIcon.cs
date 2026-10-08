@@ -9,7 +9,7 @@ using Dalamud.Plugin.Services;
 using Microsoft.Extensions.Logging;
 using Sphene.Services;
 using Sphene.Services.Mediator;
-using Sphene.UI.Styling;
+using Sphene.UI.Design;
 using Sphene.SpheneConfiguration;
 using Sphene.WebAPI;
 using Sphene.WebAPI.SignalR.Utils;
@@ -20,7 +20,6 @@ using Sphene.SpheneConfiguration.Models;
 using Sphene.Interop.Ipc;
 using Dalamud.Plugin;
 using Sphene.UI.Panels;
-using Sphene.UI.Theme;
 
 namespace Sphene.UI.Components;
 
@@ -29,7 +28,6 @@ public class SpheneIcon : WindowMediatorSubscriberBase
     private new readonly ILogger<SpheneIcon> _logger;
     private readonly SpheneMediator _mediator;
     private readonly SpheneConfigService _configService;
-    private readonly UiSharedService _uiSharedService;
     private readonly ApiController _apiController;
     private readonly IpcManager _ipcManager;
     private readonly IDalamudPluginInterface _pluginInterface;
@@ -83,7 +81,7 @@ public class SpheneIcon : WindowMediatorSubscriberBase
     private int _lastEventCacheHash = 0;
 
     public SpheneIcon(ILogger<SpheneIcon> logger, SpheneMediator mediator, 
-        SpheneConfigService configService, UiSharedService uiSharedService, ApiController apiController, 
+        SpheneConfigService configService, ApiController apiController, 
         PerformanceCollectorService performanceCollectorService, IpcManager ipcManager, IDalamudPluginInterface pluginInterface,
         ICommandManager commandManager, DalamudUtilService dalamudUtilService, ShrinkUHostService shrinkuHostService,
         ShrinkU.Configuration.ShrinkUConfigService shrinkuConfig,
@@ -95,7 +93,6 @@ public class SpheneIcon : WindowMediatorSubscriberBase
         _logger = logger;
         _mediator = mediator;
         _configService = configService;
-        _uiSharedService = uiSharedService;
         _apiController = apiController;
         _ipcManager = ipcManager;
         _pluginInterface = pluginInterface;
@@ -161,9 +158,9 @@ public class SpheneIcon : WindowMediatorSubscriberBase
     private void DrawContextMenu()
     {
         // Use BeginPopupContextItem for proper context menu behavior
-        if (ImGui.BeginPopupContextItem("SpheneIconContextMenu"))
+        if (SpheneUI.Popups.BeginContextStyled("SpheneIconContextMenu"))
         {
-            ImGui.Text("Quick Access Plugins");
+            SpheneUI.Text.Plain("Quick Access Plugins");
             ImGui.Separator();
             
             // Check available plugins and show them
@@ -181,10 +178,10 @@ public class SpheneIcon : WindowMediatorSubscriberBase
             
             if (availablePlugins.Count == 0)
             {
-                ImGui.TextDisabled("No compatible plugins found");
+                SpheneUI.Text.Muted("No compatible plugins found");
             }
 
-            ImGui.Separator();
+            SpheneUI.Layout.Separator();
 
             // Toggle icon lock state
             var locked = _configService.Current.LockSpheneIcon;
@@ -194,7 +191,7 @@ public class SpheneIcon : WindowMediatorSubscriberBase
                 _configService.Save();
             }
             
-            ImGui.Separator();
+            SpheneUI.Layout.Separator();
             
             if (ImGui.MenuItem("Settings"))
             {
@@ -202,7 +199,7 @@ public class SpheneIcon : WindowMediatorSubscriberBase
                 _mediator.Publish(new UiToggleMessage(typeof(SettingsUi)));
             }
             
-            ImGui.EndPopup();
+            SpheneUI.Popups.EndStyled();
         }
     }
     
@@ -368,6 +365,8 @@ public class SpheneIcon : WindowMediatorSubscriberBase
         }
     }
     
+    protected override bool UseSpheneChrome => false;
+
     protected override void DrawInternal()
     {
         var cfg = _configService.Current;
@@ -419,7 +418,7 @@ public class SpheneIcon : WindowMediatorSubscriberBase
         var baseIconPos = new Vector2(currentPos.X + padding, currentPos.Y + padding);
         var iconPos = new Vector2(baseIconPos.X + scaledOffset, baseIconPos.Y + scaledOffset);
         var iconAlpha = cfg.IconGlobalAlpha;
-        var iconColorVec = SpheneColors.SpheneGold;
+        var iconColorVec = SpheneUI.Palette.SpheneGold;
         iconColorVec.W *= iconAlpha;
         var iconColor = ImGui.ColorConvertFloat4ToU32(iconColorVec);
 
@@ -457,11 +456,13 @@ public class SpheneIcon : WindowMediatorSubscriberBase
         }
 
         // Draw Sphene Logo or fallback
-        if (_spheneLogoTexture != null)
+        var logoTexture = _spheneLogoTexture ??= SpheneUI.Media.Texture("sphene:logo",
+            () => Convert.FromBase64String(SpheneImages.SpheneLogoBase64));
+        if (logoTexture != null)
         {
-            var tintColor = ImGui.ColorConvertFloat4ToU32(new Vector4(1, 1, 1, iconAlpha));
-            drawList.AddImage(_spheneLogoTexture.Handle, iconPos, iconPos + new Vector2(scaledIconSize, scaledIconSize),
-                Vector2.Zero, Vector2.One, tintColor);
+            SpheneUI.Media.ImageInRect(drawList, logoTexture, iconPos,
+                iconPos + new Vector2(scaledIconSize, scaledIconSize), ImageFit.Stretch,
+                new Vector4(1, 1, 1, iconAlpha));
         }
         else
         {
@@ -470,7 +471,7 @@ public class SpheneIcon : WindowMediatorSubscriberBase
                 scaledIconSize/2 - 2, iconColor);
 
             // Add "S" text in the center
-            using (_uiSharedService.UidFont.Push())
+            using (SpheneUI.UidFont.Push())
             {
                 var text = "S";
                 var textSize = ImGui.CalcTextSize(text);
@@ -507,7 +508,7 @@ public class SpheneIcon : WindowMediatorSubscriberBase
             {
                 var center = new Vector2(iconPos.X + scaledIconSize / 2, iconPos.Y + scaledIconSize / 2);
                 var radius = scaledIconSize / 2 + 4f;
-                var ringColor = ImGui.ColorConvertFloat4ToU32(SpheneColors.EtherealPurple with { W = 0.9f * iconAlpha });
+                var ringColor = ImGui.ColorConvertFloat4ToU32(SpheneUI.Palette.EtherealPurple with { W = 0.9f * iconAlpha });
                 var bgRingColor = ImGui.ColorConvertFloat4ToU32(new Vector4(1, 1, 1, 0.12f * iconAlpha));
 
                 // Background ring
@@ -531,7 +532,7 @@ public class SpheneIcon : WindowMediatorSubscriberBase
                 var fade = 1.0f - (float)(fadeElapsedMs / DragRingFadeDurationMs);
                 var center = new Vector2(iconPos.X + scaledIconSize / 2, iconPos.Y + scaledIconSize / 2);
                 var radius = scaledIconSize / 2 + 4f;
-                var ringColor = ImGui.ColorConvertFloat4ToU32(SpheneColors.EtherealPurple with { W = 0.9f * iconAlpha * fade });
+                var ringColor = ImGui.ColorConvertFloat4ToU32(SpheneUI.Palette.EtherealPurple with { W = 0.9f * iconAlpha * fade });
 
                 drawList.PathArcTo(center, radius, -MathF.PI / 2, -MathF.PI / 2 + MathF.PI * 2, 64);
                 drawList.PathStroke(ringColor, ImDrawFlags.None, 2f);
@@ -615,23 +616,23 @@ public class SpheneIcon : WindowMediatorSubscriberBase
         if (ImGui.IsItemHovered())
         {
             RefreshTooltipCache(iconLocked);
-            using (SpheneCustomTheme.ApplyTooltipTheme())
+            using (SpheneUI.Theme.TooltipScope())
             {
                 ImGui.BeginTooltip();
-                ImGui.TextUnformatted(_tooltipHeaderText);
+                SpheneUI.Text.Plain(_tooltipHeaderText);
                 ImGui.Separator();
-                ImGui.TextUnformatted(_tooltipStatusText);
+                SpheneUI.Text.Plain(_tooltipStatusText);
                 if (_updateAvailable && _updateInfo != null && !string.IsNullOrEmpty(_tooltipUpdateText))
                 {
                     ImGui.Separator();
-                    ImGui.TextUnformatted(_tooltipUpdateText);
+                    SpheneUI.Text.Plain(_tooltipUpdateText);
                 }
                 if (_cachedEventDescriptions.Count > 0)
                 {
                     ImGui.Separator();
                     foreach (var description in _cachedEventDescriptions)
                     {
-                        ImGui.TextUnformatted(description);
+                        SpheneUI.Text.Plain(description);
                     }
                 }
                 ImGui.EndTooltip();
@@ -738,20 +739,12 @@ public class SpheneIcon : WindowMediatorSubscriberBase
         _lastSavedIconPosition = _iconPosition;
     }
     
-    private void LoadSpheneLogoTexture()
+    private static void LoadSpheneLogoTexture()
     {
-        try
-        {
-            if (!string.IsNullOrEmpty(SpheneImages.SpheneLogoBase64))
-            {
-                var imageData = Convert.FromBase64String(SpheneImages.SpheneLogoBase64);
-                _spheneLogoTexture = _uiSharedService.LoadImage(imageData);
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to load Sphene logo texture");
-        }
+        // Texture resolves asynchronously through the media cache; the draw
+        // path renders the circle fallback until the wrap is available.
+        _ = SpheneUI.Media.Texture("sphene:logo",
+            () => Convert.FromBase64String(SpheneImages.SpheneLogoBase64));
     }
     
     private void DrawStatusIndicator(ImDrawListPtr drawList, Vector2 iconPos, float iconSize, float alpha = 1.0f)
@@ -763,7 +756,7 @@ public class SpheneIcon : WindowMediatorSubscriberBase
         );
 
         var statusColor = _apiController.IsTransientDisconnectInProgress
-            ? Sphene.UI.Theme.SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning
+            ? Sphene.UI.Design.SpheneTheme.Current.CompactServerStatusWarning
             : GetStatusColor(_apiController.ServerState);
         statusColor.W *= alpha;
         var indicatorColor = ImGui.ColorConvertFloat4ToU32(statusColor);
@@ -816,7 +809,7 @@ public class SpheneIcon : WindowMediatorSubscriberBase
     
     private static Vector4 GetStatusColor(ServerState serverState)
     {
-        var t = Sphene.UI.Theme.SpheneCustomTheme.CurrentTheme;
+        var t = Sphene.UI.Design.SpheneTheme.Current;
         return serverState switch
         {
             ServerState.Connected => t.CompactServerStatusConnected,
@@ -1092,7 +1085,7 @@ public class SpheneIcon : WindowMediatorSubscriberBase
                     IconEventType.ModTransferAvailable or IconEventType.ModTransferCompleted => ImGui.ColorConvertU32ToFloat4(cfg.IconModTransferColor),
                     IconEventType.PairRequest => ImGui.ColorConvertU32ToFloat4(cfg.IconPairRequestColor),
                     IconEventType.Notification => ImGui.ColorConvertU32ToFloat4(cfg.IconNotificationColor),
-                    _ => SpheneColors.SpheneGold
+                    _ => SpheneUI.Palette.SpheneGold
                 };
                 badgeColor.W *= cfg.IconGlobalAlpha;
 
@@ -1195,7 +1188,6 @@ public class SpheneIcon : WindowMediatorSubscriberBase
         if (disposing)
         {
             _configService.ConfigSave -= OnConfigurationChanged;
-            _spheneLogoTexture?.Dispose();
             _logger.LogDebug("SpheneIcon disposed");
         }
         base.Dispose(disposing);

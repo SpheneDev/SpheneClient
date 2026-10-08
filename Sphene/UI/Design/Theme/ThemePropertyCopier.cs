@@ -1,4 +1,4 @@
-namespace Sphene.UI.Theme;
+namespace Sphene.UI.Design;
 
 public static class ThemePropertyCopier
 {

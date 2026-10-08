@@ -1,5 +1,6 @@
 using Dalamud.Bindings.ImGui;
 using Sphene.SpheneConfiguration;
+using Sphene.UI.Design;
 
 namespace Sphene.UI.Components;
 
@@ -11,13 +12,13 @@ public static class PerformanceOptionBlock
         try
         {
             var showPerformanceIndicator = performanceConfigService.Current.ShowPerformanceIndicator;
-            if (UiSharedService.DrawToggle("Show performance indicator", ref showPerformanceIndicator))
+            if (SpheneUI.Controls.Toggle("Show performance indicator", ref showPerformanceIndicator))
             {
                 performanceConfigService.Current.ShowPerformanceIndicator = showPerformanceIndicator;
                 performanceConfigService.Save();
             }
 
-            uiShared.DrawHelpText("Will show a performance indicator when players exceed defined thresholds in Sphenes UI." + Environment.NewLine + "Will use warning thresholds.");
+            SpheneUI.Controls.HelpText("Will show a performance indicator when players exceed defined thresholds in Sphenes UI." + Environment.NewLine + "Will use warning thresholds.");
             return showPerformanceIndicator;
         }
         finally
@@ -32,13 +33,13 @@ public static class PerformanceOptionBlock
         try
         {
             var warnOnExceedingThresholds = performanceConfigService.Current.WarnOnExceedingThresholds;
-            if (UiSharedService.DrawToggle("Warn on loading in players exceeding performance thresholds", ref warnOnExceedingThresholds))
+            if (SpheneUI.Controls.Toggle("Warn on loading in players exceeding performance thresholds", ref warnOnExceedingThresholds))
             {
                 performanceConfigService.Current.WarnOnExceedingThresholds = warnOnExceedingThresholds;
                 performanceConfigService.Save();
             }
 
-            uiShared.DrawHelpText("Sphene will print a warning in chat once per session of meeting those people. Will not warn on players with preferred permissions.");
+            SpheneUI.Controls.HelpText("Sphene will print a warning in chat once per session of meeting those people. Will not warn on players with preferred permissions.");
             return warnOnExceedingThresholds;
         }
         finally
@@ -53,13 +54,13 @@ public static class PerformanceOptionBlock
         try
         {
             var warnOnPref = performanceConfigService.Current.WarnOnPreferredPermissionsExceedingThresholds;
-            if (UiSharedService.DrawToggle("Warn/Indicate also on players with preferred permissions", ref warnOnPref))
+            if (SpheneUI.Controls.Toggle("Warn/Indicate also on players with preferred permissions", ref warnOnPref))
             {
                 performanceConfigService.Current.WarnOnPreferredPermissionsExceedingThresholds = warnOnPref;
                 performanceConfigService.Save();
             }
 
-            uiShared.DrawHelpText("Sphene will also print warnings and show performance indicator for players where you enabled preferred permissions. If warning in general is disabled, this will not produce any warnings.");
+            SpheneUI.Controls.HelpText("Sphene will also print warnings and show performance indicator for players where you enabled preferred permissions. If warning in general is disabled, this will not produce any warnings.");
         }
         finally
         {
@@ -73,14 +74,14 @@ public static class PerformanceOptionBlock
         try
         {
             var vram = performanceConfigService.Current.VRAMSizeWarningThresholdMiB;
-            if (UiSharedService.DrawInputInt("Warning VRAM threshold", ref vram))
+            if (SpheneUI.Controls.InputInt("Warning VRAM threshold", ref vram))
             {
                 performanceConfigService.Current.VRAMSizeWarningThresholdMiB = vram;
                 performanceConfigService.Save();
             }
             ImGui.SameLine();
-            ImGui.Text("(MiB)");
-            uiShared.DrawHelpText("Limit in MiB of approximate VRAM usage to trigger warning or performance indicator on UI." + UiSharedService.TooltipSeparator
+            SpheneUI.Text.Plain("(MiB)");
+            SpheneUI.Controls.HelpText("Limit in MiB of approximate VRAM usage to trigger warning or performance indicator on UI." + SpheneUI.TooltipSeparator
                 + "Default: 375 MiB");
         }
         finally
@@ -95,14 +96,14 @@ public static class PerformanceOptionBlock
         try
         {
             var tris = performanceConfigService.Current.TrisWarningThresholdThousands;
-            if (UiSharedService.DrawInputInt("Warning Triangle threshold", ref tris))
+            if (SpheneUI.Controls.InputInt("Warning Triangle threshold", ref tris))
             {
                 performanceConfigService.Current.TrisWarningThresholdThousands = tris;
                 performanceConfigService.Save();
             }
             ImGui.SameLine();
-            ImGui.Text("(thousand triangles)");
-            uiShared.DrawHelpText("Limit in approximate used triangles from mods to trigger warning or performance indicator on UI." + UiSharedService.TooltipSeparator
+            SpheneUI.Text.Plain("(thousand triangles)");
+            SpheneUI.Controls.HelpText("Limit in approximate used triangles from mods to trigger warning or performance indicator on UI." + SpheneUI.TooltipSeparator
                 + "Default: 165 thousand");
         }
         finally
@@ -117,15 +118,15 @@ public static class PerformanceOptionBlock
         try
         {
             var autoPause = performanceConfigService.Current.AutoPausePlayersExceedingThresholds;
-            if (UiSharedService.DrawToggle("Automatically pause players exceeding thresholds", ref autoPause))
+            if (SpheneUI.Controls.Toggle("Automatically pause players exceeding thresholds", ref autoPause))
             {
                 performanceConfigService.Current.AutoPausePlayersExceedingThresholds = autoPause;
                 performanceConfigService.Save();
             }
 
-            uiShared.DrawHelpText("When enabled, it will automatically pause all players without preferred permissions that exceed the thresholds defined below." + Environment.NewLine
+            SpheneUI.Controls.HelpText("When enabled, it will automatically pause all players without preferred permissions that exceed the thresholds defined below." + Environment.NewLine
                 + "Will print a warning in chat when a player got paused automatically."
-                + UiSharedService.TooltipSeparator + "Warning: this will not automatically unpause those people again, you will have to do this manually.");
+                + SpheneUI.TooltipSeparator + "Warning: this will not automatically unpause those people again, you will have to do this manually.");
             return autoPause;
         }
         finally
@@ -140,13 +141,13 @@ public static class PerformanceOptionBlock
         try
         {
             var autoPauseEveryone = performanceConfigService.Current.AutoPausePlayersWithPreferredPermissionsExceedingThresholds;
-            if (UiSharedService.DrawToggle("Automatically pause also players with preferred permissions", ref autoPauseEveryone))
+            if (SpheneUI.Controls.Toggle("Automatically pause also players with preferred permissions", ref autoPauseEveryone))
             {
                 performanceConfigService.Current.AutoPausePlayersWithPreferredPermissionsExceedingThresholds = autoPauseEveryone;
                 performanceConfigService.Save();
             }
 
-            uiShared.DrawHelpText("When enabled, will automatically pause all players regardless of preferred permissions that exceed thresholds defined below." + UiSharedService.TooltipSeparator +
+            SpheneUI.Controls.HelpText("When enabled, will automatically pause all players regardless of preferred permissions that exceed thresholds defined below." + SpheneUI.TooltipSeparator +
                 "Warning: this will not automatically unpause those people again, you will have to do this manually.");
         }
         finally
@@ -161,14 +162,14 @@ public static class PerformanceOptionBlock
         try
         {
             var vramAuto = performanceConfigService.Current.VRAMSizeAutoPauseThresholdMiB;
-            if (UiSharedService.DrawInputInt("Auto Pause VRAM threshold", ref vramAuto))
+            if (SpheneUI.Controls.InputInt("Auto Pause VRAM threshold", ref vramAuto))
             {
                 performanceConfigService.Current.VRAMSizeAutoPauseThresholdMiB = vramAuto;
                 performanceConfigService.Save();
             }
             ImGui.SameLine();
-            ImGui.Text("(MiB)");
-            uiShared.DrawHelpText("When a loading in player and their VRAM usage exceeds this amount, automatically pauses the synced player." + UiSharedService.TooltipSeparator
+            SpheneUI.Text.Plain("(MiB)");
+            SpheneUI.Controls.HelpText("When a loading in player and their VRAM usage exceeds this amount, automatically pauses the synced player." + SpheneUI.TooltipSeparator
                 + "Default: 550 MiB");
         }
         finally
@@ -183,14 +184,14 @@ public static class PerformanceOptionBlock
         try
         {
             var trisAuto = performanceConfigService.Current.TrisAutoPauseThresholdThousands;
-            if (UiSharedService.DrawInputInt("Auto Pause Triangle threshold", ref trisAuto))
+            if (SpheneUI.Controls.InputInt("Auto Pause Triangle threshold", ref trisAuto))
             {
                 performanceConfigService.Current.TrisAutoPauseThresholdThousands = trisAuto;
                 performanceConfigService.Save();
             }
             ImGui.SameLine();
-            ImGui.Text("(thousand triangles)");
-            uiShared.DrawHelpText("When a loading in player and their triangle count exceeds this amount, automatically pauses the synced player." + UiSharedService.TooltipSeparator
+            SpheneUI.Text.Plain("(thousand triangles)");
+            SpheneUI.Controls.HelpText("When a loading in player and their triangle count exceeds this amount, automatically pauses the synced player." + SpheneUI.TooltipSeparator
                 + "Default: 250 thousand");
         }
         finally

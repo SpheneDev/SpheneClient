@@ -3,6 +3,7 @@ using Sphene.API.Dto.CharaData;
 using Sphene.SpheneConfiguration.Models;
 using Sphene.Services.CharaData.Models;
 using System.Text;
+using Sphene.UI.Design;
 
 namespace Sphene.UI.CharaDataHub;
 
@@ -40,7 +41,7 @@ internal sealed partial class CharaDataHubUi
 
 		void AddErrorStart(StringBuilder sb)
 		{
-			sb.Append(UiSharedService.TooltipSeparator);
+			sb.Append(SpheneUI.TooltipSeparator);
 			sb.AppendLine("Cannot execute:");
 		}
 
@@ -82,7 +83,7 @@ internal sealed partial class CharaDataHubUi
 		}
 		if (sb.Length > 0)
 		{
-			UiSharedService.AttachToolTip(sb.ToString());
+			SpheneUI.AttachTooltip(sb.ToString());
 		}
 	}
 
@@ -95,7 +96,7 @@ internal sealed partial class CharaDataHubUi
 
 		void AddErrorStart(StringBuilder sb)
 		{
-			sb.Append(UiSharedService.TooltipSeparator);
+			sb.Append(SpheneUI.TooltipSeparator);
 			sb.AppendLine("Cannot execute:");
 		}
 
@@ -125,7 +126,7 @@ internal sealed partial class CharaDataHubUi
 		}
 		if (sb.Length > 0)
 		{
-			UiSharedService.AttachToolTip(sb.ToString());
+			SpheneUI.AttachTooltip(sb.ToString());
 		}
 	}
 

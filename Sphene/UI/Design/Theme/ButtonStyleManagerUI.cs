@@ -7,7 +7,7 @@ using Dalamud.Interface;
 using System.Text.Json;
 using Sphene.Configuration;
 
-namespace Sphene.UI.Theme;
+namespace Sphene.UI.Design;
 
 public static class ButtonStyleManagerUI
 {
@@ -179,11 +179,11 @@ public static class ButtonStyleManagerUI
 
     public static void Draw()
     {
-        var theme = SpheneCustomTheme.CurrentTheme;
+        var theme = SpheneTheme.Current;
 
-        Sphene.UI.UiSharedService.DrawToggle("Button Picker", ref _pickerEnabled);
-        Sphene.UI.UiSharedService.AttachToolTip("When enabled you can Click on Active Control Panel UI Buttons to navigate to their Button Style settings.");
-        Sphene.UI.UiSharedService.DrawSeparator();
+        SpheneUI.Controls.Toggle("Button Picker", ref _pickerEnabled);
+        SpheneUI.AttachTooltip("When enabled you can Click on Active Control Panel UI Buttons to navigate to their Button Style settings.");
+        SpheneUI.Layout.Separator();
 
         ImGui.PushFont(UiBuilder.IconFont);
         var iconWidth = ImGui.CalcTextSize(_keys[_selectedIndex].Icon.ToIconString()).X;
@@ -194,7 +194,7 @@ public static class ButtonStyleManagerUI
         var desiredPad = iconWidth + padX + extraPad + spaceWidth * 2.0f;
         var spaces = Math.Max(4, (int)MathF.Ceiling(desiredPad / MathF.Max(1e-3f, spaceWidth)));
         var selectedDisplay = new string(' ', spaces) + _keys[_selectedIndex].Label;
-        using var comboStyle = Sphene.UI.UiSharedService.PushValueControlStyle();
+        using var comboStyle = SpheneUI.Controls.PushValueControlStyle();
         if (ImGui.BeginCombo("Button", selectedDisplay))
         {
             string? currentCategory = null;
@@ -203,17 +203,17 @@ public static class ButtonStyleManagerUI
                 var item = _keys[i];
                 if (!string.Equals(item.Category, currentCategory, StringComparison.Ordinal))
                 {
-                    if (currentCategory != null) Sphene.UI.UiSharedService.DrawSeparator();
-                    Sphene.UI.UiSharedService.ColorText(item.Category,
-                        Sphene.UI.Styling.SpheneDesign.TextMuted);
+                    if (currentCategory != null) SpheneUI.Layout.Separator();
+                    SpheneUI.Text.Colored(item.Category,
+                        SpheneUI.Colors.TextMuted);
                     currentCategory = item.Category;
                 }
                 bool selected = _selectedIndex == i;
                 ImGui.PushFont(UiBuilder.IconFont);
-                Sphene.UI.UiSharedService.Text(item.Icon.ToIconString());
+                SpheneUI.Text.Plain(item.Icon.ToIconString());
                 ImGui.PopFont();
                 ImGui.SameLine();
-                if (Sphene.UI.UiSharedService.DrawSelectable(item.Label, selected))
+                if (SpheneUI.Controls.Selectable(item.Label, selected))
                     _selectedIndex = i;
                 if (selected)
                     ImGui.SetItemDefaultFocus();
@@ -229,7 +229,7 @@ public static class ButtonStyleManagerUI
         ImGui.GetWindowDrawList().AddText(iconPos, ImGui.GetColorU32(ImGuiCol.Text), _keys[_selectedIndex].Icon.ToIconString());
         ImGui.PopFont();
 
-        Sphene.UI.UiSharedService.DrawSeparator();
+        SpheneUI.Layout.Separator();
 
         DrawSelectedButtonOverrides(theme);
     }
@@ -259,36 +259,36 @@ public static class ButtonStyleManagerUI
         heightDelta = ov.HeightDelta;
         iconOffset = ov.IconOffset;
 
-        Sphene.UI.UiSharedService.Text("Selected Button Overrides");
-        if (Sphene.UI.UiSharedService.DrawDragFloat("Width", ref widthDelta, 0.1f, -100f, 200f))
+        SpheneUI.Text.Plain("Selected Button Overrides");
+        if (SpheneUI.Controls.DragFloat("Width", ref widthDelta, 0.1f, -100f, 200f))
         {
             ov.WidthDelta = widthDelta;
             theme.NotifyThemeChanged();
         }
-        if (Sphene.UI.UiSharedService.DrawDragFloat("Height", ref heightDelta, 0.1f, -50f, 100f))
+        if (SpheneUI.Controls.DragFloat("Height", ref heightDelta, 0.1f, -50f, 100f))
         {
             ov.HeightDelta = heightDelta;
             theme.NotifyThemeChanged();
         }
-        if (Sphene.UI.UiSharedService.DrawDragFloat2("Icon Offset", ref iconOffset, 0.1f, -50f, 50f))
+        if (SpheneUI.Controls.DragFloat2("Icon Offset", ref iconOffset, 0.1f, -50f, 50f))
         {
             ov.IconOffset = iconOffset;
             theme.NotifyThemeChanged();
         }
 
-        Sphene.UI.UiSharedService.DrawSeparator();
-        Sphene.UI.UiSharedService.Text("Selected Button Colors");
+        SpheneUI.Layout.Separator();
+        SpheneUI.Text.Plain("Selected Button Colors");
         var effBtn = ov.Button ?? defaults.Button;
         // Reserve the swatch's normal slot plus the icon button and its gap so
         // the button ends flush at the shared control edge.
-        if (Sphene.UI.UiSharedService.DrawColorEdit("Button", ref effBtn,
-                Sphene.UI.Styling.SpheneDesign.ControlHeight + ImGui.GetStyle().ItemSpacing.X))
+        if (SpheneUI.Controls.ColorEdit("Button", ref effBtn,
+                SpheneUI.Metrics.ControlHeight + ImGui.GetStyle().ItemSpacing.X))
         {
             ov.Button = effBtn;
             theme.NotifyThemeChanged();
         }
         ImGui.SameLine();
-        if (Sphene.UI.UiSharedService.DrawIconButton("##genHoverActive", FontAwesomeIcon.Magic))
+        if (SpheneUI.Controls.IconButton("##genHoverActive", FontAwesomeIcon.Magic))
         {
             var hover = DeriveHoverColor(effBtn);
             var active = DeriveActiveColor(effBtn);
@@ -296,45 +296,45 @@ public static class ButtonStyleManagerUI
             ov.ButtonActive = active;
             theme.NotifyThemeChanged();
         }
-        Sphene.UI.UiSharedService.AttachToolTip("Generate Hover/Active colors from current Button color.");
+        SpheneUI.AttachTooltip("Generate Hover/Active colors from current Button color.");
         var effBtnH = ov.ButtonHovered ?? defaults.Hovered;
-        if (Sphene.UI.UiSharedService.DrawColorEdit("Button Hovered", ref effBtnH))
+        if (SpheneUI.Controls.ColorEdit("Button Hovered", ref effBtnH))
         {
             ov.ButtonHovered = effBtnH;
             theme.NotifyThemeChanged();
         }
         var effBtnA = ov.ButtonActive ?? defaults.Active;
-        if (Sphene.UI.UiSharedService.DrawColorEdit("Button Active", ref effBtnA))
+        if (SpheneUI.Controls.ColorEdit("Button Active", ref effBtnA))
         {
             ov.ButtonActive = effBtnA;
             theme.NotifyThemeChanged();
         }
         var effIcon = ov.Icon ?? defaults.Icon;
-        if (Sphene.UI.UiSharedService.DrawColorEdit("Icon", ref effIcon))
+        if (SpheneUI.Controls.ColorEdit("Icon", ref effIcon))
         {
             ov.Icon = effIcon;
             theme.NotifyThemeChanged();
         }
         var effBorder = ov.Border ?? defaults.Border;
-        if (Sphene.UI.UiSharedService.DrawColorEdit("Border", ref effBorder))
+        if (SpheneUI.Controls.ColorEdit("Border", ref effBorder))
         {
             ov.Border = effBorder;
             theme.NotifyThemeChanged();
         }
         var effBorderSize = ov.BorderSize ?? defaults.BorderSize;
-        if (Sphene.UI.UiSharedService.DrawSliderFloat("Border Width", ref effBorderSize, 0f, 5f, "%.1f"))
+        if (SpheneUI.Controls.SliderFloat("Border Width", ref effBorderSize, 0f, 5f, "%.1f"))
         {
             ov.BorderSize = effBorderSize;
             theme.NotifyThemeChanged();
         }
         var effTxt = ov.Text ?? defaults.Text;
-        if (Sphene.UI.UiSharedService.DrawColorEdit("Text", ref effTxt))
+        if (SpheneUI.Controls.ColorEdit("Text", ref effTxt))
         {
             ov.Text = effTxt;
             theme.NotifyThemeChanged();
         }
 
-        if (Sphene.UI.UiSharedService.DrawButton("Reset Changes"))
+        if (SpheneUI.Controls.Button("Reset Changes"))
         {
             var selectedThemeName = ThemeManager.GetSelectedTheme();
             ThemeConfiguration? baseline = null;
@@ -372,9 +372,9 @@ public static class ButtonStyleManagerUI
             theme.NotifyThemeChanged();
         }
 
-        Sphene.UI.UiSharedService.DrawSeparator();
+        SpheneUI.Layout.Separator();
         var srcKey = _keys[_selectedIndex].Key;
-        if (Sphene.UI.UiSharedService.DrawButton("Copy Colors"))
+        if (SpheneUI.Controls.Button("Copy Colors"))
         {
             if (!theme.ButtonStyles.TryGetValue(srcKey, out var src))
             {
@@ -402,7 +402,7 @@ public static class ButtonStyleManagerUI
             ImGui.SetClipboardText("SPHENE_BTN_STYLE:colors:" + payload);
         }
         ImGui.SameLine();
-        if (Sphene.UI.UiSharedService.DrawButton("Copy All"))
+        if (SpheneUI.Controls.Button("Copy All"))
         {
             if (!theme.ButtonStyles.TryGetValue(srcKey, out var src))
             {
@@ -413,7 +413,7 @@ public static class ButtonStyleManagerUI
             ImGui.SetClipboardText("SPHENE_BTN_STYLE:all:" + payload);
         }
 
-        if (Sphene.UI.UiSharedService.DrawButton("Paste Colors"))
+        if (SpheneUI.Controls.Button("Paste Colors"))
         {
             var clip = ImGui.GetClipboardText();
             if (clip != null && clip.StartsWith("SPHENE_BTN_STYLE:colors:", StringComparison.Ordinal))
@@ -440,7 +440,7 @@ public static class ButtonStyleManagerUI
             }
         }
         ImGui.SameLine();
-        if (Sphene.UI.UiSharedService.DrawButton("Paste All"))
+        if (SpheneUI.Controls.Button("Paste All"))
         {
             var clip = ImGui.GetClipboardText();
             if (clip != null && clip.StartsWith("SPHENE_BTN_STYLE:all:", StringComparison.Ordinal))

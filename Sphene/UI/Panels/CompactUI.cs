@@ -17,8 +17,7 @@ using Sphene.Services.Mediator;
 using Sphene.Services.ServerConfiguration;
 using Sphene.UI.Components;
 using Sphene.UI.Handlers;
-using Sphene.UI.Styling;
-using Sphene.UI.Theme;
+using Sphene.UI.Design;
 using Sphene.WebAPI;
 using Sphene.WebAPI.Files;
 using Sphene.WebAPI.Files.Models;
@@ -56,7 +55,6 @@ public class CompactUi : WindowMediatorSubscriberBase
     private readonly ServerConfigurationManager _serverManager;
     private readonly TopTabMenu _tabMenu;
     private readonly TagHandler _tagHandler;
-    private readonly UiSharedService _uiSharedService;
     private readonly DalamudUtilService _dalamudUtilService;
     private readonly CharacterAnalyzer _characterAnalyzer;
     private readonly TextureBackupService _textureBackupService;
@@ -184,7 +182,7 @@ public class CompactUi : WindowMediatorSubscriberBase
     private readonly ShrinkU.Services.TextureConversionService _shrinkuConversionService;
     private readonly ShrinkUConfigService _shrinkuConfigService;
 
-    public CompactUi(ILogger<CompactUi> logger, UiSharedService uiShared, SpheneConfigService configService, ApiController apiController, PairManager pairManager,
+    public CompactUi(ILogger<CompactUi> logger, SpheneConfigService configService, ApiController apiController, PairManager pairManager,
         ServerConfigurationManager serverManager, SpheneMediator mediator, FileUploadManager fileTransferManager,
         TagHandler tagHandler, DrawEntityFactory drawEntityFactory, SelectTagForPairUi selectTagForPairUi, SelectPairForTagUi selectPairForTagUi,
         PerformanceCollectorService performanceCollectorService, IpcManager ipcManager, DalamudUtilService dalamudUtilService, CharacterAnalyzer characterAnalyzer,
@@ -196,7 +194,6 @@ public class CompactUi : WindowMediatorSubscriberBase
     {
         _prePausedPairs = new(StringComparer.Ordinal);
         _prePausedSyncshells = new(StringComparer.Ordinal);
-        _uiSharedService = uiShared;
         _configService = configService;
         _apiController = apiController;
         _pairManager = pairManager;
@@ -309,7 +306,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                 _logger.LogDebug(ex, "Failed to update restore progress");
             }
         };
-        _tabMenu = new TopTabMenu(Mediator, _apiController, _pairManager, _uiSharedService);
+        _tabMenu = new TopTabMenu(Mediator, _apiController, _pairManager);
 
         Mediator.Subscribe<PenumbraModTransferAvailableMessage>(this, OnModSharingTransferAvailable);
         Mediator.Subscribe<PenumbraModTransferCompletedMessage>(this, OnModSharingTransferCompleted);
@@ -369,7 +366,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                 IconOffset = new(2,1),
                 ShowTooltip = () =>
                 {
-                    using (SpheneCustomTheme.ApplyTooltipTheme())
+                    using (SpheneUI.Theme.TooltipScope())
                     {
                         ImGui.BeginTooltip();
                         ImGui.Text("Open Network Configuration");
@@ -387,7 +384,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                 IconOffset = new(2,1),
                 ShowTooltip = () =>
                 {
-                    using (SpheneCustomTheme.ApplyTooltipTheme())
+                    using (SpheneUI.Theme.TooltipScope())
                     {
                         ImGui.BeginTooltip();
                         ImGui.Text("Open Network Event Log");
@@ -740,10 +737,10 @@ public class CompactUi : WindowMediatorSubscriberBase
             _restoreAfterUnstick = true;
         }
         // Apply CompactUI theme before the window is drawn
-        _themeScope = SpheneCustomTheme.ApplyThemeWithOriginalRadius();
+        _themeScope = SpheneUI.Theme.CompactScope();
         
         // Update window flags based on current theme settings
-        if (!SpheneCustomTheme.CurrentTheme.CompactShowImGuiHeader)
+        if (!SpheneTheme.Current.CompactShowImGuiHeader)
         {
             Flags |= ImGuiWindowFlags.NoTitleBar;
         }
@@ -807,7 +804,7 @@ public class CompactUi : WindowMediatorSubscriberBase
 #if IS_TEST_BUILD
     private void DrawTestServerToggleButton()
     {
-        if (_uiSharedService.IconButton(FontAwesomeIcon.Bug, null, null, null, null, ButtonStyleKeys.Compact_TestServer))
+        if (SpheneUI.Icons.Button(FontAwesomeIcon.Bug, null, null, null, null, ButtonStyleKeys.Compact_TestServer))
         {
             ToggleTestServerConnection();
         }
@@ -816,7 +813,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         var tooltip = isEnabled
             ? "Test Server: Enabled\nClick to switch back to the main server."
             : "Test Server: Disabled\nClick to switch to the test server.\nA disclaimer will be shown once.";
-        UiSharedService.AttachToolTip(tooltip);
+        SpheneUI.AttachTooltip(tooltip);
     }
 
     private void ToggleTestServerConnection()
@@ -848,24 +845,24 @@ public class CompactUi : WindowMediatorSubscriberBase
             ImGui.OpenPopup(TestServerDisclaimerPopupName);
         }
 
-        using (SpheneCustomTheme.ApplyContextMenuTheme())
+        using (SpheneUI.Theme.ContextMenuScope())
         {
             var isOpen = _showTestServerDisclaimerPopup;
-            if (ImGui.BeginPopupModal(TestServerDisclaimerPopupName, ref isOpen, UiSharedService.PopupWindowFlags))
+            if (ImGui.BeginPopupModal(TestServerDisclaimerPopupName, ref isOpen, SpheneUI.Popups.WindowFlags))
             {
                 var elapsedSeconds = (DateTime.UtcNow - _testServerDisclaimerOpenedAt).TotalSeconds;
                 var remainingSeconds = Math.Max(0.0, 20.0 - elapsedSeconds);
                 var canConfirm = remainingSeconds <= 0.0;
 
-                SpheneCustomTheme.DrawStyledText("Test Server Disclaimer", SpheneCustomTheme.CurrentTheme.CompactHeaderText);
+                SpheneUI.Text.Colored("Test Server Disclaimer", SpheneTheme.Current.CompactHeaderText);
                 ImGui.Separator();
-                UiSharedService.TextWrapped("You are about to connect to the Test Server.");
-                UiSharedService.TextWrapped("On the Test Server, a new UID is created automatically for you.");
-                UiSharedService.TextWrapped("Anything you do there has no effect on your main server account.");
-                UiSharedService.TextWrapped("If you find bugs, please report them on Discord.");
+                SpheneUI.Text.Wrapped("You are about to connect to the Test Server.");
+                SpheneUI.Text.Wrapped("On the Test Server, a new UID is created automatically for you.");
+                SpheneUI.Text.Wrapped("Anything you do there has no effect on your main server account.");
+                SpheneUI.Text.Wrapped("If you find bugs, please report them on Discord.");
 
                 ImGui.Spacing();
-                if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.Users, "Open Discord"))
+                if (SpheneUI.Icons.ActionButton(FontAwesomeIcon.Users, "Open Discord"))
                 {
                     Util.OpenLink("https://discord.gg/GbnwsP2XsF");
                 }
@@ -873,12 +870,12 @@ public class CompactUi : WindowMediatorSubscriberBase
                 ImGui.Spacing();
                 if (!canConfirm)
                 {
-                    UiSharedService.ColorTextWrapped($"Please wait {Math.Ceiling(remainingSeconds)} seconds before confirming.", SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning);
+                    SpheneUI.Text.ColoredWrapped($"Please wait {Math.Ceiling(remainingSeconds)} seconds before confirming.", SpheneTheme.Current.CompactServerStatusWarning);
                 }
 
                 using (ImRaii.Disabled(!canConfirm))
                 {
-                    if (_uiSharedService.IconTextButton(FontAwesomeIcon.Check, "I Understand, Connect"))
+                    if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Check, "I Understand, Connect"))
                     {
                         _configService.Current.HasAcceptedTestServerDisclaimer = true;
                         _configService.Save();
@@ -888,12 +885,12 @@ public class CompactUi : WindowMediatorSubscriberBase
                 }
 
                 ImGui.SameLine();
-                if (_uiSharedService.IconTextButton(FontAwesomeIcon.Times, "Cancel"))
+                if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Times, "Cancel"))
                 {
                     isOpen = false;
                 }
 
-                UiSharedService.SetScaledWindowSize(420);
+                SpheneUI.Layout.SetScaledWindowSize(420);
                 ImGui.EndPopup();
             }
 
@@ -982,8 +979,8 @@ public class CompactUi : WindowMediatorSubscriberBase
     {
         // Theme is already applied in PreDraw, no need to apply it again here
 
-        var theme = SpheneCustomTheme.CurrentTheme;
-        SpheneWindowChrome.DrawWindowBlur(theme.CompactEnableWindowBlur ? theme.CompactWindowBlurStrength : 0f);
+        var theme = SpheneTheme.Current;
+        SpheneUI.Chrome.WindowBlur(theme.CompactEnableWindowBlur ? theme.CompactWindowBlurStrength : 0f);
 
         // Draw Halloween background first (behind all content)
         DrawHalloweenBackground();
@@ -994,48 +991,48 @@ public class CompactUi : WindowMediatorSubscriberBase
         {
             var ver = _apiController.CurrentClientVersion;
             var unsupported = "UNSUPPORTED VERSION";
-            using (_uiSharedService.UidFont.Push())
+            using (SpheneUI.UidFont.Push())
             {
                 var uidTextSize = ImGui.CalcTextSize(unsupported);
                 ImGui.SetCursorPosX((ImGui.GetWindowContentRegionMax().X + ImGui.GetWindowContentRegionMin().X) / 2 - uidTextSize.X / 2);
                 ImGui.AlignTextToFramePadding();
-                ImGui.TextColored(SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning, unsupported);
+                ImGui.TextColored(SpheneTheme.Current.CompactServerStatusWarning, unsupported);
             }
-            UiSharedService.ColorTextWrapped($"Your Network client is outdated, current version is {ver.Major}.{ver.Minor}.{ver.Build}. " +
-            $"Please update your client to maintain Network compatibility. Open /xlplugins and update the plugin.", SpheneCustomTheme.CurrentTheme.CompactServerStatusError);
+            SpheneUI.Text.ColoredWrapped($"Your Network client is outdated, current version is {ver.Major}.{ver.Minor}.{ver.Build}. " +
+            $"Please update your client to maintain Network compatibility. Open /xlplugins and update the plugin.", SpheneTheme.Current.CompactServerStatusError);
         }
 
         if (!_ipcManager.Initialized)
         {
             var unsupported = "Limited functionality";
 
-            using (_uiSharedService.UidFont.Push())
+            using (SpheneUI.UidFont.Push())
             {
                 var uidTextSize = ImGui.CalcTextSize(unsupported);
                 ImGui.SetCursorPosX((ImGui.GetWindowContentRegionMax().X + ImGui.GetWindowContentRegionMin().X) / 2 - uidTextSize.X / 2);
                 ImGui.AlignTextToFramePadding();
-                ImGui.TextColored(SpheneCustomTheme.CurrentTheme.CompactServerStatusError, unsupported);
+                ImGui.TextColored(SpheneTheme.Current.CompactServerStatusError, unsupported);
             }
             var penumAvailable = _ipcManager.Penumbra.APIAvailable;
             var glamAvailable = _ipcManager.Glamourer.APIAvailable;
 
-            UiSharedService.ColorTextWrapped("Some features are currently unavailable. To enable full synchronization, please make sure these plugins are enabled and up to date:", SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning);
+            SpheneUI.Text.ColoredWrapped("Some features are currently unavailable. To enable full synchronization, please make sure these plugins are enabled and up to date:", SpheneTheme.Current.CompactServerStatusWarning);
             using var indent = ImRaii.PushIndent(10f);
             if (!penumAvailable)
             {
-                UiSharedService.TextWrapped("Penumbra (required)");
-                _uiSharedService.BooleanToColoredIcon(penumAvailable, true);
+                SpheneUI.Text.Wrapped("Penumbra (required)");
+                SpheneUI.Icons.BoolIcon(penumAvailable, true);
             }
             if (!glamAvailable)
             {
-                UiSharedService.TextWrapped("Glamourer (required)");
-                _uiSharedService.BooleanToColoredIcon(glamAvailable, true);
+                SpheneUI.Text.Wrapped("Glamourer (required)");
+                SpheneUI.Icons.BoolIcon(glamAvailable, true);
             }
             ImGui.Separator();
         }
 
         // Draw window header with title and buttons only if ImGui header is disabled
-        if (!SpheneCustomTheme.CurrentTheme.CompactShowImGuiHeader)
+        if (!SpheneTheme.Current.CompactShowImGuiHeader)
         {
             DrawWindowHeader();
         }
@@ -1129,19 +1126,19 @@ public class CompactUi : WindowMediatorSubscriberBase
             var titleSize = ImGui.CalcTextSize(title);
             ImGui.SetCursorPosX((ImGui.GetWindowContentRegionMax().X + ImGui.GetWindowContentRegionMin().X) * 0.5f - titleSize.X * 0.5f);
             ImGui.AlignTextToFramePadding();
-            ImGui.TextColored(SpheneCustomTheme.CurrentTheme.CompactHeaderText, title);
+            ImGui.TextColored(SpheneTheme.Current.CompactHeaderText, title);
 
             ImGui.Spacing();
 
             var centerX = (ImGui.GetWindowContentRegionMax().X + ImGui.GetWindowContentRegionMin().X) * 0.5f;
             var spinnerSize = ImGui.GetTextLineHeight();
             ImGui.SetCursorPosX(centerX - spinnerSize * 0.5f);
-            using (ImRaii.PushColor(ImGuiCol.Text, SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning))
+            using (ImRaii.PushColor(ImGuiCol.Text, SpheneTheme.Current.CompactServerStatusWarning))
             {
                 DrawRotatingSpinnerIcon(1.0f);
             }
 
-            using (ImRaii.PushColor(ImGuiCol.Text, SpheneCustomTheme.CurrentTheme.CompactText))
+            using (ImRaii.PushColor(ImGuiCol.Text, SpheneTheme.Current.CompactText))
             {
                 CenterDisabledLine(status);
             }
@@ -1168,7 +1165,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                 ImGui.SetCursorPosX(ImGui.GetCursorPosX() + MathF.Max(0, (headerAvail - headerSize.X) * 0.5f));
                 ImGui.AlignTextToFramePadding();
                 using (ImRaii.PushStyle(ImGuiStyleVar.FramePadding, new Vector2(headerPad, ImGui.GetStyle().FramePadding.Y)))
-                using (ImRaii.PushColor(ImGuiCol.Text, SpheneCustomTheme.CurrentTheme.CompactHeaderText))
+                using (ImRaii.PushColor(ImGuiCol.Text, SpheneTheme.Current.CompactHeaderText))
                 {
                     ImGui.TextUnformatted(header);
                 }
@@ -1187,7 +1184,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                 ImGui.SetCursorPosX(ImGui.GetCursorPosX() + MathF.Max(0, (headerAvail - header2Size.X) * 0.5f));
                 ImGui.AlignTextToFramePadding();
                 using (ImRaii.PushStyle(ImGuiStyleVar.FramePadding, new Vector2(headerPad, ImGui.GetStyle().FramePadding.Y)))
-                using (ImRaii.PushColor(ImGuiCol.Text, SpheneCustomTheme.CurrentTheme.CompactHeaderText))
+                using (ImRaii.PushColor(ImGuiCol.Text, SpheneTheme.Current.CompactHeaderText))
                 {
                     ImGui.TextUnformatted(header2);
                 }
@@ -1240,7 +1237,7 @@ public class CompactUi : WindowMediatorSubscriberBase
              }
              else
              {
-                 UiSharedService.ColorTextWrapped(GetServerError(), GetServerStatusColor());
+                 SpheneUI.Text.ColoredWrapped(GetServerError(), GetServerStatusColor());
              }
         }
 
@@ -1263,7 +1260,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                 }
 
                 ImGui.SetCursorPosX(startX);
-                ImGui.PushStyleColor(ImGuiCol.Text, SpheneCustomTheme.CurrentTheme.CompactTextSecondary);
+                ImGui.PushStyleColor(ImGuiCol.Text, SpheneTheme.Current.CompactTextSecondary);
                 ImGui.PushTextWrapPos(startX + avail);
                 ImGui.TextUnformatted(text);
                 ImGui.PopTextWrapPos();
@@ -1338,19 +1335,19 @@ public class CompactUi : WindowMediatorSubscriberBase
             var titleSize = ImGui.CalcTextSize(title);
             ImGui.SetCursorPosX((ImGui.GetWindowContentRegionMax().X + ImGui.GetWindowContentRegionMin().X) * 0.5f - titleSize.X * 0.5f);
             ImGui.AlignTextToFramePadding();
-            ImGui.TextColored(SpheneCustomTheme.CurrentTheme.CompactHeaderText, title);
+            ImGui.TextColored(SpheneTheme.Current.CompactHeaderText, title);
 
             ImGui.Spacing();
 
             var centerX = (ImGui.GetWindowContentRegionMax().X + ImGui.GetWindowContentRegionMin().X) * 0.5f;
             var spinnerSize = ImGui.GetTextLineHeight();
             ImGui.SetCursorPosX(centerX - spinnerSize * 0.5f);
-            using (ImRaii.PushColor(ImGuiCol.Text, SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning))
+            using (ImRaii.PushColor(ImGuiCol.Text, SpheneTheme.Current.CompactServerStatusWarning))
             {
                 DrawRotatingSpinnerIcon(1.0f);
             }
 
-            using (ImRaii.PushColor(ImGuiCol.Text, SpheneCustomTheme.CurrentTheme.CompactText))
+            using (ImRaii.PushColor(ImGuiCol.Text, SpheneTheme.Current.CompactText))
             {
                 CenterDisabledLine(status);
             }
@@ -1377,7 +1374,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                 ImGui.SetCursorPosX(ImGui.GetCursorPosX() + MathF.Max(0, (headerAvail - header1Size.X) * 0.5f));
                 ImGui.AlignTextToFramePadding();
                 using (ImRaii.PushStyle(ImGuiStyleVar.FramePadding, new Vector2(headerPad, ImGui.GetStyle().FramePadding.Y)))
-                using (ImRaii.PushColor(ImGuiCol.Text, SpheneCustomTheme.CurrentTheme.CompactHeaderText))
+                using (ImRaii.PushColor(ImGuiCol.Text, SpheneTheme.Current.CompactHeaderText))
                 {
                     ImGui.TextUnformatted(header1);
                 }
@@ -1402,7 +1399,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                 ImGui.SetCursorPosX(ImGui.GetCursorPosX() + MathF.Max(0, (headerAvail - header2Size.X) * 0.5f));
                 ImGui.AlignTextToFramePadding();
                 using (ImRaii.PushStyle(ImGuiStyleVar.FramePadding, new Vector2(headerPad, ImGui.GetStyle().FramePadding.Y)))
-                using (ImRaii.PushColor(ImGuiCol.Text, SpheneCustomTheme.CurrentTheme.CompactHeaderText))
+                using (ImRaii.PushColor(ImGuiCol.Text, SpheneTheme.Current.CompactHeaderText))
                 {
                     ImGui.TextUnformatted(header2);
                 }
@@ -1411,7 +1408,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                 CenterDisabledWrapped(hint);
                 if (ImGui.IsItemHovered())
                 {
-                    using (SpheneCustomTheme.ApplyTooltipTheme())
+                    using (SpheneUI.Theme.TooltipScope())
                     {
                         ImGui.BeginTooltip();
                         ImGui.TextUnformatted("Tip");
@@ -1444,17 +1441,17 @@ public class CompactUi : WindowMediatorSubscriberBase
                     var size = ImGui.CalcTextSize(text).X;
                     var avail = ImGui.GetContentRegionAvail().X;
                     ImGui.SetCursorPosX(MathF.Max(0, (avail - size) / 2));
-                    UiSharedService.ColorText(text, color);
+                    SpheneUI.Text.Colored(text, color);
                 }
 
-                CenterLine("Your Character", SpheneCustomTheme.CurrentTheme.CompactHeaderText);
+                CenterLine("Your Character", SpheneTheme.Current.CompactHeaderText);
                 ImGuiHelpers.ScaledDummy(2);
                 ImGui.Separator();
-                CenterLine(charDisplay, SpheneCustomTheme.CurrentTheme.CompactText);
+                CenterLine(charDisplay, SpheneTheme.Current.CompactText);
                 ImGui.Separator();
                 ImGuiHelpers.ScaledDummy(2);
-                CenterLine("is not yet synced to Sphene.", SpheneCustomTheme.CurrentTheme.CompactHeaderText);
-                CenterLine("Add it below to start syncing.", SpheneCustomTheme.CurrentTheme.CompactHeaderText);
+                CenterLine("is not yet synced to Sphene.", SpheneTheme.Current.CompactHeaderText);
+                CenterLine("Add it below to start syncing.", SpheneTheme.Current.CompactHeaderText);
                 ImGuiHelpers.ScaledDummy(5);
                 ImGui.Separator();
 
@@ -1468,23 +1465,23 @@ public class CompactUi : WindowMediatorSubscriberBase
                     {
                         _selectedSecretKeyForNewCharacter = initialKey.Key;
                     }
-                    CenterLine("Secret Key:", SpheneCustomTheme.CurrentTheme.CompactTextSecondary);
+                    CenterLine("Secret Key:", SpheneTheme.Current.CompactTextSecondary);
                     ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X);
-                    _uiSharedService.DrawCombo("##compactNewCharKey", keys,
+                    SpheneUI.Controls.Combo("##compactNewCharKey", keys,
                         (w) => w.Value.FriendlyName,
                         (w) => { _selectedSecretKeyForNewCharacter = w.Key; },
                         initialKey);
                     ImGuiHelpers.ScaledDummy(3);
-                    CenterLine("or enter a new key:", SpheneCustomTheme.CurrentTheme.CompactTextSecondary);
+                    CenterLine("or enter a new key:", SpheneTheme.Current.CompactTextSecondary);
                     ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X);
                     ImGui.InputTextWithHint("##customSecretKey", "enter secret key here", ref _customSecretKeyInput, 255);
                     ImGuiHelpers.ScaledDummy(3);
                 }
 
-                var btnWidth2 = _uiSharedService.GetIconTextButtonSize(FontAwesomeIcon.User, "Add current character");
+                var btnWidth2 = SpheneUI.Icons.TextButtonWidth(FontAwesomeIcon.User, "Add current character");
                 var availWidthBtn = ImGui.GetContentRegionAvail().X;
                 ImGui.SetCursorPosX(MathF.Max(0, (availWidthBtn - btnWidth2) / 2));
-                if (_uiSharedService.IconTextButton(FontAwesomeIcon.User, "Add current character"))
+                if (SpheneUI.Icons.TextButton(FontAwesomeIcon.User, "Add current character"))
                 {
                     int keyToUse = -1;
                     if (!currentServer.UseOAuth2)
@@ -1520,7 +1517,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                 if (startX < 0) startX = 0;
                 
                 ImGui.SetCursorPosX(startX);
-                SpheneCustomTheme.DrawStyledText(onlineText, SpheneCustomTheme.CurrentTheme.CompactHeaderText);
+                SpheneUI.Text.Colored(onlineText, SpheneTheme.Current.CompactHeaderText);
                 
                 using (ImRaii.PushId("pairlist")) DrawPairs();
                 
@@ -1533,19 +1530,19 @@ public class CompactUi : WindowMediatorSubscriberBase
         }
         
         // Draw update notification at bottom if available or forced by theme
-        if (Sphene.UI.Theme.SpheneCustomTheme.CurrentTheme.ForceShowUpdateHint || _updateBannerInfo?.IsUpdateAvailable == true)
+        if (Sphene.UI.Design.SpheneTheme.Current.ForceShowUpdateHint || _updateBannerInfo?.IsUpdateAvailable == true)
         {
             using (ImRaii.PushId("update-hint-footer"))
             {
                 var startY = ImGui.GetCursorPosY();
                 var lineH = ImGui.GetTextLineHeight();
-                var h = Sphene.UI.Theme.SpheneCustomTheme.CurrentTheme.CompactUpdateHintHeight;
-                var pad = Sphene.UI.Theme.SpheneCustomTheme.CurrentTheme.CompactUpdateHintPaddingY;
+                var h = Sphene.UI.Design.SpheneTheme.Current.CompactUpdateHintHeight;
+                var pad = Sphene.UI.Design.SpheneTheme.Current.CompactUpdateHintPaddingY;
                 var offset = Math.Max(0.0f, (h - lineH) * 0.5f);
                 ImGui.SetCursorPosY(startY + pad + offset);
                 using (var font = ImRaii.PushFont(UiBuilder.IconFont))
                 {
-                    ImGui.TextColored(Sphene.UI.Theme.SpheneCustomTheme.CurrentTheme.CompactUpdateHintColor, FontAwesomeIcon.InfoCircle.ToIconString());
+                    ImGui.TextColored(Sphene.UI.Design.SpheneTheme.Current.CompactUpdateHintColor, FontAwesomeIcon.InfoCircle.ToIconString());
                 }
                 ImGui.SameLine();
                 var updateText = _updateBannerInfo?.LatestVersion != null
@@ -1553,9 +1550,9 @@ public class CompactUi : WindowMediatorSubscriberBase
                         ? $"Testbuild update available: {_updateBannerInfo.LatestVersion}"
                         : $"Update available: {_updateBannerInfo.LatestVersion}"
                     : "Update available";
-                UiSharedService.ColorTextWrapped(updateText, Sphene.UI.Theme.SpheneCustomTheme.CurrentTheme.CompactUpdateHintColor);
+                SpheneUI.Text.ColoredWrapped(updateText, Sphene.UI.Design.SpheneTheme.Current.CompactUpdateHintColor);
                 ImGui.SameLine();
-                if (_uiSharedService.IconTextButton(FontAwesomeIcon.Download, "Open Details"))
+                if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Download, "Open Details"))
                 {
                     _logger.LogDebug("Update details button clicked, toggling UpdateNotificationUi");
                     Mediator.Publish(new UiToggleMessage(typeof(UpdateNotificationUi)));
@@ -1573,9 +1570,9 @@ public class CompactUi : WindowMediatorSubscriberBase
             _lastAddedUserComment = string.Empty;
         }
 
-        using (SpheneCustomTheme.ApplyContextMenuTheme())
+        using (SpheneUI.Theme.ContextMenuScope())
         {
-            if (ImGui.BeginPopupModal("Set Notes for New User", ref _showModalForUserAddition, UiSharedService.PopupWindowFlags))
+            if (ImGui.BeginPopupModal("Set Notes for New User", ref _showModalForUserAddition, SpheneUI.Popups.WindowFlags))
             {
                 if (_lastAddedUser == null)
                 {
@@ -1583,9 +1580,9 @@ public class CompactUi : WindowMediatorSubscriberBase
                 }
                 else
                 {
-                    UiSharedService.TextWrapped($"You have successfully added {_lastAddedUser.UserData.AliasOrUID}. Set a local note for the user in the field below:");
+                    SpheneUI.Text.Wrapped($"You have successfully added {_lastAddedUser.UserData.AliasOrUID}. Set a local note for the user in the field below:");
                     ImGui.InputTextWithHint("##noteforuser", $"Note for {_lastAddedUser.UserData.AliasOrUID}", ref _lastAddedUserComment, 100);
-                    if (_uiSharedService.IconTextButton(FontAwesomeIcon.Save, "Save Note"))
+                    if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Save, "Save Note"))
                     {
                         _serverManager.SetNoteForUid(_lastAddedUser.UserData.UID, _lastAddedUserComment);
                         _lastAddedUser = null;
@@ -1593,7 +1590,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                         _showModalForUserAddition = false;
                     }
                 }
-                UiSharedService.SetScaledWindowSize(275);
+                SpheneUI.Layout.SetScaledWindowSize(275);
                 ImGui.EndPopup();
             }
         }
@@ -1651,9 +1648,9 @@ public class CompactUi : WindowMediatorSubscriberBase
     {
         // Reserve additional space for update notification if available
         var updateNotificationHeight =
-            (Sphene.UI.Theme.SpheneCustomTheme.CurrentTheme.ForceShowUpdateHint || _updateBannerInfo?.IsUpdateAvailable == true)
-                ? Sphene.UI.Theme.SpheneCustomTheme.CurrentTheme.CompactUpdateHintHeight
-                    + Sphene.UI.Theme.SpheneCustomTheme.CurrentTheme.CompactUpdateHintPaddingY * 2
+            (Sphene.UI.Design.SpheneTheme.Current.ForceShowUpdateHint || _updateBannerInfo?.IsUpdateAvailable == true)
+                ? Sphene.UI.Design.SpheneTheme.Current.CompactUpdateHintHeight
+                    + Sphene.UI.Design.SpheneTheme.Current.CompactUpdateHintPaddingY * 2
                     + ImGui.GetStyle().ItemSpacing.Y
                 : 0f;
 
@@ -1672,7 +1669,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         // The list content follows the panel window padding like everything
         // else; fades and separators use their own edge padding instead.
         var xSize = ImGui.GetContentRegionAvail().X;
-        if (SpheneWindowChrome.BeginScrollArea("list", new Vector2(xSize, ySize),
+        if (SpheneUI.Layout.BeginScrollArea("list", new Vector2(xSize, ySize),
                 noPadding: true, contentInset: 0f))
         {
             foreach (var item in _drawFolders)
@@ -1682,7 +1679,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         }
         // The fade always spans the window's inner edge; only the separators
         // get an adjustable padding. WindowPadding must not affect it.
-        SpheneWindowChrome.EndScrollArea(edgePaddingX: 0f);
+        SpheneUI.Layout.EndScrollArea(edgePaddingX: 0f);
     }
     
 
@@ -1691,18 +1688,18 @@ public class CompactUi : WindowMediatorSubscriberBase
     private void DrawModeControls()
     {
         ImGui.BeginGroup();
-        ImGui.TextColored(SpheneCustomTheme.CurrentTheme.CompactTextSecondary, "Mode:");
+        ImGui.TextColored(SpheneTheme.Current.CompactTextSecondary, "Mode:");
         ImGui.SameLine();
         var currentTime = DateTime.UtcNow;
         var timeSinceLastClick = currentTime - _lastIncognitoButtonClick;
         var isButtonDisabled = timeSinceLastClick.TotalSeconds < 5.0;
         if (_isIncognitoModeActive)
         {
-            var resumeColor = isButtonDisabled ? SpheneCustomTheme.CurrentTheme.CompactTextSecondary : SpheneCustomTheme.CurrentTheme.CompactServerStatusConnected;
+            var resumeColor = isButtonDisabled ? SpheneTheme.Current.CompactTextSecondary : SpheneTheme.Current.CompactServerStatusConnected;
             ImGui.PushStyleColor(ImGuiCol.Text, resumeColor);
             using (ImRaii.Disabled(isButtonDisabled))
             {
-                if (_uiSharedService.IconButton(FontAwesomeIcon.Play, null, null, null, null, ButtonStyleKeys.Compact_IncognitoOff))
+                if (SpheneUI.Icons.Button(FontAwesomeIcon.Play, null, null, null, null, ButtonStyleKeys.Compact_IncognitoOff))
                 {
                     _lastIncognitoButtonClick = currentTime;
                     _ = Task.Run(() => HandleIncognitoModeToggle());
@@ -1717,18 +1714,18 @@ public class CompactUi : WindowMediatorSubscriberBase
                     var remainingSeconds = Math.Ceiling(5.0 - timeSinceLastClick.TotalSeconds);
                     tooltipText += $"\nCooldown: {remainingSeconds} seconds remaining";
                 }
-                UiSharedService.AttachToolTip(tooltipText);
+                SpheneUI.AttachTooltip(tooltipText);
             }
             ImGui.SameLine();
-            ImGui.TextColored(SpheneCustomTheme.CurrentTheme.CompactServerStatusConnected, "Incognito");
+            ImGui.TextColored(SpheneTheme.Current.CompactServerStatusConnected, "Incognito");
         }
         else
         {
-            var heartColor = isButtonDisabled ? SpheneCustomTheme.CurrentTheme.CompactTextSecondary : SpheneCustomTheme.CurrentTheme.CompactServerStatusError;
+            var heartColor = isButtonDisabled ? SpheneTheme.Current.CompactTextSecondary : SpheneTheme.Current.CompactServerStatusError;
             ImGui.PushStyleColor(ImGuiCol.Text, heartColor);
             using (ImRaii.Disabled(isButtonDisabled))
             {
-                if (_uiSharedService.IconButton(FontAwesomeIcon.Heart, null, null, null, null, ButtonStyleKeys.Compact_IncognitoOn))
+                if (SpheneUI.Icons.Button(FontAwesomeIcon.Heart, null, null, null, null, ButtonStyleKeys.Compact_IncognitoOn))
                 {
                     _lastIncognitoButtonClick = currentTime;
                     _ = Task.Run(() => HandleIncognitoModeToggle());
@@ -1743,10 +1740,10 @@ public class CompactUi : WindowMediatorSubscriberBase
                     var remainingSeconds = Math.Ceiling(5.0 - timeSinceLastClick.TotalSeconds);
                     tooltipText += $"\nCooldown: {remainingSeconds} seconds remaining";
                 }
-                UiSharedService.AttachToolTip(tooltipText);
+                SpheneUI.AttachTooltip(tooltipText);
             }
             ImGui.SameLine();
-            ImGui.TextColored(SpheneCustomTheme.CurrentTheme.CompactText, "Normal");
+            ImGui.TextColored(SpheneTheme.Current.CompactText, "Normal");
         }
         bool hasAreaSyncshells = _areaBoundSyncshellService.HasAvailableAreaSyncshells();
         if (hasAreaSyncshells && !_hadAvailableAreaSyncshells)
@@ -1759,25 +1756,25 @@ public class CompactUi : WindowMediatorSubscriberBase
         ImGui.SameLine();
         var now = DateTime.UtcNow;
         var drawAttention = hasAreaSyncshells && now < _areaSyncshellAttentionUntilUtc;
-        var iconButtonSize = _uiSharedService.GetIconButtonSize(FontAwesomeIcon.MapMarkerAlt);
+        var iconButtonSize = SpheneUI.Icons.ButtonSize(FontAwesomeIcon.MapMarkerAlt);
         var wideButtonWidth = iconButtonSize.X + 18f * ImGuiHelpers.GlobalScale;
         if (drawAttention)
         {
             var time = (float)now.TimeOfDay.TotalSeconds;
             var pulse = 0.5f + 0.5f * MathF.Sin(time * 6.0f);
-            var highlight = Vector4.Lerp(SpheneCustomTheme.CurrentTheme.CompactAccent, SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning, pulse * 0.65f);
+            var highlight = Vector4.Lerp(SpheneTheme.Current.CompactAccent, SpheneTheme.Current.CompactServerStatusWarning, pulse * 0.65f);
             var button = new Vector4(highlight.X, highlight.Y, highlight.Z, 0.55f);
             var hovered = new Vector4(highlight.X, highlight.Y, highlight.Z, 0.75f);
             var active = new Vector4(highlight.X, highlight.Y, highlight.Z, 0.9f);
             ImGui.PushStyleColor(ImGuiCol.Button, button);
             ImGui.PushStyleColor(ImGuiCol.ButtonHovered, hovered);
             ImGui.PushStyleColor(ImGuiCol.ButtonActive, active);
-            ImGui.PushStyleColor(ImGuiCol.Text, SpheneCustomTheme.CurrentTheme.CompactText);
+            ImGui.PushStyleColor(ImGuiCol.Text, SpheneTheme.Current.CompactText);
         }
         else if (!hasAreaSyncshells)
         {
-            var baseColor = SpheneCustomTheme.CurrentTheme.CompactActionButton;
-            var textColor = SpheneCustomTheme.CurrentTheme.CompactTextSecondary;
+            var baseColor = SpheneTheme.Current.CompactActionButton;
+            var textColor = SpheneTheme.Current.CompactTextSecondary;
             var disabledButton = new Vector4(baseColor.X, baseColor.Y, baseColor.Z, 0.18f);
             var disabledHovered = new Vector4(baseColor.X, baseColor.Y, baseColor.Z, 0.18f);
             var disabledActive = new Vector4(baseColor.X, baseColor.Y, baseColor.Z, 0.18f);
@@ -1790,7 +1787,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         bool clicked;
         using (ImRaii.Disabled(!hasAreaSyncshells))
         {
-            clicked = _uiSharedService.IconButton(FontAwesomeIcon.MapMarkerAlt, width: wideButtonWidth, styleKey: ButtonStyleKeys.Compact_AreaSelect);
+            clicked = SpheneUI.Icons.Button(FontAwesomeIcon.MapMarkerAlt, width: wideButtonWidth, styleKey: ButtonStyleKeys.Compact_AreaSelect);
         }
         if (drawAttention)
         {
@@ -1799,8 +1796,8 @@ public class CompactUi : WindowMediatorSubscriberBase
             var min = ImGui.GetItemRectMin();
             var max = ImGui.GetItemRectMax();
             var badgeCenter = new Vector2(max.X - 7f, min.Y + 7f);
-            drawList.AddCircleFilled(badgeCenter, 5.5f, ImGui.ColorConvertFloat4ToU32(SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning));
-            drawList.AddCircle(badgeCenter, 5.5f, ImGui.ColorConvertFloat4ToU32(SpheneCustomTheme.CurrentTheme.CompactBorder), 12, 1.5f);
+            drawList.AddCircleFilled(badgeCenter, 5.5f, ImGui.ColorConvertFloat4ToU32(SpheneTheme.Current.CompactServerStatusWarning));
+            drawList.AddCircle(badgeCenter, 5.5f, ImGui.ColorConvertFloat4ToU32(SpheneTheme.Current.CompactBorder), 12, 1.5f);
         }
         else if (!hasAreaSyncshells)
         {
@@ -1812,7 +1809,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         }
         var hasAnyAreaSyncshellsHere = _areaBoundSyncshellService.HasAnyAreaSyncshellsInCurrentLocation();
         var isInAreaSyncshellHere = _areaBoundSyncshellService.IsInAreaSyncshellInCurrentLocation();
-        UiSharedService.AttachToolTip(hasAreaSyncshells
+        SpheneUI.AttachTooltip(hasAreaSyncshells
             ? "Open Area Syncshell Selection"
             : !hasAnyAreaSyncshellsHere
                 ? "No Area Syncshells found"
@@ -1828,7 +1825,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         var extraLeftShift = 18.0f;
         var targetRightEdge = ImGui.GetWindowContentRegionMax().X - headerPaddingRight - extraLeftShift;
 
-        var conversionButtonSize = _uiSharedService.GetIconButtonSize(FontAwesomeIcon.ArrowsToEye);
+        var conversionButtonSize = SpheneUI.Icons.ButtonSize(FontAwesomeIcon.ArrowsToEye);
         var buttonWidth = conversionButtonSize.X;
         var spacing = ImGui.GetStyle().ItemSpacing.X;
         var textureLabelWidth = ImGui.CalcTextSize("VRAM:").X;
@@ -1854,16 +1851,16 @@ public class CompactUi : WindowMediatorSubscriberBase
         
         ImGui.SameLine(startX);
         ImGui.BeginGroup();
-        ImGui.TextColored(SpheneCustomTheme.CurrentTheme.CompactTextSecondary, "VRAM:");
+        ImGui.TextColored(SpheneTheme.Current.CompactTextSecondary, "VRAM:");
         ImGui.SameLine();
         using (ImRaii.Disabled(_shrinkuConversionService.IsConverting))
         {
-            if (_uiSharedService.IconButton(FontAwesomeIcon.ArrowsToEye, null, null, null, null, ButtonStyleKeys.Compact_Conversion) && !_shrinkuConversionService.IsConverting)
+            if (SpheneUI.Icons.Button(FontAwesomeIcon.ArrowsToEye, null, null, null, null, ButtonStyleKeys.Compact_Conversion) && !_shrinkuConversionService.IsConverting)
             {
                 _conversionWindowOpen = true;
             }
         }
-        UiSharedService.AttachToolTip(_shrinkuConversionService.IsConverting
+        SpheneUI.AttachTooltip(_shrinkuConversionService.IsConverting
             ? "Texture Conversion\nDisabled while background conversion is running"
             : "Texture Conversion\nOptimize and convert textures to BC7 format");
         ImGui.SameLine();
@@ -1886,7 +1883,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         if (currentUploads.Any())
         {
             ImGui.AlignTextToFramePadding();
-            _uiSharedService.IconText(FontAwesomeIcon.Upload);
+            SpheneUI.Icons.Icon(FontAwesomeIcon.Upload);
             ImGui.SameLine(35 * ImGuiHelpers.GlobalScale);
             
             var totalUploads = currentUploads.Count;
@@ -1897,14 +1894,14 @@ public class CompactUi : WindowMediatorSubscriberBase
             var uploadProgress = totalToUpload > 0 ? (float)totalUploaded / totalToUpload : 0f;
             var uploadText = $"{doneUploads}/{totalUploads} ({UiSharedService.ByteToString(totalUploaded)}/{UiSharedService.ByteToString(totalToUpload)})";
             
-            UiSharedService.DrawTransmissionBar("Transmitting", uploadProgress, uploadText, true);
+            SpheneUI.Controls.TransmissionBar("Transmitting", uploadProgress, uploadText, true);
         }
 
         // Only show download progress if there are active downloads
         if (currentDownloads.Any())
         {
             ImGui.AlignTextToFramePadding();
-            _uiSharedService.IconText(FontAwesomeIcon.Download);
+            SpheneUI.Icons.Icon(FontAwesomeIcon.Download);
             ImGui.SameLine(35 * ImGuiHelpers.GlobalScale);
             
             var totalDownloads = currentDownloads.Sum(c => c.TotalFiles);
@@ -1915,29 +1912,29 @@ public class CompactUi : WindowMediatorSubscriberBase
             var downloadProgress = totalToDownload > 0 ? (float)totalDownloaded / totalToDownload : 0f;
             var downloadText = $"{doneDownloads}/{totalDownloads} ({UiSharedService.ByteToString(totalDownloaded)}/{UiSharedService.ByteToString(totalToDownload)})";
             
-            UiSharedService.DrawTransmissionBar("Receiving", downloadProgress, downloadText, false);
+            SpheneUI.Controls.TransmissionBar("Receiving", downloadProgress, downloadText, false);
         }
 
         // Show transmission preview in-place when enabled
-        var theme = Sphene.UI.Theme.SpheneCustomTheme.CurrentTheme;
+        var theme = Sphene.UI.Design.SpheneTheme.Current;
         if (theme.ShowTransmissionPreview)
         {
             if (!currentUploads.Any())
             {
                 ImGui.AlignTextToFramePadding();
-                _uiSharedService.IconText(FontAwesomeIcon.Upload);
+                SpheneUI.Icons.Icon(FontAwesomeIcon.Upload);
                 ImGui.SameLine(35 * ImGuiHelpers.GlobalScale);
                 var previewUpload = theme.TransmissionPreviewUploadFill / 100.0f;
-                UiSharedService.DrawTransmissionBar("Transmitting", previewUpload, $"{theme.TransmissionPreviewUploadFill:F1}%", true);
+                SpheneUI.Controls.TransmissionBar("Transmitting", previewUpload, $"{theme.TransmissionPreviewUploadFill:F1}%", true);
             }
 
             if (!currentDownloads.Any())
             {
                 ImGui.AlignTextToFramePadding();
-                _uiSharedService.IconText(FontAwesomeIcon.Download);
+                SpheneUI.Icons.Icon(FontAwesomeIcon.Download);
                 ImGui.SameLine(35 * ImGuiHelpers.GlobalScale);
                 var previewDownload = theme.TransmissionPreviewDownloadFill / 100.0f;
-                UiSharedService.DrawTransmissionBar("Receiving", previewDownload, $"{theme.TransmissionPreviewDownloadFill:F1}%", false);
+                SpheneUI.Controls.TransmissionBar("Receiving", previewDownload, $"{theme.TransmissionPreviewDownloadFill:F1}%", false);
         }
         }
     }
@@ -1948,12 +1945,12 @@ public class CompactUi : WindowMediatorSubscriberBase
     {
         var uidText = GetUidText();
         
-        var fontHandle = _uiSharedService.UidFont;
+        var fontHandle = SpheneUI.UidFont;
         if (fontHandle.Available)
         {
             using (fontHandle.Push())
             {
-                ImGui.SetWindowFontScale(SpheneCustomTheme.CurrentTheme.CompactUidFontScale);
+                ImGui.SetWindowFontScale(SpheneTheme.Current.CompactUidFontScale);
                 DrawUidTextInternal(uidText);
                 ImGui.SetWindowFontScale(1.0f);
             }
@@ -1973,7 +1970,7 @@ public class CompactUi : WindowMediatorSubscriberBase
             ImGui.SetCursorPosX((avail.X - textSize.X) * 0.5f);
             ImGui.SetCursorPosY((avail.Y - textSize.Y) * 0.5f);
             
-            using (ImRaii.PushColor(ImGuiCol.Text, SpheneCustomTheme.CurrentTheme.CompactTextSecondary))
+            using (ImRaii.PushColor(ImGuiCol.Text, SpheneTheme.Current.CompactTextSecondary))
             {
                 ImGui.Text(text);
             }
@@ -1985,7 +1982,7 @@ public class CompactUi : WindowMediatorSubscriberBase
             {
                 ImGui.SetClipboardText(_apiController.DisplayName);
             }
-            UiSharedService.AttachToolTip("Click to copy");
+            SpheneUI.AttachTooltip("Click to copy");
         }
 
         var nowLocal = DateTime.Now;
@@ -1998,7 +1995,7 @@ public class CompactUi : WindowMediatorSubscriberBase
             using (ImRaii.PushColor(ImGuiCol.Text, new Vector4(0.55f, 0.85f, 1.0f, pulse)))
             {
                 var buttonText = _aprilFoolsHyperSyncEnabled ? "Disable HyperSync™" : "Enable HyperSync™";
-                if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.Rocket, buttonText))
+                if (SpheneUI.Icons.ActionButton(FontAwesomeIcon.Rocket, buttonText))
                 {
                     var wasEnabled = _aprilFoolsHyperSyncEnabled;
                     _aprilFoolsHyperSyncEnabled = !_aprilFoolsHyperSyncEnabled;
@@ -2006,7 +2003,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                     ImGui.OpenPopup(wasEnabled ? "HyperSyncDisabled" : "HyperSync");
                 }
             }
-            UiSharedService.AttachToolTip(_aprilFoolsHyperSyncEnabled ? "Click to disable HyperSync™ (Beta)" : "Click to enable HyperSync™ (Beta)");
+            SpheneUI.AttachTooltip(_aprilFoolsHyperSyncEnabled ? "Click to disable HyperSync™ (Beta)" : "Click to enable HyperSync™ (Beta)");
         }
     }
 
@@ -2017,7 +2014,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         var pausedTitleSize = ImGui.CalcTextSize(pausedTitle);
         ImGui.SetCursorPosX((ImGui.GetWindowContentRegionMax().X + ImGui.GetWindowContentRegionMin().X) * 0.5f - pausedTitleSize.X * 0.5f);
         ImGui.AlignTextToFramePadding();
-        UiSharedService.ColorText(pausedTitle, SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning);
+        SpheneUI.Text.Colored(pausedTitle, SpheneTheme.Current.CompactServerStatusWarning);
         ImGui.Spacing();
         var pausedMessage = "You manually disconnected from the Sphene server. Press the Connect button to reconnect.";
         var pausedContentMin = ImGui.GetWindowContentRegionMin().X;
@@ -2029,17 +2026,17 @@ public class CompactUi : WindowMediatorSubscriberBase
         var textSize = ImGui.CalcTextSize(pausedMessage, wrapWidth: availWidth);
         var startX = pausedContentMin + MathF.Max(0, (pausedContentWidth - pausedMsgBoxWidth) * 0.5f) + MathF.Max(0, (pausedMsgBoxWidth - textSize.X) * 0.5f);
         ImGui.SetCursorPosX(startX);
-        UiSharedService.ColorTextWrapped(pausedMessage, SpheneCustomTheme.CurrentTheme.CompactTextSecondary, startX + availWidth);
+        SpheneUI.Text.ColoredWrapped(pausedMessage, SpheneTheme.Current.CompactTextSecondary, startX + availWidth);
         ImGui.Spacing();
-        var btnWidth = _uiSharedService.GetIconTextButtonSize(FontAwesomeIcon.Link, "Connect");
+        var btnWidth = SpheneUI.Icons.TextButtonWidth(FontAwesomeIcon.Link, "Connect");
         ImGui.SetCursorPosX(pausedContentMin + MathF.Max(0, (pausedContentWidth - btnWidth) * 0.5f));
-        if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.Link, "Connect") && _serverManager.CurrentServer != null)
+        if (SpheneUI.Icons.ActionButton(FontAwesomeIcon.Link, "Connect") && _serverManager.CurrentServer != null)
         {
             _serverManager.CurrentServer.FullPause = false;
             _serverManager.Save();
             _ = _apiController.CreateConnectionsAsync();
         }
-        UiSharedService.AttachToolTip("Reconnect to the Sphene server");
+        SpheneUI.AttachTooltip("Reconnect to the Sphene server");
     }
 
     private void DrawHeaderCard(ImGuiStylePtr style)
@@ -2047,7 +2044,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         // 0. Pre-Flight Check: Fonts
         // The user explicitly requested that the window should NOT be drawn/calculated
         // until the font is fully loaded, to ensure correct sizing and no jumping.
-        if (!_uiSharedService.UidFont.Available)
+        if (!SpheneUI.UidFont.Available)
         {
             // Draw a placeholder with the approximate height to prevent total collapse,
             // but do not attempt to layout the content.
@@ -2072,9 +2069,9 @@ public class CompactUi : WindowMediatorSubscriberBase
         
         // Calculate exact UID width using the now GUARANTEED available font
         var uidText = GetUidText();
-        using (_uiSharedService.UidFont.Push())
+        using (SpheneUI.UidFont.Push())
         {
-            var targetScale = SpheneCustomTheme.CurrentTheme.CompactUidFontScale;
+            var targetScale = SpheneTheme.Current.CompactUidFontScale;
             ImGui.SetWindowFontScale(targetScale);
             _ = ImGui.CalcTextSize(uidText);
             ImGui.SetWindowFontScale(1.0f);
@@ -2137,7 +2134,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         // Force the width to match the calculated available width exactly
         var bgMax = new Vector2(bgMin.X + availableWidth, groupMax.Y + padding.Y);
         
-        drawList.AddRectFilled(bgMin, bgMax, ImGui.GetColorU32(SpheneCustomTheme.CurrentTheme.CompactControlPanelBg), 10.0f);
+        drawList.AddRectFilled(bgMin, bgMax, ImGui.GetColorU32(SpheneTheme.Current.CompactControlPanelBg), 10.0f);
         
         drawList.ChannelsMerge();
         
@@ -2150,7 +2147,7 @@ public class CompactUi : WindowMediatorSubscriberBase
     {
         // Use CompactUidColor for connected state, server status colors for other states
         var uidColor = _apiController.DisplayServerState == ServerState.Connected 
-            ? SpheneCustomTheme.CurrentTheme.CompactUidColor 
+            ? SpheneTheme.Current.CompactUidColor 
             : GetServerStatusColor();
         
         ImGui.TextColored(uidColor, uidText);
@@ -2258,7 +2255,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         }
 
         if (_configService.Current.GroupUpSyncshells)
-            drawFolders.Add(new DrawGroupedGroupFolder(groupFolders, _tagHandler, _uiSharedService));
+            drawFolders.Add(new DrawGroupedGroupFolder(groupFolders, _tagHandler));
         else
             drawFolders.AddRange(groupFolders);
 
@@ -2373,21 +2370,21 @@ public class CompactUi : WindowMediatorSubscriberBase
     {
         return _apiController.DisplayServerState switch
         {
-            ServerState.Connecting => SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning,
-            ServerState.Reconnecting => SpheneCustomTheme.CurrentTheme.CompactServerStatusError,
-            ServerState.Connected => SpheneCustomTheme.CurrentTheme.CompactServerStatusConnected,
-            ServerState.Disconnected => SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning,
-            ServerState.Disconnecting => SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning,
-            ServerState.Unauthorized => SpheneCustomTheme.CurrentTheme.CompactServerStatusError,
-            ServerState.VersionMisMatch => SpheneCustomTheme.CurrentTheme.CompactServerStatusError,
-            ServerState.Offline => SpheneCustomTheme.CurrentTheme.CompactServerStatusError,
-            ServerState.RateLimited => SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning,
-            ServerState.NoSecretKey => SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning,
-            ServerState.MultiChara => SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning,
-            ServerState.OAuthMisconfigured => SpheneCustomTheme.CurrentTheme.CompactServerStatusError,
-            ServerState.OAuthLoginTokenStale => SpheneCustomTheme.CurrentTheme.CompactServerStatusError,
-            ServerState.NoAutoLogon => SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning,
-            _ => SpheneCustomTheme.CurrentTheme.CompactServerStatusError
+            ServerState.Connecting => SpheneTheme.Current.CompactServerStatusWarning,
+            ServerState.Reconnecting => SpheneTheme.Current.CompactServerStatusError,
+            ServerState.Connected => SpheneTheme.Current.CompactServerStatusConnected,
+            ServerState.Disconnected => SpheneTheme.Current.CompactServerStatusWarning,
+            ServerState.Disconnecting => SpheneTheme.Current.CompactServerStatusWarning,
+            ServerState.Unauthorized => SpheneTheme.Current.CompactServerStatusError,
+            ServerState.VersionMisMatch => SpheneTheme.Current.CompactServerStatusError,
+            ServerState.Offline => SpheneTheme.Current.CompactServerStatusError,
+            ServerState.RateLimited => SpheneTheme.Current.CompactServerStatusWarning,
+            ServerState.NoSecretKey => SpheneTheme.Current.CompactServerStatusWarning,
+            ServerState.MultiChara => SpheneTheme.Current.CompactServerStatusWarning,
+            ServerState.OAuthMisconfigured => SpheneTheme.Current.CompactServerStatusError,
+            ServerState.OAuthLoginTokenStale => SpheneTheme.Current.CompactServerStatusError,
+            ServerState.NoAutoLogon => SpheneTheme.Current.CompactServerStatusWarning,
+            _ => SpheneTheme.Current.CompactServerStatusError
         };
     }
 
@@ -2667,15 +2664,15 @@ public class CompactUi : WindowMediatorSubscriberBase
 
         if (textureSizeMB <= 300)
         {
-            return (SpheneCustomTheme.CurrentTheme.CompactServerStatusConnected, $"Texture Size: Optimal ({textureSizeMB:F1} MB)", FontAwesomeIcon.CheckCircle);
+            return (SpheneTheme.Current.CompactServerStatusConnected, $"Texture Size: Optimal ({textureSizeMB:F1} MB)", FontAwesomeIcon.CheckCircle);
         }
         else if (textureSizeMB <= 600)
         {
-            return (SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning, $"Texture Size: Large ({textureSizeMB:F1} MB)", FontAwesomeIcon.ExclamationTriangle);
+            return (SpheneTheme.Current.CompactServerStatusWarning, $"Texture Size: Large ({textureSizeMB:F1} MB)", FontAwesomeIcon.ExclamationTriangle);
         }
         else
         {
-            return (SpheneCustomTheme.CurrentTheme.CompactServerStatusError, $"Texture Size: Very Large ({textureSizeMB:F1} MB)", FontAwesomeIcon.ExclamationCircle);
+            return (SpheneTheme.Current.CompactServerStatusError, $"Texture Size: Very Large ({textureSizeMB:F1} MB)", FontAwesomeIcon.ExclamationCircle);
         }
     }
 
@@ -2689,7 +2686,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         if (_automaticModeEnabled && _shrinkuConversionService.IsConverting)
         {
             DrawRotatingSpinnerIcon();
-            UiSharedService.AttachToolTip("Automatic conversion is running");
+            SpheneUI.AttachTooltip("Automatic conversion is running");
 
             ImGui.SameLine(0, 2);
             ImGui.PushStyleColor(ImGuiCol.Text, color);
@@ -2699,18 +2696,18 @@ public class CompactUi : WindowMediatorSubscriberBase
             // Keep size tooltip on the MB text
             if (ImGui.IsItemHovered())
             {
-                using (SpheneCustomTheme.ApplyTooltipTheme())
+                using (SpheneUI.Theme.TooltipScope())
                 {
                     ImGui.BeginTooltip();
-                    ImGui.TextColored(SpheneCustomTheme.CurrentTheme.CompactHeaderText, "Used VRAM Size");
+                    ImGui.TextColored(SpheneTheme.Current.CompactHeaderText, "Used VRAM Size");
                     ImGui.Separator();
                     ImGui.Text($"Current: {textureSizeMB:F0} MB");
                     ImGui.Spacing();
-                    ImGui.TextColored(SpheneCustomTheme.CurrentTheme.CompactServerStatusConnected, "• 0-300 MB: Optimal");
-                    ImGui.TextColored(SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning, "• 300-600 MB: Large");
-                    ImGui.TextColored(SpheneCustomTheme.CurrentTheme.CompactServerStatusError, "• 600+ MB: Very Large");
+                    ImGui.TextColored(SpheneTheme.Current.CompactServerStatusConnected, "• 0-300 MB: Optimal");
+                    ImGui.TextColored(SpheneTheme.Current.CompactServerStatusWarning, "• 300-600 MB: Large");
+                    ImGui.TextColored(SpheneTheme.Current.CompactServerStatusError, "• 600+ MB: Very Large");
                     ImGui.Spacing();
-                    ImGui.TextColored(SpheneCustomTheme.CurrentTheme.CompactHeaderText, "Tip: Click the button for quick conversion!");
+                    ImGui.TextColored(SpheneTheme.Current.CompactHeaderText, "Tip: Click the button for quick conversion!");
                     ImGui.EndTooltip();
                 }
             }
@@ -2718,25 +2715,25 @@ public class CompactUi : WindowMediatorSubscriberBase
         else
         {
             ImGui.PushStyleColor(ImGuiCol.Text, color);
-            _uiSharedService.IconText(icon);
+            SpheneUI.Icons.Icon(icon);
             ImGui.SameLine(0, 2);
             ImGui.Text($"{textureSizeMB:F0}MB");
             ImGui.PopStyleColor();
 
             if (ImGui.IsItemHovered())
             {
-                using (SpheneCustomTheme.ApplyTooltipTheme())
+                using (SpheneUI.Theme.TooltipScope())
                 {
                     ImGui.BeginTooltip();
-                    ImGui.TextColored(SpheneCustomTheme.CurrentTheme.CompactHeaderText, "Texture Size");
+                    ImGui.TextColored(SpheneTheme.Current.CompactHeaderText, "Texture Size");
                     ImGui.Separator();
                     ImGui.Text($"Current: {textureSizeMB:F0} MB");
                     ImGui.Spacing();
-                    ImGui.TextColored(SpheneCustomTheme.CurrentTheme.CompactServerStatusConnected, "• 0-300 MB: Optimal");
-                    ImGui.TextColored(SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning, "• 300-600 MB: Large");
-                    ImGui.TextColored(SpheneCustomTheme.CurrentTheme.CompactServerStatusError, "• 600+ MB: Very Large");
+                    ImGui.TextColored(SpheneTheme.Current.CompactServerStatusConnected, "• 0-300 MB: Optimal");
+                    ImGui.TextColored(SpheneTheme.Current.CompactServerStatusWarning, "• 300-600 MB: Large");
+                    ImGui.TextColored(SpheneTheme.Current.CompactServerStatusError, "• 600+ MB: Very Large");
                     ImGui.Spacing();
-                    ImGui.TextColored(SpheneCustomTheme.CurrentTheme.CompactHeaderText, "Tip: Click the button for quick conversion!");
+                    ImGui.TextColored(SpheneTheme.Current.CompactHeaderText, "Tip: Click the button for quick conversion!");
                     ImGui.EndTooltip();
                 }
             }
@@ -2748,7 +2745,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         if (!_conversionWindowOpen)
             return;
 
-        using (SpheneCustomTheme.ApplyContextMenuTheme())
+        using (SpheneUI.Theme.ContextMenuScope())
         {
             // Dynamic window size for better flexibility
             if (ImGui.Begin("Texture Conversion", ref _conversionWindowOpen, ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.AlwaysAutoResize))
@@ -2762,7 +2759,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                 // If analysis is running or blocking, show busy indicator and avoid interactive content
                 if ((_popupAnalysisTask != null && !_popupAnalysisTask.IsCompleted) || _isPopupAnalysisBlocking)
                 {
-                    UiSharedService.ColorTextWrapped("Analyzing character data...", SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning);
+                    SpheneUI.Text.ColoredWrapped("Analyzing character data...", SpheneTheme.Current.CompactServerStatusWarning);
                     if (_characterAnalyzer.IsAnalysisRunning)
                     {
                         ImGui.SameLine();
@@ -2777,7 +2774,7 @@ public class CompactUi : WindowMediatorSubscriberBase
             
             if (analysis == null || !analysis.Any())
             {
-                ImGui.TextColored(SpheneCustomTheme.CurrentTheme.CompactServerStatusError, "No character data available");
+                ImGui.TextColored(SpheneTheme.Current.CompactServerStatusError, "No character data available");
                 ImGui.Text("Please ensure you have a character loaded and analyzed.");
                 
                 // Still show backup management even without analysis
@@ -2816,11 +2813,11 @@ public class CompactUi : WindowMediatorSubscriberBase
                 {
                     DrawRotatingSpinnerIcon(1.0f);
                     ImGui.SameLine();
-                    UiSharedService.ColorTextWrapped(_allBackupsStatusText, SpheneCustomTheme.CurrentTheme.CompactTextSecondary);
+                    SpheneUI.Text.ColoredWrapped(_allBackupsStatusText, SpheneTheme.Current.CompactTextSecondary);
                 }
                 else
                 {
-                    UiSharedService.ColorTextWrapped(_allBackupsStatusText, allCount > 0 ? SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning : SpheneCustomTheme.CurrentTheme.CompactServerStatusError);
+                    SpheneUI.Text.ColoredWrapped(_allBackupsStatusText, allCount > 0 ? SpheneTheme.Current.CompactServerStatusWarning : SpheneTheme.Current.CompactServerStatusError);
                 }
                 if (allCount == 0)
                 {
@@ -2828,7 +2825,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                     detectionInProgress = _isTextureBackupScanInProgress || (_shrinkUDetectionTask != null && !_shrinkUDetectionTask.IsCompleted);
                     withinForcedWindow = _backupScanTriggeredAt != DateTime.MinValue && (DateTime.UtcNow - _backupScanTriggeredAt) < TimeSpan.FromSeconds(10);
                     scanning = (detectionInProgress || withinForcedWindow);
-                    UiSharedService.AttachToolTip(scanning
+                    SpheneUI.AttachTooltip(scanning
                         ? "Backups are being scanned. It may be that none exist yet or conversion was not required."
                         : "There are currently no backups. A backup may not exist yet or was never required if the mod was already converted.");
                 }
@@ -2839,24 +2836,24 @@ public class CompactUi : WindowMediatorSubscriberBase
                 {
                     using (ImRaii.Disabled(_automaticModeEnabled))
                     {
-                        if (_uiSharedService.IconTextButton(FontAwesomeIcon.Undo, "Restore from ShrinkU backups"))
+                        if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Undo, "Restore from ShrinkU backups"))
                         {
                             StartTextureRestore(new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase));
                         }
                     }
-                    UiSharedService.AttachToolTip(_automaticModeEnabled
+                    SpheneUI.AttachTooltip(_automaticModeEnabled
                         ? "Disable Automatic mode to enable restore."
                         : "Restore textures from ShrinkU backups.");
                     if (_automaticModeEnabled)
                     {
                         ImGui.SameLine();
-                        _uiSharedService.IconText(FontAwesomeIcon.ExclamationTriangle, SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning);
+                        SpheneUI.Icons.Icon(FontAwesomeIcon.ExclamationTriangle, SpheneTheme.Current.CompactServerStatusWarning);
                         ImGui.SameLine();
-                        UiSharedService.ColorText("Disabled in Automatic mode", SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning);
+                        SpheneUI.Text.Colored("Disabled in Automatic mode", SpheneTheme.Current.CompactServerStatusWarning);
                     }
                     ImGui.SameLine();
                     
-                    if (_uiSharedService.IconTextButton(FontAwesomeIcon.FolderOpen, "Open backup folder"))
+                    if (SpheneUI.Icons.TextButton(FontAwesomeIcon.FolderOpen, "Open backup folder"))
                     {
                         try
                         {
@@ -2886,24 +2883,24 @@ public class CompactUi : WindowMediatorSubscriberBase
                     {
                         DrawRotatingSpinnerIcon(1.0f);
                         ImGui.SameLine();
-                        UiSharedService.ColorTextWrapped(msg, SpheneCustomTheme.CurrentTheme.CompactTextSecondary);
+                        SpheneUI.Text.ColoredWrapped(msg, SpheneTheme.Current.CompactTextSecondary);
                     }
                     else
                     {
-                        UiSharedService.ColorTextWrapped(msg, SpheneCustomTheme.CurrentTheme.CompactTextSecondary);
+                        SpheneUI.Text.ColoredWrapped(msg, SpheneTheme.Current.CompactTextSecondary);
                     }
                     // Reserve extra space to avoid layout shift on periodic redraws
                     ImGui.Dummy(new Vector2(0, ImGui.GetTextLineHeightWithSpacing() * 2));
                     
                     using (ImRaii.Disabled(true))
                     {
-                        _uiSharedService.IconTextButton(FontAwesomeIcon.Undo, "Restore from ShrinkU backups");
+                        SpheneUI.Icons.TextButton(FontAwesomeIcon.Undo, "Restore from ShrinkU backups");
                     }
-                    UiSharedService.AttachToolTip(scanning
+                    SpheneUI.AttachTooltip(scanning
                         ? "Scanning backups; restore will be enabled automatically when backups are found."
                         : "No texture backups available to restore.");
                     ImGui.SameLine();
-                    if (_uiSharedService.IconTextButton(FontAwesomeIcon.FolderOpen, "Open backup folder"))
+                    if (SpheneUI.Icons.TextButton(FontAwesomeIcon.FolderOpen, "Open backup folder"))
                     {
                         try
                         {
@@ -2958,13 +2955,13 @@ public class CompactUi : WindowMediatorSubscriberBase
                 ImGui.TableNextRow();
 
                 ImGui.TableSetColumnIndex(0);
-                ImGui.TextColored(SpheneCustomTheme.CurrentTheme.CompactHeaderText, "Statistics");
+                ImGui.TextColored(SpheneTheme.Current.CompactHeaderText, "Statistics");
                 ImGui.Text($"Total Textures: {totalTextures}");
                 ImGui.Text($"BC7 Optimized: {bc7Textures}");
-                ImGui.TextColored(SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning, $"To Convert: {nonBc7Textures?.Count ?? 0} ({totalSizeMB:F1} MB)");
+                ImGui.TextColored(SpheneTheme.Current.CompactServerStatusWarning, $"To Convert: {nonBc7Textures?.Count ?? 0} ({totalSizeMB:F1} MB)");
 
                 ImGui.TableSetColumnIndex(1);
-                ImGui.TextColored(SpheneCustomTheme.CurrentTheme.CompactHeaderText, "Storage");
+                ImGui.TextColored(SpheneTheme.Current.CompactHeaderText, "Storage");
                 
                 // Ensure storage info task is started or refreshed periodically
                 try
@@ -2988,11 +2985,11 @@ public class CompactUi : WindowMediatorSubscriberBase
                 if (fileCount > 0)
                 {
                     var sizeInMB = totalSize / (1024.0 * 1024.0);
-                    ImGui.TextColored(SpheneCustomTheme.CurrentTheme.CompactServerStatusWarning, $"Storage: {sizeInMB:F2} MB ({fileCount} files)");
+                    ImGui.TextColored(SpheneTheme.Current.CompactServerStatusWarning, $"Storage: {sizeInMB:F2} MB ({fileCount} files)");
                 }
                 else
                 {
-                    ImGui.TextColored(SpheneCustomTheme.CurrentTheme.CompactTextSecondary, "Calculating...");
+                    ImGui.TextColored(SpheneTheme.Current.CompactTextSecondary, "Calculating...");
                 }
                 ImGui.EndTable();
             }
@@ -3002,7 +2999,7 @@ public class CompactUi : WindowMediatorSubscriberBase
             ImGui.Spacing();
 
             // Backups Section (Redesigned)
-            ImGui.TextColored(SpheneCustomTheme.Colors.SpheneGold, "Backups");
+            ImGui.TextColored(SpheneUI.Palette.SpheneGold, "Backups");
             var availableBackups = GetCachedBackupsForCurrentAnalysis();
             // Compute counts and gate status text updates on changes in number/type
             var textureBackupCount = availableBackups.Count(kvp => !kvp.Key.StartsWith("[ShrinkU Mod:", StringComparison.Ordinal));
@@ -3053,38 +3050,38 @@ public class CompactUi : WindowMediatorSubscriberBase
             {
                 DrawRotatingSpinnerIcon(1.0f);
                 ImGui.SameLine();
-                UiSharedService.ColorText(_currentBackupsStatusText, SpheneCustomTheme.CurrentTheme.CompactTextSecondary);
+                SpheneUI.Text.Colored(_currentBackupsStatusText, SpheneTheme.Current.CompactTextSecondary);
             }
             else
             {
-                UiSharedService.ColorText(_currentBackupsStatusText,
+                SpheneUI.Text.Colored(_currentBackupsStatusText,
                     (textureBackupCount > 0 || shrinkuModBackupCount > 0)
-                        ? SpheneCustomTheme.Colors.Success
-                        : SpheneCustomTheme.CurrentTheme.CompactTextSecondary);
+                        ? SpheneUI.Palette.Success
+                        : SpheneTheme.Current.CompactTextSecondary);
             }
 
             if (textureBackupCount > 0 || shrinkuModBackupCount > 0)
             {
                 using (ImRaii.Disabled(_automaticModeEnabled))
                 {
-                    if (_uiSharedService.IconTextButton(FontAwesomeIcon.Undo, "Restore"))
+                    if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Undo, "Restore"))
                     {
                         StartTextureRestore(availableBackups);
                     }
                 }
-                UiSharedService.AttachToolTip(_automaticModeEnabled
+                SpheneUI.AttachTooltip(_automaticModeEnabled
                     ? "Disable Automatic mode to enable restore."
                     : "Restore current textures from backups created earlier.");
                 if (_automaticModeEnabled)
                 {
                     ImGui.SameLine();
-                    _uiSharedService.IconText(FontAwesomeIcon.ExclamationTriangle, SpheneCustomTheme.Colors.Warning);
+                    SpheneUI.Icons.Icon(FontAwesomeIcon.ExclamationTriangle, SpheneUI.Palette.Warning);
                     ImGui.SameLine();
-                    UiSharedService.ColorText("Disabled in Automatic mode", SpheneCustomTheme.Colors.Warning);
+                    SpheneUI.Text.Colored("Disabled in Automatic mode", SpheneUI.Palette.Warning);
                 }
                 
                 ImGui.SameLine();
-                if (_uiSharedService.IconTextButton(FontAwesomeIcon.FolderOpen, "Open folder"))
+                if (SpheneUI.Icons.TextButton(FontAwesomeIcon.FolderOpen, "Open folder"))
                 {
                     try
                     {
@@ -3108,11 +3105,11 @@ public class CompactUi : WindowMediatorSubscriberBase
             {
                 using (ImRaii.Disabled(true))
                 {
-                    _uiSharedService.IconTextButton(FontAwesomeIcon.Undo, "Restore");
+                    SpheneUI.Icons.TextButton(FontAwesomeIcon.Undo, "Restore");
                 }
-                UiSharedService.AttachToolTip("No texture backups available to restore.");
+                SpheneUI.AttachTooltip("No texture backups available to restore.");
                 ImGui.SameLine();
-                if (_uiSharedService.IconTextButton(FontAwesomeIcon.FolderOpen, "Open folder"))
+                if (SpheneUI.Icons.TextButton(FontAwesomeIcon.FolderOpen, "Open folder"))
                 {
                     try
                     {
@@ -3140,7 +3137,7 @@ public class CompactUi : WindowMediatorSubscriberBase
             ImGui.Spacing();
 
             // Conversion Section
-            ImGui.TextColored(SpheneCustomTheme.Colors.SpheneGold, "Conversion Options");
+            ImGui.TextColored(SpheneUI.Palette.SpheneGold, "Conversion Options");
             // Sync checkbox state with ShrinkU config to reflect external changes
             try
             {
@@ -3190,7 +3187,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                     _logger.LogDebug(ex, "Failed to start automatic conversion on mode enable");
                 }
             }
-            UiSharedService.AttachToolTip(_automaticModeEnabled
+            SpheneUI.AttachTooltip(_automaticModeEnabled
                 ? "Automatic conversion is enabled. Revert actions are disabled."
                 : "Enable automatic on-the-fly conversion of non-BC7 textures.");
 
@@ -3244,7 +3241,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                     }
                     if (mods.Count > 0)
                     {
-                        ImGui.TextColored(SpheneCustomTheme.Colors.SpheneGold, $"Affected Mods (Excluded: {excludedCount})");
+                        ImGui.TextColored(SpheneUI.Palette.SpheneGold, $"Affected Mods (Excluded: {excludedCount})");
                         // Use a child window to make the list scrollable
                         var requiredHeight = Math.Max(50, mods.Count * ImGui.GetTextLineHeightWithSpacing() + 10);
                         var childHeight = Math.Min(requiredHeight, 300.0f);
@@ -3277,7 +3274,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                 }
                 catch (Exception ex) { _logger.LogDebug(ex, "Failed computing affected mods"); }
 
-                if (_uiSharedService.IconTextButton(FontAwesomeIcon.FileArchive, $"Convert {(nonBc7Textures?.Count ?? 0)} to BC7"))
+                if (SpheneUI.Icons.TextButton(FontAwesomeIcon.FileArchive, $"Convert {(nonBc7Textures?.Count ?? 0)} to BC7"))
                 {
                     _ = StartTextureConversion(nonBc7Textures!);
                     _conversionWindowOpen = false;
@@ -3287,7 +3284,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                 }
 
                 ImGui.SameLine();
-                if (_uiSharedService.IconTextButton(FontAwesomeIcon.ExternalLinkAlt, "Open ShrinkU"))
+                if (SpheneUI.Icons.TextButton(FontAwesomeIcon.ExternalLinkAlt, "Open ShrinkU"))
                 {
                     try
                     {
@@ -3309,7 +3306,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                     {
                         ImGui.SameLine();
                         DrawRotatingSpinnerIcon();
-                        UiSharedService.AttachToolTip("Automatic conversion is running");
+                        SpheneUI.AttachTooltip("Automatic conversion is running");
                     }
                 }
                 catch (Exception ex)
@@ -3322,7 +3319,7 @@ public class CompactUi : WindowMediatorSubscriberBase
             }
             else
             {
-                ImGui.TextColored(SpheneCustomTheme.Colors.Success, "All textures are already optimized!");
+                ImGui.TextColored(SpheneUI.Palette.Success, "All textures are already optimized!");
             }
 
             }
@@ -3385,7 +3382,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         if (converting && !_autoSilentConversion && !_automaticModeEnabled && !(_shrinkuHostService?.IsConversionUiOpen ?? false))
             _conversionProgressWindowOpen = true;
 
-        using (SpheneCustomTheme.ApplyContextMenuTheme())
+        using (SpheneUI.Theme.ContextMenuScope())
         {
             ImGui.SetNextWindowSize(new Vector2(350, 0), ImGuiCond.FirstUseEver);
             ImGui.SetNextWindowSizeConstraints(new Vector2(350, 0), new Vector2(350, float.MaxValue));
@@ -3492,17 +3489,17 @@ public class CompactUi : WindowMediatorSubscriberBase
 
                 if (converting)
                 {
-                    if (_uiSharedService.IconTextButton(FontAwesomeIcon.StopCircle, "Cancel Conversion"))
+                    if (SpheneUI.Icons.TextButton(FontAwesomeIcon.StopCircle, "Cancel Conversion"))
                     {
                         try { _shrinkuConversionService.Cancel(); }
                         catch (Exception ex) { _logger.LogDebug(ex, "Failed to cancel ShrinkU conversion"); }
                     }
                     ImGui.SameLine();
-                    UiSharedService.ColorText("Conversion is running...", SpheneCustomTheme.Colors.Warning);
+                    SpheneUI.Text.Colored("Conversion is running...", SpheneUI.Palette.Warning);
                 }
                 else
                 {
-                    UiSharedService.ColorText("Conversion completed.", SpheneCustomTheme.Colors.Success);
+                    SpheneUI.Text.Colored("Conversion completed.", SpheneUI.Palette.Success);
                 }
 
                 ImGui.End();
@@ -3542,7 +3539,7 @@ public class CompactUi : WindowMediatorSubscriberBase
 
         if (_restoreWindowOpen)
         {
-            using (SpheneCustomTheme.ApplyContextMenuTheme())
+            using (SpheneUI.Theme.ContextMenuScope())
             {
                 ImGui.SetNextWindowSize(new Vector2(350, 0), ImGuiCond.FirstUseEver);
                 ImGui.SetNextWindowSizeConstraints(new Vector2(350, 0), new Vector2(350, float.MaxValue));
@@ -3577,23 +3574,23 @@ public class CompactUi : WindowMediatorSubscriberBase
                     if (!string.IsNullOrEmpty(_restoreStepText))
                     {
                         ImGui.Spacing();
-                        UiSharedService.ColorText(_restoreStepText, SpheneCustomTheme.Colors.TextSecondary);
+                        SpheneUI.Text.Colored(_restoreStepText, SpheneUI.Palette.TextSecondary);
                     }
 
                     ImGui.Spacing();
                     if (restoreRunning)
                     {
-                        if (_uiSharedService.IconTextButton(FontAwesomeIcon.StopCircle, "Cancel Restore"))
+                        if (SpheneUI.Icons.TextButton(FontAwesomeIcon.StopCircle, "Cancel Restore"))
                         {
                             try { _restoreCancellationTokenSource.Cancel(); }
                             catch (Exception ex) { _logger.LogDebug(ex, "Failed to cancel restore operation"); }
                         }
                         ImGui.SameLine();
-                        UiSharedService.ColorText("Restore is running...", SpheneCustomTheme.Colors.Warning);
+                        SpheneUI.Text.Colored("Restore is running...", SpheneUI.Palette.Warning);
                     }
                     else
                     {
-                        UiSharedService.ColorText("Restore completed.", SpheneCustomTheme.Colors.Success);
+                        SpheneUI.Text.Colored("Restore completed.", SpheneUI.Palette.Success);
                     }
 
                     ImGui.End();
@@ -3636,7 +3633,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         var pos = ImGui.GetCursorScreenPos();
         var center = new Vector2(pos.X + size.X * 0.5f, pos.Y + size.Y * 0.5f);
         var drawList = ImGui.GetWindowDrawList();
-        var theme = SpheneCustomTheme.CurrentTheme;
+        var theme = SpheneTheme.Current;
         var color = theme.TextPrimary;
         var u32 = ImGui.ColorConvertFloat4ToU32(color);
         var t = (float)ImGui.GetTime();
@@ -4385,11 +4382,11 @@ public class CompactUi : WindowMediatorSubscriberBase
         var headerStart = new Vector2(contentStart.X, contentStart.Y);
         var headerEnd = new Vector2(headerStart.X + ImGui.GetContentRegionAvail().X, headerStart.Y + headerHeight);
         
-        var headerBgColor = SpheneCustomTheme.CurrentTheme.CompactHeaderBg;
+        var headerBgColor = SpheneTheme.Current.CompactHeaderBg;
         
         // Draw the rounded background rectangle
         var drawList = ImGui.GetWindowDrawList();
-        drawList.AddRectFilled(headerStart, headerEnd, SpheneColors.ToImGuiColor(headerBgColor), SpheneCustomTheme.CurrentTheme.CompactHeaderRounding);
+        drawList.AddRectFilled(headerStart, headerEnd, SpheneUI.ColorUtils.ToU32(headerBgColor), SpheneTheme.Current.CompactHeaderRounding);
 
         var nowLocal = DateTime.Now;
         var isAprilFoolsSeason = (nowLocal.Month == 4 && nowLocal.Day == 1) || (nowLocal.Month == 3 && nowLocal.Day == 31);
@@ -4463,13 +4460,13 @@ public class CompactUi : WindowMediatorSubscriberBase
         
         // --- Status Indicator (Left) ---
         var connectionStatus = string.Empty; 
-        UiSharedService.DrawThemedStatusIndicator(connectionStatus,
+        SpheneUI.Controls.StatusDot(connectionStatus,
             _apiController.DisplayServerState == ServerState.Connected,
             hasWarning: _apiController.IsTransientDisconnectInProgress);
         ImGui.SameLine();
 
         // Window title - vertically centered
-        SpheneCustomTheme.DrawStyledText(ControlPanelTitle, SpheneCustomTheme.CurrentTheme.CompactPanelTitleText);
+        SpheneUI.Text.Colored(ControlPanelTitle, SpheneTheme.Current.CompactPanelTitleText);
 
         if (ImGui.BeginPopupModal("HyperSync", ImGuiWindowFlags.AlwaysAutoResize))
         {
@@ -4477,7 +4474,7 @@ public class CompactUi : WindowMediatorSubscriberBase
             ImGui.Spacing();
             ImGui.TextWrapped("Sphene is now synchronizing packets, pixels, and vibes across all shards. This is completely normal.");
             ImGui.Spacing();
-            if (_uiSharedService.IconTextButton(FontAwesomeIcon.Check, "Understood"))
+            if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Check, "Understood"))
             {
                 ImGui.CloseCurrentPopup();
             }
@@ -4490,7 +4487,7 @@ public class CompactUi : WindowMediatorSubscriberBase
             ImGui.Spacing();
             ImGui.TextWrapped("April Fools. There was never a HyperSync. It was just Sphene doing Sphene things.");
             ImGui.Spacing();
-            if (_uiSharedService.IconTextButton(FontAwesomeIcon.Check, "Okay"))
+            if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Check, "Okay"))
             {
                 ImGui.CloseCurrentPopup();
             }
@@ -4514,14 +4511,14 @@ public class CompactUi : WindowMediatorSubscriberBase
         
         // 1. Close Button
         ImGui.SetCursorScreenPos(new Vector2(contentStart.X + currentX, buttonY));
-        if (_uiSharedService.IconButton(FontAwesomeIcon.Times, null, null, null, null, ButtonStyleKeys.Compact_Close))
+        if (SpheneUI.Icons.Button(FontAwesomeIcon.Times, null, null, null, null, ButtonStyleKeys.Compact_Close))
         {
             _logger.LogDebug("Close button clicked, closing CompactUI");
             IsOpen = false;
         }
         if (ImGui.IsItemHovered())
         {
-            using (SpheneCustomTheme.ApplyTooltipTheme())
+            using (SpheneUI.Theme.TooltipScope())
             {
                 ImGui.BeginTooltip();
                 ImGui.Text("Close Sphene");
@@ -4533,13 +4530,13 @@ public class CompactUi : WindowMediatorSubscriberBase
         
         // 2. Settings Button
         ImGui.SetCursorScreenPos(new Vector2(contentStart.X + currentX, buttonY));
-        if (_uiSharedService.IconButton(FontAwesomeIcon.Cog, null, null, null, null, ButtonStyleKeys.Compact_Settings))
+        if (SpheneUI.Icons.Button(FontAwesomeIcon.Cog, null, null, null, null, ButtonStyleKeys.Compact_Settings))
         {
             Mediator.Publish(new UiToggleMessage(typeof(SettingsUi)));
         }
         if (ImGui.IsItemHovered())
         {
-            using (SpheneCustomTheme.ApplyTooltipTheme())
+            using (SpheneUI.Theme.TooltipScope())
             {
                 ImGui.BeginTooltip();
                 ImGui.Text("Open Network Configuration");
@@ -4557,13 +4554,13 @@ public class CompactUi : WindowMediatorSubscriberBase
         ImGui.SetCursorScreenPos(new Vector2(contentStart.X + currentX, buttonY));
         using (ImRaii.Disabled(isReconnectButtonDisabled))
         {
-            if (_uiSharedService.IconButton(FontAwesomeIcon.Redo, null, null, null, null, ButtonStyleKeys.Compact_Reconnect))
+            if (SpheneUI.Icons.Button(FontAwesomeIcon.Redo, null, null, null, null, ButtonStyleKeys.Compact_Reconnect))
             {
                 _lastReconnectButtonClick = reconnectCurrentTime;
                 _ = Task.Run(() => _apiController.CreateConnectionsAsync(forceCharacterDataReload: true));
             }
         }
-        UiSharedService.AttachToolTip(isReconnectButtonDisabled 
+        SpheneUI.AttachTooltip(isReconnectButtonDisabled 
             ? $"Reconnect Cooldown: {Math.Ceiling(5.0 - reconnectTimeSinceLastClick.TotalSeconds)}s" 
             : "Reconnect to the Sphene Network");
             
@@ -4580,23 +4577,23 @@ public class CompactUi : WindowMediatorSubscriberBase
         ImGui.SetCursorScreenPos(new Vector2(contentStart.X + currentX, buttonY));
         if (_apiController.IsConnected)
         {
-            if (_uiSharedService.IconButton(FontAwesomeIcon.Unlink, null, null, null, null, ButtonStyleKeys.Compact_Disconnect) && _serverManager.CurrentServer != null)
+            if (SpheneUI.Icons.Button(FontAwesomeIcon.Unlink, null, null, null, null, ButtonStyleKeys.Compact_Disconnect) && _serverManager.CurrentServer != null)
             {
                 _serverManager.CurrentServer.FullPause = true;
                 _serverManager.Save();
                 _ = _apiController.CreateConnectionsAsync();
             }
-            UiSharedService.AttachToolTip("Disconnect from Server");
+            SpheneUI.AttachTooltip("Disconnect from Server");
         }
         else
         {
-            if (_uiSharedService.IconButton(FontAwesomeIcon.Link, null, null, null, null, ButtonStyleKeys.Compact_Connect) && _serverManager.CurrentServer != null)
+            if (SpheneUI.Icons.Button(FontAwesomeIcon.Link, null, null, null, null, ButtonStyleKeys.Compact_Connect) && _serverManager.CurrentServer != null)
             {
                 _serverManager.CurrentServer.FullPause = false;
                 _serverManager.Save();
                 _ = _apiController.CreateConnectionsAsync();
             }
-            UiSharedService.AttachToolTip("Connect to Server");
+            SpheneUI.AttachTooltip("Connect to Server");
         }
         
         // Move cursor to end of header area

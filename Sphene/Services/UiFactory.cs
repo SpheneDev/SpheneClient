@@ -20,7 +20,6 @@ public class UiFactory
     private readonly ILoggerFactory _loggerFactory;
     private readonly SpheneMediator _spheneMediator;
     private readonly ApiController _apiController;
-    private readonly UiSharedService _uiSharedService;
     private readonly PairManager _pairManager;
     private readonly ServerConfigurationManager _serverConfigManager;
     private readonly SpheneProfileManager _spheneProfileManager;
@@ -31,7 +30,7 @@ public class UiFactory
     private readonly SpheneConfigService _configService;
 
     public UiFactory(ILoggerFactory loggerFactory, SpheneMediator spheneMediator, ApiController apiController,
-        UiSharedService uiSharedService, PairManager pairManager, ServerConfigurationManager serverConfigManager,
+        PairManager pairManager, ServerConfigurationManager serverConfigManager,
         SpheneProfileManager spheneProfileManager, PerformanceCollectorService performanceCollectorService,
         DalamudUtilService dalamudUtilService, FileDialogManager fileDialogManager, HousingOwnershipService housingOwnershipService,
         SpheneConfigService configService)
@@ -39,7 +38,6 @@ public class UiFactory
         _loggerFactory = loggerFactory;
         _spheneMediator = spheneMediator;
         _apiController = apiController;
-        _uiSharedService = uiSharedService;
         _pairManager = pairManager;
         _serverConfigManager = serverConfigManager;
         _spheneProfileManager = spheneProfileManager;
@@ -53,30 +51,30 @@ public class UiFactory
     public SyncshellAdminUI CreateSyncshellAdminUi(GroupFullInfoDto dto)
     {
         return new SyncshellAdminUI(_loggerFactory.CreateLogger<SyncshellAdminUI>(), _spheneMediator,
-            _apiController, _uiSharedService, _pairManager, _dalamudUtilService, dto, _performanceCollectorService, _fileDialogManager, _housingOwnershipService);
+            _apiController, _pairManager, _dalamudUtilService, dto, _performanceCollectorService, _fileDialogManager, _housingOwnershipService);
     }
 
     public StandaloneProfileUi CreateStandaloneProfileUi(Pair pair)
     {
         return new StandaloneProfileUi(_loggerFactory.CreateLogger<StandaloneProfileUi>(), _spheneMediator,
-            _uiSharedService, _serverConfigManager, _spheneProfileManager, _pairManager, pair, _performanceCollectorService);
+            _serverConfigManager, _spheneProfileManager, _pairManager, pair, _performanceCollectorService);
     }
 
     public PermissionWindowUI CreatePermissionPopupUi(Pair pair)
     {
         return new PermissionWindowUI(_loggerFactory.CreateLogger<PermissionWindowUI>(), pair,
-            _spheneMediator, _uiSharedService, _apiController, _performanceCollectorService);
+            _spheneMediator, _apiController, _performanceCollectorService);
     }
 
     public SyncshellWelcomePageUI CreateSyncshellWelcomePageUi(SyncshellWelcomePageDto welcomePage, string groupName)
     {
         return new SyncshellWelcomePageUI(_loggerFactory.CreateLogger<SyncshellWelcomePageUI>(), _spheneMediator,
-            _uiSharedService, _configService, welcomePage, groupName, _performanceCollectorService);
+            _configService, welcomePage, groupName, _performanceCollectorService);
     }
 
     public WelcomePageLivePreviewUI CreateWelcomePageLivePreviewUi(PerformanceCollectorService performanceCollectorService)
     {
         return new WelcomePageLivePreviewUI(_loggerFactory.CreateLogger<WelcomePageLivePreviewUI>(), _spheneMediator,
-            _uiSharedService, performanceCollectorService);
+            performanceCollectorService);
     }
 }

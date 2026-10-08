@@ -7,6 +7,7 @@ using Sphene.Services;
 using Sphene.Services.ServerConfiguration;
 using Sphene.SpheneConfiguration.Models;
 using Sphene.WebAPI;
+using Sphene.UI.Design;
 
 namespace Sphene.UI.Components;
 
@@ -18,18 +19,18 @@ public static class ConnectivityOptionBlock
         try
         {
             var sendCensus = serverConfigurationManager.SendCensusData;
-            if (UiSharedService.DrawToggle("Send Statistical Census Data", ref sendCensus))
+            if (SpheneUI.Controls.Toggle("Send Statistical Census Data", ref sendCensus))
             {
                 serverConfigurationManager.SendCensusData = sendCensus;
             }
 
-            uiShared.DrawHelpText("This will allow sending census data to the currently connected service." + UiSharedService.TooltipSeparator
+            SpheneUI.Controls.HelpText("This will allow sending census data to the currently connected service." + SpheneUI.TooltipSeparator
                 + "Census data contains:" + Environment.NewLine
                 + "- Current World" + Environment.NewLine
                 + "- Current Gender" + Environment.NewLine
                 + "- Current Race" + Environment.NewLine
-                + "- Current Clan (this is not your Free Company, this is e.g. Keeper or Seeker for Miqo'te)" + UiSharedService.TooltipSeparator
-                + "The census data is only saved temporarily and will be removed from the server on disconnect. It is stored temporarily associated with your UID while you are connected." + UiSharedService.TooltipSeparator
+                + "- Current Clan (this is not your Free Company, this is e.g. Keeper or Seeker for Miqo'te)" + SpheneUI.TooltipSeparator
+                + "The census data is only saved temporarily and will be removed from the server on disconnect. It is stored temporarily associated with your UID while you are connected." + SpheneUI.TooltipSeparator
                 + "If you do not wish to participate in the statistical census, untick this box and reconnect to the server.");
         }
         finally
@@ -44,13 +45,13 @@ public static class ConnectivityOptionBlock
         try
         {
             var isAutoLogin = authentication.AutoLogin;
-            if (UiSharedService.DrawToggle("Automatically login to Sphene", ref isAutoLogin))
+            if (SpheneUI.Controls.Toggle("Automatically login to Sphene", ref isAutoLogin))
             {
                 authentication.AutoLogin = isAutoLogin;
                 serverConfigurationManager.Save();
             }
 
-            uiShared.DrawHelpText("When enabled and logging into this character in XIV, Sphene will automatically connect to the current service.");
+            SpheneUI.Controls.HelpText("When enabled and logging into this character in XIV, Sphene will automatically connect to the current service.");
         }
         finally
         {
@@ -64,13 +65,13 @@ public static class ConnectivityOptionBlock
         try
         {
             var serverTransport = serverConfigurationManager.GetTransport();
-            uiShared.DrawCombo("Server Transport Type", Enum.GetValues<HttpTransportType>().Where(t => t != HttpTransportType.None),
+            SpheneUI.Controls.Combo("Server Transport Type", Enum.GetValues<HttpTransportType>().Where(t => t != HttpTransportType.None),
                 v => v.ToString(),
                 onSelected: t => serverConfigurationManager.SetTransportType(t),
                 serverTransport);
 
-            uiShared.DrawHelpText("You normally do not need to change this, if you don't know what this is or what it's for, keep it to WebSockets." + Environment.NewLine
-                + "If you run into connection issues with e.g. VPNs, try ServerSentEvents first before trying out LongPolling." + UiSharedService.TooltipSeparator
+            SpheneUI.Controls.HelpText("You normally do not need to change this, if you don't know what this is or what it's for, keep it to WebSockets." + Environment.NewLine
+                + "If you run into connection issues with e.g. VPNs, try ServerSentEvents first before trying out LongPolling." + SpheneUI.TooltipSeparator
                 + "Note: if the server does not support a specific Transport Type it will fall through to the next automatically: WebSockets > ServerSentEvents > LongPolling");
         }
         finally
@@ -85,13 +86,13 @@ public static class ConnectivityOptionBlock
         try
         {
             var forceWebSockets = selectedServer.ForceWebSockets;
-            if (UiSharedService.DrawToggle("[wine only] Force WebSockets", ref forceWebSockets))
+            if (SpheneUI.Controls.Toggle("[wine only] Force WebSockets", ref forceWebSockets))
             {
                 selectedServer.ForceWebSockets = forceWebSockets;
                 serverConfigurationManager.Save();
             }
 
-            uiShared.DrawHelpText("On wine, Sphene will automatically fall back to ServerSentEvents/LongPolling, even if WebSockets is selected. "
+            SpheneUI.Controls.HelpText("On wine, Sphene will automatically fall back to ServerSentEvents/LongPolling, even if WebSockets is selected. "
                 + "If you experience connection issues or cannot connect at all, try enabling this option. "
                 + "WebSockets are known to crash XIV entirely on wine 8.5 shipped with Dalamud. "
                 + "Only enable this if you are not running wine 8.5 or if the fallback transports fail to connect." + Environment.NewLine
@@ -108,13 +109,13 @@ public static class ConnectivityOptionBlock
         ImGui.PushID(blockId);
         try
         {
-            if (UiSharedService.DrawToggle("Use Discord OAuth2 Authentication", ref useOauth))
+            if (SpheneUI.Controls.Toggle("Use Discord OAuth2 Authentication", ref useOauth))
             {
                 selectedServer.UseOAuth2 = useOauth;
                 serverConfigurationManager.Save();
             }
 
-            uiShared.DrawHelpText("Use Discord OAuth2 Authentication to identify with this server instead of secret keys");
+            SpheneUI.Controls.HelpText("Use Discord OAuth2 Authentication to identify with this server instead of secret keys");
             if (!useOauth)
             {
                 return;
@@ -125,13 +126,13 @@ public static class ConnectivityOptionBlock
             if (string.IsNullOrEmpty(discordUser))
             {
                 ImGuiHelpers.ScaledDummy(10f);
-                UiSharedService.ColorTextWrapped("You have enabled OAuth2 but it is not linked. Press the buttons Check, then Authenticate to link properly.", ImGuiColors.DalamudRed);
+                SpheneUI.Text.ColoredWrapped("You have enabled OAuth2 but it is not linked. Press the buttons Check, then Authenticate to link properly.", ImGuiColors.DalamudRed);
             }
 
             if (!string.IsNullOrEmpty(discordUser) && selectedServer.Authentications.TrueForAll(u => string.IsNullOrEmpty(u.UID)))
             {
                 ImGuiHelpers.ScaledDummy(10f);
-                UiSharedService.ColorTextWrapped("You have enabled OAuth2 but no characters configured. Set the correct UIDs for your characters in \"Character Management\".", ImGuiColors.DalamudRed);
+                SpheneUI.Text.ColoredWrapped("You have enabled OAuth2 but no characters configured. Set the correct UIDs for your characters in \"Character Management\".", ImGuiColors.DalamudRed);
             }
 
         }
@@ -147,13 +148,13 @@ public static class ConnectivityOptionBlock
         try
         {
             var individualIsSticky = permissions.IndividualIsSticky;
-            if (UiSharedService.DrawToggle("Individually set permissions become preferred permissions", ref individualIsSticky))
+            if (SpheneUI.Controls.Toggle("Individually set permissions become preferred permissions", ref individualIsSticky))
             {
                 permissions.IndividualIsSticky = individualIsSticky;
                 _ = apiController.UserUpdateDefaultPermissions(permissions);
             }
 
-            uiShared.DrawHelpText("The preferred attribute means that the permissions to that user will never change through any of your permission changes to Syncshells " +
+            SpheneUI.Controls.HelpText("The preferred attribute means that the permissions to that user will never change through any of your permission changes to Syncshells " +
                 "(i.e. if you have paused one specific user in a Syncshell and they become preferred permissions, then pause and unpause the same Syncshell, the user will remain paused - " +
                 "if a user does not have preferred permissions, it will follow the permissions of the Syncshell and be unpaused)." + Environment.NewLine + Environment.NewLine +
                 "This setting means:" + Environment.NewLine +
@@ -174,13 +175,13 @@ public static class ConnectivityOptionBlock
         try
         {
             var disableIndividualSounds = permissions.DisableIndividualSounds;
-            if (UiSharedService.DrawToggle("Disable individual pair sounds", ref disableIndividualSounds))
+            if (SpheneUI.Controls.Toggle("Disable individual pair sounds", ref disableIndividualSounds))
             {
                 permissions.DisableIndividualSounds = disableIndividualSounds;
                 _ = apiController.UserUpdateDefaultPermissions(permissions);
             }
 
-            uiShared.DrawHelpText("This setting will disable sound sync for all new individual pairs.");
+            SpheneUI.Controls.HelpText("This setting will disable sound sync for all new individual pairs.");
         }
         finally
         {
@@ -194,13 +195,13 @@ public static class ConnectivityOptionBlock
         try
         {
             var disableIndividualAnimations = permissions.DisableIndividualAnimations;
-            if (UiSharedService.DrawToggle("Disable individual pair animations", ref disableIndividualAnimations))
+            if (SpheneUI.Controls.Toggle("Disable individual pair animations", ref disableIndividualAnimations))
             {
                 permissions.DisableIndividualAnimations = disableIndividualAnimations;
                 _ = apiController.UserUpdateDefaultPermissions(permissions);
             }
 
-            uiShared.DrawHelpText("This setting will disable animation sync for all new individual pairs.");
+            SpheneUI.Controls.HelpText("This setting will disable animation sync for all new individual pairs.");
         }
         finally
         {
@@ -214,13 +215,13 @@ public static class ConnectivityOptionBlock
         try
         {
             var disableIndividualVfx = permissions.DisableIndividualVFX;
-            if (UiSharedService.DrawToggle("Disable individual pair VFX", ref disableIndividualVfx))
+            if (SpheneUI.Controls.Toggle("Disable individual pair VFX", ref disableIndividualVfx))
             {
                 permissions.DisableIndividualVFX = disableIndividualVfx;
                 _ = apiController.UserUpdateDefaultPermissions(permissions);
             }
 
-            uiShared.DrawHelpText("This setting will disable VFX sync for all new individual pairs.");
+            SpheneUI.Controls.HelpText("This setting will disable VFX sync for all new individual pairs.");
         }
         finally
         {
@@ -234,13 +235,13 @@ public static class ConnectivityOptionBlock
         try
         {
             var disableGroupSounds = permissions.DisableGroupSounds;
-            if (UiSharedService.DrawToggle("Disable Syncshell pair sounds", ref disableGroupSounds))
+            if (SpheneUI.Controls.Toggle("Disable Syncshell pair sounds", ref disableGroupSounds))
             {
                 permissions.DisableGroupSounds = disableGroupSounds;
                 _ = apiController.UserUpdateDefaultPermissions(permissions);
             }
 
-            uiShared.DrawHelpText("This setting will disable sound sync for all non-sticky pairs in newly joined syncshells.");
+            SpheneUI.Controls.HelpText("This setting will disable sound sync for all non-sticky pairs in newly joined syncshells.");
         }
         finally
         {
@@ -254,13 +255,13 @@ public static class ConnectivityOptionBlock
         try
         {
             var disableGroupAnimations = permissions.DisableGroupAnimations;
-            if (UiSharedService.DrawToggle("Disable Syncshell pair animations", ref disableGroupAnimations))
+            if (SpheneUI.Controls.Toggle("Disable Syncshell pair animations", ref disableGroupAnimations))
             {
                 permissions.DisableGroupAnimations = disableGroupAnimations;
                 _ = apiController.UserUpdateDefaultPermissions(permissions);
             }
 
-            uiShared.DrawHelpText("This setting will disable animation sync for all non-sticky pairs in newly joined syncshells.");
+            SpheneUI.Controls.HelpText("This setting will disable animation sync for all non-sticky pairs in newly joined syncshells.");
         }
         finally
         {
@@ -274,13 +275,13 @@ public static class ConnectivityOptionBlock
         try
         {
             var disableGroupVfx = permissions.DisableGroupVFX;
-            if (UiSharedService.DrawToggle("Disable Syncshell pair VFX", ref disableGroupVfx))
+            if (SpheneUI.Controls.Toggle("Disable Syncshell pair VFX", ref disableGroupVfx))
             {
                 permissions.DisableGroupVFX = disableGroupVfx;
                 _ = apiController.UserUpdateDefaultPermissions(permissions);
             }
 
-            uiShared.DrawHelpText("This setting will disable VFX sync for all non-sticky pairs in newly joined syncshells.");
+            SpheneUI.Controls.HelpText("This setting will disable VFX sync for all non-sticky pairs in newly joined syncshells.");
         }
         finally
         {

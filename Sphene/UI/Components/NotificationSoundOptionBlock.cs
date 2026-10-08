@@ -5,6 +5,7 @@ using Dalamud.Interface.ImGuiFileDialog;
 using Sphene.Services;
 using Sphene.SpheneConfiguration;
 using Sphene.SpheneConfiguration.Models;
+using Sphene.UI.Design;
 
 namespace Sphene.UI.Components;
 
@@ -21,14 +22,14 @@ public static class NotificationSoundOptionBlock
         var changed = false;
 
         var enabled = soundConfig.Enabled;
-        if (UiSharedService.DrawToggle("Enabled##" + blockId, ref enabled))
+        if (SpheneUI.Controls.Toggle("Enabled##" + blockId, ref enabled))
         {
             soundConfig.Enabled = enabled;
             changed = true;
         }
 
         var outputMode = (int)soundConfig.OutputMode;
-        if (UiSharedService.DrawLabeledCombo("Output Mode##" + blockId, ref outputMode, "Game System\0Sphene Default\0Custom Sound\0"))
+        if (SpheneUI.Controls.LabeledCombo("Output Mode##" + blockId, ref outputMode, "Game System\0Sphene Default\0Custom Sound\0"))
         {
             soundConfig.OutputMode = (SoundOutputMode)outputMode;
             changed = true;
@@ -47,7 +48,7 @@ public static class NotificationSoundOptionBlock
 
                 var soundNames = string.Join("\0", registry.Select(s => s.Name)) + "\0";
                 var currentIndex = registry.Select((s, i) => new { s, i }).FirstOrDefault(x => string.Equals(x.s.Name, soundConfig.SelectedGameSoundName, StringComparison.Ordinal))?.i ?? 0;
-                if (UiSharedService.DrawLabeledCombo("Sound##" + blockId, ref currentIndex, soundNames))
+                if (SpheneUI.Controls.LabeledCombo("Sound##" + blockId, ref currentIndex, soundNames))
                 {
                     soundConfig.SelectedGameSoundName = registry[currentIndex].Name;
                     changed = true;
@@ -55,7 +56,7 @@ public static class NotificationSoundOptionBlock
             }
             else
             {
-                UiSharedService.ColorTextWrapped("No predefined game sounds available.", ImGuiColors.DalamudGrey);
+                SpheneUI.Text.ColoredWrapped("No predefined game sounds available.", ImGuiColors.DalamudGrey);
             }
         }
         else if (soundConfig.OutputMode == SoundOutputMode.SpheneDefault)
@@ -71,7 +72,7 @@ public static class NotificationSoundOptionBlock
 
                 var soundNames = string.Join("\0", registry.Select(s => s.Name)) + "\0";
                 var currentIndex = registry.Select((s, i) => new { s, i }).FirstOrDefault(x => string.Equals(x.s.Name, soundConfig.SelectedSpheneDefaultSound, StringComparison.Ordinal))?.i ?? 0;
-                if (UiSharedService.DrawLabeledCombo("Built-in Sound##" + blockId, ref currentIndex, soundNames))
+                if (SpheneUI.Controls.LabeledCombo("Built-in Sound##" + blockId, ref currentIndex, soundNames))
                 {
                     soundConfig.SelectedSpheneDefaultSound = registry[currentIndex].Name;
                     changed = true;
@@ -79,17 +80,17 @@ public static class NotificationSoundOptionBlock
             }
             else
             {
-                UiSharedService.ColorTextWrapped("No built-in sounds available.", ImGuiColors.DalamudGrey);
+                SpheneUI.Text.ColoredWrapped("No built-in sounds available.", ImGuiColors.DalamudGrey);
             }
         }
         else if (soundConfig.OutputMode == SoundOutputMode.CustomSound)
         {
             var customPath = soundConfig.CustomSoundPath;
             var caps = fileDialogManager == null
-                ? Array.Empty<UiSharedService.InputButtonSpec>()
-                : new[] { new UiSharedService.InputButtonSpec(Label: "Browse",
+                ? Array.Empty<SpheneUI.Controls.InputButtonSpec>()
+                : new[] { new SpheneUI.Controls.InputButtonSpec(Label: "Browse",
                     Tooltip: "Browse for a sound file.") };
-            var (pathChanged, browsePressed) = uiShared.DrawInputTextWithButtons(
+            var (pathChanged, browsePressed) = SpheneUI.Controls.InputTextWithButtons(
                 "Sound File##CustomSoundPath" + blockId, ref customPath, 256,
                 buttons: caps);
             if (pathChanged)
@@ -112,13 +113,13 @@ public static class NotificationSoundOptionBlock
         }
 
         var volume = soundConfig.Volume;
-        if (UiSharedService.DrawSliderFloat("Volume##" + blockId, ref volume, 0.0f, 1.0f, "%.2f"))
+        if (SpheneUI.Controls.SliderFloat("Volume##" + blockId, ref volume, 0.0f, 1.0f, "%.2f"))
         {
             soundConfig.Volume = volume;
             changed = true;
         }
 
-        if (onTestSound != null && UiSharedService.DrawButton("Test Sound##" + blockId))
+        if (onTestSound != null && SpheneUI.Controls.Button("Test Sound##" + blockId))
         {
             onTestSound(soundConfig);
         }

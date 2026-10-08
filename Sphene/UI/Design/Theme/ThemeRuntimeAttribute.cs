@@ -1,4 +1,4 @@
-namespace Sphene.UI.Theme;
+namespace Sphene.UI.Design;
 
 /// <summary>
 /// Marks a <see cref="ThemeConfiguration"/> property as runtime-only state.

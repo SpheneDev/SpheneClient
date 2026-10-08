@@ -5,7 +5,7 @@ using Dalamud.Interface.Utility.Raii;
 using Sphene.Services;
 using Sphene.Services.Mediator;
 using Sphene.Services.Events;
-using Sphene.UI.Theme;
+using Sphene.UI.Design;
 using Sphene.SpheneConfiguration;
 using Microsoft.Extensions.Logging;
 using System.Numerics;
@@ -16,12 +16,10 @@ public class PopupHandler : WindowMediatorSubscriberBase
 {
     protected bool _openPopup = false;
     private readonly HashSet<IPopupHandler> _handlers;
-    private readonly UiSharedService _uiSharedService;
     private IPopupHandler? _currentHandler = null;
 
     public PopupHandler(ILogger<PopupHandler> logger, SpheneMediator mediator, IEnumerable<IPopupHandler> popupHandlers,
-        PerformanceCollectorService performanceCollectorService, UiSharedService uiSharedService,
-        SpheneConfigService configService)
+        PerformanceCollectorService performanceCollectorService, SpheneConfigService configService)
         : base(logger, mediator, "SphenePopupHandler", performanceCollectorService)
     {
         Flags = ImGuiWindowFlags.NoBringToFrontOnFocus
@@ -52,9 +50,10 @@ public class PopupHandler : WindowMediatorSubscriberBase
             _currentHandler = _handlers.OfType<CensusPopupHandler>().Single();
             IsOpen = true;
         });
-        _uiSharedService = uiSharedService;
         DisableWindowSounds = true;
     }
+
+    protected override bool UseSpheneChrome => false;
 
     protected override void DrawInternal()
     {
@@ -71,18 +70,18 @@ public class PopupHandler : WindowMediatorSubscriberBase
             ImGui.OpenPopup(WindowName);
             _openPopup = false;
         }
-        if (ImGui.BeginPopup(WindowName))
+        if (SpheneUI.Popups.BeginStyled(WindowName))
         {
             _currentHandler.DrawContent();
             if (_currentHandler.ShowClose)
             {
-                ImGui.Separator();
-                if (_uiSharedService.IconTextButton(FontAwesomeIcon.Times, "Close", null, false, ButtonStyleKeys.Popup_Close))
+                SpheneUI.Layout.Separator();
+                if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Times, "Close", null, false, ButtonStyleKeys.Popup_Close))
                 {
                     ImGui.CloseCurrentPopup();
                 }
             }
-            ImGui.EndPopup();
+            SpheneUI.Popups.EndStyled();
         }
     }
 }

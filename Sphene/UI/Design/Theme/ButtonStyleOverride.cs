@@ -1,6 +1,6 @@
 using System.Numerics;
 
-namespace Sphene.UI.Theme;
+namespace Sphene.UI.Design;
 
 public class ButtonStyleOverride
 {

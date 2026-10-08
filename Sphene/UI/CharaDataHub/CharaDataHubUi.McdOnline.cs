@@ -6,6 +6,7 @@ using Dalamud.Interface;
 using Sphene.API.Dto.CharaData;
 using Sphene.Services.CharaData.Models;
 using System.Numerics;
+using Sphene.UI.Design;
 
 namespace Sphene.UI.CharaDataHub;
 
@@ -23,7 +24,7 @@ internal sealed partial class CharaDataHubUi
         if (dataDto == null)
         {
             ImGuiHelpers.ScaledDummy(5);
-            UiSharedService.DrawGroupedCenteredColorText("Select an entry above to edit its data.", ImGuiColors.DalamudYellow);
+            SpheneUI.Text.GroupedCentered("Select an entry above to edit its data.", ImGuiColors.DalamudYellow);
             return;
         }
 
@@ -31,7 +32,7 @@ internal sealed partial class CharaDataHubUi
 
         if (updateDto == null)
         {
-            UiSharedService.DrawGroupedCenteredColorText("Something went awfully wrong and there's no update DTO. Try updating Character Data via the button above.", ImGuiColors.DalamudYellow);
+            SpheneUI.Text.GroupedCentered("Something went awfully wrong and there's no update DTO. Try updating Character Data via the button above.", ImGuiColors.DalamudYellow);
             return;
         }
 
@@ -54,28 +55,28 @@ internal sealed partial class CharaDataHubUi
         if (canUpdate || _charaDataManager.UploadTask != null)
         {
             ImGuiHelpers.ScaledDummy(5);
-            UiSharedService.DrawGrouped(() =>
+            SpheneUI.Layout.Group(() =>
             {
                 if (canUpdate)
                 {
                     ImGui.AlignTextToFramePadding();
-                    UiSharedService.ColorTextWrapped("Warning: You have unsaved changes!", ImGuiColors.DalamudRed);
+                    SpheneUI.Text.ColoredWrapped("Warning: You have unsaved changes!", ImGuiColors.DalamudRed);
                     ImGui.SameLine();
                     using (ImRaii.Disabled(_charaDataManager.CharaUpdateTask != null && !_charaDataManager.CharaUpdateTask.IsCompleted))
                     {
-                        if (_uiSharedService.IconTextButton(FontAwesomeIcon.ArrowCircleUp, "Save to Server"))
+                        if (SpheneUI.Icons.TextButton(FontAwesomeIcon.ArrowCircleUp, "Save to Server"))
                         {
                             _charaDataManager.UploadCharaData(dataDto.Id);
                         }
                         ImGui.SameLine();
-                        if (_uiSharedService.IconTextButton(FontAwesomeIcon.Undo, "Undo all changes"))
+                        if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Undo, "Undo all changes"))
                         {
                             updateDto.UndoChanges();
                         }
                     }
                     if (_charaDataManager.CharaUpdateTask != null && !_charaDataManager.CharaUpdateTask.IsCompleted)
                     {
-                        UiSharedService.ColorTextWrapped("Updating data on server, please wait.", ImGuiColors.DalamudYellow);
+                        SpheneUI.Text.ColoredWrapped("Updating data on server, please wait.", ImGuiColors.DalamudYellow);
                     }
                 }
 
@@ -85,23 +86,23 @@ internal sealed partial class CharaDataHubUi
                     {
                         if (_charaDataManager.UploadProgress != null)
                         {
-                            UiSharedService.ColorTextWrapped(_charaDataManager.UploadProgress.Value ?? string.Empty, ImGuiColors.DalamudYellow);
+                            SpheneUI.Text.ColoredWrapped(_charaDataManager.UploadProgress.Value ?? string.Empty, ImGuiColors.DalamudYellow);
                         }
-                        if ((!_charaDataManager.UploadTask?.IsCompleted ?? false) && _uiSharedService.IconTextButton(FontAwesomeIcon.Ban, "Cancel Upload"))
+                        if ((!_charaDataManager.UploadTask?.IsCompleted ?? false) && SpheneUI.Icons.TextButton(FontAwesomeIcon.Ban, "Cancel Upload"))
                         {
                             _charaDataManager.CancelUpload();
                         }
                         else if (_charaDataManager.UploadTask?.IsCompleted ?? false)
                         {
-                            var color = UiSharedService.GetBoolColor(_charaDataManager.UploadTask.Result.Success);
-                            UiSharedService.ColorTextWrapped(_charaDataManager.UploadTask.Result.Output, color);
+                            var color = SpheneUI.Colors.Bool(_charaDataManager.UploadTask.Result.Success);
+                            SpheneUI.Text.ColoredWrapped(_charaDataManager.UploadTask.Result.Output, color);
                         }
                     });
                 }
                 else if (_charaDataManager.UploadTask?.IsCompleted ?? false)
                 {
-                    var color = UiSharedService.GetBoolColor(_charaDataManager.UploadTask.Result.Success);
-                    UiSharedService.ColorTextWrapped(_charaDataManager.UploadTask.Result.Output, color);
+                    var color = SpheneUI.Colors.Bool(_charaDataManager.UploadTask.Result.Success);
+                    SpheneUI.Text.ColoredWrapped(_charaDataManager.UploadTask.Result.Output, color);
                 }
             });
         }
@@ -109,14 +110,14 @@ internal sealed partial class CharaDataHubUi
         if (otherUpdates > 0)
         {
             ImGuiHelpers.ScaledDummy(5);
-            UiSharedService.DrawGrouped(() =>
+            SpheneUI.Layout.Group(() =>
             {
                 ImGui.AlignTextToFramePadding();
-                UiSharedService.ColorTextWrapped($"You have {otherUpdates} other entries with unsaved changes.", ImGuiColors.DalamudYellow);
+                SpheneUI.Text.ColoredWrapped($"You have {otherUpdates} other entries with unsaved changes.", ImGuiColors.DalamudYellow);
                 ImGui.SameLine();
                 using (ImRaii.Disabled(_charaDataManager.CharaUpdateTask != null && !_charaDataManager.CharaUpdateTask.IsCompleted))
                 {
-                    if (_uiSharedService.IconTextButton(FontAwesomeIcon.ArrowAltCircleUp, "Save all to server"))
+                    if (SpheneUI.Icons.TextButton(FontAwesomeIcon.ArrowAltCircleUp, "Save all to server"))
                     {
                         _charaDataManager.UploadAllCharaData();
                     }
@@ -143,15 +144,15 @@ internal sealed partial class CharaDataHubUi
 
     private void DrawEditCharaDataAccessAndSharing(CharaDataExtendedUpdateDto updateDto)
     {
-        _uiSharedService.BigText("Access and Sharing");
+        SpheneUI.Text.Big("Access and Sharing");
 
-        UiSharedService.ScaledNextItemWidth(200);
+        SpheneUI.Layout.ScaledNextItemWidth(200);
         var dtoAccessType = updateDto.AccessType;
         if (ImGui.BeginCombo("Access Restrictions", GetAccessTypeString(dtoAccessType)))
         {
             foreach (var accessType in Enum.GetValues(typeof(AccessTypeDto)).Cast<AccessTypeDto>())
             {
-                if (ImGui.Selectable(GetAccessTypeString(accessType), accessType == dtoAccessType))
+                if (SpheneUI.Controls.Selectable(GetAccessTypeString(accessType), accessType == dtoAccessType))
                 {
                     updateDto.AccessType = accessType;
                 }
@@ -159,24 +160,24 @@ internal sealed partial class CharaDataHubUi
 
             ImGui.EndCombo();
         }
-        _uiSharedService.DrawHelpText("You can control who has access to your character data based on the access restrictions." + UiSharedService.TooltipSeparator
+        SpheneUI.Controls.HelpText("You can control who has access to your character data based on the access restrictions." + SpheneUI.TooltipSeparator
             + "Specified: Only people and syncshells you directly specify in 'Specific Individuals / Syncshells' can access this character data" + Environment.NewLine
             + "Direct Pairs: Only people you have directly paired can access this character data" + Environment.NewLine
             + "All Pairs: All people you have paired can access this character data" + Environment.NewLine
-            + "Everyone: Everyone can access this character data" + UiSharedService.TooltipSeparator
+            + "Everyone: Everyone can access this character data" + SpheneUI.TooltipSeparator
             + "Note: To access your character data the person in question requires to have the code. Exceptions for 'Shared' data, see 'Sharing' below." + Environment.NewLine
             + "Note: For 'Direct' and 'All Pairs' the pause state plays a role. Paused people will not be able to access your character data." + Environment.NewLine
             + "Note: Directly specified Individuals or Syncshells in the 'Specific Individuals / Syncshells' list will be able to access your character data regardless of pause or pair state.");
 
         DrawSpecific(updateDto);
 
-        UiSharedService.ScaledNextItemWidth(200);
+        SpheneUI.Layout.ScaledNextItemWidth(200);
         var dtoShareType = updateDto.ShareType;
         if (ImGui.BeginCombo("Sharing", GetShareTypeString(dtoShareType)))
         {
             foreach (var shareType in Enum.GetValues(typeof(ShareTypeDto)).Cast<ShareTypeDto>())
             {
-                if (ImGui.Selectable(GetShareTypeString(shareType), shareType == dtoShareType))
+                if (SpheneUI.Controls.Selectable(GetShareTypeString(shareType), shareType == dtoShareType))
                 {
                     updateDto.ShareType = shareType;
                 }
@@ -184,9 +185,9 @@ internal sealed partial class CharaDataHubUi
 
             ImGui.EndCombo();
         }
-        _uiSharedService.DrawHelpText("This regulates how you want to distribute this character data." + UiSharedService.TooltipSeparator
+        SpheneUI.Controls.HelpText("This regulates how you want to distribute this character data." + SpheneUI.TooltipSeparator
             + "Code Only: People require to have the code to download this character data" + Environment.NewLine
-            + "Shared: People that are allowed through 'Access Restrictions' will have this character data entry displayed in 'Shared with You' (it can also be accessed through the code)" + UiSharedService.TooltipSeparator
+            + "Shared: People that are allowed through 'Access Restrictions' will have this character data entry displayed in 'Shared with You' (it can also be accessed through the code)" + SpheneUI.TooltipSeparator
             + "Note: Shared with Access Restriction 'Everyone' is the same as shared with Access Restriction 'All Pairs', it will not show up for everyone but just your pairs.");
 
         ImGuiHelpers.ScaledDummy(10f);
@@ -194,34 +195,34 @@ internal sealed partial class CharaDataHubUi
 
     private void DrawEditCharaDataAppearance(CharaDataFullExtendedDto dataDto, CharaDataExtendedUpdateDto updateDto)
     {
-        _uiSharedService.BigText("Appearance");
+        SpheneUI.Text.Big("Appearance");
 
-        if (_uiSharedService.IconTextButton(FontAwesomeIcon.ArrowRight, "Set Appearance to Current Appearance"))
+        if (SpheneUI.Icons.TextButton(FontAwesomeIcon.ArrowRight, "Set Appearance to Current Appearance"))
         {
             _charaDataManager.SetAppearanceData(dataDto.Id);
         }
-        _uiSharedService.DrawHelpText("This will overwrite the appearance data currently stored in this Character Data entry with your current appearance.");
+        SpheneUI.Controls.HelpText("This will overwrite the appearance data currently stored in this Character Data entry with your current appearance.");
         ImGui.SameLine();
         using (ImRaii.Disabled(dataDto.HasMissingFiles || !updateDto.IsAppearanceEqual || _charaDataManager.DataApplicationTask != null))
         {
-            if (_uiSharedService.IconTextButton(FontAwesomeIcon.CheckCircle, "Preview Saved Apperance on Self"))
+            if (SpheneUI.Icons.TextButton(FontAwesomeIcon.CheckCircle, "Preview Saved Apperance on Self"))
             {
                 _charaDataManager.ApplyDataToSelf(dataDto);
             }
         }
-        _uiSharedService.DrawHelpText("This will download and apply the saved character data to yourself. Once loaded it will automatically revert itself within 15 seconds." + UiSharedService.TooltipSeparator
+        SpheneUI.Controls.HelpText("This will download and apply the saved character data to yourself. Once loaded it will automatically revert itself within 15 seconds." + SpheneUI.TooltipSeparator
             + "Note: Weapons will not be displayed correctly unless using the same job as the saved data.");
 
-        ImGui.TextUnformatted("Contains Glamourer Data");
+        SpheneUI.Text.Plain("Contains Glamourer Data");
         ImGui.SameLine();
         bool hasGlamourerdata = !string.IsNullOrEmpty(updateDto.GlamourerData);
-        UiSharedService.ScaledSameLine(200);
-        _uiSharedService.BooleanToColoredIcon(hasGlamourerdata, false);
+        SpheneUI.Layout.ScaledSameLine(200);
+        SpheneUI.Icons.BoolIcon(hasGlamourerdata, false);
 
-        ImGui.TextUnformatted("Contains Files");
+        SpheneUI.Text.Plain("Contains Files");
         var hasFiles = (updateDto.FileGamePaths ?? []).Any() || (dataDto.OriginalFiles.Any());
-        UiSharedService.ScaledSameLine(200);
-        _uiSharedService.BooleanToColoredIcon(hasFiles, false);
+        SpheneUI.Layout.ScaledSameLine(200);
+        SpheneUI.Icons.BoolIcon(hasFiles, false);
         if (hasFiles && updateDto.IsAppearanceEqual)
         {
             ImGui.SameLine();
@@ -230,25 +231,25 @@ internal sealed partial class CharaDataHubUi
             var pos = ImGui.GetCursorPosX();
             ImGui.NewLine();
             ImGui.SameLine(pos);
-            ImGui.TextUnformatted($"{dataDto.FileGamePaths.DistinctBy(k => k.HashOrFileSwap).Count()} unique file hashes (original upload: {dataDto.OriginalFiles.DistinctBy(k => k.HashOrFileSwap).Count()} file hashes)");
+            SpheneUI.Text.Plain($"{dataDto.FileGamePaths.DistinctBy(k => k.HashOrFileSwap).Count()} unique file hashes (original upload: {dataDto.OriginalFiles.DistinctBy(k => k.HashOrFileSwap).Count()} file hashes)");
             ImGui.NewLine();
             ImGui.SameLine(pos);
-            ImGui.TextUnformatted($"{dataDto.FileGamePaths.Count} associated game paths");
+            SpheneUI.Text.Plain($"{dataDto.FileGamePaths.Count} associated game paths");
             ImGui.NewLine();
             ImGui.SameLine(pos);
-            ImGui.TextUnformatted($"{dataDto.FileSwaps!.Count} file swaps");
+            SpheneUI.Text.Plain($"{dataDto.FileSwaps!.Count} file swaps");
             ImGui.NewLine();
             ImGui.SameLine(pos);
             if (!dataDto.HasMissingFiles)
             {
-                UiSharedService.ColorTextWrapped("All files to download this character data are present on the server", ImGuiColors.HealerGreen);
+                SpheneUI.Text.ColoredWrapped("All files to download this character data are present on the server", ImGuiColors.HealerGreen);
             }
             else
             {
-                UiSharedService.ColorTextWrapped($"{dataDto.MissingFiles.DistinctBy(k => k.HashOrFileSwap).Count()} files to download this character data are missing on the server", ImGuiColors.DalamudRed);
+                SpheneUI.Text.ColoredWrapped($"{dataDto.MissingFiles.DistinctBy(k => k.HashOrFileSwap).Count()} files to download this character data are missing on the server", ImGuiColors.DalamudRed);
                 ImGui.NewLine();
                 ImGui.SameLine(pos);
-                if (_uiSharedService.IconTextButton(FontAwesomeIcon.ArrowCircleUp, "Attempt to upload missing files and restore Character Data"))
+                if (SpheneUI.Icons.TextButton(FontAwesomeIcon.ArrowCircleUp, "Attempt to upload missing files and restore Character Data"))
                 {
                     _charaDataManager.UploadMissingFiles(dataDto.Id);
                 }
@@ -259,97 +260,97 @@ internal sealed partial class CharaDataHubUi
             ImGui.SameLine();
             ImGuiHelpers.ScaledDummy(20, 1);
             ImGui.SameLine();
-            UiSharedService.ColorTextWrapped("New data was set. It may contain files that require to be uploaded (will happen on Saving to server)", ImGuiColors.DalamudYellow);
+            SpheneUI.Text.ColoredWrapped("New data was set. It may contain files that require to be uploaded (will happen on Saving to server)", ImGuiColors.DalamudYellow);
         }
 
-        ImGui.TextUnformatted("Contains Manipulation Data");
+        SpheneUI.Text.Plain("Contains Manipulation Data");
         bool hasManipData = !string.IsNullOrEmpty(updateDto.ManipulationData);
-        UiSharedService.ScaledSameLine(200);
-        _uiSharedService.BooleanToColoredIcon(hasManipData, false);
+        SpheneUI.Layout.ScaledSameLine(200);
+        SpheneUI.Icons.BoolIcon(hasManipData, false);
 
-        ImGui.TextUnformatted("Contains Customize+ Data");
+        SpheneUI.Text.Plain("Contains Customize+ Data");
         ImGui.SameLine();
         bool hasCustomizeData = !string.IsNullOrEmpty(updateDto.CustomizeData);
-        UiSharedService.ScaledSameLine(200);
-        _uiSharedService.BooleanToColoredIcon(hasCustomizeData, false);
+        SpheneUI.Layout.ScaledSameLine(200);
+        SpheneUI.Icons.BoolIcon(hasCustomizeData, false);
     }
 
     private void DrawEditCharaDataGeneral(CharaDataFullExtendedDto dataDto, CharaDataExtendedUpdateDto updateDto)
     {
-        _uiSharedService.BigText("General");
+        SpheneUI.Text.Big("General");
         string code = dataDto.FullId;
         using (ImRaii.Disabled())
         {
-            UiSharedService.ScaledNextItemWidth(200);
-            ImGui.InputText("##CharaDataCode", ref code, 255, ImGuiInputTextFlags.ReadOnly);
+            SpheneUI.Layout.ScaledNextItemWidth(200);
+            SpheneUI.Controls.InputText("##CharaDataCode", ref code, 255, ImGuiInputTextFlags.ReadOnly);
         }
         ImGui.SameLine();
-        ImGui.TextUnformatted("Chara Data Code");
+        SpheneUI.Text.Plain("Chara Data Code");
         ImGui.SameLine();
-        if (_uiSharedService.IconButton(FontAwesomeIcon.Copy))
+        if (SpheneUI.Icons.Button(FontAwesomeIcon.Copy))
         {
             ImGui.SetClipboardText(code);
         }
-        UiSharedService.AttachToolTip("Copy Code to Clipboard");
+        SpheneUI.AttachTooltip("Copy Code to Clipboard");
 
         string creationTime = dataDto.CreatedDate.ToLocalTime().ToString();
         string updateTime = dataDto.UpdatedDate.ToLocalTime().ToString();
         string downloadCount = dataDto.DownloadCount.ToString();
         using (ImRaii.Disabled())
         {
-            UiSharedService.ScaledNextItemWidth(200);
-            ImGui.InputText("##CreationDate", ref creationTime, 255, ImGuiInputTextFlags.ReadOnly);
+            SpheneUI.Layout.ScaledNextItemWidth(200);
+            SpheneUI.Controls.InputText("##CreationDate", ref creationTime, 255, ImGuiInputTextFlags.ReadOnly);
         }
         ImGui.SameLine();
-        ImGui.TextUnformatted("Creation Date");
+        SpheneUI.Text.Plain("Creation Date");
         ImGui.SameLine();
         ImGuiHelpers.ScaledDummy(20);
         ImGui.SameLine();
         using (ImRaii.Disabled())
         {
-            UiSharedService.ScaledNextItemWidth(200);
-            ImGui.InputText("##LastUpdate", ref updateTime, 255, ImGuiInputTextFlags.ReadOnly);
+            SpheneUI.Layout.ScaledNextItemWidth(200);
+            SpheneUI.Controls.InputText("##LastUpdate", ref updateTime, 255, ImGuiInputTextFlags.ReadOnly);
         }
         ImGui.SameLine();
-        ImGui.TextUnformatted("Last Update Date");
+        SpheneUI.Text.Plain("Last Update Date");
         ImGui.SameLine();
         ImGuiHelpers.ScaledDummy(23);
         ImGui.SameLine();
         using (ImRaii.Disabled())
         {
-            UiSharedService.ScaledNextItemWidth(50);
-            ImGui.InputText("##DlCount", ref downloadCount, 255, ImGuiInputTextFlags.ReadOnly);
+            SpheneUI.Layout.ScaledNextItemWidth(50);
+            SpheneUI.Controls.InputText("##DlCount", ref downloadCount, 255, ImGuiInputTextFlags.ReadOnly);
         }
         ImGui.SameLine();
-        ImGui.TextUnformatted("Download Count");
+        SpheneUI.Text.Plain("Download Count");
 
         string description = updateDto.Description;
-        UiSharedService.ScaledNextItemWidth(735);
-        if (ImGui.InputText("##Description", ref description, 200))
+        SpheneUI.Layout.ScaledNextItemWidth(735);
+        if (SpheneUI.Controls.InputText("##Description", ref description, 200))
         {
             updateDto.Description = description;
         }
         ImGui.SameLine();
-        ImGui.TextUnformatted("Description");
-        _uiSharedService.DrawHelpText("Description for this Character Data." + UiSharedService.TooltipSeparator
+        SpheneUI.Text.Plain("Description");
+        SpheneUI.Controls.HelpText("Description for this Character Data." + SpheneUI.TooltipSeparator
             + "Note: the description will be visible to anyone who can access this character data. See 'Access Restrictions' and 'Sharing' below.");
 
         var expiryDate = updateDto.ExpiryDate;
         bool isExpiring = expiryDate != DateTime.MaxValue;
-        if (ImGui.Checkbox("Expires", ref isExpiring))
+        if (SpheneUI.Controls.Toggle("Expires", ref isExpiring))
         {
             updateDto.SetExpiry(isExpiring);
         }
-        _uiSharedService.DrawHelpText("If expiration is enabled, the uploaded character data will be automatically deleted from the server at the specified date.");
+        SpheneUI.Controls.HelpText("If expiration is enabled, the uploaded character data will be automatically deleted from the server at the specified date.");
         using (ImRaii.Disabled(!isExpiring))
         {
             ImGui.SameLine();
-            UiSharedService.ScaledNextItemWidth(100);
+            SpheneUI.Layout.ScaledNextItemWidth(100);
             if (ImGui.BeginCombo("Year", expiryDate.Year.ToString()))
             {
                 for (int year = DateTime.UtcNow.Year; year < DateTime.UtcNow.Year + 4; year++)
                 {
-                    if (ImGui.Selectable(year.ToString(), year == expiryDate.Year))
+                    if (SpheneUI.Controls.Selectable(year.ToString(), year == expiryDate.Year))
                     {
                         updateDto.SetExpiry(year, expiryDate.Month, expiryDate.Day);
                     }
@@ -359,12 +360,12 @@ internal sealed partial class CharaDataHubUi
             ImGui.SameLine();
 
             int daysInMonth = DateTime.DaysInMonth(expiryDate.Year, expiryDate.Month);
-            UiSharedService.ScaledNextItemWidth(100);
+            SpheneUI.Layout.ScaledNextItemWidth(100);
             if (ImGui.BeginCombo("Month", expiryDate.Month.ToString()))
             {
                 for (int month = 1; month <= 12; month++)
                 {
-                    if (ImGui.Selectable(month.ToString(), month == expiryDate.Month))
+                    if (SpheneUI.Controls.Selectable(month.ToString(), month == expiryDate.Month))
                     {
                         updateDto.SetExpiry(expiryDate.Year, month, expiryDate.Day);
                     }
@@ -373,12 +374,12 @@ internal sealed partial class CharaDataHubUi
             }
             ImGui.SameLine();
 
-            UiSharedService.ScaledNextItemWidth(100);
+            SpheneUI.Layout.ScaledNextItemWidth(100);
             if (ImGui.BeginCombo("Day", expiryDate.Day.ToString()))
             {
                 for (int day = 1; day <= daysInMonth; day++)
                 {
-                    if (ImGui.Selectable(day.ToString(), day == expiryDate.Day))
+                    if (SpheneUI.Controls.Selectable(day.ToString(), day == expiryDate.Day))
                     {
                         updateDto.SetExpiry(expiryDate.Year, expiryDate.Month, day);
                     }
@@ -390,7 +391,7 @@ internal sealed partial class CharaDataHubUi
 
         using (ImRaii.Disabled(!UiSharedService.CtrlPressed()))
         {
-            if (_uiSharedService.IconTextButton(FontAwesomeIcon.Trash, "Delete Character Data"))
+            if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Trash, "Delete Character Data"))
             {
                 _ = _charaDataManager.DeleteCharaData(dataDto);
                 SelectedDtoId = string.Empty;
@@ -398,24 +399,24 @@ internal sealed partial class CharaDataHubUi
         }
         if (!UiSharedService.CtrlPressed())
         {
-            UiSharedService.AttachToolTip("Hold CTRL and click to delete the current data. This operation is irreversible.");
+            SpheneUI.AttachTooltip("Hold CTRL and click to delete the current data. This operation is irreversible.");
         }
     }
 
     private void DrawEditCharaDataPoses(CharaDataExtendedUpdateDto updateDto)
     {
-        _uiSharedService.BigText("Poses");
+        SpheneUI.Text.Big("Poses");
         var poseCount = updateDto.PoseList.Count();
         using (ImRaii.Disabled(poseCount >= maxPoses))
         {
-            if (_uiSharedService.IconTextButton(FontAwesomeIcon.Plus, "Add new Pose"))
+            if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Plus, "Add new Pose"))
             {
                 updateDto.AddPose();
             }
         }
         ImGui.SameLine();
         using (ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.DalamudYellow, poseCount == maxPoses))
-            ImGui.TextUnformatted($"{poseCount}/{maxPoses} poses attached");
+            SpheneUI.Text.Plain($"{poseCount}/{maxPoses} poses attached");
         ImGuiHelpers.ScaledDummy(5);
 
         using var indent = ImRaii.PushIndent(10f);
@@ -424,13 +425,13 @@ internal sealed partial class CharaDataHubUi
         if (!_uiSharedService.IsInGpose && _charaDataManager.BrioAvailable)
         {
             ImGuiHelpers.ScaledDummy(5);
-            UiSharedService.DrawGroupedCenteredColorText("To attach pose and world data you need to be in GPose.", ImGuiColors.DalamudYellow);
+            SpheneUI.Text.GroupedCentered("To attach pose and world data you need to be in GPose.", ImGuiColors.DalamudYellow);
             ImGuiHelpers.ScaledDummy(5);
         }
         else if (!_charaDataManager.BrioAvailable)
         {
             ImGuiHelpers.ScaledDummy(5);
-            UiSharedService.DrawGroupedCenteredColorText("To attach pose and world data Brio requires to be installed.", ImGuiColors.DalamudRed);
+            SpheneUI.Text.GroupedCentered("To attach pose and world data Brio requires to be installed.", ImGuiColors.DalamudRed);
             ImGuiHelpers.ScaledDummy(5);
         }
 
@@ -438,38 +439,38 @@ internal sealed partial class CharaDataHubUi
         {
             ImGui.AlignTextToFramePadding();
             using var id = ImRaii.PushId("pose" + poseNumber);
-            ImGui.TextUnformatted(poseNumber.ToString());
+            SpheneUI.Text.Plain(poseNumber.ToString());
 
             if (pose.Id == null)
             {
-                UiSharedService.ScaledSameLine(50);
-                _uiSharedService.IconText(FontAwesomeIcon.Plus, ImGuiColors.DalamudYellow);
-                UiSharedService.AttachToolTip("This pose has not been added to the server yet. Save changes to upload this Pose data.");
+                SpheneUI.Layout.ScaledSameLine(50);
+                SpheneUI.Icons.Icon(FontAwesomeIcon.Plus, ImGuiColors.DalamudYellow);
+                SpheneUI.AttachTooltip("This pose has not been added to the server yet. Save changes to upload this Pose data.");
             }
 
             bool poseHasChanges = updateDto.PoseHasChanges(pose);
             if (poseHasChanges)
             {
-                UiSharedService.ScaledSameLine(50);
-                _uiSharedService.IconText(FontAwesomeIcon.ExclamationTriangle, ImGuiColors.DalamudYellow);
-                UiSharedService.AttachToolTip("This pose has changes that have not been saved to the server yet.");
+                SpheneUI.Layout.ScaledSameLine(50);
+                SpheneUI.Icons.Icon(FontAwesomeIcon.ExclamationTriangle, ImGuiColors.DalamudYellow);
+                SpheneUI.AttachTooltip("This pose has changes that have not been saved to the server yet.");
             }
 
-            UiSharedService.ScaledSameLine(75);
+            SpheneUI.Layout.ScaledSameLine(75);
             if (pose.Description == null && pose.WorldData == null && pose.PoseData == null)
             {
-                UiSharedService.ColorText("Pose scheduled for deletion", ImGuiColors.DalamudYellow);
+                SpheneUI.Text.Colored("Pose scheduled for deletion", ImGuiColors.DalamudYellow);
             }
             else
             {
                 var desc = pose.Description ?? string.Empty;
-                if (ImGui.InputTextWithHint("##description", "Description", ref desc, 100))
+                if (SpheneUI.Controls.InputTextWithHint("##description", "Description", ref desc, 100))
                 {
                     pose.Description = desc;
                     updateDto.UpdatePoseList();
                 }
                 ImGui.SameLine();
-                if (_uiSharedService.IconTextButton(FontAwesomeIcon.Trash, "Delete"))
+                if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Trash, "Delete"))
                 {
                     updateDto.RemovePose(pose);
                 }
@@ -478,8 +479,8 @@ internal sealed partial class CharaDataHubUi
                 ImGuiHelpers.ScaledDummy(10, 1);
                 ImGui.SameLine();
                 bool hasPoseData = !string.IsNullOrEmpty(pose.PoseData);
-                _uiSharedService.IconText(FontAwesomeIcon.Running, UiSharedService.GetBoolColor(hasPoseData));
-                UiSharedService.AttachToolTip(hasPoseData
+                SpheneUI.Icons.Icon(FontAwesomeIcon.Running, SpheneUI.Colors.Bool(hasPoseData));
+                SpheneUI.AttachTooltip(hasPoseData
                     ? "This Pose entry has pose data attached"
                     : "This Pose entry has no pose data attached");
                 ImGui.SameLine();
@@ -487,22 +488,22 @@ internal sealed partial class CharaDataHubUi
                 using (ImRaii.Disabled(!_uiSharedService.IsInGpose || !(_charaDataManager.AttachingPoseTask?.IsCompleted ?? true) || !_charaDataManager.BrioAvailable))
                 {
                     using var poseid = ImRaii.PushId("poseSet" + poseNumber);
-                    if (_uiSharedService.IconButton(FontAwesomeIcon.Plus))
+                    if (SpheneUI.Icons.Button(FontAwesomeIcon.Plus))
                     {
                         _charaDataManager.AttachPoseData(pose, updateDto);
                     }
-                    UiSharedService.AttachToolTip("Apply current pose data to pose");
+                    SpheneUI.AttachTooltip("Apply current pose data to pose");
                 }
                 ImGui.SameLine();
                 using (ImRaii.Disabled(!hasPoseData))
                 {
                     using var poseid = ImRaii.PushId("poseDelete" + poseNumber);
-                    if (_uiSharedService.IconButton(FontAwesomeIcon.Trash))
+                    if (SpheneUI.Icons.Button(FontAwesomeIcon.Trash))
                     {
                         pose.PoseData = string.Empty;
                         updateDto.UpdatePoseList();
                     }
-                    UiSharedService.AttachToolTip("Delete current pose data from pose");
+                    SpheneUI.AttachTooltip("Delete current pose data from pose");
                 }
 
                 ImGui.SameLine();
@@ -510,13 +511,13 @@ internal sealed partial class CharaDataHubUi
                 ImGui.SameLine();
                 var worldData = pose.WorldData;
                 bool hasWorldData = worldData.HasValue;
-                _uiSharedService.IconText(FontAwesomeIcon.Globe, UiSharedService.GetBoolColor(hasWorldData));
+                SpheneUI.Icons.Icon(FontAwesomeIcon.Globe, SpheneUI.Colors.Bool(hasWorldData));
                 var tooltipText = !hasWorldData ? "This Pose has no world data attached." : "This Pose has world data attached.";
                 if (hasWorldData)
                 {
-                    tooltipText += UiSharedService.TooltipSeparator + "Click to show location on map";
+                    tooltipText += SpheneUI.TooltipSeparator + "Click to show location on map";
                 }
-                UiSharedService.AttachToolTip(tooltipText);
+                SpheneUI.AttachTooltip(tooltipText);
                 if (hasWorldData && ImGui.IsItemClicked(ImGuiMouseButton.Left))
                 {
                     var wd = worldData.GetValueOrDefault();
@@ -527,29 +528,29 @@ internal sealed partial class CharaDataHubUi
                 using (ImRaii.Disabled(!_uiSharedService.IsInGpose || !(_charaDataManager.AttachingPoseTask?.IsCompleted ?? true) || !_charaDataManager.BrioAvailable))
                 {
                     using var worldId = ImRaii.PushId("worldSet" + poseNumber);
-                    if (_uiSharedService.IconButton(FontAwesomeIcon.Plus))
+                    if (SpheneUI.Icons.Button(FontAwesomeIcon.Plus))
                     {
                         _charaDataManager.AttachWorldData(pose, updateDto);
                     }
-                    UiSharedService.AttachToolTip("Apply current world position data to pose");
+                    SpheneUI.AttachTooltip("Apply current world position data to pose");
                 }
                 ImGui.SameLine();
                 using (ImRaii.Disabled(!hasWorldData))
                 {
                     using var worldId = ImRaii.PushId("worldDelete" + poseNumber);
-                    if (_uiSharedService.IconButton(FontAwesomeIcon.Trash))
+                    if (SpheneUI.Icons.Button(FontAwesomeIcon.Trash))
                     {
                         pose.WorldData = default(WorldData);
                         updateDto.UpdatePoseList();
                     }
-                    UiSharedService.AttachToolTip("Delete current world position data from pose");
+                    SpheneUI.AttachTooltip("Delete current world position data from pose");
                 }
             }
 
             if (poseHasChanges)
             {
                 ImGui.SameLine();
-                if (_uiSharedService.IconTextButton(FontAwesomeIcon.Undo, "Undo"))
+                if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Undo, "Undo"))
                 {
                     updateDto.RevertDeletion(pose);
                 }
@@ -561,7 +562,7 @@ internal sealed partial class CharaDataHubUi
 
     private void DrawMcdOnline()
     {
-        _uiSharedService.BigText("Sphene Character Data Online");
+        SpheneUI.Text.Big("Sphene Character Data Online");
 
         DrawHelpFoldout("In this tab you can create, view and edit your own Sphene Character Data that is stored on the server." + Environment.NewLine + Environment.NewLine
             + "Sphene Character Data Online functions similar to the previous MCDF standard for exporting your character, except that you do not have to send a file to the other person but solely a code." + Environment.NewLine + Environment.NewLine
@@ -572,7 +573,7 @@ internal sealed partial class CharaDataHubUi
         using (ImRaii.Disabled((!_charaDataManager.GetAllDataTask?.IsCompleted ?? false)
             || (_charaDataManager.DataGetTimeoutTask != null && !_charaDataManager.DataGetTimeoutTask.IsCompleted)))
         {
-            if (_uiSharedService.IconTextButton(FontAwesomeIcon.ArrowCircleDown, "Download your Character Data from Server"))
+            if (SpheneUI.Icons.TextButton(FontAwesomeIcon.ArrowCircleDown, "Download your Character Data from Server"))
             {
                 var token = _disposalCts?.Token ?? CancellationToken.None;
                 _ = _charaDataManager.GetAllData(token);
@@ -580,7 +581,7 @@ internal sealed partial class CharaDataHubUi
         }
         if (_charaDataManager.DataGetTimeoutTask != null && !_charaDataManager.DataGetTimeoutTask.IsCompleted)
         {
-            UiSharedService.AttachToolTip("You can only refresh all character data from server every minute. Please wait.");
+            SpheneUI.AttachTooltip("You can only refresh all character data from server every minute. Please wait.");
         }
 
         using (var table = ImRaii.Table("Own Character Data", 12, ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingFixedFit | ImGuiTableFlags.ScrollY,
@@ -606,16 +607,16 @@ internal sealed partial class CharaDataHubUi
                 ImGui.TableNextColumn();
                 ImGui.Dummy(new(0, 0));
                 ImGui.TableNextColumn();
-                ImGui.Checkbox("###createOnlyShowfav", ref _createOnlyShowFav);
-                UiSharedService.AttachToolTip("Filter by favorites");
+                SpheneUI.Controls.Checkbox("###createOnlyShowfav", ref _createOnlyShowFav);
+                SpheneUI.AttachTooltip("Filter by favorites");
                 ImGui.TableNextColumn();
                 var x1 = ImGui.GetContentRegionAvail().X;
                 ImGui.SetNextItemWidth(x1);
-                ImGui.InputTextWithHint("###createFilterCode", "Filter by code", ref _createCodeFilter, 200);
+                SpheneUI.Controls.InputTextWithHint("###createFilterCode", "Filter by code", ref _createCodeFilter, 200);
                 ImGui.TableNextColumn();
                 var x2 = ImGui.GetContentRegionAvail().X;
                 ImGui.SetNextItemWidth(x2);
-                ImGui.InputTextWithHint("###createFilterDesc", "Filter by description", ref _createDescFilter, 200);
+                SpheneUI.Controls.InputTextWithHint("###createFilterDesc", "Filter by description", ref _createDescFilter, 200);
                 ImGui.TableNextColumn();
                 ImGui.Dummy(new(0, 0));
                 ImGui.TableNextColumn();
@@ -623,8 +624,8 @@ internal sealed partial class CharaDataHubUi
                 ImGui.TableNextColumn();
                 ImGui.Dummy(new(0, 0));
                 ImGui.TableNextColumn();
-                ImGui.Checkbox("###createShowNotDl", ref _createOnlyShowNotDownloadable);
-                UiSharedService.AttachToolTip("Filter by not downloadable");
+                SpheneUI.Controls.Checkbox("###createShowNotDl", ref _createOnlyShowNotDownloadable);
+                SpheneUI.AttachTooltip("Filter by not downloadable");
                 ImGui.TableNextColumn();
                 ImGui.Dummy(new(0, 0));
                 ImGui.TableNextColumn();
@@ -662,7 +663,7 @@ internal sealed partial class CharaDataHubUi
                     var uDto = _charaDataManager.GetUpdateDto(entry.Id);
                     ImGui.TableNextColumn();
                     if (string.Equals(entry.Id, SelectedDtoId, StringComparison.Ordinal))
-                        _uiSharedService.IconText(FontAwesomeIcon.CaretRight);
+                        SpheneUI.Icons.Icon(FontAwesomeIcon.CaretRight);
 
                     ImGui.TableNextColumn();
                     DrawAddOrRemoveFavorite(entry);
@@ -671,66 +672,66 @@ internal sealed partial class CharaDataHubUi
                     var idText = entry.FullId;
                     if (uDto?.HasChanges ?? false)
                     {
-                        UiSharedService.ColorText(idText, ImGuiColors.DalamudYellow);
-                        UiSharedService.AttachToolTip("This entry has unsaved changes");
+                        SpheneUI.Text.Colored(idText, ImGuiColors.DalamudYellow);
+                        SpheneUI.AttachTooltip("This entry has unsaved changes");
                     }
                     else
                     {
-                        ImGui.TextUnformatted(idText);
+                        SpheneUI.Text.Plain(idText);
                     }
                     if (ImGui.IsItemClicked()) SelectedDtoId = entry.Id;
 
                     ImGui.TableNextColumn();
-                    ImGui.TextUnformatted(entry.Description);
+                    SpheneUI.Text.Plain(entry.Description);
                     if (ImGui.IsItemClicked()) SelectedDtoId = entry.Id;
-                    UiSharedService.AttachToolTip(entry.Description);
+                    SpheneUI.AttachTooltip(entry.Description);
 
                     ImGui.TableNextColumn();
-                    ImGui.TextUnformatted(entry.CreatedDate.ToLocalTime().ToString());
-                    if (ImGui.IsItemClicked()) SelectedDtoId = entry.Id;
-
-                    ImGui.TableNextColumn();
-                    ImGui.TextUnformatted(entry.UpdatedDate.ToLocalTime().ToString());
+                    SpheneUI.Text.Plain(entry.CreatedDate.ToLocalTime().ToString());
                     if (ImGui.IsItemClicked()) SelectedDtoId = entry.Id;
 
                     ImGui.TableNextColumn();
-                    ImGui.TextUnformatted(entry.DownloadCount.ToString());
+                    SpheneUI.Text.Plain(entry.UpdatedDate.ToLocalTime().ToString());
+                    if (ImGui.IsItemClicked()) SelectedDtoId = entry.Id;
+
+                    ImGui.TableNextColumn();
+                    SpheneUI.Text.Plain(entry.DownloadCount.ToString());
                     if (ImGui.IsItemClicked()) SelectedDtoId = entry.Id;
 
                     ImGui.TableNextColumn();
                     bool isDownloadable = !entry.HasMissingFiles
                         && !string.IsNullOrEmpty(entry.GlamourerData);
-                    _uiSharedService.BooleanToColoredIcon(isDownloadable, false);
+                    SpheneUI.Icons.BoolIcon(isDownloadable, false);
                     if (ImGui.IsItemClicked()) SelectedDtoId = entry.Id;
-                    UiSharedService.AttachToolTip(isDownloadable ? "Can be downloaded by others" : "Cannot be downloaded: Has missing files or data, please review this entry manually");
+                    SpheneUI.AttachTooltip(isDownloadable ? "Can be downloaded by others" : "Cannot be downloaded: Has missing files or data, please review this entry manually");
 
                     ImGui.TableNextColumn();
                     var count = entry.FileGamePaths.Concat(entry.FileSwaps).Count();
-                    ImGui.TextUnformatted(count.ToString());
+                    SpheneUI.Text.Plain(count.ToString());
                     if (ImGui.IsItemClicked()) SelectedDtoId = entry.Id;
-                    UiSharedService.AttachToolTip(count == 0 ? "No File data attached" : "Has File data attached");
+                    SpheneUI.AttachTooltip(count == 0 ? "No File data attached" : "Has File data attached");
 
                     ImGui.TableNextColumn();
                     bool hasGlamourerData = !string.IsNullOrEmpty(entry.GlamourerData);
-                    _uiSharedService.BooleanToColoredIcon(hasGlamourerData, false);
+                    SpheneUI.Icons.BoolIcon(hasGlamourerData, false);
                     if (ImGui.IsItemClicked()) SelectedDtoId = entry.Id;
-                    UiSharedService.AttachToolTip(string.IsNullOrEmpty(entry.GlamourerData) ? "No Glamourer data attached" : "Has Glamourer data attached");
+                    SpheneUI.AttachTooltip(string.IsNullOrEmpty(entry.GlamourerData) ? "No Glamourer data attached" : "Has Glamourer data attached");
 
                     ImGui.TableNextColumn();
                     bool hasCustomizeData = !string.IsNullOrEmpty(entry.CustomizeData);
-                    _uiSharedService.BooleanToColoredIcon(hasCustomizeData, false);
+                    SpheneUI.Icons.BoolIcon(hasCustomizeData, false);
                     if (ImGui.IsItemClicked()) SelectedDtoId = entry.Id;
-                    UiSharedService.AttachToolTip(string.IsNullOrEmpty(entry.CustomizeData) ? "No Customize+ data attached" : "Has Customize+ data attached");
+                    SpheneUI.AttachTooltip(string.IsNullOrEmpty(entry.CustomizeData) ? "No Customize+ data attached" : "Has Customize+ data attached");
 
                     ImGui.TableNextColumn();
                     FontAwesomeIcon eIcon = FontAwesomeIcon.None;
                     if (!Equals(DateTime.MaxValue, entry.ExpiryDate))
                         eIcon = FontAwesomeIcon.Clock;
-                    _uiSharedService.IconText(eIcon, ImGuiColors.DalamudYellow);
+                    SpheneUI.Icons.Icon(eIcon, ImGuiColors.DalamudYellow);
                     if (ImGui.IsItemClicked()) SelectedDtoId = entry.Id;
                     if (eIcon != FontAwesomeIcon.None)
                     {
-                        UiSharedService.AttachToolTip($"This entry will expire on {entry.ExpiryDate.ToLocalTime()}");
+                        SpheneUI.AttachTooltip($"This entry will expire on {entry.ExpiryDate.ToLocalTime()}");
                     }
                 }
             }
@@ -738,7 +739,7 @@ internal sealed partial class CharaDataHubUi
 
         using (ImRaii.Disabled(!_charaDataManager.Initialized || _charaDataManager.DataCreationTask != null || _charaDataManager.OwnCharaData.Count == _charaDataManager.MaxCreatableCharaData))
         {
-            if (_uiSharedService.IconTextButton(FontAwesomeIcon.Plus, "New Character Data Entry"))
+            if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Plus, "New Character Data Entry"))
             {
                 var token2 = _closalCts?.Token ?? CancellationToken.None;
                 _charaDataManager.CreateCharaDataEntry(token2);
@@ -747,37 +748,37 @@ internal sealed partial class CharaDataHubUi
         }
         if (_charaDataManager.DataCreationTask != null)
         {
-            UiSharedService.AttachToolTip("You can only create new character data every few seconds. Please wait.");
+            SpheneUI.AttachTooltip("You can only create new character data every few seconds. Please wait.");
         }
         if (!_charaDataManager.Initialized)
         {
-            UiSharedService.AttachToolTip("Please use the button \"Get Own Chara Data\" once before you can add new data entries.");
+            SpheneUI.AttachTooltip("Please use the button \"Get Own Chara Data\" once before you can add new data entries.");
         }
 
         if (_charaDataManager.Initialized)
         {
             ImGui.SameLine();
             ImGui.AlignTextToFramePadding();
-            UiSharedService.TextWrapped($"Chara Data Entries on Server: {_charaDataManager.OwnCharaData.Count}/{_charaDataManager.MaxCreatableCharaData}");
+            SpheneUI.Text.Wrapped($"Chara Data Entries on Server: {_charaDataManager.OwnCharaData.Count}/{_charaDataManager.MaxCreatableCharaData}");
             if (_charaDataManager.OwnCharaData.Count == _charaDataManager.MaxCreatableCharaData)
             {
                 ImGui.AlignTextToFramePadding();
-                UiSharedService.ColorTextWrapped("You have reached the maximum Character Data entries and cannot create more.", ImGuiColors.DalamudYellow);
+                SpheneUI.Text.ColoredWrapped("You have reached the maximum Character Data entries and cannot create more.", ImGuiColors.DalamudYellow);
             }
         }
 
         if (_charaDataManager.DataCreationTask != null && !_charaDataManager.DataCreationTask.IsCompleted)
         {
-            UiSharedService.ColorTextWrapped("Creating new character data entry on server...", ImGuiColors.DalamudYellow);
+            SpheneUI.Text.ColoredWrapped("Creating new character data entry on server...", ImGuiColors.DalamudYellow);
         }
         else if (_charaDataManager.DataCreationTask != null && _charaDataManager.DataCreationTask.IsCompleted)
         {
             var color = _charaDataManager.DataCreationTask.Result.Success ? ImGuiColors.HealerGreen : ImGuiColors.DalamudRed;
-            UiSharedService.ColorTextWrapped(_charaDataManager.DataCreationTask.Result.Output, color);
+            SpheneUI.Text.ColoredWrapped(_charaDataManager.DataCreationTask.Result.Output, color);
         }
 
         ImGuiHelpers.ScaledDummy(10);
-        ImGui.Separator();
+        SpheneUI.Layout.Separator();
 
         var charaDataEntries = _charaDataManager.OwnCharaData.Count;
         if (charaDataEntries != _dataEntries && _selectNewEntry && _charaDataManager.OwnCharaData.Any())
@@ -796,7 +797,7 @@ internal sealed partial class CharaDataHubUi
 
     private void DrawSpecific(CharaDataExtendedUpdateDto updateDto)
     {
-        UiSharedService.DrawTree("Access for Specific Individuals / Syncshells", () =>
+        SpheneUI.Layout.Tree("Access for Specific Individuals / Syncshells", () =>
         {
             using (ImRaii.PushId("user"))
             {
@@ -808,15 +809,15 @@ internal sealed partial class CharaDataHubUi
                     using (ImRaii.Disabled(string.IsNullOrEmpty(_specificIndividualAdd)
                         || updateDto.UserList.Any(f => string.Equals(f.UID, _specificIndividualAdd, StringComparison.Ordinal) || string.Equals(f.Alias, _specificIndividualAdd, StringComparison.Ordinal))))
                     {
-                        if (_uiSharedService.IconButton(FontAwesomeIcon.Plus))
+                        if (SpheneUI.Icons.Button(FontAwesomeIcon.Plus))
                         {
                             updateDto.AddUserToList(_specificIndividualAdd);
                             _specificIndividualAdd = string.Empty;
                         }
                     }
                     ImGui.SameLine();
-                    ImGui.TextUnformatted("UID/Vanity UID to Add");
-                    _uiSharedService.DrawHelpText("Users added to this list will be able to access this character data regardless of your pause or pair state with them." + UiSharedService.TooltipSeparator
+                    SpheneUI.Text.Plain("UID/Vanity UID to Add");
+                    SpheneUI.Controls.HelpText("Users added to this list will be able to access this character data regardless of your pause or pair state with them." + SpheneUI.TooltipSeparator
                         + "Note: Mistyped entries will be automatically removed on updating data to server.");
 
                     using (var lb = ImRaii.ListBox("Allowed Individuals", new(200 * ImGuiHelpers.GlobalScale, 200 * ImGuiHelpers.GlobalScale)))
@@ -824,7 +825,7 @@ internal sealed partial class CharaDataHubUi
                         foreach (var user in updateDto.UserList)
                         {
                             var userString = string.IsNullOrEmpty(user.Alias) ? user.UID : $"{user.Alias} ({user.UID})";
-                            if (ImGui.Selectable(userString, string.Equals(user.UID, _selectedSpecificUserIndividual, StringComparison.Ordinal)))
+                            if (SpheneUI.Controls.Selectable(userString, string.Equals(user.UID, _selectedSpecificUserIndividual, StringComparison.Ordinal)))
                             {
                                 _selectedSpecificUserIndividual = user.UID;
                             }
@@ -833,7 +834,7 @@ internal sealed partial class CharaDataHubUi
 
                     using (ImRaii.Disabled(string.IsNullOrEmpty(_selectedSpecificUserIndividual)))
                     {
-                        if (_uiSharedService.IconTextButton(FontAwesomeIcon.Trash, "Remove selected User"))
+                        if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Trash, "Remove selected User"))
                         {
                             updateDto.RemoveUserFromList(_selectedSpecificUserIndividual);
                             _selectedSpecificUserIndividual = string.Empty;
@@ -842,7 +843,7 @@ internal sealed partial class CharaDataHubUi
 
                     using (ImRaii.Disabled(!UiSharedService.CtrlPressed()))
                     {
-                        if (_uiSharedService.IconTextButton(FontAwesomeIcon.ExclamationTriangle, "Apply current Allowed Individuals to all MCDO entries"))
+                        if (SpheneUI.Icons.TextButton(FontAwesomeIcon.ExclamationTriangle, "Apply current Allowed Individuals to all MCDO entries"))
                         {
                             foreach (var own in _charaDataManager.OwnCharaData.Values.Where(k => !string.Equals(k.Id, updateDto.Id, StringComparison.Ordinal)))
                             {
@@ -859,7 +860,7 @@ internal sealed partial class CharaDataHubUi
                             }
                         }
                     }
-                    UiSharedService.AttachToolTip("This will apply the current list of allowed specific individuals to ALL of your MCDO entries." + UiSharedService.TooltipSeparator
+                    SpheneUI.AttachTooltip("This will apply the current list of allowed specific individuals to ALL of your MCDO entries." + SpheneUI.TooltipSeparator
                         + "Hold CTRL to enable.");
                 }
             }
@@ -877,15 +878,15 @@ internal sealed partial class CharaDataHubUi
                     using (ImRaii.Disabled(string.IsNullOrEmpty(_specificGroupAdd)
                         || updateDto.GroupList.Any(f => string.Equals(f.GID, _specificGroupAdd, StringComparison.Ordinal) || string.Equals(f.Alias, _specificGroupAdd, StringComparison.Ordinal))))
                     {
-                        if (_uiSharedService.IconButton(FontAwesomeIcon.Plus))
+                        if (SpheneUI.Icons.Button(FontAwesomeIcon.Plus))
                         {
                             updateDto.AddGroupToList(_specificGroupAdd);
                             _specificGroupAdd = string.Empty;
                         }
                     }
                     ImGui.SameLine();
-                    ImGui.TextUnformatted("GID/Vanity GID to Add");
-                    _uiSharedService.DrawHelpText("Users in Syncshells added to this list will be able to access this character data regardless of your pause or pair state with them." + UiSharedService.TooltipSeparator
+                    SpheneUI.Text.Plain("GID/Vanity GID to Add");
+                    SpheneUI.Controls.HelpText("Users in Syncshells added to this list will be able to access this character data regardless of your pause or pair state with them." + SpheneUI.TooltipSeparator
                         + "Note: Mistyped entries will be automatically removed on updating data to server.");
 
                     using (var lb = ImRaii.ListBox("Allowed Syncshells", new(200 * ImGuiHelpers.GlobalScale, 200 * ImGuiHelpers.GlobalScale)))
@@ -893,7 +894,7 @@ internal sealed partial class CharaDataHubUi
                         foreach (var group in updateDto.GroupList)
                         {
                             var userString = string.IsNullOrEmpty(group.Alias) ? group.GID : $"{group.Alias} ({group.GID})";
-                            if (ImGui.Selectable(userString, string.Equals(group.GID, _selectedSpecificGroupIndividual, StringComparison.Ordinal)))
+                            if (SpheneUI.Controls.Selectable(userString, string.Equals(group.GID, _selectedSpecificGroupIndividual, StringComparison.Ordinal)))
                             {
                                 _selectedSpecificGroupIndividual = group.GID;
                             }
@@ -902,7 +903,7 @@ internal sealed partial class CharaDataHubUi
 
                     using (ImRaii.Disabled(string.IsNullOrEmpty(_selectedSpecificGroupIndividual)))
                     {
-                        if (_uiSharedService.IconTextButton(FontAwesomeIcon.Trash, "Remove selected Syncshell"))
+                        if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Trash, "Remove selected Syncshell"))
                         {
                             updateDto.RemoveGroupFromList(_selectedSpecificGroupIndividual);
                             _selectedSpecificGroupIndividual = string.Empty;
@@ -911,7 +912,7 @@ internal sealed partial class CharaDataHubUi
 
                     using (ImRaii.Disabled(!UiSharedService.CtrlPressed()))
                     {
-                        if (_uiSharedService.IconTextButton(FontAwesomeIcon.ExclamationTriangle, "Apply current Allowed Syncshells to all MCDO entries"))
+                        if (SpheneUI.Icons.TextButton(FontAwesomeIcon.ExclamationTriangle, "Apply current Allowed Syncshells to all MCDO entries"))
                         {
                             foreach (var own in _charaDataManager.OwnCharaData.Values.Where(k => !string.Equals(k.Id, updateDto.Id, StringComparison.Ordinal)))
                             {
@@ -928,12 +929,12 @@ internal sealed partial class CharaDataHubUi
                             }
                         }
                     }
-                    UiSharedService.AttachToolTip("This will apply the current list of allowed specific syncshells to ALL of your MCDO entries." + UiSharedService.TooltipSeparator
+                    SpheneUI.AttachTooltip("This will apply the current list of allowed specific syncshells to ALL of your MCDO entries." + SpheneUI.TooltipSeparator
                         + "Hold CTRL to enable.");
                 }
             }
 
-            ImGui.Separator();
+            SpheneUI.Layout.Separator();
             ImGuiHelpers.ScaledDummy(5);
         });
     }
@@ -942,8 +943,8 @@ internal sealed partial class CharaDataHubUi
         Func<T, (string Id, string? Alias, string AliasOrId, string? Note)> parseEntry)
     {
         const float ComponentWidth = 200;
-        UiSharedService.ScaledNextItemWidth(ComponentWidth - ImGui.GetFrameHeight());
-        ImGui.InputText(inputId, ref value, 20);
+        SpheneUI.Layout.ScaledNextItemWidth(ComponentWidth - ImGui.GetFrameHeight());
+        SpheneUI.Controls.InputText(inputId, ref value, 20);
         ImGui.SameLine(0.0f, 0.0f);
 
         using var combo = ImRaii.Combo(comboId, string.Empty, ImGuiComboFlags.NoPreview | ImGuiComboFlags.PopupAlignLeft);
@@ -973,7 +974,7 @@ internal sealed partial class CharaDataHubUi
             var selected = !string.IsNullOrEmpty(value)
                 && (string.Equals(id, value, StringComparison.Ordinal) || string.Equals(alias, value, StringComparison.Ordinal));
             using var font = ImRaii.PushFont(UiBuilder.MonoFont, note is null);
-            if (ImGui.Selectable(note is null ? aliasOrId : $"{note} ({aliasOrId})", selected, ImGuiSelectableFlags.None, new(width, 0)))
+            if (SpheneUI.Controls.Selectable(note is null ? aliasOrId : $"{note} ({aliasOrId})", selected, ImGuiSelectableFlags.None, new(width, 0)))
             {
                 value = aliasOrId;
             }

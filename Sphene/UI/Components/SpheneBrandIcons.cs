@@ -1,7 +1,7 @@
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Textures.TextureWraps;
 using Dalamud.Interface.Utility;
-using Sphene.UI.Styling;
+using Sphene.UI.Design;
 using System;
 using System.Collections.Generic;
 using System.Numerics;
@@ -197,26 +197,11 @@ public static class SpheneBrandIcons
         "hNhhLgAhxA5zAQghdpgLQAixw1wAQogd5gIQQuwwF4AQYoe5AIQQO8wFIITYYS4AIcQOcwEIIXaYC0AIscNcAEKIHeYCEELsMBeA" +
         "EGKHuQCEEDv+H8Xj+HYgwhxmAAAAAElFTkSuQmCC";
 
-    private static readonly IDalamudTextureWrap?[] Textures = new IDalamudTextureWrap?[2];
-    private static bool _loadAttempted;
-
     /// <summary>Returns the embedded texture for <paramref name="brand"/>, loading it lazily.</summary>
-    public static IDalamudTextureWrap? GetTexture(UiSharedService uiShared, Brand brand)
+    public static IDalamudTextureWrap? GetTexture(Brand brand)
     {
-        if (!_loadAttempted)
-        {
-            _loadAttempted = true;
-            try
-            {
-                Textures[0] = uiShared.LoadImage(Convert.FromBase64String(DiscordPngBase64));
-                Textures[1] = uiShared.LoadImage(Convert.FromBase64String(KofiPngBase64));
-            }
-            catch
-            {
-                // Brand icons are cosmetic; stay null so callers skip drawing.
-            }
-        }
-        return Textures[(int)brand];
+        return SpheneUI.Media.Texture(brand == Brand.Discord ? "brand:discord" : "brand:kofi",
+            () => Convert.FromBase64String(brand == Brand.Discord ? DiscordPngBase64 : KofiPngBase64));
     }
 
     /// <summary>Returns the brand color for <paramref name="brand"/>.</summary>
@@ -228,20 +213,19 @@ public static class SpheneBrandIcons
         => brand == Brand.Discord ? DiscordColorHover : KofiColorHover;
 
     /// <summary>Draws a tinted brand glyph into <paramref name="drawList"/> inside the given rect.</summary>
-    public static void DrawIcon(UiSharedService uiShared, ImDrawListPtr drawList, Brand brand,
+    public static void DrawIcon(ImDrawListPtr drawList, Brand brand,
         Vector2 min, Vector2 max, Vector4? tint = null)
     {
-        var texture = GetTexture(uiShared, brand);
+        var texture = GetTexture(brand);
         if (texture == null)
             return;
         var color = tint ?? GetBrandColor(brand);
-        drawList.AddImage(texture.Handle, min, max, Vector2.Zero, Vector2.One,
-            ImGui.ColorConvertFloat4ToU32(color));
+        SpheneUI.Media.ImageInRect(drawList, texture, min, max, ImageFit.Stretch, color);
     }
 
     /// <summary>Draws a centered tinted brand glyph button of the given square size.</summary>
     /// <returns>True when the button was clicked.</returns>
-    public static bool IconButton(UiSharedService uiShared, Brand brand, string id,
+    public static bool IconButton(Brand brand, string id,
         float size, Vector4? tint = null, string? tooltip = null)
     {
         ImGui.PushID(id);
@@ -250,10 +234,10 @@ public static class SpheneBrandIcons
         var hovered = ImGui.IsItemHovered();
         var color = tint ?? (hovered ? GetBrandHoverColor(brand) : GetBrandColor(brand));
         var inset = size * 0.15f;
-        DrawIcon(uiShared, ImGui.GetWindowDrawList(), brand,
+        DrawIcon(ImGui.GetWindowDrawList(), brand,
             pos + new Vector2(inset, inset), pos + new Vector2(size - inset, size - inset), color);
         if (tooltip != null && hovered)
-            UiSharedService.AttachToolTip(tooltip);
+            SpheneUI.AttachTooltip(tooltip);
         ImGui.PopID();
         return result;
     }
@@ -268,7 +252,7 @@ public static class SpheneBrandIcons
 
     /// <summary>Draws a brand-colored button with the brand glyph and a text label.</summary>
     /// <returns>True when the button was clicked.</returns>
-    public static bool IconTextButton(UiSharedService uiShared, Brand brand, string text,
+    public static bool IconTextButton(Brand brand, string text,
         string id, float? width = null, string? tooltip = null)
     {
         ImGui.PushID(id);
@@ -281,12 +265,12 @@ public static class SpheneBrandIcons
         ImGui.PushStyleColor(ImGuiCol.Button, GetBrandColor(brand));
         ImGui.PushStyleColor(ImGuiCol.ButtonHovered, GetBrandHoverColor(brand));
         ImGui.PushStyleColor(ImGuiCol.ButtonActive, GetBrandHoverColor(brand));
-        var result = ImGui.Button($"##brandTextBtn{id}", new Vector2(buttonWidth, buttonHeight));
+        var result = SpheneUI.Controls.Button($"##brandTextBtn{id}", new Vector2(buttonWidth, buttonHeight));
         ImGui.PopStyleColor(3);
 
         var pos = ImGui.GetItemRectMin();
         var iconPos = new Vector2(pos.X + framePad.X, pos.Y + (buttonHeight - iconSize) * 0.5f);
-        DrawIcon(uiShared, ImGui.GetWindowDrawList(), brand,
+        DrawIcon(ImGui.GetWindowDrawList(), brand,
             iconPos, iconPos + new Vector2(iconSize, iconSize), Vector4.One);
 
         var textPos = new Vector2(iconPos.X + iconSize + gap,
@@ -294,7 +278,7 @@ public static class SpheneBrandIcons
         ImGui.GetWindowDrawList().AddText(textPos, ImGui.GetColorU32(ImGuiCol.Text), text);
 
         if (tooltip != null && ImGui.IsItemHovered())
-            UiSharedService.AttachToolTip(tooltip);
+            SpheneUI.AttachTooltip(tooltip);
         ImGui.PopID();
         return result;
     }
@@ -303,7 +287,7 @@ public static class SpheneBrandIcons
     /// brand glyph in white. The background brightens on hover.
     /// </summary>
     /// <returns>True when the button was clicked.</returns>
-    public static bool FramedIconButton(UiSharedService uiShared, Brand brand, string id,
+    public static bool FramedIconButton(Brand brand, string id,
         float size, string? tooltip = null)
     {
         ImGui.PushID(id);
@@ -311,13 +295,13 @@ public static class SpheneBrandIcons
         ImGui.PushStyleColor(ImGuiCol.Button, GetBrandColor(brand));
         ImGui.PushStyleColor(ImGuiCol.ButtonHovered, GetBrandHoverColor(brand));
         ImGui.PushStyleColor(ImGuiCol.ButtonActive, GetBrandHoverColor(brand));
-        var result = ImGui.Button($"##brandFrameBtn{id}", new Vector2(size, size));
+        var result = SpheneUI.Controls.Button($"##brandFrameBtn{id}", new Vector2(size, size));
         ImGui.PopStyleColor(3);
         var inset = size * 0.17f;
-        DrawIcon(uiShared, ImGui.GetWindowDrawList(), brand,
+        DrawIcon(ImGui.GetWindowDrawList(), brand,
             pos + new Vector2(inset, inset), pos + new Vector2(size - inset, size - inset), Vector4.One);
         if (tooltip != null && ImGui.IsItemHovered())
-            UiSharedService.AttachToolTip(tooltip);
+            SpheneUI.AttachTooltip(tooltip);
         ImGui.PopID();
         return result;
     }
@@ -334,7 +318,7 @@ public static class SpheneBrandIcons
     /// </summary>
     /// <param name="width">Total strip width; null auto-sizes each segment to its content.</param>
     /// <returns>The strip size so callers can align following content.</returns>
-    public static Vector2 BrandStrip(UiSharedService uiShared, string id,
+    public static Vector2 BrandStrip(string id,
         IReadOnlyList<StripSegment> segments, float height, float? width = null)
     {
         var count = segments.Count;
@@ -371,13 +355,13 @@ public static class SpheneBrandIcons
             }
             if (!string.IsNullOrEmpty(segments[k].Tooltip) && hovered)
             {
-                UiSharedService.AttachToolTip(segments[k].Tooltip!);
+                SpheneUI.AttachTooltip(segments[k].Tooltip!);
             }
             x += widths[k];
         }
         ImGui.SetCursorScreenPos(pos + new Vector2(totalWidth, height));
 
-        DrawStripSurface(uiShared, ImGui.GetWindowDrawList(), pos, widths, colors, segments, height);
+        DrawStripSurface(ImGui.GetWindowDrawList(), pos, widths, colors, segments, height);
         return new Vector2(totalWidth, height);
     }
 
@@ -395,7 +379,7 @@ public static class SpheneBrandIcons
     /// Renders the strip surface as a single grid sampled from a continuous
     /// gradient: segment colors blend at seams, every edge fades to alpha zero.
     /// </summary>
-    private static void DrawStripSurface(UiSharedService uiShared, ImDrawListPtr drawList,
+    private static void DrawStripSurface(ImDrawListPtr drawList,
         Vector2 pos, float[] widths, Vector4[] colors,
         IReadOnlyList<StripSegment> segments, float height)
     {
@@ -486,7 +470,7 @@ public static class SpheneBrandIcons
                 : iconSize + gap + ImGui.CalcTextSize(label).X;
             var contentX = segMin.X + (segW - contentW) * 0.5f;
             var iconMin = new Vector2(contentX, segMin.Y + (height - iconSize) * 0.5f);
-            DrawIcon(uiShared, drawList, segments[k].Brand,
+            DrawIcon(drawList, segments[k].Brand,
                 iconMin, iconMin + new Vector2(iconSize, iconSize), Vector4.One);
             if (label != null)
             {
@@ -549,5 +533,5 @@ public static class SpheneBrandIcons
         => MathF.Pow(Math.Clamp(t, 0f, 1f), 0.6f);
 
     private static uint FadedColor(Vector4 color, float alphaFactor)
-        => ImGui.ColorConvertFloat4ToU32(SpheneColors.WithAlpha(color, color.W * alphaFactor));
+        => ImGui.ColorConvertFloat4ToU32(SpheneUI.ColorUtils.WithAlpha(color, color.W * alphaFactor));
 }

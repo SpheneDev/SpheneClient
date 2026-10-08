@@ -6,8 +6,7 @@ using Sphene.PlayerData.Pairs;
 using Sphene.UI.Handlers;
 using Sphene.WebAPI;
 using Sphene.SpheneConfiguration;
-using Sphene.UI.Styling;
-using Sphene.UI.Theme;
+using Sphene.UI.Design;
 using System.Collections.Immutable;
 using System.Numerics;
 
@@ -54,7 +53,7 @@ public class DrawFolderTag : DrawFolderBase
 
             ImGui.AlignTextToFramePadding();
 
-            _uiSharedService.IconText(icon);
+            SpheneUI.Icons.Icon(icon);
             if (ImGui.IsItemClicked())
             {
                 _tagHandler.SetTagOpen(_id, !_tagHandler.IsTagOpen(_id));
@@ -71,13 +70,13 @@ public class DrawFolderTag : DrawFolderBase
             DrawName(rightSideStart - leftSideEnd);
         }
 
-        SpheneWindowChrome.ScrollAreaSeparator(
-            SpheneCustomTheme.CurrentTheme.CompactPairListSeparatorPadding);
+        SpheneUI.Layout.ScrollAreaSeparator(
+            SpheneTheme.Current.CompactPairListSeparatorPadding);
 
         // if opened draw content
         if (_tagHandler.IsTagOpen(_id))
         {
-            var baseIndent = _uiSharedService.GetIconSize(FontAwesomeIcon.EllipsisV).X + ImGui.GetStyle().ItemSpacing.X;
+            var baseIndent = SpheneUI.Icons.Size(FontAwesomeIcon.EllipsisV).X + ImGui.GetStyle().ItemSpacing.X;
             var indentAmount = baseIndent;
             using var indent = ImRaii.PushIndent(indentAmount, false);
             if (DrawPairs.Any())
@@ -89,11 +88,11 @@ public class DrawFolderTag : DrawFolderBase
             }
             else
             {
-                ImGui.TextUnformatted("No users (online)");
+                SpheneUI.Text.Plain("No users (online)");
             }
 
-            SpheneWindowChrome.ScrollAreaSeparator(
-                SpheneCustomTheme.CurrentTheme.CompactPairListSeparatorPadding);
+            SpheneUI.Layout.ScrollAreaSeparator(
+                SpheneTheme.Current.CompactPairListSeparatorPadding);
         }
     }
 
@@ -136,7 +135,7 @@ public class DrawFolderTag : DrawFolderBase
         };
 
         ImGui.AlignTextToFramePadding();
-        _uiSharedService.IconText(icon);
+        SpheneUI.Icons.Icon(icon);
 
         if (RenderCount)
         {
@@ -145,9 +144,9 @@ public class DrawFolderTag : DrawFolderBase
                 ImGui.SameLine();
                 ImGui.AlignTextToFramePadding();
 
-                ImGui.TextUnformatted("[" + OnlinePairs.ToString() + "]");
+                SpheneUI.Text.Plain("[" + OnlinePairs.ToString() + "]");
             }
-            UiSharedService.AttachToolTip(OnlinePairs + " online" + Environment.NewLine + TotalPairs + " total");
+            SpheneUI.AttachTooltip(OnlinePairs + " online" + Environment.NewLine + TotalPairs + " total");
         }
         ImGui.SameLine();
         return ImGui.GetCursorPosX();
@@ -155,17 +154,17 @@ public class DrawFolderTag : DrawFolderBase
 
     protected override void DrawMenu(float menuWidth)
     {
-        ImGui.TextUnformatted("Group Menu");
-        if (_uiSharedService.IconTextButton(FontAwesomeIcon.Users, "Select Pairs", menuWidth, true, ButtonStyleKeys.ContextMenu_Item))
+        SpheneUI.Text.Plain("Group Menu");
+        if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Users, "Select Pairs", menuWidth, true, ButtonStyleKeys.ContextMenu_Item))
         {
             _selectPairForTagUi.Open(_id);
         }
-        UiSharedService.AttachToolTip("Select Individual Pairs for this Pair Group");
-        if (_uiSharedService.IconTextButton(FontAwesomeIcon.Trash, "Delete Pair Group", menuWidth, true, ButtonStyleKeys.ContextMenu_Item) && UiSharedService.CtrlPressed())
+        SpheneUI.AttachTooltip("Select Individual Pairs for this Pair Group");
+        if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Trash, "Delete Pair Group", menuWidth, true, ButtonStyleKeys.ContextMenu_Item) && UiSharedService.CtrlPressed())
         {
             _tagHandler.RemoveTag(_id);
         }
-        UiSharedService.AttachToolTip("Hold CTRL to remove this Group permanently." + Environment.NewLine +
+        SpheneUI.AttachTooltip("Hold CTRL to remove this Group permanently." + Environment.NewLine +
             "Note: this will not unpair with users in this Group.");
     }
 
@@ -187,17 +186,17 @@ public class DrawFolderTag : DrawFolderBase
 
         var textColor = _id switch
         {
-            TagHandler.CustomOfflineTag => SpheneCustomTheme.CurrentTheme.CompactOfflinePausedText,
-            TagHandler.CustomOfflineSyncshellTag => SpheneCustomTheme.CurrentTheme.CompactOfflineSyncshellText,
-            TagHandler.CustomVisibleTag => SpheneCustomTheme.CurrentTheme.CompactVisibleText,
-            TagHandler.CustomUnpairedTag => SpheneCustomTheme.CurrentTheme.CompactPairsText,
-            TagHandler.CustomOnlineTag => SpheneCustomTheme.CurrentTheme.CompactPairsText,
-            TagHandler.CustomPausedTag => SpheneCustomTheme.CurrentTheme.CompactPairsText,
-            TagHandler.CustomAllTag => SpheneCustomTheme.CurrentTheme.CompactPairsText,
-            _ => SpheneCustomTheme.CurrentTheme.CompactPairsText
+            TagHandler.CustomOfflineTag => SpheneTheme.Current.CompactOfflinePausedText,
+            TagHandler.CustomOfflineSyncshellTag => SpheneTheme.Current.CompactOfflineSyncshellText,
+            TagHandler.CustomVisibleTag => SpheneTheme.Current.CompactVisibleText,
+            TagHandler.CustomUnpairedTag => SpheneTheme.Current.CompactPairsText,
+            TagHandler.CustomOnlineTag => SpheneTheme.Current.CompactPairsText,
+            TagHandler.CustomPausedTag => SpheneTheme.Current.CompactPairsText,
+            TagHandler.CustomAllTag => SpheneTheme.Current.CompactPairsText,
+            _ => SpheneTheme.Current.CompactPairsText
         };
 
-        UiSharedService.ColorText(name, textColor);
+        SpheneUI.Text.Colored(name, textColor);
     }
 
     protected override float DrawRightSide(float currentRightSideX)
@@ -217,7 +216,7 @@ public class DrawFolderTag : DrawFolderBase
         };
 
         // Draw menu button first (rightmost position)
-        var menuButtonSize = _uiSharedService.GetIconButtonSize(FontAwesomeIcon.EllipsisV);
+        var menuButtonSize = SpheneUI.Icons.ButtonSize(FontAwesomeIcon.EllipsisV);
         var menuButtonOffset = currentRightSideX - menuButtonSize.X;
         
         if (shouldRenderMenu)
@@ -228,16 +227,16 @@ public class DrawFolderTag : DrawFolderBase
             using var menuButtonHoveredColor = ImRaii.PushColor(ImGuiCol.ButtonHovered, new Vector4(0.4f, 0.6f, 1.0f, 0.6f));
             using var menuButtonActiveColor = ImRaii.PushColor(ImGuiCol.ButtonActive, new Vector4(0.5f, 0.7f, 1.0f, 0.8f));
             
-            if (_uiSharedService.IconButton(FontAwesomeIcon.EllipsisV, menuButtonSize.Y, null, null, menuButtonSize.X, ButtonStyleKeys.PairTag_Menu))
+            if (SpheneUI.Icons.Button(FontAwesomeIcon.EllipsisV, menuButtonSize.Y, null, null, menuButtonSize.X, ButtonStyleKeys.PairTag_Menu))
             {
                 ImGui.OpenPopup("User Flyout Menu");
             }
-            using (SpheneCustomTheme.ApplyContextMenuTheme())
+            using (SpheneUI.Theme.ContextMenuScope())
             {
-                if (SpheneWindowChrome.BeginStyledPopup("User Flyout Menu"))
+                if (SpheneUI.Popups.BeginStyled("User Flyout Menu"))
                 {
                     using (ImRaii.PushId($"buttons-{_id}")) DrawMenu(200f); // Use fixed width for menu
-                    SpheneWindowChrome.EndStyledPopup();
+                    SpheneUI.Popups.EndStyled();
                 }
             }
         }
@@ -246,7 +245,7 @@ public class DrawFolderTag : DrawFolderBase
 
         var allArePaused = _allPairs.All(pair => pair.UserPair!.OwnPermissions.IsPaused());
         var pauseButton = allArePaused ? FontAwesomeIcon.Play : FontAwesomeIcon.Pause;
-        var pauseButtonSize = _uiSharedService.GetIconButtonSize(pauseButton);
+        var pauseButtonSize = SpheneUI.Icons.ButtonSize(pauseButton);
 
         // Position pause button to the left of menu button
         var buttonPauseOffset = (shouldRenderMenu ? menuButtonOffset : currentRightSideX) - pauseButtonSize.X - spacingX;
@@ -257,7 +256,7 @@ public class DrawFolderTag : DrawFolderBase
         using var pauseButtonHoveredColor = ImRaii.PushColor(ImGuiCol.ButtonHovered, new Vector4(0.4f, 0.6f, 1.0f, 0.6f));
         using var pauseButtonActiveColor = ImRaii.PushColor(ImGuiCol.ButtonActive, new Vector4(0.5f, 0.7f, 1.0f, 0.8f));
         
-        if (_uiSharedService.IconButton(pauseButton, pauseButtonSize.Y, null, null, pauseButtonSize.X, ButtonStyleKeys.PairTag_Pause))
+        if (SpheneUI.Icons.Button(pauseButton, pauseButtonSize.Y, null, null, pauseButtonSize.X, ButtonStyleKeys.PairTag_Pause))
         {
             if (allArePaused)
             {
@@ -270,11 +269,11 @@ public class DrawFolderTag : DrawFolderBase
         }
         if (allArePaused)
         {
-            UiSharedService.AttachToolTip($"Resume pairing with all pairs in {_id}");
+            SpheneUI.AttachTooltip($"Resume pairing with all pairs in {_id}");
         }
         else
         {
-            UiSharedService.AttachToolTip($"Pause pairing with all pairs in {_id}");
+            SpheneUI.AttachTooltip($"Pause pairing with all pairs in {_id}");
         }
 
         return buttonPauseOffset;

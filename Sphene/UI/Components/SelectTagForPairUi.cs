@@ -5,10 +5,9 @@ using Dalamud.Interface.Utility.Raii;
 using Dalamud.Utility;
 using Sphene.PlayerData.Pairs;
 using Sphene.UI.Handlers;
-using Sphene.UI.Theme;
+using Sphene.UI.Design;
 
 using System.Numerics;
-using Sphene.UI.Styling;
 
 namespace Sphene.UI.Components;
 
@@ -16,8 +15,6 @@ public class SelectTagForPairUi
 {
     private readonly TagHandler _tagHandler;
     private readonly IdDisplayHandler _uidDisplayHandler;
-    private readonly UiSharedService _uiSharedService;
-
     /// <summary>
     /// The group UI is always open for a specific pair. This defines which pair the UI is open for.
     /// </summary>
@@ -34,13 +31,12 @@ public class SelectTagForPairUi
     /// </summary>
     private string _tagNameToAdd = "";
 
-    public SelectTagForPairUi(TagHandler tagHandler, IdDisplayHandler uidDisplayHandler, UiSharedService uiSharedService)
+    public SelectTagForPairUi(TagHandler tagHandler, IdDisplayHandler uidDisplayHandler)
     {
         _show = false;
         _pair = null;
         _tagHandler = tagHandler;
         _uidDisplayHandler = uidDisplayHandler;
-        _uiSharedService = uiSharedService;
     }
 
     public void Draw()
@@ -59,15 +55,15 @@ public class SelectTagForPairUi
             _show = false;
         }
 
-        if (SpheneWindowChrome.BeginStyledPopup(popupName))
+        if (SpheneUI.Popups.BeginStyled(popupName))
         {
-            using (SpheneCustomTheme.ApplyContextMenuTheme())
+            using (SpheneUI.Theme.ContextMenuScope())
             {
                 var tags = _tagHandler.GetAllTagsSorted();
                 var childHeight = tags.Count != 0 ? tags.Count * 25 : 1;
                 var childSize = new Vector2(0, childHeight > 100 ? 100 : childHeight) * ImGuiHelpers.GlobalScale;
 
-                UiSharedService.Text($"Select the groups you want {name} to be in.");
+                SpheneUI.Text.Plain($"Select the groups you want {name} to be in.");
                 if (ImGui.BeginChild(name + "##listGroups", childSize))
                 {
                     foreach (var tag in tags)
@@ -78,19 +74,19 @@ public class SelectTagForPairUi
                 ImGui.EndChild();
             }
 
-            UiSharedService.DrawSeparator();
-            UiSharedService.Text($"Create a new group for {name}.");
-            if (_uiSharedService.IconButton(FontAwesomeIcon.Plus))
+            SpheneUI.Layout.Separator();
+            SpheneUI.Text.Plain($"Create a new group for {name}.");
+            if (SpheneUI.Icons.Button(FontAwesomeIcon.Plus))
             {
                 HandleAddTag();
             }
             ImGui.SameLine();
-            UiSharedService.DrawInputTextWithHint("##category_name", "New Group", ref _tagNameToAdd, 40);
+            SpheneUI.Controls.InputTextWithHint("##category_name", "New Group", ref _tagNameToAdd, 40);
             if (ImGui.IsKeyDown(ImGuiKey.Enter))
             {
                 HandleAddTag();
             }
-            SpheneWindowChrome.EndStyledPopup();
+            SpheneUI.Popups.EndStyled();
         }
     }
 
@@ -108,7 +104,7 @@ public class SelectTagForPairUi
     {
         var hasTagBefore = _tagHandler.HasTag(pair.UserData.UID, name);
         var hasTag = hasTagBefore;
-        if (UiSharedService.DrawToggleChip(name, ref hasTag))
+        if (SpheneUI.Controls.ToggleChip(name, ref hasTag))
         {
             if (hasTag)
             {

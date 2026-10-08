@@ -9,6 +9,7 @@ using Sphene.SpheneConfiguration;
 using Sphene.UI.Components;
 using Sphene.WebAPI;
 using System.Numerics;
+using Sphene.UI.Design;
 
 namespace Sphene.UI.Panels;
 
@@ -103,52 +104,47 @@ public class NewOptionsUi : WindowMediatorSubscriberBase
             return;
         }
 
-        UiSharedService.ColorText("New Options", ImGuiColors.ParsedBlue);
-        UiSharedService.ColorTextWrapped("These settings were added in recent updates. Review them here and adjust what you need.", ImGuiColors.DalamudGrey);
-        ImGuiHelpers.ScaledDummy(0, 6);
-        ImGui.Separator();
-        ImGuiHelpers.ScaledDummy(0, 4);
+        SpheneUI.Text.PageHeader("New Options", "These settings were added in recent updates. Review them here and adjust what you need.");
 
         var footerHeight = ImGui.GetFrameHeightWithSpacing()
             + (ImGui.GetTextLineHeightWithSpacing() * 2f)
             + (ImGui.GetStyle().ItemSpacing.Y * 3f)
             + (ImGui.GetStyle().FramePadding.Y * 2f)
             + (ImGuiHelpers.GlobalScale * 4f);
-        var optionsPaneHeight = Math.Max(0f, ImGui.GetContentRegionAvail().Y - footerHeight);
-        if (ImGui.BeginChild("NewOptionsPane", new Vector2(-1, optionsPaneHeight), true, ImGuiWindowFlags.NoNav))
+        if (SpheneUI.Layout.BeginScrollArea("NewOptionsPane",
+            new Vector2(-1, SpheneUI.Layout.FillToViewBottomHeight(footerHeight)), border: true))
         {
             var pendingReleaseGroups = UpdateOptionPanel.GetPendingReleaseGroups(_configService, _apiController.SupporterFeaturesEnabled);
             for (var i = 0; i < pendingReleaseGroups.Count; i++)
             {
                 var releaseGroup = pendingReleaseGroups[i];
-                UiSharedService.ColorText($"Added in {releaseGroup.Tag}", ImGuiColors.ParsedBlue);
-                ImGuiHelpers.ScaledDummy(0, 4);
+                SpheneUI.Text.SectionHeader($"Added in {releaseGroup.Tag}");
 
                 foreach (var link in releaseGroup.Links)
                 {
-                    UiSharedService.ColorText(UpdateOptionPanel.GetTitle(link), ImGuiColors.ParsedBlue);
+                    SpheneUI.Text.Colored(UpdateOptionPanel.GetTitle(link), SpheneUI.Palette.CrystalBlue);
                     UpdateOptionPanel.DrawByLink(link, _configService, _uiShared, Mediator, _apiController.SupporterFeaturesEnabled);
                     ImGuiHelpers.ScaledDummy(0, 6);
-                    ImGui.Separator();
+                    SpheneUI.Layout.Separator();
                     ImGuiHelpers.ScaledDummy(0, 4);
                 }
 
                 if (i < pendingReleaseGroups.Count - 1)
                 {
                     ImGuiHelpers.ScaledDummy(0, 4);
-                    ImGui.Separator();
+                    SpheneUI.Layout.Separator();
                     ImGuiHelpers.ScaledDummy(0, 4);
                 }
             }
         }
-        ImGui.EndChild();
+        SpheneUI.Layout.EndScrollArea();
 
         ImGuiHelpers.ScaledDummy(0, 6);
-        ImGui.Separator();
+        SpheneUI.Layout.Separator();
         ImGuiHelpers.ScaledDummy(0, 4);
-        UiSharedService.ColorTextWrapped("After confirmation, this window will stay hidden untill new Settings have been added.", ImGuiColors.DalamudGrey);
+        SpheneUI.Text.MutedWrapped("After confirmation, this window will stay hidden untill new Settings have been added.");
         ImGuiHelpers.ScaledDummy(0, 4);
-        if (ImGui.Button("I reviewed everything, confirm", new Vector2(-1, 0)))
+        if (SpheneUI.Controls.Button("I reviewed everything, confirm", new Vector2(-1, 0)))
         {
             UpdateOptionPanel.MarkCurrentTagAsSeen(_configService, _apiController.SupporterFeaturesEnabled);
             IsOpen = false;

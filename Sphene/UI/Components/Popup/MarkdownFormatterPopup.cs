@@ -5,6 +5,7 @@ using Dalamud.Interface.Utility.Raii;
 using Dalamud.Bindings.ImGui;
 
 using Sphene.UI.Components;
+using Sphene.UI.Design;
 
 namespace Sphene.UI.Components.Popup;
 
@@ -50,17 +51,17 @@ public static class MarkdownFormatterPopup
         if (ImGui.Begin("Markdown Formatter", ref _isOpen, ImGuiWindowFlags.None))
         {
             DrawToolbar();
-            ImGui.Separator();
+            SpheneUI.Layout.Separator();
 
             var contentRegion = ImGui.GetContentRegionAvail();
             var inputWidth = contentRegion.X * 0.5f - 5;
 
             // Input section
             ImGui.BeginChild("InputSection", new Vector2(inputWidth, contentRegion.Y - 40), true);
-            ImGui.Text("Input Text:");
-            ImGui.Separator();
+            SpheneUI.Text.Plain("Input Text:");
+            SpheneUI.Layout.Separator();
             
-            if (ImGui.InputTextMultiline("##input", ref _inputText, 10000, new Vector2(-1, -1)))
+            if (SpheneUI.Controls.InputTextMultiline("##input", ref _inputText, 10000, new Vector2(-1, -1)))
             {
                 // Text changed, update formatted output
                 UpdateFormattedText();
@@ -71,8 +72,8 @@ public static class MarkdownFormatterPopup
 
             // Preview section
             ImGui.BeginChild("PreviewSection", new Vector2(-1, contentRegion.Y - 40), true);
-            ImGui.Text("Preview:");
-            ImGui.Separator();
+            SpheneUI.Text.Plain("Preview:");
+            SpheneUI.Layout.Separator();
 
             string formattedText = GetFormattedText();
             if (!string.IsNullOrEmpty(formattedText))
@@ -81,13 +82,13 @@ public static class MarkdownFormatterPopup
             }
             else
             {
-                ImGui.TextDisabled("Enter text to see preview...");
+                SpheneUI.Text.Muted("Enter text to see preview...");
             }
 
             ImGui.EndChild();
 
             // Bottom buttons
-            ImGui.Separator();
+            SpheneUI.Layout.Separator();
             DrawBottomButtons();
         }
         ImGui.End();
@@ -101,10 +102,10 @@ public static class MarkdownFormatterPopup
 
     private static void DrawToolbar()
     {
-        ImGui.Text("Formatting Tools:");
+        SpheneUI.Text.Plain("Formatting Tools:");
 
         // First row of toggle buttons
-        bool boldPressed = ImGui.Button(_isBold ? "Bold [ON]" : "Bold [OFF]");
+        bool boldPressed = SpheneUI.Controls.Button(_isBold ? "Bold [ON]" : "Bold [OFF]");
         if (boldPressed)
         {
             _isBold = !_isBold;
@@ -112,7 +113,7 @@ public static class MarkdownFormatterPopup
         }
         ImGui.SameLine();
         
-        bool underlinePressed = ImGui.Button(_isUnderline ? "Underline [ON]" : "Underline [OFF]");
+        bool underlinePressed = SpheneUI.Controls.Button(_isUnderline ? "Underline [ON]" : "Underline [OFF]");
         if (underlinePressed)
         {
             _isUnderline = !_isUnderline;
@@ -120,28 +121,28 @@ public static class MarkdownFormatterPopup
         }
 
         // Second row - Headers and Color
-        if (ImGui.Button(_headerLevel == 1 ? "H1 [ON]" : "H1 [OFF]"))
+        if (SpheneUI.Controls.Button(_headerLevel == 1 ? "H1 [ON]" : "H1 [OFF]"))
         {
             _headerLevel = _headerLevel == 1 ? 0 : 1;
             UpdateFormattedText();
         }
         ImGui.SameLine();
         
-        if (ImGui.Button(_headerLevel == 2 ? "H2 [ON]" : "H2 [OFF]"))
+        if (SpheneUI.Controls.Button(_headerLevel == 2 ? "H2 [ON]" : "H2 [OFF]"))
         {
             _headerLevel = _headerLevel == 2 ? 0 : 2;
             UpdateFormattedText();
         }
         ImGui.SameLine();
         
-        if (ImGui.Button(_headerLevel == 3 ? "H3 [ON]" : "H3 [OFF]"))
+        if (SpheneUI.Controls.Button(_headerLevel == 3 ? "H3 [ON]" : "H3 [OFF]"))
         {
             _headerLevel = _headerLevel == 3 ? 0 : 3;
             UpdateFormattedText();
         }
         ImGui.SameLine();
         
-        if (ImGui.Button(_hasColor ? "Color [ON]" : "Color [OFF]"))
+        if (SpheneUI.Controls.Button(_hasColor ? "Color [ON]" : "Color [OFF]"))
         {
             if (_hasColor)
             {
@@ -157,12 +158,12 @@ public static class MarkdownFormatterPopup
         if (_hasColor)
         {
             ImGui.SameLine();
-            if (ImGui.Button("Change Color"))
+            if (SpheneUI.Controls.Button("Change Color"))
             {
                 _showColorPicker = true;
             }
             ImGui.SameLine();
-            if (ImGui.Button("Remove Color"))
+            if (SpheneUI.Controls.Button("Remove Color"))
             {
                 _hasColor = false;
                 UpdateFormattedText();
@@ -170,16 +171,16 @@ public static class MarkdownFormatterPopup
             
             // Show live color preview
             ImGui.SameLine();
-            ImGui.Text("Preview:");
+            SpheneUI.Text.Plain("Preview:");
             ImGui.SameLine();
             ImGui.PushStyleColor(ImGuiCol.Text, _selectedColor);
-            ImGui.Text("Sample Text");
+            SpheneUI.Text.Plain("Sample Text");
             ImGui.PopStyleColor();
         }
 
         // Show current formatting state
         ImGui.NewLine();
-        ImGui.Text("Current Format: " + GetFormattingDescription());
+        SpheneUI.Text.Plain("Current Format: " + GetFormattingDescription());
     }
 
     private static void DrawColorPicker()
@@ -196,14 +197,14 @@ public static class MarkdownFormatterPopup
                 UpdateFormattedText();
             }
             
-            if (ImGui.Button("Done"))
+            if (SpheneUI.Controls.Button("Done"))
             {
                 _hasColor = true;
                 _showColorPicker = false;
                 UpdateFormattedText();
             }
             ImGui.SameLine();
-            if (ImGui.Button("Cancel"))
+            if (SpheneUI.Controls.Button("Cancel"))
             {
                 // Restore previous color if cancelled
                 _selectedColor = previousColor;
@@ -216,7 +217,7 @@ public static class MarkdownFormatterPopup
 
     private static void DrawBottomButtons()
     {
-        if (ImGui.Button("Copy Formatted Text"))
+        if (SpheneUI.Controls.Button("Copy Formatted Text"))
         {
             string formattedText = GetFormattedText();
             if (!string.IsNullOrEmpty(formattedText))
@@ -226,27 +227,27 @@ public static class MarkdownFormatterPopup
         }
         ImGui.SameLine();
         
-        if (ImGui.Button("Copy Raw Text") && !string.IsNullOrEmpty(_inputText))
+        if (SpheneUI.Controls.Button("Copy Raw Text") && !string.IsNullOrEmpty(_inputText))
         {
             ImGui.SetClipboardText(_inputText);
         }
         ImGui.SameLine();
         
-        if (ImGui.Button("Clear"))
+        if (SpheneUI.Controls.Button("Clear"))
         {
             _inputText = "";
             UpdateFormattedText();
         }
         ImGui.SameLine();
         
-        if (ImGui.Button("Reset Format"))
+        if (SpheneUI.Controls.Button("Reset Format"))
         {
             ResetToggles();
             UpdateFormattedText();
         }
         ImGui.SameLine();
         
-        if (ImGui.Button("Close"))
+        if (SpheneUI.Controls.Button("Close"))
         {
             Close();
         }

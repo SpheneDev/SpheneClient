@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging;
 using Sphene.API.Dto.Group;
 using Sphene.Services;
 using Sphene.Services.Mediator;
+using Sphene.UI.Design;
 using Sphene.WebAPI;
 using System.Numerics;
 
@@ -53,19 +54,14 @@ public class AreaBoundSyncshellSelectionUI : WindowMediatorSubscriberBase
         if (_availableSyncshells == null || _availableSyncshells.Count == 0) return;
 
         // Header
-        ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.2f, 0.8f, 1.0f, 1.0f));
-        ImGui.Text($"Multiple Area Syncshells Available ({_availableSyncshells.Count})");
-        ImGui.PopStyleColor();
-        
-        ImGui.Separator();
-        
-        ImGui.TextWrapped("Multiple area-bound syncshells are available in this location. Expand each group to see details and select which one you would like to join:");
-        
-        ImGui.Spacing();
-        
+        SpheneUI.Text.PageHeader($"Multiple Area Syncshells Available ({_availableSyncshells.Count})");
+
+        SpheneUI.Text.MutedWrapped("Multiple area-bound syncshells are available in this location. Expand each group to see details and select which one you would like to join:");
+
+        SpheneUI.Layout.VerticalSpace();
+
         // Syncshell list with collapsible groups
-        using var child = ImRaii.Child("SyncshellList", new Vector2(0, 300), true);
-        if (child)
+        if (SpheneUI.Layout.BeginScrollArea("SyncshellList", new Vector2(0, 300), border: true))
         {
             for (int i = 0; i < _availableSyncshells.Count; i++)
             {
@@ -101,44 +97,36 @@ public class AreaBoundSyncshellSelectionUI : WindowMediatorSubscriberBase
                     ImGui.Indent();
                     
                     // Syncshell details
-                    ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.7f, 0.7f, 0.7f, 1.0f));
-                    ImGui.Text($"ID: {syncshell.Group.GID}");
-                    ImGui.PopStyleColor();
-                    
+                    SpheneUI.Text.Muted($"ID: {syncshell.Group.GID}");
+
                     // Rules info
                     if (syncshell.Settings.RequireRulesAcceptance && !string.IsNullOrEmpty(syncshell.Settings.JoinRules))
                     {
-                        ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 0.8f, 0.2f, 1.0f));
-                        ImGui.Text("⚠ Requires rules acceptance");
-                        ImGui.PopStyleColor();
+                        SpheneUI.Text.Colored("⚠ Requires rules acceptance", ImGuiColors.DalamudYellow);
                     }
 
                     if (syncshell.IsLocked)
                     {
-                        ImGui.TextColored(ImGuiColors.DalamudRed, "This syncshell is locked. Joining is disabled.");
+                        SpheneUI.Text.Colored("This syncshell is locked. Joining is disabled.", ImGuiColors.DalamudRed);
                     }
-                    
+
                     // Custom join message
                     if (!string.IsNullOrEmpty(syncshell.Settings.CustomJoinMessage))
                     {
-                        ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.8f, 0.8f, 0.8f, 1.0f));
-                        ImGui.TextWrapped(syncshell.Settings.CustomJoinMessage);
-                        ImGui.PopStyleColor();
+                        SpheneUI.Text.MutedWrapped(syncshell.Settings.CustomJoinMessage);
                     }
-                    
+
                     // Selection button within the expanded node
                     if (_selectedIndex != i)
                     {
-                        if (ImGui.Button($"Select##select_{i}"))
+                        if (SpheneUI.Controls.Button($"Select##select_{i}"))
                         {
                             _selectedIndex = i;
                         }
                     }
                     else
                     {
-                        ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.2f, 0.8f, 1.0f, 1.0f));
-                        ImGui.Text("✓ Selected");
-                        ImGui.PopStyleColor();
+                        SpheneUI.Text.Colored("✓ Selected", SpheneUI.Palette.CrystalBlue);
                     }
                     
                     ImGui.Unindent();
@@ -148,27 +136,27 @@ public class AreaBoundSyncshellSelectionUI : WindowMediatorSubscriberBase
                 ImGui.Spacing();
             }
         }
-        
+        SpheneUI.Layout.EndScrollArea();
+
         // Error message
         if (!string.IsNullOrEmpty(_errorMessage))
         {
-            ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 0.3f, 0.3f, 1.0f));
-            ImGui.TextWrapped(_errorMessage);
-            ImGui.PopStyleColor();
+            SpheneUI.Layout.Callout(_errorMessage, Dalamud.Interface.FontAwesomeIcon.ExclamationTriangle, SpheneUI.Colors.Danger);
         }
-        
-        ImGui.Separator();
-        
+
+        SpheneUI.Layout.Separator();
+
         // Buttons
-        var buttonWidth = (ImGui.GetContentRegionAvail().X - ImGui.GetStyle().ItemSpacing.X * 2) / 3;
-        
+        var buttonWidth = (SpheneUI.Controls.BoundedAvailX() - ImGui.GetStyle().ItemSpacing.X * 2) / 3;
+        var buttonSize = new Vector2(buttonWidth, 0);
+
         // Join button
         bool canJoin = _selectedIndex >= 0
                        && _selectedIndex < _availableSyncshells.Count
                        && !_availableSyncshells[_selectedIndex].IsLocked;
         using (ImRaii.Disabled(!canJoin))
         {
-            if (ImGui.Button("Join Selected", new Vector2(buttonWidth, 0)))
+            if (SpheneUI.Controls.Button("Join Selected", buttonSize))
             {
                 _ = Task.Run(async () =>
                 {
@@ -177,25 +165,21 @@ public class AreaBoundSyncshellSelectionUI : WindowMediatorSubscriberBase
                 });
             }
         }
-        
-        if (!canJoin && ImGui.IsItemHovered())
+
+        if (!canJoin)
         {
-            if (_selectedIndex >= 0 && _selectedIndex < _availableSyncshells.Count && _availableSyncshells[_selectedIndex].IsLocked)
-            {
-                ImGui.SetTooltip("This syncshell is locked. Joining is disabled.");
-            }
-            else
-            {
-                ImGui.SetTooltip("Please select a syncshell to join");
-            }
+            SpheneUI.AttachTooltip(_selectedIndex >= 0 && _selectedIndex < _availableSyncshells.Count && _availableSyncshells[_selectedIndex].IsLocked
+                ? "This syncshell is locked. Joining is disabled."
+                : "Please select a syncshell to join");
         }
-        
+
         ImGui.SameLine();
-        
+
         // Join All button
-        using (ImRaii.Disabled(_availableSyncshells.All(s => s.IsLocked)))
+        var allLocked = _availableSyncshells.All(s => s.IsLocked);
+        using (ImRaii.Disabled(allLocked))
         {
-            if (ImGui.Button("Join All", new Vector2(buttonWidth, 0)))
+            if (SpheneUI.Controls.Button("Join All", buttonSize))
             {
                 _ = Task.Run(async () =>
                 {
@@ -204,23 +188,15 @@ public class AreaBoundSyncshellSelectionUI : WindowMediatorSubscriberBase
                 });
             }
         }
-        
-        if (ImGui.IsItemHovered())
-        {
-            if (_availableSyncshells.All(s => s.IsLocked))
-            {
-                ImGui.SetTooltip("All syncshells in this area are locked. Joining is disabled.");
-            }
-            else
-            {
-                ImGui.SetTooltip("Join all available syncshells in this area");
-            }
-        }
-        
+
+        SpheneUI.AttachTooltip(allLocked
+            ? "All syncshells in this area are locked. Joining is disabled."
+            : "Join all available syncshells in this area");
+
         ImGui.SameLine();
-        
+
         // Cancel button
-        if (ImGui.Button("Cancel", new Vector2(buttonWidth, 0)))
+        if (SpheneUI.Controls.Button("Cancel", buttonSize))
         {
             _logger.LogDebug("User cancelled syncshell selection");
             _availableSyncshells = null;

@@ -2,7 +2,7 @@ using System.Numerics;
 using System.Reflection;
 using System.Text.Json.Serialization;
 
-namespace Sphene.UI.Theme;
+namespace Sphene.UI.Design;
 
 public class ThemeConfiguration
 {

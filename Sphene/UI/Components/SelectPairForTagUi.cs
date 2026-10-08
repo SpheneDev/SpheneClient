@@ -2,7 +2,7 @@ using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Utility;
 using Sphene.PlayerData.Pairs;
 using Sphene.UI.Handlers;
-using Sphene.UI.Theme;
+using Sphene.UI.Design;
 
 using System.Numerics;
 
@@ -40,26 +40,24 @@ public class SelectPairForTagUi
         if (_show && !_opened)
         {
             ImGui.SetNextWindowSize(minSize);
-            UiSharedService.CenterNextWindow(minSize.X, minSize.Y, ImGuiCond.Always);
+            SpheneUI.Layout.CenterNextWindow(minSize.X, minSize.Y, ImGuiCond.Always);
             ImGui.OpenPopup(popupName);
             _opened = true;
         }
 
         ImGui.SetNextWindowSizeConstraints(minSize, maxSize);
-        if (ImGui.BeginPopupModal(popupName, ref _show, ImGuiWindowFlags.Popup | ImGuiWindowFlags.Modal))
+        if (SpheneUI.Popups.BeginModalStyled(popupName, ref _show, ImGuiWindowFlags.Popup | ImGuiWindowFlags.Modal))
         {
-            using (SpheneCustomTheme.ApplyContextMenuTheme())
-            {
-            UiSharedService.Text($"Select users for group {_tag}");
+            SpheneUI.Text.Plain($"Select users for group {_tag}");
 
-            UiSharedService.DrawInputTextWithHint("##filter", "Filter", ref _filter, 255, ImGuiInputTextFlags.None);
+            SpheneUI.Controls.InputTextWithHint("##filter", "Filter", ref _filter, 255, ImGuiInputTextFlags.None);
             foreach (var item in pairs
                 .Where(p => string.IsNullOrEmpty(_filter) || PairName(p).Contains(_filter, StringComparison.OrdinalIgnoreCase))
                 .OrderBy(p => PairName(p), StringComparer.OrdinalIgnoreCase)
                 .ToList())
             {
                 var isInGroup = _peopleInGroup.Contains(item.UserData.UID);
-                if (UiSharedService.DrawToggleChip(PairName(item), ref isInGroup))
+                if (SpheneUI.Controls.ToggleChip(PairName(item), ref isInGroup))
                 {
                     if (isInGroup)
                     {
@@ -73,8 +71,7 @@ public class SelectPairForTagUi
                     }
                 }
             }
-            }
-            ImGui.EndPopup();
+            SpheneUI.Popups.EndStyled();
         }
         else
         {

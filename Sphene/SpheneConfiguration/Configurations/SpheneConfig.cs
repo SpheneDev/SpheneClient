@@ -246,6 +246,10 @@ public class SpheneConfig : ISpheneConfiguration
     public SupporterLabelOrder SupporterLabelOrder { get; set; } = SupporterLabelOrder.SymbolThenText;
     public ushort SupporterColorKey { get; set; } = 43;
     public ushort SupporterLabelColorKey { get; set; } = 43;
+    public bool SupporterSymbolGlowEnabled { get; set; } = false;
+    public ushort SupporterSymbolGlowKey { get; set; } = 0;
+    public bool SupporterLabelGlowEnabled { get; set; } = false;
+    public ushort SupporterLabelGlowKey { get; set; } = 0;
     public bool SupporterIconEnabled { get; set; } = true;
     public string SupporterIconId { get; set; } = string.Empty;
     public bool SupporterIconLabelEnabled { get; set; } = false;

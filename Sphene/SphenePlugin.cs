@@ -6,7 +6,7 @@ using Sphene.Services;
 using Sphene.Services.Mediator;
 using Sphene.Services.ServerConfiguration;
 using Sphene.UI;
-using Sphene.UI.Theme;
+using Sphene.UI.Design;
 using Sphene.WebAPI;
 using Sphene.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -116,7 +116,7 @@ public class SphenePlugin : MediatorSubscriberBase, IHostedService
             {
                 // Load built-in theme
                 var presetTheme = ThemePresets.BuiltInThemes.GetValueOrDefault(selectedThemeName, ThemePresets.BuiltInThemes["Default Sphene"]);
-                ThemePropertyCopier.Copy(presetTheme, SpheneCustomTheme.CurrentTheme);
+                ThemePropertyCopier.Copy(presetTheme, SpheneTheme.Current);
                 Logger.LogDebug("Loaded built-in theme: {Theme}", selectedThemeName);
             }
             else
@@ -125,25 +125,25 @@ public class SphenePlugin : MediatorSubscriberBase, IHostedService
                 var customTheme = ThemeManager.LoadTheme(selectedThemeName);
                 if (customTheme != null)
                 {
-                    ThemePropertyCopier.Copy(customTheme, SpheneCustomTheme.CurrentTheme);
+                    ThemePropertyCopier.Copy(customTheme, SpheneTheme.Current);
                     Logger.LogDebug("Loaded custom theme: {Theme}", selectedThemeName);
                 }
                 else
                 {
                     Logger.LogWarning("Failed to load theme '{Theme}', falling back to Default Sphene", selectedThemeName);
                     var defaultTheme = ThemePresets.BuiltInThemes["Default Sphene"];
-                    ThemePropertyCopier.Copy(defaultTheme, SpheneCustomTheme.CurrentTheme);
+                    ThemePropertyCopier.Copy(defaultTheme, SpheneTheme.Current);
                 }
             }
             
             // Notify theme changed to apply immediately
-            SpheneCustomTheme.CurrentTheme.NotifyThemeChanged();
+            SpheneTheme.Current.NotifyThemeChanged();
             
             // Add a small delay to ensure UI components have time to apply the theme
             _ = Task.Run(async () =>
             {
                 await Task.Delay(100).ConfigureAwait(false);
-                SpheneCustomTheme.CurrentTheme.NotifyThemeChanged();
+                SpheneTheme.Current.NotifyThemeChanged();
             });
         }
 

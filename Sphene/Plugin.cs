@@ -512,7 +512,7 @@ public sealed class Plugin : IAsyncDalamudPlugin
                 s.GetRequiredService<ChangelogService>()));
 
             collection.AddScoped<WindowMediatorSubscriberBase, EditProfileUi>((s) => new EditProfileUi(s.GetRequiredService<ILogger<EditProfileUi>>(),
-                s.GetRequiredService<SpheneMediator>(), s.GetRequiredService<ApiController>(), s.GetRequiredService<UiSharedService>(), s.GetRequiredService<FileDialogManager>(),
+                s.GetRequiredService<SpheneMediator>(), s.GetRequiredService<ApiController>(), s.GetRequiredService<FileDialogManager>(),
                 s.GetRequiredService<SpheneProfileManager>(), s.GetRequiredService<PerformanceCollectorService>()));
             collection.AddScoped<WindowMediatorSubscriberBase, PopupHandler>();
             collection.AddScoped<IPopupHandler, BanUserPopupHandler>();

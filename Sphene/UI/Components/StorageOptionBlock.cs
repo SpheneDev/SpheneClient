@@ -1,5 +1,6 @@
 using Dalamud.Bindings.ImGui;
 using Sphene.SpheneConfiguration;
+using Sphene.UI.Design;
 
 namespace Sphene.UI.Components;
 
@@ -11,13 +12,13 @@ public static class StorageOptionBlock
         try
         {
             var deleteAfterInstall = configService.Current.DeletePenumbraModAfterInstall;
-            if (UiSharedService.DrawToggle("Delete downloaded mods after successful install", ref deleteAfterInstall))
+            if (SpheneUI.Controls.Toggle("Delete downloaded mods after successful install", ref deleteAfterInstall))
             {
                 configService.Current.DeletePenumbraModAfterInstall = deleteAfterInstall;
                 configService.Save();
             }
 
-            uiShared.DrawHelpText("If enabled, the downloaded .pmp file will be deleted automatically after it has been successfully imported into Penumbra.");
+            SpheneUI.Controls.HelpText("If enabled, the downloaded .pmp file will be deleted automatically after it has been successfully imported into Penumbra.");
         }
         finally
         {
@@ -32,13 +33,13 @@ public static class StorageOptionBlock
         try
         {
             var useFileCompactor = configService.Current.UseCompactor;
-            if (UiSharedService.DrawToggle("Use file compactor", ref useFileCompactor, menuPopupId: menuPopupId))
+            if (SpheneUI.Controls.Toggle("Use file compactor", ref useFileCompactor, menuPopupId: menuPopupId))
             {
                 configService.Current.UseCompactor = useFileCompactor;
                 configService.Save();
             }
 
-            uiShared.DrawHelpText("The file compactor can massively reduce your saved files. It might incur a minor penalty on loading files on a slow CPU." + Environment.NewLine
+            SpheneUI.Controls.HelpText("The file compactor can massively reduce your saved files. It might incur a minor penalty on loading files on a slow CPU." + Environment.NewLine
                 + "It is recommended to leave it enabled to save on space.");
             return useFileCompactor;
         }
@@ -53,7 +54,7 @@ public static class StorageOptionBlock
         ImGui.PushID(blockId);
         try
         {
-            UiSharedService.DrawToggle("I understand and accept the risks", ref readClearCache);
+            SpheneUI.Controls.Toggle("I understand and accept the risks", ref readClearCache);
         }
         finally
         {

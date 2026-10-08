@@ -21,6 +21,7 @@ using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using NotificationType = Sphene.SpheneConfiguration.Models.NotificationType;
 using Sphene.SpheneConfiguration.Models;
+using Sphene.UI.Design;
 
 namespace Sphene.UI.Components.Popup;
 
@@ -31,7 +32,6 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
     private readonly bool _isOwner = false;
     private readonly List<string> _oneTimeInvites = [];
     private readonly PairManager _pairManager;
-    private readonly UiSharedService _uiSharedService;
     private readonly DalamudUtilService _dalamudUtilService;
     private List<BannedGroupUserDto> _bannedUsers = [];
     private int _multiInvites;
@@ -68,11 +68,14 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
     
     private string _welcomeText = string.Empty;
     private string _welcomeImageBase64 = string.Empty;
+    private string WelcomeImageKey => $"welcome:{GroupFullInfo.Group.GID}";
+    private IDalamudTextureWrap? WelcomeImageWrap => string.IsNullOrEmpty(_welcomeImageBase64)
+        ? null
+        : SpheneUI.Media.Texture(WelcomeImageKey, () => Convert.FromBase64String(_welcomeImageBase64));
     
     // Text selection tracking
     
     
-    private IDalamudTextureWrap? _welcomeImageTexture = null;
     private string _imageFileName = string.Empty;
     private string _imageContentType = string.Empty;
     private long _imageSize = 0;
@@ -95,8 +98,8 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
     
     // UI-only state for property preferences - immediate UI updates
     
-    // Tab switching control
-    private bool _shouldSelectAreaBindingTab = false;
+    // Active sidebar page
+    private AdminPage _activeAdminPage = AdminPage.Home;
     private bool _areaBindingTabWasOpen = false;
     private readonly Dictionary<string, (bool AllowOutdoor, bool AllowIndoor)> _uiPropertyStates = new(StringComparer.Ordinal);
     
@@ -104,12 +107,11 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
     private readonly HashSet<string> _deletedPropertyKeys = new(StringComparer.Ordinal);
     
     public SyncshellAdminUI(ILogger<SyncshellAdminUI> logger, SpheneMediator mediator, ApiController apiController,
-        UiSharedService uiSharedService, PairManager pairManager, DalamudUtilService dalamudUtilService, GroupFullInfoDto groupFullInfo, PerformanceCollectorService performanceCollectorService, FileDialogManager fileDialogManager, HousingOwnershipService housingOwnershipService)
+        PairManager pairManager, DalamudUtilService dalamudUtilService, GroupFullInfoDto groupFullInfo, PerformanceCollectorService performanceCollectorService, FileDialogManager fileDialogManager, HousingOwnershipService housingOwnershipService)
         : base(logger, mediator, "Syncshell Admin Panel (" + groupFullInfo.GroupAliasOrGID + ")", performanceCollectorService)
     {
         GroupFullInfo = groupFullInfo;
         _apiController = apiController;
-        _uiSharedService = uiSharedService;
         _pairManager = pairManager;
         _dalamudUtilService = dalamudUtilService;
         _fileDialogManager = fileDialogManager;
@@ -238,679 +240,677 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
 
         using var id = ImRaii.PushId("syncshell_admin_" + GroupFullInfo.GID);
 
-        using (_uiSharedService.UidFont.Push())
-            ImGui.TextUnformatted(GroupFullInfo.GroupAliasOrGID);
+        DrawAdminContent();
+    }
 
-        ImGui.Separator();
+    private enum AdminPage
+    {
+        Home,
+        Invites,
+        UserManagement,
+        WelcomePage,
+        AreaBinding,
+    }
+
+    private void DrawAdminContent()
+    {
+        if (_activeAdminPage == AdminPage.AreaBinding && !_isOwner)
+        {
+            _activeAdminPage = AdminPage.Home;
+        }
+
+        var theme = SpheneTheme.Current;
+        var accentHome = theme.AccentBlue;
+        var accentMembers = SpheneUI.Palette.NetworkActive;
+        var accentShell = SpheneUI.Palette.EtherealPurple;
+        var accentArea = new Vector4(0.93f, 0.68f, 0.38f, 1f);
+
+        var labels = _isOwner
+            ? new[] { "Home", "Invites", "User Management", "Welcome Page", "Area Binding" }
+            : new[] { "Home", "Invites", "User Management", "Welcome Page" };
+        var railWidth = SpheneUI.Layout.NavRailWidth(labels);
+        SpheneUI.Layout.BeginNavRail("syncshell-admin", railWidth);
+        SpheneUI.Layout.NavRailCategory("Manage", accentMembers);
+        if (SpheneUI.Layout.NavRailItem("Home", _activeAdminPage == AdminPage.Home, accentHome))
+        {
+            _activeAdminPage = AdminPage.Home;
+        }
+        if (SpheneUI.Layout.NavRailItem("Invites", _activeAdminPage == AdminPage.Invites, accentMembers))
+        {
+            _activeAdminPage = AdminPage.Invites;
+        }
+        if (SpheneUI.Layout.NavRailItem("User Management", _activeAdminPage == AdminPage.UserManagement, accentMembers))
+        {
+            _activeAdminPage = AdminPage.UserManagement;
+        }
+        SpheneUI.Layout.NavRailDivider(accentMembers, accentShell);
+        SpheneUI.Layout.NavRailCategory("Syncshell", accentShell);
+        if (SpheneUI.Layout.NavRailItem("Welcome Page", _activeAdminPage == AdminPage.WelcomePage, accentShell))
+        {
+            _activeAdminPage = AdminPage.WelcomePage;
+        }
+        if (_isOwner
+            && SpheneUI.Layout.NavRailItem("Area Binding", _activeAdminPage == AdminPage.AreaBinding, accentArea))
+        {
+            _activeAdminPage = AdminPage.AreaBinding;
+        }
+        SpheneUI.Layout.EndNavRail();
+
+        var onAreaBinding = _activeAdminPage == AdminPage.AreaBinding;
+        if (onAreaBinding && !_areaBindingTabWasOpen)
+        {
+            RefreshDetectedHousingProperties("nav select");
+            _ = LoadCurrentAreaBinding();
+        }
+        _areaBindingTabWasOpen = onAreaBinding;
+
+        if (SpheneUI.Layout.BeginNavContent("syncshell-admin"))
+        {
+            ImGuiHelpers.ScaledDummy(0, 8);
+            switch (_activeAdminPage)
+            {
+                case AdminPage.Home:
+                    DrawHomePage();
+                    break;
+                case AdminPage.Invites:
+                    DrawInvitesPage();
+                    break;
+                case AdminPage.UserManagement:
+                    DrawUserManagementPage();
+                    break;
+                case AdminPage.WelcomePage:
+                    DrawWelcomePageControls();
+                    break;
+                case AdminPage.AreaBinding:
+                    DrawAreaBindingPage();
+                    break;
+            }
+        }
+        SpheneUI.Layout.EndNavContent();
+    }
+
+    private void DrawHomePage()
+    {
         var perm = GroupFullInfo.GroupPermissions;
 
-        using var tabbar = ImRaii.TabBar("syncshell_tab_" + GroupFullInfo.GID);
-
-        if (tabbar)
+        SpheneUI.Layout.SectionCard(() =>
         {
-            var homeTab = ImRaii.TabItem("Home");
-            if (homeTab)
+            var isInvitesDisabled = perm.IsDisableInvites();
+            ImGui.AlignTextToFramePadding();
+            SpheneUI.Text.Plain("Invites are");
+            ImGui.SameLine();
+            SpheneUI.Text.Colored(isInvitesDisabled ? "locked" : "unlocked", isInvitesDisabled ? ImGuiColors.DalamudRed : ImGuiColors.ParsedGreen);
+            var lockButtonText = isInvitesDisabled ? "Unlock Syncshell" : "Lock Syncshell";
+            var lockButtonWidth = SpheneUI.Icons.TextButtonWidth(isInvitesDisabled ? FontAwesomeIcon.Unlock : FontAwesomeIcon.Lock, lockButtonText);
+            ImGui.SameLine(ImGui.GetContentRegionAvail().X - lockButtonWidth);
+            if (SpheneUI.Icons.TextButton(isInvitesDisabled ? FontAwesomeIcon.Unlock : FontAwesomeIcon.Lock, lockButtonText))
             {
-                UiSharedService.ColorText("Home", ImGuiColors.ParsedBlue);
-                UiSharedService.ColorTextWrapped("Quick overview and key syncshell controls.", ImGuiColors.DalamudGrey);
+                perm.SetDisableInvites(!isInvitesDisabled);
+                _ = _apiController.GroupChangeGroupPermissionState(new(GroupFullInfo.Group, perm));
+            }
+        }, "Syncshell Status", description: "Locking disables new invites and prevents new users from joining.");
 
-                if (_isOwner)
+        ImGuiHelpers.ScaledDummy(0, 10);
+
+        SpheneUI.Layout.SectionCard(() =>
+        {
+            var isDisableAnimations = perm.IsPreferDisableAnimations();
+            var isDisableSounds = perm.IsPreferDisableSounds();
+            var isDisableVfx = perm.IsPreferDisableVFX();
+
+            ImGui.AlignTextToFramePadding();
+            SpheneUI.Text.Plain("Sound Sync:");
+            ImGui.SameLine();
+            SpheneUI.Icons.BoolIcon(!isDisableSounds);
+            ImGui.SameLine();
+            SpheneUI.Text.Colored(!isDisableSounds ? "Enabled" : "Disabled", !isDisableSounds ? ImGuiColors.ParsedGreen : ImGuiColors.DalamudRed);
+            ImGui.SameLine(230);
+            if (SpheneUI.Icons.TextButton(isDisableSounds ? FontAwesomeIcon.VolumeUp : FontAwesomeIcon.VolumeMute,
+                    isDisableSounds ? "Suggest to enable sound sync" : "Suggest to disable sound sync"))
+            {
+                perm.SetPreferDisableSounds(!perm.IsPreferDisableSounds());
+                _ = _apiController.GroupChangeGroupPermissionState(new(GroupFullInfo.Group, perm));
+            }
+
+            ImGuiHelpers.ScaledDummy(2f);
+
+            ImGui.AlignTextToFramePadding();
+            SpheneUI.Text.Plain("Animation Sync:");
+            ImGui.SameLine();
+            SpheneUI.Icons.BoolIcon(!isDisableAnimations);
+            ImGui.SameLine();
+            SpheneUI.Text.Colored(!isDisableAnimations ? "Enabled" : "Disabled", !isDisableAnimations ? ImGuiColors.ParsedGreen : ImGuiColors.DalamudRed);
+            ImGui.SameLine(230);
+            if (SpheneUI.Icons.TextButton(isDisableAnimations ? FontAwesomeIcon.Running : FontAwesomeIcon.Stop,
+                    isDisableAnimations ? "Suggest to enable animation sync" : "Suggest to disable animation sync"))
+            {
+                perm.SetPreferDisableAnimations(!perm.IsPreferDisableAnimations());
+                _ = _apiController.GroupChangeGroupPermissionState(new(GroupFullInfo.Group, perm));
+            }
+
+            ImGuiHelpers.ScaledDummy(2f);
+
+            ImGui.AlignTextToFramePadding();
+            SpheneUI.Text.Plain("VFX Sync:");
+            ImGui.SameLine();
+            SpheneUI.Icons.BoolIcon(!isDisableVfx);
+            ImGui.SameLine();
+            SpheneUI.Text.Colored(!isDisableVfx ? "Enabled" : "Disabled", !isDisableVfx ? ImGuiColors.ParsedGreen : ImGuiColors.DalamudRed);
+            ImGui.SameLine(230);
+            if (SpheneUI.Icons.TextButton(isDisableVfx ? FontAwesomeIcon.Sun : FontAwesomeIcon.Circle,
+                    isDisableVfx ? "Suggest to enable vfx sync" : "Suggest to disable vfx sync"))
+            {
+                perm.SetPreferDisableVFX(!perm.IsPreferDisableVFX());
+                _ = _apiController.GroupChangeGroupPermissionState(new(GroupFullInfo.Group, perm));
+            }
+        }, "Suggested Sync Preferences", description: "These defaults are shown to users when they join this syncshell.");
+
+        if (!_isOwner)
+        {
+            return;
+        }
+
+        ImGuiHelpers.ScaledDummy(0, 10);
+
+        SpheneUI.Layout.SectionCard(() =>
+        {
+            SpheneUI.Text.SectionHeader("Password");
+            ImGuiHelpers.ScaledDummy(0, 6);
+
+            ImGui.AlignTextToFramePadding();
+            SpheneUI.Text.Plain("New Password:");
+            var buttonSize = SpheneUI.Icons.TextButtonWidth(FontAwesomeIcon.Passport, "Change Password");
+            var spacing = ImGui.GetStyle().ItemSpacing.X;
+
+            ImGui.SameLine();
+            ImGui.SetNextItemWidth(MathF.Max(80f, ImGui.GetContentRegionAvail().X - buttonSize - spacing));
+            SpheneUI.Controls.InputTextWithHint("##changepw", "Min 10 characters", ref _newPassword, 50);
+            ImGui.SameLine();
+            using (ImRaii.Disabled(_newPassword.Length < 10))
+            {
+                if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Passport, "Change Password"))
                 {
-                    var openAreaBindingWidth = _uiSharedService.GetIconTextButtonSize(FontAwesomeIcon.MapMarkerAlt, "Area Binding");
-                    ImGui.SameLine(ImGui.GetContentRegionAvail().X - openAreaBindingWidth);
-                    if (_uiSharedService.IconTextButton(FontAwesomeIcon.MapMarkerAlt, "Area Binding"))
-                    {
-                        _shouldSelectAreaBindingTab = true;
-                    }
-                }
-
-                ImGuiHelpers.ScaledDummy(0, 6);
-                ImGui.Separator();
-                ImGuiHelpers.ScaledDummy(0, 6);
-
-                UiSharedService.ColorText("Syncshell Status", ImGuiColors.ParsedBlue);
-                UiSharedService.ColorTextWrapped("Locking disables new invites and prevents new users from joining.", ImGuiColors.DalamudGrey);
-
-                var isInvitesDisabled = perm.IsDisableInvites();
-                ImGui.AlignTextToFramePadding();
-                ImGui.TextUnformatted("Invites are");
-                ImGui.SameLine();
-                UiSharedService.ColorText(isInvitesDisabled ? "locked" : "unlocked", isInvitesDisabled ? ImGuiColors.DalamudRed : ImGuiColors.ParsedGreen);
-                var lockButtonText = isInvitesDisabled ? "Unlock Syncshell" : "Lock Syncshell";
-                var lockButtonWidth = _uiSharedService.GetIconTextButtonSize(isInvitesDisabled ? FontAwesomeIcon.Unlock : FontAwesomeIcon.Lock, lockButtonText);
-                ImGui.SameLine(ImGui.GetContentRegionAvail().X - lockButtonWidth);
-                if (_uiSharedService.IconTextButton(isInvitesDisabled ? FontAwesomeIcon.Unlock : FontAwesomeIcon.Lock, lockButtonText))
-                {
-                    perm.SetDisableInvites(!isInvitesDisabled);
-                    _ = _apiController.GroupChangeGroupPermissionState(new(GroupFullInfo.Group, perm));
-                }
-
-                ImGuiHelpers.ScaledDummy(0, 6);
-                ImGui.Separator();
-                ImGuiHelpers.ScaledDummy(0, 6);
-
-                UiSharedService.ColorText("Suggested Sync Preferences", ImGuiColors.ParsedBlue);
-                UiSharedService.ColorTextWrapped("These defaults are shown to users when they join this syncshell.", ImGuiColors.DalamudGrey);
-
-                var isDisableAnimations = perm.IsPreferDisableAnimations();
-                var isDisableSounds = perm.IsPreferDisableSounds();
-                var isDisableVfx = perm.IsPreferDisableVFX();
-
-                ImGui.AlignTextToFramePadding();
-                ImGui.Text("Sound Sync:");
-                ImGui.SameLine();
-                _uiSharedService.BooleanToColoredIcon(!isDisableSounds);
-                ImGui.SameLine();
-                ImGui.TextColored(!isDisableSounds ? ImGuiColors.ParsedGreen : ImGuiColors.DalamudRed, !isDisableSounds ? "Enabled" : "Disabled");
-                ImGui.SameLine(230);
-                if (_uiSharedService.IconTextButton(isDisableSounds ? FontAwesomeIcon.VolumeUp : FontAwesomeIcon.VolumeMute,
-                        isDisableSounds ? "Suggest to enable sound sync" : "Suggest to disable sound sync"))
-                {
-                    perm.SetPreferDisableSounds(!perm.IsPreferDisableSounds());
-                    _ = _apiController.GroupChangeGroupPermissionState(new(GroupFullInfo.Group, perm));
-                }
-
-                ImGuiHelpers.ScaledDummy(2f);
-
-                ImGui.AlignTextToFramePadding();
-                ImGui.Text("Animation Sync:");
-                ImGui.SameLine();
-                _uiSharedService.BooleanToColoredIcon(!isDisableAnimations);
-                ImGui.SameLine();
-                ImGui.TextColored(!isDisableAnimations ? ImGuiColors.ParsedGreen : ImGuiColors.DalamudRed, !isDisableAnimations ? "Enabled" : "Disabled");
-                ImGui.SameLine(230);
-                if (_uiSharedService.IconTextButton(isDisableAnimations ? FontAwesomeIcon.Running : FontAwesomeIcon.Stop,
-                        isDisableAnimations ? "Suggest to enable animation sync" : "Suggest to disable animation sync"))
-                {
-                    perm.SetPreferDisableAnimations(!perm.IsPreferDisableAnimations());
-                    _ = _apiController.GroupChangeGroupPermissionState(new(GroupFullInfo.Group, perm));
-                }
-
-                ImGuiHelpers.ScaledDummy(2f);
-
-                ImGui.AlignTextToFramePadding();
-                ImGui.Text("VFX Sync:");
-                ImGui.SameLine();
-                _uiSharedService.BooleanToColoredIcon(!isDisableVfx);
-                ImGui.SameLine();
-                ImGui.TextColored(!isDisableVfx ? ImGuiColors.ParsedGreen : ImGuiColors.DalamudRed, !isDisableVfx ? "Enabled" : "Disabled");
-                ImGui.SameLine(230);
-                if (_uiSharedService.IconTextButton(isDisableVfx ? FontAwesomeIcon.Sun : FontAwesomeIcon.Circle,
-                        isDisableVfx ? "Suggest to enable vfx sync" : "Suggest to disable vfx sync"))
-                {
-                    perm.SetPreferDisableVFX(!perm.IsPreferDisableVFX());
-                    _ = _apiController.GroupChangeGroupPermissionState(new(GroupFullInfo.Group, perm));
-                }
-
-                ImGuiHelpers.ScaledDummy(0, 6);
-
-                if (_isOwner)
-                {
-                    ImGui.Separator();
-                    ImGuiHelpers.ScaledDummy(0, 6);
-
-                    UiSharedService.ColorText("Owner Settings", ImGuiColors.ParsedBlue);
-                    UiSharedService.ColorTextWrapped("Security and identity settings for this syncshell.", ImGuiColors.DalamudGrey);
-
-                    ImGuiHelpers.ScaledDummy(0, 6);
-                    UiSharedService.ColorText("Password", ImGuiColors.ParsedBlue);
-                    ImGuiHelpers.ScaledDummy(0, 6);
-
-                    ImGui.AlignTextToFramePadding();
-                    ImGui.Text("New Password:");
-                    var availableWidth = ImGui.GetWindowContentRegionMax().X - ImGui.GetWindowContentRegionMin().X;
-                    var buttonSize = _uiSharedService.GetIconTextButtonSize(FontAwesomeIcon.Passport, "Change Password");
-                    var textSize = ImGui.CalcTextSize("New Password:").X;
-                    var spacing = ImGui.GetStyle().ItemSpacing.X;
-
-                    ImGui.SameLine();
-                    ImGui.SetNextItemWidth(availableWidth - buttonSize - textSize - spacing * 2);
-                    ImGui.InputTextWithHint("##changepw", "Min 10 characters", ref _newPassword, 50);
-                    ImGui.SameLine();
-                    using (ImRaii.Disabled(_newPassword.Length < 10))
-                    {
-                        if (_uiSharedService.IconTextButton(FontAwesomeIcon.Passport, "Change Password"))
-                        {
-                            _pwChangeSuccess = _apiController.GroupChangePassword(new GroupPasswordDto(GroupFullInfo.Group, _newPassword)).Result;
-                            _newPassword = string.Empty;
-                        }
-                    }
-                    UiSharedService.AttachToolTip("Password requires to be at least 10 characters long. This action is irreversible.");
-
-                    if (!_pwChangeSuccess)
-                    {
-                        UiSharedService.ColorTextWrapped("Failed to change the password. Password requires to be at least 10 characters long.", ImGuiColors.DalamudYellow);
-                    }
-
-                    ImGuiHelpers.ScaledDummy(0, 6);
-                    ImGui.Separator();
-                    ImGuiHelpers.ScaledDummy(0, 6);
-
-                    UiSharedService.ColorText("Identity", ImGuiColors.ParsedBlue);
-                    ImGuiHelpers.ScaledDummy(0, 6);
-
-                    ImGui.AlignTextToFramePadding();
-                    ImGui.Text("Syncshell Alias:");
-                    var aliasAvailableWidth = ImGui.GetWindowContentRegionMax().X - ImGui.GetWindowContentRegionMin().X;
-                    var aliasButtonSize = _uiSharedService.GetIconTextButtonSize(FontAwesomeIcon.Tag, "Set Alias");
-                    var aliasTextSize = ImGui.CalcTextSize("Syncshell Alias:").X;
-                    var aliasSpacing = ImGui.GetStyle().ItemSpacing.X;
-
-                    ImGui.SameLine();
-                    ImGui.SetNextItemWidth(aliasAvailableWidth - aliasButtonSize - aliasTextSize - aliasSpacing * 2);
-                    ImGui.InputTextWithHint("##changealias", "3-50 characters (leave empty to clear)", ref _newAlias, 50);
-                    ImGui.SameLine();
-                    using (ImRaii.Disabled(_newAlias.Length > 0 && _newAlias.Length < 3))
-                    {
-                        if (_uiSharedService.IconTextButton(FontAwesomeIcon.Tag, "Set Alias"))
-                        {
-                            var aliasToSet = string.IsNullOrWhiteSpace(_newAlias) ? null : _newAlias.Trim();
-                            _aliasChangeSuccess = _apiController.GroupSetAlias(new GroupAliasDto(GroupFullInfo.Group, aliasToSet)).Result;
-                            if (_aliasChangeSuccess)
-                            {
-                                _newAlias = string.Empty;
-                            }
-                        }
-                    }
-                    UiSharedService.AttachToolTip("Set a custom alias for your syncshell (3-50 characters). Leave empty to clear the alias.");
-
-                    if (!_aliasChangeSuccess)
-                    {
-                        UiSharedService.ColorTextWrapped("Failed to change the alias. Alias must be 3-50 characters long and unique.", ImGuiColors.DalamudYellow);
-                    }
-
-                    var currentAlias = GroupFullInfo.Group.Alias;
-                    if (!string.IsNullOrEmpty(currentAlias))
-                    {
-                        ImGui.TextColored(ImGuiColors.ParsedGreen, $"Current alias: {currentAlias}");
-                    }
-                    else
-                    {
-                        ImGui.TextColored(ImGuiColors.DalamudGrey, "No alias set");
-                    }
-
-                    ImGuiHelpers.ScaledDummy(0, 6);
-                    ImGui.Separator();
-                    ImGuiHelpers.ScaledDummy(0, 6);
-
-                    UiSharedService.ColorText("Danger Zone", ImGuiColors.DalamudRed);
-                    UiSharedService.ColorTextWrapped("This action is irreversible.", ImGuiColors.DalamudGrey);
-                    ImGuiHelpers.ScaledDummy(0, 6);
-
-                    if (_uiSharedService.IconTextButton(FontAwesomeIcon.Trash, "Delete Syncshell") && UiSharedService.CtrlPressed() && UiSharedService.ShiftPressed())
-                    {
-                        IsOpen = false;
-                        _ = _apiController.GroupDelete(new(GroupFullInfo.Group));
-                    }
-                    UiSharedService.AttachToolTip("Hold CTRL and Shift and click to delete this Syncshell." + Environment.NewLine + "WARNING: this action is irreversible.");
+                    _pwChangeSuccess = _apiController.GroupChangePassword(new GroupPasswordDto(GroupFullInfo.Group, _newPassword)).Result;
+                    _newPassword = string.Empty;
                 }
             }
-            homeTab.Dispose();
+            SpheneUI.AttachTooltip("Password requires to be at least 10 characters long. This action is irreversible.");
 
-            var invitesTab = ImRaii.TabItem("Invites");
-            if (invitesTab)
+            if (!_pwChangeSuccess)
             {
-                UiSharedService.ColorText("Invites", ImGuiColors.ParsedBlue);
-                UiSharedService.ColorTextWrapped("Generate one-time invites for new members.", ImGuiColors.DalamudGrey);
+                SpheneUI.Text.ColoredWrapped("Failed to change the password. Password requires to be at least 10 characters long.", ImGuiColors.DalamudYellow);
+            }
 
-                ImGuiHelpers.ScaledDummy(0, 6);
-                ImGui.Separator();
-                ImGuiHelpers.ScaledDummy(0, 6);
+            ImGuiHelpers.ScaledDummy(0, 6);
+            SpheneUI.Layout.Separator();
+            ImGuiHelpers.ScaledDummy(0, 6);
 
-                if (_uiSharedService.IconTextButton(FontAwesomeIcon.Envelope, "Generate Single Invite"))
+            SpheneUI.Text.SectionHeader("Identity");
+            ImGuiHelpers.ScaledDummy(0, 6);
+
+            ImGui.AlignTextToFramePadding();
+            SpheneUI.Text.Plain("Syncshell Alias:");
+            var aliasButtonSize = SpheneUI.Icons.TextButtonWidth(FontAwesomeIcon.Tag, "Set Alias");
+            var aliasSpacing = ImGui.GetStyle().ItemSpacing.X;
+
+            ImGui.SameLine();
+            ImGui.SetNextItemWidth(MathF.Max(80f, ImGui.GetContentRegionAvail().X - aliasButtonSize - aliasSpacing));
+            SpheneUI.Controls.InputTextWithHint("##changealias", "3-50 characters (leave empty to clear)", ref _newAlias, 50);
+            ImGui.SameLine();
+            using (ImRaii.Disabled(_newAlias.Length > 0 && _newAlias.Length < 3))
+            {
+                if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Tag, "Set Alias"))
                 {
-                    ImGui.SetClipboardText(_apiController.GroupCreateTempInvite(new(GroupFullInfo.Group), 1).Result.FirstOrDefault() ?? string.Empty);
-                }
-                UiSharedService.AttachToolTip("Creates a single-use invite (valid for 24h) and copies it to the clipboard.");
-
-                ImGuiHelpers.ScaledDummy(0, 6);
-
-                ImGui.AlignTextToFramePadding();
-                ImGui.TextUnformatted("Amount");
-                ImGui.SameLine();
-                ImGui.SetNextItemWidth(100);
-                ImGui.InputInt("##amountofinvites", ref _multiInvites);
-                ImGui.SameLine();
-                using (ImRaii.Disabled(_multiInvites <= 1 || _multiInvites > 100))
-                {
-                    if (_uiSharedService.IconTextButton(FontAwesomeIcon.Envelope, "Generate " + _multiInvites + " invites"))
+                    var aliasToSet = string.IsNullOrWhiteSpace(_newAlias) ? null : _newAlias.Trim();
+                    _aliasChangeSuccess = _apiController.GroupSetAlias(new GroupAliasDto(GroupFullInfo.Group, aliasToSet)).Result;
+                    if (_aliasChangeSuccess)
                     {
-                        _ = Task.Run(async () =>
-                        {
-                            try
-                            {
-                                var invites = await _apiController.GroupCreateTempInvite(new(GroupFullInfo.Group), _multiInvites).ConfigureAwait(false);
-                                lock (_oneTimeInvites)
-                                {
-                                    _oneTimeInvites.AddRange(invites);
-                                }
-                            }
-                            catch (Exception ex)
-                            {
-                                _logger.LogError(ex, "Failed to generate {Count} one-time invites for group {GID}", _multiInvites, GroupFullInfo.Group.GID);
-                            }
-                        });
+                        _newAlias = string.Empty;
                     }
-                }
-                UiSharedService.AttachToolTip($"Generate {_multiInvites} one-time invites (2-100 allowed)");
-
-                if (_oneTimeInvites.Any())
-                {
-                    ImGuiHelpers.ScaledDummy(0, 6);
-                    ImGui.Separator();
-                    ImGuiHelpers.ScaledDummy(0, 6);
-
-                    UiSharedService.ColorText("Generated", ImGuiColors.ParsedBlue);
-                    var invites = string.Join(Environment.NewLine, _oneTimeInvites);
-                    ImGui.InputTextMultiline("##generated_invites", ref invites, 5000, new(0, 120), ImGuiInputTextFlags.ReadOnly);
-                    if (_uiSharedService.IconTextButton(FontAwesomeIcon.Copy, "Copy All"))
-                    {
-                        ImGui.SetClipboardText(invites);
-                    }
-                    UiSharedService.AttachToolTip("Copy all generated invites to clipboard");
-                    ImGui.SameLine();
-                    if (_uiSharedService.IconTextButton(FontAwesomeIcon.Trash, "Clear"))
-                    {
-                        _oneTimeInvites.Clear();
-                    }
-                    UiSharedService.AttachToolTip("Clear the generated invites list");
                 }
             }
-            invitesTab.Dispose();
+            SpheneUI.AttachTooltip("Set a custom alias for your syncshell (3-50 characters). Leave empty to clear the alias.");
 
-            var mgmtTab = ImRaii.TabItem("User Management");
-            if (mgmtTab)
+            if (!_aliasChangeSuccess)
             {
-                UiSharedService.ColorText("User Management", ImGuiColors.ParsedBlue);
-                UiSharedService.ColorTextWrapped("Manage members, roles, pins, and bans.", ImGuiColors.DalamudGrey);
+                SpheneUI.Text.ColoredWrapped("Failed to change the alias. Alias must be 3-50 characters long and unique.", ImGuiColors.DalamudYellow);
+            }
 
-                ImGuiHelpers.ScaledDummy(0, 6);
-                ImGui.Separator();
-                ImGuiHelpers.ScaledDummy(0, 6);
+            var currentAlias = GroupFullInfo.Group.Alias;
+            SpheneUI.Text.Colored(!string.IsNullOrEmpty(currentAlias) ? $"Current alias: {currentAlias}" : "No alias set",
+                !string.IsNullOrEmpty(currentAlias) ? ImGuiColors.ParsedGreen : ImGuiColors.DalamudGrey);
+        }, "Owner Settings", description: "Security and identity settings for this syncshell.");
 
-                // User List Section
-                if (true)
-                {
-                    UiSharedService.ColorText("Users", ImGuiColors.ParsedBlue);
-                    ImGuiHelpers.ScaledDummy(0, 6);
-                    
-                    if (!_pairManager.GroupPairs.TryGetValue(GroupFullInfo, out var pairs))
-                    {
-                        UiSharedService.ColorTextWrapped("No users found in this Syncshell", ImGuiColors.DalamudYellow);
-                    }
-                    else
-                    {
-                        var groupedPairs = new Dictionary<Pair, GroupPairUserInfo?>(pairs.Select(p => new KeyValuePair<Pair, GroupPairUserInfo?>(p,
-                            GroupFullInfo.GroupPairUserInfos.TryGetValue(p.UserData.UID, out GroupPairUserInfo value) ? value : null)));
+        ImGuiHelpers.ScaledDummy(0, 10);
 
-                        var sortedPairs = groupedPairs.OrderBy(p =>
-                        {
-                            if (p.Value == null) return 10;
-                            if (p.Value.Value.IsModerator()) return 0;
-                            if (p.Value.Value.IsPinned()) return 1;
-                            return 10;
-                        }).ThenBy(p => p.Key.GetNote() ?? p.Key.UserData.AliasOrUID, StringComparer.OrdinalIgnoreCase).ToList();
+        SpheneUI.Layout.SectionCard(() =>
+        {
+            SpheneUI.Text.ColoredWrapped("Deleting removes the syncshell for every member. This action is irreversible.", ImGuiColors.DalamudGrey);
+            ImGuiHelpers.ScaledDummy(0, 6);
 
-                        var totalUsers = sortedPairs.Count;
-                        var totalPages = (int)Math.Ceiling((double)totalUsers / _userListItemsPerPage);
-                        
-                        // Ensure current page is within bounds
-                        if (_userListCurrentPage >= totalPages && totalPages > 0)
-                            _userListCurrentPage = totalPages - 1;
-                        if (_userListCurrentPage < 0)
-                            _userListCurrentPage = 0;
+            if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Trash, "Delete Syncshell") && UiSharedService.CtrlPressed() && UiSharedService.ShiftPressed())
+            {
+                IsOpen = false;
+                _ = _apiController.GroupDelete(new(GroupFullInfo.Group));
+            }
+            SpheneUI.AttachTooltip("Hold CTRL and Shift and click to delete this Syncshell." + Environment.NewLine + "WARNING: this action is irreversible.");
+        }, "Danger Zone", accentColor: ImGuiColors.DalamudRed);
+    }
 
-                        // Pagination controls
-                        ImGui.Text($"Users: {totalUsers} | Page {_userListCurrentPage + 1} of {Math.Max(1, totalPages)}");
-                        ImGui.SameLine();
-                        
-                        using (ImRaii.Disabled(_userListCurrentPage <= 0))
-                        {
-                            if (ImGui.Button("<<"))
-                                _userListCurrentPage = 0;
-                        }
-                        ImGui.SameLine();
-                        
-                        using (ImRaii.Disabled(_userListCurrentPage <= 0))
-                        {
-                            if (ImGui.Button("<"))
-                                _userListCurrentPage--;
-                        }
-                        ImGui.SameLine();
-                        
-                        using (ImRaii.Disabled(_userListCurrentPage >= totalPages - 1))
-                        {
-                            if (ImGui.Button(">"))
-                                _userListCurrentPage++;
-                        }
-                        ImGui.SameLine();
-                        
-                        using (ImRaii.Disabled(_userListCurrentPage >= totalPages - 1))
-                        {
-                            if (ImGui.Button(">>"))
-                                _userListCurrentPage = Math.Max(0, totalPages - 1);
-                        }
+    private void DrawInvitesPage()
+    {
+        SpheneUI.Layout.SectionCard(() =>
+        {
+            if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Envelope, "Generate Single Invite"))
+            {
+                ImGui.SetClipboardText(_apiController.GroupCreateTempInvite(new(GroupFullInfo.Group), 1).Result.FirstOrDefault() ?? string.Empty);
+            }
+            SpheneUI.AttachTooltip("Creates a single-use invite (valid for 24h) and copies it to the clipboard.");
 
-                        ImGuiHelpers.ScaledDummy(1f);
+            ImGuiHelpers.ScaledDummy(0, 6);
 
-                        // Get current page items
-                        var currentPagePairs = sortedPairs
-                            .Skip(_userListCurrentPage * _userListItemsPerPage)
-                            .Take(_userListItemsPerPage)
-                            .ToList();
-
-                        using var table = ImRaii.Table("userList#" + GroupFullInfo.Group.GID, 4, ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.ScrollY | ImGuiTableFlags.Borders);
-                        if (table)
-                        {
-                            ImGui.TableSetupColumn("Alias/UID/Note", ImGuiTableColumnFlags.None, 3);
-                            ImGui.TableSetupColumn("Online/Name", ImGuiTableColumnFlags.None, 2);
-                            ImGui.TableSetupColumn("Flags", ImGuiTableColumnFlags.None, 1);
-                            ImGui.TableSetupColumn("Actions", ImGuiTableColumnFlags.None, 2);
-                            ImGui.TableHeadersRow();
-
-                            foreach (var pair in currentPagePairs)
-                            {
-                                using var tableId = ImRaii.PushId("userTable_" + pair.Key.UserData.UID);
-
-                                ImGui.TableNextColumn(); // alias/uid/note
-                                var note = pair.Key.GetNote();
-                                var text = note == null ? pair.Key.UserData.AliasOrUID : note + " (" + pair.Key.UserData.AliasOrUID + ")";
-                                ImGui.AlignTextToFramePadding();
-                                ImGui.TextUnformatted(text);
-
-                                ImGui.TableNextColumn(); // online/name
-                                string onlineText = pair.Key.IsOnline ? "Online" : "Offline";
-                                if (!string.IsNullOrEmpty(pair.Key.PlayerName))
-                                {
-                                    onlineText += " (" + pair.Key.PlayerName + ")";
-                                }
-                                var boolcolor = UiSharedService.GetBoolColor(pair.Key.IsOnline);
-                                ImGui.AlignTextToFramePadding();
-                                UiSharedService.ColorText(onlineText, boolcolor);
-
-                                ImGui.TableNextColumn(); // special flags
-                                if (pair.Value != null && (pair.Value.Value.IsModerator() || pair.Value.Value.IsPinned()))
-                                {
-                                    if (pair.Value.Value.IsModerator())
-                                    {
-                                        _uiSharedService.IconText(FontAwesomeIcon.UserShield);
-                                        UiSharedService.AttachToolTip("Moderator");
-                                    }
-                                    if (pair.Value.Value.IsPinned())
-                                    {
-                                        _uiSharedService.IconText(FontAwesomeIcon.Thumbtack);
-                                        UiSharedService.AttachToolTip("Pinned");
-                                    }
-                                }
-                                else
-                                {
-                                    _uiSharedService.IconText(FontAwesomeIcon.None);
-                                }
-
-                                ImGui.TableNextColumn(); // actions
-                                if (_isOwner)
-                                {
-                                    if (_uiSharedService.IconButton(FontAwesomeIcon.UserShield))
-                                    {
-                                        GroupPairUserInfo userInfo = pair.Value ?? GroupPairUserInfo.None;
-
-                                        userInfo.SetModerator(!userInfo.IsModerator());
-
-                                        _ = _apiController.GroupSetUserInfo(new GroupPairUserInfoDto(GroupFullInfo.Group, pair.Key.UserData, userInfo));
-                                    }
-                                    UiSharedService.AttachToolTip(pair.Value != null && pair.Value.Value.IsModerator() ? "Demod user" : "Mod user");
-                                    ImGui.SameLine();
-                                }
-
-                                if (_isOwner || (pair.Value == null || (pair.Value != null && !pair.Value.Value.IsModerator())))
-                                {
-                                    if (_uiSharedService.IconButton(FontAwesomeIcon.Thumbtack))
-                                    {
-                                        GroupPairUserInfo userInfo = pair.Value ?? GroupPairUserInfo.None;
-
-                                        userInfo.SetPinned(!userInfo.IsPinned());
-
-                                        _ = _apiController.GroupSetUserInfo(new GroupPairUserInfoDto(GroupFullInfo.Group, pair.Key.UserData, userInfo));
-                                    }
-                                    UiSharedService.AttachToolTip(pair.Value != null && pair.Value.Value.IsPinned() ? "Unpin user" : "Pin user");
-                                    ImGui.SameLine();
-
-                                    using (ImRaii.Disabled(!UiSharedService.CtrlPressed()))
-                                    {
-                                        if (_uiSharedService.IconButton(FontAwesomeIcon.Trash))
-                                        {
-                                            _ = _apiController.GroupRemoveUser(new GroupPairDto(GroupFullInfo.Group, pair.Key.UserData));
-                                        }
-                                    }
-                                    UiSharedService.AttachToolTip("Remove user from Syncshell"
-                                        + UiSharedService.TooltipSeparator + "Hold CTRL to enable this button");
-
-                                    ImGui.SameLine();
-                                    using (ImRaii.Disabled(!UiSharedService.CtrlPressed()))
-                                    {
-                                        if (_uiSharedService.IconButton(FontAwesomeIcon.Ban))
-                                        {
-                                            Mediator.Publish(new OpenBanUserPopupMessage(pair.Key, GroupFullInfo));
-                                        }
-                                    }
-                                    UiSharedService.AttachToolTip("Ban user from Syncshell"
-                                        + UiSharedService.TooltipSeparator + "Hold CTRL to enable this button");
-                                }
-                            }
-                        }
-                    }
-                    
-                    ImGuiHelpers.ScaledDummy(0, 6);
-                    ImGui.Separator();
-                    ImGuiHelpers.ScaledDummy(0, 6);
-                }
-                
-                // Mass Management Section
-                if (true)
-                {
-                    UiSharedService.ColorText("Mass Management", ImGuiColors.ParsedBlue);
-                    UiSharedService.ColorTextWrapped("Bulk operations for this syncshell. Hold CTRL when required.", ImGuiColors.DalamudGrey);
-                    ImGuiHelpers.ScaledDummy(0, 6);
-                    
-                    ImGui.TextUnformatted("Clear Syncshell:");
-                    using (ImRaii.Disabled(!UiSharedService.CtrlPressed()))
-                    {
-                        if (_uiSharedService.IconTextButton(FontAwesomeIcon.Broom, "Clear Syncshell"))
-                        {
-                            _ = _apiController.GroupClear(new(GroupFullInfo.Group));
-                        }
-                    }
-                    UiSharedService.AttachToolTip("This will remove all non-pinned, non-moderator users from the Syncshell."
-                        + UiSharedService.TooltipSeparator + "Hold CTRL to enable this button");
-
-                    ImGuiHelpers.ScaledDummy(3f);
-                    
-                    ImGui.TextUnformatted("Inactive User Management:");
-                    ImGui.AlignTextToFramePadding();
-                    ImGui.Text("Inactivity threshold:");
-                    ImGui.SameLine();
-                    ImGui.SetNextItemWidth(150);
-                    _uiSharedService.DrawCombo("Days of inactivity", [7, 14, 30, 90], (count) =>
-                    {
-                        return count + " days";
-                    },
-                    (selected) =>
-                    {
-                        _pruneDays = selected;
-                        _pruneTestTask = null;
-                        _pruneTask = null;
-                    },
-                    _pruneDays);
-                    
-                    ImGui.SameLine();
-                    if (_uiSharedService.IconTextButton(FontAwesomeIcon.Search, "Check Inactive Users"))
-                    {
-                        _pruneTestTask = _apiController.GroupPrune(new(GroupFullInfo.Group), _pruneDays, execute: false);
-                        _pruneTask = null;
-                    }
-                    UiSharedService.AttachToolTip($"This will start the prune process for this Syncshell of inactive Sphene users that have not logged in in the past {_pruneDays} days."
-                        + Environment.NewLine + "You will be able to review the amount of inactive users before executing the prune."
-                        + UiSharedService.TooltipSeparator + "Note: this check excludes pinned users and moderators of this Syncshell.");
-
-                    if (_pruneTestTask != null)
-                    {
-                        if (!_pruneTestTask.IsCompleted)
-                        {
-                            UiSharedService.ColorTextWrapped("Calculating inactive users...", ImGuiColors.DalamudYellow);
-                        }
-                        else
-                        {
-                            ImGui.AlignTextToFramePadding();
-                            UiSharedService.TextWrapped($"Found {_pruneTestTask.Result} user(s) that have not logged into Sphene in the past {_pruneDays} days.");
-                            if (_pruneTestTask.Result > 0)
-                            {
-                                using (ImRaii.Disabled(!UiSharedService.CtrlPressed()))
-                                {
-                                    if (_uiSharedService.IconTextButton(FontAwesomeIcon.Broom, "Prune Inactive Users"))
-                                    {
-                                        _pruneTask = _apiController.GroupPrune(new(GroupFullInfo.Group), _pruneDays, execute: true);
-                                        _pruneTestTask = null;
-                                    }
-                                }
-                                UiSharedService.AttachToolTip($"Pruning will remove {_pruneTestTask?.Result ?? 0} inactive user(s)."
-                                    + UiSharedService.TooltipSeparator + "Hold CTRL to enable this button");
-                            }
-                        }
-                    }
-                    if (_pruneTask != null)
-                    {
-                        if (!_pruneTask.IsCompleted)
-                        {
-                            UiSharedService.ColorTextWrapped("Pruning Syncshell...", ImGuiColors.DalamudYellow);
-                        }
-                        else
-                        {
-                            UiSharedService.TextWrapped($"Syncshell was pruned and {_pruneTask.Result} inactive user(s) have been removed.");
-                        }
-                    }
-                    
-                    ImGuiHelpers.ScaledDummy(0, 6);
-                    ImGui.Separator();
-                    ImGuiHelpers.ScaledDummy(0, 6);
-                }
-                
-                // User Bans Section
-                if (true)
-                {
-                    UiSharedService.ColorText("User Bans", ImGuiColors.ParsedBlue);
-                    
-                    var banRefreshWidth = _uiSharedService.GetIconTextButtonSize(FontAwesomeIcon.Sync, "Refresh");
-                    ImGui.SameLine(ImGui.GetContentRegionAvail().X - banRefreshWidth);
-                    if (_uiSharedService.IconTextButton(FontAwesomeIcon.Sync, "Refresh"))
-                    {
-                        _bannedUsers = _apiController.GroupGetBannedUsers(new GroupDto(GroupFullInfo.Group)).Result;
-                    }
-                    UiSharedService.AttachToolTip("Refresh the banned users list from the server");
-
-                    ImGuiHelpers.ScaledDummy(0, 6);
-                    
-                    if (_bannedUsers.Any())
-                    {
-                        if (ImGui.BeginTable("bannedusertable" + GroupFullInfo.GID, 6, ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.ScrollY | ImGuiTableFlags.Borders))
-                        {
-                            ImGui.TableSetupColumn("UID", ImGuiTableColumnFlags.None, 1);
-                            ImGui.TableSetupColumn("Alias", ImGuiTableColumnFlags.None, 1);
-                            ImGui.TableSetupColumn("Banned By", ImGuiTableColumnFlags.None, 1);
-                            ImGui.TableSetupColumn("Date", ImGuiTableColumnFlags.None, 2);
-                            ImGui.TableSetupColumn("Reason", ImGuiTableColumnFlags.None, 3);
-                            ImGui.TableSetupColumn("Actions", ImGuiTableColumnFlags.None, 1);
-
-                            ImGui.TableHeadersRow();
-
-                            foreach (var bannedUser in _bannedUsers.ToList())
-                            {
-                                ImGui.TableNextColumn();
-                                ImGui.TextUnformatted(bannedUser.UID);
-                                ImGui.TableNextColumn();
-                                ImGui.TextUnformatted(bannedUser.UserAlias ?? string.Empty);
-                                ImGui.TableNextColumn();
-                                ImGui.TextUnformatted(bannedUser.BannedBy);
-                                ImGui.TableNextColumn();
-                                ImGui.TextUnformatted(bannedUser.BannedOn.ToLocalTime().ToString(CultureInfo.CurrentCulture));
-                                ImGui.TableNextColumn();
-                                UiSharedService.TextWrapped(bannedUser.Reason);
-                                ImGui.TableNextColumn();
-                                using var idScope = ImRaii.PushId(bannedUser.UID);
-                if (_uiSharedService.IconTextButton(FontAwesomeIcon.UserCheck, "Unban"))
+            ImGui.AlignTextToFramePadding();
+            SpheneUI.Text.Plain("Amount");
+            ImGui.SameLine();
+            SpheneUI.Controls.InputInt("##amountofinvites", ref _multiInvites, preferredWidth: 100);
+            ImGui.SameLine();
+            using (ImRaii.Disabled(_multiInvites <= 1 || _multiInvites > 100))
+            {
+                if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Envelope, "Generate " + _multiInvites + " invites"))
                 {
                     _ = Task.Run(async () =>
                     {
-                        try { await _apiController.GroupUnbanUser(bannedUser).ConfigureAwait(false); }
-                        catch (Exception ex) { _logger.LogError(ex, "Failed to unban user {UID}", bannedUser.UID); }
-                    });
-                    _bannedUsers.RemoveAll(b => string.Equals(b.UID, bannedUser.UID, StringComparison.Ordinal));
-                }
-                                UiSharedService.AttachToolTip("Remove this user from the ban list");
+                        try
+                        {
+                            var invites = await _apiController.GroupCreateTempInvite(new(GroupFullInfo.Group), _multiInvites).ConfigureAwait(false);
+                            lock (_oneTimeInvites)
+                            {
+                                _oneTimeInvites.AddRange(invites);
                             }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex, "Failed to generate {Count} one-time invites for group {GID}", _multiInvites, GroupFullInfo.Group.GID);
+                        }
+                    });
+                }
+            }
+            SpheneUI.AttachTooltip($"Generate {_multiInvites} one-time invites (2-100 allowed)");
+        }, "Generate Invites", description: "Create single-use invites valid for 24 hours.");
 
-                            ImGui.EndTable();
+        if (!_oneTimeInvites.Any())
+        {
+            return;
+        }
+
+        ImGuiHelpers.ScaledDummy(0, 10);
+
+        SpheneUI.Layout.SectionCard(() =>
+        {
+            var invites = string.Join(Environment.NewLine, _oneTimeInvites);
+            SpheneUI.Controls.InputTextMultiline("##generated_invites", ref invites, 5000, new(0, 120), ImGuiInputTextFlags.ReadOnly);
+            if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Copy, "Copy All"))
+            {
+                ImGui.SetClipboardText(invites);
+            }
+            SpheneUI.AttachTooltip("Copy all generated invites to clipboard");
+            ImGui.SameLine();
+            if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Trash, "Clear"))
+            {
+                _oneTimeInvites.Clear();
+            }
+            SpheneUI.AttachTooltip("Clear the generated invites list");
+        }, "Generated", description: "Share these codes with the people you want to invite.");
+    }
+
+    private void DrawUserManagementPage()
+    {
+        SpheneUI.Layout.SectionCard(() =>
+        {
+            ImGuiHelpers.ScaledDummy(0, 4);
+                    
+            if (!_pairManager.GroupPairs.TryGetValue(GroupFullInfo, out var pairs))
+            {
+                SpheneUI.Text.ColoredWrapped("No users found in this Syncshell", ImGuiColors.DalamudYellow);
+            }
+            else
+            {
+                var groupedPairs = new Dictionary<Pair, GroupPairUserInfo?>(pairs.Select(p => new KeyValuePair<Pair, GroupPairUserInfo?>(p,
+                    GroupFullInfo.GroupPairUserInfos.TryGetValue(p.UserData.UID, out GroupPairUserInfo value) ? value : null)));
+
+                var sortedPairs = groupedPairs.OrderBy(p =>
+                {
+                    if (p.Value == null) return 10;
+                    if (p.Value.Value.IsModerator()) return 0;
+                    if (p.Value.Value.IsPinned()) return 1;
+                    return 10;
+                }).ThenBy(p => p.Key.GetNote() ?? p.Key.UserData.AliasOrUID, StringComparer.OrdinalIgnoreCase).ToList();
+
+                var totalUsers = sortedPairs.Count;
+                var totalPages = (int)Math.Ceiling((double)totalUsers / _userListItemsPerPage);
+                        
+                // Ensure current page is within bounds
+                if (_userListCurrentPage >= totalPages && totalPages > 0)
+                    _userListCurrentPage = totalPages - 1;
+                if (_userListCurrentPage < 0)
+                    _userListCurrentPage = 0;
+
+                // Pagination controls
+                SpheneUI.Text.Plain($"Users: {totalUsers} | Page {_userListCurrentPage + 1} of {Math.Max(1, totalPages)}");
+                ImGui.SameLine();
+                        
+                using (ImRaii.Disabled(_userListCurrentPage <= 0))
+                {
+                    if (SpheneUI.Controls.Button("<<"))
+                        _userListCurrentPage = 0;
+                }
+                ImGui.SameLine();
+                        
+                using (ImRaii.Disabled(_userListCurrentPage <= 0))
+                {
+                    if (SpheneUI.Controls.Button("<"))
+                        _userListCurrentPage--;
+                }
+                ImGui.SameLine();
+                        
+                using (ImRaii.Disabled(_userListCurrentPage >= totalPages - 1))
+                {
+                    if (SpheneUI.Controls.Button(">"))
+                        _userListCurrentPage++;
+                }
+                ImGui.SameLine();
+                        
+                using (ImRaii.Disabled(_userListCurrentPage >= totalPages - 1))
+                {
+                    if (SpheneUI.Controls.Button(">>"))
+                        _userListCurrentPage = Math.Max(0, totalPages - 1);
+                }
+
+                ImGuiHelpers.ScaledDummy(1f);
+
+                // Get current page items
+                var currentPagePairs = sortedPairs
+                    .Skip(_userListCurrentPage * _userListItemsPerPage)
+                    .Take(_userListItemsPerPage)
+                    .ToList();
+
+                using var table = ImRaii.Table("userList#" + GroupFullInfo.Group.GID, 4, ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.ScrollY | ImGuiTableFlags.Borders);
+                if (table)
+                {
+                    ImGui.TableSetupColumn("Alias/UID/Note", ImGuiTableColumnFlags.None, 3);
+                    ImGui.TableSetupColumn("Online/Name", ImGuiTableColumnFlags.None, 2);
+                    ImGui.TableSetupColumn("Flags", ImGuiTableColumnFlags.None, 1);
+                    ImGui.TableSetupColumn("Actions", ImGuiTableColumnFlags.None, 2);
+                    ImGui.TableHeadersRow();
+
+                    foreach (var pair in currentPagePairs)
+                    {
+                        using var tableId = ImRaii.PushId("userTable_" + pair.Key.UserData.UID);
+
+                        ImGui.TableNextColumn(); // alias/uid/note
+                        var note = pair.Key.GetNote();
+                        var text = note == null ? pair.Key.UserData.AliasOrUID : note + " (" + pair.Key.UserData.AliasOrUID + ")";
+                        ImGui.AlignTextToFramePadding();
+                        SpheneUI.Text.Plain(text);
+
+                        ImGui.TableNextColumn(); // online/name
+                        string onlineText = pair.Key.IsOnline ? "Online" : "Offline";
+                        if (!string.IsNullOrEmpty(pair.Key.PlayerName))
+                        {
+                            onlineText += " (" + pair.Key.PlayerName + ")";
+                        }
+                        var boolcolor = SpheneUI.Colors.Bool(pair.Key.IsOnline);
+                        ImGui.AlignTextToFramePadding();
+                        SpheneUI.Text.Colored(onlineText, boolcolor);
+
+                        ImGui.TableNextColumn(); // special flags
+                        if (pair.Value != null && (pair.Value.Value.IsModerator() || pair.Value.Value.IsPinned()))
+                        {
+                            if (pair.Value.Value.IsModerator())
+                            {
+                                SpheneUI.Icons.Icon(FontAwesomeIcon.UserShield);
+                                SpheneUI.AttachTooltip("Moderator");
+                            }
+                            if (pair.Value.Value.IsPinned())
+                            {
+                                SpheneUI.Icons.Icon(FontAwesomeIcon.Thumbtack);
+                                SpheneUI.AttachTooltip("Pinned");
+                            }
+                        }
+                        else
+                        {
+                            SpheneUI.Icons.Icon(FontAwesomeIcon.None);
+                        }
+
+                        ImGui.TableNextColumn(); // actions
+                        if (_isOwner)
+                        {
+                            if (SpheneUI.Icons.Button(FontAwesomeIcon.UserShield))
+                            {
+                                GroupPairUserInfo userInfo = pair.Value ?? GroupPairUserInfo.None;
+
+                                userInfo.SetModerator(!userInfo.IsModerator());
+
+                                _ = _apiController.GroupSetUserInfo(new GroupPairUserInfoDto(GroupFullInfo.Group, pair.Key.UserData, userInfo));
+                            }
+                            SpheneUI.AttachTooltip(pair.Value != null && pair.Value.Value.IsModerator() ? "Demod user" : "Mod user");
+                            ImGui.SameLine();
+                        }
+
+                        if (_isOwner || (pair.Value == null || (pair.Value != null && !pair.Value.Value.IsModerator())))
+                        {
+                            if (SpheneUI.Icons.Button(FontAwesomeIcon.Thumbtack))
+                            {
+                                GroupPairUserInfo userInfo = pair.Value ?? GroupPairUserInfo.None;
+
+                                userInfo.SetPinned(!userInfo.IsPinned());
+
+                                _ = _apiController.GroupSetUserInfo(new GroupPairUserInfoDto(GroupFullInfo.Group, pair.Key.UserData, userInfo));
+                            }
+                            SpheneUI.AttachTooltip(pair.Value != null && pair.Value.Value.IsPinned() ? "Unpin user" : "Pin user");
+                            ImGui.SameLine();
+
+                            using (ImRaii.Disabled(!UiSharedService.CtrlPressed()))
+                            {
+                                if (SpheneUI.Icons.Button(FontAwesomeIcon.Trash))
+                                {
+                                    _ = _apiController.GroupRemoveUser(new GroupPairDto(GroupFullInfo.Group, pair.Key.UserData));
+                                }
+                            }
+                            SpheneUI.AttachTooltip("Remove user from Syncshell"
+                                + SpheneUI.TooltipSeparator + "Hold CTRL to enable this button");
+
+                            ImGui.SameLine();
+                            using (ImRaii.Disabled(!UiSharedService.CtrlPressed()))
+                            {
+                                if (SpheneUI.Icons.Button(FontAwesomeIcon.Ban))
+                                {
+                                    Mediator.Publish(new OpenBanUserPopupMessage(pair.Key, GroupFullInfo));
+                                }
+                            }
+                            SpheneUI.AttachTooltip("Ban user from Syncshell"
+                                + SpheneUI.TooltipSeparator + "Hold CTRL to enable this button");
                         }
                     }
-                    else
-                    {
-                        ImGui.TextColored(ImGuiColors.DalamudGrey, "No banned users");
-                    }
+                }
+            }
                     
-                    ImGuiHelpers.ScaledDummy(0, 6);
-                }
-            }
-            mgmtTab.Dispose();
+            ImGuiHelpers.ScaledDummy(0, 6);
+            SpheneUI.Layout.Separator();
+            ImGuiHelpers.ScaledDummy(0, 6);
+        }, "Users", description: "Members of this syncshell. Pinned users and moderators are listed first.");
 
-            if (_isOwner || _isModerator)
+        ImGuiHelpers.ScaledDummy(0, 10);
+
+        SpheneUI.Layout.SectionCard(() =>
+        {
+            ImGuiHelpers.ScaledDummy(0, 4);
+                    
+            SpheneUI.Text.Plain("Clear Syncshell:");
+            using (ImRaii.Disabled(!UiSharedService.CtrlPressed()))
             {
-                var welcomePageTab = ImRaii.TabItem("Welcome Page");
-                if (welcomePageTab)
+                if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Broom, "Clear Syncshell"))
                 {
-                    DrawWelcomePageControls();
+                    _ = _apiController.GroupClear(new(GroupFullInfo.Group));
                 }
-                welcomePageTab.Dispose();
             }
+            SpheneUI.AttachTooltip("This will remove all non-pinned, non-moderator users from the Syncshell."
+                + SpheneUI.TooltipSeparator + "Hold CTRL to enable this button");
 
-            if (_isOwner)
+            ImGuiHelpers.ScaledDummy(3f);
+                    
+            SpheneUI.Text.Plain("Inactive User Management:");
+            ImGui.AlignTextToFramePadding();
+            SpheneUI.Text.Plain("Inactivity threshold:");
+            ImGui.SameLine();
+            ImGui.SetNextItemWidth(150);
+            SpheneUI.Controls.Combo("Days of inactivity", [7, 14, 30, 90], (count) =>
             {
-                var isAreaBindingOpen = false;
-                var areaBindingTab = ImRaii.TabItem("Area Binding", _shouldSelectAreaBindingTab ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None);
-                if (areaBindingTab)
-                {
-                    isAreaBindingOpen = true;
-                    if (!_areaBindingTabWasOpen)
-                    {
-                        RefreshDetectedHousingProperties("tab open");
-                        _ = LoadCurrentAreaBinding();
-                    }
-
-                    _shouldSelectAreaBindingTab = false;
-
-                    UiSharedService.ColorText("Area Binding", ImGuiColors.ParsedBlue);
-                    var refreshButtonWidth = _uiSharedService.GetIconTextButtonSize(FontAwesomeIcon.Sync, "Refresh");
-                    ImGui.SameLine(ImGui.GetContentRegionAvail().X - refreshButtonWidth);
-                    if (_uiSharedService.IconTextButton(FontAwesomeIcon.Sync, "Refresh"))
-                    {
-                        RefreshDetectedHousingProperties("refresh button");
-                        _ = LoadCurrentAreaBinding();
-                    }
-
-                    UiSharedService.ColorTextWrapped("Bind this syncshell to specific housing locations. Toggle a property, then select which areas should trigger auto-join.", ImGuiColors.DalamudGrey);
-
-                    ImGuiHelpers.ScaledDummy(0, 6);
-                    ImGui.Separator();
-                    ImGuiHelpers.ScaledDummy(0, 6);
-
-                    UiSharedService.ColorText("Housing Properties", ImGuiColors.ParsedBlue);
-                    UiSharedService.ColorTextWrapped("Detected properties show what the game reports. Enable a property to manage its area triggers.", ImGuiColors.DalamudGrey);
-                    ImGuiHelpers.ScaledDummy(0, 6);
-
-                    DrawOwnedPropertiesControls();
-                }
-                areaBindingTab.Dispose();
-                _areaBindingTabWasOpen = isAreaBindingOpen;
+                return count + " days";
+            },
+            (selected) =>
+            {
+                _pruneDays = selected;
+                _pruneTestTask = null;
+                _pruneTask = null;
+            },
+            _pruneDays);
+                    
+            ImGui.SameLine();
+            if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Search, "Check Inactive Users"))
+            {
+                _pruneTestTask = _apiController.GroupPrune(new(GroupFullInfo.Group), _pruneDays, execute: false);
+                _pruneTask = null;
             }
+            SpheneUI.AttachTooltip($"This will start the prune process for this Syncshell of inactive Sphene users that have not logged in in the past {_pruneDays} days."
+                + Environment.NewLine + "You will be able to review the amount of inactive users before executing the prune."
+                + SpheneUI.TooltipSeparator + "Note: this check excludes pinned users and moderators of this Syncshell.");
+
+            if (_pruneTestTask != null)
+            {
+                if (!_pruneTestTask.IsCompleted)
+                {
+                    SpheneUI.Text.ColoredWrapped("Calculating inactive users...", ImGuiColors.DalamudYellow);
+                }
+                else
+                {
+                    ImGui.AlignTextToFramePadding();
+                    SpheneUI.Text.Wrapped($"Found {_pruneTestTask.Result} user(s) that have not logged into Sphene in the past {_pruneDays} days.");
+                    if (_pruneTestTask.Result > 0)
+                    {
+                        using (ImRaii.Disabled(!UiSharedService.CtrlPressed()))
+                        {
+                            if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Broom, "Prune Inactive Users"))
+                            {
+                                _pruneTask = _apiController.GroupPrune(new(GroupFullInfo.Group), _pruneDays, execute: true);
+                                _pruneTestTask = null;
+                            }
+                        }
+                        SpheneUI.AttachTooltip($"Pruning will remove {_pruneTestTask?.Result ?? 0} inactive user(s)."
+                            + SpheneUI.TooltipSeparator + "Hold CTRL to enable this button");
+                    }
+                }
+            }
+            if (_pruneTask != null)
+            {
+                if (!_pruneTask.IsCompleted)
+                {
+                    SpheneUI.Text.ColoredWrapped("Pruning Syncshell...", ImGuiColors.DalamudYellow);
+                }
+                else
+                {
+                    SpheneUI.Text.Wrapped($"Syncshell was pruned and {_pruneTask.Result} inactive user(s) have been removed.");
+                }
+            }
+                    
+            ImGuiHelpers.ScaledDummy(0, 6);
+            SpheneUI.Layout.Separator();
+            ImGuiHelpers.ScaledDummy(0, 6);
+        }, "Mass Management", description: "Bulk operations for this syncshell. Hold CTRL when required.");
+
+        ImGuiHelpers.ScaledDummy(0, 10);
+
+        SpheneUI.Layout.SectionCard(() =>
+        {
+            var banRefreshWidth = SpheneUI.Icons.TextButtonWidth(FontAwesomeIcon.Sync, "Refresh");
+            ImGui.SetCursorPosX(ImGui.GetCursorPosX() + MathF.Max(0f, ImGui.GetContentRegionAvail().X - banRefreshWidth));
+            if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Sync, "Refresh"))
+            {
+                _bannedUsers = _apiController.GroupGetBannedUsers(new GroupDto(GroupFullInfo.Group)).Result;
+            }
+            SpheneUI.AttachTooltip("Refresh the banned users list from the server");
+
+            ImGuiHelpers.ScaledDummy(0, 6);
+                    
+            if (_bannedUsers.Any())
+            {
+                if (ImGui.BeginTable("bannedusertable" + GroupFullInfo.GID, 6, ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.ScrollY | ImGuiTableFlags.Borders))
+                {
+                    ImGui.TableSetupColumn("UID", ImGuiTableColumnFlags.None, 1);
+                    ImGui.TableSetupColumn("Alias", ImGuiTableColumnFlags.None, 1);
+                    ImGui.TableSetupColumn("Banned By", ImGuiTableColumnFlags.None, 1);
+                    ImGui.TableSetupColumn("Date", ImGuiTableColumnFlags.None, 2);
+                    ImGui.TableSetupColumn("Reason", ImGuiTableColumnFlags.None, 3);
+                    ImGui.TableSetupColumn("Actions", ImGuiTableColumnFlags.None, 1);
+
+                    ImGui.TableHeadersRow();
+
+                    foreach (var bannedUser in _bannedUsers.ToList())
+                    {
+                        ImGui.TableNextColumn();
+                        SpheneUI.Text.Plain(bannedUser.UID);
+                        ImGui.TableNextColumn();
+                        SpheneUI.Text.Plain(bannedUser.UserAlias ?? string.Empty);
+                        ImGui.TableNextColumn();
+                        SpheneUI.Text.Plain(bannedUser.BannedBy);
+                        ImGui.TableNextColumn();
+                        SpheneUI.Text.Plain(bannedUser.BannedOn.ToLocalTime().ToString(CultureInfo.CurrentCulture));
+                        ImGui.TableNextColumn();
+                        SpheneUI.Text.Wrapped(bannedUser.Reason);
+                        ImGui.TableNextColumn();
+                        using var idScope = ImRaii.PushId(bannedUser.UID);
+        if (SpheneUI.Icons.TextButton(FontAwesomeIcon.UserCheck, "Unban"))
+        {
+            _ = Task.Run(async () =>
+            {
+                try { await _apiController.GroupUnbanUser(bannedUser).ConfigureAwait(false); }
+                catch (Exception ex) { _logger.LogError(ex, "Failed to unban user {UID}", bannedUser.UID); }
+            });
+            _bannedUsers.RemoveAll(b => string.Equals(b.UID, bannedUser.UID, StringComparison.Ordinal));
         }
+                        SpheneUI.AttachTooltip("Remove this user from the ban list");
+                    }
+
+                    ImGui.EndTable();
+                }
+            }
+            else
+            {
+                SpheneUI.Text.Colored("No banned users", ImGuiColors.DalamudGrey);
+            }
+
+            ImGuiHelpers.ScaledDummy(0, 6);
+        }, "User Bans", description: "Manage the ban list for this syncshell.");
+    }
+
+    private void DrawAreaBindingPage()
+    {
+        var refreshButtonWidth = SpheneUI.Icons.TextButtonWidth(FontAwesomeIcon.Sync, "Refresh");
+        ImGui.SetCursorPosX(ImGui.GetCursorPosX() + MathF.Max(0f, ImGui.GetContentRegionAvail().X - refreshButtonWidth));
+        if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Sync, "Refresh"))
+        {
+            RefreshDetectedHousingProperties("refresh button");
+            _ = LoadCurrentAreaBinding();
+        }
+        SpheneUI.AttachTooltip("Refresh detected housing properties and reload the current binding.");
+        SpheneUI.Text.ColoredWrapped("Bind this syncshell to specific housing locations. Toggle a property, then select which areas should trigger auto-join.", ImGuiColors.DalamudGrey);
+
+        ImGuiHelpers.ScaledDummy(0, 10);
+
+        SpheneUI.Layout.SectionCard(() =>
+        {
+            DrawOwnedPropertiesControls();
+        }, "Housing Properties", description: "Detected properties show what the game reports. Enable a property to manage its area triggers.");
     }
 
     private async Task UpdateAreaBindingSettings()
@@ -1037,22 +1037,6 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
                 _welcomePageEnabled = page.IsEnabled;
                 _showOnJoin = page.ShowOnJoin;
                 _showOnAreaBoundJoin = page.ShowOnAreaBoundJoin;
-                
-                // Create texture from base64 image data if available
-                if (!string.IsNullOrEmpty(_welcomeImageBase64))
-                {
-                    try
-                    {
-                        var imageData = Convert.FromBase64String(_welcomeImageBase64);
-                        _welcomeImageTexture?.Dispose();
-                        _welcomeImageTexture = _uiSharedService.LoadImage(imageData);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(ex, "Failed to load welcome page image texture");
-                        _welcomeImageTexture = null;
-                    }
-                }
             }
             else
             {
@@ -1064,8 +1048,7 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
                 _welcomePageEnabled = false;
                 _showOnJoin = true;
                 _showOnAreaBoundJoin = true;
-                _welcomeImageTexture?.Dispose();
-                _welcomeImageTexture = null;
+                SpheneUI.Media.Evict(WelcomeImageKey);
             }
         }
         catch (Exception ex)
@@ -1082,71 +1065,53 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
     {
         if (_isLoadingWelcomePage)
         {
-            ImGui.TextUnformatted("Loading welcome page settings...");
+            SpheneUI.Text.Plain("Loading welcome page settings...");
             return;
         }
 
-        UiSharedService.ColorText("Welcome Page", ImGuiColors.ParsedBlue);
-        UiSharedService.ColorTextWrapped("Configure a page that can be shown when users join this syncshell.", ImGuiColors.DalamudGrey);
-
-        ImGuiHelpers.ScaledDummy(0, 6);
-        ImGui.Separator();
-        ImGuiHelpers.ScaledDummy(0, 6);
-
-        UiSharedService.ColorText("Configuration", ImGuiColors.ParsedBlue);
-        if (ImGui.Checkbox("Enable Welcome Page", ref _welcomePageEnabled))
+        SpheneUI.Layout.SectionCard(() =>
         {
-            _ = SaveWelcomePage();
-        }
+            if (SpheneUI.Controls.Toggle("Enable Welcome Page", ref _welcomePageEnabled))
+            {
+                _ = SaveWelcomePage();
+            }
+        }, "Activation", description: "Configure a page that can be shown when users join this syncshell.");
 
-        ImGuiHelpers.ScaledDummy(0, 6);
-        
         if (_welcomePageEnabled)
         {
-            // Display Settings Section
-            if (true)
+            ImGuiHelpers.ScaledDummy(0, 10);
+            SpheneUI.Layout.SectionCard(() =>
             {
-                ImGui.Separator();
-                ImGuiHelpers.ScaledDummy(0, 6);
-                UiSharedService.ColorText("Display", ImGuiColors.ParsedBlue);
-                
-                if (ImGui.Checkbox("Show on regular join", ref _showOnJoin))
+                if (SpheneUI.Controls.Toggle("Show on regular join", ref _showOnJoin))
                 {
                     _ = SaveWelcomePage();
                 }
-                UiSharedService.AttachToolTip("Show welcome page when users manually join the syncshell");
-                
-                if (ImGui.Checkbox("Show on area-bound join", ref _showOnAreaBoundJoin))
+                SpheneUI.AttachTooltip("Show welcome page when users manually join the syncshell");
+
+                if (SpheneUI.Controls.Toggle("Show on area-bound join", ref _showOnAreaBoundJoin))
                 {
                     _ = SaveWelcomePage();
                 }
-                UiSharedService.AttachToolTip("Show welcome page when users auto-join via area binding");
-                
-                ImGuiHelpers.ScaledDummy(0, 6);
-            }
-            
-            // Welcome Message Section
-            if (true)
+                SpheneUI.AttachTooltip("Show welcome page when users auto-join via area binding");
+            }, "Display");
+
+            ImGuiHelpers.ScaledDummy(0, 10);
+            SpheneUI.Layout.SectionCard(() =>
             {
-                ImGui.Separator();
-                ImGuiHelpers.ScaledDummy(0, 6);
-                UiSharedService.ColorText("Message", ImGuiColors.ParsedBlue);
-                
-                UiSharedService.AttachToolTip("Supports Markdown formatting:\n**bold**, *italic*, <color=#FF0000>colored text</color>, `code`, # headers\n\nUse the buttons below or keyboard shortcuts:\nCtrl+B: Bold, Ctrl+I: Italic, Ctrl+K: Code");
                 
                 // Markdown Formatter button and Live Preview button
-                if (ImGui.Button("Markdown Formatter"))
+                if (SpheneUI.Controls.Button("Markdown Formatter"))
                 {
                     MarkdownFormatterPopup.Open();
                 }
-                UiSharedService.AttachToolTip("Open advanced Markdown formatter with live preview");
+                SpheneUI.AttachTooltip("Open advanced Markdown formatter with live preview");
                 
                 ImGui.SameLine();
-                if (ImGui.Button("Live Preview"))
+                if (SpheneUI.Controls.Button("Live Preview"))
                 {
-                    Mediator.Publish(new OpenWelcomePageLivePreviewMessage(GroupFullInfo, _welcomeText, _welcomeImageTexture));
+                    Mediator.Publish(new OpenWelcomePageLivePreviewMessage(GroupFullInfo, _welcomeText, WelcomeImageWrap));
                 }
-                UiSharedService.AttachToolTip("Open live preview of the welcome message");
+                SpheneUI.AttachTooltip("Open live preview of the welcome message");
                 
                 ImGuiHelpers.ScaledDummy(2f);
                 
@@ -1157,64 +1122,59 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
                 string originalText = _welcomeText;
                 
                 // Input text field
-                if (ImGui.InputTextMultiline("##welcometext", ref _welcomeText, 2000, new Vector2(0, 100)) || textChanged)
+                if (SpheneUI.Controls.InputTextMultiline("##welcometext", ref _welcomeText, 2000, new Vector2(0, 100)) || textChanged)
                 {
                     _ = SaveWelcomePage();
                     
                     // Update live preview if it's open and text has changed
                     if (!string.Equals(originalText, _welcomeText, StringComparison.Ordinal))
                     {
-                        Mediator.Publish(new UpdateWelcomePageLivePreviewMessage(_welcomeText, _welcomeImageTexture));
+                        Mediator.Publish(new UpdateWelcomePageLivePreviewMessage(_welcomeText, WelcomeImageWrap));
                     }
                 }
                 
-                ImGuiHelpers.ScaledDummy(0, 6);
-            }
-            
-            // Welcome Image Section
-            if (true)
+            }, "Message", description: "Supports Markdown: **bold**, *italic*, `code`, # headers.");
+
+            ImGuiHelpers.ScaledDummy(0, 10);
+            SpheneUI.Layout.SectionCard(() =>
             {
-                ImGui.Separator();
-                ImGuiHelpers.ScaledDummy(0, 6);
-                UiSharedService.ColorText("Image", ImGuiColors.ParsedBlue);
                 
                 if (!string.IsNullOrEmpty(_imageFileName))
                 {
-                    ImGui.TextColored(ImGuiColors.ParsedGreen, $"Current image: {_imageFileName}");
+                    SpheneUI.Text.Colored($"Current image: {_imageFileName}", ImGuiColors.ParsedGreen);
                     ImGui.SameLine();
-                    ImGui.TextColored(ImGuiColors.DalamudGrey, $"({_imageSize} bytes)");
+                    SpheneUI.Text.Colored($"({_imageSize} bytes)", ImGuiColors.DalamudGrey);
                     
                     // Display the actual image if available
-                    if (_welcomeImageTexture != null)
+                    var welcomeWrap = WelcomeImageWrap;
+                    if (welcomeWrap != null)
                     {
                         var maxImageSize = new Vector2(300, 200); // Max display size
-                        var imageSize = new Vector2(_welcomeImageTexture.Width, _welcomeImageTexture.Height);
-                        
+                        var imageSize = new Vector2(welcomeWrap.Width, welcomeWrap.Height);
+
                         // Scale image to fit within max size while maintaining aspect ratio
                         var scale = Math.Min(maxImageSize.X / imageSize.X, maxImageSize.Y / imageSize.Y);
                         if (scale > 1.0f) scale = 1.0f; // Don't upscale
-                        
-                        var displaySize = imageSize * scale;
-                        ImGui.Image(_welcomeImageTexture.Handle, displaySize);
+
+                        SpheneUI.Media.Image(welcomeWrap, imageSize * scale, ImageFit.Stretch);
                     }
-                    
-                    if (_uiSharedService.IconTextButton(FontAwesomeIcon.Trash, "Remove Image"))
+
+                    if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Trash, "Remove Image"))
                 {
                     _welcomeImageBase64 = string.Empty;
                     _imageFileName = string.Empty;
                     _imageContentType = string.Empty;
                     _imageSize = 0;
-                    _welcomeImageTexture?.Dispose();
-                    _welcomeImageTexture = null;
+                    SpheneUI.Media.Evict(WelcomeImageKey);
                     _ = SaveWelcomePage();
                 }
             }
             else
             {
-                ImGui.TextColored(ImGuiColors.DalamudGrey, "No image selected");
+                SpheneUI.Text.Colored("No image selected", ImGuiColors.DalamudGrey);
             }
             
-            if (_uiSharedService.IconTextButton(FontAwesomeIcon.Upload, "Select Image"))
+            if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Upload, "Select Image"))
             {
                 _fileDialogManager.OpenFileDialog("Select Welcome Page Image", ".png,.jpg,.jpeg,.gif", (success, file) =>
                 {
@@ -1250,18 +1210,9 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
                             _imageContentType = $"image/{format.FileExtensions.First()}";
                             _imageSize = fileContent.Length;
                             
-                            // Create texture for immediate display
-                            try
-                            {
-                                _welcomeImageTexture?.Dispose();
-                                _welcomeImageTexture = _uiSharedService.LoadImage(fileContent);
-                            }
-                            catch (Exception ex)
-                            {
-                                _logger.LogError(ex, "Failed to create texture from uploaded image");
-                                _welcomeImageTexture = null;
-                            }
-                            
+                            // Invalidate the cached texture so it re-decodes on next draw
+                            SpheneUI.Media.Evict(WelcomeImageKey);
+
                             // Save the welcome page with new image
                             await SaveWelcomePage().ConfigureAwait(false);
                         }
@@ -1272,15 +1223,13 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
                     });
                 });
             }
-            UiSharedService.AttachToolTip("Select an image file to display on the welcome page (PNG, JPG, GIF supported)");
-            
-            ImGuiHelpers.ScaledDummy(0, 6);
+            SpheneUI.AttachTooltip("Select an image file to display on the welcome page (PNG, JPG, GIF supported)");
+        }, "Image", description: "Optional image shown at the top of the page (max 1 MB, 1920x1080).");
         }
-        }
-        
+
         if (!_welcomePageSaveSuccess)
         {
-            UiSharedService.ColorTextWrapped("Failed to save welcome page settings. Please try again.", ImGuiColors.DalamudRed);
+            SpheneUI.Text.ColoredWrapped("Failed to save welcome page settings. Please try again.", ImGuiColors.DalamudRed);
         }
     }
     
@@ -1318,7 +1267,7 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
     {
         if (disposing)
         {
-            _welcomeImageTexture?.Dispose();
+            SpheneUI.Media.Evict(WelcomeImageKey);
         }
         base.Dispose(disposing);
     }
@@ -1371,6 +1320,9 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
         var childHeight = -8f * scale;
 
         ImGui.BeginChild("housing-properties-left", new Vector2(leftWidth, childHeight), false, ImGuiWindowFlags.NoBackground);
+        var leftMin2 = ImGui.GetWindowPos();
+        var leftPad = ImGui.GetStyle().WindowPadding.X;
+        SpheneUI.ContentBounds.Push(new Vector2(leftMin2.X + leftPad, leftMin2.X + ImGui.GetWindowSize().X - leftPad));
         try
         {
             using var cellPad = ImRaii.PushStyle(ImGuiStyleVar.CellPadding, new Vector2(ImGui.GetStyle().CellPadding.X, 5f * ImGuiHelpers.GlobalScale));
@@ -1433,13 +1385,13 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
 
                         if (isActive)
                         {
-                            ImGui.TextColored(ImGuiColors.ParsedGreen, $"{entry.Type} • {serverName}");
+                            SpheneUI.Text.Colored($"{entry.Type} • {serverName}", ImGuiColors.ParsedGreen);
                         }
                         else
                         {
-                            ImGui.TextUnformatted($"{entry.Type} • {serverName}");
+                            SpheneUI.Text.Plain($"{entry.Type} • {serverName}");
                         }
-                        ImGui.TextUnformatted(territoryName);
+                        SpheneUI.Text.Plain(territoryName);
 
                         var sizeLabel = _dalamudUtilService.GetHousingPlotSizeLabel(location);
                         var wardText = location.WardId > 0 ? $"Ward {location.WardId}" : "Ward -";
@@ -1450,7 +1402,7 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
                             partsLine.Add($"Room {location.RoomId}");
                         }
                         partsLine.Add(sizeLabel);
-                        ImGui.TextColored(ImGuiColors.DalamudGrey, string.Join(" • ", partsLine));
+                        SpheneUI.Text.Colored(string.Join(" • ", partsLine), ImGuiColors.DalamudGrey);
 
                         ImGui.TableNextColumn();
                         using (ImRaii.Disabled(!isActive))
@@ -1472,6 +1424,7 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
         }
         finally
         {
+            SpheneUI.ContentBounds.Pop();
             ImGui.EndChild();
         }
 
@@ -1484,18 +1437,21 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
         ImGui.SameLine();
         ImGui.SetCursorPosX(ImGui.GetCursorPosX() + (16f * ImGuiHelpers.GlobalScale));
         ImGui.BeginChild("housing-settings-right", new Vector2(0, childHeight), false, ImGuiWindowFlags.NoBackground);
+        var rightMin = ImGui.GetWindowPos();
+        var rightPad = ImGui.GetStyle().WindowPadding.X;
+        SpheneUI.ContentBounds.Push(new Vector2(rightMin.X + rightPad, rightMin.X + ImGui.GetWindowSize().X - rightPad));
         try
         {
-            ImGui.TextColored(ImGuiColors.ParsedBlue, "Settings");
-            UiSharedService.ColorTextWrapped("Manage your area Binding settings for this Syncshell", ImGuiColors.DalamudGrey);
-            UiSharedService.ColorTextWrapped($"Active bound areas: {GetUniqueBoundAreaCount()}", ImGuiColors.ParsedGreen);
+            SpheneUI.Text.SectionHeader("Settings", "Manage your area Binding settings for this Syncshell");
+            SpheneUI.Text.ColoredWrapped($"Active bound areas: {GetUniqueBoundAreaCount()}", ImGuiColors.ParsedGreen);
             ImGuiHelpers.ScaledDummy(1f);
-            ImGui.Separator();
+            SpheneUI.Layout.Separator();
             DrawAreaBindingAdvancedSettings();
 
         }
         finally
         {
+            SpheneUI.ContentBounds.Pop();
             ImGui.EndChild();
         }
     }
@@ -1680,7 +1636,7 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
         var hasBoundAreas = _boundAreas.Count > 0;
         if (!hasBoundAreas)
         {
-            ImGui.TextColored(ImGuiColors.DalamudGrey, "Select at least one bound area (Outdoor/Ground/Basement/Room) to unlock these settings.");
+            SpheneUI.Text.Colored("Select at least one bound area (Outdoor/Ground/Basement/Room) to unlock these settings.", ImGuiColors.DalamudGrey);
             ImGuiHelpers.ScaledDummy(1f);
         }
 
@@ -1688,66 +1644,64 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
         {
             var dirty = false;
 
-            ImGui.TextColored(ImGuiColors.ParsedBlue, "Auto-Join");
+            SpheneUI.Text.SectionHeader("Auto-Join");
             ImGui.Indent();
-            if (ImGui.Checkbox("Auto Broadcast Enabled", ref _autoBroadcastEnabled)) dirty = true;
-            UiSharedService.AttachToolTip("Automatically broadcast this syncshell to users entering any bound area");
+            if (SpheneUI.Controls.Toggle("Auto Broadcast Enabled", ref _autoBroadcastEnabled)) dirty = true;
+            SpheneUI.AttachTooltip("Automatically broadcast this syncshell to users entering any bound area");
 
-            if (ImGui.Checkbox("Require Owner Presence", ref _requireOwnerPresence)) dirty = true;
-            UiSharedService.AttachToolTip("Only allow auto-join when the syncshell owner is present in the area");
+            if (SpheneUI.Controls.Toggle("Require Owner Presence", ref _requireOwnerPresence)) dirty = true;
+            SpheneUI.AttachTooltip("Only allow auto-join when the syncshell owner is present in the area");
 
-            ImGui.SetNextItemWidth(120);
-            if (ImGui.InputInt("Max Auto Join Users", ref _maxAutoJoinUsers))
+            if (SpheneUI.Controls.InputInt("Max Auto Join Users", ref _maxAutoJoinUsers, preferredWidth: 120))
             {
                 _maxAutoJoinUsers = Math.Max(1, Math.Min(100, _maxAutoJoinUsers));
                 dirty = true;
             }
-            UiSharedService.AttachToolTip("Maximum number of users that can auto-join this syncshell");
+            SpheneUI.AttachTooltip("Maximum number of users that can auto-join this syncshell");
             ImGui.Unindent();
 
             ImGuiHelpers.ScaledDummy(1f);
-            ImGui.Separator();
+            SpheneUI.Layout.Separator();
 
-            ImGui.TextColored(ImGuiColors.ParsedBlue, "Notifications");
+            SpheneUI.Text.SectionHeader("Notifications");
             ImGui.Indent();
-            if (ImGui.Checkbox("Notify on User Enter", ref _notifyOnUserEnter)) dirty = true;
-            if (ImGui.Checkbox("Notify on User Leave", ref _notifyOnUserLeave)) dirty = true;
+            if (SpheneUI.Controls.Toggle("Notify on User Enter", ref _notifyOnUserEnter)) dirty = true;
+            if (SpheneUI.Controls.Toggle("Notify on User Leave", ref _notifyOnUserLeave)) dirty = true;
             ImGui.Unindent();
 
             ImGuiHelpers.ScaledDummy(1f);
-            ImGui.Separator();
+            SpheneUI.Layout.Separator();
 
-            ImGui.TextColored(ImGuiColors.ParsedBlue, "Messages");
+            SpheneUI.Text.SectionHeader("Messages");
             ImGui.Indent();
             ImGui.SetNextItemWidth(420);
-            if (ImGui.InputTextWithHint("##custom_join_message", "Optional message shown when users auto-join", ref _customJoinMessage, 200))
+            if (SpheneUI.Controls.InputTextWithHint("##custom_join_message", "Optional message shown when users auto-join", ref _customJoinMessage, 200))
             {
                 dirty = true;
             }
             ImGui.Unindent();
 
             ImGuiHelpers.ScaledDummy(1f);
-            ImGui.Separator();
+            SpheneUI.Layout.Separator();
 
-            ImGui.TextColored(ImGuiColors.ParsedBlue, "Rules");
+            SpheneUI.Text.SectionHeader("Rules");
             ImGui.Indent();
-            if (ImGui.Checkbox("Require Rules Acceptance", ref _requireRulesAcceptance)) dirty = true;
-            UiSharedService.AttachToolTip("Require users to accept rules before auto-joining");
+            if (SpheneUI.Controls.Toggle("Require Rules Acceptance", ref _requireRulesAcceptance)) dirty = true;
+            SpheneUI.AttachTooltip("Require users to accept rules before auto-joining");
 
             if (_requireRulesAcceptance)
             {
-                ImGui.SetNextItemWidth(120);
-                if (ImGui.InputInt("Rules Version", ref _rulesVersion))
+                if (SpheneUI.Controls.InputInt("Rules Version", ref _rulesVersion, preferredWidth: 120))
                 {
                     _rulesVersion = Math.Max(1, _rulesVersion);
                     dirty = true;
                 }
-                UiSharedService.AttachToolTip("Increment this when rules change to require re-acceptance");
+                SpheneUI.AttachTooltip("Increment this when rules change to require re-acceptance");
 
-                ImGui.TextUnformatted("Rules Text:");
+                SpheneUI.Text.Plain("Rules Text:");
                 ImGui.SetNextItemWidth(-1);
                 var size = new Vector2(ImGui.GetContentRegionAvail().X, ImGui.GetTextLineHeight() * 6);
-                if (ImGui.InputTextMultiline("##join_rules", ref _joinRules, 2000, size))
+                if (SpheneUI.Controls.InputTextMultiline("##join_rules", ref _joinRules, 2000, size))
                 {
                     ParseRulesIntoList();
                     dirty = true;
@@ -1758,15 +1712,15 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
             ImGuiHelpers.ScaledDummy(1f);
             if (dirty)
             {
-                if (_uiSharedService.IconTextButton(FontAwesomeIcon.Save, "Apply"))
+                if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Save, "Apply"))
                 {
                     _ = UpdateAreaBindingSettings();
                 }
-                UiSharedService.AttachToolTip("Apply settings to the server");
+                SpheneUI.AttachTooltip("Apply settings to the server");
             }
             else
             {
-                ImGui.TextColored(ImGuiColors.DalamudGrey, "No changes");
+                SpheneUI.Text.Colored("No changes", ImGuiColors.DalamudGrey);
             }
         }
     }
@@ -1963,7 +1917,7 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
         if (showHeader)
         {
             ImGuiHelpers.ScaledDummy(1f);
-            ImGui.TextColored(ImGuiColors.DalamudGrey, "Bound areas:");
+            SpheneUI.Text.Colored("Bound areas:", ImGuiColors.DalamudGrey);
         }
 
         ImGui.PushID($"bound_areas_{propertyLocation.ServerId}_{propertyLocation.TerritoryId}_{propertyLocation.WardId}_{propertyLocation.HouseId}");
@@ -2000,7 +1954,7 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
         else if (!isSmall)
         {
             if (!verticalLayout) ImGui.SameLine();
-            ImGui.TextColored(ImGuiColors.DalamudGrey, plotSize);
+            SpheneUI.Text.Colored(plotSize, ImGuiColors.DalamudGrey);
         }
 
         ImGui.PopID();
@@ -2025,7 +1979,7 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
         if (showHeader)
         {
             ImGuiHelpers.ScaledDummy(1f);
-            ImGui.TextColored(ImGuiColors.DalamudGrey, "Bound areas:");
+            SpheneUI.Text.Colored("Bound areas:", ImGuiColors.DalamudGrey);
         }
 
         ImGui.PushID($"bound_room_{roomLocation.ServerId}_{roomLocation.TerritoryId}_{roomLocation.WardId}_{roomLocation.HouseId}_{roomLocation.RoomId}");
@@ -2043,18 +1997,18 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
     private static bool CheckboxWithStatusColor(string label, ref bool value)
     {
         ImGui.PushID(label);
-        var changed = ImGui.Checkbox("##cb", ref value);
+        var changed = SpheneUI.Controls.Checkbox("##cb", ref value);
         ImGui.PopID();
         ImGui.SameLine();
         ImGui.AlignTextToFramePadding();
         if (value)
         {
             var green = ImGuiColors.ParsedGreen;
-            ImGui.TextColored(new Vector4(green.X, green.Y, green.Z, 0.85f), label);
+            SpheneUI.Text.Colored(label, new Vector4(green.X, green.Y, green.Z, 0.85f));
         }
         else
         {
-            ImGui.TextUnformatted(label);
+            SpheneUI.Text.Plain(label);
         }
         return changed;
     }

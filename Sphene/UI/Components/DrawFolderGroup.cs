@@ -11,8 +11,7 @@ using Sphene.Services.Mediator;
 using Sphene.UI.Handlers;
 using Sphene.WebAPI;
 using Sphene.SpheneConfiguration;
-using Sphene.UI.Styling;
-using Sphene.UI.Theme;
+using Sphene.UI.Design;
 using System.Collections.Immutable;
 using System.Numerics;
 
@@ -130,7 +129,7 @@ public class DrawFolderGroup : DrawFolderBase
 
             ImGui.AlignTextToFramePadding();
 
-            _uiSharedService.IconText(icon);
+            SpheneUI.Icons.Icon(icon);
             if (ImGui.IsItemClicked())
             {
                 _tagHandler.SetTagOpen(_id, !_tagHandler.IsTagOpen(_id));
@@ -147,13 +146,13 @@ public class DrawFolderGroup : DrawFolderBase
             DrawName(rightSideStart - leftSideEnd);
         }
 
-        SpheneWindowChrome.ScrollAreaSeparator(
-            SpheneCustomTheme.CurrentTheme.CompactPairListSeparatorPadding);
+        SpheneUI.Layout.ScrollAreaSeparator(
+            SpheneTheme.Current.CompactPairListSeparatorPadding);
 
         // if opened draw content
         if (_tagHandler.IsTagOpen(_id))
         {
-            var baseIndent = _uiSharedService.GetIconSize(FontAwesomeIcon.EllipsisV).X + ImGui.GetStyle().ItemSpacing.X;
+            var baseIndent = SpheneUI.Icons.Size(FontAwesomeIcon.EllipsisV).X + ImGui.GetStyle().ItemSpacing.X;
             var indentAmount = baseIndent;
             using var indent = ImRaii.PushIndent(indentAmount, false);
             if (DrawPairs.Any())
@@ -168,16 +167,16 @@ public class DrawFolderGroup : DrawFolderBase
                 // Show more informative message for syncshells
                 if (TotalPairs > 0)
                 {
-                    ImGui.TextUnformatted($"No visible users ({OnlinePairs} online, {TotalPairs} total)");
+                    SpheneUI.Text.Plain($"No visible users ({OnlinePairs} online, {TotalPairs} total)");
                 }
                 else
                 {
-                    ImGui.TextUnformatted("No users in syncshell");
+                    SpheneUI.Text.Plain("No users in syncshell");
                 }
             }
 
-            SpheneWindowChrome.ScrollAreaSeparator(
-                SpheneCustomTheme.CurrentTheme.CompactPairListSeparatorPadding);
+            SpheneUI.Layout.ScrollAreaSeparator(
+                SpheneTheme.Current.CompactPairListSeparatorPadding);
         }
     }
 
@@ -195,28 +194,28 @@ public class DrawFolderGroup : DrawFolderBase
             if (_configService.Current.ShowAreaBoundSyncshellWelcomeMessages)
             {
                 // Normal non-clickable indicator when welcome messages are enabled
-                _uiSharedService.IconText(FontAwesomeIcon.MapMarkerAlt);
-                UiSharedService.AttachToolTip("This is an area-bound syncshell");
+                SpheneUI.Icons.Icon(FontAwesomeIcon.MapMarkerAlt);
+                SpheneUI.AttachTooltip("This is an area-bound syncshell");
             }
             else
             {
                 // Clickable indicator when welcome messages are disabled - looks like normal icon but is clickable
-                _uiSharedService.IconText(FontAwesomeIcon.MapMarkerAlt);
+                SpheneUI.Icons.Icon(FontAwesomeIcon.MapMarkerAlt);
                 if (ImGui.IsItemClicked())
                 {
                     // Show welcome message on demand
                     _ = ShowWelcomeMessageOnDemand();
                 }
-                UiSharedService.AttachToolTip("This is an area-bound syncshell\nClick to view welcome message");
+                SpheneUI.AttachTooltip("This is an area-bound syncshell\nClick to view welcome message");
             }
         }
         else
         {
             // For normal Syncshells: Keep original order with group emoji first
-            _uiSharedService.IconText(_groupFullInfoDto.GroupPermissions.IsDisableInvites() ? FontAwesomeIcon.Lock : FontAwesomeIcon.Users);
+            SpheneUI.Icons.Icon(_groupFullInfoDto.GroupPermissions.IsDisableInvites() ? FontAwesomeIcon.Lock : FontAwesomeIcon.Users);
             if (_groupFullInfoDto.GroupPermissions.IsDisableInvites())
             {
-                UiSharedService.AttachToolTip("Syncshell " + _groupFullInfoDto.GroupAliasOrGID + " is closed for invites");
+                SpheneUI.AttachTooltip("Syncshell " + _groupFullInfoDto.GroupAliasOrGID + " is closed for invites");
             }
         }
 
@@ -225,28 +224,28 @@ public class DrawFolderGroup : DrawFolderBase
             ImGui.SameLine();
             ImGui.AlignTextToFramePadding();
 
-            ImGui.TextUnformatted("[" + OnlinePairs.ToString() + "]");
+            SpheneUI.Text.Plain("[" + OnlinePairs.ToString() + "]");
         }
-        UiSharedService.AttachToolTip(OnlinePairs + " online" + Environment.NewLine + TotalPairs + " total");
+        SpheneUI.AttachTooltip(OnlinePairs + " online" + Environment.NewLine + TotalPairs + " total");
 
         ImGui.SameLine();
         if (IsOwner)
         {
             ImGui.AlignTextToFramePadding();
-            _uiSharedService.IconText(FontAwesomeIcon.Crown);
-            UiSharedService.AttachToolTip("You are the owner of " + _groupFullInfoDto.GroupAliasOrGID);
+            SpheneUI.Icons.Icon(FontAwesomeIcon.Crown);
+            SpheneUI.AttachTooltip("You are the owner of " + _groupFullInfoDto.GroupAliasOrGID);
         }
         else if (IsModerator)
         {
             ImGui.AlignTextToFramePadding();
-            _uiSharedService.IconText(FontAwesomeIcon.UserShield);
-            UiSharedService.AttachToolTip("You are a moderator in " + _groupFullInfoDto.GroupAliasOrGID);
+            SpheneUI.Icons.Icon(FontAwesomeIcon.UserShield);
+            SpheneUI.AttachTooltip("You are a moderator in " + _groupFullInfoDto.GroupAliasOrGID);
         }
         else if (IsPinned)
         {
             ImGui.AlignTextToFramePadding();
-            _uiSharedService.IconText(FontAwesomeIcon.Thumbtack);
-            UiSharedService.AttachToolTip("You are pinned in " + _groupFullInfoDto.GroupAliasOrGID);
+            SpheneUI.Icons.Icon(FontAwesomeIcon.Thumbtack);
+            SpheneUI.AttachTooltip("You are pinned in " + _groupFullInfoDto.GroupAliasOrGID);
         }
 
         // For normal syncshells, show area-bound indicator at the end (if somehow it's area-bound but not detected above)
@@ -259,19 +258,19 @@ public class DrawFolderGroup : DrawFolderBase
             if (_configService.Current.ShowAreaBoundSyncshellWelcomeMessages)
             {
                 // Normal non-clickable indicator when welcome messages are enabled
-                _uiSharedService.IconText(FontAwesomeIcon.MapMarkerAlt);
-                UiSharedService.AttachToolTip("This is an area-bound syncshell");
+                SpheneUI.Icons.Icon(FontAwesomeIcon.MapMarkerAlt);
+                SpheneUI.AttachTooltip("This is an area-bound syncshell");
             }
             else
             {
                 // Clickable indicator when welcome messages are disabled - looks like normal icon but is clickable
-                _uiSharedService.IconText(FontAwesomeIcon.MapMarkerAlt);
+                SpheneUI.Icons.Icon(FontAwesomeIcon.MapMarkerAlt);
                 if (ImGui.IsItemClicked())
                 {
                     // Show welcome message on demand
                     _ = ShowWelcomeMessageOnDemand();
                 }
-                UiSharedService.AttachToolTip("This is an area-bound syncshell\nClick to view welcome message");
+                SpheneUI.AttachTooltip("This is an area-bound syncshell\nClick to view welcome message");
             }
         }
 
@@ -281,23 +280,23 @@ public class DrawFolderGroup : DrawFolderBase
 
     protected override void DrawMenu(float menuWidth)
     {
-        ImGui.TextUnformatted("Syncshell Menu (" + _groupFullInfoDto.GroupAliasOrGID + ")");
-        ImGui.Separator();
+        SpheneUI.Text.Plain("Syncshell Menu (" + _groupFullInfoDto.GroupAliasOrGID + ")");
+        SpheneUI.Layout.Separator();
 
-        ImGui.TextUnformatted("General Syncshell Actions");
-        if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.Copy, "Copy ID", menuWidth, ButtonStyleKeys.ContextMenu_Item))
+        SpheneUI.Text.Plain("General Syncshell Actions");
+        if (SpheneUI.Icons.ActionButton(FontAwesomeIcon.Copy, "Copy ID", menuWidth, ButtonStyleKeys.ContextMenu_Item))
         {
             ImGui.CloseCurrentPopup();
             ImGui.SetClipboardText(_groupFullInfoDto.GroupAliasOrGID);
         }
-        UiSharedService.AttachToolTip("Copy Syncshell ID to Clipboard");
+        SpheneUI.AttachTooltip("Copy Syncshell ID to Clipboard");
 
-        if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.StickyNote, "Copy Notes", menuWidth, ButtonStyleKeys.ContextMenu_Item))
+        if (SpheneUI.Icons.ActionButton(FontAwesomeIcon.StickyNote, "Copy Notes", menuWidth, ButtonStyleKeys.ContextMenu_Item))
         {
             ImGui.CloseCurrentPopup();
             ImGui.SetClipboardText(UiSharedService.GetNotes(DrawPairs.Select(k => k.Pair).ToList()));
         }
-        UiSharedService.AttachToolTip("Copies all your notes for all users in this Syncshell to the clipboard." + Environment.NewLine + "They can be imported via Settings -> General -> Notes -> Import notes from clipboard");
+        SpheneUI.AttachTooltip("Copies all your notes for all users in this Syncshell to the clipboard." + Environment.NewLine + "They can be imported via Settings -> General -> Notes -> Import notes from clipboard");
 
         // Check if this is an area-bound syncshell to show appropriate leave button
         bool isAreaBound = _areaBoundSyncshellService.IsAreaBoundSyncshell(_groupFullInfoDto.Group.GID);
@@ -306,38 +305,38 @@ public class DrawFolderGroup : DrawFolderBase
         if (isOwner)
         {
             // Show "Delete Syncshell" button for owners
-            if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.Trash, "Delete Syncshell", menuWidth, ButtonStyleKeys.ContextMenu_Item) && UiSharedService.CtrlPressed())
+            if (SpheneUI.Icons.ActionButton(FontAwesomeIcon.Trash, "Delete Syncshell", menuWidth, ButtonStyleKeys.ContextMenu_Item) && UiSharedService.CtrlPressed())
             {
                 _ = _apiController.GroupDelete(new(_groupFullInfoDto.Group));
                 ImGui.CloseCurrentPopup();
             }
-            UiSharedService.AttachToolTip("Hold CTRL and click to delete this Syncshell" + Environment.NewLine + 
+            SpheneUI.AttachTooltip("Hold CTRL and click to delete this Syncshell" + Environment.NewLine + 
                 "WARNING: This action is irreversible and will permanently delete the Syncshell for all members.");
         }
         else if (isAreaBound)
         {
             // Show "Leave Area Syncshell" button for non-owners in area-bound syncshells
-            if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.MapMarkerAlt, "Leave Area Syncshell", menuWidth, ButtonStyleKeys.ContextMenu_Item) && UiSharedService.CtrlPressed())
+            if (SpheneUI.Icons.ActionButton(FontAwesomeIcon.MapMarkerAlt, "Leave Area Syncshell", menuWidth, ButtonStyleKeys.ContextMenu_Item) && UiSharedService.CtrlPressed())
             {
                 _ = LeaveAreaSyncshellWithConsentReset();
                 ImGui.CloseCurrentPopup();
             }
-            UiSharedService.AttachToolTip("Hold CTRL and click to leave this Area Syncshell" + Environment.NewLine + 
+            SpheneUI.AttachTooltip("Hold CTRL and click to leave this Area Syncshell" + Environment.NewLine + 
                 "This will reset your consent and you'll need to accept again when re-entering the area.");
         }
         else
         {
             // Show regular "Leave Syncshell" button for non-owners in regular syncshells
-            if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.ArrowCircleLeft, "Leave Syncshell", menuWidth, ButtonStyleKeys.ContextMenu_Item) && UiSharedService.CtrlPressed())
+            if (SpheneUI.Icons.ActionButton(FontAwesomeIcon.ArrowCircleLeft, "Leave Syncshell", menuWidth, ButtonStyleKeys.ContextMenu_Item) && UiSharedService.CtrlPressed())
             {
                 _ = _apiController.GroupLeave(_groupFullInfoDto);
                 ImGui.CloseCurrentPopup();
             }
-            UiSharedService.AttachToolTip("Hold CTRL and click to leave this Syncshell");
+            SpheneUI.AttachTooltip("Hold CTRL and click to leave this Syncshell");
         }
 
-        ImGui.Separator();
-        ImGui.TextUnformatted("Permission Settings");
+        SpheneUI.Layout.Separator();
+        SpheneUI.Text.Plain("Permission Settings");
         var perm = _groupFullInfoDto.GroupUserPermissions;
         bool disableSounds = perm.IsDisableSounds();
         bool disableAnims = perm.IsDisableAnimations();
@@ -346,7 +345,7 @@ public class DrawFolderGroup : DrawFolderBase
         if ((_groupFullInfoDto.GroupPermissions.IsPreferDisableAnimations() != disableAnims
             || _groupFullInfoDto.GroupPermissions.IsPreferDisableSounds() != disableSounds
             || _groupFullInfoDto.GroupPermissions.IsPreferDisableVFX() != disableVfx)
-            && _uiSharedService.IconTextActionButton(FontAwesomeIcon.Check, "Align with suggested permissions", menuWidth, ButtonStyleKeys.ContextMenu_Item))
+            && SpheneUI.Icons.ActionButton(FontAwesomeIcon.Check, "Align with suggested permissions", menuWidth, ButtonStyleKeys.ContextMenu_Item))
         {
             perm.SetDisableVFX(_groupFullInfoDto.GroupPermissions.IsPreferDisableVFX());
             perm.SetDisableSounds(_groupFullInfoDto.GroupPermissions.IsPreferDisableSounds());
@@ -355,21 +354,21 @@ public class DrawFolderGroup : DrawFolderBase
             ImGui.CloseCurrentPopup();
         }
 
-        if (_uiSharedService.IconTextActionButton(disableSounds ? FontAwesomeIcon.VolumeUp : FontAwesomeIcon.VolumeOff, disableSounds ? "Enable Sound Sync" : "Disable Sound Sync", menuWidth, ButtonStyleKeys.ContextMenu_Item))
+        if (SpheneUI.Icons.ActionButton(disableSounds ? FontAwesomeIcon.VolumeUp : FontAwesomeIcon.VolumeOff, disableSounds ? "Enable Sound Sync" : "Disable Sound Sync", menuWidth, ButtonStyleKeys.ContextMenu_Item))
         {
             perm.SetDisableSounds(!disableSounds);
             _ = _apiController.GroupChangeIndividualPermissionState(new(_groupFullInfoDto.Group, new(_apiController.UID), perm));
             ImGui.CloseCurrentPopup();
         }
 
-        if (_uiSharedService.IconTextActionButton(disableAnims ? FontAwesomeIcon.Running : FontAwesomeIcon.Stop, disableAnims ? "Enable Animation Sync" : "Disable Animation Sync", menuWidth, ButtonStyleKeys.ContextMenu_Item))
+        if (SpheneUI.Icons.ActionButton(disableAnims ? FontAwesomeIcon.Running : FontAwesomeIcon.Stop, disableAnims ? "Enable Animation Sync" : "Disable Animation Sync", menuWidth, ButtonStyleKeys.ContextMenu_Item))
         {
             perm.SetDisableAnimations(!disableAnims);
             _ = _apiController.GroupChangeIndividualPermissionState(new(_groupFullInfoDto.Group, new(_apiController.UID), perm));
             ImGui.CloseCurrentPopup();
         }
 
-        if (_uiSharedService.IconTextActionButton(disableVfx ? FontAwesomeIcon.Sun : FontAwesomeIcon.Circle, disableVfx ? "Enable VFX Sync" : "Disable VFX Sync", menuWidth, ButtonStyleKeys.ContextMenu_Item))
+        if (SpheneUI.Icons.ActionButton(disableVfx ? FontAwesomeIcon.Sun : FontAwesomeIcon.Circle, disableVfx ? "Enable VFX Sync" : "Disable VFX Sync", menuWidth, ButtonStyleKeys.ContextMenu_Item))
         {
             perm.SetDisableVFX(!disableVfx);
             _ = _apiController.GroupChangeIndividualPermissionState(new(_groupFullInfoDto.Group, new(_apiController.UID), perm));
@@ -378,9 +377,9 @@ public class DrawFolderGroup : DrawFolderBase
 
         if (IsModerator || IsOwner)
         {
-            ImGui.Separator();
-            ImGui.TextUnformatted("Syncshell Admin Functions");
-            if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.Cog, "Open Admin Panel", menuWidth, ButtonStyleKeys.ContextMenu_Item))
+            SpheneUI.Layout.Separator();
+            SpheneUI.Text.Plain("Syncshell Admin Functions");
+            if (SpheneUI.Icons.ActionButton(FontAwesomeIcon.Cog, "Open Admin Panel", menuWidth, ButtonStyleKeys.ContextMenu_Item))
             {
                 ImGui.CloseCurrentPopup();
                 _spheneMediator.Publish(new OpenSyncshellAdminPanel(_groupFullInfoDto));
@@ -398,37 +397,37 @@ public class DrawFolderGroup : DrawFolderBase
         var spacingX = ImGui.GetStyle().ItemSpacing.X;
 
         FontAwesomeIcon pauseIcon = _groupFullInfoDto.GroupUserPermissions.IsPaused() ? FontAwesomeIcon.Play : FontAwesomeIcon.Pause;
-        var pauseButtonSize = _uiSharedService.GetIconButtonSize(pauseIcon);
-        var menuButtonSize = _uiSharedService.GetIconButtonSize(FontAwesomeIcon.EllipsisV);
+        var pauseButtonSize = SpheneUI.Icons.ButtonSize(pauseIcon);
+        var menuButtonSize = SpheneUI.Icons.ButtonSize(FontAwesomeIcon.EllipsisV);
 
-        var userCogButtonSize = _uiSharedService.GetIconSize(FontAwesomeIcon.UsersCog);
+        var userCogButtonSize = SpheneUI.Icons.Size(FontAwesomeIcon.UsersCog);
 
         var individualSoundsDisabled = _groupFullInfoDto.GroupUserPermissions.IsDisableSounds();
         var individualAnimDisabled = _groupFullInfoDto.GroupUserPermissions.IsDisableAnimations();
         var individualVFXDisabled = _groupFullInfoDto.GroupUserPermissions.IsDisableVFX();
 
         // Use container-relative positioning for buttons
-        var containerWidth = UiSharedService.BoundedContentAvailX();
+        var containerWidth = SpheneUI.Controls.BoundedAvailX();
         var actualWindowEndX = ImGui.GetCursorPosX() + containerWidth;
         
         var menuButtonOffset = actualWindowEndX - menuButtonSize.X;
         ImGui.SameLine(menuButtonOffset);
         
-        using var menuButtonColor = ImRaii.PushColor(ImGuiCol.Button, SpheneCustomTheme.CurrentTheme.CompactSyncshellButton);
-        using var menuButtonHoveredColor = ImRaii.PushColor(ImGuiCol.ButtonHovered, SpheneCustomTheme.CurrentTheme.CompactSyncshellButtonHovered);
-        using var menuButtonActiveColor = ImRaii.PushColor(ImGuiCol.ButtonActive, SpheneCustomTheme.CurrentTheme.CompactSyncshellButtonActive);
+        using var menuButtonColor = ImRaii.PushColor(ImGuiCol.Button, SpheneTheme.Current.CompactSyncshellButton);
+        using var menuButtonHoveredColor = ImRaii.PushColor(ImGuiCol.ButtonHovered, SpheneTheme.Current.CompactSyncshellButtonHovered);
+        using var menuButtonActiveColor = ImRaii.PushColor(ImGuiCol.ButtonActive, SpheneTheme.Current.CompactSyncshellButtonActive);
         
-        if (_uiSharedService.IconButton(FontAwesomeIcon.EllipsisV, menuButtonSize.Y, null, null, menuButtonSize.X, ButtonStyleKeys.GroupSyncshell_Menu))
+        if (SpheneUI.Icons.Button(FontAwesomeIcon.EllipsisV, menuButtonSize.Y, null, null, menuButtonSize.X, ButtonStyleKeys.GroupSyncshell_Menu))
         {
             ImGui.OpenPopup("User Flyout Menu");
         }
-        using (SpheneCustomTheme.ApplyContextMenuTheme())
+        using (SpheneUI.Theme.ContextMenuScope())
         {
-            if (SpheneWindowChrome.BeginStyledPopup("User Flyout Menu"))
+            if (SpheneUI.Popups.BeginStyled("User Flyout Menu"))
             {
                 using (ImRaii.PushId($"buttons-{_id}")) DrawMenu(_menuWidth);
                 _menuWidth = ImGui.GetWindowContentRegionMax().X - ImGui.GetWindowContentRegionMin().X;
-                SpheneWindowChrome.EndStyledPopup();
+                SpheneUI.Popups.EndStyled();
             }
             else
             {
@@ -441,11 +440,11 @@ public class DrawFolderGroup : DrawFolderBase
         ImGui.SameLine(pauseButtonOffset);
         
         // Draw pause button with brighter blue color styling
-        using var pauseButtonColor = ImRaii.PushColor(ImGuiCol.Button, SpheneCustomTheme.CurrentTheme.CompactSyncshellButton);
-        using var pauseButtonHoveredColor = ImRaii.PushColor(ImGuiCol.ButtonHovered, SpheneCustomTheme.CurrentTheme.CompactSyncshellButtonHovered);
-        using var pauseButtonActiveColor = ImRaii.PushColor(ImGuiCol.ButtonActive, SpheneCustomTheme.CurrentTheme.CompactSyncshellButtonActive);
+        using var pauseButtonColor = ImRaii.PushColor(ImGuiCol.Button, SpheneTheme.Current.CompactSyncshellButton);
+        using var pauseButtonHoveredColor = ImRaii.PushColor(ImGuiCol.ButtonHovered, SpheneTheme.Current.CompactSyncshellButtonHovered);
+        using var pauseButtonActiveColor = ImRaii.PushColor(ImGuiCol.ButtonActive, SpheneTheme.Current.CompactSyncshellButtonActive);
         
-        if (_uiSharedService.IconButton(pauseIcon, pauseButtonSize.Y, null, null, pauseButtonSize.X, ButtonStyleKeys.GroupSyncshell_Pause))
+        if (SpheneUI.Icons.Button(pauseIcon, pauseButtonSize.Y, null, null, pauseButtonSize.X, ButtonStyleKeys.GroupSyncshell_Pause))
         {
             var perm = _groupFullInfoDto.GroupUserPermissions;
             perm.SetPaused(!perm.IsPaused());
@@ -458,53 +457,53 @@ public class DrawFolderGroup : DrawFolderBase
 
         ImGui.AlignTextToFramePadding();
 
-        _uiSharedService.IconText(FontAwesomeIcon.UsersCog, (_groupFullInfoDto.GroupPermissions.IsPreferDisableAnimations() != individualAnimDisabled
+        SpheneUI.Icons.Icon(FontAwesomeIcon.UsersCog, (_groupFullInfoDto.GroupPermissions.IsPreferDisableAnimations() != individualAnimDisabled
             || _groupFullInfoDto.GroupPermissions.IsPreferDisableSounds() != individualSoundsDisabled
             || _groupFullInfoDto.GroupPermissions.IsPreferDisableVFX() != individualVFXDisabled) ? ImGuiColors.DalamudYellow : null);
         if (ImGui.IsItemHovered())
         {
-            using (SpheneCustomTheme.ApplyTooltipTheme())
+            using (SpheneUI.Theme.TooltipScope())
             {
                 ImGui.BeginTooltip();
 
-                ImGui.TextUnformatted("Syncshell Permissions");
+                SpheneUI.Text.Plain("Syncshell Permissions");
                 ImGuiHelpers.ScaledDummy(2f);
 
-                _uiSharedService.BooleanToColoredIcon(!individualSoundsDisabled, inline: false);
+                SpheneUI.Icons.BoolIcon(!individualSoundsDisabled, inline: false);
                 ImGui.SameLine(40 * ImGuiHelpers.GlobalScale);
                 ImGui.AlignTextToFramePadding();
-                ImGui.TextUnformatted("Sound Sync");
+                SpheneUI.Text.Plain("Sound Sync");
 
-                _uiSharedService.BooleanToColoredIcon(!individualAnimDisabled, inline: false);
+                SpheneUI.Icons.BoolIcon(!individualAnimDisabled, inline: false);
                 ImGui.SameLine(40 * ImGuiHelpers.GlobalScale);
                 ImGui.AlignTextToFramePadding();
-                ImGui.TextUnformatted("Animation Sync");
+                SpheneUI.Text.Plain("Animation Sync");
 
-                _uiSharedService.BooleanToColoredIcon(!individualVFXDisabled, inline: false);
+                SpheneUI.Icons.BoolIcon(!individualVFXDisabled, inline: false);
                 ImGui.SameLine(40 * ImGuiHelpers.GlobalScale);
                 ImGui.AlignTextToFramePadding();
-                ImGui.TextUnformatted("VFX Sync");
+                SpheneUI.Text.Plain("VFX Sync");
 
                 ImGui.Separator();
 
                 ImGuiHelpers.ScaledDummy(2f);
-                ImGui.TextUnformatted("Suggested Permissions");
+                SpheneUI.Text.Plain("Suggested Permissions");
                 ImGuiHelpers.ScaledDummy(2f);
 
-                _uiSharedService.BooleanToColoredIcon(!_groupFullInfoDto.GroupPermissions.IsPreferDisableSounds(), inline: false);
+                SpheneUI.Icons.BoolIcon(!_groupFullInfoDto.GroupPermissions.IsPreferDisableSounds(), inline: false);
                 ImGui.SameLine(40 * ImGuiHelpers.GlobalScale);
                 ImGui.AlignTextToFramePadding();
-                ImGui.TextUnformatted("Sound Sync");
+                SpheneUI.Text.Plain("Sound Sync");
 
-                _uiSharedService.BooleanToColoredIcon(!_groupFullInfoDto.GroupPermissions.IsPreferDisableAnimations(), inline: false);
+                SpheneUI.Icons.BoolIcon(!_groupFullInfoDto.GroupPermissions.IsPreferDisableAnimations(), inline: false);
                 ImGui.SameLine(40 * ImGuiHelpers.GlobalScale);
                 ImGui.AlignTextToFramePadding();
-                ImGui.TextUnformatted("Animation Sync");
+                SpheneUI.Text.Plain("Animation Sync");
 
-                _uiSharedService.BooleanToColoredIcon(!_groupFullInfoDto.GroupPermissions.IsPreferDisableVFX(), inline: false);
+                SpheneUI.Icons.BoolIcon(!_groupFullInfoDto.GroupPermissions.IsPreferDisableVFX(), inline: false);
                 ImGui.SameLine(40 * ImGuiHelpers.GlobalScale);
                 ImGui.AlignTextToFramePadding();
-                ImGui.TextUnformatted("VFX Sync");
+                SpheneUI.Text.Plain("VFX Sync");
 
                 ImGui.EndTooltip();
             }

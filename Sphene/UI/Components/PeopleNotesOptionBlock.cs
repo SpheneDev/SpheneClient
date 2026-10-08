@@ -1,5 +1,6 @@
 using Dalamud.Bindings.ImGui;
 using Sphene.SpheneConfiguration;
+using Sphene.UI.Design;
 
 namespace Sphene.UI.Components;
 
@@ -10,8 +11,8 @@ public static class PeopleNotesOptionBlock
         ImGui.PushID(blockId);
         try
         {
-            UiSharedService.DrawToggle("Overwrite existing labels", ref overwriteExistingLabels);
-            uiShared.DrawHelpText("When enabled, importing notes replaces existing labels for matching users. When disabled, only empty labels are filled.");
+            SpheneUI.Controls.Toggle("Overwrite existing labels", ref overwriteExistingLabels);
+            SpheneUI.Controls.HelpText("When enabled, importing notes replaces existing labels for matching users. When disabled, only empty labels are filled.");
         }
         finally
         {
@@ -25,13 +26,13 @@ public static class PeopleNotesOptionBlock
         try
         {
             var openPopupOnAddition = configService.Current.OpenPopupOnAdd;
-            if (UiSharedService.DrawToggle("Open Notes Popup on user addition", ref openPopupOnAddition))
+            if (SpheneUI.Controls.Toggle("Open Notes Popup on user addition", ref openPopupOnAddition))
             {
                 configService.Current.OpenPopupOnAdd = openPopupOnAddition;
                 configService.Save();
             }
 
-            uiShared.DrawHelpText("When enabled, the notes popup opens automatically after adding a new user.");
+            SpheneUI.Controls.HelpText("When enabled, the notes popup opens automatically after adding a new user.");
         }
         finally
         {
@@ -45,13 +46,13 @@ public static class PeopleNotesOptionBlock
         try
         {
             var autoPopulateNotes = configService.Current.AutoPopulateEmptyNotesFromCharaName;
-            if (UiSharedService.DrawToggle("Automatically populate notes using player names", ref autoPopulateNotes))
+            if (SpheneUI.Controls.Toggle("Automatically populate notes using player names", ref autoPopulateNotes))
             {
                 configService.Current.AutoPopulateEmptyNotesFromCharaName = autoPopulateNotes;
                 configService.Save();
             }
 
-            uiShared.DrawHelpText("When enabled, empty notes are automatically filled with the detected player name.");
+            SpheneUI.Controls.HelpText("When enabled, empty notes are automatically filled with the detected player name.");
         }
         finally
         {

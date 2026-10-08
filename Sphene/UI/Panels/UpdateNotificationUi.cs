@@ -10,6 +10,7 @@ using Sphene.Services.Mediator;
 using Microsoft.Extensions.Logging;
 using System.Numerics;
 using System.Diagnostics;
+using Sphene.UI.Design;
 
 namespace Sphene.UI.Panels;
 
@@ -54,67 +55,68 @@ public class UpdateNotificationUi : WindowMediatorSubscriberBase
         
         if (_uiShared.IsInGpose) return;
 
-        var updateKind = _updateInfo.IsTestBuildUpdate ? "Testbuild Update" : "Update";
-        var latestVersionLabel = _updateInfo.IsTestBuildUpdate ? "Latest Testbuild Version:" : "Latest Version:";
-        
-        // Header
-        _uiShared.BigText($"{updateKind} Available!");
-        ImGui.Separator();
-        
-        // Version info
-        UiSharedService.TextWrapped(_updateInfo.IsTestBuildUpdate
-            ? "A newer testbuild version of Sphene is available for download."
-            : "A new version of Sphene is available for download.");
-        ImGui.Spacing();
-        
-        using (var table = ImRaii.Table("VersionTable", 2, ImGuiTableFlags.None))
+        if (SpheneUI.Layout.BeginScrollArea("update-content", ImGui.GetContentRegionAvail(),
+                contentPadding: Vector2.Zero))
         {
-            if (table)
-            {
-                ImGui.TableSetupColumn("Label", ImGuiTableColumnFlags.WidthFixed, 120);
-                ImGui.TableSetupColumn("Version", ImGuiTableColumnFlags.WidthStretch);
-                
-                ImGui.TableNextRow();
-                ImGui.TableNextColumn();
-                ImGui.Text("Current Version:");
-                ImGui.TableNextColumn();
-                ImGui.TextColored(ImGuiColors.DalamudYellow, _updateInfo.CurrentVersion.ToString());
-                
-                ImGui.TableNextRow();
-                ImGui.TableNextColumn();
-                ImGui.Text(latestVersionLabel);
-                ImGui.TableNextColumn();
-                ImGui.TextColored(ImGuiColors.HealerGreen, _updateInfo.LatestVersion.ToString());
-            }
+            DrawUpdateContent();
         }
-        
-        ImGui.Spacing();
-        
-        
-        ImGui.Spacing();
-        
+        SpheneUI.Layout.EndScrollArea();
+    }
+
+    private void DrawUpdateContent()
+    {
+        var updateKind = _updateInfo!.IsTestBuildUpdate ? "Testbuild Update" : "Update";
+        var latestVersionLabel = _updateInfo.IsTestBuildUpdate ? "Latest Testbuild Version:" : "Latest Version:";
+
+        // Header
+        SpheneUI.Text.PageHeader($"{updateKind} Available!",
+            _updateInfo.IsTestBuildUpdate
+                ? "A newer testbuild version of Sphene is available for download."
+                : "A new version of Sphene is available for download.");
+
+        // Version info
+        SpheneUI.Layout.SectionCard(() =>
+        {
+            using (var table = ImRaii.Table("VersionTable", 2, ImGuiTableFlags.None))
+            {
+                if (table)
+                {
+                    ImGui.TableSetupColumn("Label", ImGuiTableColumnFlags.WidthFixed, 120);
+                    ImGui.TableSetupColumn("Version", ImGuiTableColumnFlags.WidthStretch);
+
+                    ImGui.TableNextRow();
+                    ImGui.TableNextColumn();
+                    SpheneUI.Text.Muted("Current Version:");
+                    ImGui.TableNextColumn();
+                    SpheneUI.Text.Colored(_updateInfo.CurrentVersion.ToString(), ImGuiColors.DalamudYellow);
+
+                    ImGui.TableNextRow();
+                    ImGui.TableNextColumn();
+                    SpheneUI.Text.Muted(latestVersionLabel);
+                    ImGui.TableNextColumn();
+                    SpheneUI.Text.Colored(_updateInfo.LatestVersion.ToString(), ImGuiColors.HealerGreen);
+                }
+            }
+        });
+
         // Instructions
-        UiSharedService.ColorTextWrapped(
+        SpheneUI.Text.Wrapped(
             "To update Sphene, please use the Dalamud Plugin Installer. " +
-            "Go to System → Dalamud Plugins → Installed Plugins and look for available updates.", 
-            ImGuiColors.DalamudWhite);
-        
-        ImGui.Spacing();
-        
+            "Go to System → Dalamud Plugins → Installed Plugins and look for available updates.");
+
         // Delay warning
-        UiSharedService.ColorTextWrapped(
-            "Note: Dalamud may take 2-3 minutes to show new updates in its repository. " +
-            "If you don't see the update immediately, please wait a moment and check again.", 
-            ImGuiColors.DalamudYellow);
-        
-        ImGui.Spacing();
-        ImGui.Separator();
+        SpheneUI.Layout.Callout(
+            "Dalamud may take 2-3 minutes to show new updates in its repository. " +
+            "If you don't see the update immediately, please wait a moment and check again.",
+            FontAwesomeIcon.InfoCircle, ImGuiColors.DalamudYellow);
+
+        SpheneUI.Layout.Separator();
         
         // Buttons
         
         if (!string.IsNullOrEmpty(_updateInfo.DownloadUrl))
         {
-            if (_uiShared.IconTextButton(FontAwesomeIcon.Download, "Open Plugin Installer"))
+            if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Download, "Open Plugin Installer"))
             {
                 try
                 {
@@ -131,19 +133,16 @@ public class UpdateNotificationUi : WindowMediatorSubscriberBase
             ImGui.SameLine();
         }
         
-        if (_uiShared.IconTextButton(FontAwesomeIcon.Clock, "Remind Me Later"))
+        if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Clock, "Remind Me Later"))
         {
             IsOpen = false;
         }
         
         ImGui.Spacing();
-        
+
         // Footer note
-        using (var font = ImRaii.PushFont(UiBuilder.IconFont))
-        {
-            ImGui.TextColored(ImGuiColors.DalamudGrey, FontAwesomeIcon.InfoCircle.ToIconString());
-        }
+        SpheneUI.Icons.Icon(FontAwesomeIcon.InfoCircle, SpheneUI.Colors.TextMuted);
         ImGui.SameLine();
-        ImGui.TextColored(ImGuiColors.DalamudGrey, "This notification will appear again on next login if the update is still available.");
+        SpheneUI.Text.Muted("This notification will appear again on next login if the update is still available.");
     }
 }

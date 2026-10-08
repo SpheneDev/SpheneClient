@@ -17,6 +17,7 @@ using System.Numerics;
 using System.Text.Json;
 using Sphene.PlayerData.Data;
 using Sphene.SpheneConfiguration.Models;
+using Sphene.UI.Design;
 
 namespace Sphene.UI.Panels;
 
@@ -222,7 +223,8 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         var pendingAckCount = _sessionAcknowledgmentManager?.GetPendingAcknowledgments().Count ?? 0;
 
         var sidebarWidth = 210f * ImGuiHelpers.GlobalScale;
-        using (ImRaii.Child("##StatusDebugSidebar", new Vector2(sidebarWidth, 0), true))
+        if (SpheneUI.Layout.BeginScrollArea("##StatusDebugSidebar",
+                new Vector2(sidebarWidth, ImGui.GetContentRegionAvail().Y), border: true))
         {
             DrawNavEntry(StatusDebugPage.Summary, FontAwesomeIcon.ChartLine, "Summary");
             DrawNavEntry(StatusDebugPage.Pairs, FontAwesomeIcon.UserFriends, "Pairs", directPairsCount, totalRequestsCount);
@@ -231,9 +233,10 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             DrawNavEntry(StatusDebugPage.Diagnostics, FontAwesomeIcon.Stethoscope, "Diagnostics");
             DrawNavEntry(StatusDebugPage.Logs, FontAwesomeIcon.Stream, "Logs");
         }
+        SpheneUI.Layout.EndScrollArea();
 
         ImGui.SameLine();
-        using (ImRaii.Child("##StatusDebugContent", new Vector2(0, 0), false))
+        if (SpheneUI.Layout.BeginScrollArea("##StatusDebugContent", ImGui.GetContentRegionAvail()))
         {
             switch (_page)
             {
@@ -257,6 +260,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                     break;
             }
         }
+        SpheneUI.Layout.EndScrollArea();
     }
 
     private void DrawNavEntry(StatusDebugPage page, FontAwesomeIcon icon, string label, int badgeA = 0, int badgeB = 0)
@@ -293,12 +297,12 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         ImGui.SetCursorScreenPos(new Vector2(cursor.X + paddingX, iconY));
         using (ImRaii.PushFont(UiBuilder.IconFont))
         {
-            ImGui.TextUnformatted(icon.ToIconString());
+            SpheneUI.Text.Plain(icon.ToIconString());
         }
 
         var textX = cursor.X + paddingX + 24f * scale;
         ImGui.SetCursorScreenPos(new Vector2(textX, iconY));
-        ImGui.TextUnformatted(label);
+        SpheneUI.Text.Plain(label);
 
         var badgeCursorX = cursor.X + rowWidth - paddingX;
         if (badgeB > 0)
@@ -354,18 +358,18 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                 {
                     DrawStatusIcon(FontAwesomeIcon.CheckCircle, ImGuiColors.HealerGreen);
                     ImGui.SameLine();
-                    UiSharedService.ColorText("Connected", ImGuiColors.HealerGreen);
+                    SpheneUI.Text.Colored("Connected", ImGuiColors.HealerGreen);
                 }
                 else
                 {
                     DrawStatusIcon(FontAwesomeIcon.TimesCircle, ImGuiColors.DalamudRed);
                     ImGui.SameLine();
-                    UiSharedService.ColorText("Disconnected", ImGuiColors.DalamudRed);
+                    SpheneUI.Text.Colored("Disconnected", ImGuiColors.DalamudRed);
                 }
             });
 
-            DrawSummaryRow("Server", () => ImGui.TextUnformatted(_apiController.ServerInfo.ShardName ?? "Not connected"));
-            DrawSummaryRow("User UID", () => ImGui.TextUnformatted(_apiController.UID ?? "Not logged in"));
+            DrawSummaryRow("Server", () => SpheneUI.Text.Plain(_apiController.ServerInfo.ShardName ?? "Not connected"));
+            DrawSummaryRow("User UID", () => SpheneUI.Text.Plain(_apiController.UID ?? "Not logged in"));
 
             var healthStatus = _healthMonitor.GetHealthStatus();
             DrawSummaryRow("Health", () =>
@@ -374,16 +378,16 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                 {
                     DrawStatusIcon(FontAwesomeIcon.Heartbeat, ImGuiColors.HealerGreen);
                     ImGui.SameLine();
-                    UiSharedService.ColorText("Healthy", ImGuiColors.HealerGreen);
+                    SpheneUI.Text.Colored("Healthy", ImGuiColors.HealerGreen);
                 }
                 else
                 {
                     DrawStatusIcon(FontAwesomeIcon.Heartbeat, ImGuiColors.DalamudRed);
                     ImGui.SameLine();
-                    UiSharedService.ColorText("Unhealthy", ImGuiColors.DalamudRed);
+                    SpheneUI.Text.Colored("Unhealthy", ImGuiColors.DalamudRed);
                 }
                 ImGui.SameLine();
-                ImGui.TextUnformatted($"({healthStatus.ConsecutiveFailures} failures)");
+                SpheneUI.Text.Plain($"({healthStatus.ConsecutiveFailures} failures)");
             });
 
             var circuitStatus = _circuitBreaker.GetStatus();
@@ -396,17 +400,17 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                     CircuitBreakerState.Open => ImGuiColors.DalamudRed,
                     _ => ImGuiColors.DalamudWhite
                 };
-                UiSharedService.ColorText(circuitStatus.State.ToString(), stateColor);
+                SpheneUI.Text.Colored(circuitStatus.State.ToString(), stateColor);
                 ImGui.SameLine();
-                ImGui.TextUnformatted($"(failures={circuitStatus.FailureCount})");
+                SpheneUI.Text.Plain($"(failures={circuitStatus.FailureCount})");
             });
 
-            DrawSummaryRow("Pairs", () => ImGui.TextUnformatted(_pairManager.DirectPairs.Count.ToString()));
+            DrawSummaryRow("Pairs", () => SpheneUI.Text.Plain(_pairManager.DirectPairs.Count.ToString()));
             DrawSummaryRow("Pair Requests", () =>
             {
                 var incoming = _pairManager.GetInboundIndividualPairRequestsSnapshot().Count;
                 var outgoing = _pairManager.GetOutboundIndividualPairRequestsSnapshot().Count;
-                ImGui.TextUnformatted($"incoming={incoming}, outgoing={outgoing}, new={unseenInboundRequests}");
+                SpheneUI.Text.Plain($"incoming={incoming}, outgoing={outgoing}, new={unseenInboundRequests}");
             });
 
             ImGui.EndTable();
@@ -414,14 +418,14 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
 
         ImGui.Spacing();
 
-        if (ImGui.CollapsingHeader("Actions", ImGuiTreeNodeFlags.DefaultOpen))
+        if (SpheneUI.Controls.CollapsibleSection("Actions", defaultOpen: true))
         {
             DrawControlButtons();
         }
 
         ImGui.Spacing();
 
-        if (ImGui.CollapsingHeader("Health Details"))
+        if (SpheneUI.Controls.CollapsibleSection("Health Details"))
         {
             DrawHealthMonitoringSection();
         }
@@ -431,7 +435,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
     {
         ImGui.TableNextRow();
         ImGui.TableSetColumnIndex(0);
-        ImGui.TextUnformatted(key);
+        SpheneUI.Text.Plain(key);
         ImGui.TableSetColumnIndex(1);
         drawValue();
     }
@@ -441,7 +445,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         using (ImRaii.PushFont(UiBuilder.IconFont))
         using (ImRaii.PushColor(ImGuiCol.Text, color))
         {
-            ImGui.TextUnformatted(icon.ToIconString());
+            SpheneUI.Text.Plain(icon.ToIconString());
         }
     }
 
@@ -512,13 +516,13 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                 using (ImRaii.PushFont(UiBuilder.IconFont))
                 {
                     var icon = (pair.IsVisible || pair.IsMutuallyVisible) ? FontAwesomeIcon.Eye : FontAwesomeIcon.Circle;
-                    ImGui.TextUnformatted(icon.ToIconString());
+                    SpheneUI.Text.Plain(icon.ToIconString());
                 }
             }
 
             ImGui.SameLine();
             ImGui.SetCursorPosY(ImGui.GetCursorPosY() - 1f * ImGuiHelpers.GlobalScale);
-            if (ImGui.Selectable($"{pair.UserData.AliasOrUID}##pair_select_{key}", selected, ImGuiSelectableFlags.None, new Vector2(0, rowHeight)))
+            if (SpheneUI.Controls.Selectable($"{pair.UserData.AliasOrUID}##pair_select_{key}", selected, ImGuiSelectableFlags.None, new Vector2(0, rowHeight)))
             {
                 _selectedCharacterUid = key;
             }
@@ -527,16 +531,16 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
 
     private void DrawPairsPage(IReadOnlyList<Pair> inboundRequests, IReadOnlyList<Pair> outboundRequests)
     {
-        if (ImGui.CollapsingHeader("Pair Requests", ImGuiTreeNodeFlags.DefaultOpen))
+        if (SpheneUI.Controls.CollapsibleSection("Pair Requests", defaultOpen: true))
         {
-            ImGui.TextUnformatted($"Incoming: {inboundRequests.Count}");
+            SpheneUI.Text.Plain($"Incoming: {inboundRequests.Count}");
             ImGui.SameLine();
-            ImGui.TextUnformatted($"Outgoing: {outboundRequests.Count}");
+            SpheneUI.Text.Plain($"Outgoing: {outboundRequests.Count}");
             ImGui.SameLine();
-            ImGui.TextUnformatted($"New: {_pairManager.UnseenInboundIndividualPairRequestCount}");
+            SpheneUI.Text.Plain($"New: {_pairManager.UnseenInboundIndividualPairRequestCount}");
         }
 
-        if (ImGui.CollapsingHeader("Pairs", ImGuiTreeNodeFlags.DefaultOpen))
+        if (SpheneUI.Controls.CollapsibleSection("Pairs", defaultOpen: true))
         {
             DrawPairedUsersTable();
         }
@@ -548,13 +552,13 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         var selectedPair = EnsureSelectedCharacterPair(pairs);
         if (pairs.Count == 0)
         {
-            ImGui.TextUnformatted("No paired users");
+            SpheneUI.Text.Plain("No paired users");
             return;
         }
 
         if (selectedPair == null)
         {
-            ImGui.TextUnformatted("No character selected");
+            SpheneUI.Text.Plain("No character selected");
             return;
         }
 
@@ -570,10 +574,10 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             using (ImRaii.Child("##CharacterDataPairList", new Vector2(0, headerHeight), true))
             {
                 ImGui.AlignTextToFramePadding();
-                ImGui.TextUnformatted("Pairs");
+                SpheneUI.Text.Plain("Pairs");
                 ImGui.SameLine();
-                UiSharedService.ColorText($"({pairs.Count})", ImGuiColors.DalamudGrey);
-                ImGui.Separator();
+                SpheneUI.Text.Colored($"({pairs.Count})", ImGuiColors.DalamudGrey);
+                SpheneUI.Layout.Separator();
 
                 using (ImRaii.Child("##CharacterDataPairListScroll", new Vector2(0, 0), false))
                 {
@@ -590,7 +594,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             ImGui.EndTable();
         }
 
-        ImGui.Separator();
+        SpheneUI.Layout.Separator();
 
         using var tabBar = ImRaii.TabBar("##CharacterDataTabs");
         if (!tabBar)
@@ -643,7 +647,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         var pairs = BuildCharacterDataPairsSnapshot();
         if (pairs.Count == 0)
         {
-            ImGui.TextUnformatted("No paired users");
+            SpheneUI.Text.Plain("No paired users");
             return;
         }
 
@@ -664,7 +668,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             ImGui.TableNextRow();
 
             ImGui.TableSetColumnIndex(0);
-            ImGui.TextUnformatted(pair.UserData.AliasOrUID);
+            SpheneUI.Text.Plain(pair.UserData.AliasOrUID);
 
             ImGui.TableSetColumnIndex(1);
             var statusColor = pair.IndividualPairStatus switch
@@ -673,7 +677,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                 API.Data.Enum.IndividualPairStatus.OneSided => ImGuiColors.DalamudYellow,
                 _ => ImGuiColors.DalamudRed
             };
-            UiSharedService.ColorText(pair.IndividualPairStatus.ToString(), statusColor);
+            SpheneUI.Text.Colored(pair.IndividualPairStatus.ToString(), statusColor);
 
             ImGui.TableSetColumnIndex(2);
             if (pair.IsOnline)
@@ -695,7 +699,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                 _ => ImGuiColors.DalamudGrey
             };
             DrawStatusIcon(FontAwesomeIcon.Eye, incomingColor);
-            UiSharedService.AttachToolTip($"IN:{incoming.Outcome}"
+            SpheneUI.AttachTooltip($"IN:{incoming.Outcome}"
                                           + (incoming.Hash != null ? $" hash={incoming.Hash[..Math.Min(8, incoming.Hash.Length)]}" : string.Empty)
                                           + (incoming.Outcome == Pair.AckV3Outcome.Fail ? $"{Environment.NewLine}{incoming.ErrorCode}{(string.IsNullOrWhiteSpace(incoming.ErrorMessage) ? string.Empty : $"{Environment.NewLine}{incoming.ErrorMessage}")}" : string.Empty));
 
@@ -703,22 +707,22 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             if (pair.HasPendingAcknowledgment)
             {
                 DrawStatusIcon(FontAwesomeIcon.Clock, ImGuiColors.DalamudYellow);
-                UiSharedService.AttachToolTip("OUT:Pending");
+                SpheneUI.AttachTooltip("OUT:Pending");
             }
             else if (pair.LastAcknowledgmentSuccess == true)
             {
                 DrawStatusIcon(FontAwesomeIcon.CheckCircle, ImGuiColors.HealerGreen);
-                UiSharedService.AttachToolTip("OUT:Success");
+                SpheneUI.AttachTooltip("OUT:Success");
             }
             else if (pair.LastAcknowledgmentSuccess == false)
             {
                 DrawStatusIcon(FontAwesomeIcon.ExclamationTriangle, ImGuiColors.DalamudRed);
-                UiSharedService.AttachToolTip($"OUT:Fail{Environment.NewLine}{pair.LastAcknowledgmentErrorCode}{(string.IsNullOrWhiteSpace(pair.LastAcknowledgmentErrorMessage) ? string.Empty : $"{Environment.NewLine}{pair.LastAcknowledgmentErrorMessage}")}");
+                SpheneUI.AttachTooltip($"OUT:Fail{Environment.NewLine}{pair.LastAcknowledgmentErrorCode}{(string.IsNullOrWhiteSpace(pair.LastAcknowledgmentErrorMessage) ? string.Empty : $"{Environment.NewLine}{pair.LastAcknowledgmentErrorMessage}")}");
             }
             else
             {
                 DrawStatusIcon(FontAwesomeIcon.Minus, ImGuiColors.DalamudGrey);
-                UiSharedService.AttachToolTip("OUT:Unknown");
+                SpheneUI.AttachTooltip("OUT:Unknown");
             }
 
         }
@@ -730,12 +734,12 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
     {
         if (_acknowledgmentManager == null || _sessionAcknowledgmentManager == null)
         {
-            ImGui.Text("Acknowledgment system not available");
+            SpheneUI.Text.Plain("Acknowledgment system not available");
             return;
         }
         
-        ImGui.Text("Acknowledgment System Status");
-        ImGui.Separator();
+        SpheneUI.Text.Plain("Acknowledgment System Status");
+        SpheneUI.Layout.Separator();
         
         // Get metrics and configuration
         var sendMetrics = _acknowledgmentManager.GetMetrics();
@@ -745,63 +749,63 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         var successRate = resultMetrics.Total > 0 ? (double)resultMetrics.Success / resultMetrics.Total * 100d : 0d;
         
         // Metrics overview
-        ImGui.Text("Metrics Overview:");
+        SpheneUI.Text.Plain("Metrics Overview:");
         ImGui.Columns(4, "AckMetrics", true);
         
-        ImGui.Text("Total Results");
+        SpheneUI.Text.Plain("Total Results");
         ImGui.NextColumn();
-        ImGui.Text("Success Rate");
+        SpheneUI.Text.Plain("Success Rate");
         ImGui.NextColumn();
-        ImGui.Text("Avg Response");
+        SpheneUI.Text.Plain("Avg Response");
         ImGui.NextColumn();
-        ImGui.Text("Pending");
+        SpheneUI.Text.Plain("Pending");
         ImGui.NextColumn();
         
         ImGui.Separator();
         
-        ImGui.Text($"{resultMetrics.Total}");
+        SpheneUI.Text.Plain($"{resultMetrics.Total}");
         ImGui.NextColumn();
-        UiSharedService.ColorText($"{successRate:F1}%", 
+        SpheneUI.Text.Colored($"{successRate:F1}%", 
             successRate > 90 ? ImGuiColors.HealerGreen : 
             successRate > 70 ? ImGuiColors.DalamudYellow : ImGuiColors.DalamudRed);
         ImGui.NextColumn();
-        ImGui.Text($"{resultMetrics.AverageResponseTimeMs:F0}ms");
+        SpheneUI.Text.Plain($"{resultMetrics.AverageResponseTimeMs:F0}ms");
         ImGui.NextColumn();
-        ImGui.Text($"{pendingAcks.Count}");
+        SpheneUI.Text.Plain($"{pendingAcks.Count}");
         ImGui.NextColumn();
         
         ImGui.Columns(1);
         ImGui.Spacing();
         
         // Configuration settings
-        if (ImGui.CollapsingHeader("Configuration"))
+        if (SpheneUI.Controls.CollapsibleSection("Configuration"))
         {
-            ImGui.Text($"Max Batch Size: {config.MaxBatchSize}");
-            ImGui.Text($"Batch Timeout: {config.BatchTimeoutMs}ms");
-            ImGui.Text($"Max Retries: {config.MaxRetryAttempts}");
-            ImGui.Text($"Default Timeout: {config.DefaultTimeoutSeconds}s");
-            ImGui.Text($"Batching Enabled: {(config.EnableBatching ? "Yes" : "No")}");
-            ImGui.Text($"Auto Retry Enabled: {(config.EnableAutoRetry ? "Yes" : "No")}");
+            SpheneUI.Text.Plain($"Max Batch Size: {config.MaxBatchSize}");
+            SpheneUI.Text.Plain($"Batch Timeout: {config.BatchTimeoutMs}ms");
+            SpheneUI.Text.Plain($"Max Retries: {config.MaxRetryAttempts}");
+            SpheneUI.Text.Plain($"Default Timeout: {config.DefaultTimeoutSeconds}s");
+            SpheneUI.Text.Plain($"Batching Enabled: {(config.EnableBatching ? "Yes" : "No")}");
+            SpheneUI.Text.Plain($"Auto Retry Enabled: {(config.EnableAutoRetry ? "Yes" : "No")}");
         }
         
         // Pending acknowledgments table
-        if (ImGui.CollapsingHeader("Pending Acknowledgments"))
+        if (SpheneUI.Controls.CollapsibleSection("Pending Acknowledgments"))
         {
             if (pendingAcks.Count == 0)
             {
-                ImGui.Text("No pending acknowledgments");
+                SpheneUI.Text.Plain("No pending acknowledgments");
             }
             else
             {
                 ImGui.Columns(4, "PendingAcks", true);
                 
-                ImGui.Text("User");
+                SpheneUI.Text.Plain("User");
                 ImGui.NextColumn();
-                ImGui.Text("Ack Key");
+                SpheneUI.Text.Plain("Ack Key");
                 ImGui.NextColumn();
-                ImGui.Text("Status");
+                SpheneUI.Text.Plain("Status");
                 ImGui.NextColumn();
-                ImGui.Text("Actions");
+                SpheneUI.Text.Plain("Actions");
                 ImGui.NextColumn();
                 
                 ImGui.Separator();
@@ -814,9 +818,9 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                     var pair = _pairManager.GetPairByUID(userKey);
                     var outgoing = pair?.GetOutgoingAckV3State();
                     
-                    ImGui.TextUnformatted(displayName);
+                    SpheneUI.Text.Plain(displayName);
                     ImGui.NextColumn();
-                    ImGui.TextUnformatted(ackId.Length > 16 ? $"{ackId[..16]}..." : ackId);
+                    SpheneUI.Text.Plain(ackId.Length > 16 ? $"{ackId[..16]}..." : ackId);
                     ImGui.NextColumn();
 
                     if (outgoing.HasValue)
@@ -829,20 +833,20 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                             Pair.AckV3Outcome.Fail => ImGuiColors.DalamudRed,
                             _ => ImGuiColors.DalamudGrey
                         };
-                        UiSharedService.ColorText(state.Outcome.ToString(), statusColor);
+                        SpheneUI.Text.Colored(state.Outcome.ToString(), statusColor);
                         if (state.Outcome == Pair.AckV3Outcome.Fail)
                         {
-                            UiSharedService.AttachToolTip($"{state.ErrorCode}{(string.IsNullOrWhiteSpace(state.ErrorMessage) ? string.Empty : $"{Environment.NewLine}{state.ErrorMessage}")}");
+                            SpheneUI.AttachTooltip($"{state.ErrorCode}{(string.IsNullOrWhiteSpace(state.ErrorMessage) ? string.Empty : $"{Environment.NewLine}{state.ErrorMessage}")}");
                         }
                     }
                     else
                     {
-                        ImGui.TextUnformatted("-");
+                        SpheneUI.Text.Plain("-");
                     }
                     ImGui.NextColumn();
                     
                     ImGui.PushID($"clear_{userKey}");
-                    if (ImGui.Button("Clear"))
+                    if (SpheneUI.Controls.Button("Clear"))
                     {
                         var user = new UserData(userKey);
                         var removed = _sessionAcknowledgmentManager.RemovePendingAcknowledgment(user, ackId);
@@ -859,7 +863,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                     
                     ImGui.SameLine();
                     ImGui.PushID($"timeout_{userKey}");
-                    if (ImGui.Button("Mark Timeout"))
+                    if (SpheneUI.Controls.Button("Mark Timeout"))
                     {
                         _sessionAcknowledgmentManager.ProcessTimeoutAcknowledgment(ackId);
                         LogCommunication($"[DEBUG] Marked acknowledgment as timeout for {userKey}", "ACK");
@@ -874,28 +878,28 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         }
         
         // Error statistics
-        if (ImGui.CollapsingHeader("Error Statistics"))
+        if (SpheneUI.Controls.CollapsibleSection("Error Statistics"))
         {
             if (resultMetrics.ErrorCounts.Count == 0)
             {
-                ImGui.Text("No errors recorded");
+                SpheneUI.Text.Plain("No errors recorded");
             }
             else
             {
                 ImGui.Columns(2, "ErrorStats", true);
                 
-                ImGui.Text("Error Type");
+                SpheneUI.Text.Plain("Error Type");
                 ImGui.NextColumn();
-                ImGui.Text("Count");
+                SpheneUI.Text.Plain("Count");
                 ImGui.NextColumn();
                 
                 ImGui.Separator();
                 
                 foreach (var error in resultMetrics.ErrorCounts.OrderByDescending(k => k.Value))
                 {
-                    ImGui.Text(error.Key.ToString());
+                    SpheneUI.Text.Plain(error.Key.ToString());
                     ImGui.NextColumn();
-                    UiSharedService.ColorText($"{error.Value}", ImGuiColors.DalamudRed);
+                    SpheneUI.Text.Colored($"{error.Value}", ImGuiColors.DalamudRed);
                     ImGui.NextColumn();
                 }
                 
@@ -904,19 +908,19 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         }
         
         // Priority statistics
-        if (ImGui.CollapsingHeader("Priority Statistics"))
+        if (SpheneUI.Controls.CollapsibleSection("Priority Statistics"))
         {
             if (sendMetrics.PriorityCounts.Count == 0)
             {
-                ImGui.Text("No priority data available");
+                SpheneUI.Text.Plain("No priority data available");
             }
             else
             {
                 ImGui.Columns(2, "PriorityStats", true);
                 
-                ImGui.Text("Priority");
+                SpheneUI.Text.Plain("Priority");
                 ImGui.NextColumn();
-                ImGui.Text("Count");
+                SpheneUI.Text.Plain("Count");
                 ImGui.NextColumn();
                 
                 ImGui.Separator();
@@ -931,9 +935,9 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                         _ => ImGuiColors.DalamudWhite
                     };
                     
-                    UiSharedService.ColorText(priority.Key.ToString(), color);
+                    SpheneUI.Text.Colored(priority.Key.ToString(), color);
                     ImGui.NextColumn();
-                    ImGui.Text($"{priority.Value}");
+                    SpheneUI.Text.Plain($"{priority.Value}");
                     ImGui.NextColumn();
                 }
                 
@@ -944,34 +948,34 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
     
     private void DrawControlButtons()
     {
-        ImGui.Text("Debug Controls:");
+        SpheneUI.Text.Plain("Debug Controls:");
         
-        if (ImGui.Button("Force Reconnect"))
+        if (SpheneUI.Controls.Button("Force Reconnect"))
         {
             LogCommunication("[DEBUG] Force reconnect triggered");
             _ = _apiController.CreateConnectionsAsync();
         }
         
         ImGui.SameLine();
-        if (ImGui.Button("Refresh Pairs"))
+        if (SpheneUI.Controls.Button("Refresh Pairs"))
         {
             LogCommunication("[DEBUG] Pair refresh triggered");
             _ = _apiController.CreateConnectionsAsync();
         }
         
         ImGui.SameLine();
-        if (ImGui.Button("Clear Log"))
+        if (SpheneUI.Controls.Button("Clear Log"))
         {
             ClearDebugLog();
         }
 
         ImGui.Spacing();
-        ImGui.Text("Disconnect Simulation:");
+        SpheneUI.Text.Plain("Disconnect Simulation:");
         _simulatedDisconnectSeconds = Math.Clamp(_simulatedDisconnectSeconds, 1, 300);
         ImGui.SetNextItemWidth(140f * ImGuiHelpers.GlobalScale);
-        ImGui.SliderInt("Duration (seconds)##DisconnectSimulationDuration", ref _simulatedDisconnectSeconds, 1, 300);
+        SpheneUI.Controls.SliderInt("Duration (seconds)##DisconnectSimulationDuration", ref _simulatedDisconnectSeconds, 1, 300);
 
-        if (ImGui.Button("Simulate Real Disconnect"))
+        if (SpheneUI.Controls.Button("Simulate Real Disconnect"))
         {
             LogCommunication($"[DEBUG] Simulating real disconnect for {_simulatedDisconnectSeconds}s");
             _ = _apiController.SimulateDisconnectForTestingAsync(TimeSpan.FromSeconds(_simulatedDisconnectSeconds));
@@ -980,37 +984,37 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         if (_apiController.IsDisconnectSimulationRunning)
         {
             ImGui.SameLine();
-            UiSharedService.ColorText("Simulation running...", ImGuiColors.DalamudYellow);
+            SpheneUI.Text.Colored("Simulation running...", ImGuiColors.DalamudYellow);
         }
     }
     
     private void DrawHealthMonitoringSection()
     {
-        ImGui.Text("Connection Health Monitoring:");
+        SpheneUI.Text.Plain("Connection Health Monitoring:");
         
         var healthStatus = _healthMonitor.GetHealthStatus();
         var circuitStatus = _circuitBreaker.GetStatus();
         
         // Health Monitor Status
-        ImGui.Text("Health Status:");
+        SpheneUI.Text.Plain("Health Status:");
         ImGui.SameLine();
         if (healthStatus.IsHealthy)
         {
-            UiSharedService.ColorText("Healthy", ImGuiColors.HealerGreen);
+            SpheneUI.Text.Colored("Healthy", ImGuiColors.HealerGreen);
         }
         else
         {
-            UiSharedService.ColorText("Unhealthy", ImGuiColors.DalamudRed);
+            SpheneUI.Text.Colored("Unhealthy", ImGuiColors.DalamudRed);
         }
         
-        ImGui.Text($"Consecutive Failures: {healthStatus.ConsecutiveFailures}");
-        ImGui.Text($"Time Since Last Success: {healthStatus.TimeSinceLastSuccess:hh\\:mm\\:ss}");
-        ImGui.Text($"Last Health Check: {healthStatus.LastHealthCheck:HH:mm:ss}");
+        SpheneUI.Text.Plain($"Consecutive Failures: {healthStatus.ConsecutiveFailures}");
+        SpheneUI.Text.Plain($"Time Since Last Success: {healthStatus.TimeSinceLastSuccess:hh\\:mm\\:ss}");
+        SpheneUI.Text.Plain($"Last Health Check: {healthStatus.LastHealthCheck:HH:mm:ss}");
         
         ImGui.Spacing();
         
         // Circuit Breaker Status
-        ImGui.Text("Circuit Breaker:");
+        SpheneUI.Text.Plain("Circuit Breaker:");
         ImGui.SameLine();
         var stateColor = circuitStatus.State switch
         {
@@ -1019,23 +1023,23 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             CircuitBreakerState.Open => ImGuiColors.DalamudRed,
             _ => ImGuiColors.DalamudWhite
         };
-        UiSharedService.ColorText(circuitStatus.State.ToString(), stateColor);
+        SpheneUI.Text.Colored(circuitStatus.State.ToString(), stateColor);
         
-        ImGui.Text($"Failure Count: {circuitStatus.FailureCount}");
+        SpheneUI.Text.Plain($"Failure Count: {circuitStatus.FailureCount}");
         if (circuitStatus.LastFailureTime != DateTime.MinValue)
         {
-            ImGui.Text($"Last Failure: {circuitStatus.LastFailureTime:HH:mm:ss}");
+            SpheneUI.Text.Plain($"Last Failure: {circuitStatus.LastFailureTime:HH:mm:ss}");
         }
         
         if (circuitStatus.State == CircuitBreakerState.HalfOpen)
         {
-            ImGui.Text($"Half-Open Attempts: {circuitStatus.HalfOpenAttempts}");
+            SpheneUI.Text.Plain($"Half-Open Attempts: {circuitStatus.HalfOpenAttempts}");
         }
         
         ImGui.Spacing();
         
         // Reset buttons
-        if (ImGui.Button("Reset Circuit Breaker"))
+        if (SpheneUI.Controls.Button("Reset Circuit Breaker"))
         {
             _circuitBreaker.Reset();
             LogCommunication("[DEBUG] Circuit breaker manually reset");
@@ -1045,19 +1049,19 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
     private static void DrawCharacterDebugLogs(Pair selectedPair)
     {
         var logText = GetApplyDebugText(selectedPair);
-        if (ImGui.Button($"Copy##copy_apply_debug_{GetPairKey(selectedPair)}"))
+        if (SpheneUI.Controls.Button($"Copy##copy_apply_debug_{GetPairKey(selectedPair)}"))
         {
             ImGui.SetClipboardText(logText);
         }
         ImGui.SameLine();
-        if (ImGui.Button($"Clear##clear_apply_debug_{GetPairKey(selectedPair)}"))
+        if (SpheneUI.Controls.Button($"Clear##clear_apply_debug_{GetPairKey(selectedPair)}"))
         {
             selectedPair.ClearApplyDebug();
         }
 
         var availableSize = ImGui.GetContentRegionAvail();
         using var child = ImRaii.Child("CharacterDebugLogContent", availableSize, true);
-        if (child) ImGui.TextUnformatted(logText);
+        if (child) SpheneUI.Text.Plain(logText);
     }
 
     private static string GetApplyDebugText(Pair pair)
@@ -1074,10 +1078,10 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
     private static void DrawCharacterHeaderSummary(Pair pair)
     {
         var uid = GetPairKey(pair);
-        ImGui.TextUnformatted(pair.UserData.AliasOrUID);
+        SpheneUI.Text.Plain(pair.UserData.AliasOrUID);
         ImGui.SameLine();
-        UiSharedService.ColorText($"({uid})", ImGuiColors.DalamudGrey);
-        ImGui.Separator();
+        SpheneUI.Text.Colored($"({uid})", ImGuiColors.DalamudGrey);
+        SpheneUI.Layout.Separator();
 
         if (ImGui.BeginTable("##CharacterHeaderSummaryTable", 2, ImGuiTableFlags.SizingStretchProp))
         {
@@ -1090,19 +1094,19 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                 {
                     DrawStatusIcon(FontAwesomeIcon.Eye, ImGuiColors.ParsedGreen);
                     ImGui.SameLine();
-                    UiSharedService.ColorText("Visible", ImGuiColors.ParsedGreen);
+                    SpheneUI.Text.Colored("Visible", ImGuiColors.ParsedGreen);
                 }
                 else if (pair.IsOnline)
                 {
                     DrawStatusIcon(FontAwesomeIcon.Circle, ImGuiColors.HealerGreen);
                     ImGui.SameLine();
-                    UiSharedService.ColorText("Online", ImGuiColors.HealerGreen);
+                    SpheneUI.Text.Colored("Online", ImGuiColors.HealerGreen);
                 }
                 else
                 {
                     DrawStatusIcon(FontAwesomeIcon.Circle, ImGuiColors.DalamudGrey);
                     ImGui.SameLine();
-                    UiSharedService.ColorText("Offline", ImGuiColors.DalamudGrey);
+                    SpheneUI.Text.Colored("Offline", ImGuiColors.DalamudGrey);
                 }
             });
 
@@ -1114,14 +1118,14 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                     API.Data.Enum.IndividualPairStatus.OneSided => ImGuiColors.DalamudYellow,
                     _ => ImGuiColors.DalamudRed
                 };
-                UiSharedService.ColorText(pair.IndividualPairStatus.ToString(), statusColor);
+                SpheneUI.Text.Colored(pair.IndividualPairStatus.ToString(), statusColor);
             });
 
-            DrawSummaryRow("Groups", () => ImGui.TextUnformatted(pair.UserPair.Groups.Count.ToString()));
+            DrawSummaryRow("Groups", () => SpheneUI.Text.Plain(pair.UserPair.Groups.Count.ToString()));
             DrawSummaryRow("Collection", () =>
             {
                 var collectionId = pair.GetPenumbraCollectionId();
-                ImGui.TextUnformatted(collectionId == Guid.Empty ? "(none)" : collectionId.ToString());
+                SpheneUI.Text.Plain(collectionId == Guid.Empty ? "(none)" : collectionId.ToString());
             });
 
             DrawSummaryRow("Last Received", () =>
@@ -1129,18 +1133,18 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                 var hash = pair.LastReceivedCharacterDataHash;
                 if (string.IsNullOrEmpty(hash))
                 {
-                    ImGui.TextUnformatted("-");
+                    SpheneUI.Text.Plain("-");
                     return;
                 }
 
                 var shortHash = hash.Length > 10 ? hash[..10] : hash;
-                ImGui.TextUnformatted(shortHash);
-                UiSharedService.AttachToolTip(hash);
+                SpheneUI.Text.Plain(shortHash);
+                SpheneUI.AttachTooltip(hash);
             });
 
             DrawSummaryRow("Received At", () =>
             {
-                ImGui.TextUnformatted(pair.LastReceivedCharacterDataTime?.ToLocalTime().ToString("HH:mm:ss") ?? "-");
+                SpheneUI.Text.Plain(pair.LastReceivedCharacterDataTime?.ToLocalTime().ToString("HH:mm:ss") ?? "-");
             });
 
             DrawSummaryRow("Ack", () =>
@@ -1156,19 +1160,19 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                     Pair.AckV3Outcome.Fail => ImGuiColors.DalamudRed,
                     _ => ImGuiColors.DalamudGrey
                 };
-                UiSharedService.ColorText($"OUT:{outLabel}", outColor);
+                SpheneUI.Text.Colored($"OUT:{outLabel}", outColor);
                 if (outgoing.Time.HasValue)
                 {
                     ImGui.SameLine();
-                    ImGui.TextUnformatted(outgoing.Time.Value.ToLocalTime().ToString("HH:mm:ss"));
+                    SpheneUI.Text.Plain(outgoing.Time.Value.ToLocalTime().ToString("HH:mm:ss"));
                 }
                 if (outgoing.Outcome == Pair.AckV3Outcome.Fail)
                 {
-                    UiSharedService.AttachToolTip($"{outgoing.ErrorCode}{(string.IsNullOrWhiteSpace(outgoing.ErrorMessage) ? string.Empty : $"{Environment.NewLine}{outgoing.ErrorMessage}")}");
+                    SpheneUI.AttachTooltip($"{outgoing.ErrorCode}{(string.IsNullOrWhiteSpace(outgoing.ErrorMessage) ? string.Empty : $"{Environment.NewLine}{outgoing.ErrorMessage}")}");
                 }
 
                 ImGui.SameLine();
-                ImGui.TextUnformatted(" | ");
+                SpheneUI.Text.Plain(" | ");
                 ImGui.SameLine();
 
                 var inLabel = incoming.Outcome.ToString();
@@ -1179,15 +1183,15 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                     Pair.AckV3Outcome.Fail => ImGuiColors.DalamudRed,
                     _ => ImGuiColors.DalamudGrey
                 };
-                UiSharedService.ColorText($"IN:{inLabel}", inColor);
+                SpheneUI.Text.Colored($"IN:{inLabel}", inColor);
                 if (incoming.Time.HasValue)
                 {
                     ImGui.SameLine();
-                    ImGui.TextUnformatted(incoming.Time.Value.ToLocalTime().ToString("HH:mm:ss"));
+                    SpheneUI.Text.Plain(incoming.Time.Value.ToLocalTime().ToString("HH:mm:ss"));
                 }
                 if (incoming.Outcome == Pair.AckV3Outcome.Fail)
                 {
-                    UiSharedService.AttachToolTip($"{incoming.ErrorCode}{(string.IsNullOrWhiteSpace(incoming.ErrorMessage) ? string.Empty : $"{Environment.NewLine}{incoming.ErrorMessage}")}");
+                    SpheneUI.AttachTooltip($"{incoming.ErrorCode}{(string.IsNullOrWhiteSpace(incoming.ErrorMessage) ? string.Empty : $"{Environment.NewLine}{incoming.ErrorMessage}")}");
                 }
             });
 
@@ -1221,8 +1225,8 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             ImGui.EndTable();
         }
 
-        ImGui.Separator();
-        ImGui.Text("Received Created Character Data");
+        SpheneUI.Layout.Separator();
+        SpheneUI.Text.Plain("Received Created Character Data");
         DrawReceivedCharacterData(selectedPair);
     }
 
@@ -1234,29 +1238,29 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         var lastReceivedTime = pair.LastReceivedCharacterDataTime?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "-";
         var lastChangeTime = pair.LastReceivedCharacterDataChangeTime?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "-";
 
-        ImGui.TextUnformatted($"Last Received Hash: {lastReceivedHash}");
-        ImGui.TextUnformatted($"Previous Received Hash: {previousReceivedHash}");
-        ImGui.TextUnformatted($"Last Received Time: {lastReceivedTime}");
-        ImGui.TextUnformatted($"Last Change Time: {lastChangeTime}");
-        ImGui.Separator();
+        SpheneUI.Text.Plain($"Last Received Hash: {lastReceivedHash}");
+        SpheneUI.Text.Plain($"Previous Received Hash: {previousReceivedHash}");
+        SpheneUI.Text.Plain($"Last Received Time: {lastReceivedTime}");
+        SpheneUI.Text.Plain($"Last Change Time: {lastChangeTime}");
+        SpheneUI.Layout.Separator();
 
         var receivedDataJson = receivedData != null
             ? JsonSerializer.Serialize(receivedData, new JsonSerializerOptions() { WriteIndented = true })
             : "No received character data.";
 
-        if (ImGui.Button($"Copy##received_character_data_copy_{GetPairKey(pair)}"))
+        if (SpheneUI.Controls.Button($"Copy##received_character_data_copy_{GetPairKey(pair)}"))
         {
             ImGui.SetClipboardText(receivedDataJson);
         }
 
         ImGui.SameLine();
-        UiSharedService.ColorText($"{receivedDataJson.Length:n0} chars", ImGuiColors.DalamudGrey);
+        SpheneUI.Text.Colored($"{receivedDataJson.Length:n0} chars", ImGuiColors.DalamudGrey);
 
         var avail = ImGui.GetContentRegionAvail();
         using var child = ImRaii.Child($"##received_character_data_{GetPairKey(pair)}", new Vector2(0, MathF.Min(260f * ImGuiHelpers.GlobalScale, avail.Y)), true);
         if (child)
         {
-            ImGui.TextUnformatted(receivedDataJson);
+            SpheneUI.Text.Plain(receivedDataJson);
         }
     }
 
@@ -1264,11 +1268,11 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
     {
         ImGui.TableNextRow();
         ImGui.TableSetColumnIndex(0);
-        ImGui.Text(metric);
+        SpheneUI.Text.Plain(metric);
         ImGui.TableSetColumnIndex(1);
-        ImGui.Text(current);
+        SpheneUI.Text.Plain(current);
         ImGui.TableSetColumnIndex(2);
-        ImGui.Text(last ?? "-");
+        SpheneUI.Text.Plain(last ?? "-");
     }
 
     private static string FormatNullableBool(bool? value)
@@ -1288,16 +1292,16 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
 
     private void DrawPenumbraCollectionOverview(Pair selectedPair)
     {
-        ImGui.Text("Penumbra Collection Overview");
+        SpheneUI.Text.Plain("Penumbra Collection Overview");
 
         var selectedUid = selectedPair.UserData.UID;
         var collectionId = selectedPair.GetPenumbraCollectionId();
-        ImGui.TextUnformatted($"User: {selectedPair.UserData.AliasOrUID} ({selectedUid})");
-        ImGui.TextUnformatted($"Collection ID: {(collectionId == Guid.Empty ? "(none)" : collectionId.ToString())}");
-        ImGui.TextUnformatted($"Character Visible: {(selectedPair.IsVisible ? "Yes" : "No")}, Mutually Visible: {(selectedPair.IsMutuallyVisible ? "Yes" : "No")}");
+        SpheneUI.Text.Plain($"User: {selectedPair.UserData.AliasOrUID} ({selectedUid})");
+        SpheneUI.Text.Plain($"Collection ID: {(collectionId == Guid.Empty ? "(none)" : collectionId.ToString())}");
+        SpheneUI.Text.Plain($"Character Visible: {(selectedPair.IsVisible ? "Yes" : "No")}, Mutually Visible: {(selectedPair.IsMutuallyVisible ? "Yes" : "No")}");
 
         var isRefreshing = _activePenumbraRefreshInProgress.Contains(selectedUid);
-        if (ImGui.Button($"Refresh Active Paths##refresh_active_paths_{selectedUid}") && !isRefreshing)
+        if (SpheneUI.Controls.Button($"Refresh Active Paths##refresh_active_paths_{selectedUid}") && !isRefreshing)
         {
             _ = RefreshPenumbraActivePathsAsync(selectedPair);
         }
@@ -1305,20 +1309,20 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         ImGui.SameLine();
         if (isRefreshing)
         {
-            UiSharedService.ColorText("Refreshing active paths...", ImGuiColors.DalamudYellow);
+            SpheneUI.Text.Colored("Refreshing active paths...", ImGuiColors.DalamudYellow);
         }
         else if (_activePenumbraPathsUpdatedAt.TryGetValue(selectedUid, out var updatedAt))
         {
-            ImGui.TextUnformatted($"Last refresh: {updatedAt.ToLocalTime():HH:mm:ss}");
+            SpheneUI.Text.Plain($"Last refresh: {updatedAt.ToLocalTime():HH:mm:ss}");
         }
         else
         {
-            ImGui.TextUnformatted("Active paths not refreshed yet.");
+            SpheneUI.Text.Plain("Active paths not refreshed yet.");
         }
 
         if (_activePenumbraPathsErrors.TryGetValue(selectedUid, out var refreshError) && !string.IsNullOrEmpty(refreshError))
         {
-            UiSharedService.ColorTextWrapped($"Refresh error: {refreshError}", ImGuiColors.DalamudRed);
+            SpheneUI.Text.ColoredWrapped($"Refresh error: {refreshError}", ImGuiColors.DalamudRed);
         }
 
         var deliveredByPath = BuildDeliveredPathState(selectedPair.LastReceivedCharacterData);
@@ -1344,11 +1348,11 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
 
         if (activeDeliveredPaths.Count == 0)
         {
-            ImGui.TextUnformatted("No active paths delivered.");
+            SpheneUI.Text.Plain("No active paths delivered.");
             return;
         }
 
-        ImGui.TextUnformatted($"Active delivered paths: {activeDeliveredPaths.Count} | Loaded: {loadedByPath.Count} | Player Active: {playerActiveByPath.Count} | Minion Active: {minionActiveByPath.Count} | Pet Active: {petActiveByPath.Count}");
+        SpheneUI.Text.Plain($"Active delivered paths: {activeDeliveredPaths.Count} | Loaded: {loadedByPath.Count} | Player Active: {playerActiveByPath.Count} | Minion Active: {minionActiveByPath.Count} | Pet Active: {petActiveByPath.Count}");
 
         var tableAvailY = MathF.Max(200f * ImGuiHelpers.GlobalScale, ImGui.GetContentRegionAvail().Y);
         if (!ImGui.BeginTable("PenumbraCollectionOverviewTable", 9,
@@ -1398,19 +1402,19 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             DrawTrimmedTextWithTooltip(path, 96);
 
             ImGui.TableSetColumnIndex(1);
-            ImGui.TextUnformatted(deliveredState != null ? string.Join(", ", deliveredState.ObjectKinds.OrderBy(v => v, StringComparer.OrdinalIgnoreCase)) : "-");
+            SpheneUI.Text.Plain(deliveredState != null ? string.Join(", ", deliveredState.ObjectKinds.OrderBy(v => v, StringComparer.OrdinalIgnoreCase)) : "-");
 
             ImGui.TableSetColumnIndex(2);
-            ImGui.TextUnformatted(deliveredState != null ? string.Join(", ", deliveredState.Sources.OrderBy(v => v, StringComparer.OrdinalIgnoreCase)) : "-");
+            SpheneUI.Text.Plain(deliveredState != null ? string.Join(", ", deliveredState.Sources.OrderBy(v => v, StringComparer.OrdinalIgnoreCase)) : "-");
 
             ImGui.TableSetColumnIndex(3);
             if (hasDelivered)
             {
-                UiSharedService.ColorText(isDataFlagActive ? "Yes" : "No", isDataFlagActive ? ImGuiColors.HealerGreen : ImGuiColors.DalamudRed);
+                SpheneUI.Text.Colored(isDataFlagActive ? "Yes" : "No", isDataFlagActive ? ImGuiColors.HealerGreen : ImGuiColors.DalamudRed);
             }
             else
             {
-                ImGui.TextUnformatted("-");
+                SpheneUI.Text.Plain("-");
             }
 
             ImGui.TableSetColumnIndex(4);
@@ -1420,13 +1424,13 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             DrawTrimmedTextWithTooltip(string.IsNullOrEmpty(activeSource) ? "-" : activeSource, 72);
 
             ImGui.TableSetColumnIndex(6);
-            UiSharedService.ColorText(hasLoaded ? "Yes" : "No", hasLoaded ? ImGuiColors.HealerGreen : ImGuiColors.DalamudRed);
+            SpheneUI.Text.Colored(hasLoaded ? "Yes" : "No", hasLoaded ? ImGuiColors.HealerGreen : ImGuiColors.DalamudRed);
 
             ImGui.TableSetColumnIndex(7);
-            UiSharedService.ColorText(isPenumbraActive ? "Yes" : "No", isPenumbraActive ? ImGuiColors.HealerGreen : ImGuiColors.DalamudRed);
+            SpheneUI.Text.Colored(isPenumbraActive ? "Yes" : "No", isPenumbraActive ? ImGuiColors.HealerGreen : ImGuiColors.DalamudRed);
 
             ImGui.TableSetColumnIndex(8);
-            UiSharedService.ColorText(matches ? "OK" : "Diff", matches ? ImGuiColors.HealerGreen : ImGuiColors.DalamudYellow);
+            SpheneUI.Text.Colored(matches ? "OK" : "Diff", matches ? ImGuiColors.HealerGreen : ImGuiColors.DalamudYellow);
         }
 
         ImGui.EndTable();
@@ -1510,17 +1514,17 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
     {
         if (string.IsNullOrEmpty(text))
         {
-            ImGui.TextUnformatted("-");
+            SpheneUI.Text.Plain("-");
             return;
         }
 
         var display = text.Length > maxLength
             ? "..." + text[^Math.Max(1, maxLength - 3)..]
             : text;
-        ImGui.TextUnformatted(display);
+        SpheneUI.Text.Plain(display);
         if (ImGui.IsItemHovered())
         {
-            UiSharedService.AttachToolTip(text);
+            SpheneUI.AttachTooltip(text);
         }
     }
 
@@ -1641,15 +1645,15 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
 
     private void DrawActiveMismatchTracker()
     {
-        ImGui.Text("Active Mismatch Tracker");
-        ImGui.TextWrapped("Tracks paths flagged as IsActive=true in delivered data but not active in Penumbra collection. Auto-refreshes every 10 seconds.");
-        ImGui.Separator();
+        SpheneUI.Text.Plain("Active Mismatch Tracker");
+        SpheneUI.Text.Wrapped("Tracks paths flagged as IsActive=true in delivered data but not active in Penumbra collection. Auto-refreshes every 10 seconds.");
+        SpheneUI.Layout.Separator();
 
         // Filter settings
-        ImGui.Text("Filter Settings:");
+        SpheneUI.Text.Plain("Filter Settings:");
         
         var trackEquipment = _configService.Current.MismatchTrackerTrackEquipmentPaths;
-        if (ImGui.Checkbox("Track Equipment (weapon/equipment/accessory)", ref trackEquipment))
+        if (SpheneUI.Controls.Checkbox("Track Equipment (weapon/equipment/accessory)", ref trackEquipment))
         {
             _configService.Current.MismatchTrackerTrackEquipmentPaths = trackEquipment;
             _configService.Save();
@@ -1657,7 +1661,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
 
         ImGui.SameLine();
         var trackCompanions = _configService.Current.MismatchTrackerTrackMinionMountAndPetPaths;
-        if (ImGui.Checkbox("Minion/Mount/Pet", ref trackCompanions))
+        if (SpheneUI.Controls.Checkbox("Minion/Mount/Pet", ref trackCompanions))
         {
             _configService.Current.MismatchTrackerTrackMinionMountAndPetPaths = trackCompanions;
             _configService.Save();
@@ -1665,7 +1669,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         
         ImGui.SameLine();
         var trackPhyb = _configService.Current.MismatchTrackerTrackPhybFiles;
-        if (ImGui.Checkbox(".phyb", ref trackPhyb))
+        if (SpheneUI.Controls.Checkbox(".phyb", ref trackPhyb))
         {
             _configService.Current.MismatchTrackerTrackPhybFiles = trackPhyb;
             _configService.Save();
@@ -1673,7 +1677,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         
         ImGui.SameLine();
         var trackSkp = _configService.Current.MismatchTrackerTrackSkpFiles;
-        if (ImGui.Checkbox(".skp", ref trackSkp))
+        if (SpheneUI.Controls.Checkbox(".skp", ref trackSkp))
         {
             _configService.Current.MismatchTrackerTrackSkpFiles = trackSkp;
             _configService.Save();
@@ -1681,21 +1685,21 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         
         ImGui.SameLine();
         var trackPbd = _configService.Current.MismatchTrackerTrackPbdFiles;
-        if (ImGui.Checkbox(".pbd", ref trackPbd))
+        if (SpheneUI.Controls.Checkbox(".pbd", ref trackPbd))
         {
             _configService.Current.MismatchTrackerTrackPbdFiles = trackPbd;
             _configService.Save();
         }
         
-        ImGui.Separator();
+        SpheneUI.Layout.Separator();
 
-        if (ImGui.Button("Clear All Records"))
+        if (SpheneUI.Controls.Button("Clear All Records"))
         {
             _mismatchTracker.Clear();
         }
 
         ImGui.SameLine();
-        if (ImGui.Button("Reset Counters"))
+        if (SpheneUI.Controls.Button("Reset Counters"))
         {
             _mismatchTracker.ResetGlobalCounters();
         }
@@ -1709,15 +1713,15 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             .ToList();
         var (globalChecks, _) = _mismatchTracker.GetGlobalStats();
         ImGui.SameLine();
-        ImGui.Text($"| Mismatches: {records.Count} | Total Checks: {globalChecks} | Auto-refresh every 10s");
+        SpheneUI.Text.Plain($"| Mismatches: {records.Count} | Total Checks: {globalChecks} | Auto-refresh every 10s");
 
         if (records.Count == 0)
         {
-            ImGui.Text("No mismatches recorded yet.");
+            SpheneUI.Text.Plain("No mismatches recorded yet.");
             return;
         }
 
-        ImGui.Separator();
+        SpheneUI.Layout.Separator();
 
         var mismatchAvailY = MathF.Max(220f * ImGuiHelpers.GlobalScale, ImGui.GetContentRegionAvail().Y);
         if (!ImGui.BeginTable("ActiveMismatchTable", 8,
@@ -1750,7 +1754,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
 
             ImGui.TableSetColumnIndex(0);
             var displayName = GetDisplayName(record.Uid);
-            ImGui.TextUnformatted(displayName);
+            SpheneUI.Text.Plain(displayName);
 
             ImGui.TableSetColumnIndex(1);
             DrawTrimmedTextWithTooltip(record.GamePath, 100);
@@ -1762,7 +1766,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                 : globalPercentage >= 5 ? ImGuiColors.DalamudOrange 
                 : globalPercentage >= 1 ? ImGuiColors.DalamudYellow 
                 : ImGuiColors.HealerGreen;
-            UiSharedService.ColorText($"{globalPercentage:F2}%", globalColor);
+            SpheneUI.Text.Colored($"{globalPercentage:F2}%", globalColor);
 
             ImGui.TableSetColumnIndex(3);
             // Local % - mismatch count / this path's own check count
@@ -1771,19 +1775,19 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                 : localPercentage >= 25 ? ImGuiColors.DalamudOrange 
                 : localPercentage >= 10 ? ImGuiColors.DalamudYellow 
                 : ImGuiColors.HealerGreen;
-            UiSharedService.ColorText($"{localPercentage:F1}%", localColor);
+            SpheneUI.Text.Colored($"{localPercentage:F1}%", localColor);
 
             ImGui.TableSetColumnIndex(4);
-            ImGui.TextUnformatted($"{record.MismatchCount}/{record.TotalCheckCount}");
+            SpheneUI.Text.Plain($"{record.MismatchCount}/{record.TotalCheckCount}");
 
             ImGui.TableSetColumnIndex(5);
             if (record.LastSeen != DateTimeOffset.MinValue)
             {
-                ImGui.TextUnformatted(record.LastSeen.ToLocalTime().ToString("HH:mm:ss"));
+                SpheneUI.Text.Plain(record.LastSeen.ToLocalTime().ToString("HH:mm:ss"));
             }
             else
             {
-                ImGui.TextUnformatted("-");
+                SpheneUI.Text.Plain("-");
             }
 
             ImGui.TableSetColumnIndex(6);
@@ -1957,28 +1961,28 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
     
     internal void DrawLogsPanel(bool showPopupButton)
     {
-        if (ImGui.Button("Clear"))
+        if (SpheneUI.Controls.Button("Clear"))
         {
             ClearDebugLog();
         }
-        UiSharedService.AttachToolTip("Clears the in-window log buffer.");
+        SpheneUI.AttachTooltip("Clears the in-window log buffer.");
 
         ImGui.SameLine();
-        if (ImGui.Button("Copy Visible"))
+        if (SpheneUI.Controls.Button("Copy Visible"))
         {
             ImGui.SetClipboardText(BuildLogText(GetFilteredDebugLogSnapshot(maxEntries: 1200)));
         }
-        UiSharedService.AttachToolTip("Copies the currently visible (filtered) log lines to clipboard.");
+        SpheneUI.AttachTooltip("Copies the currently visible (filtered) log lines to clipboard.");
 
         ImGui.SameLine();
-        if (ImGui.Button("Copy Report"))
+        if (SpheneUI.Controls.Button("Copy Report"))
         {
             ImGui.SetClipboardText(BuildDebugReportJson(GetFilteredDebugLogSnapshot(maxEntries: 1200)));
         }
-        UiSharedService.AttachToolTip("Copies a JSON report with filters and entries (filtered) to clipboard.");
+        SpheneUI.AttachTooltip("Copies a JSON report with filters and entries (filtered) to clipboard.");
 
         ImGui.SameLine();
-        if (ImGui.Button("Write Report File"))
+        if (SpheneUI.Controls.Button("Write Report File"))
         {
             var path = WriteDebugReportFile(GetFilteredDebugLogSnapshot(maxEntries: 2500));
             if (!string.IsNullOrWhiteSpace(path))
@@ -1986,30 +1990,30 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                 _lastReportPath = path;
             }
         }
-        UiSharedService.AttachToolTip("Writes a JSON report file to your plugin config folder.");
+        SpheneUI.AttachTooltip("Writes a JSON report file to your plugin config folder.");
 
         if (showPopupButton)
         {
             ImGui.SameLine();
-            if (ImGui.Button("Open Popup"))
+            if (SpheneUI.Controls.Button("Open Popup"))
             {
                 Mediator.Publish(new UiToggleMessage(typeof(StatusDebugLogPopupUi)));
             }
-            UiSharedService.AttachToolTip("Opens the log viewer in a separate popup window.");
+            SpheneUI.AttachTooltip("Opens the log viewer in a separate popup window.");
         }
 
         ImGui.SameLine();
-        ImGui.Checkbox("Auto-scroll", ref _autoScroll);
-        UiSharedService.AttachToolTip("Keeps the view pinned to the newest entries.");
+        SpheneUI.Controls.Checkbox("Auto-scroll", ref _autoScroll);
+        SpheneUI.AttachTooltip("Keeps the view pinned to the newest entries.");
 
         if (!string.IsNullOrWhiteSpace(_lastReportPath))
         {
             ImGui.SameLine();
-            if (ImGui.Button("Copy Report Path"))
+            if (SpheneUI.Controls.Button("Copy Report Path"))
             {
                 ImGui.SetClipboardText(_lastReportPath);
             }
-            UiSharedService.AttachToolTip(_lastReportPath);
+            SpheneUI.AttachTooltip(_lastReportPath);
         }
 
         ImGui.Spacing();
@@ -2020,7 +2024,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             foreach (var level in Enum.GetValues<DebugLogLevel>())
             {
                 var selected = level == _debugLogMinLevel;
-                if (ImGui.Selectable(level.ToString(), selected))
+                if (SpheneUI.Controls.Selectable(level.ToString(), selected))
                 {
                     _debugLogMinLevel = level;
                 }
@@ -2028,58 +2032,58 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             }
             ImGui.EndCombo();
         }
-        UiSharedService.AttachToolTip("Minimum severity to show in the log list.");
+        SpheneUI.AttachTooltip("Minimum severity to show in the log list.");
 
         ImGui.SameLine();
-        ImGui.Checkbox("Selected character only", ref _debugLogSelectedCharacterOnly);
-        UiSharedService.AttachToolTip("Shows only entries for the currently selected character in this window.");
+        SpheneUI.Controls.Checkbox("Selected character only", ref _debugLogSelectedCharacterOnly);
+        SpheneUI.AttachTooltip("Shows only entries for the currently selected character in this window.");
 
         ImGui.SameLine();
         ImGui.SetNextItemWidth(220f * ImGuiHelpers.GlobalScale);
-        ImGui.InputTextWithHint("##LogSearch", "Search...", ref _debugLogSearch, 128);
-        UiSharedService.AttachToolTip("Filters by text across message, details, and UID.");
+        SpheneUI.Controls.InputTextWithHint("##LogSearch", "Search...", ref _debugLogSearch, 128);
+        SpheneUI.AttachTooltip("Filters by text across message, details, and UID.");
         ImGui.SameLine();
-        ImGui.Checkbox("Apply details", ref _includeApplyChangeDetails);
-        UiSharedService.AttachToolTip("Includes APPLY details for Info/Debug entries (can add a lot of text).");
+        SpheneUI.Controls.Checkbox("Apply details", ref _includeApplyChangeDetails);
+        SpheneUI.AttachTooltip("Includes APPLY details for Info/Debug entries (can add a lot of text).");
 
         ImGui.Spacing();
-        ImGui.TextUnformatted("Show:");
+        SpheneUI.Text.Plain("Show:");
         ImGui.SameLine();
-        ImGui.Checkbox("Conn", ref _showConnections);
-        UiSharedService.AttachToolTip("Connection state changes.");
+        SpheneUI.Controls.Checkbox("Conn", ref _showConnections);
+        SpheneUI.AttachTooltip("Connection state changes.");
         ImGui.SameLine();
-        ImGui.Checkbox("Health", ref _showHealthChecks);
-        UiSharedService.AttachToolTip("Periodic client health checks.");
+        SpheneUI.Controls.Checkbox("Health", ref _showHealthChecks);
+        SpheneUI.AttachTooltip("Periodic client health checks.");
         ImGui.SameLine();
-        ImGui.Checkbox("Ack", ref _showAcknowledgments);
-        UiSharedService.AttachToolTip("Acknowledgment / sync confirmation events.");
+        SpheneUI.Controls.Checkbox("Ack", ref _showAcknowledgments);
+        SpheneUI.AttachTooltip("Acknowledgment / sync confirmation events.");
         ImGui.SameLine();
-        ImGui.Checkbox("Circuit", ref _showCircuitBreaker);
-        UiSharedService.AttachToolTip("Circuit breaker state changes.");
+        SpheneUI.Controls.Checkbox("Circuit", ref _showCircuitBreaker);
+        SpheneUI.AttachTooltip("Circuit breaker state changes.");
         ImGui.SameLine();
-        ImGui.Checkbox("Apply", ref _showApplies);
-        UiSharedService.AttachToolTip("Character data apply pipeline events.");
+        SpheneUI.Controls.Checkbox("Apply", ref _showApplies);
+        SpheneUI.AttachTooltip("Character data apply pipeline events.");
         ImGui.SameLine();
-        ImGui.Checkbox("Hub", ref _showHub);
-        UiSharedService.AttachToolTip("SignalR hub reconnect/close messages.");
+        SpheneUI.Controls.Checkbox("Hub", ref _showHub);
+        SpheneUI.AttachTooltip("SignalR hub reconnect/close messages.");
         ImGui.SameLine();
-        ImGui.Checkbox("Notif", ref _showNotifications);
-        UiSharedService.AttachToolTip("In-game notifications emitted by Sphene.");
+        SpheneUI.Controls.Checkbox("Notif", ref _showNotifications);
+        SpheneUI.AttachTooltip("In-game notifications emitted by Sphene.");
         ImGui.SameLine();
-        ImGui.Checkbox("DL", ref _showDownloads);
-        UiSharedService.AttachToolTip("File download / transfer events.");
+        SpheneUI.Controls.Checkbox("DL", ref _showDownloads);
+        SpheneUI.AttachTooltip("File download / transfer events.");
         ImGui.SameLine();
-        ImGui.Checkbox("MM", ref _showMismatches);
-        UiSharedService.AttachToolTip("Mismatch tracking events.");
+        SpheneUI.Controls.Checkbox("MM", ref _showMismatches);
+        SpheneUI.AttachTooltip("Mismatch tracking events.");
         ImGui.SameLine();
-        ImGui.Checkbox("IPC", ref _showIpc);
-        UiSharedService.AttachToolTip("IPC and Penumbra related events.");
+        SpheneUI.Controls.Checkbox("IPC", ref _showIpc);
+        SpheneUI.AttachTooltip("IPC and Penumbra related events.");
         ImGui.SameLine();
-        ImGui.Checkbox("Minion", ref _showMinions);
-        UiSharedService.AttachToolTip("Minion/Mount/Pet/Companion diagnostic logs (reapply, binding, redraw).");
+        SpheneUI.Controls.Checkbox("Minion", ref _showMinions);
+        SpheneUI.AttachTooltip("Minion/Mount/Pet/Companion diagnostic logs (reapply, binding, redraw).");
         ImGui.SameLine();
-        ImGui.Checkbox("SCD", ref _showMinionScd);
-        UiSharedService.AttachToolTip("Minion sound (.scd) override logs. These can be frequent for effect-heavy minions.");
+        SpheneUI.Controls.Checkbox("SCD", ref _showMinionScd);
+        SpheneUI.AttachTooltip("Minion sound (.scd) override logs. These can be frequent for effect-heavy minions.");
 
         var pairs = BuildCharacterDataPairsSnapshot();
         var selectedPair = EnsureSelectedCharacterPair(pairs);
@@ -2091,7 +2095,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         if (ImGui.BeginCombo("Character Filter", uidLabel))
         {
             var anySelected = string.IsNullOrWhiteSpace(_debugLogSpecificUid) && !_debugLogSelectedCharacterOnly;
-            if (ImGui.Selectable("All", anySelected))
+            if (SpheneUI.Controls.Selectable("All", anySelected))
             {
                 _debugLogSpecificUid = string.Empty;
                 _debugLogSelectedCharacterOnly = false;
@@ -2100,19 +2104,19 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             if (_selectedCharacterUid != null)
             {
                 var selected = _debugLogSelectedCharacterOnly;
-                if (ImGui.Selectable("Selected Character", selected))
+                if (SpheneUI.Controls.Selectable("Selected Character", selected))
                 {
                     _debugLogSelectedCharacterOnly = true;
                     _debugLogSpecificUid = string.Empty;
                 }
             }
 
-            ImGui.Separator();
+            SpheneUI.Layout.Separator();
             foreach (var pair in pairs)
             {
                 var key = GetPairKey(pair);
                 var selected = string.Equals(_debugLogSpecificUid, key, StringComparison.Ordinal) && !_debugLogSelectedCharacterOnly;
-                if (ImGui.Selectable(pair.UserData.AliasOrUID, selected))
+                if (SpheneUI.Controls.Selectable(pair.UserData.AliasOrUID, selected))
                 {
                     _debugLogSpecificUid = key;
                     _debugLogSelectedCharacterOnly = false;
@@ -2120,36 +2124,36 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             }
             ImGui.EndCombo();
         }
-        UiSharedService.AttachToolTip("Limits entries to a specific user (UID).");
+        SpheneUI.AttachTooltip("Limits entries to a specific user (UID).");
 
         ImGui.SameLine();
-        ImGui.Checkbox("Ack session filter", ref _debugLogAckContextFilterEnabled);
-        UiSharedService.AttachToolTip("Filters to the selected character's acknowledgment session/hash context.");
+        SpheneUI.Controls.Checkbox("Ack session filter", ref _debugLogAckContextFilterEnabled);
+        SpheneUI.AttachTooltip("Filters to the selected character's acknowledgment session/hash context.");
         if (_debugLogAckContextFilterEnabled && selectedPair != null)
         {
             ImGui.SameLine();
-            if (ImGui.Button("Use OUT"))
+            if (SpheneUI.Controls.Button("Use OUT"))
             {
                 _debugLogAckContextSessionId = selectedPair.LastOutgoingAcknowledgmentSessionId ?? string.Empty;
                 var hash = selectedPair.LastOutgoingAcknowledgmentHash ?? selectedPair.LastAcknowledgmentId ?? string.Empty;
                 _debugLogAckContextHashPrefix = string.IsNullOrWhiteSpace(hash) ? string.Empty : hash[..Math.Min(8, hash.Length)];
             }
-            UiSharedService.AttachToolTip("Uses the last outgoing acknowledgment context for the selected character.");
+            SpheneUI.AttachTooltip("Uses the last outgoing acknowledgment context for the selected character.");
             ImGui.SameLine();
-            if (ImGui.Button("Use IN"))
+            if (SpheneUI.Controls.Button("Use IN"))
             {
                 _debugLogAckContextSessionId = selectedPair.LastIncomingAckSessionId ?? string.Empty;
                 var hash = selectedPair.LastIncomingAckHash ?? selectedPair.LastReceivedCharacterDataHash ?? string.Empty;
                 _debugLogAckContextHashPrefix = string.IsNullOrWhiteSpace(hash) ? string.Empty : hash[..Math.Min(8, hash.Length)];
             }
-            UiSharedService.AttachToolTip("Uses the last incoming acknowledgment context for the selected character.");
+            SpheneUI.AttachTooltip("Uses the last incoming acknowledgment context for the selected character.");
             ImGui.SameLine();
-            if (ImGui.Button("Clear##ack_ctx"))
+            if (SpheneUI.Controls.Button("Clear##ack_ctx"))
             {
                 _debugLogAckContextSessionId = string.Empty;
                 _debugLogAckContextHashPrefix = string.Empty;
             }
-            UiSharedService.AttachToolTip("Clears the acknowledgment context filter values.");
+            SpheneUI.AttachTooltip("Clears the acknowledgment context filter values.");
 
             if (!string.IsNullOrWhiteSpace(_debugLogAckContextSessionId) || !string.IsNullOrWhiteSpace(_debugLogAckContextHashPrefix))
             {
@@ -2157,12 +2161,12 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                 var sessionShort = string.IsNullOrWhiteSpace(_debugLogAckContextSessionId)
                     ? "-"
                     : _debugLogAckContextSessionId[..Math.Min(8, _debugLogAckContextSessionId.Length)];
-                ImGui.TextUnformatted($"session={sessionShort} hash={_debugLogAckContextHashPrefix}");
-                UiSharedService.AttachToolTip("Active acknowledgment context used for filtering.");
+                SpheneUI.Text.Plain($"session={sessionShort} hash={_debugLogAckContextHashPrefix}");
+                SpheneUI.AttachTooltip("Active acknowledgment context used for filtering.");
             }
         }
 
-        ImGui.Separator();
+        SpheneUI.Layout.Separator();
 
         var entries = GetFilteredDebugLogSnapshot(maxEntries: 2500);
         var avail = ImGui.GetContentRegionAvail();
@@ -2189,25 +2193,25 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             ImGui.PushID(i);
 
             ImGui.TableSetColumnIndex(0);
-            ImGui.TextUnformatted(entry.Timestamp.ToLocalTime().ToString("HH:mm:ss.fff"));
+            SpheneUI.Text.Plain(entry.Timestamp.ToLocalTime().ToString("HH:mm:ss.fff"));
 
             ImGui.TableSetColumnIndex(1);
             DrawLevelIcon(entry.Level);
 
             ImGui.TableSetColumnIndex(2);
-            ImGui.TextUnformatted(entry.Category);
+            SpheneUI.Text.Plain(entry.Category);
 
             ImGui.TableSetColumnIndex(3);
-            ImGui.TextUnformatted(string.IsNullOrEmpty(entry.Uid) ? "-" : GetDisplayName(entry.Uid));
+            SpheneUI.Text.Plain(string.IsNullOrEmpty(entry.Uid) ? "-" : GetDisplayName(entry.Uid));
 
             ImGui.TableSetColumnIndex(4);
-            ImGui.TextUnformatted(entry.Message);
+            SpheneUI.Text.Plain(entry.Message);
             if (ShouldIncludeDetails(entry) && ImGui.IsItemHovered())
             {
-                UiSharedService.AttachToolTip(entry.Details!);
+                SpheneUI.AttachTooltip(entry.Details!);
             }
 
-            if (ImGui.BeginPopupContextItem("##log_ctx"))
+            if (SpheneUI.Popups.BeginContextStyled("##log_ctx"))
             {
                 if (ImGui.MenuItem("Copy message"))
                 {
@@ -2217,7 +2221,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                 {
                     ImGui.SetClipboardText(entry.Details!);
                 }
-                ImGui.EndPopup();
+                SpheneUI.Popups.EndStyled();
             }
 
             ImGui.TableSetColumnIndex(5);
@@ -2226,12 +2230,12 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                 var size = ImGui.GetFrameHeight();
                 using (ImRaii.PushFont(UiBuilder.IconFont))
                 {
-                    if (ImGui.Button($"{FontAwesomeIcon.Copy.ToIconString()}##copy_details", new Vector2(size, size)))
+                    if (SpheneUI.Controls.Button($"{FontAwesomeIcon.Copy.ToIconString()}##copy_details", new Vector2(size, size)))
                     {
                         ImGui.SetClipboardText(entry.Details!);
                     }
                 }
-                UiSharedService.AttachToolTip("Copy details / stacktrace");
+                SpheneUI.AttachTooltip("Copy details / stacktrace");
             }
 
             ImGui.PopID();
@@ -2348,7 +2352,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         using (ImRaii.PushFont(UiBuilder.IconFont))
         using (ImRaii.PushColor(ImGuiCol.Text, color))
         {
-            ImGui.TextUnformatted(icon.ToIconString());
+            SpheneUI.Text.Plain(icon.ToIconString());
         }
     }
 
@@ -2699,15 +2703,15 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             {
                 ImGui.TableNextRow();
                 ImGui.TableNextColumn();
-                ImGui.TextUnformatted(pair.UserData.AliasOrUID);
+                SpheneUI.Text.Plain(pair.UserData.AliasOrUID);
 
                 ImGui.TableNextColumn();
                 var data = pair.LastReceivedCharacterData;
                 if (data == null)
                 {
-                    ImGui.TextColored(ImGuiColors.DalamudGrey, "No Data");
+                    SpheneUI.Text.Colored("No Data", ImGuiColors.DalamudGrey);
                     ImGui.TableNextColumn();
-                    ImGui.TextUnformatted("-");
+                    SpheneUI.Text.Plain("-");
                 }
                 else
                 {
@@ -2742,21 +2746,21 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                         var filterEnabled = _configService.Current.FilterCharacterLegacyShpkInOutgoingCharacterData;
                         if (filterEnabled)
                         {
-                            ImGui.TextColored(ImGuiColors.DalamudYellow, "FOUND (Filtered)");
+                            SpheneUI.Text.Colored("FOUND (Filtered)", ImGuiColors.DalamudYellow);
                             details.Insert(0, "Inbound filter active: characterlegacy.shpk entries were blocked for apply/download.");
                         }
                         else
                         {
-                            ImGui.TextColored(ImGuiColors.DalamudRed, "FOUND");
+                            SpheneUI.Text.Colored("FOUND", ImGuiColors.DalamudRed);
                         }
                         ImGui.TableNextColumn();
-                        ImGui.TextWrapped(string.Join("\n", details));
+                        SpheneUI.Text.Wrapped(string.Join("\n", details));
                     }
                     else
                     {
-                        ImGui.TextColored(ImGuiColors.HealerGreen, "Clean");
+                        SpheneUI.Text.Colored("Clean", ImGuiColors.HealerGreen);
                         ImGui.TableNextColumn();
-                        ImGui.TextUnformatted("-");
+                        SpheneUI.Text.Plain("-");
                     }
                 }
             }

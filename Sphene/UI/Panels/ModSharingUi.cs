@@ -6,6 +6,7 @@ using Sphene.Services;
 using Sphene.Services.Mediator;
 using Sphene.WebAPI;
 using System.Numerics;
+using Sphene.UI.Design;
 
 namespace Sphene.UI.Panels;
 
@@ -13,7 +14,6 @@ public sealed class ModSharingUi : WindowMediatorSubscriberBase
 {
     private readonly ApiController _apiController;
     private readonly SpheneConfigService _configService;
-    private readonly UiSharedService _uiSharedService;
     private readonly PenumbraSendModUi _penumbraSendModUi;
     private readonly PenumbraReceiveModUi _penumbraReceiveModUi;
     private readonly ModPackageHistoryUi _modPackageHistoryUi;
@@ -25,7 +25,6 @@ public sealed class ModSharingUi : WindowMediatorSubscriberBase
         SpheneMediator mediator,
         ApiController apiController,
         SpheneConfigService configService,
-        UiSharedService uiSharedService,
         PenumbraSendModUi penumbraSendModUi,
         PenumbraReceiveModUi penumbraReceiveModUi,
         ModPackageHistoryUi modPackageHistoryUi,
@@ -34,7 +33,6 @@ public sealed class ModSharingUi : WindowMediatorSubscriberBase
     {
         _apiController = apiController;
         _configService = configService;
-        _uiSharedService = uiSharedService;
         _penumbraSendModUi = penumbraSendModUi;
         _penumbraReceiveModUi = penumbraReceiveModUi;
         _modPackageHistoryUi = modPackageHistoryUi;
@@ -68,19 +66,28 @@ public sealed class ModSharingUi : WindowMediatorSubscriberBase
         var requested = _selectTabOnNextDraw;
         _selectTabOnNextDraw = null;
 
-        UiSharedService.TextWrapped("Share Penumbra mods with paired users, install received packages, and manage history & backups.");
-        ImGui.Spacing();
+        if (SpheneUI.Layout.BeginScrollArea("mod-sharing-content", ImGui.GetContentRegionAvail(),
+                contentPadding: Vector2.Zero))
+        {
+            DrawSharingContent(requested);
+        }
+        SpheneUI.Layout.EndScrollArea();
+    }
+
+    private void DrawSharingContent(ModSharingTab? requested)
+    {
+        SpheneUI.Text.PageHeader("Mod Sharing", "Share Penumbra mods with paired users, install received packages, and manage history & backups.");
 
         var allowPenumbraMods = _configService.Current.AllowReceivingPenumbraMods;
-        if (ImGui.Checkbox("Allow receiving Penumbra mod packages", ref allowPenumbraMods))
+        if (SpheneUI.Controls.Toggle("Allow receiving Penumbra mod packages", ref allowPenumbraMods))
         {
             _configService.Current.AllowReceivingPenumbraMods = allowPenumbraMods;
             _configService.Save();
             _ = _apiController.UserUpdatePenumbraReceivePreference(allowPenumbraMods);
         }
-        _uiSharedService.DrawHelpText("When disabled, incoming Penumbra mod packages are ignored and no install popups are shown.");
+        SpheneUI.Controls.HelpText("When disabled, incoming Penumbra mod packages are ignored and no install popups are shown.");
 
-        ImGui.Separator();
+        SpheneUI.Layout.Separator();
 
         using var tabBar = ImRaii.TabBar("ModSharingTabs");
         if (!tabBar)
@@ -104,7 +111,7 @@ public sealed class ModSharingUi : WindowMediatorSubscriberBase
                 ImGui.Spacing();
                 if (!allowPenumbraMods)
                 {
-                    ImGui.TextDisabled("Receiving mod packages is currently disabled.");
+                    SpheneUI.Text.Muted("Receiving mod packages is currently disabled.");
                     ImGui.Spacing();
                 }
                 using (ImRaii.Disabled(!allowPenumbraMods))

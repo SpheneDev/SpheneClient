@@ -4,8 +4,7 @@ using Dalamud.Interface.Utility.Raii;
 using Sphene.PlayerData.Pairs;
 using Sphene.UI.Handlers;
 using System.Collections.Immutable;
-using Sphene.UI.Styling;
-using Sphene.UI.Theme;
+using Sphene.UI.Design;
 
 namespace Sphene.UI.Components;
 
@@ -53,7 +52,7 @@ public abstract class DrawFolderBase : IDrawFolder
 
             ImGui.AlignTextToFramePadding();
 
-            _uiSharedService.IconText(icon);
+            SpheneUI.Icons.Icon(icon);
             if (ImGui.IsItemClicked())
             {
                 _tagHandler.SetTagOpen(_id, !_tagHandler.IsTagOpen(_id));
@@ -70,13 +69,13 @@ public abstract class DrawFolderBase : IDrawFolder
             DrawName(rightSideStart - leftSideEnd);
         }
 
-        SpheneWindowChrome.ScrollAreaSeparator(
-            SpheneCustomTheme.CurrentTheme.CompactPairListSeparatorPadding);
+        SpheneUI.Layout.ScrollAreaSeparator(
+            SpheneTheme.Current.CompactPairListSeparatorPadding);
 
         // if opened draw content
         if (_tagHandler.IsTagOpen(_id))
         {
-            using var indent = ImRaii.PushIndent(_uiSharedService.GetIconSize(FontAwesomeIcon.EllipsisV).X + ImGui.GetStyle().ItemSpacing.X, false);
+            using var indent = ImRaii.PushIndent(SpheneUI.Icons.Size(FontAwesomeIcon.EllipsisV).X + ImGui.GetStyle().ItemSpacing.X, false);
             if (DrawPairs.Any())
             {
                 foreach (var item in DrawPairs)
@@ -86,11 +85,11 @@ public abstract class DrawFolderBase : IDrawFolder
             }
             else
             {
-                ImGui.TextUnformatted("No users (online)");
+                SpheneUI.Text.Plain("No users (online)");
             }
 
-            SpheneWindowChrome.ScrollAreaSeparator(
-                SpheneCustomTheme.CurrentTheme.CompactPairListSeparatorPadding);
+            SpheneUI.Layout.ScrollAreaSeparator(
+                SpheneTheme.Current.CompactPairListSeparatorPadding);
         }
     }
 
@@ -125,10 +124,10 @@ public abstract class DrawFolderBase : IDrawFolder
 
     protected float DrawRightSideInternal()
     {
-        var barButtonSize = _uiSharedService.GetIconButtonSize(FontAwesomeIcon.EllipsisV);
+        var barButtonSize = SpheneUI.Icons.ButtonSize(FontAwesomeIcon.EllipsisV);
         var spacingX = ImGui.GetStyle().ItemSpacing.X;
         // Use container-relative positioning for buttons
-        var containerWidth = UiSharedService.BoundedContentAvailX();
+        var containerWidth = SpheneUI.Controls.BoundedAvailX();
         var actualWindowEndX = ImGui.GetCursorPosX() + containerWidth;
 
         // Flyout Menu
@@ -137,17 +136,17 @@ public abstract class DrawFolderBase : IDrawFolder
         if (RenderMenu)
         {
             ImGui.SameLine(actualWindowEndX - barButtonSize.X);
-            if (_uiSharedService.IconButton(FontAwesomeIcon.EllipsisV))
+            if (SpheneUI.Icons.Button(FontAwesomeIcon.EllipsisV))
             {
                 ImGui.OpenPopup("User Flyout Menu");
             }
-            using (SpheneCustomTheme.ApplyContextMenuTheme())
+            using (SpheneUI.Theme.ContextMenuScope())
             {
-                if (SpheneWindowChrome.BeginStyledPopup("User Flyout Menu"))
+                if (SpheneUI.Popups.BeginStyled("User Flyout Menu"))
                 {
                     using (ImRaii.PushId($"buttons-{_id}")) DrawMenu(_menuWidth);
                     _menuWidth = ImGui.GetWindowContentRegionMax().X - ImGui.GetWindowContentRegionMin().X;
-                    SpheneWindowChrome.EndStyledPopup();
+                    SpheneUI.Popups.EndStyled();
                 }
                 else
                 {

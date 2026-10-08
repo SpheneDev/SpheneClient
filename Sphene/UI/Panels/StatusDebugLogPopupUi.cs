@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using Sphene.Services;
 using Sphene.Services.Mediator;
 using Sphene.UI;
+using Sphene.UI.Design;
 using System.Numerics;
 
 namespace Sphene.UI.Panels;
@@ -26,6 +27,11 @@ public sealed class StatusDebugLogPopupUi : WindowMediatorSubscriberBase
 
     protected override void DrawInternal()
     {
-        _statusDebugUi.DrawLogsPanel(showPopupButton: false);
+        if (SpheneUI.Layout.BeginScrollArea("debug-log-content", ImGui.GetContentRegionAvail(),
+                contentPadding: Vector2.Zero))
+        {
+            _statusDebugUi.DrawLogsPanel(showPopupButton: false);
+        }
+        SpheneUI.Layout.EndScrollArea();
     }
 }

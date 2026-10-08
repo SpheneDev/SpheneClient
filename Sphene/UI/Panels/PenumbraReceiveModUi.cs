@@ -18,6 +18,7 @@ using System.Text.Json;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
+using Sphene.UI.Design;
 
 namespace Sphene.UI.Panels;
 
@@ -394,7 +395,12 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
         {
             if (ImGui.BeginTabItem("Pending"))
             {
-                DrawPendingTab(isEmbedded: false);
+                if (SpheneUI.Layout.BeginScrollArea("ReceiveModsRootWindow",
+                        ImGui.GetContentRegionAvail(), contentPadding: Vector2.Zero))
+                {
+                    DrawPendingTab(isEmbedded: false);
+                }
+                SpheneUI.Layout.EndScrollArea();
                 ImGui.EndTabItem();
             }
 
@@ -404,10 +410,12 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
 
     internal void DrawEmbedded()
     {
-        using (ImRaii.Child("ReceiveModsRootEmbedded", new Vector2(0f, 0f), false, ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse))
+        if (SpheneUI.Layout.BeginScrollArea("ReceiveModsRootEmbedded",
+                ImGui.GetContentRegionAvail(), contentPadding: Vector2.Zero))
         {
             DrawPendingTab(isEmbedded: true);
         }
+        SpheneUI.Layout.EndScrollArea();
     }
 
     private void DrawPendingTab(bool isEmbedded)
@@ -489,19 +497,19 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
 
             using (ImRaii.Child("LeftList", new Vector2(0f, listHeight), false))
             {
-                UiSharedService.ColorText($"Received Mods ({displayed.Count})", ImGuiColors.DalamudWhite);
-                ImGui.Separator();
+                SpheneUI.Text.Colored($"Received Mods ({displayed.Count})", ImGuiColors.DalamudWhite);
+                SpheneUI.Layout.Separator();
                 ImGui.SetNextItemWidth(-1);
-                ImGui.InputTextWithHint("##pendingFilter", "Filter mods or sender…", ref _pendingFilter, 64);
+                SpheneUI.Controls.InputTextWithHint("##pendingFilter", "Filter mods or sender…", ref _pendingFilter, 64);
                 ImGui.Spacing();
 
                 if (_pendingNotifications.Count == 0)
                 {
-                    ImGui.TextDisabled("No mods pending.");
+                    SpheneUI.Text.Muted("No mods pending.");
                 }
                 else if (displayed.Count == 0)
                 {
-                    ImGui.TextDisabled("No matches.");
+                    SpheneUI.Text.Muted("No matches.");
                 }
                 else
                 {
@@ -514,7 +522,7 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
                         {
                             isChecked = _selectedForBatch.Contains(notif);
                         }
-                        if (ImGui.Checkbox("##check", ref isChecked))
+                        if (SpheneUI.Controls.Checkbox("##check", ref isChecked))
                         {
                             lock (_pendingLock)
                             {
@@ -570,9 +578,9 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
 
                         using (ImRaii.PushColor(ImGuiCol.Text, color))
                         {
-                            using (_uiSharedService.IconFont.Push())
+                            using (SpheneUI.IconFont.Push())
                             {
-                                ImGui.TextUnformatted(icon.ToIconString());
+                                SpheneUI.Text.Plain(icon.ToIconString());
                             }
                             if (ImGui.IsItemHovered())
                             {
@@ -581,7 +589,7 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
                             ImGui.SameLine();
 
                             var isSelected = currentSelected == notif;
-                            if (ImGui.Selectable($"{name}##select", isSelected))
+                            if (SpheneUI.Controls.Selectable($"{name}##select", isSelected))
                             {
                                 lock (_pendingLock)
                                 {
@@ -658,22 +666,22 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
                 }
             }
 
-            ImGui.Separator();
+            SpheneUI.Layout.Separator();
 
             var hasPending = pending.Count > 0;
             using (ImRaii.Disabled(_isInstalling || !hasPending))
             {
-                if (ImGui.Button("Select All"))
+                if (SpheneUI.Controls.Button("Select All"))
                 {
                     SelectAll();
                 }
                 ImGui.SameLine();
-                if (ImGui.Button("Select Installed"))
+                if (SpheneUI.Controls.Button("Select Installed"))
                 {
                     SelectInstalled();
                 }
                 ImGui.SameLine();
-                if (ImGui.Button("Select New"))
+                if (SpheneUI.Controls.Button("Select New"))
                 {
                     SelectNew();
                 }
@@ -684,12 +692,12 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
             {
                 using (ImRaii.Disabled(selectedCount == 0))
                 {
-                    if (ImGui.Button($"Install Selected ({selectedCount})"))
+                    if (SpheneUI.Controls.Button($"Install Selected ({selectedCount})"))
                     {
                         StartBatchInstall();
                     }
                     ImGui.SameLine();
-                    if (ImGui.Button($"Discard Selected ({selectedCount})"))
+                    if (SpheneUI.Controls.Button($"Discard Selected ({selectedCount})"))
                     {
                         BatchDiscard();
                     }
@@ -697,7 +705,7 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
                 ImGui.SameLine();
                 using (ImRaii.Disabled(!hasPending))
                 {
-                    if (ImGui.Button($"Discard All ({pending.Count})"))
+                    if (SpheneUI.Controls.Button($"Discard All ({pending.Count})"))
                     {
                         DiscardAll();
                     }
@@ -728,7 +736,7 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
         {
             if (_selectedNotification == null)
             {
-                UiSharedService.ColorText("No mod selected.", ImGuiColors.DalamudRed);
+                SpheneUI.Text.Colored("No mod selected.", ImGuiColors.DalamudRed);
             }
             else
             {
@@ -738,41 +746,41 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
                 var modFolderName = _selectedNotification.ModFolderName ?? string.Empty;
                 var modInfo = _selectedNotification.ModInfo?.FirstOrDefault();
 
-                UiSharedService.ColorText("Mod Details", ImGuiColors.DalamudWhite);
-                ImGui.Separator();
+                SpheneUI.Text.Colored("Mod Details", ImGuiColors.DalamudWhite);
+                SpheneUI.Layout.Separator();
                 ImGui.Spacing();
 
                 var detailsHeight = modInfo != null ? 150f * scale : 80f * scale;
                 using (ImRaii.Child("Details", new Vector2(0f, detailsHeight), true))
                 {
-                    ImGui.TextUnformatted("Sender");
+                    SpheneUI.Text.Plain("Sender");
                     ImGui.SameLine(140f * scale);
-                    ImGui.TextColored(ImGuiColors.HealerGreen, string.IsNullOrWhiteSpace(sender) ? "Unknown" : sender);
+                    SpheneUI.Text.Colored(string.IsNullOrWhiteSpace(sender) ? "Unknown" : sender, ImGuiColors.HealerGreen);
 
                     var name = modInfo?.Name ?? modFolderName;
-                    ImGui.TextUnformatted("Mod");
+                    SpheneUI.Text.Plain("Mod");
                     ImGui.SameLine(140f * scale);
-                    ImGui.TextColored(ImGuiColors.DalamudYellow, string.IsNullOrWhiteSpace(name) ? "<Unknown>" : name);
+                    SpheneUI.Text.Colored(string.IsNullOrWhiteSpace(name) ? "<Unknown>" : name, ImGuiColors.DalamudYellow);
 
                     if (modInfo != null)
                     {
                         if (!string.IsNullOrWhiteSpace(modInfo.Author))
                         {
-                            ImGui.TextUnformatted("Author");
+                            SpheneUI.Text.Plain("Author");
                             ImGui.SameLine(140f * scale);
-                            ImGui.TextUnformatted(modInfo.Author);
+                            SpheneUI.Text.Plain(modInfo.Author);
                         }
                         if (!string.IsNullOrWhiteSpace(modInfo.Version))
                         {
-                            ImGui.TextUnformatted("Version");
+                            SpheneUI.Text.Plain("Version");
                             ImGui.SameLine(140f * scale);
-                            ImGui.TextUnformatted(modInfo.Version);
+                            SpheneUI.Text.Plain(modInfo.Version);
                         }
                         if (!string.IsNullOrWhiteSpace(modInfo.Website))
                         {
-                            ImGui.TextUnformatted("Website");
+                            SpheneUI.Text.Plain("Website");
                             ImGui.SameLine(140f * scale);
-                            ImGui.TextUnformatted(modInfo.Website);
+                            SpheneUI.Text.Plain(modInfo.Website);
                         }
                     }
                 }
@@ -786,7 +794,7 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
                     ImGui.Spacing();
                     using (ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.DalamudOrange))
                     {
-                        UiSharedService.TextWrapped($"This mod is already installed in Penumbra ('{modFolderName}'). Installing it again will overwrite the existing mod.");
+                        SpheneUI.Text.Wrapped($"This mod is already installed in Penumbra ('{modFolderName}'). Installing it again will overwrite the existing mod.");
                     }
 
                     if (_installedVersion != null && modInfo?.Version != null)
@@ -800,21 +808,21 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
                         {
                             using (ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.HealerGreen))
                             {
-                                UiSharedService.TextWrapped($"Upgrade available! Installed: {installedVer} → Received: {receivedVer}");
+                                SpheneUI.Text.Wrapped($"Upgrade available! Installed: {installedVer} → Received: {receivedVer}");
                             }
                         }
                         else if (comparison < 0)
                         {
                             using (ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.DalamudOrange))
                             {
-                                UiSharedService.TextWrapped($"Warning: The received version ({receivedVer}) is older than the installed version ({installedVer}).");
+                                SpheneUI.Text.Wrapped($"Warning: The received version ({receivedVer}) is older than the installed version ({installedVer}).");
                             }
                         }
                         else
                         {
                             using (ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.DalamudGrey))
                             {
-                                UiSharedService.TextWrapped($"Same version installed: {installedVer}");
+                                SpheneUI.Text.Wrapped($"Same version installed: {installedVer}");
                             }
                         }
                     }
@@ -823,15 +831,15 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
                 ImGui.Spacing();
                 using (ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.DalamudYellow))
                 {
-                    UiSharedService.TextWrapped("Only install mods from people you fully trust. Invalid or malicious mods can break your game or cause unexpected issues.");
+                    SpheneUI.Text.Wrapped("Only install mods from people you fully trust. Invalid or malicious mods can break your game or cause unexpected issues.");
                 }
 
                 ImGui.Spacing();
-                UiSharedService.TextWrapped("Do you want to download and install this Penumbra mod package now?");
+                SpheneUI.Text.Wrapped("Do you want to download and install this Penumbra mod package now?");
             }
         }
 
-        ImGui.Separator();
+        SpheneUI.Layout.Separator();
         ImGui.Spacing();
 
         // Button Area
@@ -851,7 +859,7 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
                     ? (isUpgrade ? "Upgrade" : "Reinstall") 
                     : "Download and install";
 
-                if (_uiSharedService.IconTextButton(FontAwesomeIcon.Download, btnText))
+                if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Download, btnText))
                 {
                     _statusIsError = false;
                     _statusText = "Starting download and installation…";
@@ -861,7 +869,7 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
             }
 
             ImGui.SameLine();
-            if (_uiSharedService.IconTextButton(FontAwesomeIcon.Trash, "Discard"))
+            if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Trash, "Discard"))
             {
                 FileTransferNotificationDto? toDiscard;
                 bool closeWindow;
@@ -898,7 +906,7 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
             if (!isEmbedded)
             {
                 ImGui.SameLine();
-                if (_uiSharedService.IconTextButton(FontAwesomeIcon.TimesCircle, "Close"))
+                if (SpheneUI.Icons.TextButton(FontAwesomeIcon.TimesCircle, "Close"))
                 {
                     IsOpen = false;
                 }
@@ -906,7 +914,7 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
         }
         else
         {
-            if (!isEmbedded && _uiSharedService.IconTextButton(FontAwesomeIcon.TimesCircle, "Close"))
+            if (!isEmbedded && SpheneUI.Icons.TextButton(FontAwesomeIcon.TimesCircle, "Close"))
             {
                 IsOpen = false;
             }
@@ -915,7 +923,7 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
         // Status Area
         using (ImRaii.Child("Status", new Vector2(0f, statusHeight), false))
         {
-            UiSharedService.ColorText("Status", ImGuiColors.DalamudWhite);
+            SpheneUI.Text.Colored("Status", ImGuiColors.DalamudWhite);
 
             if (_progress.HasValue)
             {
@@ -923,14 +931,14 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
                 var barWidth = ImGui.GetContentRegionAvail().X;
                 var cursor = ImGui.GetCursorPos();
                 var barSize = new Vector2(barWidth, 20f * scale);
-                ImGui.ProgressBar(clamped, barSize);
+                SpheneUI.Controls.ProgressBar(clamped, barSize);
                 ImGui.SetCursorPos(cursor + new Vector2(0f, barSize.Y + 4f * scale));
             }
 
             if (!string.IsNullOrWhiteSpace(_statusText))
             {
                 var color = _statusIsError ? ImGuiColors.DalamudRed : ImGuiColors.DalamudGrey;
-                UiSharedService.ColorText(_statusText, color);
+                SpheneUI.Text.Colored(_statusText, color);
             }
         }
     }

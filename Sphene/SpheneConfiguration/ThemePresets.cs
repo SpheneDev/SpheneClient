@@ -1,5 +1,5 @@
 using System.Numerics;
-using Sphene.UI.Theme;
+using Sphene.UI.Design;
 
 namespace Sphene.Configuration;
 

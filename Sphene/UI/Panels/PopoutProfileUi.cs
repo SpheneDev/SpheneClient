@@ -10,6 +10,7 @@ using Sphene.Services.Mediator;
 using Sphene.Services.ServerConfiguration;
 using Microsoft.Extensions.Logging;
 using System.Numerics;
+using Sphene.UI.Design;
 
 namespace Sphene.UI.Panels;
 
@@ -18,20 +19,16 @@ public class PopoutProfileUi : WindowMediatorSubscriberBase
     private readonly SpheneProfileManager _spheneProfileManager;
     private readonly PairManager _pairManager;
     private readonly ServerConfigurationManager _serverManager;
-    private readonly UiSharedService _uiSharedService;
     private Vector2 _lastMainPos = Vector2.Zero;
     private Vector2 _lastMainSize = Vector2.Zero;
     private byte[] _lastProfilePicture = [];
     private byte[] _lastSupporterPicture = [];
     private Pair? _pair;
-    private IDalamudTextureWrap? _supporterTextureWrap;
-    private IDalamudTextureWrap? _textureWrap;
+    private string? _pairKey;
 
-    public PopoutProfileUi(ILogger<PopoutProfileUi> logger, SpheneMediator mediator, UiSharedService uiBuilder,
-        ServerConfigurationManager serverManager, SpheneConfigService SpheneConfigService,
+    public PopoutProfileUi(ILogger<PopoutProfileUi> logger, SpheneMediator mediator, ServerConfigurationManager serverManager, SpheneConfigService SpheneConfigService,
         SpheneProfileManager spheneProfileManager, PairManager pairManager, PerformanceCollectorService performanceCollectorService) : base(logger, mediator, "###SphenePopoutProfileUI", performanceCollectorService)
     {
-        _uiSharedService = uiBuilder;
         _serverManager = serverManager;
         _spheneProfileManager = spheneProfileManager;
         _pairManager = pairManager;
@@ -41,12 +38,9 @@ public class PopoutProfileUi : WindowMediatorSubscriberBase
         {
             IsOpen = msg.Pair != null;
             _pair = msg.Pair;
+            _pairKey = msg.Pair == null ? null : $"popout:{msg.Pair.UserData.UID}";
             _lastProfilePicture = [];
             _lastSupporterPicture = [];
-            _textureWrap?.Dispose();
-            _textureWrap = null;
-            _supporterTextureWrap?.Dispose();
-            _supporterTextureWrap = null;
         });
 
         Mediator.Subscribe<CompactUiChange>(this, (msg) =>
@@ -77,6 +71,9 @@ public class PopoutProfileUi : WindowMediatorSubscriberBase
         IsOpen = false;
     }
 
+    // AlwaysAutoResize fights the fold animation — the window would not shrink.
+    protected override bool ChromeCollapsible => false;
+
     protected override void DrawInternal()
     {
         if (_pair == null) return;
@@ -87,76 +84,75 @@ public class PopoutProfileUi : WindowMediatorSubscriberBase
 
             var spheneProfile = _spheneProfileManager.GetSpheneProfile(_pair.UserData);
 
-            if (_textureWrap == null || !spheneProfile.ImageData.Value.SequenceEqual(_lastProfilePicture))
+            var profileKey = _pairKey!;
+            if (!spheneProfile.ImageData.Value.SequenceEqual(_lastProfilePicture))
             {
-                _textureWrap?.Dispose();
                 _lastProfilePicture = spheneProfile.ImageData.Value;
-                _textureWrap = _uiSharedService.LoadImage(_lastProfilePicture);
+                SpheneUI.Media.Evict(profileKey);
             }
+            var textureWrap = SpheneUI.Media.Texture(profileKey, _lastProfilePicture);
 
-            if (_supporterTextureWrap == null || !spheneProfile.SupporterImageData.Value.SequenceEqual(_lastSupporterPicture))
+            var supporterKey = profileKey + ":supporter";
+            if (!spheneProfile.SupporterImageData.Value.SequenceEqual(_lastSupporterPicture))
             {
-                _supporterTextureWrap?.Dispose();
-                _supporterTextureWrap = null;
-                if (!string.IsNullOrEmpty(spheneProfile.Base64SupporterPicture))
-                {
-                    _lastSupporterPicture = spheneProfile.SupporterImageData.Value;
-                    _supporterTextureWrap = _uiSharedService.LoadImage(_lastSupporterPicture);
-                }
+                _lastSupporterPicture = spheneProfile.SupporterImageData.Value;
+                SpheneUI.Media.Evict(supporterKey);
             }
+            var supporterTextureWrap = string.IsNullOrEmpty(spheneProfile.Base64SupporterPicture)
+                ? null
+                : SpheneUI.Media.Texture(supporterKey, _lastSupporterPicture);
 
             var drawList = ImGui.GetWindowDrawList();
             var rectMin = drawList.GetClipRectMin();
             var rectMax = drawList.GetClipRectMax();
 
-            using (_uiSharedService.UidFont.Push())
-                UiSharedService.ColorText(_pair.UserData.AliasOrUID, ImGuiColors.HealerGreen);
+            SpheneUI.Text.Big(_pair.UserData.AliasOrUID, ImGuiColors.HealerGreen);
 
             ImGuiHelpers.ScaledDummy(spacing.Y, spacing.Y);
             var textPos = ImGui.GetCursorPosY();
-            ImGui.Separator();
+            SpheneUI.Layout.Separator();
             var imagePos = ImGui.GetCursorPos();
             ImGuiHelpers.ScaledDummy(256, 256 * ImGuiHelpers.GlobalScale + spacing.Y);
             var note = _serverManager.GetNoteForUid(_pair.UserData.UID);
             if (!string.IsNullOrEmpty(note))
             {
-                UiSharedService.ColorText(note, ImGuiColors.DalamudGrey);
+                SpheneUI.Text.Colored(note, ImGuiColors.DalamudGrey);
             }
         string status = _pair.IsMutuallyVisible ? "Visible" : (_pair.IsOnline ? "Online" : "Offline");
-        UiSharedService.ColorText(status, (_pair.IsMutuallyVisible || _pair.IsOnline) ? ImGuiColors.HealerGreen : ImGuiColors.DalamudRed);
+        SpheneUI.Text.Colored(status, (_pair.IsMutuallyVisible || _pair.IsOnline) ? ImGuiColors.HealerGreen : ImGuiColors.DalamudRed);
         if (_pair.IsMutuallyVisible)
             {
                 ImGui.SameLine();
-                ImGui.TextUnformatted($"({_pair.PlayerName})");
+                SpheneUI.Text.Plain($"({_pair.PlayerName})");
             }
             if (_pair.UserPair.IndividualPairStatus == API.Data.Enum.IndividualPairStatus.Bidirectional)
             {
-                ImGui.TextUnformatted("Directly paired");
+                SpheneUI.Text.Plain("Directly paired");
                 if (_pair.UserPair.OwnPermissions.IsPaused())
                 {
                     ImGui.SameLine();
-                    UiSharedService.ColorText("You: paused", ImGuiColors.DalamudYellow);
+                    SpheneUI.Text.Colored("You: paused", ImGuiColors.DalamudYellow);
                 }
                 if (_pair.UserPair.OtherPermissions.IsPaused())
                 {
                     ImGui.SameLine();
-                    UiSharedService.ColorText("They: paused", ImGuiColors.DalamudYellow);
+                    SpheneUI.Text.Colored("They: paused", ImGuiColors.DalamudYellow);
                 }
             }
             if (_pair.UserPair.Groups.Any())
             {
-                ImGui.TextUnformatted("Paired through Syncshells:");
+                SpheneUI.Text.Plain("Paired through Syncshells:");
                 foreach (var group in _pair.UserPair.Groups)
                 {
                     var groupNote = _serverManager.GetNoteForGid(group);
                     var groupName = _pairManager.GroupPairs.First(f => string.Equals(f.Key.GID, group, StringComparison.Ordinal)).Key.GroupAliasOrGID;
                     var groupString = string.IsNullOrEmpty(groupNote) ? groupName : $"{groupNote} ({groupName})";
-                    ImGui.TextUnformatted("- " + groupString);
+                    SpheneUI.Text.Plain("- " + groupString);
                 }
             }
 
-            ImGui.Separator();
-            var font = _uiSharedService.GameFont.Push();
+            SpheneUI.Layout.Separator();
+            var font = SpheneUI.GameFont.Push();
             var remaining = ImGui.GetWindowContentRegionMax().Y - ImGui.GetCursorPosY();
             var descText = spheneProfile.Description;
             var textSize = ImGui.CalcTextSize(descText, wrapWidth: 256f * ImGuiHelpers.GlobalScale);
@@ -166,24 +162,23 @@ public class PopoutProfileUi : WindowMediatorSubscriberBase
                 descText = descText[..descText.LastIndexOf(' ')].TrimEnd();
                 textSize = ImGui.CalcTextSize(descText + $"...{Environment.NewLine}[Open Full Profile for complete description]", wrapWidth: 256f * ImGuiHelpers.GlobalScale);
             }
-            UiSharedService.TextWrapped(trimmed ? descText + $"...{Environment.NewLine}[Open Full Profile for complete description]" : spheneProfile.Description);
+            SpheneUI.Text.Wrapped(trimmed ? descText + $"...{Environment.NewLine}[Open Full Profile for complete description]" : spheneProfile.Description);
             font.Dispose();
 
             var padding = ImGui.GetStyle().WindowPadding.X / 2;
-            bool tallerThanWide = _textureWrap.Height >= _textureWrap.Width;
-            var stretchFactor = tallerThanWide ? 256f * ImGuiHelpers.GlobalScale / _textureWrap.Height : 256f * ImGuiHelpers.GlobalScale / _textureWrap.Width;
-            var newWidth = _textureWrap.Width * stretchFactor;
-            var newHeight = _textureWrap.Height * stretchFactor;
-            var remainingWidth = (256f * ImGuiHelpers.GlobalScale - newWidth) / 2f;
-            var remainingHeight = (256f * ImGuiHelpers.GlobalScale - newHeight) / 2f;
-            drawList.AddImage(_textureWrap.Handle, new Vector2(rectMin.X + padding + remainingWidth, rectMin.Y + spacing.Y + imagePos.Y + remainingHeight),
-                new Vector2(rectMin.X + padding + remainingWidth + newWidth, rectMin.Y + spacing.Y + imagePos.Y + remainingHeight + newHeight));
-            if (_supporterTextureWrap != null)
+            if (textureWrap != null)
+            {
+                var imgMin = new Vector2(rectMin.X + padding, rectMin.Y + spacing.Y + imagePos.Y);
+                SpheneUI.Media.ImageInRect(drawList, textureWrap, imgMin,
+                    imgMin + new Vector2(256f * ImGuiHelpers.GlobalScale), ImageFit.Fit);
+            }
+            if (supporterTextureWrap != null)
             {
                 const float iconSize = 38;
-                drawList.AddImage(_supporterTextureWrap.Handle,
+                SpheneUI.Media.ImageInRect(drawList, supporterTextureWrap,
                     new Vector2(rectMax.X - iconSize - spacing.X, rectMin.Y + (textPos / 2) - (iconSize / 2)),
-                    new Vector2(rectMax.X - spacing.X, rectMin.Y + iconSize + (textPos / 2) - (iconSize / 2)));
+                    new Vector2(rectMax.X - spacing.X, rectMin.Y + iconSize + (textPos / 2) - (iconSize / 2)),
+                    ImageFit.Stretch);
             }
         }
         catch (Exception ex)

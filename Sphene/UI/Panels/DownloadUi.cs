@@ -7,7 +7,7 @@ using Sphene.Services;
 using Sphene.Services.Mediator;
 using Sphene.WebAPI.Files;
 using Sphene.WebAPI.Files.Models;
-using Sphene.UI.Theme;
+using Sphene.UI.Design;
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
 using System.Numerics;
@@ -72,6 +72,8 @@ public class DownloadUi : WindowMediatorSubscriberBase
         });
     }
 
+    protected override bool UseSpheneChrome => false;
+
     protected override void DrawInternal()
     {
         if (_configService.Current.ShowTransferWindow)
@@ -87,18 +89,18 @@ public class DownloadUi : WindowMediatorSubscriberBase
                     var totalUploaded = currentUploads.Sum(c => c.Transferred);
                     var totalToUpload = currentUploads.Sum(c => c.Total);
 
-                    UiSharedService.DrawOutlinedFont($"▲", ImGuiColors.DalamudWhite, new Vector4(0, 0, 0, 255), 1);
+                    SpheneUI.Text.OutlinedOn($"▲", ImGuiColors.DalamudWhite, new Vector4(0, 0, 0, 255), 1);
                     ImGui.SameLine();
                     var xDistance = ImGui.GetCursorPosX();
-                    UiSharedService.DrawOutlinedFont($"Compressing+Uploading {doneUploads}/{totalUploads}",
+                    SpheneUI.Text.OutlinedOn($"Compressing+Uploading {doneUploads}/{totalUploads}",
                         ImGuiColors.DalamudWhite, new Vector4(0, 0, 0, 255), 1);
                     ImGui.NewLine();
                     ImGui.SameLine(xDistance);
-                    UiSharedService.DrawOutlinedFont(
+                    SpheneUI.Text.OutlinedOn(
                         $"{UiSharedService.ByteToString(totalUploaded, addSuffix: false)}/{UiSharedService.ByteToString(totalToUpload)}",
                         ImGuiColors.DalamudWhite, new Vector4(0, 0, 0, 255), 1);
 
-                    if (_currentDownloads.Any()) ImGui.Separator();
+                    if (_currentDownloads.Any()) SpheneUI.Layout.Separator();
                 }
             }
             catch
@@ -119,15 +121,15 @@ public class DownloadUi : WindowMediatorSubscriberBase
                     var totalBytes = item.Value.Sum(c => c.Value.TotalBytes);
                     var transferredBytes = item.Value.Sum(c => c.Value.TransferredBytes);
 
-                    UiSharedService.DrawOutlinedFont($"▼", ImGuiColors.DalamudWhite, new Vector4(0, 0, 0, 255), 1);
+                    SpheneUI.Text.OutlinedOn($"▼", ImGuiColors.DalamudWhite, new Vector4(0, 0, 0, 255), 1);
                     ImGui.SameLine();
                     var xDistance = ImGui.GetCursorPosX();
-                    UiSharedService.DrawOutlinedFont(
+                    SpheneUI.Text.OutlinedOn(
                         $"{item.Key.Name} [W:{dlSlot}/Q:{dlQueue}/P:{dlProg}/D:{dlDecomp}]",
                         ImGuiColors.DalamudWhite, new Vector4(0, 0, 0, 255), 1);
                     ImGui.NewLine();
                     ImGui.SameLine(xDistance);
-                    UiSharedService.DrawOutlinedFont(
+                    SpheneUI.Text.OutlinedOn(
                         $"{transferredFiles}/{totalFiles} ({UiSharedService.ByteToString(transferredBytes, addSuffix: false)}/{UiSharedService.ByteToString(totalBytes)})",
                         ImGuiColors.DalamudWhite, new Vector4(0, 0, 0, 255), 1);
                 }
@@ -159,7 +161,7 @@ public class DownloadUi : WindowMediatorSubscriberBase
                 var textSize = _configService.Current.TransferBarsShowText ? ImGui.CalcTextSize(maxDlText) : new Vector2(10, 10);
 
                 // Use theme-configured transmission bar dimensions
-                var theme = SpheneCustomTheme.CurrentTheme;
+                var theme = SpheneTheme.Current;
                 int dlBarHeight = Math.Max((int)theme.CompactTransmissionBarHeight, _configService.Current.TransferBarsShowText ? (int)textSize.Y + 5 : 10);
                 int dlBarWidth = Math.Max((int)theme.CompactTransmissionBarWidth, _configService.Current.TransferBarsShowText ? (int)textSize.X + 10 : 50);
 
@@ -189,10 +191,10 @@ public class DownloadUi : WindowMediatorSubscriberBase
                 if (_configService.Current.TransferBarsShowText)
                 {
                     var downloadText = $"{UiSharedService.ByteToString(transferredBytes, addSuffix: false)}/{UiSharedService.ByteToString(totalBytes)}";
-                    UiSharedService.DrawOutlinedFont(drawList, downloadText,
+                    SpheneUI.Text.OutlinedOn(drawList, downloadText,
                         screenPos with { X = screenPos.X - textSize.X / 2f - 1, Y = screenPos.Y - textSize.Y / 2f - 1 },
-                        UiSharedService.Color(255, 255, 255, transparency),
-                        UiSharedService.Color(0, 0, 0, transparency), 1);
+                        SpheneUI.ColorUtils.U32(255, 255, 255, transparency),
+                        SpheneUI.ColorUtils.U32(0, 0, 0, transparency), 1);
                 }
             }
 
@@ -226,16 +228,16 @@ public class DownloadUi : WindowMediatorSubscriberBase
 
                     try
                     {
-                        using var _ = _uiShared.UidFont.Push();
+                        using var _ = SpheneUI.UidFont.Push();
                         var uploadText = "Transferring";
 
                         var textSize = ImGui.CalcTextSize(uploadText);
 
                         var drawList = ImGui.GetBackgroundDrawList();
-                        UiSharedService.DrawOutlinedFont(drawList, uploadText,
+                        SpheneUI.Text.OutlinedOn(drawList, uploadText,
                             screenPos with { X = screenPos.X - textSize.X / 2f - 1, Y = screenPos.Y - textSize.Y / 2f - 1 },
-                            UiSharedService.Color(255, 255, 0, transparency),
-                            UiSharedService.Color(0, 0, 0, transparency), 2);
+                            SpheneUI.ColorUtils.U32(255, 255, 0, transparency),
+                            SpheneUI.ColorUtils.U32(0, 0, 0, transparency), 2);
                     }
                     catch
                     {

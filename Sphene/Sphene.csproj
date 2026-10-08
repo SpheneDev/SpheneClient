@@ -3,9 +3,9 @@
   <PropertyGroup>
     <Authors></Authors>
     <Company></Company>
-    <Version>1.1.16.339</Version>
-    <AssemblyVersion>1.1.16.339</AssemblyVersion>
-    <FileVersion>1.1.16.339</FileVersion>
+    <Version>1.1.16.380</Version>
+    <AssemblyVersion>1.1.16.380</AssemblyVersion>
+    <FileVersion>1.1.16.380</FileVersion>
     <Description>Through the power of Living Memory, this plugin harmonizes your Penumbra modifications and Glamourer configurations across all connected souls, ensuring endless synchronization in your shared digital realm.</Description>
     <Copyright></Copyright>
     <PackageProjectUrl>https://github.com/SpheneDev/client</PackageProjectUrl>
@@ -49,9 +49,9 @@
     <BuildDate>$([System.DateTime]::Now.ToString("ddMM"))</BuildDate>
     <BuildTime>$([System.DateTime]::Now.ToString("HHMM"))</BuildTime>
     <BuildTimestamp>$([System.DateTime]::Now.ToString("dd-MM-yy HH:mm:ss"))</BuildTimestamp>
-    <Version>1.1.16.339</Version>
-    <AssemblyVersion>1.1.16.339</AssemblyVersion>
-    <FileVersion>1.1.16.339</FileVersion>
+    <Version>1.1.16.380</Version>
+    <AssemblyVersion>1.1.16.380</AssemblyVersion>
+    <FileVersion>1.1.16.380</FileVersion>
     <DefineConstants>$(DefineConstants);BUILD_TIMESTAMP</DefineConstants>
   </PropertyGroup>
   
@@ -90,6 +90,10 @@
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
+    <PackageReference Include="Microsoft.CodeAnalysis.BannedApiAnalyzers" Version="3.3.4">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
     <PackageReference Include="NAudio" Version="2.2.1" />
     <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.*" />
     <PackageReference Include="Microsoft.AspNetCore.SignalR.Protocols.MessagePack" Version="10.0.*" />
@@ -104,6 +108,10 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
     <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.7.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AdditionalFiles Include="BannedSymbols.txt" />
   </ItemGroup>
 
   <PropertyGroup>

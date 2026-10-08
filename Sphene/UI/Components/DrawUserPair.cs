@@ -15,7 +15,7 @@ using Sphene.Services.Mediator;
 using Sphene.Services.ServerConfiguration;
 using Sphene.SpheneConfiguration;
 using Sphene.UI.Handlers;
-using Sphene.UI.Theme;
+using Sphene.UI.Design;
 using Sphene.WebAPI;
 using Sphene.FileCache;
 using Sphene.WebAPI.Files;
@@ -24,7 +24,6 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Numerics;
-using Sphene.UI.Styling;
 
 namespace Sphene.UI.Components;
 
@@ -216,25 +215,25 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
     {
         if (!_pair.IsPaused)
         {
-            if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.User, "Open Profile", _menuWidth, ButtonStyleKeys.ContextMenu_Item))
+            if (SpheneUI.Icons.ActionButton(FontAwesomeIcon.User, "Open Profile", _menuWidth, ButtonStyleKeys.ContextMenu_Item))
             {
                 _displayHandler.OpenProfile(_pair);
                 ImGui.CloseCurrentPopup();
             }
-            UiSharedService.AttachToolTip("Opens the profile for this user in a new window");
+            SpheneUI.AttachTooltip("Opens the profile for this user in a new window");
         }
 
         var canSendPenumbraMod = _pair.IndividualPairStatus == API.Data.Enum.IndividualPairStatus.Bidirectional
                                  && _pair.OtherAllowsReceivingPenumbraMods;
         using (ImRaii.Disabled(!canSendPenumbraMod))
         {
-            if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.BoxOpen, "Send Penumbra Mod", _menuWidth, ButtonStyleKeys.ContextMenu_Item) && canSendPenumbraMod)
+            if (SpheneUI.Icons.ActionButton(FontAwesomeIcon.BoxOpen, "Send Penumbra Mod", _menuWidth, ButtonStyleKeys.ContextMenu_Item) && canSendPenumbraMod)
             {
                 _mediator.Publish(new OpenSendPenumbraModWindow(_pair));
                 ImGui.CloseCurrentPopup();
             }
         }
-        UiSharedService.AttachToolTip(_pair.OtherAllowsReceivingPenumbraMods
+        SpheneUI.AttachTooltip(_pair.OtherAllowsReceivingPenumbraMods
             ? "Opens a dialog to send a Penumbra mod package to this user. Available only for online, individually paired users."
             : "This user has disabled receiving Penumbra mod packages. You cannot send mods to them.");
 
@@ -243,19 +242,19 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         using (ImRaii.Disabled(!hasPendingModTransfer))
         {
             var text = pendingCount > 1 ? $"Install received Penumbra Mods ({pendingCount})" : "Install received Penumbra Mod";
-            if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.Download, text, _menuWidth, ButtonStyleKeys.ContextMenu_Item) && hasPendingModTransfer)
+            if (SpheneUI.Icons.ActionButton(FontAwesomeIcon.Download, text, _menuWidth, ButtonStyleKeys.ContextMenu_Item) && hasPendingModTransfer)
             {
                 _mediator.Publish(new OpenPenumbraReceiveModWindow(_pendingModNotifications.ToList()));
                 ImGui.CloseCurrentPopup();
             }
         }
-        UiSharedService.AttachToolTip(hasPendingModTransfer
+        SpheneUI.AttachTooltip(hasPendingModTransfer
             ? "Opens the panel to install the received Penumbra mod package from this user."
             : "No pending Penumbra mod package available from this user.");
 
         if (_pair.IsVisible)
         {
-            if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.Sync, "Reload last data", _menuWidth, ButtonStyleKeys.ContextMenu_Item))
+            if (SpheneUI.Icons.ActionButton(FontAwesomeIcon.Sync, "Reload last data", _menuWidth, ButtonStyleKeys.ContextMenu_Item))
             {
                 var requestToken = _pair.RequestForcedRedrawOnNextCharacterReload();
                 _ = _apiController.UserRequestCharacterDataRefresh(new(_pair.UserData));
@@ -263,10 +262,10 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
                 _mediator.Publish(new NotificationMessage("Character data refresh", $"Requested a fresh sync from {_pair.UserData.AliasOrUID}", Sphene.SpheneConfiguration.Models.NotificationType.Info, TimeSpan.FromSeconds(2)));
                 ImGui.CloseCurrentPopup();
             }
-            UiSharedService.AttachToolTip("Requests a fresh character data sync from this user.");
+            SpheneUI.AttachTooltip("Requests a fresh character data sync from this user.");
         }
 
-        if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.PlayCircle, "Cycle pause state", _menuWidth, ButtonStyleKeys.ContextMenu_Item))
+        if (SpheneUI.Icons.ActionButton(FontAwesomeIcon.PlayCircle, "Cycle pause state", _menuWidth, ButtonStyleKeys.ContextMenu_Item))
         {
             _ = _apiController.CyclePauseAsync(_pair.UserData);
             ImGui.CloseCurrentPopup();
@@ -282,8 +281,8 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
 
         if (emoteSyncEnabled)
         {
-        ImGui.Separator();
-        ImGui.TextUnformatted("Emote Sync");
+        SpheneUI.Layout.Separator();
+        SpheneUI.Text.Plain("Emote Sync");
 
         var selectedForForceSync = _localPairEmoteForceSyncService.IsTargetSelected(_pair.UserData.UID);
         var selectionIcon = selectedForForceSync ? FontAwesomeIcon.ToggleOn : FontAwesomeIcon.ToggleOff;
@@ -299,7 +298,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
                 Sphene.SpheneConfiguration.Models.NotificationType.Info,
                 TimeSpan.FromSeconds(3)));
         }
-        UiSharedService.AttachToolTip("Marks this pair as a local timing-sync target. A pair cannot be both timing leader and target.");
+        SpheneUI.AttachTooltip("Marks this pair as a local timing-sync target. A pair cannot be both timing leader and target.");
 
         var isLeader = _localPairEmoteForceSyncService.IsLeader(_pair.UserData.UID);
         var leaderIcon = isLeader ? FontAwesomeIcon.Crown : FontAwesomeIcon.User;
@@ -315,7 +314,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
                 Sphene.SpheneConfiguration.Models.NotificationType.Info,
                 TimeSpan.FromSeconds(3)));
         }
-        UiSharedService.AttachToolTip("When this leader triggers an emote update, your timing and selected target timing are reset to 0. Setting a leader disables auto reset on your emote and removes this pair from targets.");
+        SpheneUI.AttachTooltip("When this leader triggers an emote update, your timing and selected target timing are reset to 0. Setting a leader disables auto reset on your emote and removes this pair from targets.");
 
         var followLeaderEnabled = _localPairEmoteForceSyncService.FollowLeaderOnLeaderEmoteEnabled;
         var followLeaderIcon = followLeaderEnabled ? FontAwesomeIcon.ToggleOn : FontAwesomeIcon.ToggleOff;
@@ -328,7 +327,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
                 Sphene.SpheneConfiguration.Models.NotificationType.Info,
                 TimeSpan.FromSeconds(3)));
         }
-        UiSharedService.AttachToolTip("Enables or disables automatic timing follow when your selected leader emotes.");
+        SpheneUI.AttachTooltip("Enables or disables automatic timing follow when your selected leader emotes.");
 
         var autoResetEnabled = _localPairEmoteForceSyncService.AutoResetOnLocalEmoteEnabled;
         var autoResetIcon = autoResetEnabled ? FontAwesomeIcon.ToggleOn : FontAwesomeIcon.ToggleOff;
@@ -343,12 +342,12 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
                 Sphene.SpheneConfiguration.Models.NotificationType.Info,
                 TimeSpan.FromSeconds(3)));
         }
-        UiSharedService.AttachToolTip("When enabled, selected visible targets are reset to animation time 0 whenever your emote state updates. Enabling this clears the timing leader.");
+        SpheneUI.AttachTooltip("When enabled, selected visible targets are reset to animation time 0 whenever your emote state updates. Enabling this clears the timing leader.");
 
         var selectedCount = _localPairEmoteForceSyncService.GetSelectedTargetCount();
         using (ImRaii.Disabled(selectedCount <= 0))
         {
-            if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.Sync, "Reset emote timing for selected", _menuWidth, ButtonStyleKeys.ContextMenu_Item))
+            if (SpheneUI.Icons.ActionButton(FontAwesomeIcon.Sync, "Reset emote timing for selected", _menuWidth, ButtonStyleKeys.ContextMenu_Item))
             {
                 _ = Task.Run(async () =>
                 {
@@ -366,19 +365,19 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
             }
         }
         
-        UiSharedService.AttachToolTip(selectedCount > 0
+        SpheneUI.AttachTooltip(selectedCount > 0
             ? $"Resets current animation time to 0 for you and {selectedCount} selected mutually visible target(s), without changing which emote each player is using."
             : "Select at least one target to reset emote timing.");
-        ImGui.Separator();
+        SpheneUI.Layout.Separator();
         }
 
-        ImGui.TextUnformatted("Pair Permission Functions");
-        if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.WindowMaximize, "Open Permissions Window", _menuWidth, ButtonStyleKeys.ContextMenu_Item))
+        SpheneUI.Text.Plain("Pair Permission Functions");
+        if (SpheneUI.Icons.ActionButton(FontAwesomeIcon.WindowMaximize, "Open Permissions Window", _menuWidth, ButtonStyleKeys.ContextMenu_Item))
         {
             _mediator.Publish(new OpenPermissionWindow(_pair));
             ImGui.CloseCurrentPopup();
         }
-        UiSharedService.AttachToolTip("Opens the Permissions Window which allows you to manage multiple permissions at once.");
+        SpheneUI.AttachTooltip("Opens the Permissions Window which allows you to manage multiple permissions at once.");
 
         var isSticky = _pair.UserPair!.OwnPermissions.IsSticky();
         string stickyText = "Preferred Permissions";
@@ -389,7 +388,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
             permissions.SetSticky(!isSticky);
             _ = _apiController.UserSetPairPermissions(new(_pair.UserData, permissions));
         }
-        UiSharedService.AttachToolTip("Preferred permissions means that this pair will not" + Environment.NewLine + " be affected by any syncshell permission changes through you.");
+        SpheneUI.AttachTooltip("Preferred permissions means that this pair will not" + Environment.NewLine + " be affected by any syncshell permission changes through you.");
 
         string individualText = Environment.NewLine + Environment.NewLine + "Note: changing this permission will turn the permissions for this"
             + Environment.NewLine + "user to preferred permissions. You can change this behavior"
@@ -405,7 +404,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
             permissions.SetDisableSounds(!isDisableSounds);
             _ = _apiController.UserSetPairPermissions(new UserPermissionsDto(_pair.UserData, permissions));
         }
-        UiSharedService.AttachToolTip("Changes sound sync permissions with this user." + (individual ? individualText : string.Empty));
+        SpheneUI.AttachTooltip("Changes sound sync permissions with this user." + (individual ? individualText : string.Empty));
 
         var isDisableAnims = _pair.UserPair!.OwnPermissions.IsDisableAnimations();
         string disableAnimsText = "Animation sync";
@@ -416,7 +415,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
             permissions.SetDisableAnimations(!isDisableAnims);
             _ = _apiController.UserSetPairPermissions(new UserPermissionsDto(_pair.UserData, permissions));
         }
-        UiSharedService.AttachToolTip("Changes animation sync permissions with this user." + (individual ? individualText : string.Empty));
+        SpheneUI.AttachTooltip("Changes animation sync permissions with this user." + (individual ? individualText : string.Empty));
 
         var isDisableVFX = _pair.UserPair!.OwnPermissions.IsDisableVFX();
         string disableVFXText = "VFX sync";
@@ -427,7 +426,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
             permissions.SetDisableVFX(!isDisableVFX);
             _ = _apiController.UserSetPairPermissions(new UserPermissionsDto(_pair.UserData, permissions));
         }
-        UiSharedService.AttachToolTip("Changes VFX sync permissions with this user." + (individual ? individualText : string.Empty));
+        SpheneUI.AttachTooltip("Changes VFX sync permissions with this user." + (individual ? individualText : string.Empty));
 
         var isDisableVfxInDuty = _pair.UserPair!.OwnPermissions.IsDisableVFXInDuty();
         string disableVfxInDutyText = "VFX sync in duty";
@@ -438,10 +437,10 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
             permissions.SetDisableVFXInDuty(!isDisableVfxInDuty);
             _ = _apiController.UserSetPairPermissions(new UserPermissionsDto(_pair.UserData, permissions));
         }
-        UiSharedService.AttachToolTip("When enabled, VFX files from this user will be removed while you are in duty." + (individual ? individualText : string.Empty));
+        SpheneUI.AttachTooltip("When enabled, VFX files from this user will be removed while you are in duty." + (individual ? individualText : string.Empty));
 
-        ImGui.Separator();
-        ImGui.TextUnformatted("Performance Functions");
+        SpheneUI.Layout.Separator();
+        SpheneUI.Text.Plain("Performance Functions");
         
         // Check if user is already whitelisted
         var userIdentifier = !string.IsNullOrEmpty(_pair.UserData.Alias) ? _pair.UserData.Alias : _pair.UserData.UID;
@@ -462,7 +461,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
                 }
                 ImGui.CloseCurrentPopup();
             }
-            UiSharedService.AttachToolTip("Adds this user to the performance whitelist to ignore all performance warnings and auto-pause operations." + Environment.NewLine + 
+            SpheneUI.AttachTooltip("Adds this user to the performance whitelist to ignore all performance warnings and auto-pause operations." + Environment.NewLine + 
                                         "Will use: " + (!string.IsNullOrEmpty(_pair.UserData.Alias) ? _pair.UserData.Alias : _pair.UserData.UID));
         }
         else
@@ -476,14 +475,14 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
                 _performanceConfigService.Save();
                 ImGui.CloseCurrentPopup();
             }
-            UiSharedService.AttachToolTip("Removes this user from the performance whitelist.");
+            SpheneUI.AttachTooltip("Removes this user from the performance whitelist.");
         }
     }
 
     private bool DrawStateColoredToggleButton(FontAwesomeIcon icon, string text, bool enabledState)
     {
         using var _ = ImRaii.PushColor(ImGuiCol.Text, enabledState ? SoftToggleEnabledColor : SoftToggleDisabledColor);
-        return _uiSharedService.IconTextActionButton(icon, text, _menuWidth, ButtonStyleKeys.ContextMenu_Item);
+        return SpheneUI.Icons.ActionButton(icon, text, _menuWidth, ButtonStyleKeys.ContextMenu_Item);
     }
 
     private bool _disposed;
@@ -508,46 +507,46 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
 
     private void DrawIndividualMenu()
     {
-        ImGui.TextUnformatted("Individual Pair Functions");
+        SpheneUI.Text.Plain("Individual Pair Functions");
         var entryUID = _pair.UserData.AliasOrUID;
 
         if (_pair.IndividualPairStatus == API.Data.Enum.IndividualPairStatus.Bidirectional)
         {
-            if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.Folder, "Pair Groups", _menuWidth, ButtonStyleKeys.ContextMenu_Item))
+            if (SpheneUI.Icons.ActionButton(FontAwesomeIcon.Folder, "Pair Groups", _menuWidth, ButtonStyleKeys.ContextMenu_Item))
             {
                 _selectTagForPairUi.Open(_pair);
             }
-            UiSharedService.AttachToolTip("Choose pair groups for " + entryUID);
-            if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.Trash, "Unpair Permanently", _menuWidth, ButtonStyleKeys.ContextMenu_Item) && UiSharedService.CtrlPressed())
+            SpheneUI.AttachTooltip("Choose pair groups for " + entryUID);
+            if (SpheneUI.Icons.ActionButton(FontAwesomeIcon.Trash, "Unpair Permanently", _menuWidth, ButtonStyleKeys.ContextMenu_Item) && UiSharedService.CtrlPressed())
             {
                 _ = _apiController.UserRemovePair(new(_pair.UserData));
             }
-            UiSharedService.AttachToolTip("Hold CTRL and click to unpair permanently from " + entryUID);
+            SpheneUI.AttachTooltip("Hold CTRL and click to unpair permanently from " + entryUID);
         }
         else if (_pair.IndividualPairStatus == API.Data.Enum.IndividualPairStatus.OneSided)
         {
-            if (!_pair.UserPair.IsOutgoingIndividualPair && _uiSharedService.IconTextActionButton(FontAwesomeIcon.Plus, "Pair individually", _menuWidth, ButtonStyleKeys.ContextMenu_Item))
+            if (!_pair.UserPair.IsOutgoingIndividualPair && SpheneUI.Icons.ActionButton(FontAwesomeIcon.Plus, "Pair individually", _menuWidth, ButtonStyleKeys.ContextMenu_Item))
             {
                 _ = _apiController.UserAddPair(new(_pair.UserData));
             }
             if (!_pair.UserPair.IsOutgoingIndividualPair)
             {
-                UiSharedService.AttachToolTip("Complete one-sided pairing with " + entryUID);
+                SpheneUI.AttachTooltip("Complete one-sided pairing with " + entryUID);
             }
 
-            if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.Trash, "Unpair Permanently", _menuWidth, ButtonStyleKeys.ContextMenu_Item) && UiSharedService.CtrlPressed())
+            if (SpheneUI.Icons.ActionButton(FontAwesomeIcon.Trash, "Unpair Permanently", _menuWidth, ButtonStyleKeys.ContextMenu_Item) && UiSharedService.CtrlPressed())
             {
                 _ = _apiController.UserRemovePair(new(_pair.UserData));
             }
-            UiSharedService.AttachToolTip("Hold CTRL and click to unpair permanently from " + entryUID);
+            SpheneUI.AttachTooltip("Hold CTRL and click to unpair permanently from " + entryUID);
         }
         else
         {
-            if (_uiSharedService.IconTextActionButton(FontAwesomeIcon.Plus, "Pair individually", _menuWidth, ButtonStyleKeys.ContextMenu_Item))
+            if (SpheneUI.Icons.ActionButton(FontAwesomeIcon.Plus, "Pair individually", _menuWidth, ButtonStyleKeys.ContextMenu_Item))
             {
                 _ = _apiController.UserAddPair(new(_pair.UserData));
             }
-            UiSharedService.AttachToolTip("Pair individually with " + entryUID);
+            SpheneUI.AttachTooltip("Pair individually with " + entryUID);
         }
     }
 
@@ -572,14 +571,14 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         if (_pair.IsPaused)
         {
             using var _ = ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.DalamudYellow);
-            _uiSharedService.IconText(FontAwesomeIcon.PauseCircle);
+            SpheneUI.Icons.Icon(FontAwesomeIcon.PauseCircle);
             showUserPairTooltip = ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled);
             tooltipLines.Add("Paused");
         }
         else if (!_pair.IsOnline)
         {
             using var _ = ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.DalamudRed);
-            _uiSharedService.IconText(_pair.IndividualPairStatus == API.Data.Enum.IndividualPairStatus.OneSided
+            SpheneUI.Icons.Icon(_pair.IndividualPairStatus == API.Data.Enum.IndividualPairStatus.OneSided
                 ? FontAwesomeIcon.ArrowsLeftRight
                 : (_pair.IndividualPairStatus == API.Data.Enum.IndividualPairStatus.Bidirectional
                     ? FontAwesomeIcon.User : FontAwesomeIcon.Users));
@@ -591,7 +590,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
             if (_pair.UserPair.Groups.Any() && _pair.IndividualPairStatus != API.Data.Enum.IndividualPairStatus.Bidirectional)
             {
                 using var _ = ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.ParsedGreen);
-                _uiSharedService.IconText(FontAwesomeIcon.Link);
+                SpheneUI.Icons.Icon(FontAwesomeIcon.Link);
                 ImGui.SameLine();
             }
             
@@ -603,7 +602,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
                 _ => ImGuiColors.ParsedGreen
             };
             var icon = (_uiSharedService.IsInGpose || _pair.IsInGpose) ? FontAwesomeIcon.Camera : FontAwesomeIcon.Eye;
-            _uiSharedService.IconText(icon, iconColor);
+            SpheneUI.Icons.Icon(icon, iconColor);
             showUserPairTooltip = ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled);
             tooltipLines.Add(string.IsNullOrWhiteSpace(_pair.PlayerName) ? "Visible" : $"Visible: {_pair.PlayerName}");
             
@@ -617,13 +616,13 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
             using var _ = ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.HealerGreen);
             if (_pair.IsInGpose)
             {
-                _uiSharedService.IconText(FontAwesomeIcon.Camera);
+                SpheneUI.Icons.Icon(FontAwesomeIcon.Camera);
                 showUserPairTooltip = ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled);
                 tooltipLines.Add("GPose (no data shared)");
             }
             else
             {
-                _uiSharedService.IconText(_pair.IndividualPairStatus == API.Data.Enum.IndividualPairStatus.Bidirectional
+                SpheneUI.Icons.Icon(_pair.IndividualPairStatus == API.Data.Enum.IndividualPairStatus.Bidirectional
                     ? FontAwesomeIcon.User : FontAwesomeIcon.Users);
                 showUserPairTooltip = ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled);
                 tooltipLines.Add("Online");
@@ -637,27 +636,27 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
             if (outgoing.Outcome == Pair.AckV3Outcome.Pending)
             {
                 using var _ = ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.DalamudYellow);
-                _uiSharedService.IconText(FontAwesomeIcon.Clock);
-                UiSharedService.AttachToolTip("Sync in progress...");
+                SpheneUI.Icons.Icon(FontAwesomeIcon.Clock);
+                SpheneUI.AttachTooltip("Sync in progress...");
             }
             else if (outgoing.Outcome == Pair.AckV3Outcome.Success)
             {
                 using var _ = ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.ParsedGreen);
-                _uiSharedService.IconText(FontAwesomeIcon.CheckCircle);
+                SpheneUI.Icons.Icon(FontAwesomeIcon.CheckCircle);
                 var timeAgo = outgoing.Time.HasValue
                     ? $" ({(DateTimeOffset.UtcNow - outgoing.Time.Value).TotalSeconds:F0}s ago)"
                     : string.Empty;
-                UiSharedService.AttachToolTip($"Synced{timeAgo}");
+                SpheneUI.AttachTooltip($"Synced{timeAgo}");
             }
             else if (outgoing.Outcome == Pair.AckV3Outcome.Fail)
             {
                 using var _ = ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.DalamudRed);
-                _uiSharedService.IconText(FontAwesomeIcon.ExclamationTriangle);
+                SpheneUI.Icons.Icon(FontAwesomeIcon.ExclamationTriangle);
                 var timeAgo = outgoing.Time.HasValue
                     ? $" ({(DateTimeOffset.UtcNow - outgoing.Time.Value).TotalSeconds:F0}s ago)"
                     : string.Empty;
                 var reason = GetFriendlyAckFailureReason(outgoing.ErrorCode, outgoing.ErrorMessage);
-                UiSharedService.AttachToolTip($"Sync failed{timeAgo}{Environment.NewLine}{reason}");
+                SpheneUI.AttachTooltip($"Sync failed{timeAgo}{Environment.NewLine}{reason}");
             }
         }
 
@@ -665,8 +664,8 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         {
             ImGui.SameLine();
             using var _ = ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.DalamudYellow);
-            _uiSharedService.IconText(FontAwesomeIcon.PersonCircleCheck);
-            UiSharedService.AttachToolTip("Auto reset on your emote is active for this timing-sync target. Their current emote timing resets to 0 when your emote updates.");
+            SpheneUI.Icons.Icon(FontAwesomeIcon.PersonCircleCheck);
+            SpheneUI.AttachTooltip("Auto reset on your emote is active for this timing-sync target. Their current emote timing resets to 0 when your emote updates.");
         }
 
         if (_pair.IndividualPairStatus == API.Data.Enum.IndividualPairStatus.OneSided)
@@ -744,9 +743,9 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         {
             ImGui.SameLine();
 
-            _uiSharedService.IconText(FontAwesomeIcon.ExclamationTriangle, ImGuiColors.DalamudYellow);
+            SpheneUI.Icons.Icon(FontAwesomeIcon.ExclamationTriangle, ImGuiColors.DalamudYellow);
 
-            string userWarningText = "WARNING: This user exceeds one or more of your defined thresholds:" + UiSharedService.TooltipSeparator;
+            string userWarningText = "WARNING: This user exceeds one or more of your defined thresholds:" + SpheneUI.TooltipSeparator;
             bool shownVram = false;
             if (_performanceConfigService.Current.VRAMSizeWarningThresholdMiB > 0
                 && _performanceConfigService.Current.VRAMSizeWarningThresholdMiB * 1024 * 1024 < _pair.LastAppliedApproximateVRAMBytes)
@@ -761,7 +760,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
                 userWarningText += $"Approx. Triangle count: Used: {_pair.LastAppliedDataTris}, Threshold: {_performanceConfigService.Current.TrisWarningThresholdThousands * 1000}";
             }
 
-            UiSharedService.AttachToolTip(userWarningText);
+            SpheneUI.AttachTooltip(userWarningText);
         }
 
         ImGui.SameLine();
@@ -826,18 +825,18 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
     private static void DrawTooltipForHoveredItem(bool isHovered, string title, string? meta, IReadOnlyList<string> lines)
     {
         if (!isHovered) return;
-        using (SpheneCustomTheme.ApplyTooltipTheme())
+        using (SpheneUI.Theme.TooltipScope())
         {
             ImGui.BeginTooltip();
             ImGui.PushTextWrapPos(ImGui.GetFontSize() * 35f);
-            ImGui.TextUnformatted(title);
+            SpheneUI.Text.Plain(title);
 
             if (lines.Count > 0)
             {
                 ImGui.Separator();
                 for (int i = 0; i < lines.Count; i++)
                 {
-                    ImGui.TextUnformatted(lines[i]);
+                    SpheneUI.Text.Plain(lines[i]);
                 }
             }
 
@@ -848,9 +847,9 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
 
                 var textSize = ImGui.CalcTextSize(meta);
                 var cursorStartX = ImGui.GetCursorPosX();
-                var availableWidth = UiSharedService.BoundedContentAvailX();
+                var availableWidth = SpheneUI.Controls.BoundedAvailX();
                 ImGui.SetCursorPosX(cursorStartX + Math.Max(0, availableWidth - textSize.X));
-                ImGui.TextColored(ImGuiColors.DalamudGrey2, meta);
+                SpheneUI.Text.Colored(meta, ImGuiColors.DalamudGrey2);
                 ImGui.PushTextWrapPos(ImGui.GetFontSize() * 35f);
             }
 
@@ -950,7 +949,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
     {
         DrawIndividualMenu();
 
-        if (_syncedGroups.Any()) ImGui.Separator();
+        if (_syncedGroups.Any()) SpheneUI.Layout.Separator();
         foreach (var entry in _syncedGroups)
         {
             bool selfIsOwner = string.Equals(_apiController.UID, entry.Owner.UID, StringComparison.Ordinal);
@@ -974,19 +973,19 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
     private float DrawRightSide()
     {
         var pauseIcon = _pair.UserPair!.OwnPermissions.IsPaused() ? FontAwesomeIcon.Play : FontAwesomeIcon.Pause;
-        var pauseButtonSize = _uiSharedService.GetIconButtonSize(pauseIcon);
+        var pauseButtonSize = SpheneUI.Icons.ButtonSize(pauseIcon);
         var isOneSidedIndividualPair = _pair.IndividualPairStatus == API.Data.Enum.IndividualPairStatus.OneSided;
         var isOneSidedIndividualListEntry = isOneSidedIndividualPair
             && _currentGroup == null
             && _id.StartsWith(TagHandler.CustomUnpairedTag, StringComparison.Ordinal);
         var rightmostIcon = isOneSidedIndividualListEntry ? FontAwesomeIcon.User : FontAwesomeIcon.EllipsisV;
-        var rightmostButtonSize = _uiSharedService.GetIconButtonSize(rightmostIcon);
-        var reloadButtonSize = _pair.IsVisible ? _uiSharedService.GetIconButtonSize(FontAwesomeIcon.Sync) : Vector2.Zero;
-        var pairButtonSize = _uiSharedService.GetIconButtonSize(FontAwesomeIcon.Plus);
-        var unpairButtonSize = _uiSharedService.GetIconButtonSize(FontAwesomeIcon.Trash);
+        var rightmostButtonSize = SpheneUI.Icons.ButtonSize(rightmostIcon);
+        var reloadButtonSize = _pair.IsVisible ? SpheneUI.Icons.ButtonSize(FontAwesomeIcon.Sync) : Vector2.Zero;
+        var pairButtonSize = SpheneUI.Icons.ButtonSize(FontAwesomeIcon.Plus);
+        var unpairButtonSize = SpheneUI.Icons.ButtonSize(FontAwesomeIcon.Trash);
         var spacingX = ImGui.GetStyle().ItemSpacing.X;
         // Use container-relative positioning for buttons
-        var containerWidth = UiSharedService.BoundedContentAvailX();
+        var containerWidth = SpheneUI.Controls.BoundedAvailX();
         var actualWindowEndX = ImGui.GetCursorPosX() + containerWidth;
         
         // Adjust button positioning for grouped syncshell folders
@@ -996,7 +995,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         // Rightmost action button
         ImGui.SameLine(currentRightSide);
         ImGui.AlignTextToFramePadding();
-        if (_uiSharedService.IconButton(rightmostIcon, null, null, null, null, ButtonStyleKeys.Pair_Menu))
+        if (SpheneUI.Icons.Button(rightmostIcon, null, null, null, null, ButtonStyleKeys.Pair_Menu))
         {
             if (isOneSidedIndividualListEntry)
             {
@@ -1007,7 +1006,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
                 ImGui.OpenPopup("User Flyout Menu");
             }
         }
-        UiSharedService.AttachToolTip(isOneSidedIndividualListEntry
+        SpheneUI.AttachTooltip(isOneSidedIndividualListEntry
             ? "Open profile of " + _pair.UserData.AliasOrUID
             : "Open user menu");
 
@@ -1016,25 +1015,25 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         {
             currentRightSide -= (reloadButtonSize.X + spacingX);
             ImGui.SameLine(currentRightSide);
-            if (_uiSharedService.IconButton(FontAwesomeIcon.Sync, null, null, null, null, ButtonStyleKeys.Pair_Reload))
+            if (SpheneUI.Icons.Button(FontAwesomeIcon.Sync, null, null, null, null, ButtonStyleKeys.Pair_Reload))
             {
                 var requestToken = _pair.RequestForcedRedrawOnNextCharacterReload();
                 _ = _apiController.UserRequestCharacterDataRefresh(new(_pair.UserData));
                 _ = _pair.ApplyLastKnownDataIfReloadPendingAsync(requestToken);
                 _mediator.Publish(new NotificationMessage("Character data refresh", $"Requested a fresh sync from {_pair.UserData.AliasOrUID}", Sphene.SpheneConfiguration.Models.NotificationType.Info, TimeSpan.FromSeconds(2)));
             }
-            UiSharedService.AttachToolTip("Request fresh character data from server");
+            SpheneUI.AttachTooltip("Request fresh character data from server");
         }
 
         if (isOneSidedIndividualListEntry && !_pair.UserPair.IsOutgoingIndividualPair)
         {
             currentRightSide -= (pairButtonSize.X + spacingX);
             ImGui.SameLine(currentRightSide);
-            if (_uiSharedService.IconButton(FontAwesomeIcon.Plus))
+            if (SpheneUI.Icons.Button(FontAwesomeIcon.Plus))
             {
                 _ = _apiController.UserAddPair(new(_pair.UserData));
             }
-            UiSharedService.AttachToolTip("Pair individually with " + _pair.UserData.AliasOrUID);
+            SpheneUI.AttachTooltip("Pair individually with " + _pair.UserData.AliasOrUID);
 
         }
 
@@ -1042,11 +1041,11 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         {
             currentRightSide -= (unpairButtonSize.X + spacingX);
             ImGui.SameLine(currentRightSide);
-            if (_uiSharedService.IconButton(FontAwesomeIcon.Trash) && UiSharedService.CtrlPressed())
+            if (SpheneUI.Icons.Button(FontAwesomeIcon.Trash) && UiSharedService.CtrlPressed())
             {
                 _ = _apiController.UserRemovePair(new(_pair.UserData));
             }
-            UiSharedService.AttachToolTip("Hold CTRL and click to unpair permanently from " + _pair.UserData.AliasOrUID);
+            SpheneUI.AttachTooltip("Hold CTRL and click to unpair permanently from " + _pair.UserData.AliasOrUID);
         }
 
         if (!isOneSidedIndividualListEntry)
@@ -1054,7 +1053,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
             // Pause/Play button (leftmost of the three)
             currentRightSide -= (pauseButtonSize.X + spacingX);
             ImGui.SameLine(currentRightSide);
-            if (_uiSharedService.IconButton(pauseIcon, null, null, null, null, ButtonStyleKeys.Pair_Pause))
+            if (SpheneUI.Icons.Button(pauseIcon, null, null, null, null, ButtonStyleKeys.Pair_Pause))
             {
                 var perm = _pair.UserPair!.OwnPermissions;
 
@@ -1065,11 +1064,11 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
                 perm.SetPaused(!perm.IsPaused());
                 _ = _apiController.UserSetPairPermissions(new(_pair.UserData, perm));
             }
-            UiSharedService.AttachToolTip(!_pair.UserPair!.OwnPermissions.IsPaused()
+            SpheneUI.AttachTooltip(!_pair.UserPair!.OwnPermissions.IsPaused()
                 ? ("Pause pairing with " + _pair.UserData.AliasOrUID
                     + (_pair.UserPair!.OwnPermissions.IsSticky()
                         ? string.Empty
-                        : UiSharedService.TooltipSeparator + "Hold CTRL to enable preferred permissions while pausing." + Environment.NewLine + "This will leave this pair paused even if unpausing syncshells including this pair."))
+                        : SpheneUI.TooltipSeparator + "Hold CTRL to enable preferred permissions while pausing." + Environment.NewLine + "This will leave this pair paused even if unpausing syncshells including this pair."))
                 : "Resume pairing with " + _pair.UserData.AliasOrUID);
         }
 
@@ -1083,26 +1082,26 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
 
             if (individualAnimDisabled || individualSoundsDisabled || individualVFXDisabled || individualIsSticky)
             {
-                currentRightSide -= (_uiSharedService.GetIconSize(individualIcon).X + spacingX);
+                currentRightSide -= (SpheneUI.Icons.Size(individualIcon).X + spacingX);
 
                 ImGui.SameLine(currentRightSide);
                 using (ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.DalamudYellow, individualAnimDisabled || individualSoundsDisabled || individualVFXDisabled))
-                    _uiSharedService.IconText(individualIcon);
+                    SpheneUI.Icons.Icon(individualIcon);
                 if (ImGui.IsItemHovered())
                 {
-                    using (SpheneCustomTheme.ApplyTooltipTheme())
+                    using (SpheneUI.Theme.TooltipScope())
                     {
                         ImGui.BeginTooltip();
 
-                        ImGui.TextUnformatted("Individual User permissions");
+                        SpheneUI.Text.Plain("Individual User permissions");
                         ImGui.Separator();
 
                         if (individualIsSticky)
                         {
-                            _uiSharedService.IconText(individualIcon);
+                            SpheneUI.Icons.Icon(individualIcon);
                             ImGui.SameLine(40 * ImGuiHelpers.GlobalScale);
                             ImGui.AlignTextToFramePadding();
-                            ImGui.TextUnformatted("Preferred permissions enabled");
+                            SpheneUI.Text.Plain("Preferred permissions enabled");
                             if (individualAnimDisabled || individualSoundsDisabled || individualVFXDisabled)
                                 ImGui.Separator();
                         }
@@ -1110,55 +1109,55 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
                         if (individualSoundsDisabled)
                         {
                             var userSoundsText = "Sound sync";
-                            _uiSharedService.IconText(FontAwesomeIcon.VolumeOff);
+                            SpheneUI.Icons.Icon(FontAwesomeIcon.VolumeOff);
                             ImGui.SameLine(40 * ImGuiHelpers.GlobalScale);
                             ImGui.AlignTextToFramePadding();
-                            ImGui.TextUnformatted(userSoundsText);
+                            SpheneUI.Text.Plain(userSoundsText);
                             ImGui.NewLine();
                             ImGui.SameLine(40 * ImGuiHelpers.GlobalScale);
                             ImGui.AlignTextToFramePadding();
-                            ImGui.TextUnformatted("You");
-                            _uiSharedService.BooleanToColoredIcon(!_pair.UserPair!.OwnPermissions.IsDisableSounds());
+                            SpheneUI.Text.Plain("You");
+                            SpheneUI.Icons.BoolIcon(!_pair.UserPair!.OwnPermissions.IsDisableSounds());
                             ImGui.SameLine();
                             ImGui.AlignTextToFramePadding();
-                            ImGui.TextUnformatted("They");
-                            _uiSharedService.BooleanToColoredIcon(!_pair.UserPair!.OtherPermissions.IsDisableSounds());
+                            SpheneUI.Text.Plain("They");
+                            SpheneUI.Icons.BoolIcon(!_pair.UserPair!.OtherPermissions.IsDisableSounds());
                         }
 
                         if (individualAnimDisabled)
                         {
                             var userAnimText = "Animation sync";
-                            _uiSharedService.IconText(FontAwesomeIcon.Stop);
+                            SpheneUI.Icons.Icon(FontAwesomeIcon.Stop);
                             ImGui.SameLine(40 * ImGuiHelpers.GlobalScale);
                             ImGui.AlignTextToFramePadding();
-                            ImGui.TextUnformatted(userAnimText);
+                            SpheneUI.Text.Plain(userAnimText);
                             ImGui.NewLine();
                             ImGui.SameLine(40 * ImGuiHelpers.GlobalScale);
                             ImGui.AlignTextToFramePadding();
-                            ImGui.TextUnformatted("You");
-                            _uiSharedService.BooleanToColoredIcon(!_pair.UserPair!.OwnPermissions.IsDisableAnimations());
+                            SpheneUI.Text.Plain("You");
+                            SpheneUI.Icons.BoolIcon(!_pair.UserPair!.OwnPermissions.IsDisableAnimations());
                             ImGui.SameLine();
                             ImGui.AlignTextToFramePadding();
-                            ImGui.TextUnformatted("They");
-                            _uiSharedService.BooleanToColoredIcon(!_pair.UserPair!.OtherPermissions.IsDisableAnimations());
+                            SpheneUI.Text.Plain("They");
+                            SpheneUI.Icons.BoolIcon(!_pair.UserPair!.OtherPermissions.IsDisableAnimations());
                         }
 
                         if (individualVFXDisabled)
                         {
                             var userVFXText = "VFX sync";
-                            _uiSharedService.IconText(FontAwesomeIcon.Circle);
+                            SpheneUI.Icons.Icon(FontAwesomeIcon.Circle);
                             ImGui.SameLine(40 * ImGuiHelpers.GlobalScale);
                             ImGui.AlignTextToFramePadding();
-                            ImGui.TextUnformatted(userVFXText);
+                            SpheneUI.Text.Plain(userVFXText);
                             ImGui.NewLine();
                             ImGui.SameLine(40 * ImGuiHelpers.GlobalScale);
                             ImGui.AlignTextToFramePadding();
-                            ImGui.TextUnformatted("You");
-                            _uiSharedService.BooleanToColoredIcon(!_pair.UserPair!.OwnPermissions.IsDisableVFX());
+                            SpheneUI.Text.Plain("You");
+                            SpheneUI.Icons.BoolIcon(!_pair.UserPair!.OwnPermissions.IsDisableVFX());
                             ImGui.SameLine();
                             ImGui.AlignTextToFramePadding();
-                            ImGui.TextUnformatted("They");
-                            _uiSharedService.BooleanToColoredIcon(!_pair.UserPair!.OtherPermissions.IsDisableVFX());
+                            SpheneUI.Text.Plain("They");
+                            SpheneUI.Icons.BoolIcon(!_pair.UserPair!.OtherPermissions.IsDisableVFX());
                         }
 
                         ImGui.EndTooltip();
@@ -1168,25 +1167,25 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
 
             if (_pendingModNotifications.Count > 0)
             {
-                var modIconWidth = _uiSharedService.GetIconSize(FontAwesomeIcon.BoxOpen).X;
+                var modIconWidth = SpheneUI.Icons.Size(FontAwesomeIcon.BoxOpen).X;
                 currentRightSide -= (modIconWidth + spacingX);
                 ImGui.SameLine(currentRightSide);
                 using (ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.ParsedGreen))
-                    _uiSharedService.IconText(FontAwesomeIcon.BoxOpen);
+                    SpheneUI.Icons.Icon(FontAwesomeIcon.BoxOpen);
                 
                 var tooltip = _pendingModNotifications.Count > 1 
                     ? $"This user has {_pendingModNotifications.Count} Penumbra mod packages ready to install."
                     : "This user has a Penumbra mod package ready to install.";
-                UiSharedService.AttachToolTip(tooltip);
+                SpheneUI.AttachTooltip(tooltip);
             }
         }
 
         if (_charaDataManager.SharedWithYouData.TryGetValue(_pair.UserData, out var sharedData))
         {
-            currentRightSide -= (_uiSharedService.GetIconSize(FontAwesomeIcon.Running).X + (spacingX / 2f));
+            currentRightSide -= (SpheneUI.Icons.Size(FontAwesomeIcon.Running).X + (spacingX / 2f));
             ImGui.SameLine(currentRightSide);
-            _uiSharedService.IconText(FontAwesomeIcon.Running);
-            UiSharedService.AttachToolTip($"This user has shared {sharedData.Count} Character Data Sets with you." + UiSharedService.TooltipSeparator
+            SpheneUI.Icons.Icon(FontAwesomeIcon.Running);
+            SpheneUI.AttachTooltip($"This user has shared {sharedData.Count} Character Data Sets with you." + SpheneUI.TooltipSeparator
                 + "Click to open the Character Data Hub and show the entries.");
             if (ImGui.IsItemClicked(ImGuiMouseButton.Left))
             {
@@ -1219,29 +1218,29 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
 
             if (!string.IsNullOrEmpty(text))
             {
-                currentRightSide -= (_uiSharedService.GetIconSize(icon).X + spacingX);
+                currentRightSide -= (SpheneUI.Icons.Size(icon).X + spacingX);
                 ImGui.SameLine(currentRightSide);
-                _uiSharedService.IconText(icon);
-                UiSharedService.AttachToolTip(text);
+                SpheneUI.Icons.Icon(icon);
+                SpheneUI.AttachTooltip(text);
             }
         }
 
-        using (SpheneCustomTheme.ApplyContextMenuTheme())
+        using (SpheneUI.Theme.ContextMenuScope())
         {
-            if (SpheneWindowChrome.BeginStyledPopup("User Flyout Menu"))
+            if (SpheneUI.Popups.BeginStyled("User Flyout Menu"))
             {
                 using (ImRaii.PushId($"buttons-{_pair.UserData.UID}"))
                 {
-                    ImGui.TextUnformatted("Common Pair Functions");
+                    SpheneUI.Text.Plain("Common Pair Functions");
                     DrawCommonClientMenu();
-                    ImGui.Separator();
+                    SpheneUI.Layout.Separator();
                     DrawPairedClientMenu();
                     if (_menuWidth <= 0)
                     {
                         _menuWidth = ImGui.GetWindowContentRegionMax().X - ImGui.GetWindowContentRegionMin().X;
                     }
                 }
-                SpheneWindowChrome.EndStyledPopup();
+                SpheneUI.Popups.EndStyled();
             }
         }
 
@@ -1252,7 +1251,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
     {
         if (selfIsOwner || ((selfIsModerator) && (!userIsModerator)))
         {
-            ImGui.TextUnformatted("Syncshell Moderator Functions");
+            SpheneUI.Text.Plain("Syncshell Moderator Functions");
             var pinText = "Pinned in syncshell";
             var pinIcon = userIsPinned ? FontAwesomeIcon.ToggleOn : FontAwesomeIcon.ToggleOff;
             if (DrawStateColoredToggleButton(pinIcon, pinText, userIsPinned))
@@ -1268,28 +1267,28 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
                 }
                 _ = _apiController.GroupSetUserInfo(new GroupPairUserInfoDto(group.Group, _pair.UserData, userinfo));
             }
-            UiSharedService.AttachToolTip("Pin this user to the Syncshell. Pinned users will not be deleted in case of a manually initiated Syncshell clean");
+            SpheneUI.AttachTooltip("Pin this user to the Syncshell. Pinned users will not be deleted in case of a manually initiated Syncshell clean");
 
-            if (_uiSharedService.IconTextButton(FontAwesomeIcon.Trash, "Remove user", _menuWidth, true, ButtonStyleKeys.Pair_Remove) && UiSharedService.CtrlPressed())
+            if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Trash, "Remove user", _menuWidth, true, ButtonStyleKeys.Pair_Remove) && UiSharedService.CtrlPressed())
             {
                 ImGui.CloseCurrentPopup();
                 _ = _apiController.GroupRemoveUser(new(group.Group, _pair.UserData));
             }
-            UiSharedService.AttachToolTip("Hold CTRL and click to remove user " + (_pair.UserData.AliasOrUID) + " from Syncshell");
+            SpheneUI.AttachTooltip("Hold CTRL and click to remove user " + (_pair.UserData.AliasOrUID) + " from Syncshell");
 
-            if (_uiSharedService.IconTextButton(FontAwesomeIcon.UserSlash, "Ban User", _menuWidth, true, ButtonStyleKeys.Pair_Ban))
+            if (SpheneUI.Icons.TextButton(FontAwesomeIcon.UserSlash, "Ban User", _menuWidth, true, ButtonStyleKeys.Pair_Ban))
             {
                 _mediator.Publish(new OpenBanUserPopupMessage(_pair, group));
                 ImGui.CloseCurrentPopup();
             }
-            UiSharedService.AttachToolTip("Ban user from this Syncshell");
+            SpheneUI.AttachTooltip("Ban user from this Syncshell");
 
-            ImGui.Separator();
+            SpheneUI.Layout.Separator();
         }
 
         if (selfIsOwner)
         {
-            ImGui.TextUnformatted("Syncshell Owner Functions");
+            SpheneUI.Text.Plain("Syncshell Owner Functions");
             var modText = "Syncshell moderator";
             var modIcon = userIsModerator ? FontAwesomeIcon.ToggleOn : FontAwesomeIcon.ToggleOff;
             if (DrawStateColoredToggleButton(modIcon, modText, userIsModerator) && UiSharedService.CtrlPressed())
@@ -1306,10 +1305,10 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
 
                 _ = _apiController.GroupSetUserInfo(new GroupPairUserInfoDto(group.Group, _pair.UserData, userinfo));
             }
-            UiSharedService.AttachToolTip("Hold CTRL to change the moderator status for " + (_pair.UserData.AliasOrUID) + Environment.NewLine +
+            SpheneUI.AttachTooltip("Hold CTRL to change the moderator status for " + (_pair.UserData.AliasOrUID) + Environment.NewLine +
                 "Moderators can kick, ban/unban, pin/unpin users and clear the Syncshell.");
 
-            if (_uiSharedService.IconTextButton(FontAwesomeIcon.Crown, "Transfer Ownership", _menuWidth, true, ButtonStyleKeys.Pair_Transfer) && UiSharedService.CtrlPressed() && UiSharedService.ShiftPressed())
+            if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Crown, "Transfer Ownership", _menuWidth, true, ButtonStyleKeys.Pair_Transfer) && UiSharedService.CtrlPressed() && UiSharedService.ShiftPressed())
             {
                 ImGui.CloseCurrentPopup();
                 _ = _apiController.GroupChangeOwnership(new(group.Group, _pair.UserData));

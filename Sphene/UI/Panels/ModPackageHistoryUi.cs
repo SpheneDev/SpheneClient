@@ -25,12 +25,12 @@ using System.Numerics;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Sphene.UI.Design;
 
 namespace Sphene.UI.Panels;
 
 public class ModPackageHistoryUi : WindowMediatorSubscriberBase
 {
-    private readonly UiSharedService _uiShared;
     private readonly ApiController _apiController;
     private readonly FileTransferOrchestrator _fileTransferOrchestrator;
     private readonly FileUploadManager _fileUploadManager;
@@ -76,7 +76,6 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
     public ModPackageHistoryUi(
         ILogger<ModPackageHistoryUi> logger,
         SpheneMediator mediator,
-        UiSharedService uiShared,
         ApiController apiController,
         FileTransferOrchestrator fileTransferOrchestrator,
         FileUploadManager fileUploadManager,
@@ -89,7 +88,6 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
         PerformanceCollectorService performanceCollectorService)
         : base(logger, mediator, "Mod Packages###SpheneModPackageHistory", performanceCollectorService)
     {
-        _uiShared = uiShared;
         _apiController = apiController;
         _fileTransferOrchestrator = fileTransferOrchestrator;
         _fileUploadManager = fileUploadManager;
@@ -122,7 +120,7 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
         if (currentPage < 1) currentPage = 1;
 
         ImGui.AlignTextToFramePadding();
-        ImGui.Text($"Total: {totalItems} items | Page {currentPage} of {totalPages}");
+        SpheneUI.Text.Plain($"Total: {totalItems} items | Page {currentPage} of {totalPages}");
         
         ImGui.SameLine();
         if (ImGui.ArrowButton($"##prev{idSuffix}", ImGuiDir.Left) && currentPage > 1)
@@ -140,9 +138,9 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
         ImGui.SetNextItemWidth(100);
         if (ImGui.BeginCombo($"##perPage{idSuffix}", $"{itemsPerPage} per page"))
         {
-            if (ImGui.Selectable($"25##{idSuffix}", itemsPerPage == 25)) itemsPerPage = 25;
-            if (ImGui.Selectable($"50##{idSuffix}", itemsPerPage == 50)) itemsPerPage = 50;
-            if (ImGui.Selectable($"100##{idSuffix}", itemsPerPage == 100)) itemsPerPage = 100;
+            if (SpheneUI.Controls.Selectable($"25##{idSuffix}", itemsPerPage == 25)) itemsPerPage = 25;
+            if (SpheneUI.Controls.Selectable($"50##{idSuffix}", itemsPerPage == 50)) itemsPerPage = 50;
+            if (SpheneUI.Controls.Selectable($"100##{idSuffix}", itemsPerPage == 100)) itemsPerPage = 100;
             ImGui.EndCombo();
         }
     }
@@ -159,15 +157,26 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
 
     private void DrawContent(bool isEmbedded)
     {
+        var id = isEmbedded ? "modhistory-embedded" : "modhistory-content";
+        if (SpheneUI.Layout.BeginScrollArea(id, ImGui.GetContentRegionAvail(),
+                contentPadding: Vector2.Zero))
+        {
+            DrawTabbedContent(isEmbedded);
+        }
+        SpheneUI.Layout.EndScrollArea();
+    }
+
+    private void DrawTabbedContent(bool isEmbedded)
+    {
         if (!isEmbedded)
         {
-            _uiShared.BigText("Mod Package History");
-            UiSharedService.TextWrapped("Overview of Penumbra mod packages you have uploaded and downloaded via Sphene.");
-            ImGui.Separator();
+            SpheneUI.Text.PageHeader("Mod Package History",
+                "Overview of Penumbra mod packages you have uploaded and downloaded via Sphene.");
+            SpheneUI.Layout.Separator();
         }
         else
         {
-            ImGui.TextDisabled("Upload, download, reshare, and create backups from mod packages.");
+            SpheneUI.Text.Muted("Upload, download, reshare, and create backups from mod packages.");
             ImGui.Spacing();
         }
 
@@ -209,24 +218,24 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
 
     private void DrawModPackageUploadHistory()
     {
-        _uiShared.BigText("Uploaded Mod Packages");
+        SpheneUI.Text.Big("Uploaded Mod Packages");
 
         if (!_fileTransferOrchestrator.IsInitialized)
         {
-            UiSharedService.ColorTextWrapped("File transfer service is not initialized. Connect to a server first.", ImGuiColors.DalamudYellow);
+            SpheneUI.Text.ColoredWrapped("File transfer service is not initialized. Connect to a server first.", ImGuiColors.DalamudYellow);
             return;
         }
 
         DrawRedownloadStatus();
 
-        if (_uiShared.IconTextButton(FontAwesomeIcon.History, "Load my uploaded mod packages"))
+        if (SpheneUI.Icons.TextButton(FontAwesomeIcon.History, "Load my uploaded mod packages"))
         {
             _modUploadHistoryTask = GetModUploadHistory(CancellationToken.None);
         }
 
         if (_modUploadHistoryTask != null && !_modUploadHistoryTask.IsCompleted)
         {
-            UiSharedService.ColorTextWrapped("Loading uploaded mod package history…", ImGuiColors.DalamudGrey);
+            SpheneUI.Text.ColoredWrapped("Loading uploaded mod package history…", ImGuiColors.DalamudGrey);
             return;
         }
 
@@ -237,14 +246,14 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
 
         if (!_modUploadHistoryTask.IsCompletedSuccessfully || _modUploadHistoryTask.Result == null)
         {
-            UiSharedService.ColorTextWrapped("Failed to load uploaded mod package history. See /xllog for details.", ImGuiColors.DalamudRed);
+            SpheneUI.Text.ColoredWrapped("Failed to load uploaded mod package history. See /xllog for details.", ImGuiColors.DalamudRed);
             return;
         }
 
         var history = _modUploadHistoryTask.Result;
         if (history.Count == 0)
         {
-            UiSharedService.ColorTextWrapped("No uploaded mod packages found for this account.", ImGuiColors.DalamudGrey);
+            SpheneUI.Text.ColoredWrapped("No uploaded mod packages found for this account.", ImGuiColors.DalamudGrey);
             return;
         }
 
@@ -270,29 +279,29 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
         {
             ImGui.TableNextRow();
             ImGui.TableNextColumn();
-            ImGui.Selectable(string.IsNullOrWhiteSpace(entry.Name) ? entry.Hash : entry.Name, false, ImGuiSelectableFlags.SpanAllColumns);
+            SpheneUI.Controls.Selectable(string.IsNullOrWhiteSpace(entry.Name) ? entry.Hash : entry.Name, false, ImGuiSelectableFlags.SpanAllColumns);
 
-            if (ImGui.BeginPopupContextItem($"UploadHistoryContext{entry.Hash}{entry.UploadedDate.Ticks}"))
+            if (SpheneUI.Popups.BeginContextStyled($"UploadHistoryContext{entry.Hash}{entry.UploadedDate.Ticks}"))
             {
                 if (ImGui.MenuItem("Send to..."))
                 {
                     Mediator.Publish(new OpenSendPenumbraModWindow(null, entry.Name));
                 }
-                ImGui.EndPopup();
+                SpheneUI.Popups.EndStyled();
             }
 
             ImGui.TableNextColumn();
-            ImGui.TextUnformatted(entry.Version ?? "-");
+            SpheneUI.Text.Plain(entry.Version ?? "-");
             ImGui.TableNextColumn();
-            ImGui.TextUnformatted(entry.Author ?? "-");
+            SpheneUI.Text.Plain(entry.Author ?? "-");
             ImGui.TableNextColumn();
-            ImGui.TextUnformatted(UiSharedService.ByteToString(entry.Size));
+            SpheneUI.Text.Plain(UiSharedService.ByteToString(entry.Size));
             ImGui.TableNextColumn();
-            ImGui.TextUnformatted(entry.UploadedDate.ToLocalTime().ToString("yyyy-MM-dd HH:mm"));
+            SpheneUI.Text.Plain(entry.UploadedDate.ToLocalTime().ToString("yyyy-MM-dd HH:mm"));
             ImGui.TableNextColumn();
             using (ImRaii.Disabled(_isRedownloadBusy))
             {
-                if (ImGui.SmallButton($"Re-download##redownload_upload_{entry.Hash}_{entry.UploadedDate.Ticks}"))
+                if (SpheneUI.Controls.SmallButton($"Re-download##redownload_upload_{entry.Hash}_{entry.UploadedDate.Ticks}"))
                 {
                     StartRedownload(entry);
                 }
@@ -304,25 +313,25 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
 
     private void DrawModPackageDownloadHistory()
     {
-        ImGui.Separator();
-        _uiShared.BigText("Downloaded Mod Packages");
+        SpheneUI.Layout.Separator();
+        SpheneUI.Text.Big("Downloaded Mod Packages");
 
         if (!_fileTransferOrchestrator.IsInitialized)
         {
-            UiSharedService.ColorTextWrapped("File transfer service is not initialized. Connect to a server first.", ImGuiColors.DalamudYellow);
+            SpheneUI.Text.ColoredWrapped("File transfer service is not initialized. Connect to a server first.", ImGuiColors.DalamudYellow);
             return;
         }
 
         DrawRedownloadStatus();
 
-        if (_uiShared.IconTextButton(FontAwesomeIcon.Download, "Load my downloaded mod packages"))
+        if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Download, "Load my downloaded mod packages"))
         {
             _modDownloadHistoryTask = GetModDownloadHistory(CancellationToken.None);
         }
 
         if (_modDownloadHistoryTask != null && !_modDownloadHistoryTask.IsCompleted)
         {
-            UiSharedService.ColorTextWrapped("Loading downloaded mod package history…", ImGuiColors.DalamudGrey);
+            SpheneUI.Text.ColoredWrapped("Loading downloaded mod package history…", ImGuiColors.DalamudGrey);
             return;
         }
 
@@ -333,14 +342,14 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
 
         if (!_modDownloadHistoryTask.IsCompletedSuccessfully || _modDownloadHistoryTask.Result == null)
         {
-            UiSharedService.ColorTextWrapped("Failed to load downloaded mod package history. See /xllog for details.", ImGuiColors.DalamudRed);
+            SpheneUI.Text.ColoredWrapped("Failed to load downloaded mod package history. See /xllog for details.", ImGuiColors.DalamudRed);
             return;
         }
 
         var history = _modDownloadHistoryTask.Result;
         if (history.Count == 0)
         {
-            UiSharedService.ColorTextWrapped("No downloaded mod packages found for this account.", ImGuiColors.DalamudGrey);
+            SpheneUI.Text.ColoredWrapped("No downloaded mod packages found for this account.", ImGuiColors.DalamudGrey);
             return;
         }
 
@@ -366,33 +375,33 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
         {
             ImGui.TableNextRow();
             ImGui.TableNextColumn();
-            ImGui.Selectable(
+            SpheneUI.Controls.Selectable(
                 string.IsNullOrWhiteSpace(entry.Name) ? entry.Hash : entry.Name,
                 false,
                 ImGuiSelectableFlags.SpanAllColumns);
             ImGui.SetItemAllowOverlap();
 
-            if (ImGui.BeginPopupContextItem($"DownloadHistoryContext{entry.Hash}{entry.DownloadedAt.Ticks}"))
+            if (SpheneUI.Popups.BeginContextStyled($"DownloadHistoryContext{entry.Hash}{entry.DownloadedAt.Ticks}"))
             {
                 if (ImGui.MenuItem("Send to..."))
                 {
                     Mediator.Publish(new OpenSendPenumbraModWindow(null, entry.Name));
                 }
-                ImGui.EndPopup();
+                SpheneUI.Popups.EndStyled();
             }
 
             ImGui.TableNextColumn();
-            ImGui.TextUnformatted(entry.Version ?? "-");
+            SpheneUI.Text.Plain(entry.Version ?? "-");
             ImGui.TableNextColumn();
-            ImGui.TextUnformatted(entry.Author ?? "-");
+            SpheneUI.Text.Plain(entry.Author ?? "-");
             ImGui.TableNextColumn();
-            ImGui.TextUnformatted(UiSharedService.ByteToString(entry.Size));
+            SpheneUI.Text.Plain(UiSharedService.ByteToString(entry.Size));
             ImGui.TableNextColumn();
-            ImGui.TextUnformatted(entry.DownloadedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm"));
+            SpheneUI.Text.Plain(entry.DownloadedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm"));
             ImGui.TableNextColumn();
             using (ImRaii.Disabled(_isRedownloadBusy))
             {
-                if (ImGui.SmallButton($"Re-download##redownload_{entry.Hash}_{entry.DownloadedAt.Ticks}"))
+                if (SpheneUI.Controls.SmallButton($"Re-download##redownload_{entry.Hash}_{entry.DownloadedAt.Ticks}"))
                 {
                     StartRedownload(entry);
                 }
@@ -411,24 +420,24 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
 
         if (!string.IsNullOrWhiteSpace(_redownloadStatusText))
         {
-            UiSharedService.ColorTextWrapped(_redownloadStatusText, _redownloadStatusIsError ? ImGuiColors.DalamudRed : ImGuiColors.DalamudGrey);
+            SpheneUI.Text.ColoredWrapped(_redownloadStatusText, _redownloadStatusIsError ? ImGuiColors.DalamudRed : ImGuiColors.DalamudGrey);
         }
 
         if (_redownloadProgress is >= 0f and <= 1f)
         {
-            ImGui.ProgressBar(_redownloadProgress.Value, new Vector2(-1, 0), string.Empty);
+            SpheneUI.Controls.ProgressBar(_redownloadProgress.Value, new Vector2(-1, 0), string.Empty);
         }
 
         if (_isRedownloadBusy)
         {
             ImGui.Spacing();
-            if (ImGui.SmallButton("Cancel re-download"))
+            if (SpheneUI.Controls.SmallButton("Cancel re-download"))
             {
                 _redownloadCts?.Cancel();
             }
         }
 
-        ImGui.Separator();
+        SpheneUI.Layout.Separator();
     }
 
     private void StartRedownload(ModDownloadHistoryEntryDto entry)
@@ -790,25 +799,25 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
 
     private void DrawModPackageShareHistory()
     {
-        ImGui.Separator();
-        _uiShared.BigText("Shared Mod Packages");
+        SpheneUI.Layout.Separator();
+        SpheneUI.Text.Big("Shared Mod Packages");
 
         if (!_fileTransferOrchestrator.IsInitialized)
         {
-            UiSharedService.ColorTextWrapped("File transfer service is not initialized. Connect to a server first.", ImGuiColors.DalamudYellow);
+            SpheneUI.Text.ColoredWrapped("File transfer service is not initialized. Connect to a server first.", ImGuiColors.DalamudYellow);
             return;
         }
 
         DrawRedownloadStatus();
 
-        if (_uiShared.IconTextButton(FontAwesomeIcon.Share, "Load my shared mod packages"))
+        if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Share, "Load my shared mod packages"))
         {
             _modShareHistoryTask = GetModShareHistory(CancellationToken.None);
         }
 
         if (_modShareHistoryTask != null && !_modShareHistoryTask.IsCompleted)
         {
-            UiSharedService.ColorTextWrapped("Loading shared mod package history…", ImGuiColors.DalamudGrey);
+            SpheneUI.Text.ColoredWrapped("Loading shared mod package history…", ImGuiColors.DalamudGrey);
             return;
         }
 
@@ -819,14 +828,14 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
 
         if (!_modShareHistoryTask.IsCompletedSuccessfully || _modShareHistoryTask.Result == null)
         {
-            UiSharedService.ColorTextWrapped("Failed to load shared mod package history. See /xllog for details.", ImGuiColors.DalamudRed);
+            SpheneUI.Text.ColoredWrapped("Failed to load shared mod package history. See /xllog for details.", ImGuiColors.DalamudRed);
             return;
         }
 
         var history = _modShareHistoryTask.Result;
         if (history.Count == 0)
         {
-            UiSharedService.ColorTextWrapped("No shared mod packages found for this account.", ImGuiColors.DalamudGrey);
+            SpheneUI.Text.ColoredWrapped("No shared mod packages found for this account.", ImGuiColors.DalamudGrey);
             return;
         }
 
@@ -857,9 +866,9 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
 
             ImGui.TableNextRow();
             ImGui.TableNextColumn();
-            ImGui.Selectable(string.IsNullOrWhiteSpace(entry.Name) ? entry.Hash : entry.Name, false, ImGuiSelectableFlags.SpanAllColumns);
+            SpheneUI.Controls.Selectable(string.IsNullOrWhiteSpace(entry.Name) ? entry.Hash : entry.Name, false, ImGuiSelectableFlags.SpanAllColumns);
 
-            if (ImGui.BeginPopupContextItem($"ShareHistoryContext{entry.Hash}{entry.SharedAt.Ticks}"))
+            if (SpheneUI.Popups.BeginContextStyled($"ShareHistoryContext{entry.Hash}{entry.SharedAt.Ticks}"))
             {
                 if (ImGui.MenuItem($"Send again to {(string.IsNullOrWhiteSpace(recipientDisplayName) ? "-" : recipientDisplayName)}"))
                 {
@@ -869,23 +878,23 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
                 {
                     Mediator.Publish(new OpenSendPenumbraModWindow(null, entry.Name));
                 }
-                ImGui.EndPopup();
+                SpheneUI.Popups.EndStyled();
             }
 
             ImGui.TableNextColumn();
-            ImGui.TextUnformatted(entry.Version ?? "-");
+            SpheneUI.Text.Plain(entry.Version ?? "-");
             ImGui.TableNextColumn();
-            ImGui.TextUnformatted(entry.Author ?? "-");
+            SpheneUI.Text.Plain(entry.Author ?? "-");
             ImGui.TableNextColumn();
-            ImGui.TextUnformatted(string.IsNullOrWhiteSpace(recipientDisplayName) ? "-" : recipientDisplayName);
+            SpheneUI.Text.Plain(string.IsNullOrWhiteSpace(recipientDisplayName) ? "-" : recipientDisplayName);
             ImGui.TableNextColumn();
-            ImGui.TextUnformatted(UiSharedService.ByteToString(entry.Size));
+            SpheneUI.Text.Plain(UiSharedService.ByteToString(entry.Size));
             ImGui.TableNextColumn();
-            ImGui.TextUnformatted(entry.SharedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm"));
+            SpheneUI.Text.Plain(entry.SharedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm"));
             ImGui.TableNextColumn();
             using (ImRaii.Disabled(_isRedownloadBusy))
             {
-                if (ImGui.SmallButton($"Re-download##redownload_share_{entry.Hash}_{entry.SharedAt.Ticks}"))
+                if (SpheneUI.Controls.SmallButton($"Re-download##redownload_share_{entry.Hash}_{entry.SharedAt.Ticks}"))
                 {
                     StartRedownload(entry);
                 }
@@ -897,23 +906,23 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
 
     private void DrawModPackageReceivedHistory()
     {
-        ImGui.Separator();
-        _uiShared.BigText("Received Mod Packages");
+        SpheneUI.Layout.Separator();
+        SpheneUI.Text.Big("Received Mod Packages");
 
         if (!_fileTransferOrchestrator.IsInitialized)
         {
-            UiSharedService.ColorTextWrapped("File transfer service is not initialized. Connect to a server first.", ImGuiColors.DalamudYellow);
+            SpheneUI.Text.ColoredWrapped("File transfer service is not initialized. Connect to a server first.", ImGuiColors.DalamudYellow);
             return;
         }
 
-        if (_uiShared.IconTextButton(FontAwesomeIcon.Inbox, "Load my received mod packages"))
+        if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Inbox, "Load my received mod packages"))
         {
             _modReceivedHistoryTask = GetModReceivedHistory(CancellationToken.None);
         }
 
         if (_modReceivedHistoryTask != null && !_modReceivedHistoryTask.IsCompleted)
         {
-            UiSharedService.ColorTextWrapped("Loading received mod package history…", ImGuiColors.DalamudGrey);
+            SpheneUI.Text.ColoredWrapped("Loading received mod package history…", ImGuiColors.DalamudGrey);
             return;
         }
 
@@ -924,14 +933,14 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
 
         if (!_modReceivedHistoryTask.IsCompletedSuccessfully || _modReceivedHistoryTask.Result == null)
         {
-            UiSharedService.ColorTextWrapped("Failed to load received mod package history. See /xllog for details.", ImGuiColors.DalamudRed);
+            SpheneUI.Text.ColoredWrapped("Failed to load received mod package history. See /xllog for details.", ImGuiColors.DalamudRed);
             return;
         }
 
         var history = _modReceivedHistoryTask.Result;
         if (history.Count == 0)
         {
-            UiSharedService.ColorTextWrapped("No received mod packages found for this account.", ImGuiColors.DalamudGrey);
+            SpheneUI.Text.ColoredWrapped("No received mod packages found for this account.", ImGuiColors.DalamudGrey);
             return;
         }
 
@@ -961,18 +970,18 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
 
             ImGui.TableNextRow();
             ImGui.TableNextColumn();
-            ImGui.Selectable(string.IsNullOrWhiteSpace(entry.Name) ? entry.Hash : entry.Name, false, ImGuiSelectableFlags.SpanAllColumns);
+            SpheneUI.Controls.Selectable(string.IsNullOrWhiteSpace(entry.Name) ? entry.Hash : entry.Name, false, ImGuiSelectableFlags.SpanAllColumns);
 
             ImGui.TableNextColumn();
-            ImGui.TextUnformatted(entry.Version ?? "-");
+            SpheneUI.Text.Plain(entry.Version ?? "-");
             ImGui.TableNextColumn();
-            ImGui.TextUnformatted(entry.Author ?? "-");
+            SpheneUI.Text.Plain(entry.Author ?? "-");
             ImGui.TableNextColumn();
-            ImGui.TextUnformatted(string.IsNullOrWhiteSpace(senderDisplayName) ? "-" : senderDisplayName);
+            SpheneUI.Text.Plain(string.IsNullOrWhiteSpace(senderDisplayName) ? "-" : senderDisplayName);
             ImGui.TableNextColumn();
-            ImGui.TextUnformatted(UiSharedService.ByteToString(entry.Size));
+            SpheneUI.Text.Plain(UiSharedService.ByteToString(entry.Size));
             ImGui.TableNextColumn();
-            ImGui.TextUnformatted(entry.ReceivedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm"));
+            SpheneUI.Text.Plain(entry.ReceivedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm"));
         }
 
         ImGui.EndTable();
@@ -1057,12 +1066,12 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
 
     private void DrawPenumbraBackups()
     {
-        ImGui.Separator();
-        _uiShared.BigText("Penumbra Backups");
+        SpheneUI.Layout.Separator();
+        SpheneUI.Text.Big("Penumbra Backups");
 
         if (!_fileTransferOrchestrator.IsInitialized)
         {
-            UiSharedService.ColorTextWrapped("File transfer service is not initialized. Connect to a server first.", ImGuiColors.DalamudYellow);
+            SpheneUI.Text.ColoredWrapped("File transfer service is not initialized. Connect to a server first.", ImGuiColors.DalamudYellow);
             return;
         }
 
@@ -1071,7 +1080,7 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
         using (ImRaii.Disabled(_isBackupBusy))
         {
             DrawBackupCreateSection();
-            ImGui.Separator();
+            SpheneUI.Layout.Separator();
             DrawBackupListSection();
         }
     }
@@ -1086,26 +1095,26 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
         if (!string.IsNullOrWhiteSpace(_backupStatusText))
         {
             var color = _backupStatusIsError ? ImGuiColors.DalamudRed : ImGuiColors.DalamudGrey;
-            UiSharedService.ColorTextWrapped(_backupStatusText, color);
+            SpheneUI.Text.ColoredWrapped(_backupStatusText, color);
         }
 
         if (_backupProgress is { } p)
         {
-            ImGui.ProgressBar(p, new Vector2(-1, 0));
+            SpheneUI.Controls.ProgressBar(p, new Vector2(-1, 0));
         }
     }
 
     private void DrawBackupCreateSection()
     {
-        _uiShared.BigText("Create Backup");
+        SpheneUI.Text.Big("Create Backup");
 
         ImGui.SetNextItemWidth(-1);
-        ImGui.InputTextWithHint("##backupName", "Backup name", ref _newBackupName, 200);
+        SpheneUI.Controls.InputTextWithHint("##backupName", "Backup name", ref _newBackupName, 200);
 
-        ImGui.Separator();
-        _uiShared.BigText("From Uploaded Mod Packages");
+        SpheneUI.Layout.Separator();
+        SpheneUI.Text.Big("From Uploaded Mod Packages");
 
-        if (ImGui.Button("Load uploaded mod packages for selection"))
+        if (SpheneUI.Controls.Button("Load uploaded mod packages for selection"))
         {
             _modUploadHistoryTask = GetModUploadHistory(CancellationToken.None);
             _backupCreateSelectedHashes.Clear();
@@ -1113,25 +1122,25 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
 
         if (_modUploadHistoryTask != null && !_modUploadHistoryTask.IsCompleted)
         {
-            UiSharedService.ColorTextWrapped("Loading uploaded mod package history…", ImGuiColors.DalamudGrey);
+            SpheneUI.Text.ColoredWrapped("Loading uploaded mod package history…", ImGuiColors.DalamudGrey);
         }
         else if (_modUploadHistoryTask == null || !_modUploadHistoryTask.IsCompletedSuccessfully || _modUploadHistoryTask.Result == null)
         {
-            UiSharedService.ColorTextWrapped("Load your uploaded mod packages to create a backup.", ImGuiColors.DalamudGrey);
+            SpheneUI.Text.ColoredWrapped("Load your uploaded mod packages to create a backup.", ImGuiColors.DalamudGrey);
         }
         else
         {
             var history = _modUploadHistoryTask.Result;
             if (history.Count == 0)
             {
-                UiSharedService.ColorTextWrapped("No uploaded mod packages found for this account.", ImGuiColors.DalamudGrey);
+                SpheneUI.Text.ColoredWrapped("No uploaded mod packages found for this account.", ImGuiColors.DalamudGrey);
             }
             else
             {
                 ImGui.AlignTextToFramePadding();
-                ImGui.TextUnformatted($"Selected: {_backupCreateSelectedHashes.Count}/{history.Count}");
+                SpheneUI.Text.Plain($"Selected: {_backupCreateSelectedHashes.Count}/{history.Count}");
                 ImGui.SameLine();
-                if (ImGui.SmallButton("Select all"))
+                if (SpheneUI.Controls.SmallButton("Select all"))
                 {
                     _backupCreateSelectedHashes.Clear();
                     foreach (var entry in history)
@@ -1143,7 +1152,7 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
                     }
                 }
                 ImGui.SameLine();
-                if (ImGui.SmallButton("Clear"))
+                if (SpheneUI.Controls.SmallButton("Clear"))
                 {
                     _backupCreateSelectedHashes.Clear();
                 }
@@ -1166,18 +1175,18 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
                         ImGui.TableNextRow();
                         ImGui.TableNextColumn();
                         var selected = _backupCreateSelectedHashes.Contains(entry.Hash);
-                        if (ImGui.Checkbox($"##sel_{entry.Hash}", ref selected))
+                        if (SpheneUI.Controls.Checkbox($"##sel_{entry.Hash}", ref selected))
                         {
                             if (selected) _backupCreateSelectedHashes.Add(entry.Hash);
                             else _backupCreateSelectedHashes.Remove(entry.Hash);
                         }
 
                         ImGui.TableNextColumn();
-                        ImGui.TextUnformatted(string.IsNullOrWhiteSpace(entry.Name) ? entry.Hash : entry.Name);
+                        SpheneUI.Text.Plain(string.IsNullOrWhiteSpace(entry.Name) ? entry.Hash : entry.Name);
                         ImGui.TableNextColumn();
-                        ImGui.TextUnformatted(entry.Version ?? "-");
+                        SpheneUI.Text.Plain(entry.Version ?? "-");
                         ImGui.TableNextColumn();
-                        ImGui.TextUnformatted(entry.UploadedDate.ToLocalTime().ToString("yyyy-MM-dd HH:mm"));
+                        SpheneUI.Text.Plain(entry.UploadedDate.ToLocalTime().ToString("yyyy-MM-dd HH:mm"));
                     }
 
                     ImGui.EndTable();
@@ -1185,7 +1194,7 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
 
                 using (ImRaii.Disabled(_backupCreateSelectedHashes.Count == 0))
                 {
-                    if (ImGui.Button("Create backup from selected uploads"))
+                    if (SpheneUI.Controls.Button("Create backup from selected uploads"))
                     {
                         _ = CreateBackupFromSelectedUploadsAsync();
                     }
@@ -1193,27 +1202,27 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
             }
         }
 
-        ImGui.Separator();
-        _uiShared.BigText("From Installed Penumbra Mods");
+        SpheneUI.Layout.Separator();
+        SpheneUI.Text.Big("From Installed Penumbra Mods");
 
-        if (ImGui.Button("Load installed Penumbra mods"))
+        if (SpheneUI.Controls.Button("Load installed Penumbra mods"))
         {
             LoadInstalledPenumbraMods();
         }
 
         ImGui.SetNextItemWidth(-1);
-        ImGui.InputTextWithHint("##installedModFilter", "Filter installed mods", ref _installedModFilter, 100);
+        SpheneUI.Controls.InputTextWithHint("##installedModFilter", "Filter installed mods", ref _installedModFilter, 100);
 
         if (_installedPenumbraMods.Count == 0)
         {
-            UiSharedService.ColorTextWrapped("Load your installed Penumbra mods to upload and create a backup.", ImGuiColors.DalamudGrey);
+            SpheneUI.Text.ColoredWrapped("Load your installed Penumbra mods to upload and create a backup.", ImGuiColors.DalamudGrey);
             return;
         }
 
         ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted($"Selected: {_installedSelectedModFolders.Count}/{_installedPenumbraMods.Count}");
+        SpheneUI.Text.Plain($"Selected: {_installedSelectedModFolders.Count}/{_installedPenumbraMods.Count}");
         ImGui.SameLine();
-        if (ImGui.SmallButton("Select all##installed"))
+        if (SpheneUI.Controls.SmallButton("Select all##installed"))
         {
             _installedSelectedModFolders.Clear();
             foreach (var mod in _installedPenumbraMods)
@@ -1225,7 +1234,7 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
             }
         }
         ImGui.SameLine();
-        if (ImGui.SmallButton("Clear##installed"))
+        if (SpheneUI.Controls.SmallButton("Clear##installed"))
         {
             _installedSelectedModFolders.Clear();
         }
@@ -1248,16 +1257,16 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
                 ImGui.TableNextRow();
                 ImGui.TableNextColumn();
                 var selected = _installedSelectedModFolders.Contains(mod.ModFolderName);
-                if (ImGui.Checkbox($"##inst_{mod.ModFolderName}", ref selected))
+                if (SpheneUI.Controls.Checkbox($"##inst_{mod.ModFolderName}", ref selected))
                 {
                     if (selected) _installedSelectedModFolders.Add(mod.ModFolderName);
                     else _installedSelectedModFolders.Remove(mod.ModFolderName);
                 }
 
                 ImGui.TableNextColumn();
-                ImGui.TextUnformatted(mod.DisplayName);
+                SpheneUI.Text.Plain(mod.DisplayName);
                 ImGui.TableNextColumn();
-                ImGui.TextUnformatted(mod.ModFolderName);
+                SpheneUI.Text.Plain(mod.ModFolderName);
             }
 
             ImGui.EndTable();
@@ -1265,13 +1274,13 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
 
         using (ImRaii.Disabled(_installedSelectedModFolders.Count == 0))
         {
-            if (ImGui.Button("Upload selected installed mods"))
+            if (SpheneUI.Controls.Button("Upload selected installed mods"))
             {
                 StartUploadInstalledMods(createBackupAfterUpload: false);
             }
 
             ImGui.SameLine();
-            if (ImGui.Button("Upload and create backup"))
+            if (SpheneUI.Controls.Button("Upload and create backup"))
             {
                 StartUploadInstalledMods(createBackupAfterUpload: true);
             }
@@ -1594,9 +1603,9 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
 
     private void DrawBackupListSection()
     {
-        _uiShared.BigText("Your Backups");
+        SpheneUI.Text.Big("Your Backups");
 
-        if (_uiShared.IconTextButton(FontAwesomeIcon.Sync, "Refresh backup list"))
+        if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Sync, "Refresh backup list"))
         {
             _backupListTask = GetBackupListAsync(CancellationToken.None);
             _selectedBackupSummary = null;
@@ -1605,20 +1614,20 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
 
         if (_backupListTask != null && !_backupListTask.IsCompleted)
         {
-            UiSharedService.ColorTextWrapped("Loading backups…", ImGuiColors.DalamudGrey);
+            SpheneUI.Text.ColoredWrapped("Loading backups…", ImGuiColors.DalamudGrey);
             return;
         }
 
         if (_backupListTask == null || !_backupListTask.IsCompletedSuccessfully || _backupListTask.Result == null)
         {
-            UiSharedService.ColorTextWrapped("No backup list loaded yet.", ImGuiColors.DalamudGrey);
+            SpheneUI.Text.ColoredWrapped("No backup list loaded yet.", ImGuiColors.DalamudGrey);
             return;
         }
 
         var backups = _backupListTask.Result;
         if (backups.Count == 0)
         {
-            UiSharedService.ColorTextWrapped("No backups found for this account.", ImGuiColors.DalamudGrey);
+            SpheneUI.Text.ColoredWrapped("No backups found for this account.", ImGuiColors.DalamudGrey);
             return;
         }
 
@@ -1640,35 +1649,35 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
 
             ImGui.TableNextColumn();
             var isSelected = _selectedBackupSummary?.BackupId == backup.BackupId;
-            if (ImGui.Selectable($"{backup.BackupName}##{backup.BackupId}", isSelected))
+            if (SpheneUI.Controls.Selectable($"{backup.BackupName}##{backup.BackupId}", isSelected))
             {
                 _selectedBackupSummary = backup;
                 _selectedBackupTask = GetBackupAsync(backup.BackupId, CancellationToken.None);
             }
 
             ImGui.TableNextColumn();
-            ImGui.TextUnformatted(backup.ModCount.ToString());
+            SpheneUI.Text.Plain(backup.ModCount.ToString());
 
             ImGui.TableNextColumn();
-            UiSharedService.ColorTextWrapped(backup.IsComplete ? "Yes" : "No", backup.IsComplete ? ImGuiColors.HealerGreen : ImGuiColors.DalamudOrange);
+            SpheneUI.Text.ColoredWrapped(backup.IsComplete ? "Yes" : "No", backup.IsComplete ? ImGuiColors.HealerGreen : ImGuiColors.DalamudOrange);
 
             ImGui.TableNextColumn();
-            ImGui.TextUnformatted(backup.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm"));
+            SpheneUI.Text.Plain(backup.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm"));
 
             ImGui.TableNextColumn();
-            if (ImGui.SmallButton($"Open##open_{backup.BackupId}"))
+            if (SpheneUI.Controls.SmallButton($"Open##open_{backup.BackupId}"))
             {
                 _selectedBackupSummary = backup;
                 _selectedBackupTask = GetBackupAsync(backup.BackupId, CancellationToken.None);
             }
             ImGui.SameLine();
-            if (ImGui.SmallButton($"Delete##del_{backup.BackupId}"))
+            if (SpheneUI.Controls.SmallButton($"Delete##del_{backup.BackupId}"))
             {
                 _selectedBackupSummary = backup;
                 _ = DeleteBackupAsync(backup.BackupId);
             }
             ImGui.SameLine();
-            if (ImGui.SmallButton($"Restore##restore_{backup.BackupId}"))
+            if (SpheneUI.Controls.SmallButton($"Restore##restore_{backup.BackupId}"))
             {
                 _selectedBackupSummary = backup;
                 _ = RestoreSelectedBackupAsync();
@@ -1684,7 +1693,7 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
     {
         if (_selectedBackupTask != null && !_selectedBackupTask.IsCompleted)
         {
-            UiSharedService.ColorTextWrapped("Loading backup details…", ImGuiColors.DalamudGrey);
+            SpheneUI.Text.ColoredWrapped("Loading backup details…", ImGuiColors.DalamudGrey);
             return;
         }
 
@@ -1699,9 +1708,9 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
             return;
         }
 
-        ImGui.Separator();
-        _uiShared.BigText("Backup Details");
-        ImGui.TextUnformatted($"{selectedBackup.BackupName} ({selectedBackup.Mods.Count} mods)");
+        SpheneUI.Layout.Separator();
+        SpheneUI.Text.Big("Backup Details");
+        SpheneUI.Text.Plain($"{selectedBackup.BackupName} ({selectedBackup.Mods.Count} mods)");
 
         if (!ImGui.BeginTable("BackupDetailsTable", 4, ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerV))
         {
@@ -1718,13 +1727,13 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
         {
             ImGui.TableNextRow();
             ImGui.TableNextColumn();
-            ImGui.TextUnformatted(string.IsNullOrWhiteSpace(mod.Name) ? mod.ModFolderName : mod.Name);
+            SpheneUI.Text.Plain(string.IsNullOrWhiteSpace(mod.Name) ? mod.ModFolderName : mod.Name);
             ImGui.TableNextColumn();
-            ImGui.TextUnformatted(mod.ModFolderName);
+            SpheneUI.Text.Plain(mod.ModFolderName);
             ImGui.TableNextColumn();
-            ImGui.TextUnformatted(mod.Version ?? "-");
+            SpheneUI.Text.Plain(mod.Version ?? "-");
             ImGui.TableNextColumn();
-            ImGui.TextUnformatted(string.IsNullOrWhiteSpace(mod.Hash) ? "-" : (mod.Hash.Length > 10 ? mod.Hash[..10] : mod.Hash));
+            SpheneUI.Text.Plain(string.IsNullOrWhiteSpace(mod.Hash) ? "-" : (mod.Hash.Length > 10 ? mod.Hash[..10] : mod.Hash));
         }
 
         ImGui.EndTable();

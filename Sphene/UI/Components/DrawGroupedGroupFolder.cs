@@ -4,8 +4,7 @@ using Dalamud.Interface.Utility.Raii;
 using Sphene.UI.Handlers;
 using System.Collections.Immutable;
 using System.Numerics;
-using Sphene.UI.Styling;
-using Sphene.UI.Theme;
+using Sphene.UI.Design;
 
 namespace Sphene.UI.Components;
 
@@ -13,17 +12,14 @@ public class DrawGroupedGroupFolder : IDrawFolder
 {
     private readonly IEnumerable<IDrawFolder> _groups;
     private readonly TagHandler _tagHandler;
-    private readonly UiSharedService _uiSharedService;
-
     public IImmutableList<DrawUserPair> DrawPairs => throw new NotSupportedException();
     public int OnlinePairs => _groups.SelectMany(g => g.DrawPairs).Where(g => !g.Pair.IsEffectivelyOffline).DistinctBy(g => g.Pair.UserData.UID).Count();
     public int TotalPairs => _groups.Sum(g => g.TotalPairs);
 
-    public DrawGroupedGroupFolder(IEnumerable<IDrawFolder> groups, TagHandler tagHandler, UiSharedService uiSharedService)
+    public DrawGroupedGroupFolder(IEnumerable<IDrawFolder> groups, TagHandler tagHandler)
     {
         _groups = groups;
         _tagHandler = tagHandler;
-        _uiSharedService = uiSharedService;
     }
 
     public void Draw()
@@ -44,7 +40,7 @@ public class DrawGroupedGroupFolder : IDrawFolder
             var icon = _tagHandler.IsTagOpen(_id) ? FontAwesomeIcon.CaretDown : FontAwesomeIcon.CaretRight;
             ImGui.AlignTextToFramePadding();
 
-            _uiSharedService.IconText(icon);
+            SpheneUI.Icons.Icon(icon);
             if (ImGui.IsItemClicked())
             {
                 _tagHandler.SetTagOpen(_id, !_tagHandler.IsTagOpen(_id));
@@ -52,22 +48,22 @@ public class DrawGroupedGroupFolder : IDrawFolder
 
             ImGui.SameLine();
             ImGui.AlignTextToFramePadding();
-            _uiSharedService.IconText(FontAwesomeIcon.UsersRectangle);
+            SpheneUI.Icons.Icon(FontAwesomeIcon.UsersRectangle);
             using (ImRaii.PushStyle(ImGuiStyleVar.ItemSpacing, ImGui.GetStyle().ItemSpacing with { X = ImGui.GetStyle().ItemSpacing.X / 2f }))
             {
                 ImGui.SameLine();
                 ImGui.AlignTextToFramePadding();
-                ImGui.TextUnformatted("[" + OnlinePairs.ToString() + "]");
+                SpheneUI.Text.Plain("[" + OnlinePairs.ToString() + "]");
             }
-            UiSharedService.AttachToolTip(OnlinePairs + " online in all of your joined syncshells" + Environment.NewLine +
+            SpheneUI.AttachTooltip(OnlinePairs + " online in all of your joined syncshells" + Environment.NewLine +
                 TotalPairs + " pairs combined in all of your joined syncshells");
             ImGui.SameLine();
             ImGui.AlignTextToFramePadding();
-            UiSharedService.ColorText("All Syncshells", SpheneCustomTheme.CurrentTheme.CompactAllSyncshellsText);
+            SpheneUI.Text.Colored("All Syncshells", SpheneTheme.Current.CompactAllSyncshellsText);
         }
 
-        SpheneWindowChrome.ScrollAreaSeparator(
-            SpheneCustomTheme.CurrentTheme.CompactPairListSeparatorPadding);
+        SpheneUI.Layout.ScrollAreaSeparator(
+            SpheneTheme.Current.CompactPairListSeparatorPadding);
 
         if (_tagHandler.IsTagOpen(_id))
         {

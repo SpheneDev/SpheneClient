@@ -5,6 +5,7 @@ using Sphene.Services.Mediator;
 using Sphene.SpheneConfiguration;
 using Sphene.UI;
 using Sphene.UI.Panels;
+using Sphene.UI.Design;
 
 namespace Sphene.UI.Components;
 
@@ -12,35 +13,35 @@ public static class DebugOptionBlock
 {
     public static void DrawLogLevelOption(SpheneConfigService configService, UiSharedService uiShared, string blockId = "LogLevel")
     {
-        uiShared.DrawCombo("Log Level##" + blockId, Enum.GetValues<LogLevel>(), l => l.ToString(), l =>
+        SpheneUI.Controls.Combo("Log Level##" + blockId, Enum.GetValues<LogLevel>(), l => l.ToString(), l =>
         {
             configService.Current.LogLevel = l;
             configService.Save();
         }, configService.Current.LogLevel);
-        uiShared.DrawHelpText("Controls verbosity of logs written to /xllog and plugin console.");
+        SpheneUI.Controls.HelpText("Controls verbosity of logs written to /xllog and plugin console.");
     }
 
     public static bool DrawLogNetworkPerformanceMetricsOption(SpheneConfigService configService, UiSharedService uiShared, string blockId = "LogNetworkPerformanceMetrics")
     {
         var logPerformance = configService.Current.LogPerformance;
-        if (UiSharedService.DrawToggle("Log Network Performance Metrics##" + blockId, ref logPerformance))
+        if (SpheneUI.Controls.Toggle("Log Network Performance Metrics##" + blockId, ref logPerformance))
         {
             configService.Current.LogPerformance = logPerformance;
             configService.Save();
         }
-        uiShared.DrawHelpText("Enabling this can incur a slight performance impact. Extended monitoring is not recommended.");
+        SpheneUI.Controls.HelpText("Enabling this can incur a slight performance impact. Extended monitoring is not recommended.");
         return logPerformance;
     }
 
     public static void DrawPrintNetworkMetricsActions(UiSharedService uiShared, bool logPerformance, Action printMetrics, Action printMetricsLast60, string blockId = "PrintNetworkMetricsActions")
     {
         if (!logPerformance) ImGui.BeginDisabled();
-        if (uiShared.IconTextButton(FontAwesomeIcon.StickyNote, "Print Network Metrics to /xllog"))
+        if (SpheneUI.Icons.TextButton(FontAwesomeIcon.StickyNote, "Print Network Metrics to /xllog"))
         {
             printMetrics.Invoke();
         }
 
-        if (uiShared.IconTextButton(FontAwesomeIcon.StickyNote, "Print Network Metrics (last 60s) to /xllog"))
+        if (SpheneUI.Icons.TextButton(FontAwesomeIcon.StickyNote, "Print Network Metrics (last 60s) to /xllog"))
         {
             printMetricsLast60.Invoke();
         }
@@ -50,12 +51,12 @@ public static class DebugOptionBlock
     public static void DrawDoNotNotifyForModifiedGameFilesOrEnabledLodOption(SpheneConfigService configService, UiSharedService uiShared, string blockId = "DoNotNotifyForModifiedGameFilesOrEnabledLod")
     {
         var stopWhining = configService.Current.DebugStopWhining;
-        if (UiSharedService.DrawToggle("Do not notify for modified game files or enabled LOD##" + blockId, ref stopWhining))
+        if (SpheneUI.Controls.Toggle("Do not notify for modified game files or enabled LOD##" + blockId, ref stopWhining))
         {
             configService.Current.DebugStopWhining = stopWhining;
             configService.Save();
         }
-        uiShared.DrawHelpText("Having modified game files will still mark your logs with UNSUPPORTED and you will not receive Network support, message shown or not." + UiSharedService.TooltipSeparator
+        SpheneUI.Controls.HelpText("Having modified game files will still mark your logs with UNSUPPORTED and you will not receive Network support, message shown or not." + SpheneUI.TooltipSeparator
             + "Keeping LOD enabled can lead to more crashes. Use at your own risk.");
     }
 
@@ -65,41 +66,41 @@ public static class DebugOptionBlock
         try
         {
             var trackEquipmentPaths = configService.Current.MismatchTrackerTrackEquipmentPaths;
-            if (UiSharedService.DrawToggle("Track equipment paths (chara/weapon, chara/equipment, chara/accessory)", ref trackEquipmentPaths))
+            if (SpheneUI.Controls.Toggle("Track equipment paths (chara/weapon, chara/equipment, chara/accessory)", ref trackEquipmentPaths))
             {
                 configService.Current.MismatchTrackerTrackEquipmentPaths = trackEquipmentPaths;
                 configService.Save();
             }
 
             var trackCompanions = configService.Current.MismatchTrackerTrackMinionMountAndPetPaths;
-            if (UiSharedService.DrawToggle("Track minion/mount and pet paths", ref trackCompanions))
+            if (SpheneUI.Controls.Toggle("Track minion/mount and pet paths", ref trackCompanions))
             {
                 configService.Current.MismatchTrackerTrackMinionMountAndPetPaths = trackCompanions;
                 configService.Save();
             }
 
             var trackPhyb = configService.Current.MismatchTrackerTrackPhybFiles;
-            if (UiSharedService.DrawToggle("Track .phyb files", ref trackPhyb))
+            if (SpheneUI.Controls.Toggle("Track .phyb files", ref trackPhyb))
             {
                 configService.Current.MismatchTrackerTrackPhybFiles = trackPhyb;
                 configService.Save();
             }
 
             var trackSkp = configService.Current.MismatchTrackerTrackSkpFiles;
-            if (UiSharedService.DrawToggle("Track .skp files", ref trackSkp))
+            if (SpheneUI.Controls.Toggle("Track .skp files", ref trackSkp))
             {
                 configService.Current.MismatchTrackerTrackSkpFiles = trackSkp;
                 configService.Save();
             }
 
             var trackPbd = configService.Current.MismatchTrackerTrackPbdFiles;
-            if (UiSharedService.DrawToggle("Track .pbd files", ref trackPbd))
+            if (SpheneUI.Controls.Toggle("Track .pbd files", ref trackPbd))
             {
                 configService.Current.MismatchTrackerTrackPbdFiles = trackPbd;
                 configService.Save();
             }
 
-            uiShared.DrawHelpText("These filters affect what is recorded and displayed in the Active Mismatch Tracker.");
+            SpheneUI.Controls.HelpText("These filters affect what is recorded and displayed in the Active Mismatch Tracker.");
         }
         finally
         {
@@ -109,19 +110,19 @@ public static class DebugOptionBlock
 
     public static void DrawOpenAcknowledgmentMonitorAction(UiSharedService uiShared, SpheneMediator mediator, string blockId = "OpenAcknowledgmentMonitor")
     {
-        if (uiShared.IconTextButton(FontAwesomeIcon.Desktop, "Open Acknowledgment Monitor"))
+        if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Desktop, "Open Acknowledgment Monitor"))
         {
             mediator.Publish(new UiToggleMessage(typeof(AcknowledgmentMonitorUI)));
         }
-        UiSharedService.AttachToolTip("Opens the Acknowledgment Monitor window for monitoring acknowledgment system status and metrics.");
+        SpheneUI.AttachTooltip("Opens the Acknowledgment Monitor window for monitoring acknowledgment system status and metrics.");
     }
 
     public static void DrawOpenStatusDebugAction(UiSharedService uiShared, SpheneMediator mediator, string blockId = "OpenStatusDebug")
     {
-        if (uiShared.IconTextButton(FontAwesomeIcon.Bug, "Open Status Debug"))
+        if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Bug, "Open Status Debug"))
         {
             mediator.Publish(new UiToggleMessage(typeof(StatusDebugUi)));
         }
-        UiSharedService.AttachToolTip("Opens the Status Debug window for connection status monitoring and debugging.");
+        SpheneUI.AttachTooltip("Opens the Status Debug window for connection status monitoring and debugging.");
     }
 }

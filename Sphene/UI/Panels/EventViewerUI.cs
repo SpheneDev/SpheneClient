@@ -9,13 +9,13 @@ using Microsoft.Extensions.Logging;
 using System.Diagnostics;
 using System.Globalization;
 using System.Numerics;
+using Sphene.UI.Design;
 
 namespace Sphene.UI.Panels;
 
 internal class EventViewerUI : WindowMediatorSubscriberBase
 {
     private readonly EventAggregator _eventAggregator;
-    private readonly UiSharedService _uiSharedService;
     private List<Event> _currentEvents = new();
     private Lazy<List<Event>> _filteredEvents;
     private string _filterFreeText = string.Empty;
@@ -38,11 +38,10 @@ internal class EventViewerUI : WindowMediatorSubscriberBase
     }
 
     public EventViewerUI(ILogger<EventViewerUI> logger, SpheneMediator mediator,
-        EventAggregator eventAggregator, UiSharedService uiSharedService, PerformanceCollectorService performanceCollectorService)
+        EventAggregator eventAggregator, PerformanceCollectorService performanceCollectorService)
         : base(logger, mediator, "Sphene Event Viewer", performanceCollectorService)
     {
         _eventAggregator = eventAggregator;
-        _uiSharedService = uiSharedService;
         SizeConstraints = new()
         {
             MinimumSize = new(600, 500),
@@ -98,9 +97,19 @@ internal class EventViewerUI : WindowMediatorSubscriberBase
 
     protected override void DrawInternal()
     {
+        if (SpheneUI.Layout.BeginScrollArea("event-viewer-content", ImGui.GetContentRegionAvail(),
+                contentPadding: Vector2.Zero))
+        {
+            DrawEventContent();
+        }
+        SpheneUI.Layout.EndScrollArea();
+    }
+
+    private void DrawEventContent()
+    {
         using (ImRaii.Disabled(!_eventAggregator.NewEventsAvailable))
         {
-            if (_uiSharedService.IconTextButton(FontAwesomeIcon.ArrowsToCircle, "Refresh events"))
+            if (SpheneUI.Icons.TextButton(FontAwesomeIcon.ArrowsToCircle, "Refresh events"))
             {
                 CurrentEvents = _eventAggregator.EventList.Value.OrderByDescending(f => f.EventTime).ToList();
             }
@@ -110,13 +119,13 @@ internal class EventViewerUI : WindowMediatorSubscriberBase
         {
             ImGui.SameLine();
             ImGui.AlignTextToFramePadding();
-            UiSharedService.ColorTextWrapped("New events are available, press refresh to update", ImGuiColors.DalamudYellow);
+            SpheneUI.Text.ColoredWrapped("New events are available, press refresh to update", ImGuiColors.DalamudYellow);
         }
 
-        var buttonSize = _uiSharedService.GetIconTextButtonSize(FontAwesomeIcon.FolderOpen, "Open EventLog Folder");
+        var buttonSize = SpheneUI.Icons.TextButtonWidth(FontAwesomeIcon.FolderOpen, "Open EventLog Folder");
         var dist = ImGui.GetWindowContentRegionMax().X - buttonSize;
         ImGui.SameLine(dist);
-        if (_uiSharedService.IconTextButton(FontAwesomeIcon.FolderOpen, "Open EventLog folder"))
+        if (SpheneUI.Icons.TextButton(FontAwesomeIcon.FolderOpen, "Open EventLog folder"))
         {
             ProcessStartInfo ps = new()
             {
@@ -127,28 +136,21 @@ internal class EventViewerUI : WindowMediatorSubscriberBase
             Process.Start(ps);
         }
 
-        _uiSharedService.BigText("Last Events");
-        var foldOut = ImRaii.TreeNode("Filter");
-        if (foldOut)
+        SpheneUI.Text.Big("Last Events");
+        if (SpheneUI.Controls.CollapsibleSection("Filter"))
         {
-            if (_uiSharedService.IconTextButton(FontAwesomeIcon.Ban, "Clear Filters"))
+            if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Ban, "Clear Filters"))
             {
                 ClearFilters();
             }
             bool changedFilter = false;
-            ImGui.SetNextItemWidth(200);
-            changedFilter |= ImGui.InputText("Search all columns", ref _filterFreeText, 50);
-            ImGui.SetNextItemWidth(200);
-            changedFilter |= ImGui.InputText("Filter by Source", ref _filterSource, 50);
-            ImGui.SetNextItemWidth(200);
-            changedFilter |= ImGui.InputText("Filter by UID", ref _filterUid, 50);
-            ImGui.SetNextItemWidth(200);
-            changedFilter |= ImGui.InputText("Filter by Character", ref _filterCharacter, 50);
-            ImGui.SetNextItemWidth(200);
-            changedFilter |= ImGui.InputText("Filter by Event", ref _filterEvent, 50);
+            changedFilter |= SpheneUI.Controls.InputText("Search all columns", ref _filterFreeText, 50, preferredWidth: 200);
+            changedFilter |= SpheneUI.Controls.InputText("Filter by Source", ref _filterSource, 50, preferredWidth: 200);
+            changedFilter |= SpheneUI.Controls.InputText("Filter by UID", ref _filterUid, 50, preferredWidth: 200);
+            changedFilter |= SpheneUI.Controls.InputText("Filter by Character", ref _filterCharacter, 50, preferredWidth: 200);
+            changedFilter |= SpheneUI.Controls.InputText("Filter by Event", ref _filterEvent, 50, preferredWidth: 200);
             if (changedFilter) _filteredEvents = RecreateFilter();
         }
-        foldOut.Dispose();
 
         var cursorPos = ImGui.GetCursorPosY();
         var max = ImGui.GetWindowContentRegionMax();
@@ -186,20 +188,20 @@ internal class EventViewerUI : WindowMediatorSubscriberBase
                 };
 
                 ImGui.TableNextColumn();
-                _uiSharedService.IconText(icon, iconColor == new Vector4() ? null : iconColor);
-                UiSharedService.AttachToolTip(ev.EventSeverity.ToString());
+                SpheneUI.Icons.Icon(icon, iconColor == new Vector4() ? null : iconColor);
+                SpheneUI.AttachTooltip(ev.EventSeverity.ToString());
                 ImGui.TableNextColumn();
                 ImGui.AlignTextToFramePadding();
-                ImGui.TextUnformatted(ev.EventTime.ToString("G", CultureInfo.CurrentCulture));
+                SpheneUI.Text.Plain(ev.EventTime.ToString("G", CultureInfo.CurrentCulture));
                 ImGui.TableNextColumn();
                 ImGui.AlignTextToFramePadding();
-                ImGui.TextUnformatted(ev.EventSource);
+                SpheneUI.Text.Plain(ev.EventSource);
                 ImGui.TableNextColumn();
                 ImGui.AlignTextToFramePadding();
-                ImGui.TextUnformatted(string.IsNullOrEmpty(ev.UID) ? "--" : ev.UID);
+                SpheneUI.Text.Plain(string.IsNullOrEmpty(ev.UID) ? "--" : ev.UID);
                 ImGui.TableNextColumn();
                 ImGui.AlignTextToFramePadding();
-                ImGui.TextUnformatted(string.IsNullOrEmpty(ev.Character) ? "--" : ev.Character);
+                SpheneUI.Text.Plain(string.IsNullOrEmpty(ev.Character) ? "--" : ev.Character);
                 ImGui.TableNextColumn();
                 ImGui.AlignTextToFramePadding();
                 var posX = ImGui.GetCursorPosX();
@@ -211,10 +213,10 @@ internal class EventViewerUI : WindowMediatorSubscriberBase
                     msg = msg[..^5] + "...";
                     textSize = ImGui.CalcTextSize(msg).X;
                 }
-                ImGui.TextUnformatted(msg);
+                SpheneUI.Text.Plain(msg);
                 if (!string.Equals(msg, ev.Message, StringComparison.Ordinal))
                 {
-                    UiSharedService.AttachToolTip(ev.Message);
+                    SpheneUI.AttachTooltip(ev.Message);
                 }
             }
         }

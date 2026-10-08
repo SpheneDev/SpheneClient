@@ -1,7 +1,7 @@
 using Dalamud.Bindings.ImGui;
 using Sphene.SpheneConfiguration;
 using Sphene.Services.Mediator;
-using Sphene.UI.Theme;
+using Sphene.UI.Design;
 
 namespace Sphene.UI.Components;
 
@@ -23,7 +23,8 @@ public static class UpdateOptionPanel
         SupporterNameplateCustomization,
         SupporterNameplateStyleSync,
         SupporterServerIcons,
-        PanelPairListSeparatorPadding
+        PanelPairListSeparatorPadding,
+        SupporterNameplateGlowColors
     }
 
     private static readonly IReadOnlySet<Link> SupporterFeatureLinks = new HashSet<Link>
@@ -31,7 +32,8 @@ public static class UpdateOptionPanel
         Link.SupporterNameplateIndicators,
         Link.SupporterNameplateCustomization,
         Link.SupporterNameplateStyleSync,
-        Link.SupporterServerIcons
+        Link.SupporterServerIcons,
+        Link.SupporterNameplateGlowColors
     };
 
     private static readonly ReleaseDefinition[] Releases =
@@ -40,7 +42,7 @@ public static class UpdateOptionPanel
         new("v.1.1.13.0", [Link.ShowTestBuildUpdates, Link.FilterCharacterLegacyShpkOutgoing, Link.MismatchTrackerFilters, Link.TransfersUseSpheneCdnDirectDownloads]),
         new("v.1.1.15", [Link.NotificationSoundsSpheneDefault]),
         new("v.1.1.16", [Link.SupporterNameplateIndicators, Link.SupporterNameplateCustomization, Link.SupporterNameplateStyleSync, Link.SupporterServerIcons]),
-        new("v.1.1.17", [Link.PanelPairListSeparatorPadding]),
+        new("v.1.1.17", [Link.PanelPairListSeparatorPadding, Link.SupporterNameplateGlowColors]),
     ];
 
     private static readonly IReadOnlyDictionary<Link, string> LinkTitles = new Dictionary<Link, string>
@@ -56,7 +58,8 @@ public static class UpdateOptionPanel
         [Link.SupporterNameplateCustomization] = "Supporter: Symbol, Label & Color Customization",
         [Link.SupporterNameplateStyleSync] = "Supporter: Your style is shared with other Sphene users",
         [Link.SupporterServerIcons] = "Supporter: Server-provided & animated icons",
-        [Link.PanelPairListSeparatorPadding] = "Panel: Pair List Separator Padding (Default: 0)"
+        [Link.PanelPairListSeparatorPadding] = "Panel: Pair List Separator Padding (Default: 0)",
+        [Link.SupporterNameplateGlowColors] = "Supporter: Symbol & Label Glow Colors (Default: Disabled)"
     };
 
     private static readonly IReadOnlyDictionary<Link, Action<SpheneConfigService, UiSharedService, SpheneMediator>> LinkDrawers
@@ -94,11 +97,15 @@ public static class UpdateOptionPanel
         {
             SupporterNameplateOptionBlock.DrawSupporterServerIconsInfo(configService, uiShared, "UpdateOptionSupporterServerIcons");
         },
+        [Link.SupporterNameplateGlowColors] = (configService, uiShared, _) =>
+        {
+            SupporterNameplateOptionBlock.DrawSupporterGlowColorsInfo(configService, uiShared, "UpdateOptionSupporterGlowColors");
+        },
         [Link.PanelPairListSeparatorPadding] = (_, _, _) =>
         {
-            var theme = SpheneCustomTheme.CurrentTheme;
+            var theme = SpheneTheme.Current;
             var separatorPadding = theme.CompactPairListSeparatorPadding;
-            if (UiSharedService.DrawSliderFloat("Pair List Separator Padding##UpdateOptionPanelPairListSeparatorPadding", ref separatorPadding, 0.0f, 20.0f, "%.1f"))
+            if (SpheneUI.Controls.SliderFloat("Pair List Separator Padding##UpdateOptionPanelPairListSeparatorPadding", ref separatorPadding, 0.0f, 20.0f, "%.1f"))
             {
                 theme.CompactPairListSeparatorPadding = separatorPadding;
                 theme.NotifyThemeChanged();

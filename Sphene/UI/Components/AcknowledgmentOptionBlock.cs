@@ -1,6 +1,7 @@
 using Dalamud.Bindings.ImGui;
 using Sphene.SpheneConfiguration;
 using Sphene.SpheneConfiguration.Models;
+using Sphene.UI.Design;
 
 namespace Sphene.UI.Components;
 
@@ -12,13 +13,13 @@ public static class AcknowledgmentOptionBlock
         try
         {
             var showPopups = configService.Current.ShowAcknowledgmentPopups;
-            if (UiSharedService.DrawToggle("Show Acknowledgment Notifications", ref showPopups))
+            if (SpheneUI.Controls.Toggle("Show Acknowledgment Notifications", ref showPopups))
             {
                 configService.Current.ShowAcknowledgmentPopups = showPopups;
                 configService.Save();
             }
 
-            uiShared.DrawHelpText("Enable or disable notifications for acknowledgment requests. Disable to prevent spam when receiving many requests.");
+            SpheneUI.Controls.HelpText("Enable or disable notifications for acknowledgment requests. Disable to prevent spam when receiving many requests.");
             return showPopups;
         }
         finally
@@ -33,13 +34,13 @@ public static class AcknowledgmentOptionBlock
         try
         {
             var showWaitingPopups = configService.Current.ShowWaitingForAcknowledgmentPopups;
-            if (UiSharedService.DrawToggle("Show 'Waiting for Acknowledgment' Popups", ref showWaitingPopups))
+            if (SpheneUI.Controls.Toggle("Show 'Waiting for Acknowledgment' Popups", ref showWaitingPopups))
             {
                 configService.Current.ShowWaitingForAcknowledgmentPopups = showWaitingPopups;
                 configService.Save();
             }
 
-            uiShared.DrawHelpText("Enable or disable 'waiting for acknowledgment' popups. Success notifications show regardless of this setting.");
+            SpheneUI.Controls.HelpText("Enable or disable 'waiting for acknowledgment' popups. Success notifications show regardless of this setting.");
         }
         finally
         {
@@ -54,13 +55,13 @@ public static class AcknowledgmentOptionBlock
         {
             var notificationLocation = (int)configService.Current.AcknowledgmentNotification;
             var notificationOptions = new[] { "None", "Chat", "Toast", "Both" };
-            if (UiSharedService.DrawLabeledCombo("Notification Location", ref notificationLocation, notificationOptions, notificationOptions.Length))
+            if (SpheneUI.Controls.LabeledCombo("Notification Location", ref notificationLocation, notificationOptions, notificationOptions.Length))
             {
                 configService.Current.AcknowledgmentNotification = (NotificationLocation)notificationLocation;
                 configService.Save();
             }
 
-            uiShared.DrawHelpText("Choose where acknowledgment notifications should appear.");
+            SpheneUI.Controls.HelpText("Choose where acknowledgment notifications should appear.");
         }
         finally
         {
@@ -74,13 +75,13 @@ public static class AcknowledgmentOptionBlock
         try
         {
             var enableBatching = configService.Current.EnableAcknowledgmentBatching;
-            if (UiSharedService.DrawToggle("Enable Batching", ref enableBatching))
+            if (SpheneUI.Controls.Toggle("Enable Batching", ref enableBatching))
             {
                 configService.Current.EnableAcknowledgmentBatching = enableBatching;
                 configService.Save();
             }
 
-            uiShared.DrawHelpText("Group multiple acknowledgments for better performance. Recommended with many active connections.");
+            SpheneUI.Controls.HelpText("Group multiple acknowledgments for better performance. Recommended with many active connections.");
         }
         finally
         {
@@ -94,13 +95,13 @@ public static class AcknowledgmentOptionBlock
         try
         {
             var enableAutoRetry = configService.Current.EnableAcknowledgmentAutoRetry;
-            if (UiSharedService.DrawToggle("Enable Auto Retry", ref enableAutoRetry))
+            if (SpheneUI.Controls.Toggle("Enable Auto Retry", ref enableAutoRetry))
             {
                 configService.Current.EnableAcknowledgmentAutoRetry = enableAutoRetry;
                 configService.Save();
             }
 
-            uiShared.DrawHelpText("Automatically retry failed acknowledgments to improve reliability.");
+            SpheneUI.Controls.HelpText("Automatically retry failed acknowledgments to improve reliability.");
         }
         finally
         {
@@ -114,13 +115,13 @@ public static class AcknowledgmentOptionBlock
         try
         {
             var timeoutSeconds = configService.Current.AcknowledgmentTimeoutSeconds;
-            if (UiSharedService.DrawSliderInt("Acknowledgment Timeout (seconds)", ref timeoutSeconds, 5, 120))
+            if (SpheneUI.Controls.SliderInt("Acknowledgment Timeout (seconds)", ref timeoutSeconds, 5, 120))
             {
                 configService.Current.AcknowledgmentTimeoutSeconds = timeoutSeconds;
                 configService.Save();
             }
 
-            uiShared.DrawHelpText("How long to wait for acknowledgment responses before timing out.");
+            SpheneUI.Controls.HelpText("How long to wait for acknowledgment responses before timing out.");
         }
         finally
         {
@@ -133,7 +134,7 @@ public static class AcknowledgmentOptionBlock
         ImGui.PushID(blockId);
         try
         {
-            if (UiSharedService.DrawButton("Reset Acknowledgment Settings to Defaults"))
+            if (SpheneUI.Controls.Button("Reset Acknowledgment Settings to Defaults"))
             {
                 configService.Current.ShowAcknowledgmentPopups = false;
                 configService.Current.ShowWaitingForAcknowledgmentPopups = false;
@@ -144,7 +145,7 @@ public static class AcknowledgmentOptionBlock
                 configService.Save();
             }
 
-            uiShared.DrawHelpText("Reset all acknowledgment settings to their default values.");
+            SpheneUI.Controls.HelpText("Reset all acknowledgment settings to their default values.");
         }
         finally
         {

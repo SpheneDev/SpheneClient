@@ -12,6 +12,7 @@ using Sphene.UI.Components;
 using System.Numerics;
 using System.Linq;
 using System.Text;
+using Sphene.UI.Design;
 
 namespace Sphene.UI.Panels;
 
@@ -20,7 +21,6 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
     private readonly UiSharedService _uiShared;
     private readonly SpheneConfigService _configService;
     private readonly ChangelogService _changelogService;
-    private IDalamudTextureWrap? _spheneLogoTextureWrap;
     private string _version = string.Empty;
     private string _lastSeenVersionBeforeUpdate = string.Empty;
     private volatile bool _loading;
@@ -127,42 +127,44 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
         var childBg = ImGui.GetStyle().Colors[(int)ImGuiCol.ChildBg];
         var opaqueChildBg = new Vector4(childBg.X, childBg.Y, childBg.Z, 1f);
 
-        using (var table = ImRaii.Table("ReleaseInfo", 2, ImGuiTableFlags.None))
+        SpheneUI.Text.PageHeader("Release Notes");
+
+        SpheneUI.Layout.SectionCard(() =>
         {
-            if (table)
+            using (var table = ImRaii.Table("ReleaseInfo", 2, ImGuiTableFlags.None))
             {
-                ImGui.TableSetupColumn("Label", ImGuiTableColumnFlags.WidthFixed, 120);
-                ImGui.TableSetupColumn("Value", ImGuiTableColumnFlags.WidthStretch);
+                if (table)
+                {
+                    ImGui.TableSetupColumn("Label", ImGuiTableColumnFlags.WidthFixed, 120);
+                    ImGui.TableSetupColumn("Value", ImGuiTableColumnFlags.WidthStretch);
 
-                ImGui.TableNextRow();
-                ImGui.TableNextColumn();
-                ImGui.Text("Last seen:");
-                ImGui.TableNextColumn();
-                var lastSeen = _lastSeenVersionBeforeUpdate;
-                ImGui.TextColored(ImGuiColors.DalamudGrey, string.IsNullOrWhiteSpace(lastSeen) ? "Unknown" : lastSeen);
+                    ImGui.TableNextRow();
+                    ImGui.TableNextColumn();
+                    SpheneUI.Text.Muted("Last seen:");
+                    ImGui.TableNextColumn();
+                    var lastSeen = _lastSeenVersionBeforeUpdate;
+                    SpheneUI.Text.Colored(string.IsNullOrWhiteSpace(lastSeen) ? "Unknown" : lastSeen, ImGuiColors.DalamudGrey);
 
-                ImGui.TableNextRow();
-                ImGui.TableNextColumn();
-                ImGui.Text("Version:");
-                ImGui.TableNextColumn();
-                ImGui.TextColored(ImGuiColors.HealerGreen, string.IsNullOrEmpty(_version) ? "Unknown" : _version);
+                    ImGui.TableNextRow();
+                    ImGui.TableNextColumn();
+                    SpheneUI.Text.Muted("Version:");
+                    ImGui.TableNextColumn();
+                    SpheneUI.Text.Colored(string.IsNullOrEmpty(_version) ? "Unknown" : _version, ImGuiColors.HealerGreen);
+                }
             }
-        }
-
-        ImGui.Spacing();
+        });
 
         // Controls
-        ImGui.Spacing();
-        if (_uiShared.IconTextButton(_showAll ? FontAwesomeIcon.List : FontAwesomeIcon.ListOl, _showAll ? "Show last 5" : "Show all"))
+        if (SpheneUI.Icons.TextButton(_showAll ? FontAwesomeIcon.List : FontAwesomeIcon.ListOl, _showAll ? "Show last 5" : "Show all"))
         {
             _showAll = !_showAll;
         }
         ImGui.SameLine();
-        UiSharedService.AttachToolTip("Toggle between last five releases and all releases.");
+        SpheneUI.AttachTooltip("Toggle between last five releases and all releases.");
 
 #if !IS_TEST_BUILD
         ImGui.SameLine();
-        if (_uiShared.IconTextButton(FontAwesomeIcon.Eye, _showTestBuildReleases ? "Hide testbuild releases" : "Show testbuild releases"))
+        if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Eye, _showTestBuildReleases ? "Hide testbuild releases" : "Show testbuild releases"))
         {
             _showTestBuildReleases = !_showTestBuildReleases;
             _configService.Current.ShowTestBuildChangelogs = _showTestBuildReleases;
@@ -170,16 +172,17 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
             StartLoadingEntries();
         }
         ImGui.SameLine();
-        UiSharedService.AttachToolTip("Toggle whether prerelease/testbuild releases are visible.");
+        SpheneUI.AttachTooltip("Toggle whether prerelease/testbuild releases are visible.");
 #endif
         ImGui.Spacing();
 
         var footerHeight = ImGui.GetFrameHeightWithSpacing() + (ImGui.GetStyle().ItemSpacing.Y * 2f) + (ImGuiHelpers.GlobalScale * 6f);
-        var changelogPaneHeight = Math.Max(0f, ImGui.GetContentRegionAvail().Y - footerHeight);
+        var changelogPaneHeight = SpheneUI.Layout.FillToViewBottomHeight(footerHeight);
         using (ImRaii.PushColor(ImGuiCol.ChildBg, ImGui.GetColorU32(opaqueChildBg)))
-        using (var child = ImRaii.Child("ChangelogPane", new Vector2(-1, changelogPaneHeight), true, ImGuiWindowFlags.NoNav))
         {
-            if (child)
+            var scrollBegun = SpheneUI.Layout.BeginScrollArea("ChangelogPane", new Vector2(-1, changelogPaneHeight), border: true,
+                windowFlags: ImGuiWindowFlags.NoNav);
+            if (scrollBegun)
             {
                 var childWindowPos = ImGui.GetWindowPos();
                 var childWindowSize = ImGui.GetWindowSize();
@@ -191,11 +194,11 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
                 {
                     if (_loading)
                     {
-                        UiSharedService.TextWrapped("Loading release notes...");
+                        SpheneUI.Text.Wrapped("Loading release notes...");
                     }
                     else if (_entries == null || _entries.Count == 0)
                     {
-                        UiSharedService.TextWrapped("No release notes available.");
+                        SpheneUI.Text.Wrapped("No release notes available.");
                     }
                     else
                     {
@@ -238,7 +241,7 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
                                         var normalizedDescription = NormalizeDescription(e.Description);
                                         if (!DrawImportantDescriptionIfTagged(normalizedDescription))
                                         {
-                                            UiSharedService.TextWrapped(normalizedDescription);
+                                            SpheneUI.Text.Wrapped(normalizedDescription);
                                         }
                                     }
                                 }
@@ -261,12 +264,12 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
                                             var baseColor = ImGuiColors.ParsedBlue;
                                             var textColor = new Vector4(baseColor.X, baseColor.Y, baseColor.Z, 0.90f);
                                             ImGui.PushStyleColor(ImGuiCol.Text, textColor);
-                                            UiSharedService.TextWrapped(trimmedMain);
+                                            SpheneUI.Text.Wrapped(trimmedMain);
                                             ImGui.PopStyleColor();
                                         }
                                         else
                                         {
-                                            UiSharedService.TextWrapped(trimmedMain);
+                                            SpheneUI.Text.Wrapped(trimmedMain);
                                         }
 
                                         if (change.Sub is { Count: > 0 })
@@ -282,7 +285,7 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
                                                 if (!string.IsNullOrWhiteSpace(section.Heading))
                                                 {
                                                     ImGui.PushStyleColor(ImGuiCol.Text, ImGuiColors.DalamudYellow);
-                                                    UiSharedService.TextWrapped(section.Heading);
+                                                    SpheneUI.Text.Wrapped(section.Heading);
                                                     ImGui.PopStyleColor();
                                                     ImGuiHelpers.ScaledDummy(1f);
                                                 }
@@ -296,7 +299,7 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
 
                                                     ImGui.Bullet();
                                                     ImGui.SameLine(0, bulletGap);
-                                                    UiSharedService.TextWrapped(trimmedSub);
+                                                    SpheneUI.Text.Wrapped(trimmedSub);
                                                 }
 
                                                 isFirstSection = false;
@@ -314,41 +317,28 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
                             }
                             ImGui.Spacing();
                         }
-                        
+
                     }
                 }
             }
+            SpheneUI.Layout.EndScrollArea();
         }
 
-        ImGui.Separator();
-        if (_uiShared.IconTextButton(FontAwesomeIcon.Check, "Okay close!"))
+        SpheneUI.Layout.Separator();
+        if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Check, "Okay close!"))
         {
             // Close will persist the last seen version
             IsOpen = false;
         }
     }
 
-    protected override void Dispose(bool disposing)
-    {
-        if (disposing)
-        {
-            _spheneLogoTextureWrap?.Dispose();
-            _spheneLogoTextureWrap = null;
-        }
-        base.Dispose(disposing);
-    }
-
     private void DrawSpheneWatermark(ImDrawListPtr drawList, Vector2 rectMin, Vector2 rectMax, float alpha, float verticalOffsetFactor)
     {
         try
         {
-            if (_spheneLogoTextureWrap == null)
-            {
-                var imageData = System.Convert.FromBase64String(SpheneImages.SpheneLogoBase64);
-                _spheneLogoTextureWrap = _uiShared.LoadImage(imageData);
-            }
-
-            if (_spheneLogoTextureWrap == null)
+            var logoWrap = SpheneUI.Media.Texture("sphene:logo",
+                () => System.Convert.FromBase64String(SpheneImages.SpheneLogoBase64));
+            if (logoWrap == null)
                 return;
 
             var regionSize = rectMax - rectMin;
@@ -362,7 +352,7 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
             var pMax = center + half;
 
             var tint = new Vector4(1f, 1f, 1f, Math.Clamp(alpha, 0f, 1f));
-            drawList.AddImage(_spheneLogoTextureWrap.Handle, pMin, pMax, Vector2.Zero, Vector2.One, ImGui.GetColorU32(tint));
+            SpheneUI.Media.ImageInRect(drawList, logoWrap, pMin, pMax, ImageFit.Stretch, tint);
         }
         catch (Exception ex)
         {
@@ -430,7 +420,7 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
         ImGui.SetCursorScreenPos(iconPos);
         ImGui.InvisibleButton(id, iconSize);
         if (ImGui.IsItemHovered())
-            UiSharedService.AttachToolTip(tooltip);
+            SpheneUI.AttachTooltip(tooltip);
         ImGui.SetCursorScreenPos(cursor);
     }
 
@@ -488,10 +478,10 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
         using (ImRaii.PushFont(UiBuilder.IconFont))
         using (ImRaii.PushColor(ImGuiCol.Text, baseCol))
         {
-            ImGui.TextUnformatted(icon);
+            SpheneUI.Text.Plain(icon);
         }
         ImGui.SameLine();
-        UiSharedService.TextWrapped(text);
+        SpheneUI.Text.Wrapped(text);
         ImGui.Dummy(new Vector2(0, ImGui.GetTextLineHeightWithSpacing() * 0.5f));
         return true;
     }

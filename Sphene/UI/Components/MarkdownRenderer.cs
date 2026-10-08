@@ -7,6 +7,7 @@ using Dalamud.Interface.Colors;
 using Dalamud.Interface.Utility;
 using Dalamud.Interface.Utility.Raii;
 using Dalamud.Bindings.ImGui;
+using Sphene.UI.Design;
 
 namespace Sphene.UI.Components;
 
@@ -413,14 +414,14 @@ public static class MarkdownRenderer
             switch (segment.Type)
             {
                 case FormatType.Normal:
-                    ImGui.TextUnformatted(segment.Text);
+                    SpheneUI.Text.Plain(segment.Text);
                     break;
                 
                 case FormatType.Bold:
                     using (ImRaii.PushFont(UiBuilder.DefaultFont))
                     {
                         ImGui.SetWindowFontScale(1.1f);
-                        ImGui.TextUnformatted(segment.Text);
+                        SpheneUI.Text.Plain(segment.Text);
                         ImGui.SetWindowFontScale(1.0f);
                     }
                     break;
@@ -429,21 +430,21 @@ public static class MarkdownRenderer
                     // Since ImGui doesn't have italic, we'll use a slightly different color
                     using (ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.DalamudGrey3))
                     {
-                        ImGui.TextUnformatted(segment.Text);
+                        SpheneUI.Text.Plain(segment.Text);
                     }
                     break;
                 
                 case FormatType.Color:
                     using (ImRaii.PushColor(ImGuiCol.Text, segment.Color))
                     {
-                        ImGui.TextUnformatted(segment.Text);
+                        SpheneUI.Text.Plain(segment.Text);
                     }
                     break;
                 
                 case FormatType.Code:
                     using (ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.DalamudGrey2))
                     {
-                        ImGui.TextUnformatted($" {segment.Text} ");
+                        SpheneUI.Text.Plain($" {segment.Text} ");
                     }
                     break;
                 
@@ -452,7 +453,7 @@ public static class MarkdownRenderer
                     using (ImRaii.PushFont(UiBuilder.DefaultFont))
                     {
                         ImGui.SetWindowFontScale(1.1f);
-                        ImGui.TextUnformatted(segment.Text);
+                        SpheneUI.Text.Plain(segment.Text);
                         ImGui.SetWindowFontScale(1.0f);
                     }
                     break;
@@ -460,7 +461,7 @@ public static class MarkdownRenderer
                 case FormatType.ItalicColor:
                     using (ImRaii.PushColor(ImGuiCol.Text, segment.Color))
                     {
-                        ImGui.TextUnformatted(segment.Text);
+                        SpheneUI.Text.Plain(segment.Text);
                     }
                     break;
                 
@@ -469,7 +470,7 @@ public static class MarkdownRenderer
                     using (ImRaii.PushFont(UiBuilder.DefaultFont))
                     {
                         ImGui.SetWindowFontScale(1.1f);
-                        ImGui.TextUnformatted(segment.Text);
+                        SpheneUI.Text.Plain(segment.Text);
                         ImGui.SetWindowFontScale(1.0f);
                     }
                     break;
@@ -478,7 +479,7 @@ public static class MarkdownRenderer
                     using (ImRaii.PushFont(UiBuilder.DefaultFont))
                     {
                         ImGui.SetWindowFontScale(1.1f);
-                        ImGui.TextUnformatted(segment.Text);
+                        SpheneUI.Text.Plain(segment.Text);
                         ImGui.SetWindowFontScale(1.0f);
                     }
                     break;
@@ -487,7 +488,7 @@ public static class MarkdownRenderer
                     // ImGui doesn't have native underline support, so we'll draw a line under the text
                     var textSize = ImGui.CalcTextSize(segment.Text);
                     var cursorPos = ImGui.GetCursorScreenPos();
-                    ImGui.TextUnformatted(segment.Text);
+                    SpheneUI.Text.Plain(segment.Text);
                     var drawList = ImGui.GetWindowDrawList();
                     drawList.AddLine(
                         new Vector2(cursorPos.X, cursorPos.Y + textSize.Y),
@@ -502,7 +503,7 @@ public static class MarkdownRenderer
                     {
                         var colorUnderlineTextSize = ImGui.CalcTextSize(segment.Text);
                         var colorUnderlineCursorPos = ImGui.GetCursorScreenPos();
-                        ImGui.TextUnformatted(segment.Text);
+                        SpheneUI.Text.Plain(segment.Text);
                         var colorUnderlineDrawList = ImGui.GetWindowDrawList();
                         colorUnderlineDrawList.AddLine(
                             new Vector2(colorUnderlineCursorPos.X, colorUnderlineCursorPos.Y + colorUnderlineTextSize.Y),
@@ -519,7 +520,7 @@ public static class MarkdownRenderer
                         ImGui.SetWindowFontScale(1.1f);
                         var boldUnderlineTextSize = ImGui.CalcTextSize(segment.Text);
                         var boldUnderlineCursorPos = ImGui.GetCursorScreenPos();
-                        ImGui.TextUnformatted(segment.Text);
+                        SpheneUI.Text.Plain(segment.Text);
                         ImGui.SetWindowFontScale(1.0f);
                         var boldUnderlineDrawList = ImGui.GetWindowDrawList();
                         boldUnderlineDrawList.AddLine(
@@ -536,7 +537,7 @@ public static class MarkdownRenderer
                     {
                         var italicUnderlineTextSize = ImGui.CalcTextSize(segment.Text);
                         var italicUnderlineCursorPos = ImGui.GetCursorScreenPos();
-                        ImGui.TextUnformatted(segment.Text);
+                        SpheneUI.Text.Plain(segment.Text);
                         var italicUnderlineDrawList = ImGui.GetWindowDrawList();
                         italicUnderlineDrawList.AddLine(
                             new Vector2(italicUnderlineCursorPos.X, italicUnderlineCursorPos.Y + italicUnderlineTextSize.Y),
@@ -554,7 +555,7 @@ public static class MarkdownRenderer
                         ImGui.SetWindowFontScale(1.1f);
                         var boldColorUnderlineTextSize = ImGui.CalcTextSize(segment.Text);
                         var boldColorUnderlineCursorPos = ImGui.GetCursorScreenPos();
-                        ImGui.TextUnformatted(segment.Text);
+                        SpheneUI.Text.Plain(segment.Text);
                         ImGui.SetWindowFontScale(1.0f);
                         var boldColorUnderlineDrawList = ImGui.GetWindowDrawList();
                         boldColorUnderlineDrawList.AddLine(
@@ -571,7 +572,7 @@ public static class MarkdownRenderer
                     {
                         var italicColorUnderlineTextSize = ImGui.CalcTextSize(segment.Text);
                         var italicColorUnderlineCursorPos = ImGui.GetCursorScreenPos();
-                        ImGui.TextUnformatted(segment.Text);
+                        SpheneUI.Text.Plain(segment.Text);
                         var italicColorUnderlineDrawList = ImGui.GetWindowDrawList();
                         italicColorUnderlineDrawList.AddLine(
                             new Vector2(italicColorUnderlineCursorPos.X, italicColorUnderlineCursorPos.Y + italicColorUnderlineTextSize.Y),
@@ -588,7 +589,7 @@ public static class MarkdownRenderer
                         ImGui.SetWindowFontScale(1.1f);
                         var boldItalicUnderlineTextSize = ImGui.CalcTextSize(segment.Text);
                         var boldItalicUnderlineCursorPos = ImGui.GetCursorScreenPos();
-                        ImGui.TextUnformatted(segment.Text);
+                        SpheneUI.Text.Plain(segment.Text);
                         ImGui.SetWindowFontScale(1.0f);
                         var boldItalicUnderlineDrawList = ImGui.GetWindowDrawList();
                         boldItalicUnderlineDrawList.AddLine(
@@ -607,7 +608,7 @@ public static class MarkdownRenderer
                         ImGui.SetWindowFontScale(1.1f);
                         var boldItalicColorUnderlineTextSize = ImGui.CalcTextSize(segment.Text);
                         var boldItalicColorUnderlineCursorPos = ImGui.GetCursorScreenPos();
-                        ImGui.TextUnformatted(segment.Text);
+                        SpheneUI.Text.Plain(segment.Text);
                         ImGui.SetWindowFontScale(1.0f);
                         var boldItalicColorUnderlineDrawList = ImGui.GetWindowDrawList();
                         boldItalicColorUnderlineDrawList.AddLine(

@@ -42,6 +42,8 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
         bool TextEnabled, string LabelText,
         SupporterLabelOrder LabelOrder, SupporterSymbolPosition Position,
         ushort SymbolColorKey, ushort LabelColorKey,
+        bool SymbolGlowEnabled, ushort SymbolGlowKey,
+        bool LabelGlowEnabled, ushort LabelGlowKey,
         bool IconEnabled, string IconId, bool IconLabelEnabled, string IconLabelText, uint IconLabelColor);
 
     private readonly INamePlateGui _namePlateGui;
@@ -165,7 +167,7 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
         _supporterStyleFingerprint = styles.Count == 0
             ? string.Empty
             : string.Join(";", styles.OrderBy(k => k.Key, StringComparer.OrdinalIgnoreCase)
-                .Select(k => $"{k.Key}~{k.Value.IndicatorsEnabled}~{k.Value.SymbolChar}~{k.Value.SymbolPosition}~{k.Value.TextEnabled}~{k.Value.LabelText}~{k.Value.LabelOrder}~{k.Value.SymbolColorKey}~{k.Value.LabelColorKey}~{k.Value.IconEnabled}~{k.Value.IconId}~{k.Value.IconLabelEnabled}~{k.Value.IconLabelText}~{k.Value.IconLabelColor}"));
+                .Select(k => $"{k.Key}~{k.Value.IndicatorsEnabled}~{k.Value.SymbolChar}~{k.Value.SymbolPosition}~{k.Value.TextEnabled}~{k.Value.LabelText}~{k.Value.LabelOrder}~{k.Value.SymbolColorKey}~{k.Value.LabelColorKey}~{k.Value.SymbolGlowEnabled}~{k.Value.SymbolGlowKey}~{k.Value.LabelGlowEnabled}~{k.Value.LabelGlowKey}~{k.Value.IconEnabled}~{k.Value.IconId}~{k.Value.IconLabelEnabled}~{k.Value.IconLabelText}~{k.Value.IconLabelColor}"));
         _logger.LogDebug("[Nameplate] Cache refreshed: {count} supporter names [{names}], own IsSupporter={isSupporter}, localName={localName}, pairs={pairs}",
             names.Count, string.Join(", ", names), _apiController.IsSupporter,
             _objectTable.LocalPlayer?.Name.TextValue ?? "null", _pairManager.PairsWithGroups.Count);
@@ -194,6 +196,8 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
             c.SupporterTextEnabled && !string.IsNullOrWhiteSpace(c.SupporterLabelText), c.SupporterLabelText ?? string.Empty,
             c.SupporterLabelOrder, c.SupporterSymbolPosition,
             c.SupporterColorKey, c.SupporterLabelColorKey,
+            c.SupporterSymbolGlowEnabled, c.SupporterSymbolGlowKey,
+            c.SupporterLabelGlowEnabled, c.SupporterLabelGlowKey,
             c.SupporterIconEnabled, c.SupporterIconId ?? string.Empty,
             c.SupporterIconLabelEnabled, c.SupporterIconLabelText ?? string.Empty, c.SupporterIconLabelColor);
     }
@@ -210,6 +214,8 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
             s.TextEnabled && !string.IsNullOrWhiteSpace(s.LabelText), s.LabelText ?? string.Empty,
             order, position,
             (ushort)Math.Clamp(s.SymbolColorKey, 0, ushort.MaxValue), (ushort)Math.Clamp(s.LabelColorKey, 0, ushort.MaxValue),
+            s.SymbolGlowEnabled, (ushort)Math.Clamp(s.SymbolGlowKey, 0, ushort.MaxValue),
+            s.LabelGlowEnabled, (ushort)Math.Clamp(s.LabelGlowKey, 0, ushort.MaxValue),
             s.IconEnabled, s.IconId ?? string.Empty,
             s.IconLabelEnabled, s.IconLabelText ?? string.Empty, s.IconLabelColor);
     }
@@ -227,6 +233,10 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
             LabelOrder = (int)c.SupporterLabelOrder,
             SymbolColorKey = c.SupporterColorKey,
             LabelColorKey = c.SupporterLabelColorKey,
+            SymbolGlowEnabled = c.SupporterSymbolGlowEnabled,
+            SymbolGlowKey = c.SupporterSymbolGlowKey,
+            LabelGlowEnabled = c.SupporterLabelGlowEnabled,
+            LabelGlowKey = c.SupporterLabelGlowKey,
             IconEnabled = c.SupporterIconEnabled,
             IconId = c.SupporterIconId ?? string.Empty,
             IconLabelEnabled = c.SupporterIconLabelEnabled,
@@ -376,26 +386,38 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
 
             var original = h.InfoView.Name;
 
+            var symbolGlowEnabled = style.SymbolGlowEnabled;
+            var symbolGlowKey = style.SymbolGlowKey;
+            var labelGlowEnabled = style.LabelGlowEnabled;
+            var labelGlowKey = style.LabelGlowKey;
+
             SeStringBuilder AppendSupporterParts(SeStringBuilder builder)
             {
                 var first = true;
-                void AddPart(string? partText, ushort partColorKey)
+                void AddPart(string? partText, ushort partColorKey, bool glowEnabled, ushort glowKey)
                 {
                     if (string.IsNullOrEmpty(partText)) return;
                     if (!first) builder.AddText(" ");
-                    builder.AddUiForeground(partText, partColorKey);
+                    if (glowEnabled)
+                    {
+                        builder.AddUiGlow(glowKey).AddUiForeground(partText, partColorKey).AddUiGlowOff();
+                    }
+                    else
+                    {
+                        builder.AddUiForeground(partText, partColorKey);
+                    }
                     first = false;
                 }
 
                 if (order == SupporterLabelOrder.SymbolThenText)
                 {
-                    if (symbolEnabled) AddPart(symbol, symbolColorKey);
-                    if (textEnabled) AddPart(labelText, labelColorKey);
+                    if (symbolEnabled) AddPart(symbol, symbolColorKey, symbolGlowEnabled, symbolGlowKey);
+                    if (textEnabled) AddPart(labelText, labelColorKey, labelGlowEnabled, labelGlowKey);
                 }
                 else
                 {
-                    if (textEnabled) AddPart(labelText, labelColorKey);
-                    if (symbolEnabled) AddPart(symbol, symbolColorKey);
+                    if (textEnabled) AddPart(labelText, labelColorKey, labelGlowEnabled, labelGlowKey);
+                    if (symbolEnabled) AddPart(symbol, symbolColorKey, symbolGlowEnabled, symbolGlowKey);
                 }
                 return builder;
             }
@@ -415,7 +437,10 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
                 left = AppendSupporterParts(new SeStringBuilder()).AddText(" ").Build();
                 if (symbolEnabled)
                 {
-                    right = new SeStringBuilder().AddText(" ").AddUiForeground(symbol, symbolColorKey).Build();
+                    var rightBuilder = new SeStringBuilder().AddText(" ");
+                    right = (symbolGlowEnabled
+                        ? rightBuilder.AddUiGlow(symbolGlowKey).AddUiForeground(symbol, symbolColorKey).AddUiGlowOff()
+                        : rightBuilder.AddUiForeground(symbol, symbolColorKey)).Build();
                 }
             }
 
@@ -431,7 +456,7 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
     private void RequestRedrawIfSettingsChanged()
     {
         var current = _configService.Current;
-        var key = $"{current.ShowSupporterNameplate}|{current.SupporterSymbolChar}|{current.SupporterTextEnabled}|{current.SupporterLabelText}|{current.SupporterLabelOrder}|{current.SupporterSymbolPosition}|{current.SupporterColorKey}|{current.SupporterLabelColorKey}|{current.SupporterIconEnabled}|{current.SupporterIconId}|{current.SupporterIconLabelEnabled}|{current.SupporterIconLabelText}|{current.SupporterIconLabelColor}|{_apiController.SupporterFeaturesEnabled}|{string.Join(",", _supporterNameCache.OrderBy(n => n, StringComparer.OrdinalIgnoreCase))}|{_supporterStyleFingerprint}";
+        var key = $"{current.ShowSupporterNameplate}|{current.SupporterSymbolChar}|{current.SupporterTextEnabled}|{current.SupporterLabelText}|{current.SupporterLabelOrder}|{current.SupporterSymbolPosition}|{current.SupporterColorKey}|{current.SupporterLabelColorKey}|{current.SupporterSymbolGlowEnabled}|{current.SupporterSymbolGlowKey}|{current.SupporterLabelGlowEnabled}|{current.SupporterLabelGlowKey}|{current.SupporterIconEnabled}|{current.SupporterIconId}|{current.SupporterIconLabelEnabled}|{current.SupporterIconLabelText}|{current.SupporterIconLabelColor}|{_apiController.SupporterFeaturesEnabled}|{string.Join(",", _supporterNameCache.OrderBy(n => n, StringComparer.OrdinalIgnoreCase))}|{_supporterStyleFingerprint}";
 
         var publishKey = _apiController.IsConnected && _apiController.IsSupporter && _apiController.SupporterFeaturesEnabled
             ? key
@@ -822,7 +847,7 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
             {
                 if (!hasDefaultIcon)
                     continue;
-                handle = defaultTex.Handle;
+                handle = defaultTex!.Handle;
                 uv0 = Vector2.Zero;
                 uv1 = Vector2.One;
                 size = new Vector2(baseHeight);

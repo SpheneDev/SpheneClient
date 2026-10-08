@@ -6,7 +6,7 @@ using Sphene.SpheneConfiguration;
 using Sphene.PlayerData.Pairs;
 using Sphene.Services.Mediator;
 using Sphene.Services.ServerConfiguration;
-using Sphene.UI.Theme;
+using Sphene.UI.Design;
 
 
 
@@ -41,7 +41,7 @@ public class IdDisplayHandler
             ImGui.AlignTextToFramePadding();
 
             using (ImRaii.PushFont(UiBuilder.MonoFont, textIsUid))
-                ImGui.TextUnformatted(playerText);
+                SpheneUI.Text.Plain(playerText);
 
             if (ImGui.IsItemClicked(ImGuiMouseButton.Left))
             {
@@ -74,7 +74,7 @@ public class IdDisplayHandler
             ImGui.AlignTextToFramePadding();
 
             ImGui.SetNextItemWidth(editBoxWidth.Invoke());
-            if (ImGui.InputTextWithHint("", "Name/Notes", ref _editComment, 255, ImGuiInputTextFlags.EnterReturnsTrue))
+            if (SpheneUI.Controls.InputTextWithHint("", "Name/Notes", ref _editComment, 255, ImGuiInputTextFlags.EnterReturnsTrue))
             {
                 _serverManager.SetNoteForGid(group.GID, _editComment, save: true);
                 _editEntry = string.Empty;
@@ -84,7 +84,7 @@ public class IdDisplayHandler
             {
                 _editEntry = string.Empty;
             }
-            UiSharedService.AttachToolTip("Hit ENTER to save\nRight click to cancel");
+            SpheneUI.AttachTooltip("Hit ENTER to save\nRight click to cancel");
         }
     }
 
@@ -97,9 +97,9 @@ public class IdDisplayHandler
             ImGui.AlignTextToFramePadding();
 
             using (ImRaii.PushFont(UiBuilder.MonoFont, textIsUid))
-            using (ImRaii.PushColor(ImGuiCol.Text, SpheneCustomTheme.CurrentTheme.CompactPairsText))
+            using (ImRaii.PushColor(ImGuiCol.Text, SpheneTheme.Current.CompactPairsText))
             {
-                ImGui.TextUnformatted(playerText);
+                SpheneUI.Text.Plain(playerText);
             }
 
             if (ImGui.IsItemHovered())
@@ -169,7 +169,7 @@ public class IdDisplayHandler
             ImGui.AlignTextToFramePadding();
 
             ImGui.SetNextItemWidth(editBoxWidth.Invoke());
-            if (ImGui.InputTextWithHint("##" + pair.UserData.UID, "Nick/Notes", ref _editComment, 255, ImGuiInputTextFlags.EnterReturnsTrue))
+            if (SpheneUI.Controls.InputTextWithHint("##" + pair.UserData.UID, "Nick/Notes", ref _editComment, 255, ImGuiInputTextFlags.EnterReturnsTrue))
             {
                 _serverManager.SetNoteForUid(pair.UserData.UID, _editComment);
                 _serverManager.SaveNotes();
@@ -180,7 +180,7 @@ public class IdDisplayHandler
             {
                 _editEntry = string.Empty;
             }
-            UiSharedService.AttachToolTip("Hit ENTER to save\nRight click to cancel");
+            SpheneUI.AttachTooltip("Hit ENTER to save\nRight click to cancel");
         }
     }
 

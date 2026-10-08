@@ -8,23 +8,21 @@ using Sphene.Services.Mediator;
 using Sphene.WebAPI;
 using Microsoft.Extensions.Logging;
 using System.Numerics;
+using Sphene.UI.Design;
 
 namespace Sphene.UI.Syncshell;
 
 public class CreateSyncshellUI : WindowMediatorSubscriberBase
 {
     private readonly ApiController _apiController;
-    private readonly UiSharedService _uiSharedService;
     private bool _errorGroupCreate;
     private GroupJoinDto? _lastCreatedGroup;
     private string _groupAlias = string.Empty;
 
-    public CreateSyncshellUI(ILogger<CreateSyncshellUI> logger, SpheneMediator spheneMediator, ApiController apiController, UiSharedService uiSharedService,
-        PerformanceCollectorService performanceCollectorService)
+    public CreateSyncshellUI(ILogger<CreateSyncshellUI> logger, SpheneMediator spheneMediator, ApiController apiController, PerformanceCollectorService performanceCollectorService)
         : base(logger, spheneMediator, "Create new Syncshell###SpheneCreateSyncshell", performanceCollectorService)
     {
         _apiController = apiController;
-        _uiSharedService = uiSharedService;
         SizeConstraints = new()
         {
             MinimumSize = new(550, 380),
@@ -38,19 +36,24 @@ public class CreateSyncshellUI : WindowMediatorSubscriberBase
 
     protected override void DrawInternal()
     {
-        using (_uiSharedService.UidFont.Push())
-            ImGui.TextUnformatted("Create new Syncshell");
+        if (SpheneUI.Layout.BeginScrollArea("create-content", ImGui.GetContentRegionAvail(),
+                contentPadding: Vector2.Zero))
+        {
+            DrawCreateContent();
+        }
+        SpheneUI.Layout.EndScrollArea();
+    }
+
+    private void DrawCreateContent()
+    {
+        SpheneUI.Text.PageHeader("Create new Syncshell");
 
         if (_lastCreatedGroup == null)
         {
-            // Alias input field
-            ImGui.TextUnformatted("Syncshell Alias (optional):");
-            ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X);
-            ImGui.InputText("##alias", ref _groupAlias, 50);
-            UiSharedService.AttachToolTip("Optional alias for your Syncshell (3-50 characters). Leave empty to use only the generated ID.");
-            ImGuiHelpers.ScaledDummy(1f);
-            
-            if (_uiSharedService.IconTextButton(FontAwesomeIcon.Plus, "Create Syncshell"))
+            SpheneUI.Controls.InputTextWithHint("Syncshell Alias (optional)##alias", "3-50 characters", ref _groupAlias, 50);
+            SpheneUI.AttachTooltip("Optional alias for your Syncshell (3-50 characters). Leave empty to use only the generated ID.");
+            SpheneUI.Layout.VerticalSpace();
+            if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Plus, "Create Syncshell"))
             {
                 try
                 {
@@ -63,59 +66,56 @@ public class CreateSyncshellUI : WindowMediatorSubscriberBase
                     _errorGroupCreate = true;
                 }
             }
-            ImGui.SameLine();
-        }
 
-        ImGui.Separator();
-
-        if (_lastCreatedGroup == null)
-        {
-            UiSharedService.TextWrapped("Creating a new Syncshell will create it with your current preferred permissions for Syncshells as default suggested permissions." + Environment.NewLine +
-                "- You can own up to " + _apiController.ServerInfo.MaxGroupsCreatedByUser + " Syncshells on this server." + Environment.NewLine +
-                "- You can join up to " + _apiController.ServerInfo.MaxGroupsJoinedByUser + " Syncshells on this server (including your own)" + Environment.NewLine +
-                "- Syncshells on this server can have a maximum of " + _apiController.ServerInfo.MaxGroupUserCount + " users");
-            ImGuiHelpers.ScaledDummy(2f);
-            ImGui.TextUnformatted("Your current Syncshell preferred permissions are:");
-            ImGui.AlignTextToFramePadding();
-            ImGui.TextUnformatted("- Animations");
-            _uiSharedService.BooleanToColoredIcon(!_apiController.DefaultPermissions!.DisableGroupAnimations);
-            ImGui.AlignTextToFramePadding();
-            ImGui.TextUnformatted("- Sounds");
-            _uiSharedService.BooleanToColoredIcon(!_apiController.DefaultPermissions!.DisableGroupSounds);
-            ImGui.AlignTextToFramePadding();
-            ImGui.TextUnformatted("- VFX");
-            _uiSharedService.BooleanToColoredIcon(!_apiController.DefaultPermissions!.DisableGroupVFX);
-            UiSharedService.TextWrapped("(Those preferred permissions can be changed anytime after Syncshell creation, your defaults can be changed anytime in the Sphene Settings)");
+            SpheneUI.Layout.Section("Details", () =>
+            {
+                SpheneUI.Text.Wrapped("Creating a new Syncshell will create it with your current preferred permissions for Syncshells as default suggested permissions." + Environment.NewLine +
+                    "- You can own up to " + _apiController.ServerInfo.MaxGroupsCreatedByUser + " Syncshells on this server." + Environment.NewLine +
+                    "- You can join up to " + _apiController.ServerInfo.MaxGroupsJoinedByUser + " Syncshells on this server (including your own)" + Environment.NewLine +
+                    "- Syncshells on this server can have a maximum of " + _apiController.ServerInfo.MaxGroupUserCount + " users");
+                SpheneUI.Text.Muted("Your current Syncshell preferred permissions are:");
+                ImGui.AlignTextToFramePadding();
+                SpheneUI.Text.Plain("- Animations");
+                SpheneUI.Icons.BoolIcon(!_apiController.DefaultPermissions!.DisableGroupAnimations);
+                ImGui.AlignTextToFramePadding();
+                SpheneUI.Text.Plain("- Sounds");
+                SpheneUI.Icons.BoolIcon(!_apiController.DefaultPermissions!.DisableGroupSounds);
+                ImGui.AlignTextToFramePadding();
+                SpheneUI.Text.Plain("- VFX");
+                SpheneUI.Icons.BoolIcon(!_apiController.DefaultPermissions!.DisableGroupVFX);
+                SpheneUI.Text.MutedWrapped("(Those preferred permissions can be changed anytime after Syncshell creation, your defaults can be changed anytime in the Sphene Settings)");
+            });
         }
         else
         {
             _errorGroupCreate = false;
-            ImGui.TextUnformatted("Syncshell ID: " + _lastCreatedGroup.Group.GID);
-            ImGui.AlignTextToFramePadding();
-            ImGui.TextUnformatted("Syncshell Password: " + _lastCreatedGroup.Password);
-            ImGui.SameLine();
-            if (_uiSharedService.IconButton(FontAwesomeIcon.Copy))
+            SpheneUI.Layout.SectionCard(() =>
             {
-                ImGui.SetClipboardText(_lastCreatedGroup.Password);
-            }
-            UiSharedService.TextWrapped("You can change the Syncshell password later at any time.");
-            ImGui.Separator();
-            UiSharedService.TextWrapped("These settings were set based on your preferred syncshell permissions:");
-            ImGuiHelpers.ScaledDummy(2f);
+                SpheneUI.Text.Plain("Syncshell ID: " + _lastCreatedGroup.Group.GID);
+                ImGui.AlignTextToFramePadding();
+                SpheneUI.Text.Plain("Syncshell Password: " + _lastCreatedGroup.Password);
+                ImGui.SameLine();
+                if (SpheneUI.Icons.Button(FontAwesomeIcon.Copy))
+                {
+                    ImGui.SetClipboardText(_lastCreatedGroup.Password);
+                }
+                SpheneUI.Text.MutedWrapped("You can change the Syncshell password later at any time.");
+            }, "Syncshell created");
+            SpheneUI.Text.Muted("These settings were set based on your preferred syncshell permissions:");
             ImGui.AlignTextToFramePadding();
-            UiSharedService.TextWrapped("Suggest Animation sync:");
-            _uiSharedService.BooleanToColoredIcon(!_lastCreatedGroup.GroupUserPreferredPermissions.IsDisableAnimations());
+            SpheneUI.Text.Plain("Suggest Animation sync:");
+            SpheneUI.Icons.BoolIcon(!_lastCreatedGroup.GroupUserPreferredPermissions.IsDisableAnimations());
             ImGui.AlignTextToFramePadding();
-            UiSharedService.TextWrapped("Suggest Sounds sync:");
-            _uiSharedService.BooleanToColoredIcon(!_lastCreatedGroup.GroupUserPreferredPermissions.IsDisableSounds());
+            SpheneUI.Text.Plain("Suggest Sounds sync:");
+            SpheneUI.Icons.BoolIcon(!_lastCreatedGroup.GroupUserPreferredPermissions.IsDisableSounds());
             ImGui.AlignTextToFramePadding();
-            UiSharedService.TextWrapped("Suggest VFX sync:");
-            _uiSharedService.BooleanToColoredIcon(!_lastCreatedGroup.GroupUserPreferredPermissions.IsDisableVFX());
+            SpheneUI.Text.Plain("Suggest VFX sync:");
+            SpheneUI.Icons.BoolIcon(!_lastCreatedGroup.GroupUserPreferredPermissions.IsDisableVFX());
         }
 
         if (_errorGroupCreate)
         {
-            UiSharedService.ColorTextWrapped("Something went wrong during creation of a new Syncshell", new Vector4(1, 0, 0, 1));
+            SpheneUI.Layout.Callout("Something went wrong during creation of a new Syncshell", FontAwesomeIcon.ExclamationTriangle, SpheneUI.Colors.Danger);
         }
     }
 

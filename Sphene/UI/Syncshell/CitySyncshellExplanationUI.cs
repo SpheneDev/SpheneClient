@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging;
 using Sphene.Services;
 using Sphene.Services.Mediator;
 using Sphene.SpheneConfiguration;
+using Sphene.UI.Design;
 using System.Numerics;
 
 namespace Sphene.UI.Syncshell;
@@ -64,85 +65,59 @@ public class CitySyncshellExplanationUI : WindowMediatorSubscriberBase
     {
         _logger.LogDebug("CitySyncshellExplanationUI.DrawInternal called, _currentRequest is null: {isNull}, IsOpen: {isOpen}", _currentRequest == null, IsOpen);
         
-        if (_currentRequest == null) 
+        if (_currentRequest == null)
         {
             _logger.LogDebug("CitySyncshellExplanationUI.DrawInternal returning early - _currentRequest is null");
             return;
         }
 
+        if (SpheneUI.Layout.BeginScrollArea("city-explanation", ImGui.GetContentRegionAvail(),
+                contentPadding: Vector2.Zero))
+        {
+            DrawExplanationContent();
+        }
+        SpheneUI.Layout.EndScrollArea();
+    }
+
+    private void DrawExplanationContent()
+    {
         // Header
-        ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.2f, 0.8f, 1.0f, 1.0f));
-        ImGui.Text($"Welcome to {_currentRequest.CityName} City Syncshell!");
-        ImGui.PopStyleColor();
-        
-        ImGui.Separator();
-        
+        SpheneUI.Text.PageHeader($"Welcome to {_currentRequest!.CityName} City Syncshell!");
+
         // Explanation text
-        ImGui.TextWrapped("City Syncshells are public communication channels that allow players in the same city to chat and coordinate activities together.");
-        
-        ImGui.Spacing();
-        ImGui.TextWrapped("Features of City Syncshells:");
-        
-        ImGui.Bullet();
-        ImGui.SameLine();
-        ImGui.TextWrapped("Connect with other players currently in the same city");
-        
-        ImGui.Bullet();
-        ImGui.SameLine();
-        ImGui.TextWrapped("Share information about events, hunts, and activities");
-        
-        ImGui.Bullet();
-        ImGui.SameLine();
-        ImGui.TextWrapped("Find groups for content or social activities");
-        
-        ImGui.Bullet();
-        ImGui.SameLine();
-        ImGui.TextWrapped("Automatically join when entering a city, leave when departing");
-        
-        ImGui.Spacing();
-        ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 0.8f, 0.2f, 1.0f));
-        ImGui.TextWrapped("Note: City Syncshells are public spaces. Please be respectful and follow community guidelines.");
-        ImGui.PopStyleColor();
-        
-        ImGui.Separator();
-        
-        // Settings section
-        ImGui.Text("Settings:");
-        ImGui.Spacing();
-        
-        if (ImGui.Checkbox("Enable city syncshell join requests", ref _enableCitySyncshells))
+        SpheneUI.Text.Wrapped("City Syncshells are public communication channels that allow players in the same city to chat and coordinate activities together.");
+
+        SpheneUI.Text.SectionHeader("Features");
+        SpheneUI.Text.Bullet("Connect with other players currently in the same city");
+        SpheneUI.Text.Bullet("Share information about events, hunts, and activities");
+        SpheneUI.Text.Bullet("Find groups for content or social activities");
+        SpheneUI.Text.Bullet("Automatically join when entering a city, leave when departing");
+
+        SpheneUI.Layout.VerticalSpace();
+        SpheneUI.Layout.Callout("City Syncshells are public spaces. Please be respectful and follow community guidelines.", Dalamud.Interface.FontAwesomeIcon.ExclamationTriangle, ImGuiColors.DalamudYellow);
+
+        SpheneUI.Layout.Section("Settings", () =>
         {
-            _configService.Current.EnableCitySyncshellJoinRequests = _enableCitySyncshells;
-            _configService.Save();
-        }
-        ImGui.SameLine();
-        ImGui.TextDisabled("(?)");
-        if (ImGui.IsItemHovered())
-        {
-            ImGui.SetTooltip("When enabled, you will receive prompts to join city syncshells when entering major cities.\nYou can change this setting later in the Sphene settings.");
-        }
-        
-        ImGui.Separator();
-        
+            if (SpheneUI.Controls.Toggle("Enable city syncshell join requests", ref _enableCitySyncshells))
+            {
+                _configService.Current.EnableCitySyncshellJoinRequests = _enableCitySyncshells;
+                _configService.Save();
+            }
+            SpheneUI.Controls.HelpText("When enabled, you will receive prompts to join city syncshells when entering major cities. You can change this setting later in the Sphene settings.");
+        });
+
         // Buttons
-        var buttonWidth = (ImGui.GetContentRegionAvail().X - ImGui.GetStyle().ItemSpacing.X) / 2;
-        
-        // Join this time button
-        if (ImGui.Button("Join This Time", new Vector2(buttonWidth, 0)))
+        var clicked = SpheneUI.Controls.DialogButtons("citySyncshellActions", "Join This Time", "Close");
+        if (clicked == 1)
         {
             HandleJoinThisTime();
         }
-        
-        ImGui.SameLine();
-        
-        // Close button
-        if (ImGui.Button("Close", new Vector2(buttonWidth, 0)))
+        else if (clicked == 2)
         {
             HandleClose();
         }
-        
-        ImGui.Spacing();
-        ImGui.TextWrapped("This explanation will only be shown once. You can always change your city syncshell preferences in the Sphene settings under 'City Syncshell Settings'.");
+
+        SpheneUI.Text.MutedWrapped("This explanation will only be shown once. You can always change your city syncshell preferences in the Sphene settings under 'City Syncshell Settings'.");
     }
 
     protected override void Dispose(bool disposing)

@@ -11,6 +11,7 @@ using Sphene.Services.Mediator;
 using System.Numerics;
 using Microsoft.Extensions.Logging;
 using Sphene.WebAPI;
+using Sphene.UI.Design;
 
 namespace Sphene.UI.Components;
 
@@ -20,7 +21,6 @@ public class AcknowledgmentMonitorUI : WindowMediatorSubscriberBase
     private readonly EnhancedAcknowledgmentManager _acknowledgmentManager;
     private readonly SessionAcknowledgmentManager _sessionAcknowledgmentManager;
     private readonly ApiController _apiController;
-    private readonly UiSharedService _uiShared;
     private AcknowledgmentConfiguration _config;
     private AcknowledgmentMetrics _metrics;
     private bool _showAdvancedSettings = false;
@@ -28,13 +28,12 @@ public class AcknowledgmentMonitorUI : WindowMediatorSubscriberBase
     private bool _showSessionDetails = false;
     
     public AcknowledgmentMonitorUI(ILogger<AcknowledgmentMonitorUI> logger, EnhancedAcknowledgmentManager acknowledgmentManager,
-        SessionAcknowledgmentManager sessionAcknowledgmentManager, SpheneMediator mediator, PerformanceCollectorService performanceCollectorService, ApiController apiController, UiSharedService uiSharedService)
+        SessionAcknowledgmentManager sessionAcknowledgmentManager, SpheneMediator mediator, PerformanceCollectorService performanceCollectorService, ApiController apiController)
         : base(logger, mediator, "Acknowledgment Monitor###SpheneAckMonitor", performanceCollectorService)
     {
         _acknowledgmentManager = acknowledgmentManager;
         _sessionAcknowledgmentManager = sessionAcknowledgmentManager;
         _apiController = apiController;
-        _uiShared = uiSharedService;
         _config = _acknowledgmentManager.GetConfiguration();
         _metrics = _acknowledgmentManager.GetMetrics();
         
@@ -59,14 +58,24 @@ public class AcknowledgmentMonitorUI : WindowMediatorSubscriberBase
     {
         // Refresh metrics
         _metrics = _acknowledgmentManager.GetMetrics();
-        
-        if (_uiShared.DrawCollapsibleSection("Acknowledgment System Monitor"))
+
+        if (SpheneUI.Layout.BeginScrollArea("ack-monitor-content", ImGui.GetContentRegionAvail(),
+                contentPadding: Vector2.Zero))
         {
-            UiSharedService.TextWrapped("Monitor and configure acknowledgment batching, retries, and sessions.");
+            DrawMonitorContent();
+        }
+        SpheneUI.Layout.EndScrollArea();
+    }
+
+    private void DrawMonitorContent()
+    {
+        if (SpheneUI.Controls.CollapsibleSection("Acknowledgment System Monitor"))
+        {
+            SpheneUI.Text.Wrapped("Monitor and configure acknowledgment batching, retries, and sessions.");
             DrawMetricsOverview();
-            UiSharedService.DrawSeparator();
+            SpheneUI.Layout.Separator();
             DrawSessionInformation();
-            UiSharedService.DrawSeparator();
+            SpheneUI.Layout.Separator();
             
             // Only show configuration to admin users
             if (_apiController.IsAdmin)
@@ -76,13 +85,13 @@ public class AcknowledgmentMonitorUI : WindowMediatorSubscriberBase
             
             if (_showMetricsDetails)
             {
-                UiSharedService.DrawSeparator();
+                SpheneUI.Layout.Separator();
                 DrawDetailedMetrics();
             }
             
             if (_showSessionDetails)
             {
-                UiSharedService.DrawSeparator();
+                SpheneUI.Layout.Separator();
                 DrawSessionDetails();
             }
         }
@@ -91,7 +100,7 @@ public class AcknowledgmentMonitorUI : WindowMediatorSubscriberBase
     // Draws the metrics overview section
     private void DrawMetricsOverview()
     {
-        ImGui.Text("System Status");
+        SpheneUI.Text.SectionHeader("System Status");
         
         // Success rate with color coding
         var successRate = _metrics.SuccessRate;
@@ -99,11 +108,11 @@ public class AcknowledgmentMonitorUI : WindowMediatorSubscriberBase
                           successRate >= 80 ? ImGuiColors.DalamudYellow : 
                           ImGuiColors.DalamudRed;
         
-        ImGui.TextColored(successColor, $"Success Rate: {successRate:F1}%");
-        UiSharedService.AttachToolTip($"Successful acknowledgments: {_metrics.TotalSuccessful}/{_metrics.TotalReceived}");
+        SpheneUI.Text.Colored($"Success Rate: {successRate:F1}%", successColor);
+        SpheneUI.AttachTooltip($"Successful acknowledgments: {_metrics.TotalSuccessful}/{_metrics.TotalReceived}");
         
         ImGui.SameLine();
-        ImGui.Text($"| Avg Response: {_metrics.AverageResponseTimeMs:F0}ms");
+        SpheneUI.Text.Plain($"| Avg Response: {_metrics.AverageResponseTimeMs:F0}ms");
         
         // Statistics in columns
         if (ImGui.BeginTable("AckStats", 4, ImGuiTableFlags.Borders))
@@ -116,21 +125,19 @@ public class AcknowledgmentMonitorUI : WindowMediatorSubscriberBase
             
             ImGui.TableNextRow();
             ImGui.TableNextColumn();
-            ImGui.Text(_metrics.TotalSent.ToString());
+            SpheneUI.Text.Plain(_metrics.TotalSent.ToString());
             ImGui.TableNextColumn();
-            ImGui.Text(_metrics.TotalReceived.ToString());
+            SpheneUI.Text.Plain(_metrics.TotalReceived.ToString());
             ImGui.TableNextColumn();
-            ImGui.TextColored(_metrics.TotalFailed > 0 ? ImGuiColors.DalamudRed : ImGuiColors.DalamudWhite, 
-                _metrics.TotalFailed.ToString());
+            SpheneUI.Text.Colored(_metrics.TotalFailed.ToString(), _metrics.TotalFailed > 0 ? ImGuiColors.DalamudRed : ImGuiColors.DalamudWhite);
             ImGui.TableNextColumn();
-            ImGui.TextColored(_metrics.TotalRetries > 0 ? ImGuiColors.DalamudYellow : ImGuiColors.DalamudWhite, 
-                _metrics.TotalRetries.ToString());
+            SpheneUI.Text.Colored(_metrics.TotalRetries.ToString(), _metrics.TotalRetries > 0 ? ImGuiColors.DalamudYellow : ImGuiColors.DalamudWhite);
             
             ImGui.EndTable();
         }
         
         // Show/hide detailed metrics button
-        if (UiSharedService.DrawButton(_showMetricsDetails ? "Hide Details" : "Show Details"))
+        if (SpheneUI.Controls.Button(_showMetricsDetails ? "Hide Details" : "Show Details"))
         {
             _showMetricsDetails = !_showMetricsDetails;
         }
@@ -139,19 +146,19 @@ public class AcknowledgmentMonitorUI : WindowMediatorSubscriberBase
     // Draws session information section
     private void DrawSessionInformation()
     {
-        ImGui.Text("Session Information");
+        SpheneUI.Text.SectionHeader("Session Information");
         
         // Current session ID
-        ImGui.Text($"Current Session: {_sessionAcknowledgmentManager.CurrentSessionId}");
+        SpheneUI.Text.Plain($"Current Session: {_sessionAcknowledgmentManager.CurrentSessionId}");
         
         // Pending acknowledgments count
         var pendingCount = _sessionAcknowledgmentManager.GetPendingAcknowledgmentCount();
         var pendingColor = pendingCount > 0 ? ImGuiColors.DalamudYellow : ImGuiColors.ParsedGreen;
-        ImGui.TextColored(pendingColor, $"Pending Acknowledgments: {pendingCount}");
+        SpheneUI.Text.Colored($"Pending Acknowledgments: {pendingCount}", pendingColor);
         
         // Show/hide session details button
         ImGui.SameLine();
-        if (UiSharedService.DrawButton(_showSessionDetails ? "Hide Session Details" : "Show Session Details"))
+        if (SpheneUI.Controls.Button(_showSessionDetails ? "Hide Session Details" : "Show Session Details"))
         {
             _showSessionDetails = !_showSessionDetails;
         }
@@ -160,7 +167,7 @@ public class AcknowledgmentMonitorUI : WindowMediatorSubscriberBase
     // Draws detailed session information
     private void DrawSessionDetails()
     {
-        ImGui.Text("Session Details");
+        SpheneUI.Text.SectionHeader("Session Details");
         
         var acknowledgmentStatuses = _sessionAcknowledgmentManager.GetAcknowledgmentStatuses();
         var pendingAcks = _sessionAcknowledgmentManager.GetPendingAcknowledgments();
@@ -176,7 +183,7 @@ public class AcknowledgmentMonitorUI : WindowMediatorSubscriberBase
                 {
                     ImGui.TableNextRow();
                     ImGui.TableNextColumn();
-                    ImGui.Text(status);
+                    SpheneUI.Text.Plain(status);
                 }
                 
                 ImGui.EndTable();
@@ -184,14 +191,14 @@ public class AcknowledgmentMonitorUI : WindowMediatorSubscriberBase
         }
         else
         {
-            ImGui.TextColored(ImGuiColors.ParsedGreen, "No pending acknowledgments in current session.");
+            SpheneUI.Text.Colored("No pending acknowledgments in current session.", ImGuiColors.ParsedGreen);
         }
 
-        UiSharedService.DrawSeparator();
-        ImGui.Text("Pending Acknowledgments");
+        SpheneUI.Layout.Separator();
+        SpheneUI.Text.SectionHeader("Pending Acknowledgments");
         if (pendingAcks.Count == 0)
         {
-            ImGui.TextColored(ImGuiColors.ParsedGreen, "None pending");
+            SpheneUI.Text.Colored("None pending", ImGuiColors.ParsedGreen);
         }
         else
         {
@@ -209,27 +216,27 @@ public class AcknowledgmentMonitorUI : WindowMediatorSubscriberBase
                     
                     ImGui.TableNextRow();
                     ImGui.TableNextColumn();
-                    ImGui.Text(userKey);
+                    SpheneUI.Text.Plain(userKey);
                     
                     ImGui.TableNextColumn();
-                    ImGui.Text(ackId.Length > 16 ? $"{ackId[..16]}..." : ackId);
+                    SpheneUI.Text.Plain(ackId.Length > 16 ? $"{ackId[..16]}..." : ackId);
                     
                     ImGui.TableNextColumn();
                     
                     ImGui.PushID($"ack_clear_{userKey}");
-                    if (UiSharedService.DrawButton("Clear"))
+                    if (SpheneUI.Controls.Button("Clear"))
                     {
                         var removed = _sessionAcknowledgmentManager.RemovePendingAcknowledgment(new Sphene.API.Data.UserData(userKey), ackId);
                         if (removed)
                         {
-                            UiSharedService.AttachToolTip("Cleared");
+                            SpheneUI.AttachTooltip("Cleared");
                         }
                     }
                     ImGui.PopID();
                     
                     ImGui.SameLine();
                     ImGui.PushID($"ack_timeout_{userKey}");
-                    if (UiSharedService.DrawButton("Mark Timeout"))
+                    if (SpheneUI.Controls.Button("Mark Timeout"))
                     {
                         _sessionAcknowledgmentManager.ProcessTimeoutAcknowledgment(ackId);
                     }
@@ -244,24 +251,24 @@ public class AcknowledgmentMonitorUI : WindowMediatorSubscriberBase
     // Draws the detailed metrics section
     private void DrawDetailedMetrics()
     {
-        ImGui.Text("Detailed Metrics");
+        SpheneUI.Text.SectionHeader("Detailed Metrics");
         
         // Error breakdown
         if (_metrics.ErrorCounts.Any())
         {
-            ImGui.Text("Error Breakdown:");
+            SpheneUI.Text.Plain("Error Breakdown:");
             foreach (var error in _metrics.ErrorCounts.OrderByDescending(kvp => kvp.Value))
             {
-                ImGui.BulletText($"{error.Key}: {error.Value}");
+                SpheneUI.Text.Bullet($"{error.Key}: {error.Value}");
             }
         }
         
-        UiSharedService.DrawSpacing();
+        SpheneUI.Layout.VerticalSpace();
         
         // Priority breakdown
         if (_metrics.PriorityCounts.Any())
         {
-            ImGui.Text("Priority Distribution:");
+            SpheneUI.Text.Plain("Priority Distribution:");
             foreach (var priority in _metrics.PriorityCounts.OrderByDescending(kvp => kvp.Value))
             {
                 var color = priority.Key switch
@@ -272,39 +279,39 @@ public class AcknowledgmentMonitorUI : WindowMediatorSubscriberBase
                     _ => ImGuiColors.DalamudWhite
                 };
                 
-                ImGui.TextColored(color, $"● {priority.Key}: {priority.Value}");
+                SpheneUI.Text.Colored($"● {priority.Key}: {priority.Value}", color);
             }
         }
         
-        ImGui.Text($"Last Updated: {_metrics.LastUpdated:HH:mm:ss}");
+        SpheneUI.Text.Plain($"Last Updated: {_metrics.LastUpdated:HH:mm:ss}");
     }
     
     // Draws the configuration section
     private void DrawConfiguration()
     {
-        ImGui.Text("Configuration");
+        SpheneUI.Text.SectionHeader("Configuration");
         
         // Basic settings
         var enableBatching = _config.EnableBatching;
-        if (UiSharedService.DrawToggleChip("Enable Batching", ref enableBatching))
+        if (SpheneUI.Controls.ToggleChip("Enable Batching", ref enableBatching))
         {
             _config.EnableBatching = enableBatching;
         }
-        UiSharedService.AttachToolTip("Group multiple acknowledgments together for better performance");
+        SpheneUI.AttachTooltip("Group multiple acknowledgments together for better performance");
         
         ImGui.SameLine();
         var enableAutoRetry = _config.EnableAutoRetry;
-        if (UiSharedService.DrawToggleChip("Auto Retry", ref enableAutoRetry))
+        if (SpheneUI.Controls.ToggleChip("Auto Retry", ref enableAutoRetry))
         {
             _config.EnableAutoRetry = enableAutoRetry;
         }
-        UiSharedService.AttachToolTip("Automatically retry failed acknowledgments");
+        SpheneUI.AttachTooltip("Automatically retry failed acknowledgments");
         
 
         
         // Timeout settings
         var defaultTimeout = _config.DefaultTimeoutSeconds;
-        if (UiSharedService.DrawSliderInt("Default Timeout (s)", ref defaultTimeout, 5, 120))
+        if (SpheneUI.Controls.SliderInt("Default Timeout (s)", ref defaultTimeout, 5, 120))
         {
             _config.DefaultTimeoutSeconds = defaultTimeout;
         }
@@ -312,20 +319,20 @@ public class AcknowledgmentMonitorUI : WindowMediatorSubscriberBase
         if (_config.EnableBatching)
         {
             var maxBatchSize = _config.MaxBatchSize;
-            if (UiSharedService.DrawSliderInt("Max Batch Size", ref maxBatchSize, 1, 50))
+            if (SpheneUI.Controls.SliderInt("Max Batch Size", ref maxBatchSize, 1, 50))
             {
                 _config.MaxBatchSize = maxBatchSize;
             }
             
             var batchTimeoutMs = _config.BatchTimeoutMs;
-            if (UiSharedService.DrawSliderInt("Batch Timeout (ms)", ref batchTimeoutMs, 1000, 30000))
+            if (SpheneUI.Controls.SliderInt("Batch Timeout (ms)", ref batchTimeoutMs, 1000, 30000))
             {
                 _config.BatchTimeoutMs = batchTimeoutMs;
             }
         }
         
         // Advanced settings toggle
-        if (UiSharedService.DrawButton(_showAdvancedSettings ? "Hide Advanced" : "Show Advanced"))
+        if (SpheneUI.Controls.Button(_showAdvancedSettings ? "Hide Advanced" : "Show Advanced"))
         {
             _showAdvancedSettings = !_showAdvancedSettings;
         }
@@ -339,12 +346,12 @@ public class AcknowledgmentMonitorUI : WindowMediatorSubscriberBase
     // Draws the advanced settings section
     private void DrawAdvancedSettings()
     {
-        UiSharedService.DrawSeparator();
-        ImGui.Text("Advanced Settings");
+        SpheneUI.Layout.Separator();
+        SpheneUI.Text.SectionHeader("Advanced Settings");
         
         // Priority system
         var enablePriority = _config.EnablePrioritySystem;
-        if (UiSharedService.DrawToggleChip("Enable Priority System", ref enablePriority))
+        if (SpheneUI.Controls.ToggleChip("Enable Priority System", ref enablePriority))
         {
             _config.EnablePrioritySystem = enablePriority;
         }
@@ -354,19 +361,19 @@ public class AcknowledgmentMonitorUI : WindowMediatorSubscriberBase
             ImGui.Indent();
             
             var highTimeout = _config.HighPriorityTimeoutSeconds;
-            if (UiSharedService.DrawSliderInt("High Priority Timeout (s)", ref highTimeout, 1, 60))
+            if (SpheneUI.Controls.SliderInt("High Priority Timeout (s)", ref highTimeout, 1, 60))
             {
                 _config.HighPriorityTimeoutSeconds = highTimeout;
             }
             
             var mediumTimeout = _config.MediumPriorityTimeoutSeconds;
-            if (UiSharedService.DrawSliderInt("Medium Priority Timeout (s)", ref mediumTimeout, 5, 120))
+            if (SpheneUI.Controls.SliderInt("Medium Priority Timeout (s)", ref mediumTimeout, 5, 120))
             {
                 _config.MediumPriorityTimeoutSeconds = mediumTimeout;
             }
             
             var lowTimeout = _config.LowPriorityTimeoutSeconds;
-            if (UiSharedService.DrawSliderInt("Low Priority Timeout (s)", ref lowTimeout, 10, 300))
+            if (SpheneUI.Controls.SliderInt("Low Priority Timeout (s)", ref lowTimeout, 10, 300))
             {
                 _config.LowPriorityTimeoutSeconds = lowTimeout;
             }
@@ -378,19 +385,19 @@ public class AcknowledgmentMonitorUI : WindowMediatorSubscriberBase
         if (_config.EnableAutoRetry)
         {
             var maxRetries = _config.MaxRetryAttempts;
-            if (UiSharedService.DrawSliderInt("Max Retry Attempts", ref maxRetries, 0, 10))
+            if (SpheneUI.Controls.SliderInt("Max Retry Attempts", ref maxRetries, 0, 10))
             {
                 _config.MaxRetryAttempts = maxRetries;
             }
             
             var baseDelay = _config.BaseRetryDelayMs;
-            if (UiSharedService.DrawSliderInt("Base Retry Delay (ms)", ref baseDelay, 100, 10000))
+            if (SpheneUI.Controls.SliderInt("Base Retry Delay (ms)", ref baseDelay, 100, 10000))
             {
                 _config.BaseRetryDelayMs = baseDelay;
             }
             
             var maxDelay = _config.MaxRetryDelayMs;
-            if (UiSharedService.DrawSliderInt("Max Retry Delay (ms)", ref maxDelay, 1000, 60000))
+            if (SpheneUI.Controls.SliderInt("Max Retry Delay (ms)", ref maxDelay, 1000, 60000))
             {
                 _config.MaxRetryDelayMs = Math.Max(maxDelay, _config.BaseRetryDelayMs);
             }
@@ -398,13 +405,13 @@ public class AcknowledgmentMonitorUI : WindowMediatorSubscriberBase
         
         // Cache settings
         var maxCacheSize = _config.MaxCacheSize;
-        if (UiSharedService.DrawSliderInt("Max Cache Size", ref maxCacheSize, 100, 10000))
+        if (SpheneUI.Controls.SliderInt("Max Cache Size", ref maxCacheSize, 100, 10000))
         {
             _config.MaxCacheSize = maxCacheSize;
         }
         
         var cacheExpiration = _config.CacheExpirationMinutes;
-        if (UiSharedService.DrawSliderInt("Cache Expiration (min)", ref cacheExpiration, 5, 180))
+        if (SpheneUI.Controls.SliderInt("Cache Expiration (min)", ref cacheExpiration, 5, 180))
         {
             _config.CacheExpirationMinutes = cacheExpiration;
         }
@@ -413,23 +420,23 @@ public class AcknowledgmentMonitorUI : WindowMediatorSubscriberBase
         
         // Performance settings
         var maxPending = _config.MaxPendingAcknowledgmentsPerUser;
-        if (UiSharedService.DrawSliderInt("Max Pending per User", ref maxPending, 10, 1000))
+        if (SpheneUI.Controls.SliderInt("Max Pending per User", ref maxPending, 10, 1000))
         {
             _config.MaxPendingAcknowledgmentsPerUser = maxPending;
         }
         
         var enableMetrics = _config.EnableMetrics;
-        if (UiSharedService.DrawToggleChip("Enable Metrics Collection", ref enableMetrics))
+        if (SpheneUI.Controls.ToggleChip("Enable Metrics Collection", ref enableMetrics))
         {
             _config.EnableMetrics = enableMetrics;
         }
         
         // Reset to defaults button
-        UiSharedService.DrawSpacing();
-        if (UiSharedService.DrawButton("Reset to Defaults"))
+        SpheneUI.Layout.VerticalSpace();
+        if (SpheneUI.Controls.Button("Reset to Defaults"))
         {
             _config = new AcknowledgmentConfiguration();
         }
-        UiSharedService.AttachToolTip("Reset all settings to their default values");
+        SpheneUI.AttachTooltip("Reset all settings to their default values");
     }
 }

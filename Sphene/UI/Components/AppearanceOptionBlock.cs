@@ -2,6 +2,7 @@ using Dalamud.Bindings.ImGui;
 using Sphene.Services.Mediator;
 using Sphene.SpheneConfiguration;
 using System.Numerics;
+using Sphene.UI.Design;
 
 namespace Sphene.UI.Components;
 
@@ -13,7 +14,7 @@ public static class AppearanceOptionBlock
         try
         {
             var showSpheneIcon = configService.Current.ShowSpheneIcon;
-            if (UiSharedService.DrawToggle("Show Sphene Icon", ref showSpheneIcon))
+            if (SpheneUI.Controls.Toggle("Show Sphene Icon", ref showSpheneIcon))
             {
                 configService.Current.ShowSpheneIcon = showSpheneIcon;
                 configService.Save();
@@ -31,7 +32,7 @@ public static class AppearanceOptionBlock
         try
         {
             var hideInGpose = configService.Current.HideSpheneIconInGpose;
-            if (UiSharedService.DrawToggle("Hide Sphene Icon in GPose", ref hideInGpose))
+            if (SpheneUI.Controls.Toggle("Hide Sphene Icon in GPose", ref hideInGpose))
             {
                 configService.Current.HideSpheneIconInGpose = hideInGpose;
                 configService.Save();
@@ -49,7 +50,7 @@ public static class AppearanceOptionBlock
         try
         {
             var lockSpheneIcon = configService.Current.LockSpheneIcon;
-            if (UiSharedService.DrawToggle("Lock Sphene Icon position", ref lockSpheneIcon))
+            if (SpheneUI.Controls.Toggle("Lock Sphene Icon position", ref lockSpheneIcon))
             {
                 configService.Current.LockSpheneIcon = lockSpheneIcon;
                 configService.Save();
@@ -67,7 +68,7 @@ public static class AppearanceOptionBlock
         try
         {
             var enableRightClickMenu = configService.Current.EnableRightClickMenus;
-            if (UiSharedService.DrawToggle("Enable game right-click menus", ref enableRightClickMenu))
+            if (SpheneUI.Controls.Toggle("Enable game right-click menus", ref enableRightClickMenu))
             {
                 configService.Current.EnableRightClickMenus = enableRightClickMenu;
                 configService.Save();
@@ -85,7 +86,7 @@ public static class AppearanceOptionBlock
         try
         {
             var enableDtrEntry = configService.Current.EnableDtrEntry;
-            if (UiSharedService.DrawToggle("Show status in Server Info Bar", ref enableDtrEntry))
+            if (SpheneUI.Controls.Toggle("Show status in Server Info Bar", ref enableDtrEntry))
             {
                 configService.Current.EnableDtrEntry = enableDtrEntry;
                 configService.Save();
@@ -105,7 +106,7 @@ public static class AppearanceOptionBlock
         try
         {
             var showUidInDtrTooltip = configService.Current.ShowUidInDtrTooltip;
-            if (UiSharedService.DrawToggle("Show UID in tooltip", ref showUidInDtrTooltip))
+            if (SpheneUI.Controls.Toggle("Show UID in tooltip", ref showUidInDtrTooltip))
             {
                 configService.Current.ShowUidInDtrTooltip = showUidInDtrTooltip;
                 configService.Save();
@@ -123,7 +124,7 @@ public static class AppearanceOptionBlock
         try
         {
             var preferNoteInDtrTooltip = configService.Current.PreferNoteInDtrTooltip;
-            if (UiSharedService.DrawToggle("Prefer notes in tooltip", ref preferNoteInDtrTooltip))
+            if (SpheneUI.Controls.Toggle("Prefer notes in tooltip", ref preferNoteInDtrTooltip))
             {
                 configService.Current.PreferNoteInDtrTooltip = preferNoteInDtrTooltip;
                 configService.Save();
@@ -141,7 +142,7 @@ public static class AppearanceOptionBlock
         try
         {
             var useColorsInDtr = configService.Current.UseColorsInDtr;
-            if (UiSharedService.DrawToggle("Use status colors", ref useColorsInDtr))
+            if (SpheneUI.Controls.Toggle("Use status colors", ref useColorsInDtr))
             {
                 configService.Current.UseColorsInDtr = useColorsInDtr;
                 configService.Save();
@@ -159,7 +160,7 @@ public static class AppearanceOptionBlock
         try
         {
             var useFocusTarget = configService.Current.UseFocusTarget;
-            if (UiSharedService.DrawToggle("Set visible pairs as focus targets when clicking the eye", ref useFocusTarget))
+            if (SpheneUI.Controls.Toggle("Set visible pairs as focus targets when clicking the eye", ref useFocusTarget))
             {
                 configService.Current.UseFocusTarget = useFocusTarget;
                 configService.Save();
@@ -177,14 +178,14 @@ public static class AppearanceOptionBlock
         try
         {
             var showNameInsteadOfNotes = configService.Current.ShowCharacterNameInsteadOfNotesForVisible;
-            if (UiSharedService.DrawToggle("Show character name instead of notes", ref showNameInsteadOfNotes))
+            if (SpheneUI.Controls.Toggle("Show character name instead of notes", ref showNameInsteadOfNotes))
             {
                 configService.Current.ShowCharacterNameInsteadOfNotesForVisible = showNameInsteadOfNotes;
                 configService.Save();
                 mediator.Publish(new RefreshUiMessage());
             }
 
-            uiShared.DrawHelpText("When enabled, visible users will display their character name instead of your custom notes for them.");
+            SpheneUI.Controls.HelpText("When enabled, visible users will display their character name instead of your custom notes for them.");
         }
         finally
         {
@@ -198,14 +199,14 @@ public static class AppearanceOptionBlock
         try
         {
             var showVisibleSeparate = configService.Current.ShowVisibleUsersSeparately;
-            if (UiSharedService.DrawToggle("Show visible users separately", ref showVisibleSeparate))
+            if (SpheneUI.Controls.Toggle("Show visible users separately", ref showVisibleSeparate))
             {
                 configService.Current.ShowVisibleUsersSeparately = showVisibleSeparate;
                 configService.Save();
                 mediator.Publish(new StructuralRefreshUiMessage());
             }
 
-            uiShared.DrawHelpText("Visible users will appear in a separate 'Visible' group instead of being mixed with other users.");
+            SpheneUI.Controls.HelpText("Visible users will appear in a separate 'Visible' group instead of being mixed with other users.");
         }
         finally
         {
@@ -219,14 +220,14 @@ public static class AppearanceOptionBlock
         try
         {
             var showVisibleSyncshellUsersOnlyInSyncshells = configService.Current.ShowVisibleSyncshellUsersOnlyInSyncshells;
-            if (UiSharedService.DrawToggle("Show visible Syncshell users only in Syncshells", ref showVisibleSyncshellUsersOnlyInSyncshells))
+            if (SpheneUI.Controls.Toggle("Show visible Syncshell users only in Syncshells", ref showVisibleSyncshellUsersOnlyInSyncshells))
             {
                 configService.Current.ShowVisibleSyncshellUsersOnlyInSyncshells = showVisibleSyncshellUsersOnlyInSyncshells;
                 configService.Save();
                 mediator.Publish(new StructuralRefreshUiMessage());
             }
 
-            uiShared.DrawHelpText("When enabled, visible users who are only connected through Syncshells will only appear in their respective Syncshells and not in the separate 'Visible' group.");
+            SpheneUI.Controls.HelpText("When enabled, visible users who are only connected through Syncshells will only appear in their respective Syncshells and not in the separate 'Visible' group.");
         }
         finally
         {
@@ -240,14 +241,14 @@ public static class AppearanceOptionBlock
         try
         {
             var showOfflineSeparate = configService.Current.ShowOfflineUsersSeparately;
-            if (UiSharedService.DrawToggle("Show offline users separately", ref showOfflineSeparate))
+            if (SpheneUI.Controls.Toggle("Show offline users separately", ref showOfflineSeparate))
             {
                 configService.Current.ShowOfflineUsersSeparately = showOfflineSeparate;
                 configService.Save();
                 mediator.Publish(new StructuralRefreshUiMessage());
             }
 
-            uiShared.DrawHelpText("Directly paired offline users will appear in a separate 'Offline' group. Offline syncshell members remain in their syncshells.");
+            SpheneUI.Controls.HelpText("Directly paired offline users will appear in a separate 'Offline' group. Offline syncshell members remain in their syncshells.");
         }
         finally
         {
@@ -261,14 +262,14 @@ public static class AppearanceOptionBlock
         try
         {
             var showSyncshellOfflineSeparate = configService.Current.ShowSyncshellOfflineUsersSeparately;
-            if (UiSharedService.DrawToggle("Also show offline Syncshell users separately", ref showSyncshellOfflineSeparate))
+            if (SpheneUI.Controls.Toggle("Also show offline Syncshell users separately", ref showSyncshellOfflineSeparate))
             {
                 configService.Current.ShowSyncshellOfflineUsersSeparately = showSyncshellOfflineSeparate;
                 configService.Save();
                 mediator.Publish(new StructuralRefreshUiMessage());
             }
 
-            uiShared.DrawHelpText("When enabled, offline syncshell members will also appear in a separate 'Offline Syncshell' group instead of remaining in their syncshells.");
+            SpheneUI.Controls.HelpText("When enabled, offline syncshell members will also appear in a separate 'Offline Syncshell' group instead of remaining in their syncshells.");
         }
         finally
         {
@@ -282,14 +283,14 @@ public static class AppearanceOptionBlock
         try
         {
             var groupUpSyncshells = configService.Current.GroupUpSyncshells;
-            if (UiSharedService.DrawToggle("Group up all syncshells in one folder", ref groupUpSyncshells))
+            if (SpheneUI.Controls.Toggle("Group up all syncshells in one folder", ref groupUpSyncshells))
             {
                 configService.Current.GroupUpSyncshells = groupUpSyncshells;
                 configService.Save();
                 mediator.Publish(new StructuralRefreshUiMessage());
             }
 
-            uiShared.DrawHelpText("This will group up all Syncshells in a special 'All Syncshells' folder in the main UI.");
+            SpheneUI.Controls.HelpText("This will group up all Syncshells in a special 'All Syncshells' folder in the main UI.");
         }
         finally
         {
@@ -303,14 +304,14 @@ public static class AppearanceOptionBlock
         try
         {
             var showProfiles = configService.Current.ProfilesShow;
-            if (UiSharedService.DrawToggle("Show Sphene Profiles on Hover", ref showProfiles))
+            if (SpheneUI.Controls.Toggle("Show Sphene Profiles on Hover", ref showProfiles))
             {
                 mediator.Publish(new ClearProfileDataMessage());
                 configService.Current.ProfilesShow = showProfiles;
                 configService.Save();
             }
 
-            uiShared.DrawHelpText("This will show the configured user profile after a set delay");
+            SpheneUI.Controls.HelpText("This will show the configured user profile after a set delay");
             return showProfiles;
         }
         finally
@@ -325,14 +326,14 @@ public static class AppearanceOptionBlock
         try
         {
             var profileOnRight = configService.Current.ProfilePopoutRight;
-            if (UiSharedService.DrawToggle("Popout profiles on the right", ref profileOnRight))
+            if (SpheneUI.Controls.Toggle("Popout profiles on the right", ref profileOnRight))
             {
                 configService.Current.ProfilePopoutRight = profileOnRight;
                 configService.Save();
                 mediator.Publish(new CompactUiChange(Vector2.Zero, Vector2.Zero));
             }
 
-            uiShared.DrawHelpText("Will show profiles on the right side of the main UI");
+            SpheneUI.Controls.HelpText("Will show profiles on the right side of the main UI");
         }
         finally
         {
@@ -346,13 +347,13 @@ public static class AppearanceOptionBlock
         try
         {
             var profileDelay = configService.Current.ProfileDelay;
-            if (UiSharedService.DrawSliderFloat("Hover Delay", ref profileDelay, 1, 10))
+            if (SpheneUI.Controls.SliderFloat("Hover Delay", ref profileDelay, 1, 10))
             {
                 configService.Current.ProfileDelay = profileDelay;
                 configService.Save();
             }
 
-            uiShared.DrawHelpText("Delay until the profile should be displayed");
+            SpheneUI.Controls.HelpText("Delay until the profile should be displayed");
         }
         finally
         {
@@ -366,14 +367,14 @@ public static class AppearanceOptionBlock
         try
         {
             var showNsfwProfiles = configService.Current.ProfilesAllowNsfw;
-            if (UiSharedService.DrawToggle("Show profiles marked as NSFW", ref showNsfwProfiles))
+            if (SpheneUI.Controls.Toggle("Show profiles marked as NSFW", ref showNsfwProfiles))
             {
                 mediator.Publish(new ClearProfileDataMessage());
                 configService.Current.ProfilesAllowNsfw = showNsfwProfiles;
                 configService.Save();
             }
 
-            uiShared.DrawHelpText("Will show profiles that have the NSFW tag enabled");
+            SpheneUI.Controls.HelpText("Will show profiles that have the NSFW tag enabled");
         }
         finally
         {

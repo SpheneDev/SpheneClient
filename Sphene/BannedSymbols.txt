@@ -1,0 +1,5 @@
+# Raw image APIs are owned by SpheneUI.Media — banned outside UI/Design (see editorconfig scope).
+M:Dalamud.Bindings.ImGui.ImGui.Image;Use SpheneUI.Media.Image / ImageInRect / Sprite instead.
+M:Dalamud.Bindings.ImGui.ImGui.ImageWithBg;Use SpheneUI.Media.Image / ImageInRect / Sprite instead.
+M:Dalamud.Bindings.ImGui.ImDrawListPtr.AddImage;Use SpheneUI.Media.ImageInRect / ImageBackground instead.
+M:Dalamud.Bindings.ImGui.ImDrawListPtr.AddImageRounded;Use SpheneUI.Media.ImageInRect / Avatar instead.

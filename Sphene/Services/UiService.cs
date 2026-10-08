@@ -7,7 +7,7 @@ using Sphene.UI;
 using Sphene.UI.Components.Popup;
 using Sphene.UI.Panels;
 using Sphene.UI.Syncshell;
-using Sphene.UI.Theme;
+using Sphene.UI.Design;
 using Microsoft.Extensions.Logging;
 
 namespace Sphene.Services;

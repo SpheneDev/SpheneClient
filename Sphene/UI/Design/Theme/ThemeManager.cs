@@ -6,7 +6,7 @@ using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
 using Sphene.SpheneConfiguration;
 
-namespace Sphene.UI.Theme;
+namespace Sphene.UI.Design;
 
 public static class ThemeManager
 {

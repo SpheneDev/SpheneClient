@@ -2,7 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System;
 
-namespace Sphene.UI.Theme;
+namespace Sphene.UI.Design;
 
 public class Vector4JsonConverter : JsonConverter<System.Numerics.Vector4>
 {

@@ -8,6 +8,7 @@ using Sphene.Services;
 using Sphene.Services.Mediator;
 using Sphene.SpheneConfiguration;
 using Sphene.SpheneConfiguration.Configurations;
+using Sphene.UI.Design;
 using System.Numerics;
 
 namespace Sphene.UI.Syncshell;
@@ -54,21 +55,20 @@ public class AreaBoundSyncshellConsentUI : WindowMediatorSubscriberBase
         if (_currentRequest == null) return;
 
         var syncshell = _currentRequest.Syncshell;
-        
+
         // Header
-        ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.2f, 0.8f, 1.0f, 1.0f));
-        ImGui.Text($"Join Area-Bound Syncshell");
-        ImGui.PopStyleColor();
-        
-        ImGui.Separator();
-        
+        SpheneUI.Text.PageHeader("Join Area-Bound Syncshell");
+
         // Display syncshell information
-        ImGui.Text($"Syncshell: {_currentRequest.Syncshell.Group.AliasOrGID}");
-        ImGui.Text($"ID: {_currentRequest.Syncshell.Group.GID}");
-        if (syncshell.IsLocked)
+        SpheneUI.Layout.SectionCard(() =>
         {
-            ImGui.TextColored(ImGuiColors.DalamudRed, "This syncshell is locked. Joining is disabled.");
-        }
+            SpheneUI.Text.Plain($"Syncshell: {_currentRequest.Syncshell.Group.AliasOrGID}");
+            SpheneUI.Text.Muted($"ID: {_currentRequest.Syncshell.Group.GID}");
+            if (syncshell.IsLocked)
+            {
+                SpheneUI.Text.Colored("This syncshell is locked. Joining is disabled.", ImGuiColors.DalamudRed);
+            }
+        });
         
         // Calculate fixed bottom section height
         var buttonHeight = ImGui.GetFrameHeight();
@@ -96,20 +96,17 @@ public class AreaBoundSyncshellConsentUI : WindowMediatorSubscriberBase
         // Rules section - use remaining space but leave room for bottom section
         if (_currentRequest.RequiresRulesAcceptance && !string.IsNullOrEmpty(syncshell.Settings.JoinRules))
         {
-            ImGui.Separator();
-            ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 0.8f, 0.2f, 1.0f));
-            ImGui.Text("Rules (must be accepted to join):");
-            ImGui.PopStyleColor();
-            
+            SpheneUI.Text.SectionHeader("Rules (must be accepted to join)");
+
             // Calculate available height for rules, ensuring bottom section fits
             var availableHeight = ImGui.GetContentRegionAvail().Y;
             var rulesHeight = Math.Max(100, availableHeight - bottomSectionHeight);
-            
-            using var child = ImRaii.Child("RulesText", new Vector2(0, rulesHeight), true);
-            if (child)
+
+            if (SpheneUI.Layout.BeginScrollArea("RulesText", new Vector2(0, rulesHeight), border: true))
             {
-                ImGui.TextWrapped(syncshell.Settings.JoinRules);
+                SpheneUI.Text.Wrapped(syncshell.Settings.JoinRules);
             }
+            SpheneUI.Layout.EndScrollArea();
         }
         else
         {
@@ -124,11 +121,11 @@ public class AreaBoundSyncshellConsentUI : WindowMediatorSubscriberBase
         }
         
         // Bottom section starts here
-        ImGui.Separator();
+        SpheneUI.Layout.Separator();
         
         // Auto-show setting checkbox
         var autoShowConsent = _configService.Current.AutoShowAreaBoundSyncshellConsent;
-        if (ImGui.Checkbox("Automatically show area syncshell consent dialogs", ref autoShowConsent))
+        if (SpheneUI.Controls.Toggle("Automatically show area syncshell consent dialogs", ref autoShowConsent))
         {
             _configService.Current.AutoShowAreaBoundSyncshellConsent = autoShowConsent;
             _configService.Save();
@@ -137,25 +134,22 @@ public class AreaBoundSyncshellConsentUI : WindowMediatorSubscriberBase
         // Rules acceptance checkbox (if rules present)
         if (_currentRequest.RequiresRulesAcceptance && !string.IsNullOrEmpty(syncshell.Settings.JoinRules))
         {
-            ImGui.Checkbox("I accept the rules and agree to follow them", ref _rulesAccepted);
+            SpheneUI.Controls.Toggle("I accept the rules and agree to follow them", ref _rulesAccepted);
         }
         
         // Error message
         if (!string.IsNullOrEmpty(_errorMessage))
         {
-            ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 0.3f, 0.3f, 1.0f));
-            ImGui.TextWrapped(_errorMessage);
-            ImGui.PopStyleColor();
+            SpheneUI.Layout.Callout(_errorMessage, Dalamud.Interface.FontAwesomeIcon.ExclamationTriangle, SpheneUI.Colors.Danger);
         }
-        
+
         // Buttons
-        var buttonWidth = (ImGui.GetContentRegionAvail().X - ImGui.GetStyle().ItemSpacing.X) / 2;
-        
-        // Accept button
         bool canAccept = (!syncshell.IsLocked) && (!_currentRequest.RequiresRulesAcceptance || _rulesAccepted);
+        var buttonSize = new Vector2(
+            (SpheneUI.Controls.BoundedAvailX() - ImGui.GetStyle().ItemSpacing.X) * 0.5f, 0f);
         using (ImRaii.Disabled(!canAccept))
         {
-            if (ImGui.Button("Accept and Join", new Vector2(buttonWidth, 0)))
+            if (SpheneUI.Controls.Button("Accept and Join", buttonSize))
             {
                 _ = Task.Run(async () =>
                 {
@@ -164,23 +158,17 @@ public class AreaBoundSyncshellConsentUI : WindowMediatorSubscriberBase
                 });
             }
         }
-        
-        if (!canAccept && ImGui.IsItemHovered())
+
+        if (!canAccept)
         {
-            if (syncshell.IsLocked)
-            {
-                ImGui.SetTooltip("This syncshell is locked. Joining is disabled.");
-            }
-            else
-            {
-                ImGui.SetTooltip("You must accept the rules to join this syncshell");
-            }
+            SpheneUI.AttachTooltip(syncshell.IsLocked
+                ? "This syncshell is locked. Joining is disabled."
+                : "You must accept the rules to join this syncshell");
         }
-        
+
         ImGui.SameLine();
-        
-        // Decline button
-        if (ImGui.Button("Decline", new Vector2(buttonWidth, 0)))
+
+        if (SpheneUI.Controls.Button("Decline", buttonSize))
         {
             _logger.LogDebug("User declined consent for syncshell: {syncshellId}", _currentRequest.Syncshell.Group.GID);
             _currentRequest = null;
