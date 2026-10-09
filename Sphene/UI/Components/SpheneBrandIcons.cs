@@ -204,6 +204,32 @@ public static class SpheneBrandIcons
             () => Convert.FromBase64String(brand == Brand.Discord ? DiscordPngBase64 : KofiPngBase64));
     }
 
+    /// <summary>
+    /// The Sphene plugin logo from the embedded <c>images/icon.png</c>
+    /// resource — colored artwork, do not tint. Returns null while decoding.
+    /// </summary>
+    public static IDalamudTextureWrap? SpheneLogo()
+        => SpheneUI.Media.Texture("brand:sphene-logo", LoadSpheneLogoBytes);
+
+    private static byte[]? LoadSpheneLogoBytes()
+    {
+        var assembly = typeof(SpheneBrandIcons).Assembly;
+        var resourceName = assembly.GetManifestResourceNames()
+            .FirstOrDefault(n => n.EndsWith("images.icon.png", StringComparison.OrdinalIgnoreCase));
+        if (resourceName == null)
+        {
+            return null;
+        }
+        using var stream = assembly.GetManifestResourceStream(resourceName);
+        if (stream == null)
+        {
+            return null;
+        }
+        using var memory = new MemoryStream();
+        stream.CopyTo(memory);
+        return memory.ToArray();
+    }
+
     /// <summary>Returns the brand color for <paramref name="brand"/>.</summary>
     public static Vector4 GetBrandColor(Brand brand)
         => brand == Brand.Discord ? DiscordColor : KofiColor;

@@ -62,6 +62,25 @@ public static class AppearanceOptionBlock
         }
     }
 
+    /// <summary>Toggle: restore the Sphene Hub window on startup when it was open last session.</summary>
+    public static void DrawReopenSpheneHubOnStartupOption(SpheneConfigService configService, string blockId = "ReopenSpheneHubOnStartup")
+    {
+        ImGui.PushID(blockId);
+        try
+        {
+            var reopen = configService.Current.ReopenSpheneHubOnStartup;
+            if (SpheneUI.Controls.Toggle("Reopen Sphene Hub on startup if it was open", ref reopen))
+            {
+                configService.Current.ReopenSpheneHubOnStartup = reopen;
+                configService.Save();
+            }
+        }
+        finally
+        {
+            ImGui.PopID();
+        }
+    }
+
     public static void DrawEnableGameRightClickMenusOption(SpheneConfigService configService, string blockId = "EnableGameRightClickMenus")
     {
         ImGui.PushID(blockId);

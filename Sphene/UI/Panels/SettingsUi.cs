@@ -3594,6 +3594,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             AppearanceOptionBlock.DrawHideSpheneIconInGposeOption(_configService, "AppearanceHideSpheneIconInGpose");
             AppearanceOptionBlock.DrawLockSpheneIconPositionOption(_configService, "AppearanceLockSpheneIconPosition");
             AppearanceOptionBlock.DrawEnableGameRightClickMenusOption(_configService, "AppearanceEnableGameRightClickMenus");
+            AppearanceOptionBlock.DrawReopenSpheneHubOnStartupOption(_configService, "AppearanceReopenSpheneHubOnStartup");
         });
 
         DrawSettingsCard("Window Effects", () =>

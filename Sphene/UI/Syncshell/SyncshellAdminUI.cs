@@ -100,6 +100,7 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
     
     // Active sidebar page
     private AdminPage _activeAdminPage = AdminPage.Home;
+    private bool _embedded;
     private bool _areaBindingTabWasOpen = false;
     private readonly Dictionary<string, (bool AllowOutdoor, bool AllowIndoor)> _uiPropertyStates = new(StringComparer.Ordinal);
     
@@ -243,6 +244,23 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
         DrawAdminContent();
     }
 
+    /// <summary>Optional content drawn at the top of the admin rail when embedded (e.g. a back button).</summary>
+    internal Action? EmbeddedRailHeader { get; set; }
+
+    /// <summary>Renders the admin panel inside another window (Sphene Hub); the host provides the surrounding container.</summary>
+    internal void DrawEmbedded()
+    {
+        _embedded = true;
+        try
+        {
+            DrawInternal();
+        }
+        finally
+        {
+            _embedded = false;
+        }
+    }
+
     private enum AdminPage
     {
         Home,
@@ -269,7 +287,8 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
             ? new[] { "Home", "Invites", "User Management", "Welcome Page", "Area Binding" }
             : new[] { "Home", "Invites", "User Management", "Welcome Page" };
         var railWidth = SpheneUI.Layout.NavRailWidth(labels);
-        SpheneUI.Layout.BeginNavRail("syncshell-admin", railWidth);
+        SpheneUI.Layout.BeginNavRail("syncshell-admin", railWidth, _embedded);
+        EmbeddedRailHeader?.Invoke();
         SpheneUI.Layout.NavRailCategory("Manage", accentMembers);
         if (SpheneUI.Layout.NavRailItem("Home", _activeAdminPage == AdminPage.Home, accentHome))
         {

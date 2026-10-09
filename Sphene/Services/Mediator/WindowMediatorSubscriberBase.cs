@@ -1,5 +1,6 @@
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface;
+using Dalamud.Interface.Textures.TextureWraps;
 using Dalamud.Interface.Utility.Raii;
 using Dalamud.Interface.Windowing;
 using Sphene.UI.Design;
@@ -78,6 +79,9 @@ public abstract class WindowMediatorSubscriberBase : Window, IMediatorSubscriber
     protected virtual string? ChromeTrailingText => null;
 
     /// <summary>Right-side title bar buttons; defaults to a close button honoring <see cref="Window.ShowCloseButton"/>.</summary>
+    /// <summary>Optional texture drawn instead of <see cref="ChromeIcon"/> when set.</summary>
+    protected virtual IDalamudTextureWrap? ChromeIconTexture => null;
+
     protected virtual IReadOnlyList<SpheneUI.Chrome.TitleBarButton>? ChromeRightButtons =>
         ShowCloseButton
             ? [new SpheneUI.Chrome.TitleBarButton(FontAwesomeIcon.Times, "Close", () => IsOpen = false)]
@@ -117,22 +121,38 @@ public abstract class WindowMediatorSubscriberBase : Window, IMediatorSubscriber
 
     public override void Draw()
     {
-        if (AppliesOwnThemeScope)
+        try
         {
-            _performanceCollectorService.LogPerformance(this, $"Draw", DrawInternal);
-            return;
+            if (AppliesOwnThemeScope)
+            {
+                _performanceCollectorService.LogPerformance(this, $"Draw", DrawInternal);
+                return;
+            }
+            using var themeScope = SpheneUI.Theme.WindowScope();
+            // Blur is part of the chrome look — windows that opt out of the
+            // chrome (overlay hosts like PopupHandler, the draggable icon)
+            // must not get a ghost blur rect either.
+            if (UseSpheneChrome)
+            {
+                SpheneUI.Chrome.ThemedWindowBlur();
+            }
+            _performanceCollectorService.LogPerformance(this, $"Draw",
+                UseSpheneChrome ? DrawWithChrome : DrawInternal);
         }
-        using var themeScope = SpheneUI.Theme.WindowScope();
-        SpheneUI.Chrome.ThemedWindowBlur();
-        _performanceCollectorService.LogPerformance(this, $"Draw",
-            UseSpheneChrome ? DrawWithChrome : DrawInternal);
+        catch (Exception ex)
+        {
+            // One broken window must not abort WindowSystem.Draw and take all
+            // following windows down with it.
+            _logger.LogError(ex, "Window {type} ({name}) failed to draw",
+                GetType().Name, WindowName);
+        }
     }
 
     private void DrawWithChrome()
     {
         SpheneUI.Chrome.TitleBar(ChromeId, ChromeTitle, ChromeIcon,
             rightButtons: ChromeRightButtons, trailingText: ChromeTrailingText,
-            collapsible: ChromeCollapsible);
+            collapsible: ChromeCollapsible, leadingTexture: ChromeIconTexture);
 
         var foldAmount = ChromeCollapsible ? SpheneUI.Chrome.CollapseAmount(ChromeId) : 0f;
         if (foldAmount >= 1f)

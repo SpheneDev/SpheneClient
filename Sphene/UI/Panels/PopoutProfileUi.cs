@@ -23,6 +23,7 @@ public class PopoutProfileUi : WindowMediatorSubscriberBase
     private Vector2 _lastMainSize = Vector2.Zero;
     private byte[] _lastProfilePicture = [];
     private byte[] _lastSupporterPicture = [];
+    private byte[] _lastBannerPicture = [];
     private Pair? _pair;
     private string? _pairKey;
 
@@ -41,6 +42,7 @@ public class PopoutProfileUi : WindowMediatorSubscriberBase
             _pairKey = msg.Pair == null ? null : $"popout:{msg.Pair.UserData.UID}";
             _lastProfilePicture = [];
             _lastSupporterPicture = [];
+            _lastBannerPicture = [];
         });
 
         Mediator.Subscribe<CompactUiChange>(this, (msg) =>
@@ -102,11 +104,38 @@ public class PopoutProfileUi : WindowMediatorSubscriberBase
                 ? null
                 : SpheneUI.Media.Texture(supporterKey, _lastSupporterPicture);
 
+            var bannerKey = profileKey + ":banner";
+            if (!spheneProfile.BannerImageData.Value.SequenceEqual(_lastBannerPicture))
+            {
+                _lastBannerPicture = spheneProfile.BannerImageData.Value;
+                SpheneUI.Media.Evict(bannerKey);
+            }
+            var bannerTextureWrap = _lastBannerPicture.Length == 0
+                ? null
+                : SpheneUI.Media.Texture(bannerKey, _lastBannerPicture);
+            var friendTheme = spheneProfile.ProfileTheme.Value;
+
             var drawList = ImGui.GetWindowDrawList();
             var rectMin = drawList.GetClipRectMin();
             var rectMax = drawList.GetClipRectMax();
 
-            SpheneUI.Text.Big(_pair.UserData.AliasOrUID, ImGuiColors.HealerGreen);
+            // Themed banner strip on top — the friend's own profile look.
+            var bannerH = 28f * ImGuiHelpers.GlobalScale;
+            var stripMin = new Vector2(rectMin.X, rectMin.Y + spacing.Y);
+            var stripMax = new Vector2(rectMax.X, stripMin.Y + bannerH);
+            SpheneUI.Profile.Banner(drawList, stripMin, stripMax, bannerTextureWrap,
+                friendTheme, SpheneTheme.Current.AccentCyan, SpheneTheme.Current.AccentBlue);
+            ImGuiHelpers.ScaledDummy(0, bannerH / ImGuiHelpers.GlobalScale + spacing.Y);
+
+            SpheneUI.Text.Big(_pair.UserData.AliasOrUID, friendTheme.AccentColor(ImGuiColors.HealerGreen));
+            if (!string.IsNullOrWhiteSpace(spheneProfile.StatusMessage))
+            {
+                SpheneUI.Text.Colored(spheneProfile.StatusMessage, SpheneUI.Colors.TextSecondary);
+            }
+            if (!string.IsNullOrWhiteSpace(spheneProfile.Tags))
+            {
+                SpheneUI.Controls.TagChips(spheneProfile.Tags);
+            }
 
             ImGuiHelpers.ScaledDummy(spacing.Y, spacing.Y);
             var textPos = ImGui.GetCursorPosY();

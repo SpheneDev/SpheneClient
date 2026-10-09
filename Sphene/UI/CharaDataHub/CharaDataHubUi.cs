@@ -155,6 +155,33 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
 
     protected override void DrawInternal()
     {
+        DrawPrelude();
+
+        if (SpheneUI.Layout.BeginScrollArea("charadata-content", ImGui.GetContentRegionAvail(),
+                contentPadding: Vector2.Zero))
+        {
+            DrawHubContent();
+        }
+        SpheneUI.Layout.EndScrollArea();
+    }
+
+    /// <summary>Renders the data hub inside another window (Sphene Hub); the host provides the scroll area.</summary>
+    internal void DrawEmbedded()
+    {
+        DrawPrelude();
+        DrawHubContent();
+    }
+
+    /// <summary>Cleans up embedded state when the host window/page hides the data hub content.</summary>
+    internal void OnEmbeddedHidden()
+    {
+        _charaDataNearbyManager.ComputeNearbyData = false;
+        _openComboHybridId = null;
+        _openComboHybridEntries = null;
+    }
+
+    private void DrawPrelude()
+    {
         if (!_comboHybridUsedLastFrame)
         {
             _openComboHybridId = null;
@@ -177,13 +204,6 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
             SpheneUI.Text.GroupedCentered("To utilize any features related to posing or spawning characters you require to have Brio installed.", ImGuiColors.DalamudRed);
             SpheneUI.Layout.DistanceSeparator();
         }
-
-        if (SpheneUI.Layout.BeginScrollArea("charadata-content", ImGui.GetContentRegionAvail(),
-                contentPadding: Vector2.Zero))
-        {
-            DrawHubContent();
-        }
-        SpheneUI.Layout.EndScrollArea();
     }
 
     private void DrawHubContent()

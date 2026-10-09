@@ -709,6 +709,57 @@ public static partial class SpheneUI
         }
 
         /// <summary>
+        /// Renders a comma-separated tag list as rounded accent chips, wrapping
+        /// to the next line when they exceed the available width. Empty input
+        /// renders nothing. Capped at <paramref name="maxChips"/> chips.
+        /// </summary>
+        public static void TagChips(string? tags, Vector4? accent = null, int maxChips = 10)
+        {
+            if (string.IsNullOrWhiteSpace(tags))
+            {
+                return;
+            }
+            var scale = SpheneUI.Scale;
+            var chipAccent = accent ?? SpheneTheme.Current.AccentCyan;
+            var drawList = ImGui.GetWindowDrawList();
+            var avail = ImGui.GetContentRegionAvail().X;
+            var padX = 7f * scale;
+            var padY = 2f * scale;
+            var chipH = ImGui.GetTextLineHeight() + padY * 2f;
+            var startX = ImGui.GetCursorScreenPos().X;
+            var startY = ImGui.GetCursorScreenPos().Y;
+            var xMax = startX + avail;
+            var x = startX;
+            var y = startY;
+            var shown = 0;
+            foreach (var raw in tags.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                if (shown >= maxChips)
+                {
+                    break;
+                }
+                var chipW = ImGui.CalcTextSize(raw).X + padX * 2f;
+                if (x + chipW > xMax)
+                {
+                    x = startX;
+                    y += chipH + 4f * scale;
+                }
+                var chipMin = new Vector2(x, y);
+                var chipMax = chipMin + new Vector2(chipW, chipH);
+                drawList.AddRectFilled(chipMin, chipMax,
+                    ColorUtils.ToU32(ColorUtils.WithAlpha(chipAccent, 0.14f)), chipH * 0.5f);
+                drawList.AddRect(chipMin, chipMax,
+                    ColorUtils.ToU32(ColorUtils.WithAlpha(chipAccent, 0.35f)), chipH * 0.5f);
+                drawList.AddText(chipMin + new Vector2(padX, padY),
+                    ColorUtils.ToU32(SpheneUI.Colors.TextPrimary), raw);
+                x = chipMax.X + 6f * scale;
+                shown++;
+            }
+            ImGui.SetCursorScreenPos(new Vector2(startX, startY));
+            ImGui.Dummy(new Vector2(avail, y + chipH - startY));
+        }
+
+        /// <summary>
         /// Draws a ? help marker in the reserved right column of the current
         /// row (same line as the previous item when it fits, right-aligned on
         /// the next line otherwise) so all help icons share one flush column.

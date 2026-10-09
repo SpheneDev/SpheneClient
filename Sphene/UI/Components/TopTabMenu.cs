@@ -71,6 +71,10 @@ public class TopTabMenu
             _selectedTab = value;
         }
     }
+    /// <summary>Horizontal inset so the row breathes inside the edge-to-edge
+    /// CompactUI window instead of touching the window border.</summary>
+    private const float HorizontalPad = 12f;
+
     public void Draw(bool drawSeparator = true)
     {
         Draw(0, drawSeparator);
@@ -79,7 +83,9 @@ public class TopTabMenu
     public void Draw(int pendingModSharingCount, bool drawSeparator = true)
     {
         var pendingPairRequestCount = _pairManager.UnseenInboundIndividualPairRequestCount;
-        var availableWidth = ImGui.GetWindowContentRegionMax().X - ImGui.GetWindowContentRegionMin().X;
+        var availableWidth = ImGui.GetWindowContentRegionMax().X - ImGui.GetWindowContentRegionMin().X
+            - HorizontalPad * 2f;
+        using var indent = ImRaii.PushIndent(HorizontalPad);
         var spacing = ImGui.GetStyle().ItemSpacing;
         var buttonX = (availableWidth - (spacing.X * 4)) / 5f;
         var buttonY = SpheneUI.Icons.ButtonSize(FontAwesomeIcon.Pause).Y;

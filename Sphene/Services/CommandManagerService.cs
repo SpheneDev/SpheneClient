@@ -8,6 +8,7 @@ using Sphene.Services.ServerConfiguration;
 using Sphene.UI;
 using Sphene.UI.Components;
 using Sphene.UI.Panels;
+using Sphene.UI.Hub;
 using Sphene.UI.CharaDataHub;
 using Sphene.WebAPI;
 using Microsoft.Extensions.Logging;
@@ -44,6 +45,7 @@ public sealed class CommandManagerService : IDisposable
                 "Additionally possible commands:" + Environment.NewLine +
                 "\t /sphene toggle - Disconnects from Sphene, if connected. Connects to Sphene, if disconnected" + Environment.NewLine +
         "\t /sphene toggle on|off - Connects or disconnects to Sphene respectively" + Environment.NewLine +
+        "\t /sphene hub - Opens the Sphene Hub window" + Environment.NewLine +
         "\t /sphene gpose - Opens the Sphene Character Data Hub window" + Environment.NewLine +
         "\t /sphene analyze - Opens the Sphene Character Data Analysis window" + Environment.NewLine +
         "\t /sphene settings - Opens the Sphene Settings window"
@@ -94,6 +96,10 @@ public sealed class CommandManagerService : IDisposable
                 _serverConfigurationManager.Save();
                 _ = _apiController.CreateConnectionsAsync();
             }
+        }
+        else if (string.Equals(splitArgs[0], "hub", StringComparison.OrdinalIgnoreCase))
+        {
+            _mediator.Publish(new UiToggleMessage(typeof(SpheneHubUi)));
         }
         else if (string.Equals(splitArgs[0], "gpose", StringComparison.OrdinalIgnoreCase))
         {

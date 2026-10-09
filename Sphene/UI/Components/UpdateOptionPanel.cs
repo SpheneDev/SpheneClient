@@ -24,7 +24,8 @@ public static class UpdateOptionPanel
         SupporterNameplateStyleSync,
         SupporterServerIcons,
         PanelPairListSeparatorPadding,
-        SupporterNameplateGlowColors
+        SupporterNameplateGlowColors,
+        ReopenSpheneHubOnStartup
     }
 
     private static readonly IReadOnlySet<Link> SupporterFeatureLinks = new HashSet<Link>
@@ -43,6 +44,7 @@ public static class UpdateOptionPanel
         new("v.1.1.15", [Link.NotificationSoundsSpheneDefault]),
         new("v.1.1.16", [Link.SupporterNameplateIndicators, Link.SupporterNameplateCustomization, Link.SupporterNameplateStyleSync, Link.SupporterServerIcons]),
         new("v.1.1.17", [Link.PanelPairListSeparatorPadding, Link.SupporterNameplateGlowColors]),
+        new("v.1.1.18", [Link.ReopenSpheneHubOnStartup]),
     ];
 
     private static readonly IReadOnlyDictionary<Link, string> LinkTitles = new Dictionary<Link, string>
@@ -59,7 +61,8 @@ public static class UpdateOptionPanel
         [Link.SupporterNameplateStyleSync] = "Supporter: Your style is shared with other Sphene users",
         [Link.SupporterServerIcons] = "Supporter: Server-provided & animated icons",
         [Link.PanelPairListSeparatorPadding] = "Panel: Pair List Separator Padding (Default: 0)",
-        [Link.SupporterNameplateGlowColors] = "Supporter: Symbol & Label Glow Colors (Default: Disabled)"
+        [Link.SupporterNameplateGlowColors] = "Supporter: Symbol & Label Glow Colors (Default: Disabled)",
+        [Link.ReopenSpheneHubOnStartup] = "Appearance: Reopen Sphene Hub on startup if it was open (Default: Disabled)"
     };
 
     private static readonly IReadOnlyDictionary<Link, Action<SpheneConfigService, UiSharedService, SpheneMediator>> LinkDrawers
@@ -110,7 +113,9 @@ public static class UpdateOptionPanel
                 theme.CompactPairListSeparatorPadding = separatorPadding;
                 theme.NotifyThemeChanged();
             }
-        }
+        },
+        [Link.ReopenSpheneHubOnStartup] = (configService, _, _) =>
+            AppearanceOptionBlock.DrawReopenSpheneHubOnStartupOption(configService, "UpdateOptionReopenSpheneHubOnStartup")
     };
 
     public static string GetTitle(Link link)

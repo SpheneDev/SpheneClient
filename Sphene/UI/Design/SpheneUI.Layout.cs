@@ -6,6 +6,7 @@ using Dalamud.Bindings.ImGui;
 using Dalamud.Interface;
 using Dalamud.Interface.Utility;
 using Dalamud.Interface.Utility.Raii;
+using Sphene.Services;
 
 namespace Sphene.UI.Design;
 
@@ -32,7 +33,12 @@ public static partial class SpheneUI
         /// <summary>Screen-space left bound of the innermost content region, or -1.</summary>
         public static float ContentLeftBound => ContentBounds.CurrentLeft;
 
-        private const float AccentCardRounding = 8f;
+        internal const float AccentCardRounding = 8f;
+
+        /// <summary>The AccentCard's semi-transparent accent-tinted body
+        /// color — shared so banners can fade into the exact same tone.</summary>
+        internal static Vector4 AccentCardTint(Vector4 accent)
+            => new(accent.X * 0.16f, accent.Y * 0.14f, accent.Z * 0.07f, 0.82f);
 
         /// <summary>
         /// Content width that aligns with the section cards of the current
@@ -44,13 +50,34 @@ public static partial class SpheneUI
         {
             var scale = SpheneUI.Scale;
             var cursorX = ImGui.GetCursorScreenPos().X;
-            var rightEdge = MathF.Min(cursorX + ImGui.GetContentRegionAvail().X,
-                ImGui.GetWindowPos().X + ImGui.GetWindowSize().X - 1f * scale - ActiveContentInset);
+            var rightEdge = MathF.Min(
+                MathF.Min(cursorX + ImGui.GetContentRegionAvail().X,
+                    ImGui.GetWindowPos().X + ImGui.GetWindowSize().X - 1f * scale),
+                ScrollAreaRightBound);
             return MathF.Max(60f * scale, rightEdge - cursorX);
         }
 
-        private static float ActiveContentInset =>
-            ScrollAreaStack.Count > 0 ? ScrollAreaStack.Peek().ContentInset : 0f;
+        // The scroll area's right content edge (child edge minus the content
+        // inset). Nested child windows — expanders, embedded panels — have a
+        // smaller right edge of their own that wins the Min(), so their cards
+        // are never double-inset; windows outside the scroll area (popups)
+        // are excluded explicitly.
+        private static float ScrollAreaRightBound
+        {
+            get
+            {
+                if (ScrollAreaStack.Count == 0 || !ScrollAreaStack.Peek().Begun)
+                {
+                    return float.MaxValue;
+                }
+                var state = ScrollAreaStack.Peek();
+                if (ImGui.GetWindowPos().X + ImGui.GetWindowSize().X > state.ChildRight + 1f)
+                {
+                    return float.MaxValue;
+                }
+                return state.ChildRight - 1f * SpheneUI.Scale - state.ContentInset;
+            }
+        }
 
         /// <summary>
         /// Suppresses the active content bound until disposed — use while
@@ -98,10 +125,21 @@ public static partial class SpheneUI
         /// <summary>
         /// Full-width card with padded content, a tinted background, a subtle
         /// animated shimmer and a gently pulsing accent border — the prominent
-        /// promo/status card of the design system.
+        /// promo/status card of the design system. Optional
+        /// <paramref name="fxHover"/>/<paramref name="fxIdle"/> stack the
+        /// owner's combinable <see cref="ProfileRowFx"/> layers on the card
+        /// chrome (under the content, above the card background).
         /// </summary>
+        /// <param name="topBleed">Optional chrome-layer draw callback invoked
+        /// with the card's exact outer rect (drawList, cardMin, cardMax,
+        /// rounding). It renders above the card background and below the
+        /// border/effect layers — full-bleed media like hero banners belong
+        /// here since content coordinates are not reliable for edge-aligned
+        /// drawing.</param>
         public static void AccentCard(Action content, Vector4? accentColor = null,
-            bool animatedBackdrop = true, string? id = null)
+            bool animatedBackdrop = true, string? id = null,
+            ProfileRowFx fxHover = ProfileRowFx.None, ProfileRowFx fxIdle = ProfileRowFx.None,
+            Action<ImDrawListPtr, Vector2, Vector2, float>? topBleed = null)
         {
             var scale = SpheneUI.Scale;
             var padding = Spacing.CardPadding.Scaled;
@@ -111,8 +149,17 @@ public static partial class SpheneUI
 
             var drawList = ImGui.GetWindowDrawList();
             var cardMin = ImGui.GetCursorScreenPos();
-            var cardRightX = MathF.Min(cardMin.X + availWidth,
-                ImGui.GetWindowPos().X + ImGui.GetWindowSize().X - 1f * scale - ActiveContentInset);
+            var cardRightX = MathF.Min(
+                MathF.Min(cardMin.X + availWidth,
+                    ImGui.GetWindowPos().X + ImGui.GetWindowSize().X - 1f * scale),
+                ScrollAreaRightBound);
+            // an explicitly pushed bound (e.g. side-by-side columns) clamps
+            // the card to it — narrower than the plain window edge
+            var bound = ContentRightBound;
+            if (bound > 0f)
+            {
+                cardRightX = MathF.Min(cardRightX, bound);
+            }
             var innerWidth = MathF.Max(60f * scale, cardRightX - cardMin.X - padding * 2f);
             drawList.ChannelsSplit(2);
             drawList.ChannelsSetCurrent(1);
@@ -126,18 +173,30 @@ public static partial class SpheneUI
             var cardMax = new Vector2(cardRightX, ImGui.GetItemRectMax().Y + padding);
             drawList.ChannelsSetCurrent(0);
 
-            var background = new Vector4(accent.X * 0.16f, accent.Y * 0.14f, accent.Z * 0.07f, 0.82f);
+            var background = AccentCardTint(accent);
             drawList.AddRectFilled(cardMin, cardMax, ColorUtils.ToU32(background), rounding);
+            topBleed?.Invoke(drawList, cardMin, cardMax, rounding);
 
             if (animatedBackdrop)
             {
                 Chrome.AccentCardBackdrop(drawList, cardMin, cardMax, rounding, accent);
             }
 
-            var pulse = 0.30f + 0.16f * MathF.Sin((float)ImGui.GetTime() * Chrome.CardBorderPulseSpeed);
+            // backdrop off = the whole card chrome goes still (no shimmer
+            // band, no border pulse) — the static frame stays
+            var pulse = animatedBackdrop
+                ? 0.30f + 0.16f * MathF.Sin((float)ImGui.GetTime() * Chrome.CardBorderPulseSpeed)
+                : 0.30f;
             var borderColor = new Vector4(accent.X, accent.Y, accent.Z, pulse);
             drawList.AddRect(cardMin, cardMax, ColorUtils.ToU32(borderColor),
                 rounding, ImDrawFlags.RoundCornersAll, Chrome.CardBorderThickness);
+            if (fxHover != ProfileRowFx.None || fxIdle != ProfileRowFx.None)
+            {
+                var fxHovered = ImGui.IsMouseHoveringRect(cardMin, cardMax);
+                var fxT = Fx.HoverT(ImGui.GetID(id ?? "##accentcardfx"), fxHovered);
+                Profile.RowFx(drawList, cardMin, cardMax, accent,
+                    fxHovered, fxT, fxHover, fxIdle, rounding);
+            }
             drawList.ChannelsMerge();
 
             ImGui.SetCursorScreenPos(cardMin + new Vector2(0, cardMax.Y - cardMin.Y));
@@ -162,8 +221,15 @@ public static partial class SpheneUI
 
             var drawList = ImGui.GetWindowDrawList();
             var cardMin = ImGui.GetCursorScreenPos();
-            var cardRightX = MathF.Min(cardMin.X + availWidth,
-                ImGui.GetWindowPos().X + ImGui.GetWindowSize().X - 1f * scale - ActiveContentInset);
+            var cardRightX = MathF.Min(
+                MathF.Min(cardMin.X + availWidth,
+                    ImGui.GetWindowPos().X + ImGui.GetWindowSize().X - 1f * scale),
+                ScrollAreaRightBound);
+            var bound = ContentRightBound;
+            if (bound > 0f)
+            {
+                cardRightX = MathF.Min(cardRightX, bound);
+            }
             var innerWidth = MathF.Max(60f * scale, cardRightX - cardMin.X - padding * 2f);
             drawList.ChannelsSplit(2);
             drawList.ChannelsSetCurrent(1);
@@ -229,6 +295,7 @@ public static partial class SpheneUI
             public float TopInset;
             public bool BoundsPushed;
             public int Depth;
+            public float ChildRight;
         }
 
         private static readonly Stack<ScrollAreaState> ScrollAreaStack = new();
@@ -284,6 +351,7 @@ public static partial class SpheneUI
             state.Begun = begun;
             if (begun)
             {
+                state.ChildRight = ImGui.GetWindowPos().X + ImGui.GetWindowSize().X;
                 if (state.TopInset > 0f && ImGui.GetScrollY() <= Chrome.ScrollFadeDeadZone)
                 {
                     state.TopInset = 0f;
@@ -359,6 +427,131 @@ public static partial class SpheneUI
             ImGuiWindowFlags windowFlags = ImGuiWindowFlags.None)
             => BeginScrollArea(id, new Vector2(0f, FillToViewBottomHeight(bottomReserve)),
                 border, windowFlags, contentPadding: contentPadding);
+
+        private sealed class ExpanderState
+        {
+            public bool Open;
+            public float T;
+            public float ContentH;
+            public float TopY;
+        }
+
+        private static readonly Dictionary<string, ExpanderState> _expanders =
+            new(StringComparer.Ordinal);
+        private static ExpanderState? _activeExpander;
+
+        /// <summary>Toggles the inline expander <paramref name="id"/> (plays the grow animation).</summary>
+        public static void ToggleExpander(string id)
+        {
+            if (!_expanders.TryGetValue(id, out var st))
+            {
+                st = new ExpanderState();
+                _expanders[id] = st;
+            }
+            st.Open = !st.Open;
+        }
+
+        /// <summary>Sets an expander's open state explicitly — use for external close paths.</summary>
+        public static void SetExpanderOpen(string id, bool open)
+        {
+            if (!_expanders.TryGetValue(id, out var st))
+            {
+                if (!open)
+                {
+                    return;
+                }
+                st = new ExpanderState();
+                _expanders[id] = st;
+            }
+            st.Open = open;
+        }
+
+        /// <summary>Whether the expander is logically open (regardless of the animation phase).</summary>
+        public static bool IsExpanderOpen(string id)
+            => _expanders.TryGetValue(id, out var st) && st.Open;
+
+        /// <summary>Drops all expander state — call on window/page resets like <see cref="Fx.Reset"/>.</summary>
+        public static void ResetExpanders() => _expanders.Clear();
+
+        /// <summary>
+        /// In-flow expanding panel: renders its content inside the current
+        /// window (not an overlay), grows/collapses with a height + alpha
+        /// animation and clips content while animating. Once fully open the
+        /// region is exactly content-sized — no inner scrolling, the host
+        /// page scrolls instead. Being part of the host window it also
+        /// disappears with it — no focus or z-order handling needed at all.
+        /// Returns true while visible; render content after it and always
+        /// pair with <see cref="EndExpander"/>.
+        /// </summary>
+        public static bool BeginExpander(string id)
+        {
+            if (!_expanders.TryGetValue(id, out var st))
+            {
+                return false;
+            }
+            var dt = ImGui.GetIO().DeltaTime;
+            st.T = Math.Clamp(st.T + (st.Open ? dt : -dt) * 6f, 0f, 1f);
+            var eased = st.T * st.T * (3f - 2f * st.T);
+            if (eased <= 0.004f && !st.Open)
+            {
+                _expanders.Remove(id);
+                return false;
+            }
+            var scale = SpheneUI.Scale;
+            var height = MathF.Max(2f, st.ContentH * eased);
+            ImGui.PushStyleVar(ImGuiStyleVar.Alpha, eased);
+            ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(10f, 10f) * scale);
+            ImGui.PushStyleVar(ImGuiStyleVar.ChildRounding, 10f * scale);
+            ImGui.PushStyleVar(ImGuiStyleVar.ChildBorderSize, 1f * scale);
+            // The panel paints itself on the PARENT draw list before the
+            // child exists — ChildBg stays transparent because child windows
+            // paint it as their own background, and nested children (e.g.
+            // the hero's text block) would overlay an opaque rect that hides
+            // accent-tinted card surfaces beneath them.
+            var wbg = ImGui.GetStyle().Colors[(int)ImGuiCol.WindowBg];
+            var panelBg = Vector4.Lerp(wbg, Vector4.One, 0.04f);
+            panelBg.W = MathF.Max(wbg.W, 0.96f) * eased;
+            var panelMin = ImGui.GetCursorScreenPos();
+            var panelW = ImGui.GetContentRegionAvail().X;
+            var panelBound = MathF.Min(
+                ContentRightBound > 0f ? ContentRightBound : float.MaxValue,
+                ScrollAreaRightBound);
+            if (panelBound < float.MaxValue)
+            {
+                panelW = MathF.Min(panelW, panelBound - panelMin.X);
+            }
+            ImGui.GetWindowDrawList().AddRectFilled(panelMin,
+                panelMin + new Vector2(panelW, height), ColorUtils.ToU32(panelBg),
+                10f * scale);
+            ImGui.PushStyleColor(ImGuiCol.ChildBg, 0u);
+            ImGui.PushStyleColor(ImGuiCol.Border, ColorUtils.ToU32(Colors.Border));
+            // NoScrollWithMouse — the child is exactly content-sized at rest,
+            // so an inner scroll offset would only exist mid-animation and
+            // would fight the height measurement
+            ImGui.BeginChild($"##expander_{id}", new Vector2(0f, height), true,
+                ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse
+                | ImGuiWindowFlags.NoNav | ImGuiWindowFlags.NoSavedSettings);
+            st.TopY = ImGui.GetWindowPos().Y;
+            _activeExpander = st;
+            return true;
+        }
+
+        /// <summary>Ends a region opened by <see cref="BeginExpander"/>.</summary>
+        public static void EndExpander()
+        {
+            if (_activeExpander == null)
+            {
+                return;
+            }
+            var st = _activeExpander;
+            _activeExpander = null;
+            var bottom = ImGui.GetCursorScreenPos().Y;
+            var pad = ImGui.GetStyle().WindowPadding.Y;
+            st.ContentH = bottom - st.TopY + pad;
+            ImGui.EndChild();
+            ImGui.PopStyleColor(2);
+            ImGui.PopStyleVar(4);
+        }
 
         /// <summary>
         /// Ends a child opened by <see cref="BeginScrollArea"/> and overlays
@@ -848,7 +1041,9 @@ public static partial class SpheneUI
 
             var drawList = ImGui.GetWindowDrawList();
             var startPos = ImGui.GetCursorScreenPos();
-            var boxWidth = ImGui.GetContentRegionAvail().X;
+            // align with the card edge (scroll-area bound), not the raw
+            // content region — raw avail reaches further right than cards do
+            var boxWidth = CardAlignedAvailX();
             var padX = 12.0f * scale;
             var padY = 8.0f * scale;
             var wrapWidth = MathF.Max(1f, boxWidth - padX * 2f);
@@ -990,6 +1185,7 @@ public static partial class SpheneUI
             public Vector2 ContentTop;
             public Vector2 Available;
             public float Width;
+            public float WindowRight;
         }
 
         private static readonly Stack<NavRailState> NavRailStack = new();
@@ -1017,31 +1213,44 @@ public static partial class SpheneUI
         }
 
         /// <summary>
+        /// The solid color painted behind the nav rail. Hosts that draw a
+        /// full-width header band across the window should paint it in this
+        /// color so the rail and the header merge seamlessly.
+        /// </summary>
+        public static Vector4 NavRailBandColor()
+        {
+            var theme = SpheneTheme.Current;
+            var railBg = ColorUtils.LerpColor(theme.WindowBg, Vector4.One, 0.07f);
+            return ColorUtils.WithAlpha(railBg, MathF.Min(1f, theme.WindowBg.W + 0.08f));
+        }
+
+        /// <summary>
         /// Opens a navigation rail: a slightly lighter band from below the
         /// title bar to the window's bottom edge, holding nav items drawn with
         /// <see cref="NavRailItem"/>. Returns the rail width for
         /// <see cref="BeginNavContent"/>. Close with <see cref="EndNavRail"/>
-        /// before opening the content area.
+        /// before opening the content area. When <paramref name="embedded"/>
+        /// is set, the rail anchors to the current child window's top edge
+        /// instead of the parent window's title bar — used when a rail layout
+        /// is rendered inside another window's content (e.g. Sphene Hub).
         /// </summary>
-        public static float BeginNavRail(string id, float width)
+        public static float BeginNavRail(string id, float width, bool embedded = false)
         {
             var windowPos = ImGui.GetWindowPos();
             var windowSize = ImGui.GetWindowSize();
             var contentTop = ImGui.GetCursorScreenPos();
             var available = ImGui.GetContentRegionAvail();
-            var railMin = new Vector2(windowPos.X, windowPos.Y + Chrome.TitleBarHeight);
+            var railMin = new Vector2(windowPos.X, windowPos.Y + (embedded ? 0f : Chrome.TitleBarHeight));
             var railMax = new Vector2(contentTop.X + width, windowPos.Y + windowSize.Y);
-            var theme = SpheneTheme.Current;
-            var railBg = ColorUtils.LerpColor(theme.WindowBg, Vector4.One, 0.07f);
-            railBg = ColorUtils.WithAlpha(railBg, MathF.Min(1f, theme.WindowBg.W + 0.08f));
+            var railBg = NavRailBandColor();
             var style = ImGui.GetStyle();
-            var railRadius = MathF.Max(0f, style.WindowRounding - MathF.Max(style.WindowBorderSize, 0f));
+            var railRadius = embedded ? 0f : MathF.Max(0f, style.WindowRounding - MathF.Max(style.WindowBorderSize, 0f));
             var drawList = ImGui.GetWindowDrawList();
             // Escape the content clip so the rail hugs the window edges like
             // the title bar does; the bottom-left corner follows the window arc.
             ImGui.PushClipRect(windowPos, windowPos + windowSize, false);
             drawList.AddRectFilled(railMin, railMax, ColorUtils.ToU32(railBg),
-                railRadius, ImDrawFlags.RoundCornersBottomLeft);
+                railRadius, embedded ? ImDrawFlags.None : ImDrawFlags.RoundCornersBottomLeft);
             drawList.AddLine(new Vector2(railMax.X - 0.5f, railMin.Y),
                 new Vector2(railMax.X - 0.5f, railMax.Y),
                 ColorUtils.ToU32(ColorUtils.WithAlpha(Vector4.One, 0.06f)));
@@ -1056,6 +1265,7 @@ public static partial class SpheneUI
                 ContentTop = contentTop,
                 Available = available,
                 Width = width,
+                WindowRight = windowPos.X + windowSize.X,
             });
             // Center the nav child inside the rail: the rail reaches the
             // window's left edge while the child keeps a symmetric inset.
@@ -1079,23 +1289,60 @@ public static partial class SpheneUI
                 fadeSpanX: new Vector2(state.RailMin.X, state.RailMax.X));
         }
 
+        // Remembers per nested nav-content whether it scrolls, so
+        /// EndNavContent can pair BeginChild/EndScrollArea correctly even
+        /// when an embedded page opens its own rail+content inside ours.
+        private static readonly Stack<bool> NavContentScrollable = new();
+
         /// <summary>
         /// Moves the cursor right of the last opened rail and begins the
         /// content scroll area (no padding, no own background so the window
         /// surface shows through). Pops the rail state — call after
         /// <see cref="EndNavRail"/> and close with <see cref="EndNavContent"/>.
+        /// Pass <paramref name="scrollable"/> = false for a plain child when
+        /// the page hosts content that manages its own scrolling (e.g. an
+        /// embedded nav-rail layout).
         /// </summary>
-        public static bool BeginNavContent(string id)
+        public static bool BeginNavContent(string id, bool scrollable = true)
         {
             var state = NavRailStack.Count > 0 ? NavRailStack.Pop() : new NavRailState();
             ImGui.SetCursorScreenPos(state.ContentTop + new Vector2(state.Width, 0f));
-            return BeginScrollArea(id + "##content",
-                new Vector2(MathF.Max(0f, state.Available.X - state.Width), state.Available.Y),
-                windowFlags: ImGuiWindowFlags.NoBackground, noPadding: true);
+            // The content child reaches the parent window's right edge, not
+            // the content region's end (which stops windowPadding short of
+            // it). Otherwise the right card margin ends up padding + inset
+            // wider than the left one.
+            var size = new Vector2(
+                MathF.Max(0f, state.WindowRight - state.ContentTop.X - state.Width),
+                state.Available.Y);
+            NavContentScrollable.Push(scrollable);
+            if (scrollable)
+            {
+                return BeginScrollArea(id + "##content", size,
+                    windowFlags: ImGuiWindowFlags.NoBackground, noPadding: true);
+            }
+            // Non-scrollable nav content must offer the same geometry as the
+            // scroll path — no child padding, so embedded layouts (their own
+            // rail + scroll areas) land on the same content edges.
+            ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, Vector2.Zero);
+            var contentBegun = ImGui.BeginChild(id + "##content", size, false,
+                ImGuiWindowFlags.NoBackground);
+            ImGui.PopStyleVar();
+            return contentBegun;
         }
 
         /// <summary>Ends the content area opened by <see cref="BeginNavContent"/>.</summary>
-        public static void EndNavContent() => EndScrollArea();
+        public static void EndNavContent()
+        {
+            var scrollable = NavContentScrollable.Count > 0 && NavContentScrollable.Pop();
+            if (scrollable)
+            {
+                EndScrollArea();
+            }
+            else
+            {
+                ImGui.EndChild();
+            }
+        }
 
         /// <summary>
         /// Navigation item inside a rail: a full-width pill button. The active

@@ -115,6 +115,16 @@ public enum ModSharingTab
     History = 2
 }
 public record OpenModSharingWindow(ModSharingTab Tab) : MessageBase;
+public enum SpheneHubPage
+{
+    Profile = 0,
+    Friends = 1,
+    Syncshells = 2,
+    CharacterData = 3,
+    ModSharing = 4,
+    ProfileStyle = 5
+}
+public record OpenSpheneHubMessage(SpheneHubPage? Page = null, string? GroupGid = null) : MessageBase;
 public record DownloadLimitChangedMessage() : SameThreadMessage;
 public record CensusUpdateMessage(byte Gender, byte RaceId, byte TribeId) : MessageBase;
 public record TargetPairMessage(Pair Pair) : MessageBase;

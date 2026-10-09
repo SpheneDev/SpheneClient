@@ -74,6 +74,12 @@ public sealed class ModSharingUi : WindowMediatorSubscriberBase
         SpheneUI.Layout.EndScrollArea();
     }
 
+    /// <summary>Renders the sharing tabs inside another window (Sphene Hub); the host provides the scroll area.</summary>
+    internal void DrawEmbedded()
+    {
+        DrawSharingContent(null);
+    }
+
     private void DrawSharingContent(ModSharingTab? requested)
     {
         SpheneUI.Text.PageHeader("Mod Sharing", "Share Penumbra mods with paired users, install received packages, and manage history & backups.");

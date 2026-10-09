@@ -18,6 +18,7 @@ using Sphene.Services.ServerConfiguration;
 using Sphene.UI;
 using Sphene.UI.Panels;
 using Sphene.UI.Syncshell;
+using Sphene.UI.Hub;
 using Sphene.UI.CharaDataHub;
 using Sphene.UI.Components;
 using Sphene.UI.Components.Popup;
@@ -464,7 +465,8 @@ public sealed class Plugin : IAsyncDalamudPlugin
             collection.AddScoped<WindowMediatorSubscriberBase, JoinSyncshellUI>();
             collection.AddScoped<WindowMediatorSubscriberBase, CreateSyncshellUI>();
             collection.AddScoped<WindowMediatorSubscriberBase, EventViewerUI>();
-            collection.AddScoped<WindowMediatorSubscriberBase, CharaDataHubUi>();
+            collection.AddScoped<CharaDataHubUi>();
+            collection.AddScoped<WindowMediatorSubscriberBase>(s => s.GetRequiredService<CharaDataHubUi>());
             collection.AddScoped<StatusDebugUi>();
             collection.AddScoped<WindowMediatorSubscriberBase>(s => s.GetRequiredService<StatusDebugUi>());
             collection.AddScoped<StatusDebugLogPopupUi>();
@@ -478,6 +480,8 @@ public sealed class Plugin : IAsyncDalamudPlugin
             collection.AddScoped<WindowMediatorSubscriberBase>(s => s.GetRequiredService<ModPackageHistoryUi>());
             collection.AddScoped<ModSharingUi>();
             collection.AddScoped<WindowMediatorSubscriberBase>(s => s.GetRequiredService<ModSharingUi>());
+            collection.AddScoped<SpheneHubUi>();
+            collection.AddScoped<WindowMediatorSubscriberBase>(s => s.GetRequiredService<SpheneHubUi>());
 
             collection.AddScoped<WindowMediatorSubscriberBase, PairRequestsUi>();
 
@@ -511,9 +515,13 @@ public sealed class Plugin : IAsyncDalamudPlugin
                 s.GetRequiredService<PerformanceCollectorService>(),
                 s.GetRequiredService<ChangelogService>()));
 
-            collection.AddScoped<WindowMediatorSubscriberBase, EditProfileUi>((s) => new EditProfileUi(s.GetRequiredService<ILogger<EditProfileUi>>(),
+            collection.AddScoped<ImageCropUi>();
+            collection.AddScoped<WindowMediatorSubscriberBase>(s => s.GetRequiredService<ImageCropUi>());
+            collection.AddScoped<EditProfileUi>((s) => new EditProfileUi(s.GetRequiredService<ILogger<EditProfileUi>>(),
                 s.GetRequiredService<SpheneMediator>(), s.GetRequiredService<ApiController>(), s.GetRequiredService<FileDialogManager>(),
-                s.GetRequiredService<SpheneProfileManager>(), s.GetRequiredService<PerformanceCollectorService>()));
+                s.GetRequiredService<SpheneProfileManager>(), s.GetRequiredService<PerformanceCollectorService>(),
+                s.GetRequiredService<ImageCropUi>()));
+            collection.AddScoped<WindowMediatorSubscriberBase>(s => s.GetRequiredService<EditProfileUi>());
             collection.AddScoped<WindowMediatorSubscriberBase, PopupHandler>();
             collection.AddScoped<IPopupHandler, BanUserPopupHandler>();
             collection.AddScoped<IPopupHandler, CensusPopupHandler>();

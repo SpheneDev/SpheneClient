@@ -41,6 +41,8 @@ public class SpheneConfig : ISpheneConfiguration
     public bool ProfilePopoutRight { get; set; } = false;
     public bool ProfilesAllowNsfw { get; set; } = false;
     public bool ProfilesShow { get; set; } = true;
+    public bool ReopenSpheneHubOnStartup { get; set; } = false;
+    public bool SpheneHubWasOpen { get; set; } = false;
     public int MaxDisconnectPauseSeconds { get; set; } = 30; // Default 30 seconds
     public int MaxDeferredTimeoutSeconds { get; set; } = 300; // Default 5 minutes
     public bool ShowSyncshellUsersInVisible { get; set; } = true;

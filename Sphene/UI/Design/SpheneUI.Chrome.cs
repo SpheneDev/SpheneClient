@@ -5,6 +5,7 @@ using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface;
 using Dalamud.Interface.Colors;
+using Dalamud.Interface.Textures.TextureWraps;
 using Dalamud.Interface.Utility;
 using Dalamud.Interface.Utility.Raii;
 using Dalamud.Interface.Windowing;
@@ -66,8 +67,9 @@ public static partial class SpheneUI
         public static float TitleBarHeightUnscaled => TitleBarHeight / SpheneUI.Scale;
 
         /// <summary>A button on the right side of a <see cref="TitleBar"/>.</summary>
+        /// <param name="BadgeCount">Notification count rendered as a badge dot on the button (0 = hidden).</param>
         public sealed record TitleBarButton(FontAwesomeIcon Icon, string Tooltip, Action OnClick,
-            string? StyleKey = null, SpheneBrandIcons.Brand? BrandIcon = null);
+            string? StyleKey = null, SpheneBrandIcons.Brand? BrandIcon = null, int BadgeCount = 0);
 
         private sealed class FoldState
         {
@@ -161,7 +163,11 @@ public static partial class SpheneUI
         public static bool IsCollapsed(string windowName)
             => CollapseAmount(windowName) >= 1f;
 
-        private static void ToggleFold(string windowName)
+        /// <summary>Current fold target state — drives chevron icons on custom bars.</summary>
+        internal static bool FoldCollapsed(string windowName)
+            => GetFold(windowName).Collapsed;
+
+        internal static void ToggleFold(string windowName)
         {
             var fold = GetFold(windowName);
             if (!fold.Collapsed && fold.Amount <= 0f)
@@ -180,7 +186,7 @@ public static partial class SpheneUI
         public static void TitleBar(string windowName, string title,
             FontAwesomeIcon? leadingIcon = null, Vector4? accentColor = null,
             IReadOnlyList<TitleBarButton>? rightButtons = null, string? trailingText = null,
-            bool collapsible = false)
+            bool collapsible = false, IDalamudTextureWrap? leadingTexture = null)
         {
             if (collapsible)
             {
@@ -215,8 +221,10 @@ public static partial class SpheneUI
             DrawWindowSurface(drawList, windowPos, windowPos + ImGui.GetWindowSize(), style.WindowRounding);
             DrawTitleBarBackground(drawList, min, max, windowPos.Y + ImGui.GetWindowSize().Y,
                 style.WindowRounding, accent);
-            DrawTitleBarDragRegion(windowName, min, windowWidth, headerHeight);
-            DrawTitleBarLeft(min, headerHeight, title, leadingIcon, accent);
+            // No item covers the bar — ImGui's native window move handles
+            // dragging at Begin time (moving the window mid-frame via
+            // SetWindowPos leaves that frame's content behind).
+            DrawTitleBarLeft(min, headerHeight, title, leadingIcon, accent, leadingTexture);
             DrawTitleBarRight(min, max, frameHeight, rightButtons, trailingText, scale);
             ImGui.PopClipRect();
 
@@ -285,27 +293,26 @@ public static partial class SpheneUI
             drawList.AddRectFilled(lineMin, lineMax, accentLine);
         }
 
-        private static void DrawTitleBarDragRegion(string windowName, Vector2 min, float width,
-            float height)
-        {
-            ImGui.SetCursorScreenPos(min);
-            ImGui.InvisibleButton($"##{windowName}-titleDrag", new Vector2(width, height));
-            ImGui.SetItemAllowOverlap();
-            if (ImGui.IsItemActive() && ImGui.IsMouseDragging(ImGuiMouseButton.Left))
-            {
-                ImGui.SetWindowPos(ImGui.GetWindowPos() + ImGui.GetIO().MouseDelta);
-            }
-        }
-
         private static void DrawTitleBarLeft(Vector2 min, float headerHeight, string title,
-            FontAwesomeIcon? leadingIcon, Vector4 accent)
+            FontAwesomeIcon? leadingIcon, Vector4 accent, IDalamudTextureWrap? leadingTexture)
         {
             var scale = SpheneUI.Scale;
             var textHeight = ImGui.GetTextLineHeight();
             var textY = min.Y + (headerHeight - textHeight) * 0.5f;
             ImGui.SetCursorScreenPos(new Vector2(min.X + TitleBarPaddingX * scale, textY));
 
-            if (leadingIcon.HasValue)
+            if (leadingTexture != null)
+            {
+                var iconSize = headerHeight * 0.62f;
+                var iconPos = ImGui.GetCursorScreenPos()
+                    - new Vector2(0f, (iconSize - textHeight) * 0.5f);
+                ImGui.Dummy(new Vector2(iconSize, textHeight));
+                Media.ImageInRect(ImGui.GetWindowDrawList(), leadingTexture, iconPos,
+                    iconPos + new Vector2(iconSize), ImageFit.Cover,
+                    rounding: Metrics.SwatchRadius(iconSize));
+                ImGui.SameLine(0, 8f * scale);
+            }
+            else if (leadingIcon.HasValue)
             {
                 Icons.Icon(leadingIcon.Value, accent);
                 ImGui.SameLine(0, 8f * scale);
@@ -355,6 +362,8 @@ public static partial class SpheneUI
                     {
                         SpheneUI.AttachTooltip(button.Tooltip);
                     }
+                    DrawTitleBarButtonBadge(new Vector2(x, buttonY), buttonSize,
+                        button.BadgeCount, scale);
                     x -= TitleBarButtonSpacing * scale;
                     i--;
                 }
@@ -367,6 +376,36 @@ public static partial class SpheneUI
                 ImGui.SetCursorScreenPos(new Vector2(x, min.Y + (max.Y - min.Y - textHeight) * 0.5f));
                 Text.Colored(trailingText, ImGuiColors.DalamudGrey3);
             }
+        }
+
+        /// <summary>
+        /// Draws a small notification badge at the top-right corner of a title
+        /// bar button — a filled circle with a counter (clamped to 9+).
+        /// </summary>
+        internal static void DrawTitleBarButtonBadge(Vector2 buttonPos, float buttonSize,
+            int badgeCount, float scale)
+        {
+            if (badgeCount <= 0)
+            {
+                return;
+            }
+
+            var label = badgeCount > 9 ? "9+" : badgeCount.ToString();
+            var drawList = ImGui.GetWindowDrawList();
+            var badgeColor = ColorUtils.ToU32(Palette.NetworkDisconnected);
+            var textColor = ColorUtils.ToU32(Palette.CrystalWhite);
+
+            var textSize = ImGui.CalcTextSize(label);
+            var radius = MathF.Max(textSize.X * 0.5f + 3f * scale, 5.5f * scale);
+            var center = new Vector2(
+                buttonPos.X + buttonSize - radius * 0.35f,
+                buttonPos.Y + radius * 0.35f);
+
+            drawList.AddCircleFilled(center, radius, badgeColor);
+            drawList.AddCircle(center, radius,
+                ColorUtils.ToU32(ColorUtils.WithAlpha(Palette.CrystalWhite, 0.35f)),
+                0, MathF.Max(1f, scale));
+            drawList.AddText(center - textSize * 0.5f, textColor, label);
         }
 
         /// <summary>

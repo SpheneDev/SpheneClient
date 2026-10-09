@@ -30,6 +30,40 @@ public static partial class SpheneUI
             ImGui.PopTextWrapPos();
         }
 
+        /// <summary>
+        /// Truncates <paramref name="text"/> to <paramref name="maxWidth"/>
+        /// pixels with an ellipsis — first line only, binary-search measured.
+        /// </summary>
+        public static string Ellipsize(string text, float maxWidth)
+        {
+            if (maxWidth <= 0f || ImGui.CalcTextSize(text).X <= maxWidth)
+            {
+                return text;
+            }
+            var newline = text.IndexOf('\n', StringComparison.Ordinal);
+            var line = newline >= 0 ? text[..newline] : text;
+            if (line.Length > 256)
+            {
+                line = line[..256];
+            }
+            var ellipsisW = ImGui.CalcTextSize("…").X;
+            var lo = 0;
+            var hi = line.Length;
+            while (lo < hi)
+            {
+                var mid = (lo + hi + 1) / 2;
+                if (ImGui.CalcTextSize(line[..mid]).X + ellipsisW <= maxWidth)
+                {
+                    lo = mid;
+                }
+                else
+                {
+                    hi = mid - 1;
+                }
+            }
+            return lo <= 0 ? "…" : line[..lo].TrimEnd() + "…";
+        }
+
         /// <summary>Text in an explicit color; null keeps the themed text color.</summary>
         public static void Colored(string text, Vector4? color)
         {

@@ -8,6 +8,10 @@ using Dalamud.Interface.Textures.TextureWraps;
 using Dalamud.Interface.Utility;
 using Dalamud.Interface.Utility.Raii;
 using Dalamud.Plugin.Services;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.Formats.Gif;
+using SixLabors.ImageSharp.Formats.Webp;
+using SixLabors.ImageSharp.PixelFormats;
 
 namespace Sphene.UI.Design;
 
@@ -113,6 +117,267 @@ public static partial class SpheneUI
             {
                 t.Result.Dispose();
             }
+            if (_animated.TryRemove(key, out var anim) && anim is { IsCompletedSuccessfully: true } at)
+            {
+                at.Result?.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// Animated image stored as a horizontal frame atlas in a single
+        /// texture wrap. <see cref="FrameIndexAt"/> picks the frame for a
+        /// timestamp; use with <see cref="AnimatedInRect"/> which maps the
+        /// atlas UVs automatically.
+        /// </summary>
+        public sealed class AnimatedImage : IDisposable
+        {
+            public required IDalamudTextureWrap Atlas { get; init; }
+            public required int FrameCount { get; init; }
+            public required int FrameWidth { get; init; }
+            public required int FrameHeight { get; init; }
+            public required IReadOnlyList<float> Durations { get; init; }
+            public float TotalDuration { get; init; }
+
+            /// <summary>Whether more than one frame exists (false = static image).</summary>
+            public bool IsAnimated => FrameCount > 1;
+
+            /// <summary>Frame index for <paramref name="time"/> seconds, looping.</summary>
+            public int FrameIndexAt(double time)
+            {
+                if (!IsAnimated || TotalDuration <= 0f)
+                {
+                    return 0;
+                }
+                var t = time % TotalDuration;
+                var acc = 0f;
+                for (var i = 0; i < Durations.Count; i++)
+                {
+                    acc += Durations[i];
+                    if (t < acc)
+                    {
+                        return i;
+                    }
+                }
+                return 0;
+            }
+
+            public void Dispose() => Atlas.Dispose();
+        }
+
+        private static readonly ConcurrentDictionary<string, Task<AnimatedImage?>> _animated
+            = new(StringComparer.Ordinal);
+        private const int MaxAnimatedFrames = 48;
+        private const int MaxAnimatedDimension = 512;
+        private const int GradientCornerSegments = 8;
+
+        /// <summary>
+        /// Fills the rounded rect [min,max] with a four-corner bilinear
+        /// gradient by emitting a vertex-colored triangle fan (plus a 1px
+        /// alpha fringe for smooth edges). Unlike the 2×2 texture +
+        /// <c>AddImageRounded</c> path this bakes the colors straight into the
+        /// vertices, so the blend always spans the rect exactly and cannot be
+        /// offset by texture sampling/UV shading quirks.
+        /// </summary>
+        public static void FillRoundedGradient(ImDrawListPtr drawList, Vector2 min, Vector2 max,
+            Vector4 topLeft, Vector4 topRight, Vector4 bottomRight, Vector4 bottomLeft,
+            float rounding, ImDrawFlags flags = ImDrawFlags.RoundCornersAll)
+        {
+            var size = max - min;
+            if (size.X <= 0f || size.Y <= 0f)
+            {
+                return;
+            }
+            var r = MathF.Min(rounding, MathF.Min(size.X, size.Y) * 0.5f);
+            var uvWhite = ImGui.GetFontTexUvWhitePixel();
+
+            const int ringCount = GradientCornerSegments * 4;
+            Span<Vector2> ring = stackalloc Vector2[ringCount];
+            var n = 0;
+            n = AppendGradientArc(ring, n, min, new Vector2(r, r), MathF.PI, r,
+                flags.HasFlag(ImDrawFlags.RoundCornersTopLeft));
+            n = AppendGradientArc(ring, n, new Vector2(max.X, min.Y), new Vector2(-r, r),
+                -MathF.PI * 0.5f, r, flags.HasFlag(ImDrawFlags.RoundCornersTopRight));
+            n = AppendGradientArc(ring, n, max, new Vector2(-r, -r), 0f, r,
+                flags.HasFlag(ImDrawFlags.RoundCornersBottomRight));
+            AppendGradientArc(ring, n, new Vector2(min.X, max.Y), new Vector2(r, -r),
+                MathF.PI * 0.5f, r, flags.HasFlag(ImDrawFlags.RoundCornersBottomLeft));
+
+            var center = (min + max) * 0.5f;
+            var invW = 1f / size.X;
+            var invH = 1f / size.Y;
+            uint Shade(Vector2 p)
+            {
+                var tx = Math.Clamp((p.X - min.X) * invW, 0f, 1f);
+                var ty = Math.Clamp((p.Y - min.Y) * invH, 0f, 1f);
+                return ColorUtils.ToU32(Vector4.Lerp(
+                    Vector4.Lerp(topLeft, topRight, tx),
+                    Vector4.Lerp(bottomLeft, bottomRight, tx), ty));
+            }
+
+            drawList.PrimReserve(ringCount * 9, 1 + ringCount * 2);
+            var baseVtx = (int)drawList.VtxCurrentIdx;
+            drawList.PrimWriteVtx(center, uvWhite, Shade(center));
+            for (var k = 0; k < ringCount; k++)
+            {
+                var p = ring[k];
+                var dir = p - center;
+                var len = dir.Length();
+                var outer = len > 0.001f ? p + dir * (1f / len) : p;
+                var col = Shade(p);
+                drawList.PrimWriteVtx(p, uvWhite, col);
+                drawList.PrimWriteVtx(outer, uvWhite, col & 0x00FFFFFFu);
+            }
+            for (var k = 0; k < ringCount; k++)
+            {
+                var inner1 = (ushort)(baseVtx + 1 + k * 2);
+                var inner2 = (ushort)(baseVtx + 1 + ((k + 1) % ringCount) * 2);
+                var outer1 = (ushort)(inner1 + 1);
+                var outer2 = (ushort)(inner2 + 1);
+                drawList.PrimWriteIdx((ushort)baseVtx);
+                drawList.PrimWriteIdx(inner1);
+                drawList.PrimWriteIdx(inner2);
+                drawList.PrimWriteIdx(inner1);
+                drawList.PrimWriteIdx(outer1);
+                drawList.PrimWriteIdx(inner2);
+                drawList.PrimWriteIdx(inner2);
+                drawList.PrimWriteIdx(outer1);
+                drawList.PrimWriteIdx(outer2);
+            }
+        }
+
+        private static int AppendGradientArc(Span<Vector2> ring, int i, Vector2 corner,
+            Vector2 centerOffset, float startAngle, float r, bool rounded)
+        {
+            for (var s = 0; s < GradientCornerSegments; s++)
+            {
+                if (!rounded)
+                {
+                    ring[i++] = corner;
+                    continue;
+                }
+                var a = startAngle + MathF.PI * 0.5f * (s / (float)GradientCornerSegments);
+                ring[i++] = corner + centerOffset
+                    + new Vector2(MathF.Cos(a), MathF.Sin(a)) * r;
+            }
+            return i;
+        }
+
+        /// <summary>
+        /// Cache-owned animated texture for <paramref name="data"/> (GIF/WebP,
+        /// static images decode to a single frame). Frames are composited into
+        /// a horizontal atlas off the UI thread; returns null while decoding.
+        /// The cache owns the atlas — callers must not dispose it.
+        /// </summary>
+        public static AnimatedImage? Animated(string key, byte[] data)
+        {
+            if (_animated.TryGetValue(key, out var task))
+            {
+                return task is { IsCompletedSuccessfully: true } ? task.Result : null;
+            }
+            if (_provider == null || data.Length == 0)
+            {
+                return null;
+            }
+            var load = Task.Run(() => DecodeAnimatedAsync(data));
+            _animated[key] = load;
+            return null;
+        }
+
+        /// <summary>
+        /// Draws the current animation frame into the rect [min,max] with the
+        /// given fit mode, tint and corner rounding. <paramref name="time"/>
+        /// defaults to <see cref="ImGui.GetTime"/>.
+        /// </summary>
+        public static void AnimatedInRect(ImDrawListPtr drawList, AnimatedImage anim,
+            Vector2 min, Vector2 max, ImageFit fit = ImageFit.Cover, Vector4? tint = null,
+            float rounding = 0f, double? time = null)
+        {
+            var idx = anim.FrameIndexAt(time ?? ImGui.GetTime());
+            FitRect(min, max, new Vector2(anim.FrameWidth, anim.FrameHeight), fit,
+                out var rectMin, out var rectMax, out var uv0, out var uv1);
+            var frameW = 1f / anim.FrameCount;
+            var au0 = new Vector2((idx + uv0.X) * frameW, uv0.Y);
+            var au1 = new Vector2((idx + uv1.X) * frameW, uv1.Y);
+            var tintU32 = tint.HasValue ? ColorUtils.ToU32(tint.Value) : ImGui.GetColorU32(Vector4.One);
+            if (rounding > 0.5f)
+            {
+                drawList.AddImageRounded(anim.Atlas.Handle, rectMin, rectMax, au0, au1, tintU32, rounding);
+            }
+            else
+            {
+                drawList.AddImage(anim.Atlas.Handle, rectMin, rectMax, au0, au1, tintU32);
+            }
+        }
+
+        /// <summary>Composites all frames (GIF disposal applied by the decoder) into one atlas.</summary>
+        private static async Task<AnimatedImage?> DecodeAnimatedAsync(byte[] data)
+        {
+            try
+            {
+                using var image = SixLabors.ImageSharp.Image.Load<Rgba32>(data);
+                var frameWidth = image.Width;
+                var frameHeight = image.Height;
+                if (frameWidth <= 0 || frameHeight <= 0
+                    || frameWidth > MaxAnimatedDimension || frameHeight > MaxAnimatedDimension)
+                {
+                    return null;
+                }
+
+                var frameCount = Math.Clamp(image.Frames.Count, 1, MaxAnimatedFrames);
+                var durations = new float[frameCount];
+                using var atlas = new Image<Rgba32>(frameWidth * frameCount, frameHeight);
+                var framePixels = new Rgba32[frameWidth * frameHeight];
+                for (var i = 0; i < frameCount; i++)
+                {
+                    var frame = image.Frames[i];
+                    durations[i] = FrameDelaySeconds(frame);
+                    frame.CopyPixelDataTo(framePixels);
+                    var xOffset = i * frameWidth;
+                    atlas.ProcessPixelRows(accessor =>
+                    {
+                        for (var y = 0; y < frameHeight; y++)
+                        {
+                            framePixels.AsSpan(y * frameWidth, frameWidth)
+                                .CopyTo(accessor.GetRowSpan(y).Slice(xOffset, frameWidth));
+                        }
+                    });
+                }
+
+                using var stream = new MemoryStream();
+                await atlas.SaveAsPngAsync(stream).ConfigureAwait(false);
+                var wrap = await _provider!.CreateFromImageAsync(stream.ToArray()).ConfigureAwait(false);
+                var total = 0f;
+                foreach (var d in durations) total += d;
+                return new AnimatedImage
+                {
+                    Atlas = wrap,
+                    FrameCount = frameCount,
+                    FrameWidth = frameWidth,
+                    FrameHeight = frameHeight,
+                    Durations = durations,
+                    TotalDuration = total,
+                };
+            }
+            catch (Exception ex)
+            {
+                LogError(ex, "Media: animated image decode failed");
+                return null;
+            }
+        }
+
+        private static float FrameDelaySeconds(ImageFrame<Rgba32> frame)
+        {
+            var gif = frame.Metadata.GetGifMetadata();
+            if (gif != null && gif.FrameDelay > 0)
+            {
+                return MathF.Max(0.02f, gif.FrameDelay / 100f);
+            }
+            var webp = frame.Metadata.GetWebpMetadata();
+            if (webp != null && webp.FrameDelay > 0)
+            {
+                return MathF.Max(0.02f, webp.FrameDelay / 1000f);
+            }
+            return 0.1f;
         }
 
         /// <summary>
@@ -238,8 +503,10 @@ public static partial class SpheneUI
         }
 
         /// <summary>
-        /// Square avatar image: cover-cropped, rounded, bordered, with a
-        /// centered placeholder glyph while the texture is unavailable.
+        /// Circular avatar image: cover-cropped, bordered, with a centered
+        /// placeholder glyph while the texture is unavailable. Avatars are
+        /// always circles so decorations (presence dots, rings) can rely on
+        /// fixed edge positions.
         /// </summary>
         public static void Avatar(IDalamudTextureWrap? wrap, float size, Vector4? tint = null,
             FontAwesomeIcon placeholderIcon = FontAwesomeIcon.User)
@@ -248,7 +515,7 @@ public static partial class SpheneUI
             var box = new Vector2(size, size);
             ImGui.Dummy(box);
             var max = pos + box;
-            var rounding = Metrics.SwatchRadius(size);
+            var rounding = size * 0.5f;
             var drawList = ImGui.GetWindowDrawList();
             if (wrap == null)
             {
@@ -257,6 +524,21 @@ public static partial class SpheneUI
             }
             ImageInRect(drawList, wrap, pos, max, ImageFit.Cover, tint, rounding, border: true);
             Lint.CheckBounds("Media.Avatar");
+        }
+
+        /// <summary>
+        /// Discord-style presence badge on a circular avatar's lower-right
+        /// edge: dark backdrop ring plus a colored core so it reads over any
+        /// avatar art. Fixed 45° position — only valid for circle avatars.
+        /// </summary>
+        public static void PresenceDot(ImDrawListPtr drawList, Vector2 avatarPos,
+            float avatarSize, Vector4 color)
+        {
+            var dotR = MathF.Max(4.5f * Scale, avatarSize * 0.14f);
+            var center = avatarPos + new Vector2(avatarSize * 0.8536f);
+            drawList.AddCircleFilled(center, dotR + 2f * Scale,
+                ColorUtils.ToU32(ColorUtils.WithAlpha(Vector4.Zero, 0.75f)));
+            drawList.AddCircleFilled(center, dotR, ColorUtils.ToU32(color));
         }
 
         /// <summary>

@@ -20,6 +20,7 @@ using Sphene.SpheneConfiguration.Models;
 using Sphene.Interop.Ipc;
 using Dalamud.Plugin;
 using Sphene.UI.Panels;
+using Sphene.UI.Hub;
 
 namespace Sphene.UI.Components;
 
@@ -193,6 +194,12 @@ public class SpheneIcon : WindowMediatorSubscriberBase
             
             SpheneUI.Layout.Separator();
             
+            if (ImGui.MenuItem("Sphene Hub"))
+            {
+                // Open the central Sphene Hub window
+                _mediator.Publish(new UiToggleMessage(typeof(SpheneHubUi)));
+            }
+
             if (ImGui.MenuItem("Settings"))
             {
                 // Open Sphene settings
@@ -576,7 +583,11 @@ public class SpheneIcon : WindowMediatorSubscriberBase
             {
                 var delta = new Vector2(currentMouse.X - _dragStartMousePos.X, currentMouse.Y - _dragStartMousePos.Y);
                 var newPos = new Vector2(_dragStartIconPos.X + delta.X, _dragStartIconPos.Y + delta.Y);
-                ImGui.SetWindowPos(newPos);
+                // Dalamud applies Position right before Begin — never
+                // mid-frame — so the window and its draw commands land
+                // at the new spot together
+                Position = newPos;
+                PositionCondition = ImGuiCond.Always;
                 _iconPosition = newPos;
             }
         }
@@ -587,9 +598,10 @@ public class SpheneIcon : WindowMediatorSubscriberBase
         {
             if (_isDragging)
             {
-                // Save position when drag ends
+                // Save position when drag ends — Position is the dragged
+                // target already applied before Begin
                 _isDragging = false;
-                _iconPosition = ImGui.GetWindowPos();
+                _iconPosition = Position ?? ImGui.GetWindowPos();
                 _hasStoredIconPosition = true;
                 SaveIconPositionToConfig();
                 _showDragRingFade = true;
