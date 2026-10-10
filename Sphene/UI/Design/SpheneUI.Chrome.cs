@@ -245,7 +245,8 @@ public static partial class SpheneUI
         public static void TitleBar(string windowName, string title,
             FontAwesomeIcon? leadingIcon = null, Vector4? accentColor = null,
             IReadOnlyList<TitleBarButton>? rightButtons = null, string? trailingText = null,
-            bool collapsible = false, IDalamudTextureWrap? leadingTexture = null)
+            bool collapsible = false, IDalamudTextureWrap? leadingTexture = null,
+            Action<Vector2, Vector2>? middleContent = null)
         {
             if (collapsible)
             {
@@ -283,7 +284,18 @@ public static partial class SpheneUI
             // No item covers the bar — ImGui's native window move handles
             // dragging at Begin time (moving the window mid-frame via
             // SetWindowPos leaves that frame's content behind).
-            DrawTitleBarLeft(min, headerHeight, title, leadingIcon, accent, leadingTexture);
+            var leftEndX = DrawTitleBarLeft(min, headerHeight, title, leadingIcon, accent, leadingTexture);
+            if (middleContent != null)
+            {
+                var midMinX = leftEndX + 10f * scale;
+                var midMaxX = max.X - TitleBarPaddingX * scale
+                    - MeasureTitleBarRightWidth(frameHeight, headerHeight, rightButtons, trailingText, scale)
+                    - 8f * scale;
+                if (midMaxX > midMinX)
+                {
+                    middleContent(new Vector2(midMinX, min.Y), new Vector2(midMaxX, max.Y));
+                }
+            }
             DrawTitleBarRight(min, max, frameHeight, rightButtons, trailingText, scale);
             ImGui.PopClipRect();
 
@@ -352,7 +364,46 @@ public static partial class SpheneUI
             drawList.AddRectFilled(lineMin, lineMax, accentLine);
         }
 
-        private static void DrawTitleBarLeft(Vector2 min, float headerHeight, string title,
+        /// <summary>
+        /// Width the right-side buttons plus trailing text will occupy —
+        /// mirrors <see cref="DrawTitleBarRight"/>'s layout so middle content
+        /// can size itself without overlapping the button zone.
+        /// </summary>
+        private static float MeasureTitleBarRightWidth(float buttonSize, float barHeight,
+            IReadOnlyList<TitleBarButton>? rightButtons, string? trailingText, float scale)
+        {
+            var width = 0f;
+            if (rightButtons != null)
+            {
+                var i = rightButtons.Count - 1;
+                while (i >= 0)
+                {
+                    if (rightButtons[i].BrandIcon.HasValue)
+                    {
+                        var runStart = i;
+                        while (runStart - 1 >= 0 && rightButtons[runStart - 1].BrandIcon.HasValue)
+                        {
+                            runStart--;
+                        }
+                        width += (barHeight - TitleBarAccentLineHeight) * 1.15f * (i - runStart + 1);
+                        i = runStart - 1;
+                    }
+                    else
+                    {
+                        width += buttonSize;
+                        i--;
+                    }
+                    width += TitleBarButtonSpacing * scale;
+                }
+            }
+            if (!string.IsNullOrEmpty(trailingText))
+            {
+                width += ImGui.CalcTextSize(trailingText).X;
+            }
+            return width;
+        }
+
+        private static float DrawTitleBarLeft(Vector2 min, float headerHeight, string title,
             FontAwesomeIcon? leadingIcon, Vector4 accent, IDalamudTextureWrap? leadingTexture)
         {
             var scale = SpheneUI.Scale;
@@ -377,6 +428,7 @@ public static partial class SpheneUI
                 ImGui.SameLine(0, 8f * scale);
             }
             Text.Colored(title, Theme.Current.TextPrimary);
+            return ImGui.GetItemRectMax().X;
         }
 
         private static void DrawTitleBarRight(Vector2 min, Vector2 max, float buttonSize,
@@ -485,6 +537,76 @@ public static partial class SpheneUI
             }
             ImGui.SetCursorScreenPos(pos);
             SpheneBrandIcons.BrandStrip($"titlebar{start}", segments, height, segWidth * count);
+        }
+
+        /// <summary>
+        /// Breadcrumb pill ("Parent › Current") for title bars and header
+        /// rows — a dark scrim + thin border keeps it legible over imagery.
+        /// The parent segment is clickable when <paramref name="onParentClick"/>
+        /// is set; overlong text ellipsizes (parent drops first, then the label).
+        /// </summary>
+        internal static void CrumbPill(Vector2 pillMin, float maxWidth,
+            string? parentLabel, string currentLabel, Action? onParentClick = null)
+        {
+            var scale = SpheneUI.Scale;
+            var drawList = ImGui.GetWindowDrawList();
+            var pillH = 26f * scale;
+            var padX = 12f * scale;
+            var sepGap = 7f * scale;
+            const string sep = "›";
+
+            var sepW = ImGui.CalcTextSize(sep).X + sepGap * 2f;
+            var maxTextW = MathF.Max(0f, maxWidth - padX * 2f);
+            var parentW = parentLabel != null ? ImGui.CalcTextSize(parentLabel).X + sepW : 0f;
+            var currentText = Text.Ellipsize(currentLabel, MathF.Max(24f * scale, maxTextW - parentW));
+            if (ImGui.CalcTextSize(currentText).X + parentW > maxTextW)
+            {
+                // still too wide — drop the parent before shrinking further
+                parentLabel = null;
+                parentW = 0f;
+                currentText = Text.Ellipsize(currentLabel, maxTextW);
+            }
+
+            var pillW = padX * 2f + parentW + ImGui.CalcTextSize(currentText).X;
+            var pillMax = pillMin + new Vector2(pillW, pillH);
+            drawList.AddRectFilled(pillMin, pillMax,
+                ColorUtils.ToU32(ColorUtils.WithAlpha(
+                    new Vector4(0.02f, 0.02f, 0.04f, 1f), 0.55f)), pillH * 0.5f);
+            drawList.AddRect(pillMin, pillMax,
+                ColorUtils.ToU32(ColorUtils.WithAlpha(Vector4.One, 0.10f)),
+                pillH * 0.5f);
+
+            var tx = pillMin.X + padX;
+            var ty = pillMin.Y + (pillH - ImGui.GetTextLineHeight()) * 0.5f;
+            if (parentLabel != null)
+            {
+                var pw = ImGui.CalcTextSize(parentLabel).X;
+                var parentClicked = false;
+                var parentHovered = false;
+                if (onParentClick != null)
+                {
+                    ImGui.SetCursorScreenPos(new Vector2(tx, pillMin.Y));
+                    parentClicked = ImGui.InvisibleButton("##crumbparent", new Vector2(pw, pillH));
+                    parentHovered = ImGui.IsItemHovered();
+                    if (parentHovered)
+                    {
+                        ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
+                    }
+                }
+                drawList.AddText(new Vector2(tx, ty),
+                    ColorUtils.ToU32(parentHovered ? Colors.TextPrimary : Colors.TextSecondary),
+                    parentLabel);
+                if (parentClicked)
+                {
+                    onParentClick!();
+                }
+                tx += pw;
+                drawList.AddText(new Vector2(tx + sepGap, ty),
+                    ColorUtils.ToU32(Colors.TextMuted), sep);
+                tx += sepW;
+            }
+            drawList.AddText(new Vector2(tx, ty),
+                ColorUtils.ToU32(Colors.TextPrimary), currentText);
         }
 
         /// <summary>

@@ -99,8 +99,10 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
     private float _settingsRailAnim;
     private float _hubNavBlockH;
 
-    /// <summary>One location in the hub's back/forward history: page plus its detail context.</summary>
-    private readonly record struct HubLocation(SpheneHubPage Page, string? GroupGid, Pair? Friend);
+    /// <summary>One location in the hub's back/forward history: page plus its detail context — on the
+    /// settings page it also carries the active settings sub-page so back/forward walks through it.</summary>
+    private readonly record struct HubLocation(SpheneHubPage Page, string? GroupGid, Pair? Friend,
+        SettingsUi.SettingsPage? Settings = null);
     private readonly List<HubLocation> _navBack = [];
     private readonly List<HubLocation> _navForward = [];
 
@@ -127,6 +129,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         _imageCropUi = imageCropUi;
         _configService = configService;
         _areaBoundService = areaBoundService;
+        _settingsUi.SettingsPageChanged += OnSettingsPageChanged;
 
         IsOpen = configService.Current.ReopenSpheneHubOnStartup
             && configService.Current.SpheneHubWasOpen;
@@ -404,7 +407,18 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         ResetTransientState();
     }
 
-    private HubLocation CurrentLocation => new(_activePage, _selectedGroupGid, _viewingFriend);
+    private HubLocation CurrentLocation => new(_activePage, _selectedGroupGid, _viewingFriend,
+        _activePage == SpheneHubPage.Settings ? _settingsUi.ActiveSettingsPageValue : null);
+
+    /// <summary>Folds a settings-page switch into the hub history — only while the hub actually shows
+    /// the settings page, so a standalone Settings window change never hijacks hub navigation. The page
+    /// is already applied when the event fires, so the previous location is pushed directly.</summary>
+    private void OnSettingsPageChanged(SettingsUi.SettingsPage previous, SettingsUi.SettingsPage next)
+    {
+        if (_activePage != SpheneHubPage.Settings) return;
+        _navBack.Add(new HubLocation(SpheneHubPage.Settings, null, null, previous));
+        _navForward.Clear();
+    }
 
     private void SetPage(SpheneHubPage page)
         => NavigateTo(new HubLocation(page, null, null));
@@ -465,6 +479,10 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         }
         _activePage = target.Page;
         _selectedGroupGid = target.Page == SpheneHubPage.Syncshells ? target.GroupGid : null;
+        if (target.Settings is { } settingsPage)
+        {
+            _settingsUi.ApplySettingsPageQuiet(settingsPage);
+        }
     }
 
     private static bool IsProfileFamily(SpheneHubPage page)
@@ -498,6 +516,12 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         _viewingFriend = null;
         _friendAvatarBytes = [];
         _friendBannerBytes = [];
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        _settingsUi.SettingsPageChanged -= OnSettingsPageChanged;
+        base.Dispose(disposing);
     }
 
     private void DrawHubHeaderBand(Vector2 bandMin, float bandHeight, float railRightX, Vector4 accent)
@@ -893,19 +917,13 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
     }
 
     /// <summary>
-    /// The current location as a pill ("Page › detail") — a dark scrim keeps it
-    /// legible over bright banner art and dark surfaces alike; the parent
-    /// segment is clickable and navigates one level up.
+    /// The current location as a pill ("Page › detail") — resolves the crumb
+    /// labels from the hub state and renders via the shared
+    /// <see cref="SpheneUI.Chrome.CrumbPill"/>; the parent segment navigates
+    /// one level up.
     /// </summary>
     private void DrawBreadcrumbPill(Vector2 pillMin, float maxWidth)
     {
-        var scale = SpheneUI.Scale;
-        var drawList = ImGui.GetWindowDrawList();
-        var pillH = 26f * scale;
-        var padX = 12f * scale;
-        var sepGap = 7f * scale;
-        const string sep = "\u203A";
-
         string? parentLabel = null;
         var parentTarget = default(HubLocation);
         var currentLabel = PageCrumbLabel(_activePage);
@@ -926,55 +944,15 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             parentTarget = new HubLocation(SpheneHubPage.Syncshells, null, null);
             currentLabel = group.GroupAliasOrGID;
         }
-
-        var sepW = ImGui.CalcTextSize(sep).X + sepGap * 2f;
-        var maxTextW = MathF.Max(0f, maxWidth - padX * 2f);
-        var parentW = parentLabel != null ? ImGui.CalcTextSize(parentLabel).X + sepW : 0f;
-        var currentText = Ellipsize(currentLabel, MathF.Max(24f * scale, maxTextW - parentW));
-        if (ImGui.CalcTextSize(currentText).X + parentW > maxTextW)
+        else if (_activePage == SpheneHubPage.Settings)
         {
-            // still too wide — drop the parent segment before shrinking further
-            parentLabel = null;
-            parentW = 0f;
-            currentText = Ellipsize(currentLabel, maxTextW);
+            parentLabel = PageCrumbLabel(SpheneHubPage.Settings);
+            parentTarget = new HubLocation(SpheneHubPage.Settings, null, null, SettingsUi.SettingsPage.Home);
+            currentLabel = _settingsUi.ActiveCrumbLabel;
         }
 
-        var pillW = padX * 2f + parentW + ImGui.CalcTextSize(currentText).X;
-        var pillMax = pillMin + new Vector2(pillW, pillH);
-        drawList.AddRectFilled(pillMin, pillMax,
-            SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(
-                new Vector4(0.02f, 0.02f, 0.04f, 1f), 0.55f)), pillH * 0.5f);
-        drawList.AddRect(pillMin, pillMax,
-            SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(Vector4.One, 0.10f)),
-            pillH * 0.5f);
-
-        var tx = pillMin.X + padX;
-        var ty = pillMin.Y + (pillH - ImGui.GetTextLineHeight()) * 0.5f;
-        if (parentLabel != null)
-        {
-            var pw = ImGui.CalcTextSize(parentLabel).X;
-            ImGui.SetCursorScreenPos(new Vector2(tx, pillMin.Y));
-            var parentClicked = ImGui.InvisibleButton("##hubcrumb", new Vector2(pw, pillH));
-            var parentHovered = ImGui.IsItemHovered();
-            drawList.AddText(new Vector2(tx, ty),
-                SpheneUI.ColorUtils.ToU32(parentHovered
-                    ? SpheneUI.Colors.TextPrimary : SpheneUI.Colors.TextSecondary),
-                parentLabel);
-            if (parentHovered)
-            {
-                ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
-            }
-            if (parentClicked)
-            {
-                NavigateTo(parentTarget);
-            }
-            tx += pw;
-            drawList.AddText(new Vector2(tx + sepGap, ty),
-                SpheneUI.ColorUtils.ToU32(SpheneUI.Colors.TextMuted), sep);
-            tx += sepW;
-        }
-        drawList.AddText(new Vector2(tx, ty),
-            SpheneUI.ColorUtils.ToU32(SpheneUI.Colors.TextPrimary), currentText);
+        SpheneUI.Chrome.CrumbPill(pillMin, maxWidth, parentLabel, currentLabel,
+            parentLabel != null ? () => NavigateTo(parentTarget) : null);
     }
 
     private static string PageCrumbLabel(SpheneHubPage page) => page switch

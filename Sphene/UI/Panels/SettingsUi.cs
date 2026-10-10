@@ -6,6 +6,7 @@ using Dalamud.Interface.ImGuiFileDialog;
 using Dalamud.Interface.Utility;
 using Dalamud.Interface.Utility.Raii;
 using Dalamud.Interface.Windowing;
+using Dalamud.Interface.Textures.TextureWraps;
 using Dalamud.Utility;
 using Sphene.API.Data;
 using Sphene.API.Dto.Files;
@@ -101,7 +102,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
     private int _pluginInstallInProgress = 0;
     private string? _installingPluginName;
     // New navigation state for redesigned Settings layout
-    private enum SettingsPage
+    internal enum SettingsPage
     {
         Home,
         Connectivity,
@@ -118,6 +119,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
         Debug
     }
     private SettingsPage _activeSettingsPage = SettingsPage.Home;
+    private readonly List<SettingsPage> _settingsNavBack = [];
+    private readonly List<SettingsPage> _settingsNavForward = [];
     private int _settingsCardIndex;
     private string? _preferThemeTab = null;
     private bool _preferButtonStylesTab = false;
@@ -322,8 +325,10 @@ public class SettingsUi : WindowMediatorSubscriberBase
         return !string.Equals(currentJson, originalJson, StringComparison.Ordinal);
     }
 
-    protected override string ChromeTitle => "Network Configuration";
+    protected override string ChromeTitle => "Settings";
     protected override FontAwesomeIcon? ChromeIcon => FontAwesomeIcon.Cog;
+    protected override IDalamudTextureWrap? ChromeIconTexture => SpheneBrandIcons.SpheneLogo();
+    protected override Action<Vector2, Vector2>? ChromeMiddleContent => DrawSettingsTitleCluster;
     protected override string? ChromeTrailingText
     {
         get
@@ -1836,7 +1841,6 @@ public class SettingsUi : WindowMediatorSubscriberBase
             windowPos.X + windowSize.X - contentOrigin.X,
             windowPos.Y + windowSize.Y - contentOrigin.Y);
 
-        var diagnosticsPageLabel = DiagnosticsPageLabel;
         var navItems = EmbeddedNavItems;
 
         if (_activeSettingsPage == SettingsPage.Supporter && !_apiController.SupporterFeaturesEnabled)
@@ -1899,7 +1903,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         SpheneUI.Layout.BeginScrollArea("settings-content",
             new Vector2(available.X - sidebarWidth, available.Y),
             windowFlags: ImGuiWindowFlags.NoBackground, noPadding: true);
-        DrawSettingsPageContent(diagnosticsPageLabel);
+        DrawSettingsPageContent();
 
         SpheneUI.Layout.EndScrollArea(
             fadeSpanX: new Vector2(railMax.X, windowPos.X + windowSize.X),
@@ -1971,7 +1975,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         {
             if (SpheneUI.Layout.NavRailSegmentItem(label, icon, _activeSettingsPage == page, accent, special))
             {
-                _activeSettingsPage = page;
+                SetSettingsPage(page);
             }
         }
 
@@ -2028,7 +2032,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
     internal void DrawEmbeddedContent()
     {
         UpdateCompactUiThemeStick();
-        DrawSettingsPageContent(DiagnosticsPageLabel);
+        DrawSettingsPageContent();
         DrawThemeSavePrompt();
         DrawUnsavedCustomThemePrompt();
         DrawExportBackupModal();
@@ -2064,20 +2068,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
         }
     }
 
-    private void DrawSettingsPageContent(string diagnosticsPageLabel)
-    {
-        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
-        var contentAvail = ImGui.GetContentRegionAvail().X;
-        var safeContentWidth = MathF.Max(220f * ImGuiHelpers.GlobalScale, contentAvail);
-        var maxPageWidth = MathF.Min(safeContentWidth, 1040f * ImGuiHelpers.GlobalScale);
-        var pageStartX = ImGui.GetCursorPosX();
-        if (contentAvail > maxPageWidth)
-        {
-            pageStartX = ImGui.GetCursorPosX() + (contentAvail - maxPageWidth) * 0.5f;
-            ImGui.SetCursorPosX(pageStartX);
-        }
-
-        var pageInfo = _activeSettingsPage switch
+    private (string Category, string Label) SettingsCrumbInfo(string diagnosticsPageLabel)
+        => _activeSettingsPage switch
         {
             SettingsPage.Home => ("General", "Home"),
             SettingsPage.Connectivity => ("General", "Connectivity"),
@@ -2095,17 +2087,24 @@ public class SettingsUi : WindowMediatorSubscriberBase
             _ => ("General", "Home")
         };
 
+    private void DrawSettingsPageContent()
+    {
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
+        var contentAvail = ImGui.GetContentRegionAvail().X;
+        var safeContentWidth = MathF.Max(220f * ImGuiHelpers.GlobalScale, contentAvail);
+        var maxPageWidth = MathF.Min(safeContentWidth, 1040f * ImGuiHelpers.GlobalScale);
+        var pageStartX = ImGui.GetCursorPosX();
+        if (contentAvail > maxPageWidth)
+        {
+            pageStartX = ImGui.GetCursorPosX() + (contentAvail - maxPageWidth) * 0.5f;
+            ImGui.SetCursorPosX(pageStartX);
+        }
+
         using (var pageGroup = ImRaii.Group())
         {
             ImGui.PushTextWrapPos(pageStartX + maxPageWidth
                 - SpheneUI.Layout.ScrollAreaContentInset * ImGuiHelpers.GlobalScale);
             ImGui.PushItemWidth(MathF.Min(360f * ImGuiHelpers.GlobalScale, maxPageWidth * 0.6f));
-            SpheneUI.Text.Colored(pageInfo.Item1, ImGuiColors.DalamudGrey);
-            ImGui.SameLine();
-            SpheneUI.Text.Colored("•", ImGuiColors.DalamudGrey3);
-            ImGui.SameLine();
-            SpheneUI.Text.Plain(pageInfo.Item2);
-            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
 
             var settingsOptionsIndentX = GetSettingsOptionsIndentX(_activeSettingsPage);
             IDisposable? contentIndent = null;
@@ -5163,9 +5162,101 @@ public class SettingsUi : WindowMediatorSubscriberBase
         }
     }
 
+    /// <summary>
+    /// Back/forward arrows plus the crumb pill inside the chrome title bar —
+    /// the same cluster the hub draws in its header, minus the profile card.
+    /// </summary>
+    private void DrawSettingsTitleCluster(Vector2 zoneMin, Vector2 zoneMax)
+    {
+        var scale = SpheneUI.Scale;
+        var btnSize = ImGui.GetFrameHeight();
+        var zoneHeight = zoneMax.Y - zoneMin.Y;
+        var btnY = zoneMin.Y + (zoneHeight - btnSize) * 0.5f;
+
+        ImGui.SetCursorScreenPos(new Vector2(zoneMin.X, btnY));
+        if (SpheneUI.Icons.Button(FontAwesomeIcon.ArrowLeft, btnSize, null, null, btnSize,
+                enabled: _settingsNavBack.Count > 0))
+        {
+            SettingsNavigateBack();
+        }
+        SpheneUI.AttachTooltip("Back");
+
+        ImGui.SetCursorScreenPos(new Vector2(zoneMin.X + btnSize + 4f * scale, btnY));
+        if (SpheneUI.Icons.Button(FontAwesomeIcon.ArrowRight, btnSize, null, null, btnSize,
+                enabled: _settingsNavForward.Count > 0))
+        {
+            SettingsNavigateForward();
+        }
+        SpheneUI.AttachTooltip("Forward");
+
+        var pillH = 26f * scale;
+        var crumbX = zoneMin.X + btnSize * 2f + 4f * scale + 10f * scale;
+        if (crumbX >= zoneMax.X)
+        {
+            return;
+        }
+        var (category, label) = SettingsCrumbInfo(DiagnosticsPageLabel);
+        SpheneUI.Chrome.CrumbPill(
+            new Vector2(crumbX, zoneMin.Y + (zoneHeight - pillH) * 0.5f),
+            zoneMax.X - crumbX, category, label, null);
+    }
+
+    /// <summary>Raised when the active settings page changes through user navigation — args are (previous, next); the hub folds it into its own breadcrumb/history.</summary>
+    internal event Action<SettingsPage, SettingsPage>? SettingsPageChanged;
+
+    /// <summary>The currently shown settings page — read by the hub for its crumb.</summary>
+    internal SettingsPage ActiveSettingsPageValue => _activeSettingsPage;
+
+    /// <summary>Label of the active settings page for breadcrumb rendering.</summary>
+    internal string ActiveCrumbLabel => SettingsCrumbInfo(DiagnosticsPageLabel).Label;
+
+    /// <summary>Applies a page without recording it in either history — used for hub-driven restores.</summary>
+    internal void ApplySettingsPageQuiet(SettingsPage page)
+    {
+        _activeSettingsPage = page;
+    }
+
+    /// <summary>Switches the active settings page and records it in the title bar back/forward history.</summary>
+    private void SetSettingsPage(SettingsPage page)
+    {
+        if (page == _activeSettingsPage)
+        {
+            return;
+        }
+        _settingsNavBack.Add(_activeSettingsPage);
+        _settingsNavForward.Clear();
+        var previous = _activeSettingsPage;
+        _activeSettingsPage = page;
+        SettingsPageChanged?.Invoke(previous, page);
+    }
+
+    private void SettingsNavigateBack()
+    {
+        if (_settingsNavBack.Count == 0)
+        {
+            return;
+        }
+        var target = _settingsNavBack[^1];
+        _settingsNavBack.RemoveAt(_settingsNavBack.Count - 1);
+        _settingsNavForward.Add(_activeSettingsPage);
+        _activeSettingsPage = target;
+    }
+
+    private void SettingsNavigateForward()
+    {
+        if (_settingsNavForward.Count == 0)
+        {
+            return;
+        }
+        var target = _settingsNavForward[^1];
+        _settingsNavForward.RemoveAt(_settingsNavForward.Count - 1);
+        _settingsNavBack.Add(_activeSettingsPage);
+        _activeSettingsPage = target;
+    }
+
     private void OnNavigateToButtonSettings(ThemeNavigateToButtonSettingsMessage msg)
     {
-        _activeSettingsPage = SettingsPage.Theme;
+        SetSettingsPage(SettingsPage.Theme);
         IsOpen = true;
         _preferThemeTab = "Panel Theme";
         _preferButtonStylesTab = true;

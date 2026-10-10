@@ -188,6 +188,15 @@ Per-window customization via `protected override` properties:
   `SettingsUi` overrides these for the Discord/Ko-fi buttons + version text.
 - `ChromeIconTexture` — optional `IDalamudTextureWrap` drawn instead of
   `ChromeIcon` when set (cover-fit, rounded).
+- `ChromeMiddleContent` — optional `Action<Vector2, Vector2>` drawn inside
+  the title bar between the title and the right buttons; receives the
+  zone's min/max screen positions. `SettingsUi` uses it for its
+  back/forward + crumb-pill cluster.
+- `Chrome.CrumbPill(min, maxWidth, parentLabel, currentLabel,
+  onParentClick)` — the shared breadcrumb pill ("Parent › Current"),
+  dark scrim + thin border, ellipsizes (parent drops first). Parent is
+  clickable when `onParentClick` is set; the hub's nav crumb and the
+  settings page crumb both render through it.
 - `TitleBarButton.BadgeCount` renders a red counter badge on the button's
   top-right corner (0 = hidden, capped at "9+") — the design-system
   notification indicator for title bar buttons. `SpheneHubUi` reuses the

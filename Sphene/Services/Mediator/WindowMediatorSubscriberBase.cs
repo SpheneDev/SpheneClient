@@ -107,6 +107,12 @@ public abstract class WindowMediatorSubscriberBase : Window, IMediatorSubscriber
     /// <summary>Muted text rendered right of the title, before the right buttons.</summary>
     protected virtual string? ChromeTrailingText => null;
 
+    /// <summary>
+    /// Optional content drawn in the title bar between the title and the
+    /// right-side buttons — receives the zone's min/max screen positions.
+    /// </summary>
+    protected virtual Action<Vector2, Vector2>? ChromeMiddleContent => null;
+
     /// <summary>Right-side title bar buttons; defaults to a close button honoring <see cref="Window.ShowCloseButton"/>.</summary>
     /// <summary>Optional texture drawn instead of <see cref="ChromeIcon"/> when set.</summary>
     protected virtual IDalamudTextureWrap? ChromeIconTexture => null;
@@ -194,7 +200,8 @@ public abstract class WindowMediatorSubscriberBase : Window, IMediatorSubscriber
         {
             SpheneUI.Chrome.TitleBar(ChromeId, ChromeTitle, ChromeIcon,
                 rightButtons: ChromeRightButtons, trailingText: ChromeTrailingText,
-                collapsible: ChromeCollapsible, leadingTexture: ChromeIconTexture);
+                collapsible: ChromeCollapsible, leadingTexture: ChromeIconTexture,
+                middleContent: ChromeMiddleContent);
         }
         else
         {
