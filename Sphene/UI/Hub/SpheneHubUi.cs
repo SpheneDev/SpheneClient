@@ -1123,10 +1123,6 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             || string.Equals(playerName, "--", StringComparison.Ordinal)
             ? _apiController.UID : playerName;
 
-        var pairCount = _pairManager.DirectPairs.Count;
-        var shellCount = _pairManager.GroupPairs.Count;
-        var pendingRequests = _pairManager.UnseenInboundIndividualPairRequestCount;
-
         _heroEdit.Enabled = _profileEditMode;
         _heroEdit.OnAvatarClicked = () => PickAndCropImage(ImageCropUi.CropKind.Avatar);
         _heroEdit.OnBannerClicked = () => PickAndCropImage(ImageCropUi.CropKind.Banner);
@@ -1173,25 +1169,6 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             pfpWrap, bannerWrap, profileTheme, accent, theme.AccentBlue,
             isNsfw: profile.IsNSFW, watermark: SpheneBrandIcons.SpheneLogo(),
             actions: heroActions,
-            drawStats: _ =>
-            {
-                if (ImGui.BeginTable("profile_stats", 3, ImGuiTableFlags.SizingStretchSame))
-                {
-                    ImGui.TableNextColumn();
-                    SpheneUI.Profile.StatTile("Friends", FontAwesomeIcon.UserFriends, pairCount,
-                        SpheneUI.Palette.NetworkActive, "Open your friends list",
-                        () => SetPage(SpheneHubPage.Friends));
-                    ImGui.TableNextColumn();
-                    SpheneUI.Profile.StatTile("Syncshells", FontAwesomeIcon.Users, shellCount,
-                        theme.AccentBlue, "Open your syncshells",
-                        () => SetPage(SpheneHubPage.Syncshells));
-                    ImGui.TableNextColumn();
-                    SpheneUI.Profile.StatTile("Requests", FontAwesomeIcon.Inbox, pendingRequests,
-                        pendingRequests > 0 ? SpheneUI.Colors.Warning : SpheneUI.Colors.TextMuted,
-                        "Open pair requests", () => Mediator.Publish(new OpenPairRequestsUiMessage()));
-                    ImGui.EndTable();
-                }
-            },
             edit: _heroEdit);
         if (_profileEditMode)
         {

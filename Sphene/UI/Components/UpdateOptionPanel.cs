@@ -25,7 +25,8 @@ public static class UpdateOptionPanel
         SupporterServerIcons,
         PanelPairListSeparatorPadding,
         SupporterNameplateGlowColors,
-        ReopenSpheneHubOnStartup
+        ReopenSpheneHubOnStartup,
+        ReleaseNotesPage
     }
 
     private static readonly IReadOnlySet<Link> SupporterFeatureLinks = new HashSet<Link>
@@ -44,7 +45,7 @@ public static class UpdateOptionPanel
         new("v.1.1.15", [Link.NotificationSoundsSpheneDefault]),
         new("v.1.1.16", [Link.SupporterNameplateIndicators, Link.SupporterNameplateCustomization, Link.SupporterNameplateStyleSync, Link.SupporterServerIcons]),
         new("v.1.1.17", [Link.PanelPairListSeparatorPadding, Link.SupporterNameplateGlowColors]),
-        new("v.1.1.18", [Link.ReopenSpheneHubOnStartup]),
+        new("v.1.1.18", [Link.ReopenSpheneHubOnStartup, Link.ReleaseNotesPage]),
     ];
 
     private static readonly IReadOnlyDictionary<Link, string> LinkTitles = new Dictionary<Link, string>
@@ -62,7 +63,8 @@ public static class UpdateOptionPanel
         [Link.SupporterServerIcons] = "Supporter: Server-provided & animated icons",
         [Link.PanelPairListSeparatorPadding] = "Panel: Pair List Separator Padding (Default: 0)",
         [Link.SupporterNameplateGlowColors] = "Supporter: Symbol & Label Glow Colors (Default: Disabled)",
-        [Link.ReopenSpheneHubOnStartup] = "Appearance: Reopen Sphene Hub on startup if it was open (Default: Disabled)"
+        [Link.ReopenSpheneHubOnStartup] = "Appearance: Reopen Sphene Hub on startup if it was open (Default: Disabled)",
+        [Link.ReleaseNotesPage] = "General: Release Notes page (browsable changelog in Settings & Hub)"
     };
 
     private static readonly IReadOnlyDictionary<Link, Action<SpheneConfigService, UiSharedService, SpheneMediator>> LinkDrawers
@@ -115,7 +117,12 @@ public static class UpdateOptionPanel
             }
         },
         [Link.ReopenSpheneHubOnStartup] = (configService, _, _) =>
-            AppearanceOptionBlock.DrawReopenSpheneHubOnStartupOption(configService, "UpdateOptionReopenSpheneHubOnStartup")
+            AppearanceOptionBlock.DrawReopenSpheneHubOnStartupOption(configService, "UpdateOptionReopenSpheneHubOnStartup"),
+        [Link.ReleaseNotesPage] = (_, _, _) =>
+        {
+            SpheneUI.Text.Wrapped("Sphene release notes are now browsable at any time: the dedicated Release Notes page lists every release with its changelog, including testbuild entries when enabled.");
+            SpheneUI.Controls.HelpText("Open Settings > Release Notes — also available inside the Sphene Hub's embedded settings.");
+        }
     };
 
     public static string GetTitle(Link link)

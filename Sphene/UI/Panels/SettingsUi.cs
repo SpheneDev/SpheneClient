@@ -67,7 +67,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
     private readonly ServerConfigurationManager _serverConfigurationManager;
     private readonly UiSharedService _uiShared;
     private readonly ShrinkUHostService _shrinkUHostService;
-    private readonly ChangelogService _changelogService;
+    private readonly ReleaseChangelogUi _releaseChangelogUi;
     private readonly SupporterIconService _supporterIconService;
     private readonly GameSoundManager _gameSoundManager;
     private readonly FileDialogManager _fileDialogManager;
@@ -116,6 +116,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         SyncBehavior,
         Acknowledgment,
         Supporter,
+        ReleaseNotes,
         Debug
     }
     private SettingsPage _activeSettingsPage = SettingsPage.Home;
@@ -169,7 +170,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         IpcManager ipcManager, CacheMonitor cacheMonitor,
         ShrinkUHostService shrinkUHostService,
         DalamudUtilService dalamudUtilService, HttpClient httpClient,
-        ChangelogService changelogService,
+        ReleaseChangelogUi releaseChangelogUi,
         SupporterIconService supporterIconService,
         GameSoundManager gameSoundManager,
         FileDialogManager fileDialogManager,
@@ -192,7 +193,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         _fileCompactor = fileCompactor;
         _uiShared = uiShared;
         _shrinkUHostService = shrinkUHostService;
-        _changelogService = changelogService;
+        _releaseChangelogUi = releaseChangelogUi;
         _supporterIconService = supporterIconService;
         _gameSoundManager = gameSoundManager;
         _fileDialogManager = fileDialogManager;
@@ -1823,6 +1824,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         (FontAwesomeIcon.Palette, "Appearance"),
         (FontAwesomeIcon.Brush, "Theme"),
         (FontAwesomeIcon.Bell, "Notifications"),
+        (FontAwesomeIcon.Scroll, "Release Notes"),
         (FontAwesomeIcon.TachometerAlt, "Performance"),
         (FontAwesomeIcon.ExchangeAlt, "Transfers"),
         (FontAwesomeIcon.Hdd, "Storage"),
@@ -1984,6 +1986,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         SidebarButton("Connectivity", FontAwesomeIcon.Wifi, SettingsPage.Connectivity, accentGeneral);
         SidebarButton("People & Notes", FontAwesomeIcon.AddressBook, SettingsPage.PeopleNotes, accentGeneral);
         SidebarButton("Notifications", FontAwesomeIcon.Bell, SettingsPage.Alerts, accentGeneral);
+        SidebarButton("Release Notes", FontAwesomeIcon.Scroll, SettingsPage.ReleaseNotes, accentGeneral);
         if (_apiController.SupporterFeaturesEnabled)
         {
             SidebarButton("Supporter", FontAwesomeIcon.Crown, SettingsPage.Supporter, SpheneUI.Palette.SpheneGold, special: true);
@@ -2088,6 +2091,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             SettingsPage.SyncBehavior => ("Sync & Data", "Sync"),
             SettingsPage.Acknowledgment => ("Sync & Data", "Acknowledgment"),
             SettingsPage.Supporter => ("General", "Supporter"),
+            SettingsPage.ReleaseNotes => ("General", "Release Notes"),
             SettingsPage.Debug => ("Advanced", diagnosticsPageLabel),
             _ => ("General", "Home")
         };
@@ -2157,6 +2161,9 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 case SettingsPage.Supporter:
                     DrawSupporterPage();
                     break;
+                case SettingsPage.ReleaseNotes:
+                    _releaseChangelogUi.DrawEmbedded();
+                    break;
                 case SettingsPage.Debug:
                     DrawDebug();
                     break;
@@ -2221,6 +2228,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         => page switch
         {
             SettingsPage.Theme => 8f * ImGuiHelpers.GlobalScale,
+            SettingsPage.ReleaseNotes => 0f,
             SettingsPage.Connectivity => 14f * ImGuiHelpers.GlobalScale,
             SettingsPage.Storage => 14f * ImGuiHelpers.GlobalScale,
             SettingsPage.Transfers => 13f * ImGuiHelpers.GlobalScale,
@@ -2590,22 +2598,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 : "Unknown";
                 
             DrawPluginListRow("Sphene", "Advanced character synchronization and networking.", versionString, true, true,
-                onOpenSettings: () =>
-                {
-                    _ = Task.Run(async () =>
-                    {
-                        string? text = null;
-                        try
-                        {
-                            text = await _changelogService.GetChangelogTextForVersionAsync(versionString).ConfigureAwait(false);
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogDebug(ex, "Failed to load changelog text for version {version}", versionString);
-                        }
-                        Mediator.Publish(new ShowReleaseChangelogMessage(versionString, text, _configService.Current.LastSeenVersionChangelog));
-                    });
-                },
+                onOpenSettings: () => SetSettingsPage(SettingsPage.ReleaseNotes),
                 settingsLabel: "Release Notes");
 
             // 2. ShrinkU (Built-in)

@@ -508,13 +508,14 @@ public sealed class Plugin : IAsyncDalamudPlugin
                 s.GetRequiredService<SpheneMediator>(),
                 s.GetRequiredService<PerformanceCollectorService>(),
                 s.GetRequiredService<ICommandManager>()));
-            collection.AddSingleton<WindowMediatorSubscriberBase, ReleaseChangelogUi>((s) => new ReleaseChangelogUi(
+            collection.AddSingleton((s) => new ReleaseChangelogUi(
                 s.GetRequiredService<ILogger<ReleaseChangelogUi>>(),
                 s.GetRequiredService<UiSharedService>(),
                 s.GetRequiredService<SpheneConfigService>(),
                 s.GetRequiredService<SpheneMediator>(),
                 s.GetRequiredService<PerformanceCollectorService>(),
                 s.GetRequiredService<ChangelogService>()));
+            collection.AddSingleton<WindowMediatorSubscriberBase>(s => s.GetRequiredService<ReleaseChangelogUi>());
 
             collection.AddScoped<ImageCropUi>();
             collection.AddScoped<WindowMediatorSubscriberBase>(s => s.GetRequiredService<ImageCropUi>());
