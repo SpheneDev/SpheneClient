@@ -1341,6 +1341,12 @@ public static partial class SpheneUI
                 + 14f * scale;
         }
 
+        /// <summary>Scaled height of one <see cref="NavRailSegmentItem"/> row.</summary>
+        public static float NavRailItemHeightPx => NavRailItemHeight * SpheneUI.Scale;
+
+        /// <summary>Scaled vertical footprint of <see cref="NavRailDivider"/> — pad, line, pad.</summary>
+        public static float NavRailDividerHeight => 11.5f * SpheneUI.Scale;
+
         /// <summary>
         /// The solid color painted behind the nav rail. Hosts that draw a
         /// full-width header band across the window should paint it in this
@@ -1362,8 +1368,11 @@ public static partial class SpheneUI
         /// is set, the rail anchors to the current child window's top edge
         /// instead of the parent window's title bar — used when a rail layout
         /// is rendered inside another window's content (e.g. Sphene Hub).
+        /// <paramref name="topInset"/> reserves a pinned strip at the rail top —
+        /// scrolled content is clipped below it (see <see cref="BeginScrollArea"/>).
         /// </summary>
-        public static float BeginNavRail(string id, float width, bool embedded = false)
+        public static float BeginNavRail(string id, float width, bool embedded = false,
+            float topInset = 0f)
         {
             var windowPos = ImGui.GetWindowPos();
             var windowSize = ImGui.GetWindowSize();
@@ -1410,7 +1419,7 @@ public static partial class SpheneUI
             BeginScrollArea(id + "##nav", new Vector2(
                     MathF.Max(0f, railMax.X - railMin.X - railPad * 2f),
                     MathF.Max(0f, windowPos.Y + windowSize.Y - contentTop.Y)),
-                contentPadding: new Vector2(0f, 8f));
+                contentPadding: new Vector2(0f, 8f), topInset: topInset);
             return width;
         }
 
@@ -1418,12 +1427,13 @@ public static partial class SpheneUI
         /// Closes the rail opened by <see cref="BeginNavRail"/>: ends the nav
         /// scroll area with fades tinted to the rail color. The rail state
         /// stays on the stack so <see cref="BeginNavContent"/> can read it.
+        /// <paramref name="fadeMinY"/> keeps scroll fades below a pinned strip.
         /// </summary>
-        public static void EndNavRail()
+        public static void EndNavRail(float? fadeMinY = null)
         {
             var state = NavRailStack.Count > 0 ? NavRailStack.Peek() : new NavRailState();
             EndScrollArea(fadeBaseColor: state.RailBg,
-                fadeSpanX: new Vector2(state.RailMin.X, state.RailMax.X));
+                fadeSpanX: new Vector2(state.RailMin.X, state.RailMax.X), fadeMinY: fadeMinY);
         }
 
         // Remembers per nested nav-content whether it scrolls plus the

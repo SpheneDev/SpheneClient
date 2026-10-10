@@ -1889,7 +1889,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             contentPadding: new Vector2(0f, 8f));
 
         var sidebarCategories = new List<(string Label, float CenterY, Vector4 Accent)>();
-        DrawSettingsNavButtons(embedded: false, sidebarCategories, pinnedCenterY);
+        DrawSettingsNavButtons(sidebarCategories, pinnedCenterY);
 
         SpheneUI.Layout.EndScrollArea(fadeBaseColor: sidebarBg,
             fadeSpanX: new Vector2(railMin.X, railMax.X), fadeMinY: pinnedBandBottom);
@@ -1916,7 +1916,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
     /// band); embedded inside the Sphene Hub rail they render in-flow and
     /// categories simply scroll with the items.
     /// </summary>
-    private void DrawSettingsNavButtons(bool embedded,
+    private void DrawSettingsNavButtons(
         List<(string Label, float CenterY, Vector4 Accent)>? pinnedCategories, float pinnedCenterY)
     {
         var theme = SpheneTheme.Current;
@@ -1932,11 +1932,11 @@ public class SettingsUi : WindowMediatorSubscriberBase
             SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
             var text = label.ToUpperInvariant();
             var drawnInBand = false;
-            if (!embedded)
+            if (pinnedCategories != null)
             {
                 var labelTop = ImGui.GetCursorScreenPos().Y;
                 var labelCenter = labelTop + ImGui.GetTextLineHeight() * 0.5f;
-                pinnedCategories!.Add((text, labelCenter, accent));
+                pinnedCategories.Add((text, labelCenter, accent));
                 // The band owns the first label plus every label whose
                 // center has reached the pin; an approaching label is drawn
                 // in-flow so the band can ride on its top edge while it
@@ -2010,11 +2010,16 @@ public class SettingsUi : WindowMediatorSubscriberBase
     /// <summary>
     /// The settings nav rendered inside the Sphene Hub rail — same items as
     /// the standalone sidebar plus a pop-out shortcut so the windowed
-    /// settings stay one click away.
+    /// settings stay one click away. When <paramref name="pinnedCategories"/>
+    /// is supplied, category labels are recorded so the hub can pin the
+    /// current one below its own fixed header — same behavior as the
+    /// standalone sidebar band.
     /// </summary>
-    internal void DrawEmbeddedRail()
+    internal void DrawEmbeddedRail(
+        List<(string Label, float CenterY, Vector4 Accent)>? pinnedCategories = null,
+        float pinnedCenterY = 0f)
     {
-        DrawSettingsNavButtons(embedded: true, pinnedCategories: null, pinnedCenterY: 0f);
+        DrawSettingsNavButtons(pinnedCategories, pinnedCenterY);
         var theme = SpheneTheme.Current;
         SpheneUI.Layout.NavRailDivider(theme.AccentBlue, theme.AccentBlue);
         if (SpheneUI.Layout.NavRailSegmentItem("Pop Out", FontAwesomeIcon.ExternalLinkAlt,

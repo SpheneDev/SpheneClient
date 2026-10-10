@@ -37,16 +37,6 @@ namespace Sphene.UI.Hub;
 /// </summary>
 internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
 {
-    private static readonly (FontAwesomeIcon Icon, string Label)[] _hubNavItems =
-    [
-        (FontAwesomeIcon.UserCircle, "My Profile"),
-        (FontAwesomeIcon.UserFriends, "Friends"),
-        (FontAwesomeIcon.Users, "Syncshells"),
-        (FontAwesomeIcon.IdCard, "Character Data"),
-        (FontAwesomeIcon.ShareAlt, "Mod Sharing"),
-        (FontAwesomeIcon.Cog, "Settings"),
-    ];
-
     private readonly ApiController _apiController;
     private readonly PairManager _pairManager;
     private readonly SpheneProfileManager _spheneProfileManager;
@@ -98,6 +88,10 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
     // up and out of the rail while the settings list pans in from below.
     private float _settingsRailAnim;
     private float _hubNavBlockH;
+
+    /// <summary>The last non-settings location — the fixed "Back to Hub" strip on the settings
+    /// page jumps straight here instead of walking the back stack.</summary>
+    private HubLocation _lastHubLocation = new(SpheneHubPage.Profile, null, null);
 
     /// <summary>One location in the hub's back/forward history: page plus its detail context — on the
     /// settings page it also carries the active settings sub-page so back/forward walks through it.</summary>
@@ -233,14 +227,16 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         => (CollapsedStripHeight + ImGui.GetStyle().WindowBorderSize * 2f) / SpheneUI.Scale;
 
     /// <summary>
-    /// The rail eases between the hub width and the wider settings
-    /// vocabulary with the pan animation — a fixed max would leave a dead
-    /// strip of band color inside the content edge on every hub page.
+    /// Fixed rail width — the settings vocabulary exactly as the standalone
+    /// window computes it (segmented items minus one window padding), plus a
+    /// flat bonus so the header profile card has room for a typical
+    /// name/status line. Anything longer ellipsizes and shows on hover — the
+    /// rail itself never resizes.
     /// </summary>
-    private float CurrentRailWidth => float.Lerp(
-        SpheneUI.Layout.NavRailSegmentedWidth(_hubNavItems),
-        SpheneUI.Layout.NavRailSegmentedWidth(SettingsUi.EmbeddedNavItems),
-        _settingsRailAnim);
+    private static float CurrentRailWidth =>
+        SpheneUI.Layout.NavRailSegmentedWidth(SettingsUi.EmbeddedNavItems)
+        - ImGui.GetStyle().WindowPadding.X
+        + 48f * SpheneUI.Scale;
 
     protected override float ChromeCollapsedWidth
     {
@@ -303,10 +299,28 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             ImGui.SetCursorScreenPos(ImGui.GetCursorScreenPos() + new Vector2(0f, reserve));
         }
 
-        SpheneUI.Layout.BeginNavRail("sphenehub", railWidth);
-        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
         var railAnim = _settingsRailAnim;
         var slide = MathF.Max(_hubNavBlockH, 200f * SpheneUI.Scale);
+        // Pinned zone at the rail top while the settings rail is shown: the
+        // "Back to Hub" item plus a pinned category band — same anatomy as the
+        // standalone settings sidebar. The scroll top-inset clips items below
+        // it and eases in with the pan.
+        var pinItemH = SpheneUI.Layout.NavRailItemHeightPx;
+        var pinDividerH = SpheneUI.Layout.NavRailDividerHeight;
+        var pinBandH = ImGui.GetTextLineHeight() + 8f * SpheneUI.Scale;
+        var pinZoneH = pinItemH + pinDividerH + pinBandH;
+        var contentPadY = 8f * SpheneUI.Scale;
+
+        SpheneUI.Layout.BeginNavRail("sphenehub", railWidth,
+            topInset: (contentPadY + pinZoneH) * railAnim);
+        // Window pos inside the rail child — unlike the cursor this is not
+        // shifted by the child's own scroll offset, so the pinned strip never
+        // rides the scroll.
+        var railItemOrigin = ImGui.GetWindowPos() + new Vector2(0f, contentPadY);
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
+        var pinSlide = slide * (1f - railAnim);
+        var pinTop = railItemOrigin + new Vector2(0f, pinSlide);
+        var pinnedCenterY = pinTop.Y + pinItemH + pinDividerH + pinBandH * 0.5f;
         if (railAnim < 1f)
         {
             var blockStart = ImGui.GetCursorScreenPos();
@@ -347,14 +361,66 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             _hubNavBlockH = ImGui.GetCursorScreenPos().Y - blockStart.Y + slide * railAnim;
             ImGui.SetCursorScreenPos(blockStart);
         }
+        List<(string Label, float CenterY, Vector4 Accent)>? pinnedCategories = null;
         if (railAnim > 0f)
         {
             var blockStart = ImGui.GetCursorScreenPos();
-            ImGui.SetCursorScreenPos(blockStart + new Vector2(0f, slide * (1f - railAnim)));
-            _settingsUi.DrawEmbeddedRail();
+            ImGui.SetCursorScreenPos(blockStart + new Vector2(0f, pinSlide));
+            // Reserve the back item + divider — the first category's own in-flow
+            // slot already covers the pinned band beneath it.
+            ImGui.Dummy(new Vector2(1f,
+                pinItemH + pinDividerH - SpheneUI.Spacing.X8.Value * SpheneUI.Scale));
+            pinnedCategories = [];
+            _settingsUi.DrawEmbeddedRail(pinnedCategories, pinnedCenterY);
             ImGui.SetCursorScreenPos(blockStart);
         }
-        SpheneUI.Layout.EndNavRail();
+        SpheneUI.Layout.EndNavRail(fadeMinY: railItemOrigin.Y + pinZoneH * railAnim);
+
+        // Pinned zone overlay — outside the rail scroll child so it stays put
+        // while the settings items scroll beneath it. Slides in with the pan.
+        if (railAnim > 0f)
+        {
+            var railPad = SpheneUI.Layout.NavRailPadX * SpheneUI.Scale;
+            // Items span to railMax-pad; the band itself is WindowPadding wider
+            // than railWidth, so measuring from the right edge keeps the pinned
+            // item exactly as wide as the scroll items.
+            var pinW = railRightX - railPad - pinTop.X;
+            var pinMax = pinTop + new Vector2(pinW, pinZoneH);
+            var drawList = ImGui.GetWindowDrawList();
+            var railBg = SpheneUI.Layout.NavRailBandColor() with { W = 1f };
+            var clipMin = new Vector2(pinTop.X - railPad, railItemOrigin.Y);
+            var clipMax = new Vector2(railRightX, bandMin.Y + ImGui.GetWindowSize().Y);
+            ImGui.PushClipRect(clipMin, clipMax, false);
+            drawList.AddRectFilled(pinTop, pinMax, SpheneUI.ColorUtils.ToU32(railBg));
+            ImGui.SetCursorScreenPos(pinTop);
+            // Zero padding so the pinned item spans the same width the scroll
+            // child offers its items — default child padding would shrink it.
+            ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, Vector2.Zero);
+            var pinBegun = ImGui.BeginChild("##hubnav-pin", new Vector2(pinW, pinZoneH), false,
+                ImGuiWindowFlags.NoBackground | ImGuiWindowFlags.NoScrollbar
+                | ImGuiWindowFlags.NoScrollWithMouse);
+            ImGui.PopStyleVar();
+            if (pinBegun)
+            {
+                if (SpheneUI.Layout.NavRailSegmentItem("Back to Hub", FontAwesomeIcon.ChevronLeft,
+                        false, accentMe))
+                {
+                    NavigateTo(_lastHubLocation);
+                }
+                SpheneUI.Layout.NavRailDivider(accentMe, accentMe);
+            }
+            ImGui.EndChild();
+            if (pinnedCategories != null)
+            {
+                // Frame spans the whole pinned strip so the band can slide up
+                // and out when the next category pushes in — clipping it to
+                // just the band would cut the transition off.
+                SpheneUI.Layout.PinnedSectionLabel(pinTop, pinMax, pinnedCategories,
+                    bandMin, bandMin + ImGui.GetWindowSize(),
+                    baseColor: railBg, pinCenterY: pinnedCenterY);
+            }
+            ImGui.PopClipRect();
+        }
 
         DrawHubHeaderBand(bandMin, bandHeight, railRightX, accentMe);
 
@@ -479,6 +545,10 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         }
         _activePage = target.Page;
         _selectedGroupGid = target.Page == SpheneHubPage.Syncshells ? target.GroupGid : null;
+        if (target.Page != SpheneHubPage.Settings)
+        {
+            _lastHubLocation = target;
+        }
         if (target.Settings is { } settingsPage)
         {
             _settingsUi.ApplySettingsPageQuiet(settingsPage);
@@ -680,10 +750,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         var lineGap = 2f * scale;
         var nameY = cardMin.Y + (cardH - lineH * 2f - lineGap) * 0.5f;
 
-        var playerName = _dalamudUtilService.GetPlayerName();
-        var displayName = string.IsNullOrEmpty(playerName)
-            || string.Equals(playerName, "--", StringComparison.Ordinal)
-            ? _apiController.UID : playerName;
+        var displayName = HeaderDisplayName();
         var statusLine = HeaderStatusLine(profile, out var statusColor);
         var statusText = Ellipsize(statusLine, textMaxW);
         drawList.AddText(new Vector2(textX, nameY),
@@ -702,6 +769,14 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             SpheneUI.AttachTooltip(tip + " — open your profile page");
         }
         return clicked;
+    }
+
+    private string HeaderDisplayName()
+    {
+        var playerName = _dalamudUtilService.GetPlayerName();
+        return string.IsNullOrEmpty(playerName)
+            || string.Equals(playerName, "--", StringComparison.Ordinal)
+            ? _apiController.UID : playerName;
     }
 
     private static string HeaderStatusLine(SpheneProfileData profile, out Vector4 color)
