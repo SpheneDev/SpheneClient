@@ -18,7 +18,9 @@ SpheneUI
 ├─ Colors       theme-resolved semantic colors (TextMuted, FrameBg, Accent…)
 ├─ Metrics      control metrics (ControlHeight, ControlRadius, SwatchSize…)
 ├─ Text         Plain/Wrapped/Colored/ColoredWrapped/Muted/Big/Bullet/Outlined/
-│               PageHeader/SectionHeader/Header/GroupedCentered
+│               PageHeader/SectionHeader/Header/GroupedCentered/
+│               PageIntro (one-line muted blurb: ellipsized, full text on
+│               hover — for pages whose title lives in the breadcrumb)
 ├─ Icons        Icon/BoolIcon/Button/TextButton/ActionButton + sizing
 ├─ Controls     Toggle/ToggleChip/Checkbox/SmallButton/Slider*/Drag*/Input*/
 │               Combo/LabeledCombo/Button/HeroButton/IconButton/DialogButtons/
@@ -30,7 +32,8 @@ SpheneUI
 │               NavRailDivider/EndNavRail/BeginNavContent[scrollable]/
 │               EndNavContent)/
 │               VerticalTabNav/Separator/SectionSeparator/DistanceSeparator/
-│               Section/Callout(+title)/Group/VerticalSpace/IndentScope/Tree/
+│               Section/Callout(+title)/Group/VerticalSpace/Space/
+│               HorizontalSpace/IndentScope/Tree/
 │               ScaledNextItemWidth/ScaledSameLine/WindowContentWidth/
 │               CenterNextWindow/SetScaledWindowSize
 ├─ Chrome       TitleBar/Collapse/WindowBlur/ThemedWindowBlur
@@ -42,6 +45,99 @@ SpheneUI
 
 `SpheneUI.AttachTooltip` sits on the facade root and handles `--SEP--`
 (`SpheneUI.TooltipSeparator`) segment splitting.
+
+## Buttons
+
+Every push button renders through `Controls.SegCore` — the shared segmented
+renderer in the nav-menu language: a tonal shape (corner radius capped at
+25 % of the button height so short buttons stay button-shaped, never full
+pills) with a **square icon zone** on the left separated by a hairline
+seam, plus a quiet `Colors.Border` hairline (α 0.30 idle → 0.50 hover) for
+edge definition. Idle is a
+quiet gray (white α 0.075 pill / α 0.13 zone — a step brighter than the
+surrounding band so buttons read as clickable), hover lifts toward the
+accent (0.13 / 0.27), press sits at 0.17 / 0.38, and an optional `active`
+state lights the zone in solid accent with a contrast glyph — the same
+color logic as `Layout.NavRailSegmentItem`, just without a mandatory
+active indicator. Under the tint layers every button gets an opaque
+`Colors.FrameBg` scrim (≥ α 0.66) so translucent fills stay legible over
+banner art and imagery — the frosted look without a per-rect blur pass.
+
+Three modes from one core: icon + label → segmented button, icon only →
+square zone button, label only → zone with a subdued default chevron
+(`ChevronRight` at 55 % alpha) so every labeled button is recognizably a
+button. Public surface: `Controls.SegmentButton` is the canonical helper;
+`Controls.Button` (`danger:` maps to `Colors.Danger` accent), `SmallButton`,
+`IconButton`, `DialogButtons`, `Icons.Button`, `Icons.TextButton` and
+`Icons.ActionButton` all delegate to it — so every button in the app shares
+the look. `Icons.TextButtonWidth` matches `SegAutoWidth` outside compact
+scopes; explicit `Vector2` sizes keep working but include the zone width —
+when in doubt pass `new Vector2(0, height)` for auto width + fixed height.
+
+Scope gates: inside `ThemeScopeTracker` compact scopes and for buttons with
+a `styleKey` theme override (or while the style picker is enabled) the
+legacy themed path still runs, so CompactUI keeps its look and the
+button-style customizer keeps working. Value controls (inputs, sliders,
+checkboxes, toggles, selectables) keep the `ControlRadius` frame language
+via `PushValueControlStyle` instead.
+
+### Actionable landing rows
+
+When an entry point *leads somewhere* rather than triggering an action
+(opening a page, picking an item, expanding a list), use a full-width
+action row instead of a button: same pill + icon zone + seam language,
+plus a right-aligned muted meta string, a trailing `ChevronRight`, and an
+optional second muted description line. Reference: `HubRow` in
+`SpheneHubUi` (Syncshells landing — join/create rows, shell list rows,
+area-syncshell browse toggle). Keep descriptions to one clipped line and
+separate stacked rows with `Spacing.Inline`.
+
+Sibling entry points that sit side-by-side use the half-width variant
+`HubTile` (same pill + icon zone + seam, single title line, trailing
+`InfoCircle` glyph) — the explanatory text moves to the caller-attached
+tooltip via `AttachTooltip` so two tiles share one row. Reference:
+join/create tiles on the Syncshells landing page.
+
+### Page-level save/apply actions
+
+Save/Apply/Reset buttons that commit page state must stay reachable
+without scrolling — never at the bottom of a scrollable page. Dock them
+top-right beside the page's help/intro row (right-aligned via
+`GetContentRegionAvail().X - totalButtonWidth`, `SameLine`-chained), or
+into a pinned/sticky header row when the page already has one
+(`DrawStylePage` hosts Save/Reset on its pinned tab strip).
+Dirty state gating an Apply button must persist across frames in an
+instance field — a per-frame local makes the button exist only during
+the frame the control changed and is effectively unreachable
+(reference: `SyncshellAdminUI._areaSettingsDirty`).
+
+## Spacing rules
+
+All vertical rhythm and horizontal insets come from the `Spacing` token
+grid (`1/2/4/8/10/12/16/20/24/32`) — never `ScaledDummy`/`ImGui.Dummy`/
+`ImGui.Spacing` literals outside `UI/Design`. The public API on
+`SpheneUI.Layout`:
+
+| Helper | Shape | Use |
+|---|---|---|
+| `VerticalSpace(Space)` | `0 × n` | row/group breaks |
+| `VerticalSpace()` | themed `ItemSpacing.Y` | minimal same-group gap |
+| `Space(Space)` | `n × n` | block gaps that also reserve X |
+| `Space(Space, Space)` | `x × y` | asymmetric dummy |
+| `HorizontalSpace(Space)` | `n × 0` | pure horizontal spacer |
+
+Semantic tokens: `Row` (8) between consecutive controls, `Section` (12)
+between logical groups and **before a primary action row**,
+`CardGap`/`CardPadding`/`PagePadding` for surfaces, `Inline` (4) for
+same-row neighbors. The rules that keep pages uniform:
+
+- A button or action row that follows text or controls gets at least
+  `VerticalSpace(Spacing.Row)`; a primary/section-ending action gets
+  `Spacing.Section`.
+- Consecutive stacked buttons (e.g. context-menu items) stay tight — no
+  gap between sibling buttons.
+- Table cells and `SameLine` rows never get `VerticalSpace` inside.
+- `Spacing.Custom` exists only as a lint-flagged escape hatch.
 
 ## Initialization
 
@@ -89,20 +185,32 @@ Per-window customization via `protected override` properties:
 - `ChromeTitle` — defaults to `WindowName` minus the `##id` suffix.
 - `ChromeIcon`, `ChromeTrailingText`, `ChromeRightButtons` — the default
   right button is a Close `Times` button honoring `ShowCloseButton`.
-  `SettingsUi` overrides these for the Discord/Ko-fi buttons + version text;
-  `SpheneHubUi` uses them as a status/notification strip (connection text)
-  and moves window actions into the header band (bell + burger menu).
+  `SettingsUi` overrides these for the Discord/Ko-fi buttons + version text.
 - `ChromeIconTexture` — optional `IDalamudTextureWrap` drawn instead of
-  `ChromeIcon` when set (cover-fit, rounded). `SpheneHubUi` uses it to put
-  the Sphene logo in the title bar.
+  `ChromeIcon` when set (cover-fit, rounded).
 - `TitleBarButton.BadgeCount` renders a red counter badge on the button's
   top-right corner (0 = hidden, capped at "9+") — the design-system
   notification indicator for title bar buttons. `SpheneHubUi` reuses the
   drawer (`Chrome.DrawTitleBarButtonBadge`) to badge in-band buttons.
+- `ChromeHasTitleBar` — false lets the content own the window top: the
+  chrome then paints only the themed surface + border ring and the
+  window's own header band acts as the title bar. `SpheneHubUi` is the
+  reference — its band carries drag space between the widgets plus the
+  fold and close buttons itself.
+- `DrawCollapsedDuringFold` + `DrawCollapsedContent` — replaces
+  `DrawInternal` for the entire fold animation instead of the alpha-fade
+  default; only sensible with `ChromeHasTitleBar == false`. The hub draws
+  a "status strip" (profile card + fold/close buttons) while folded.
+- `ChromeCollapsedHeight`/`ChromeCollapsedWidth` — folded window size in
+  unscaled units; `Width` > 0 shrinks the window horizontally alongside
+  the fold. The hub computes it from the rail width plus its strip
+  buttons so the status card is never clipped.
+- `Chrome.ResetFold` runs in `OnOpen` for every collapsible chrome window —
+  a window closed while collapsed always reopens maximized.
 
 `SpheneBrandIcons.SpheneLogo()` returns the embedded Sphene logo texture
 (`images/icon.png`) — colored artwork, do not tint; used by `SpheneHubUi`
-for the title-bar icon and the hero banner watermark.
+for the hero banner watermark.
 
 Windows must NOT draw their own `Chrome.TitleBar` when `UseSpheneChrome`
 applies — the base does it. Windows overriding `PreDraw`/`PostDraw` must
@@ -124,6 +232,23 @@ public so generic windows keep going through `Chrome.TitleBar`.
   helpers. Always open popup windows through `Popups.BeginStyled` /
   `BeginModalStyled` / `BeginContextStyled` + `EndStyled` so the popup frame
   itself is themed; pushing a scope *after* `BeginPopup*` only styles content.
+
+## Cards and section panels
+
+Grouping surfaces are **borderless tonal panels**, not outlined boxes — the
+same language as nav rails and the header band:
+
+- `Layout.SectionCard` paints a tonal panel in the rail-band color family
+  (`NavRailBandColor`) with `AccentCardRounding` corners. Group identity
+  lives on a hairline **accent seam along the top edge** (ends fading out)
+  plus the optional accent title — no outline border, no pulses.
+- `Layout.AccentCard` stays the prominent/hero card: `AccentCardTint` body,
+  optional `Chrome.AccentCardBackdrop` shimmer, `topBleed` for full-bleed
+  media — and a **static** accent hairline edge (α 0.38) instead of the old
+  pulsing border.
+- Animated effects live on `Profile.RowFx`/`ProfileRowFx` layers (ListRows,
+  hero cards), not on container outlines. Keep effects inside surfaces; do
+  not reintroduce outlined group boxes.
 
 ## Content bounds
 
@@ -165,9 +290,58 @@ SpheneUI.Layout.EndNavContent();
 ```
 
 `NavRailItem` paints the Settings-style pill: accent fill, left edge bar and
-top sheen when active. `SyncshellAdminUI` is the reference implementation.
-The content scroll area starts right of the rail; rail and content scroll
-independently with their own fade hints.
+top sheen when active. Pass `icon:` to switch the item to icon mode — a
+**square** button (height = rail content width) rendered as the standalone
+version of `NavRailSegmentItem`'s icon zone: gray rounded square idle with
+the accent-colored glyph, accent tint on hover, solid accent with a contrast
+glyph when active — no left edge bar or sheen. The label shows as a tooltip,
+so the rail stays narrow; size it with the `NavRailWidth` overload taking
+`(FontAwesomeIcon Icon, string Label)` tuples (label is used for the
+tooltip). Icon mode is intended for tight sub-rails where labels would not
+fit.
+
+`NavRailSegmentItem(label, icon, active, accent, special?)` is the labeled
+variant for primary rails: a square icon zone on the left separated from the
+label by a thin seam. Idle, the zone is a shade lighter than the pill and the
+glyph carries the accent color; when active, only the zone lights up in solid
+accent (glyph flips to contrast color) while the label area picks up a faint
+accent tint. `special` tints the idle label in the accent color. Size the
+rail with `NavRailSegmentedWidth(items)` — `SpheneHubUi`, the embedded
+`SyncshellAdminUI` rail and the `SettingsUi` sidebar are the reference
+implementations.
+
+All pills keep a visible margin to the rail edges: the nav child itself is
+inset by `NavRailPadX` (10px scaled, public token) on both sides — enforced
+by the child rect, not `WindowPadding` — and all `NavRailWidth`/
+`NavRailSegmentedWidth` formulas include that inset. Custom rails (like the
+`SettingsUi` sidebar with its pinned category headers) should replicate the
+same inset geometry instead of relying on child `WindowPadding`. The content
+scroll area starts right of the rail; rail and content scroll independently
+with their own fade hints.
+
+### Hub-hosted settings
+
+The Sphene Hub hosts `SettingsUi` embedded: the rail slot swaps between the
+hub nav and the settings nav with a vertical pan (hub items slide up and
+out, the settings list slides in from below, attached at its bottom edge —
+see `SpheneHubUi.DrawInternal`). Shared pieces:
+
+- `SettingsUi.EmbeddedNavItems` — the static nav list; the hub lerps the
+  rail width between `NavRailSegmentedWidth(hub)` and `(settings)` with the
+  pan animation (`SpheneHubUi.CurrentRailWidth`), so hub pages keep their
+  narrow rail and the band never leaves a dead strip inside the content
+  edge.
+- `SettingsUi.DrawEmbeddedRail()` — settings items + category labels drawn
+  in-flow (no pinned band) into the hub rail child, plus a "Pop Out" item
+  that opens the standalone `SettingsUi` window.
+- `SettingsUi.DrawEmbeddedContent()` — the active settings page rendered
+  inside the hub's padded nav content child (no own scroll wrapper),
+  including the CompactUI theme-stick and the save/backup modals.
+
+Both surfaces share `_activeSettingsPage`, so embedded and standalone stay
+in sync. The standalone window remains the popout path (CompactUI toggle,
+commands, the burger menu's "Pop out Settings" and the rail's "Pop Out"
+item).
 
 ### Full-width header band (seamless rail transition)
 
@@ -193,12 +367,35 @@ zone divider at the rail border.
   outer scroll area mispositions its band. The child uses zero
   `WindowPadding`: embedded layouts provide their own rail + scroll insets,
   so their content lands on the exact same edges as scrollable pages.
+- Scrollable nav content is a **content wrapper**: it carries
+  `WindowPadding = PagePadding` (16) on all sides, so pages never add their
+  own top/side margins — they draw flush from the content origin. The
+  scroll fades still render across the full child bounds (`EndScrollArea`
+  draws them on the overlay child, not the padded content region), so the
+  padding never narrows the fades. `padded: false` opts out for pages with
+  edge-to-edge chrome of their own. Implementation detail: borderless
+  children ignore `WindowPadding` by default — `BeginScrollArea` sets
+  `ImGuiWindowFlags.AlwaysUseWindowPadding` whenever `contentPadding` is
+  passed, otherwise the push is silently a no-op (that is also why the
+  `noPadding` path uses `Indent` instead of a style var).
+- Rail hosts are **fixed surfaces**: `BeginNavRail` registers the host
+  window's rect and `EndScrollArea` never chains wheel input into a
+  registered host (programmatic `SetScrollY` would bypass `NoScrollWithMouse`
+  and slide the whole edge-to-edge layout out of the window). The rail
+  scrolls internally only when its own items overflow the band.
 - The nav-content child spans to the **parent window's right edge** (the
   content region ends `WindowPadding` short of it). Combined with
   `ScrollAreaRightBound` this makes the right card margin equal the left
   inset: `windowRight − 1px − ScrollAreaContentInset`. Never size the child
   by raw `GetContentRegionAvail` — cards would sit one padding too narrow
   on the right.
+- `BeginNavContent` paints an **opaque backing** under the whole content
+  region: the surface gradient sampled at the child's top/bottom edge,
+  alpha forced to 1. Without it the page-padding inset would leave a
+  translucent strip along the right and bottom frame edges where the
+  window blur shows through. The fades blend into the same tone (a
+  mid-sample of the backing), so the scroll lip reads as part of the
+  surface rather than a gray veil.
 - Scrollable and non-scrollable nav content nest correctly (mode is tracked
   per open rail).
 
@@ -267,8 +464,10 @@ use `Controls.Checkbox` (compact themed box, label flows inline) there.
   wrap is ready, never blocks the UI thread (no `.Result`). Evict via
   `Media.Evict(key)`.
 - `Media.Image(wrap, size, fit, rounding, border)` — inline image;
-  `ImageInRect(drawList, …)` for draw-list placement; `Sprite(handle, uv0,
-  uv1)` for atlas regions.
+  `ImageInRect(drawList, …, rounding, corners)` for draw-list placement —
+  pass `ImDrawFlags` corner flags to round only the edges that sit on a
+  window/child silhouette (e.g. `RoundCornersRight` for a backdrop that
+  hugs the frame); `Sprite(handle, uv0, uv1)` for atlas regions.
 - `Media.Avatar(wrap, size)` — profile images with rounding/badge support.
 - `Media.Placeholder(size)` / `PlaceholderInRect` — empty-state tile while
   textures resolve.
@@ -490,9 +689,9 @@ owner's** chosen effects — not the viewer's settings:
   channel so they sit above the card background but beneath the content.
   `Profile.Hero` passes the theme's `CardHover`/`CardIdle`, so the real
   card, the style preview and every other hero render identical effects
-  from the same code path. The card's built-in ambient animation (sheen
-  band + border pulse, `Chrome.AccentCardBackdrop` + the border alpha
-  pulse in `AccentCard`) is gated by the theme's `cardShimmer` flag —
+  from the same code path. The card's built-in ambient animation (the
+  `Chrome.AccentCardBackdrop` sheen band) is gated by the theme's
+  `cardShimmer` flag —
   Hero forwards it as `animatedBackdrop`, so a card with shimmer off and
   no picked effects is fully still. Defaults to on; only the profile
   card honors it, other AccentCards keep their chrome.

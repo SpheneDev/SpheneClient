@@ -154,7 +154,7 @@ public static class NotificationsOptionBlock
     public static void DrawSpheneDefaultSoundModeOption(SpheneConfigService configService, UiSharedService uiShared, SpheneMediator mediator, string blockId = "SpheneDefaultSoundMode")
     {
         SpheneUI.Controls.HelpText("Notification sounds can use Game System SCD sounds, Sphene Default built-in WAV sounds, or Custom Sound files. Each notification type has a preset default.");
-        ImGui.Spacing();
+        SpheneUI.Layout.VerticalSpace();
 
         void DrawNotificationSection(string label, NotificationSoundConfig soundConfig, string defaultText, string sectionId)
         {

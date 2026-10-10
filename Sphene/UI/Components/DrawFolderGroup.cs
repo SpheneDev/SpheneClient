@@ -284,6 +284,7 @@ public class DrawFolderGroup : DrawFolderBase
         SpheneUI.Layout.Separator();
 
         SpheneUI.Text.Plain("General Syncshell Actions");
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.Row);
         if (SpheneUI.Icons.ActionButton(FontAwesomeIcon.Copy, "Copy ID", menuWidth, ButtonStyleKeys.ContextMenu_Item))
         {
             ImGui.CloseCurrentPopup();
@@ -379,6 +380,7 @@ public class DrawFolderGroup : DrawFolderBase
         {
             SpheneUI.Layout.Separator();
             SpheneUI.Text.Plain("Syncshell Admin Functions");
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.Row);
             if (SpheneUI.Icons.ActionButton(FontAwesomeIcon.Cog, "Open Admin Panel", menuWidth, ButtonStyleKeys.ContextMenu_Item))
             {
                 ImGui.CloseCurrentPopup();
@@ -467,7 +469,7 @@ public class DrawFolderGroup : DrawFolderBase
                 ImGui.BeginTooltip();
 
                 SpheneUI.Text.Plain("Syncshell Permissions");
-                ImGuiHelpers.ScaledDummy(2f);
+                SpheneUI.Layout.Space(SpheneUI.Spacing.X2);
 
                 SpheneUI.Icons.BoolIcon(!individualSoundsDisabled, inline: false);
                 ImGui.SameLine(40 * ImGuiHelpers.GlobalScale);
@@ -486,9 +488,9 @@ public class DrawFolderGroup : DrawFolderBase
 
                 ImGui.Separator();
 
-                ImGuiHelpers.ScaledDummy(2f);
+                SpheneUI.Layout.Space(SpheneUI.Spacing.X2);
                 SpheneUI.Text.Plain("Suggested Permissions");
-                ImGuiHelpers.ScaledDummy(2f);
+                SpheneUI.Layout.Space(SpheneUI.Spacing.X2);
 
                 SpheneUI.Icons.BoolIcon(!_groupFullInfoDto.GroupPermissions.IsPreferDisableSounds(), inline: false);
                 ImGui.SameLine(40 * ImGuiHelpers.GlobalScale);

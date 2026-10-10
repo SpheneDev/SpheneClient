@@ -90,7 +90,7 @@ public static class MarkdownRenderer
         
         ImGui.SetWindowFontScale(1.0f);
         // Use smaller spacing after headers instead of full Spacing
-        ImGuiHelpers.ScaledDummy(0.5f);
+        SpheneUI.Layout.Space(SpheneUI.Spacing.Hairline);
     }
 
     private static List<TextSegment> ParseInlineFormatting(string text)

@@ -76,6 +76,7 @@ public class PopupHandler : WindowMediatorSubscriberBase
             if (_currentHandler.ShowClose)
             {
                 SpheneUI.Layout.Separator();
+                SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.Row);
                 if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Times, "Close", null, false, ButtonStyleKeys.Popup_Close))
                 {
                     ImGui.CloseCurrentPopup();

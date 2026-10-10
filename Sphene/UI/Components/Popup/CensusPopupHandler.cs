@@ -27,7 +27,7 @@ public class CensusPopupHandler : IPopupHandler
             start = ImGui.GetCursorPosY() - ImGui.CalcTextSize("Sphene Census Data").Y;
             SpheneUI.Text.Wrapped("Sphene Census Participation");
         }
-        ImGuiHelpers.ScaledDummy(5f);
+        SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
         SpheneUI.Text.Wrapped("If you are seeing this popup you are updating from a Sphene version that did not collect census data. Please read the following carefully.");
         SpheneUI.Layout.Separator();
         SpheneUI.Text.Wrapped("Sphene Census is a data collecting service that can be used for statistical purposes. " +
@@ -42,14 +42,14 @@ public class CensusPopupHandler : IPopupHandler
         SpheneUI.Text.Wrapped("This setting can be changed anytime in the Sphene Settings.");
         var width = ImGui.GetWindowContentRegionMax().X - ImGui.GetWindowContentRegionMin().X;
         var buttonSize = ImGuiHelpers.GetButtonSize("I consent to send my census data");
-        ImGuiHelpers.ScaledDummy(5f);
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.Row);
         if (SpheneUI.Controls.Button("I consent to send my census data", new Vector2(width, buttonSize.Y * 2.5f)))
         {
             _serverConfigurationManager.SendCensusData = true;
             _serverConfigurationManager.ShownCensusPopup = true;
             ImGui.CloseCurrentPopup();
         }
-        ImGuiHelpers.ScaledDummy(1f);
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.Row);
         if (SpheneUI.Controls.Button("I do not consent to send my census data", new Vector2(width, buttonSize.Y)))
         {
             _serverConfigurationManager.SendCensusData = false;

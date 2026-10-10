@@ -37,6 +37,10 @@ public static partial class SpheneUI
         /// <summary>Natural width of an <see cref="TextButton"/> for the given content.</summary>
         public static float TextButtonWidth(FontAwesomeIcon icon, string text)
         {
+            if (!SpheneUI.ThemeScopeTracker.InCompactScope)
+            {
+                return Controls.SegAutoWidth(text, icon, ImGui.GetFrameHeight());
+            }
             Vector2 iconSize;
             using (PushIconFont())
             {
@@ -94,27 +98,27 @@ public static partial class SpheneUI
         /// (size deltas, colors, icon offset) from the theme configuration.
         /// </summary>
         public static bool Button(FontAwesomeIcon icon, float? height = null, float? iconScale = null,
-            float? iconPixelSize = null, float? width = null, string? styleKey = null)
+            float? iconPixelSize = null, float? width = null, string? styleKey = null,
+            bool enabled = true)
         {
+            // SegCore dims its draw-list colors explicitly; the legacy frame
+            // path relies on BeginDisabled's style-alpha for its widgets.
+            using var disabledScope = ImRaii.Disabled(!enabled);
             var glyph = icon.ToIconString();
+            var fontScale = iconPixelSize.HasValue
+                ? MathF.Max(1f, MathF.Round(iconPixelSize.Value / ImGui.GetFontSize()))
+                : (iconScale ?? 1f);
 
             ImGui.PushID(glyph);
             Vector2 glyphSize;
             using (PushIconFont())
             {
-                var scale = iconPixelSize.HasValue
-                    ? iconPixelSize.Value / ImGui.GetFontSize()
-                    : (iconScale ?? 1f);
-                if (iconPixelSize.HasValue)
+                if (MathF.Abs(fontScale - 1f) > 0.0001f)
                 {
-                    scale = MathF.Max(1f, MathF.Round(scale));
-                }
-                if (MathF.Abs(scale - 1f) > 0.0001f)
-                {
-                    ImGui.SetWindowFontScale(scale);
+                    ImGui.SetWindowFontScale(fontScale);
                 }
                 glyphSize = ImGui.CalcTextSize(glyph);
-                if (MathF.Abs(scale - 1f) > 0.0001f)
+                if (MathF.Abs(fontScale - 1f) > 0.0001f)
                 {
                     ImGui.SetWindowFontScale(1f);
                 }
@@ -132,6 +136,17 @@ public static partial class SpheneUI
             {
                 theme.ButtonStyles.TryGetValue(styleKey, out overrideStyle);
             }
+            // Outside compact scopes — and when no style override or the
+            // style picker applies — icon buttons render through the shared
+            // segmented renderer (the zone look shared with the nav rails).
+            if (!SpheneUI.ThemeScopeTracker.InCompactScope && overrideStyle == null
+                && (string.IsNullOrEmpty(styleKey) || !ButtonStyleManagerUI.IsPickerEnabled))
+            {
+                ImGui.PopID();
+                return Controls.SegCore(glyph, null, icon,
+                    new Vector2(buttonWidth, buttonHeight), Colors.Accent,
+                    enabled: enabled, iconScale: fontScale);
+            }
             if (overrideStyle != null)
             {
                 buttonWidth += overrideStyle.WidthDelta;
@@ -147,22 +162,15 @@ public static partial class SpheneUI
             }
             using (PushIconFont())
             {
-                var scale = iconPixelSize.HasValue
-                    ? iconPixelSize.Value / ImGui.GetFontSize()
-                    : (iconScale ?? 1f);
-                if (iconPixelSize.HasValue)
+                if (MathF.Abs(fontScale - 1f) > 0.0001f)
                 {
-                    scale = MathF.Max(1f, MathF.Round(scale));
-                }
-                if (MathF.Abs(scale - 1f) > 0.0001f)
-                {
-                    ImGui.SetWindowFontScale(scale);
+                    ImGui.SetWindowFontScale(fontScale);
                 }
                 var iconColorU32 = overrideStyle?.Icon.HasValue == true
                     ? ImGui.GetColorU32(overrideStyle.Icon.Value)
                     : ImGui.GetColorU32(ImGuiCol.Text);
                 drawList.AddText(glyphPos, iconColorU32, glyph);
-                if (MathF.Abs(scale - 1f) > 0.0001f)
+                if (MathF.Abs(fontScale - 1f) > 0.0001f)
                 {
                     ImGui.SetWindowFontScale(1f);
                 }
@@ -201,8 +209,26 @@ public static partial class SpheneUI
             Vector4? defaultColor = null, float? width = null,
             Vector4? hoveredColor = null, Vector4? activeColor = null, string? styleKey = null)
         {
+            // Outside compact scopes, icon + label buttons render through the
+            // shared segmented renderer (icon zone + seam + label).
+            if (!SpheneUI.ThemeScopeTracker.InCompactScope)
+            {
+                ButtonStyleOverride? routeOverride = null;
+                if (!string.IsNullOrEmpty(styleKey))
+                {
+                    Theme.Current.ButtonStyles.TryGetValue(styleKey, out routeOverride);
+                }
+                if (routeOverride == null
+                    && (string.IsNullOrEmpty(styleKey) || !ButtonStyleManagerUI.IsPickerEnabled))
+                {
+                    return Controls.SegCore(text, text, icon,
+                        width.HasValue ? new Vector2(width.Value, 0f) : null, Colors.Accent);
+                }
+            }
             var pushedColors = 0;
             var pushedVars = 0;
+            ImGui.PushStyleVar(ImGuiStyleVar.FrameRounding, Metrics.ButtonRadius); pushedVars++;
+            ImGui.PushStyleVar(ImGuiStyleVar.FrameBorderSize, Metrics.ButtonBorderSize); pushedVars++;
             if (defaultColor.HasValue)
             {
                 ImGui.PushStyleColor(ImGuiCol.Button, defaultColor.Value);
@@ -299,6 +325,7 @@ public static partial class SpheneUI
             }
             ImGui.PushStyleColor(ImGuiCol.Border, overrideStyle?.Border ?? theme.Border); pushedColors++;
             ImGui.PushStyleVar(ImGuiStyleVar.FrameBorderSize, overrideStyle?.BorderSize ?? 0f); pushedVars++;
+            ImGui.PushStyleVar(ImGuiStyleVar.FrameRounding, Metrics.ButtonRadius); pushedVars++;
             var result = ImGui.Button(string.Empty, new Vector2(buttonWidth, buttonHeight));
             if (pushedVars > 0)
             {

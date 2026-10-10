@@ -257,6 +257,19 @@ public static partial class SpheneUI
             return new MultiPopScope(6, 8);
         }
 
+        /// <summary>
+        /// Pushes the shared push-button styling: the header-button corner
+        /// radius and frame border so every button — menus, pages, settings —
+        /// matches the title-bar look. Colors stay ambient (the active
+        /// theme's Button* slots), matching the header buttons.
+        /// </summary>
+        public static IDisposable PushButtonStyle()
+        {
+            ImGui.PushStyleVar(ImGuiStyleVar.FrameRounding, Metrics.ButtonRadius);
+            ImGui.PushStyleVar(ImGuiStyleVar.FrameBorderSize, Metrics.ButtonBorderSize);
+            return new MultiPopScope(2, 0);
+        }
+
         private static readonly ConcurrentDictionary<uint, float> _toggleAnimStates = new();
         private const float ToggleAnimDuration = 0.15f;
 
@@ -297,8 +310,11 @@ public static partial class SpheneUI
         /// column is reserved so a following <see cref="HelpText"/> marker still
         /// fits on the same line. Returns true when the value changed.
         /// </summary>
+        /// <param name="icon">Leading icon drawn inside the row, in the label color.</param>
+        /// <param name="labelColor">Optional override for the label/icon text color.</param>
         public static bool Toggle(string label, ref bool value, bool indented = false,
-            float trailingWidth = 0f, string? menuPopupId = null)
+            float trailingWidth = 0f, string? menuPopupId = null,
+            FontAwesomeIcon? icon = null, Vector4? labelColor = null)
         {
             var idSplit = label.IndexOf("##", StringComparison.Ordinal);
             var text = idSplit < 0 ? label : label[..idSplit];
@@ -378,12 +394,21 @@ public static partial class SpheneUI
 
             SwitchVisual(drawList, trackMin, trackMax, t, alpha);
 
-            if (text.Length > 0)
+            if (text.Length > 0 || icon.HasValue)
             {
                 ImGui.SetCursorScreenPos(cursor);
                 ImGui.AlignTextToFramePadding();
-                Text.Colored(indented ? "  " + text : text,
-                    indented ? ImGuiColors.DalamudGrey3 : ImGuiColors.DalamudGrey);
+                var textColor = labelColor
+                    ?? (indented ? ImGuiColors.DalamudGrey3 : ImGuiColors.DalamudGrey);
+                if (icon.HasValue)
+                {
+                    Icons.Icon(icon.Value, textColor);
+                    ImGui.SameLine();
+                }
+                if (text.Length > 0)
+                {
+                    Text.Colored(indented ? "  " + text : text, textColor);
+                }
             }
 
             Lint.CheckBounds(label);
@@ -829,34 +854,232 @@ public static partial class SpheneUI
             return changed;
         }
 
+        /// <summary>Gap between the icon zone's seam and the label.</summary>
+        private const float SegTextPadX = 10f;
+
+        /// <summary>Trailing padding after the label.</summary>
+        private const float SegTrailPadX = 12f;
+
+        /// <summary>Idle pill fill (white alpha) — deliberately brighter than
+        /// the surrounding band so push buttons read as clickable.</summary>
+        private const float SegPillIdle = 0.075f;
+        private const float SegPillHover = 0.13f;
+        private const float SegPillHeld = 0.17f;
+        private const float SegPillActive = 0.18f;
+
+        /// <summary>Icon zone fill — always a step brighter than the pill.</summary>
+        private const float SegZoneIdle = 0.13f;
+        private const float SegZoneHover = 0.27f;
+        private const float SegZoneHeld = 0.38f;
+        private const float SegZoneActive = 0.92f;
+
+        /// <summary>Hairline seam between zone and label.</summary>
+        private const float SegSeamIdle = 0.13f;
+        private const float SegSeamActive = 0.55f;
+
+        /// <summary>Opaque theme base drawn under the tint layers so busy
+        /// backdrops (banner art, images) cannot bleed through — the frosted
+        /// look without paying for a per-rect blur pass.</summary>
+        private const float SegScrimAlpha = 0.66f;
+
+        /// <summary>How far the scrim is pulled toward near-black — keeps
+        /// button bodies clearly darker than the band they sit on.</summary>
+        private const float SegScrimDarken = 0.5f;
+
+        /// <summary>Hairline around the pill — idle keeps it quiet, states
+        /// brighten it for definition without an outlined-box look.</summary>
+        private const float SegBorderIdle = 0.30f;
+        private const float SegBorderHover = 0.50f;
+        private const float SegBorderHeld = 0.58f;
+        private const float SegBorderActive = 0.55f;
+
+        /// <summary>Max corner radius relative to button height — keeps
+        /// short buttons reading as buttons instead of full pills.</summary>
+        private const float SegRadiusFactor = 0.25f;
+
         /// <summary>
-        /// Design-system push button: value-control rounding plus a shared
-        /// hover/active treatment. <paramref name="danger"/> tints the button
-        /// red for destructive actions. Use instead of raw ImGui.Button.
+        /// Auto-fit width for the segmented button: square zone (or square
+        /// button for icon-only) plus label padding, matching
+        /// <see cref="SegCore"/>'s draw math.
         /// </summary>
-        public static bool Button(string label, Vector2 size = default, bool danger = false)
+        internal static float SegAutoWidth(string? label, FontAwesomeIcon? icon, float height)
         {
-            using var style = PushValueControlStyle();
-            using var tint = ImRaii.PushColor(ImGuiCol.Button,
-                    Colors.Danger with { W = 0.55f }, danger)
-                .Push(ImGuiCol.ButtonHovered, Colors.Danger with { W = 0.8f }, danger)
-                .Push(ImGuiCol.ButtonActive, Colors.Danger with { W = 0.95f }, danger);
-            var clicked = ImGui.Button(label, size);
-            Lint.CheckBounds(label);
-            return clicked;
+            var scale = SpheneUI.Scale;
+            var display = StripLabelId(label);
+            if (string.IsNullOrEmpty(display))
+            {
+                return icon.HasValue ? height : SegTextPadX * 2f * scale;
+            }
+            var textW = ImGui.CalcTextSize(display).X;
+            return height + SegTextPadX * scale + textW + SegTrailPadX * scale;
+        }
+
+        /// <summary>Drops the ImGui "##id" suffix so only the visible label
+        /// part is measured and drawn.</summary>
+        private static string? StripLabelId(string? label)
+        {
+            if (label == null)
+            {
+                return null;
+            }
+            var idx = label.IndexOf("##", StringComparison.Ordinal);
+            return idx >= 0 ? label[..idx] : label;
         }
 
         /// <summary>
-        /// Compact text button (ImGui.SmallButton footprint) for dense rows and
-        /// inline actions — same fill language as <see cref="Button"/>.
+        /// Shared renderer for the segmented button family — the same visual
+        /// language as <c>Layout.NavRailSegmentItem</c>: a tonal pill with a
+        /// square icon zone on the left separated by a hairline seam.
+        /// Modes: icon + label → segmented button, icon only → square zone
+        /// button, label only → zone with a subdued default chevron. Idle is
+        /// a quiet gray,
+        /// hover lifts toward the accent, <paramref name="active"/> is an
+        /// optional pressed/toggled look (content buttons usually stay off).
+        /// </summary>
+        internal static bool SegCore(string id, string? label, FontAwesomeIcon? icon,
+            Vector2? size, Vector4 accent, bool active = false, bool enabled = true,
+            float iconScale = 1f)
+        {
+            var scale = SpheneUI.Scale;
+            var display = StripLabelId(label);
+            var hasLabel = !string.IsNullOrEmpty(display);
+            // Every labeled button carries a zone — the semantic icon when
+            // given, otherwise a subdued default chevron marking it as an
+            // actionable button.
+            var glyph = icon?.ToIconString()
+                ?? (hasLabel ? FontAwesomeIcon.ChevronRight.ToIconString() : null);
+            var hasZone = glyph != null;
+            var isDefaultGlyph = !icon.HasValue && hasLabel;
+            var h = size?.Y is > 0f ? size.Value.Y : ImGui.GetFrameHeight();
+            var w = size?.X is > 0f or < 0f ? size.Value.X : SegAutoWidth(display, icon, h);
+            // Fixed FrameRounding turns short buttons into pills — cap it
+            // relative to the height so proportions stay button-like at
+            // any control size.
+            var radius = MathF.Min(Metrics.ButtonRadius, h * SegRadiusFactor);
+
+            ImGui.PushID(id);
+            bool clicked;
+            using (ImRaii.Disabled(!enabled))
+            {
+                clicked = ImGui.InvisibleButton("##segbtn", new Vector2(w, h));
+            }
+            var hovered = enabled && ImGui.IsItemHovered();
+            var held = enabled && ImGui.IsItemActive();
+            var min = ImGui.GetItemRectMin();
+            var max = ImGui.GetItemRectMax();
+            ImGui.PopID();
+
+            var drawList = ImGui.GetWindowDrawList();
+            var dim = enabled ? 1f : 0.45f;
+            var scrim = ColorUtils.LerpColor(Colors.FrameBg,
+                new Vector4(0.02f, 0.02f, 0.035f, 1f), SegScrimDarken);
+            scrim.W = MathF.Max(scrim.W, SegScrimAlpha) * dim;
+            drawList.AddRectFilled(min, max, ColorUtils.ToU32(scrim), radius);
+            var pillFill = active ? ColorUtils.WithAlpha(accent, SegPillActive)
+                : held ? ColorUtils.WithAlpha(accent, SegPillHeld)
+                : hovered ? ColorUtils.WithAlpha(accent, SegPillHover)
+                : ColorUtils.WithAlpha(Vector4.One, SegPillIdle);
+            pillFill.W *= dim;
+            drawList.AddRectFilled(min, max, ColorUtils.ToU32(pillFill), radius);
+
+            var zoneW = hasZone && hasLabel ? h : 0f;
+            if (hasZone)
+            {
+                var zoneMax = hasLabel ? new Vector2(min.X + zoneW, max.Y) : max;
+                var zoneFill = active ? ColorUtils.WithAlpha(accent, SegZoneActive)
+                    : held ? ColorUtils.WithAlpha(accent, SegZoneHeld)
+                    : hovered ? ColorUtils.WithAlpha(accent, SegZoneHover)
+                    : ColorUtils.WithAlpha(Vector4.One, SegZoneIdle);
+                zoneFill.W *= dim;
+                drawList.AddRectFilled(min, zoneMax, ColorUtils.ToU32(zoneFill),
+                    radius, hasLabel ? ImDrawFlags.RoundCornersLeft : ImDrawFlags.RoundCornersAll);
+                if (hasLabel)
+                {
+                    var seamBase = active ? ColorUtils.LerpColor(accent, Vector4.One, 0.5f) : Vector4.One;
+                    var seamCol = ImGui.ColorConvertFloat4ToU32(
+                        ColorUtils.WithAlpha(seamBase, (active ? SegSeamActive : SegSeamIdle) * dim));
+                    var seamInset = h * 0.22f;
+                    drawList.AddLine(new Vector2(zoneMax.X - 0.5f, min.Y + seamInset),
+                        new Vector2(zoneMax.X - 0.5f, max.Y - seamInset), seamCol);
+                }
+                var glyphColor = active ? ColorUtils.ContrastTextColor(accent)
+                    : hovered ? ColorUtils.LerpColor(accent, Vector4.One, 0.3f)
+                    : ColorUtils.LerpColor(accent, Vector4.One, 0.1f);
+                // The default chevron stays quieter than a semantic icon so
+                // real iconography keeps standing out.
+                glyphColor.W *= dim * (isDefaultGlyph ? 0.55f : 1f);
+                using (PushIconFont())
+                {
+                    if (MathF.Abs(iconScale - 1f) > 0.0001f)
+                    {
+                        ImGui.SetWindowFontScale(iconScale);
+                    }
+                    var glyphSize = ImGui.CalcTextSize(glyph!);
+                    var zoneCenter = hasLabel
+                        ? new Vector2(min.X + zoneW * 0.5f, (min.Y + max.Y) * 0.5f)
+                        : (min + max) * 0.5f;
+                    drawList.AddText(zoneCenter - glyphSize * 0.5f,
+                        ColorUtils.ToU32(glyphColor), glyph);
+                    if (MathF.Abs(iconScale - 1f) > 0.0001f)
+                    {
+                        ImGui.SetWindowFontScale(1f);
+                    }
+                }
+            }
+
+            var borderAlpha = (active ? SegBorderActive
+                : held ? SegBorderHeld
+                : hovered ? SegBorderHover
+                : SegBorderIdle) * dim;
+            drawList.AddRect(min, max,
+                ColorUtils.ToU32(ColorUtils.WithAlpha(Colors.Border, borderAlpha)), radius);
+
+            if (hasLabel)
+            {
+                var labelSize = ImGui.CalcTextSize(display!);
+                var textPadX = SegTextPadX * scale;
+                var textX = min.X + zoneW + textPadX;
+                var textBase = active
+                    ? ColorUtils.LerpColor(accent, Vector4.One, 0.25f)
+                    : ImGui.ColorConvertU32ToFloat4(ImGui.GetColorU32(ImGuiCol.Text));
+                textBase.W *= dim;
+                ImGui.PushClipRect(new Vector2(textX, min.Y),
+                    new Vector2(max.X - textPadX * 0.5f, max.Y), true);
+                drawList.AddText(new Vector2(textX,
+                        min.Y + (max.Y - min.Y - labelSize.Y) * 0.5f),
+                    ColorUtils.ToU32(textBase), display!);
+                ImGui.PopClipRect();
+            }
+            Lint.CheckBounds(id);
+            return clicked && enabled;
+        }
+
+        /// <summary>
+        /// Segmented push button in the nav-menu language: optional square
+        /// icon zone + seam + label on a tonal pill. The single helper for
+        /// action buttons across the app — use it instead of raw ImGui
+        /// buttons. <paramref name="active"/> is an optional toggled state;
+        /// <paramref name="accent"/> overrides the theme accent per button.
+        /// </summary>
+        public static bool SegmentButton(string label, FontAwesomeIcon? icon = null,
+            Vector2? size = null, Vector4? accent = null, bool active = false, bool enabled = true)
+            => SegCore(label, label, icon, size, accent ?? Colors.Accent, active, enabled);
+
+        /// <summary>
+        /// Design-system push button: segmented pill in the shared button
+        /// language. <paramref name="danger"/> tints the zone red for
+        /// destructive actions. Use instead of raw ImGui.Button.
+        /// </summary>
+        public static bool Button(string label, Vector2 size = default, bool danger = false)
+            => SegCore(label, label, null, size == default ? null : size,
+                danger ? Colors.Danger : Colors.Accent);
+
+        /// <summary>
+        /// Compact text button for dense rows and inline actions — same
+        /// segmented fill language as <see cref="Button"/>.
         /// </summary>
         public static bool SmallButton(string label)
-        {
-            using var style = PushValueControlStyle();
-            var clicked = ImGui.SmallButton(label);
-            Lint.CheckBounds(label);
-            return clicked;
-        }
+            => SegCore(label, label, null, null, Colors.Accent);
 
         /// <summary>
         /// Prominent call-to-action button: custom accent color, centered
@@ -886,7 +1109,7 @@ public static partial class SpheneUI
                 ? (active ? baseCol * 0.9f : hovered ? baseCol * 1.1f : baseCol)
                 : new Vector4(baseCol.X, baseCol.Y, baseCol.Z, baseCol.W * 0.6f);
             drawList.AddRectFilled(start, end, ImGui.ColorConvertFloat4ToU32(col),
-                ImGui.GetStyle().FrameRounding);
+                Metrics.ButtonRadius);
 
             var textCol = enabled ? new Vector4(0.1f, 0.1f, 0.1f, 1.0f)
                 : new Vector4(0.25f, 0.25f, 0.25f, 0.7f);
@@ -939,44 +1162,16 @@ public static partial class SpheneUI
 
         /// <summary>
         /// Square icon-only button in the swatch language — frame fill, border,
-        /// centered FontAwesome glyph. Use for compact actions next to value
-        /// controls; pair with <see cref="SpheneUI.AttachTooltip"/>.
+        /// centered FontAwesome glyph in the segmented zone language. Use for
+        /// compact actions next to value controls; pair with
+        /// <see cref="SpheneUI.AttachTooltip"/>.
         /// </summary>
         public static bool IconButton(string id, FontAwesomeIcon icon,
             bool enabled = true, float? size = null)
         {
             var side = size ?? Metrics.ControlHeight;
-            var pos = ImGui.GetCursorScreenPos();
-            bool clicked;
-            using (ImRaii.Disabled(!enabled))
-            {
-                clicked = ImGui.InvisibleButton(id, new Vector2(side, side));
-            }
-            var hovered = enabled && ImGui.IsItemHovered();
-            var pressed = enabled && ImGui.IsItemActive();
-            var fill = pressed ? Colors.FrameBgActive
-                : hovered ? Colors.FrameBgHover
-                : Colors.FrameBg;
-            var accent = Colors.Accent;
-            var border = pressed || hovered
-                ? accent with { W = Metrics.SwatchBorderAlphaHover }
-                : Colors.Border with { W = Metrics.SwatchBorderAlpha };
-            var radius = Metrics.ControlRadius;
-            var max = pos + new Vector2(side, side);
-            var drawList = ImGui.GetWindowDrawList();
-            drawList.AddRectFilled(pos, max, ColorUtils.ToU32(fill), radius);
-            drawList.AddRect(pos, max, ColorUtils.ToU32(border), radius,
-                ImDrawFlags.RoundCornersAll, Metrics.ControlBorderSize);
-            var glyph = icon.ToIconString();
-            ImGui.PushFont(UiBuilder.IconFont);
-            var glyphSize = ImGui.CalcTextSize(glyph);
-            var glyphColor = enabled ? Colors.TextPrimary : Colors.TextMuted;
-            drawList.AddText(new Vector2(pos.X + (side - glyphSize.X) * 0.5f,
-                pos.Y + (side - glyphSize.Y) * 0.5f),
-                ColorUtils.ToU32(glyphColor), glyph);
-            ImGui.PopFont();
-            Lint.CheckBounds(id);
-            return clicked;
+            return SegCore(id, null, icon, new Vector2(side, side),
+                Colors.Accent, enabled: enabled);
         }
 
         /// <summary>

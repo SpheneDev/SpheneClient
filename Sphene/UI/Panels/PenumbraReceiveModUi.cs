@@ -501,7 +501,7 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
                 SpheneUI.Layout.Separator();
                 ImGui.SetNextItemWidth(-1);
                 SpheneUI.Controls.InputTextWithHint("##pendingFilter", "Filter mods or sender…", ref _pendingFilter, 64);
-                ImGui.Spacing();
+                SpheneUI.Layout.VerticalSpace();
 
                 if (_pendingNotifications.Count == 0)
                 {
@@ -748,7 +748,7 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
 
                 SpheneUI.Text.Colored("Mod Details", ImGuiColors.DalamudWhite);
                 SpheneUI.Layout.Separator();
-                ImGui.Spacing();
+                SpheneUI.Layout.VerticalSpace();
 
                 var detailsHeight = modInfo != null ? 150f * scale : 80f * scale;
                 using (ImRaii.Child("Details", new Vector2(0f, detailsHeight), true))
@@ -785,13 +785,13 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
                     }
                 }
 
-                ImGui.Spacing();
+                SpheneUI.Layout.VerticalSpace();
 
                 var isInstalled = _shrinkuPenumbraIpc.ModExists(modFolderName);
 
                 if (isInstalled)
                 {
-                    ImGui.Spacing();
+                    SpheneUI.Layout.VerticalSpace();
                     using (ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.DalamudOrange))
                     {
                         SpheneUI.Text.Wrapped($"This mod is already installed in Penumbra ('{modFolderName}'). Installing it again will overwrite the existing mod.");
@@ -803,7 +803,7 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
                         var receivedVer = modInfo.Version;
                         var comparison = CompareVersions(receivedVer, installedVer);
 
-                        ImGui.Spacing();
+                        SpheneUI.Layout.VerticalSpace();
                         if (comparison > 0)
                         {
                             using (ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.HealerGreen))
@@ -828,19 +828,19 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
                     }
                 }
 
-                ImGui.Spacing();
+                SpheneUI.Layout.VerticalSpace();
                 using (ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.DalamudYellow))
                 {
                     SpheneUI.Text.Wrapped("Only install mods from people you fully trust. Invalid or malicious mods can break your game or cause unexpected issues.");
                 }
 
-                ImGui.Spacing();
+                SpheneUI.Layout.VerticalSpace();
                 SpheneUI.Text.Wrapped("Do you want to download and install this Penumbra mod package now?");
             }
         }
 
         SpheneUI.Layout.Separator();
-        ImGui.Spacing();
+        SpheneUI.Layout.VerticalSpace();
 
         // Button Area
         if (_selectedNotification != null)

@@ -101,7 +101,7 @@ internal class JoinSyncshellUI : WindowMediatorSubscriberBase
         else
         {
             SpheneUI.Text.Plain("You are about to join the Syncshell " + _groupJoinInfo.GroupAliasOrGID + " by " + _groupJoinInfo.OwnerAliasOrUID);
-            ImGuiHelpers.ScaledDummy(2f);
+            SpheneUI.Layout.Space(SpheneUI.Spacing.X2);
             SpheneUI.Text.Muted("This Syncshell staff has set the following suggested Syncshell permissions:");
             ImGui.AlignTextToFramePadding();
             SpheneUI.Text.Plain("- Sounds ");
@@ -117,55 +117,45 @@ internal class JoinSyncshellUI : WindowMediatorSubscriberBase
                 || _groupJoinInfo.GroupPermissions.IsPreferDisableVFX() != _ownPermissions.DisableGroupVFX
                 || _groupJoinInfo.GroupPermissions.IsPreferDisableAnimations() != _ownPermissions.DisableGroupAnimations)
             {
-                ImGuiHelpers.ScaledDummy(2f);
+                SpheneUI.Layout.Space(SpheneUI.Spacing.X2);
                 SpheneUI.Text.Colored("Your current preferred default Syncshell permissions deviate from the suggested permissions:", ImGuiColors.DalamudYellow);
-                if (_groupJoinInfo.GroupPermissions.IsPreferDisableSounds() != _ownPermissions.DisableGroupSounds)
+
+                void SuggestedPermRow(string id, string label, bool ownDisabled, bool suggestedDisabled, Action apply)
                 {
+                    using var idScope = ImRaii.PushId(id);
+                    var btnW = SpheneUI.Icons.TextButtonWidth(Dalamud.Interface.FontAwesomeIcon.ArrowRight, "Apply suggested");
                     ImGui.AlignTextToFramePadding();
-                    SpheneUI.Text.Plain("- Sounds");
-                    SpheneUI.Icons.BoolIcon(!_ownPermissions.DisableGroupSounds);
-                    ImGui.SameLine(200);
-                    ImGui.AlignTextToFramePadding();
-                    SpheneUI.Text.Plain("Suggested");
-                    SpheneUI.Icons.BoolIcon(!_groupJoinInfo.GroupPermissions.IsPreferDisableSounds());
+                    SpheneUI.Text.Plain("- " + label);
                     ImGui.SameLine();
-                    using var id = ImRaii.PushId("suggestedSounds");
+                    SpheneUI.Icons.BoolIcon(!ownDisabled);
+                    ImGui.SameLine();
+                    SpheneUI.Text.Muted("yours → suggested");
+                    ImGui.SameLine();
+                    SpheneUI.Icons.BoolIcon(!suggestedDisabled);
+                    ImGui.SameLine(ImGui.GetContentRegionAvail().X - btnW);
                     if (SpheneUI.Icons.TextButton(Dalamud.Interface.FontAwesomeIcon.ArrowRight, "Apply suggested"))
                     {
-                        _ownPermissions.DisableGroupSounds = _groupJoinInfo.GroupPermissions.IsPreferDisableSounds();
+                        apply();
                     }
+                }
+
+                if (_groupJoinInfo.GroupPermissions.IsPreferDisableSounds() != _ownPermissions.DisableGroupSounds)
+                {
+                    SuggestedPermRow("suggestedSounds", "Sounds", _ownPermissions.DisableGroupSounds,
+                        _groupJoinInfo.GroupPermissions.IsPreferDisableSounds(),
+                        () => _ownPermissions.DisableGroupSounds = _groupJoinInfo.GroupPermissions.IsPreferDisableSounds());
                 }
                 if (_groupJoinInfo.GroupPermissions.IsPreferDisableAnimations() != _ownPermissions.DisableGroupAnimations)
                 {
-                    ImGui.AlignTextToFramePadding();
-                    SpheneUI.Text.Plain("- Animations");
-                    SpheneUI.Icons.BoolIcon(!_ownPermissions.DisableGroupAnimations);
-                    ImGui.SameLine(200);
-                    ImGui.AlignTextToFramePadding();
-                    SpheneUI.Text.Plain("Suggested");
-                    SpheneUI.Icons.BoolIcon(!_groupJoinInfo.GroupPermissions.IsPreferDisableAnimations());
-                    ImGui.SameLine();
-                    using var id = ImRaii.PushId("suggestedAnims");
-                    if (SpheneUI.Icons.TextButton(Dalamud.Interface.FontAwesomeIcon.ArrowRight, "Apply suggested"))
-                    {
-                        _ownPermissions.DisableGroupAnimations = _groupJoinInfo.GroupPermissions.IsPreferDisableAnimations();
-                    }
+                    SuggestedPermRow("suggestedAnims", "Animations", _ownPermissions.DisableGroupAnimations,
+                        _groupJoinInfo.GroupPermissions.IsPreferDisableAnimations(),
+                        () => _ownPermissions.DisableGroupAnimations = _groupJoinInfo.GroupPermissions.IsPreferDisableAnimations());
                 }
                 if (_groupJoinInfo.GroupPermissions.IsPreferDisableVFX() != _ownPermissions.DisableGroupVFX)
                 {
-                    ImGui.AlignTextToFramePadding();
-                    SpheneUI.Text.Plain("- VFX");
-                    SpheneUI.Icons.BoolIcon(!_ownPermissions.DisableGroupVFX);
-                    ImGui.SameLine(200);
-                    ImGui.AlignTextToFramePadding();
-                    SpheneUI.Text.Plain("Suggested");
-                    SpheneUI.Icons.BoolIcon(!_groupJoinInfo.GroupPermissions.IsPreferDisableVFX());
-                    ImGui.SameLine();
-                    using var id = ImRaii.PushId("suggestedVfx");
-                    if (SpheneUI.Icons.TextButton(Dalamud.Interface.FontAwesomeIcon.ArrowRight, "Apply suggested"))
-                    {
-                        _ownPermissions.DisableGroupVFX = _groupJoinInfo.GroupPermissions.IsPreferDisableVFX();
-                    }
+                    SuggestedPermRow("suggestedVfx", "VFX", _ownPermissions.DisableGroupVFX,
+                        _groupJoinInfo.GroupPermissions.IsPreferDisableVFX(),
+                        () => _ownPermissions.DisableGroupVFX = _groupJoinInfo.GroupPermissions.IsPreferDisableVFX());
                 }
                 SpheneUI.Text.Wrapped("Note: you do not need to apply the suggested Syncshell permissions, they are solely suggestions by the staff of the Syncshell.");
             }
@@ -173,7 +163,7 @@ internal class JoinSyncshellUI : WindowMediatorSubscriberBase
             {
                 SpheneUI.Text.Wrapped("Your default syncshell permissions on joining are in line with the suggested Syncshell permissions through the owner.");
             }
-            ImGuiHelpers.ScaledDummy(2f);
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.Section);
             if (SpheneUI.Icons.TextButton(Dalamud.Interface.FontAwesomeIcon.Plus, "Finalize and join " + _groupJoinInfo.GroupAliasOrGID))
             {
                 GroupUserPreferredPermissions joinPermissions = GroupUserPreferredPermissions.NoneSet;

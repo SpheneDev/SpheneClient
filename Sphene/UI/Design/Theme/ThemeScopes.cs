@@ -171,13 +171,13 @@ internal sealed class CompactThemeScope : ThemeStyleScope
     /// <summary>Pushes the CompactUI token set.</summary>
     public CompactThemeScope()
     {
-        SpheneUI.ThemeScopeTracker.Push();
+        SpheneUI.ThemeScopeTracker.PushCompact();
         Apply();
     }
 
     protected override void Dispose(bool disposing)
     {
-        SpheneUI.ThemeScopeTracker.Pop();
+        SpheneUI.ThemeScopeTracker.PopCompact();
         base.Dispose(disposing);
     }
 

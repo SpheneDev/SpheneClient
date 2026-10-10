@@ -76,6 +76,7 @@ public class SelectTagForPairUi
 
             SpheneUI.Layout.Separator();
             SpheneUI.Text.Plain($"Create a new group for {name}.");
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.Row);
             if (SpheneUI.Icons.Button(FontAwesomeIcon.Plus))
             {
                 HandleAddTag();

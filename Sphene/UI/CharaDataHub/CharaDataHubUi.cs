@@ -200,7 +200,6 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
 
         if (!_charaDataManager.BrioAvailable)
         {
-            ImGuiHelpers.ScaledDummy(3);
             SpheneUI.Text.GroupedCentered("To utilize any features related to posing or spawning characters you require to have Brio installed.", ImGuiColors.DalamudRed);
             SpheneUI.Layout.DistanceSeparator();
         }
@@ -229,7 +228,7 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
             if (_charaDataManager.DataApplicationTask != null)
             {
                 SpheneUI.Text.ColoredWrapped("WARNING: During the data application avoid interacting with this actor to prevent potential crashes.", ImGuiColors.DalamudRed);
-                ImGuiHelpers.ScaledDummy(5);
+                SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
                 SpheneUI.Layout.Separator();
             }
         });
@@ -399,7 +398,7 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
     private void DrawGposeControls()
     {
         SpheneUI.Text.Big("GPose Actors");
-        ImGuiHelpers.ScaledDummy(5);
+        SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
         using var indent = ImRaii.PushIndent(10f);
 
         foreach (var actor in _dalamudUtilService.GetGposeCharactersFromObjectTable())
@@ -452,7 +451,7 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
                 }
             });
 
-            ImGuiHelpers.ScaledDummy(2);
+            SpheneUI.Layout.Space(SpheneUI.Spacing.X2);
         }
     }
 
@@ -460,7 +459,7 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
     {
         SpheneUI.Text.Big("Apply Character Appearance");
 
-        ImGuiHelpers.ScaledDummy(5);
+        SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
 
         if (_uiSharedService.IsInGpose)
         {
@@ -471,11 +470,11 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
 
         if (!_hasValidGposeTarget)
         {
-            ImGuiHelpers.ScaledDummy(3);
+            SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
             SpheneUI.Text.GroupedCentered("Applying data is only available in GPose with a valid selected GPose target.", ImGuiColors.DalamudYellow, 350);
         }
 
-        ImGuiHelpers.ScaledDummy(10);
+        SpheneUI.Layout.Space(SpheneUI.Spacing.X10);
 
         using var tabs = ImRaii.TabBar("Tabs");
 
@@ -485,7 +484,7 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
             {
                 using var id = ImRaii.PushId("byFavorite");
 
-                ImGuiHelpers.ScaledDummy(5);
+                SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
 
                 var max = ImGui.GetWindowContentRegionMax();
                 SpheneUI.Layout.Tree("Filters", () =>
@@ -497,6 +496,7 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
                     SpheneUI.Controls.InputTextWithHint("##descFilter", "Custom Description Filter", ref _filterDescription, 100);
                     SpheneUI.Controls.Toggle("Only show entries with pose data", ref _filterPoseOnly);
                     SpheneUI.Controls.Toggle("Only show entries with world data", ref _filterWorldOnly);
+                    SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.Row);
                     if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Ban, "Reset Filter"))
                     {
                         _filterCodeNote = string.Empty;
@@ -506,10 +506,10 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
                     }
                 });
 
-                ImGuiHelpers.ScaledDummy(5);
+                SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
                 SpheneUI.Layout.Separator();
                 using var scrollableChild = ImRaii.Child("favorite");
-                ImGuiHelpers.ScaledDummy(5);
+                SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
                 using var totalIndent = ImRaii.PushIndent(5f);
                 var cursorPos = ImGui.GetCursorPos();
                 max = ImGui.GetWindowContentRegionMax();
@@ -626,7 +626,7 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
                         DrawPoseData(metaInfo, _gposeTarget, _hasValidGposeTarget);
                     });
 
-                    ImGuiHelpers.ScaledDummy(5);
+                    SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
                 }
 
                 if (_configService.Current.FavoriteCodes.Count == 0)
@@ -649,7 +649,7 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
                                 + "Is Downloadable: whether or not the code is downloadable and applicable. If the code is not downloadable, contact the owner so they can attempt to fix it." + Environment.NewLine + Environment.NewLine
                                 + "To download a code the code requires correct access permissions to be set by the owner. If getting info from the code fails, contact the owner to make sure they set their Access Permissions for the code correctly.");
 
-                ImGuiHelpers.ScaledDummy(5);
+                SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
                 SpheneUI.Controls.InputTextWithHint("##importCode", "Enter Data Code", ref _importCode, 100);
                 using (ImRaii.Disabled(string.IsNullOrEmpty(_importCode)))
                 {
@@ -689,7 +689,7 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
 
                 using (ImRaii.Disabled(_charaDataManager.LastDownloadedMetaInfo == null))
                 {
-                    ImGuiHelpers.ScaledDummy(5);
+                    SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
                     var metaInfo = _charaDataManager.LastDownloadedMetaInfo;
                     SpheneUI.Text.Plain("Description");
                     ImGui.SameLine(150);
@@ -718,7 +718,7 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
                 DrawHelpFoldout("You can apply character data you created yourself in this tab. If the list is not populated press on \"Download your Character Data\"." + Environment.NewLine + Environment.NewLine
                                  + "To create new and edit your existing character data use the \"MCD Online\" tab.");
 
-                ImGuiHelpers.ScaledDummy(5);
+                SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
 
                 using (ImRaii.Disabled(_charaDataManager.GetAllDataTask != null
                     || (_charaDataManager.DataGetTimeoutTask != null && !_charaDataManager.DataGetTimeoutTask.IsCompleted)))
@@ -734,7 +734,7 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
                     SpheneUI.AttachTooltip("You can only refresh all character data from server every minute. Please wait.");
                 }
 
-                ImGuiHelpers.ScaledDummy(5);
+                SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
                 SpheneUI.Layout.Separator();
 
                 using var child = ImRaii.Child("ownDataChild", new(0, 0), false, ImGuiWindowFlags.AlwaysAutoResize);
@@ -746,7 +746,7 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
                     DrawMetaInfoData(_gposeTarget, _hasValidGposeTarget, metaInfo!, true);
                 }
 
-                ImGuiHelpers.ScaledDummy(5);
+                SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
             }
         }
 
@@ -760,7 +760,7 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
                                 + "Filter if needed to find a specific entry, then just press on \"Apply to <actor>\" and it will download and apply the Character Data to the currently targeted GPose actor." + Environment.NewLine + Environment.NewLine
                                 + "Note: Shared Data of Pairs you have paused will not be shown here.");
 
-                ImGuiHelpers.ScaledDummy(5);
+                SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
 
                 DrawUpdateSharedDataButton();
 
@@ -801,11 +801,11 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
                         .OrderBy(k => k.Key, StringComparer.OrdinalIgnoreCase).ToDictionary();
                 }
 
-                ImGuiHelpers.ScaledDummy(5);
+                SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
                 SpheneUI.Layout.Separator();
                 using var child = ImRaii.Child("sharedWithYouChild", new(0, 0), false, ImGuiWindowFlags.AlwaysAutoResize);
 
-                ImGuiHelpers.ScaledDummy(5);
+                SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
                 foreach (var entry in _filteredDict ?? [])
                 {
                     bool isFilteredAndHasToBeOpened = entry.Key.Contains(_sharedWithYouOwnerFilter) && _openDataApplicationShared;
@@ -817,7 +817,7 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
                         {
                             DrawMetaInfoData(_gposeTarget, _hasValidGposeTarget, data);
                         }
-                        ImGuiHelpers.ScaledDummy(5);
+                        SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
                     });
                     if (isFilteredAndHasToBeOpened)
                         _openDataApplicationShared = false;
@@ -836,7 +836,7 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
                                 + "You can then apply it to any handled GPose actor." + Environment.NewLine + Environment.NewLine
                                 + "MCDF to share with others can be generated using the \"MCDF Export\" tab at the top.");
 
-                ImGuiHelpers.ScaledDummy(5);
+                SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
 
                 if (_charaDataManager.LoadedMcdfHeader == null || _charaDataManager.LoadedMcdfHeader.IsCompleted)
                 {
@@ -863,7 +863,7 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
                         ImGui.SameLine(200);
                         SpheneUI.Text.Wrapped(_charaDataManager.LoadedMcdfHeader.Result.LoadedFile.CharaFileData.Description);
 
-                        ImGuiHelpers.ScaledDummy(5);
+                        SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
 
                         using (ImRaii.Disabled(!_hasValidGposeTarget))
                         {
@@ -905,7 +905,7 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
         DrawHelpFoldout("This feature allows you to pack your character into a MCDF file and manually send it to other people. MCDF files can officially only be imported during GPose through Sphene. " +
             "Be aware that the possibility exists that people write unofficial custom exporters to extract the containing data.");
 
-        ImGuiHelpers.ScaledDummy(5);
+        SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
 
         SpheneUI.Controls.Checkbox("##readExport", ref _readExport);
         ImGui.SameLine();
@@ -916,6 +916,7 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
             ImGui.Indent();
 
             SpheneUI.Controls.InputTextWithHint("Export Descriptor", "This description will be shown on loading the data", ref _exportDescription, 255);
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.Row);
             if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Save, "Export Character as MCDF"))
             {
                 string defaultFileName = string.IsNullOrEmpty(_exportDescription)
@@ -941,7 +942,7 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
 
     private void DrawMetaInfoData(string selectedGposeActor, bool hasValidGposeTarget, CharaDataMetaInfoExtendedDto data, bool canOpen = false)
     {
-        ImGuiHelpers.ScaledDummy(5);
+        SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
         using var entryId = ImRaii.PushId(data.FullId);
 
         var startPos = ImGui.GetCursorPosX();
@@ -1082,9 +1083,9 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
 
     private void DrawSettings()
     {
-        ImGuiHelpers.ScaledDummy(5);
+        SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
         SpheneUI.Text.Big("Settings");
-        ImGuiHelpers.ScaledDummy(5);
+        SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
         bool openInGpose = _configService.Current.OpenSpheneHubOnGposeStart;
         if (SpheneUI.Controls.Toggle("Open Character Data Hub when GPose loads", ref openInGpose))
         {
@@ -1115,6 +1116,7 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
         ImGui.SameLine(300);
         ImGui.AlignTextToFramePadding();
         SpheneUI.Text.Plain(string.IsNullOrEmpty(_configService.Current.LastSavedCharaDataLocation) ? "Not set" : _configService.Current.LastSavedCharaDataLocation);
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.Row);
         if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Ban, "Clear Last Export Folder"))
         {
             _configService.Current.LastSavedCharaDataLocation = string.Empty;
@@ -1127,7 +1129,7 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
     {
         if (_configService.Current.ShowHelpTexts)
         {
-            ImGuiHelpers.ScaledDummy(5);
+            SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
             SpheneUI.Layout.Tree("What is this? (Explanation / Help)", () =>
             {
                 SpheneUI.Text.Wrapped(text);

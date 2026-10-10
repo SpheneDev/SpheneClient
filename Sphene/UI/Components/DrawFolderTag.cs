@@ -155,6 +155,7 @@ public class DrawFolderTag : DrawFolderBase
     protected override void DrawMenu(float menuWidth)
     {
         SpheneUI.Text.Plain("Group Menu");
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.Row);
         if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Users, "Select Pairs", menuWidth, true, ButtonStyleKeys.ContextMenu_Item))
         {
             _selectPairForTagUi.Open(_id);

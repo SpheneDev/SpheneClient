@@ -30,6 +30,7 @@ public class BanUserPopupHandler : IPopupHandler
         SpheneUI.Text.Wrapped("User " + (_reportedPair.UserData.AliasOrUID) + " will be banned and removed from this Syncshell.");
         SpheneUI.Controls.InputTextWithHint("##banreason", "Ban Reason", ref _banReason, 255);
 
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.Row);
         if (SpheneUI.Icons.TextButton(FontAwesomeIcon.UserSlash, "Ban User"))
         {
             ImGui.CloseCurrentPopup();

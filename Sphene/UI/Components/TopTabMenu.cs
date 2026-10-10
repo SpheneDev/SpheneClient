@@ -139,7 +139,7 @@ public class TopTabMenu
             DrawUserConfig(availableWidth, spacing.X);
         }
 
-        if (TabSelection != SelectedTab.None) ImGuiHelpers.ScaledDummy(3f);
+        if (TabSelection != SelectedTab.None) SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
         if (drawSeparator) SpheneUI.Layout.Separator();
     }
 
@@ -172,7 +172,7 @@ public class TopTabMenu
         var totalRequests = incoming.Count + outgoing.Count;
         var unseen = _pairManager.UnseenInboundIndividualPairRequestCount;
 
-        ImGuiHelpers.ScaledDummy(3f);
+        SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
 
         var buttonStart = ImGui.GetCursorScreenPos();
         var buttonHeight = ImGui.GetFrameHeight();

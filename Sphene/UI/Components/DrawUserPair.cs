@@ -372,6 +372,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         }
 
         SpheneUI.Text.Plain("Pair Permission Functions");
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.Row);
         if (SpheneUI.Icons.ActionButton(FontAwesomeIcon.WindowMaximize, "Open Permissions Window", _menuWidth, ButtonStyleKeys.ContextMenu_Item))
         {
             _mediator.Publish(new OpenPermissionWindow(_pair));
@@ -843,7 +844,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
             if (!string.IsNullOrWhiteSpace(meta))
             {
                 ImGui.PopTextWrapPos();
-                ImGui.Spacing();
+                SpheneUI.Layout.VerticalSpace();
 
                 var textSize = ImGui.CalcTextSize(meta);
                 var cursorStartX = ImGui.GetCursorPosX();

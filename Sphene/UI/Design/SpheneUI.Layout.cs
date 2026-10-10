@@ -182,12 +182,9 @@ public static partial class SpheneUI
                 Chrome.AccentCardBackdrop(drawList, cardMin, cardMax, rounding, accent);
             }
 
-            // backdrop off = the whole card chrome goes still (no shimmer
-            // band, no border pulse) — the static frame stays
-            var pulse = animatedBackdrop
-                ? 0.30f + 0.16f * MathF.Sin((float)ImGui.GetTime() * Chrome.CardBorderPulseSpeed)
-                : 0.30f;
-            var borderColor = new Vector4(accent.X, accent.Y, accent.Z, pulse);
+            // Static accent hairline instead of a pulsing border — keeps the
+            // hero card defined without the plastic chrome look.
+            var borderColor = ColorUtils.WithAlpha(accent, 0.38f);
             drawList.AddRect(cardMin, cardMax, ColorUtils.ToU32(borderColor),
                 rounding, ImDrawFlags.RoundCornersAll, Chrome.CardBorderThickness);
             if (fxHover != ProfileRowFx.None || fxIdle != ProfileRowFx.None)
@@ -204,10 +201,11 @@ public static partial class SpheneUI
         }
 
         /// <summary>
-        /// Calm full-width section card: a softly tinted background, a thin
-        /// accent border with a gentle pulse and an optional accent title with
-        /// a fading underline. The standard grouping container for settings
-        /// blocks; use <see cref="AccentCard"/> for prominent cards.
+        /// Calm full-width section panel: a borderless tonal surface in the
+        /// rail-band color family, identified by a hairline accent seam along
+        /// its top edge and an optional accent title. The standard grouping
+        /// container for settings blocks; use <see cref="AccentCard"/> for
+        /// prominent cards.
         /// </summary>
         public static void SectionCard(Action content, string? title = null,
             Vector4? accentColor = null, string? description = null, bool animatedBackdrop = false,
@@ -246,10 +244,6 @@ public static partial class SpheneUI
                         {
                             Text.ColoredWrapped(description, Dalamud.Interface.Colors.ImGuiColors.DalamudGrey);
                         }
-                        var lineMin = ImGui.GetCursorScreenPos() + new Vector2(0, 2f * scale);
-                        var lineMax = new Vector2(lineMin.X + innerWidth, lineMin.Y + 1f * scale);
-                        var lineCol = ColorUtils.ToU32(new Vector4(accent.X, accent.Y, accent.Z, 0.4f));
-                        drawList.AddRectFilledMultiColor(lineMin, lineMax, lineCol, 0, 0, lineCol);
                         ImGuiHelpers.ScaledDummy(0, 7);
                     }
                     content();
@@ -259,10 +253,9 @@ public static partial class SpheneUI
             var cardMax = new Vector2(cardRightX, ImGui.GetItemRectMax().Y + padding);
             drawList.ChannelsSetCurrent(0);
 
-            var accentTint = new Vector4(accent.X * 0.10f, accent.Y * 0.09f, accent.Z * 0.05f, 0.55f);
-            var secondary = Theme.Current.SecondaryDark;
-            var background = Vector4.Lerp(accentTint,
-                new Vector4(secondary.X, secondary.Y, secondary.Z, 0.55f), secondary.W * 0.5f);
+            // Borderless tonal panel in the rail-band color family; the group
+            // identity lives on a hairline accent seam along the top edge.
+            var background = NavRailBandColor();
             drawList.AddRectFilled(cardMin, cardMax, ColorUtils.ToU32(background), rounding);
 
             if (animatedBackdrop)
@@ -270,10 +263,22 @@ public static partial class SpheneUI
                 Chrome.SectionCardBackdrop(drawList, cardMin, cardMax, rounding, accent);
             }
 
-            var pulse = 0.22f + 0.08f * MathF.Sin((float)ImGui.GetTime() * Chrome.CardBorderPulseSpeed);
-            var borderColor = new Vector4(accent.X, accent.Y, accent.Z, pulse);
-            drawList.AddRect(cardMin, cardMax, ColorUtils.ToU32(borderColor),
-                rounding, ImDrawFlags.RoundCornersAll, Chrome.CardBorderThickness);
+            var seamColor = ColorUtils.WithAlpha(accent, 0.32f);
+            var seamCol = ImGui.ColorConvertFloat4ToU32(seamColor);
+            var seamFade = ImGui.ColorConvertFloat4ToU32(ColorUtils.WithAlpha(seamColor, 0f));
+            var seamH = MathF.Max(1f, 1.5f * scale);
+            var seamInset = rounding * 0.9f;
+            var seamMin = new Vector2(cardMin.X + seamInset, cardMin.Y + 0.5f);
+            var seamFadeW = 24f * scale;
+            drawList.AddRectFilledMultiColor(seamMin,
+                new Vector2(seamMin.X + seamFadeW, seamMin.Y + seamH),
+                seamFade, seamCol, seamCol, seamFade);
+            drawList.AddRectFilled(new Vector2(seamMin.X + seamFadeW, seamMin.Y),
+                new Vector2(cardMax.X - seamInset - seamFadeW, seamMin.Y + seamH), seamCol);
+            drawList.AddRectFilledMultiColor(
+                new Vector2(cardMax.X - seamInset - seamFadeW, seamMin.Y),
+                new Vector2(cardMax.X - seamInset, seamMin.Y + seamH),
+                seamCol, seamFade, seamFade, seamCol);
             drawList.ChannelsMerge();
 
             ImGui.SetCursorScreenPos(cardMin + new Vector2(0, cardMax.Y - cardMin.Y));
@@ -332,6 +337,13 @@ public static partial class SpheneUI
             {
                 ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding,
                     noPadding ? Vector2.Zero : contentPadding!.Value * SpheneUI.Scale);
+            }
+            // Borderless children ignore WindowPadding unless the flag opts
+            // in — without it the padded variant would sit flush at the child
+            // edge despite the pushed style var.
+            if (contentPadding.HasValue)
+            {
+                windowFlags |= ImGuiWindowFlags.AlwaysUseWindowPadding;
             }
             var begun = ImGui.BeginChild(id, size, false, windowFlags | ImGuiWindowFlags.NoScrollbar);
             if (noPadding || contentPadding.HasValue)
@@ -598,16 +610,27 @@ public static partial class SpheneUI
 
                 // Nested scroll chaining: once this child cannot scroll further
                 // in the wheel direction ImGui still consumes the input. Forward
-                // the delta to the parent window so scrolling continues.
+                // the delta to the parent window so scrolling continues. The
+                // forward must clamp to the parent's own range — an uncapped
+                // SetScrollY overscrolls non-scrollable hosts and slides their
+                // nested children past the window edges. It must also never
+                // reach a nav-rail host: its rail+content children are
+                // edge-to-edge by design, so any scroll range it reports is
+                // incidental overflow, and programmatic SetScrollY would slide
+                // the whole embedded layout out of the window even though the
+                // host is NoScrollWithMouse.
                 if (childHovered)
                 {
                     var wheel = ImGui.GetIO().MouseWheel;
                     var atTop = scrollY <= 0.5f;
                     var atBottom = scrollY >= scrollMaxY - 0.5f;
-                    if (MathF.Abs(wheel) > 0.001f && ((wheel < 0f && atBottom) || (wheel > 0f && atTop)))
+                    if (MathF.Abs(wheel) > 0.001f && ((wheel < 0f && atBottom) || (wheel > 0f && atTop))
+                        && !IsNavRailHost(ImGui.GetWindowPos(), ImGui.GetWindowSize()))
                     {
-                        ImGui.SetScrollY(ImGui.GetScrollY()
-                            - wheel * ImGui.GetTextLineHeightWithSpacing() * 4f);
+                        var parentMaxY = ImGui.GetScrollMaxY();
+                        var parentTarget = ImGui.GetScrollY()
+                            - wheel * ImGui.GetTextLineHeightWithSpacing() * 4f;
+                        ImGui.SetScrollY(Math.Clamp(parentTarget, 0f, parentMaxY));
                     }
                 }
 
@@ -1027,10 +1050,11 @@ public static partial class SpheneUI
         }
 
         /// <summary>
-        /// Info callout — icon + wrapped text inside a tinted rounded box
-        /// spanning the content width. Pass <paramref name="title"/> for a
-        /// colored title line above neutral body text (info/warning/error
-        /// boxes). The universal "hint/note" element of the design system.
+        /// Info callout — accent icon + wrapped text inside a tonal rounded
+        /// box with a left accent spine, spanning the content width. Pass
+        /// <paramref name="title"/> for a colored title line above neutral
+        /// body text (info/warning/error boxes). The universal "hint/note"
+        /// element of the design system — borderless like the cards.
         /// </summary>
         public static void Callout(string text, FontAwesomeIcon icon = FontAwesomeIcon.InfoCircle,
             Vector4? color = null, string? title = null)
@@ -1046,7 +1070,9 @@ public static partial class SpheneUI
             var boxWidth = CardAlignedAvailX();
             var padX = 12.0f * scale;
             var padY = 8.0f * scale;
-            var wrapWidth = MathF.Max(1f, boxWidth - padX * 2f);
+            var spine = 3.0f * scale;
+            var radius = AccentCardRounding * scale;
+            var wrapWidth = MathF.Max(1f, boxWidth - padX * 2f - spine);
 
             var textSize = ImGui.CalcTextSize(text, wrapWidth: wrapWidth);
             var boxHeight = padY * 2f + textSize.Y
@@ -1054,27 +1080,29 @@ public static partial class SpheneUI
             var boxMax = new Vector2(startPos.X + boxWidth, startPos.Y + boxHeight);
 
             drawList.AddRectFilled(startPos, boxMax,
-                ColorUtils.ToU32(ColorUtils.WithAlpha(accent, 0.1f)), 8.0f * scale);
-            drawList.AddRect(startPos, boxMax,
-                ColorUtils.ToU32(ColorUtils.WithAlpha(accent, 0.4f)), 8.0f * scale,
-                ImDrawFlags.RoundCornersAll, 1.0f);
+                ColorUtils.ToU32(ColorUtils.WithAlpha(accent, 0.07f)), radius);
+            drawList.AddRectFilled(startPos, new Vector2(startPos.X + spine, boxMax.Y),
+                ColorUtils.ToU32(ColorUtils.WithAlpha(accent, 0.8f)), radius,
+                ImDrawFlags.RoundCornersLeft);
 
-            var innerMin = startPos + new Vector2(padX, padY);
+            var innerMin = startPos + new Vector2(padX + spine, padY);
             ImGui.SetCursorScreenPos(innerMin);
-            using (ImRaii.PushColor(ImGuiCol.Text, accent))
+            SpheneUI.Icons.Icon(icon, accent);
+            ImGui.SameLine();
+            if (hasTitle)
             {
-                ImGui.TextUnformatted(icon.ToIconString());
-                ImGui.SameLine();
-                if (hasTitle)
+                using (ImRaii.PushColor(ImGuiCol.Text, accent))
                 {
                     ImGui.TextUnformatted(title);
-                    ImGui.SetCursorScreenPos(new Vector2(innerMin.X, ImGui.GetCursorScreenPos().Y));
                 }
+                ImGui.SetCursorScreenPos(new Vector2(innerMin.X, ImGui.GetCursorScreenPos().Y));
             }
 
             using (ImRaii.PushColor(ImGuiCol.Text, hasTitle ? Colors.TextPrimary : accent))
             {
-                ImGui.PushTextWrapPos(startPos.X + boxWidth - padX);
+                // PushTextWrapPos is window-local, not screen space.
+                var wrapLocalX = startPos.X - ImGui.GetWindowPos().X + boxWidth - padX;
+                ImGui.PushTextWrapPos(wrapLocalX);
                 ImGui.TextUnformatted(text);
                 ImGui.PopTextWrapPos();
             }
@@ -1108,6 +1136,15 @@ public static partial class SpheneUI
 
         /// <summary>One themed vertical gap — the standard row break.</summary>
         public static void VerticalSpace() => ImGui.Spacing();
+
+        /// <summary>Square gap reserving X and Y on the spacing grid.</summary>
+        public static void Space(Space size) => ImGui.Dummy(new Vector2(size.Scaled));
+
+        /// <summary>Gap reserving X and Y on the spacing grid independently.</summary>
+        public static void Space(Space x, Space y) => ImGui.Dummy(new Vector2(x.Scaled, y.Scaled));
+
+        /// <summary>Horizontal gap on the spacing grid.</summary>
+        public static void HorizontalSpace(Space space) => ImGui.Dummy(new Vector2(space.Scaled, 0f));
 
         /// <summary>Indented content scope with a grid spacing width.</summary>
         public static IDisposable IndentScope(Space space) => ImRaii.PushIndent(space.Scaled);
@@ -1185,10 +1222,44 @@ public static partial class SpheneUI
             public Vector2 ContentTop;
             public Vector2 Available;
             public float Width;
+            public Vector2 WindowMin;
             public float WindowRight;
+            public float WindowBottom;
         }
 
         private static readonly Stack<NavRailState> NavRailStack = new();
+
+        // Windows hosting a rail+content layout are fixed surfaces: their
+        // children already reach the frame edges, so any scroll range they
+        // report is incidental padding overflow — never real scrollable
+        // content. BeginNavRail registers the host's rect every frame —
+        // entries expire after a frame so rails that stop being drawn do
+        // not linger — and EndScrollArea refuses to chain wheel input into
+        // a registered host.
+        private static readonly List<(Vector4 Rect, int Frame)> _navRailHostRects = new();
+
+        private static bool IsNavRailHost(Vector2 pos, Vector2 size)
+        {
+            var frame = ImGui.GetFrameCount();
+            for (var i = _navRailHostRects.Count - 1; i >= 0; i--)
+            {
+                var (rect, registered) = _navRailHostRects[i];
+                if (registered < frame - 1)
+                {
+                    _navRailHostRects.RemoveAt(i);
+                    continue;
+                }
+                if (MathF.Abs(rect.X - pos.X) < 0.5f && MathF.Abs(rect.Y - pos.Y) < 0.5f
+                    && MathF.Abs(rect.Z - size.X) < 0.5f && MathF.Abs(rect.W - size.Y) < 0.5f)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private static void RegisterNavRailHost(Vector2 pos, Vector2 size)
+            => _navRailHostRects.Add((new Vector4(pos.X, pos.Y, size.X, size.Y), ImGui.GetFrameCount()));
 
         /// <summary>
         /// Rail width that fits every <paramref name="labels"/> entry at the
@@ -1196,6 +1267,16 @@ public static partial class SpheneUI
         /// padding and a small breathing margin. Pass all item labels so the
         /// rail never clips one.
         /// </summary>
+        /// <summary>Label padding inside <see cref="NavRailItem"/> pills.</summary>
+        private const float NavRailItemPadX = 10f;
+
+        /// <summary>Nav item pill height — matches the header nav buttons.</summary>
+        private const float NavRailItemHeight = 30f;
+
+        /// <summary>Inner horizontal margin of a nav rail band (unscaled) —
+        /// pills float inside the band instead of touching its edges.</summary>
+        public const float NavRailPadX = 10f;
+
         public static float NavRailWidth(IReadOnlyList<string> labels)
         {
             var style = ImGui.GetStyle();
@@ -1208,8 +1289,56 @@ public static partial class SpheneUI
                     maxText = size.X;
                 }
             }
-            var padX = MathF.Max(4f * SpheneUI.Scale, style.FramePadding.X * 0.65f);
-            return maxText + padX * 2f + style.WindowPadding.X * 2f + 2f * SpheneUI.Scale;
+            var padX = MathF.Max(NavRailItemPadX * SpheneUI.Scale, style.FramePadding.X * 0.65f);
+            return maxText + padX * 2f + NavRailPadX * 2f * SpheneUI.Scale + 2f * SpheneUI.Scale;
+        }
+
+        /// <summary>
+        /// <see cref="NavRailWidth(IReadOnlyList{string})"/> for icon items:
+        /// widest icon glyph plus item padding — icon rails show a tooltip
+        /// instead of a label, so the rail stays narrow.
+        /// </summary>
+        public static float NavRailWidth(IReadOnlyList<(FontAwesomeIcon Icon, string Label)> items)
+        {
+            var style = ImGui.GetStyle();
+            var iconW = 0f;
+            using (Icons.PushFont())
+            {
+                foreach (var (icon, _) in items)
+                {
+                    var w = ImGui.CalcTextSize(icon.ToIconString()).X;
+                    if (w > iconW)
+                    {
+                        iconW = w;
+                    }
+                }
+            }
+            var padX = MathF.Max(NavRailItemPadX * SpheneUI.Scale, style.FramePadding.X * 0.65f);
+            return iconW + padX * 2f + NavRailPadX * 2f * SpheneUI.Scale + 2f * SpheneUI.Scale;
+        }
+
+        /// <summary>
+        /// Rail width for <see cref="NavRailSegmentItem"/> rows: square icon
+        /// zone plus the widest label with its padding, so the segmented pills
+        /// never clip text.
+        /// </summary>
+        public static float NavRailSegmentedWidth(IReadOnlyList<(FontAwesomeIcon Icon, string Label)> items)
+        {
+            var scale = SpheneUI.Scale;
+            var maxText = 0f;
+            foreach (var (_, label) in items)
+            {
+                var w = ImGui.CalcTextSize(label).X;
+                if (w > maxText)
+                {
+                    maxText = w;
+                }
+            }
+            return NavRailPadX * 2f * scale
+                + NavRailItemHeight * scale
+                + NavRailItemPadX * scale
+                + maxText
+                + 14f * scale;
         }
 
         /// <summary>
@@ -1238,6 +1367,10 @@ public static partial class SpheneUI
         {
             var windowPos = ImGui.GetWindowPos();
             var windowSize = ImGui.GetWindowSize();
+            RegisterNavRailHost(windowPos, windowSize);
+            // Hard-reset residual scroll: a host that still carries an offset
+            // from before it held a rail would draw its children shifted.
+            ImGui.SetScrollY(0f);
             var contentTop = ImGui.GetCursorScreenPos();
             var available = ImGui.GetContentRegionAvail();
             var railMin = new Vector2(windowPos.X, windowPos.Y + (embedded ? 0f : Chrome.TitleBarHeight));
@@ -1253,7 +1386,7 @@ public static partial class SpheneUI
                 railRadius, embedded ? ImDrawFlags.None : ImDrawFlags.RoundCornersBottomLeft);
             drawList.AddLine(new Vector2(railMax.X - 0.5f, railMin.Y),
                 new Vector2(railMax.X - 0.5f, railMax.Y),
-                ColorUtils.ToU32(ColorUtils.WithAlpha(Vector4.One, 0.06f)));
+                ColorUtils.ToU32(ColorUtils.WithAlpha(Vector4.One, 0.09f)));
             ImGui.PopClipRect();
 
             NavRailStack.Push(new NavRailState
@@ -1265,15 +1398,19 @@ public static partial class SpheneUI
                 ContentTop = contentTop,
                 Available = available,
                 Width = width,
+                WindowMin = windowPos,
                 WindowRight = windowPos.X + windowSize.X,
+                WindowBottom = windowPos.Y + windowSize.Y,
             });
-            // Center the nav child inside the rail: the rail reaches the
-            // window's left edge while the child keeps a symmetric inset.
-            var childMin = new Vector2(
-                railMin.X + MathF.Max(0f, railMax.X - railMin.X - width) * 0.5f,
-                contentTop.Y);
-            ImGui.SetCursorScreenPos(childMin);
-            BeginScrollArea(id + "##nav", new Vector2(width, MathF.Max(0f, available.Y)));
+            // The nav child is inset by NavRailPadX on both sides so pills
+            // keep a visible margin to the rail edges — enforced by the
+            // child rect itself, not by padding semantics.
+            var railPad = NavRailPadX * SpheneUI.Scale;
+            ImGui.SetCursorScreenPos(new Vector2(railMin.X + railPad, contentTop.Y));
+            BeginScrollArea(id + "##nav", new Vector2(
+                    MathF.Max(0f, railMax.X - railMin.X - railPad * 2f),
+                    MathF.Max(0f, windowPos.Y + windowSize.Y - contentTop.Y)),
+                contentPadding: new Vector2(0f, 8f));
             return width;
         }
 
@@ -1289,10 +1426,12 @@ public static partial class SpheneUI
                 fadeSpanX: new Vector2(state.RailMin.X, state.RailMax.X));
         }
 
-        // Remembers per nested nav-content whether it scrolls, so
-        /// EndNavContent can pair BeginChild/EndScrollArea correctly even
-        /// when an embedded page opens its own rail+content inside ours.
-        private static readonly Stack<bool> NavContentScrollable = new();
+        // Remembers per nested nav-content whether it scrolls plus the
+        // backing color under it, so EndNavContent can pair
+        // BeginChild/EndScrollArea correctly and tint the fades toward the
+        // same surface even when an embedded page opens its own
+        // rail+content inside ours.
+        private static readonly Stack<(bool Scrollable, Vector4? BaseColor)> NavContentScrollable = new();
 
         /// <summary>
         /// Moves the cursor right of the last opened rail and begins the
@@ -1301,31 +1440,72 @@ public static partial class SpheneUI
         /// <see cref="EndNavRail"/> and close with <see cref="EndNavContent"/>.
         /// Pass <paramref name="scrollable"/> = false for a plain child when
         /// the page hosts content that manages its own scrolling (e.g. an
-        /// embedded nav-rail layout).
+        /// embedded nav-rail layout). <paramref name="padded"/> insets the
+        /// scrollable content uniformly (<see cref="Spacing.PagePadding"/> on
+        /// all sides) — pages then start flush at the content origin without
+        /// their own page margins. The scroll fades still render across the
+        /// full child bounds, so the padding never clips them. Set
+        /// <paramref name="padded"/> = false only for content that draws its
+        /// own edge-to-edge chrome.
         /// </summary>
-        public static bool BeginNavContent(string id, bool scrollable = true)
+        public static bool BeginNavContent(string id, bool scrollable = true, bool padded = true)
         {
             var state = NavRailStack.Count > 0 ? NavRailStack.Pop() : new NavRailState();
-            ImGui.SetCursorScreenPos(state.ContentTop + new Vector2(state.Width, 0f));
-            // The content child reaches the parent window's right edge, not
-            // the content region's end (which stops windowPadding short of
-            // it). Otherwise the right card margin ends up padding + inset
-            // wider than the left one.
+            var contentMin = state.ContentTop + new Vector2(state.Width, 0f);
+            ImGui.SetCursorScreenPos(contentMin);
+            // The content child reaches the parent window's right and bottom
+            // edges, not the content region's end (which stops windowPadding
+            // short of both). Otherwise the right card margin ends up padding
+            // + inset wider than the left one and embedded rails leave a bare
+            // window-background strip under their band.
             var size = new Vector2(
                 MathF.Max(0f, state.WindowRight - state.ContentTop.X - state.Width),
-                state.Available.Y);
-            NavContentScrollable.Push(scrollable);
+                MathF.Max(0f, state.WindowBottom - state.ContentTop.Y));
+            // The page padding inside the scroll child would expose the
+            // translucent window surface — and the blur behind it — along the
+            // right and bottom edges. Paint a solid continuation of the
+            // surface gradient under the whole content region so those margins
+            // read as window chrome; the fades blend into the same tone.
+            var parentMax = new Vector2(state.WindowRight, state.WindowBottom);
+            var bgTop = Chrome.WindowSurfaceColorAt(state.WindowMin, parentMax, contentMin.Y);
+            var bgBottom = Chrome.WindowSurfaceColorAt(state.WindowMin, parentMax,
+                contentMin.Y + size.Y);
+            var baseColor = Vector4.Lerp(bgTop, bgBottom, 0.5f);
+            baseColor.W = 1f;
+            bgTop.W = 1f;
+            bgBottom.W = 1f;
+            // Corners the backing shares with the window silhouette keep the
+            // frame arc — a square fill would blunt the frame's rounding.
+            var style = ImGui.GetStyle();
+            var cornerR = MathF.Max(0f, style.WindowRounding);
+            var topRightR = contentMin.Y <= state.WindowMin.Y + 0.5f ? cornerR : 0f;
+            var bottomRightR = contentMin.Y + size.Y >= parentMax.Y - 0.5f ? cornerR : 0f;
+            ImGui.PushClipRect(state.WindowMin, parentMax, false);
+            Chrome.VerticalFade(ImGui.GetWindowDrawList(), contentMin, contentMin + size,
+                bgTop, bgBottom, 0f, topRightR, 0f, bottomRightR);
+            ImGui.PopClipRect();
+            NavContentScrollable.Push((scrollable, baseColor));
             if (scrollable)
             {
+                if (padded)
+                {
+                    return BeginScrollArea(id + "##content", size,
+                        windowFlags: ImGuiWindowFlags.NoBackground,
+                        contentPadding: new Vector2(Spacing.PagePadding.Value));
+                }
                 return BeginScrollArea(id + "##content", size,
                     windowFlags: ImGuiWindowFlags.NoBackground, noPadding: true);
             }
             // Non-scrollable nav content must offer the same geometry as the
             // scroll path — no child padding, so embedded layouts (their own
-            // rail + scroll areas) land on the same content edges.
+            // rail + scroll areas) land on the same content edges. NoScrollbar:
+            // inner scroll areas push the cursor a hair past the child bottom
+            // (trailing item spacing), which would surface a permanent bar that
+            // eats into the embedded layout's width.
             ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, Vector2.Zero);
             var contentBegun = ImGui.BeginChild(id + "##content", size, false,
-                ImGuiWindowFlags.NoBackground);
+                ImGuiWindowFlags.NoBackground | ImGuiWindowFlags.NoScrollbar
+                | ImGuiWindowFlags.NoScrollWithMouse);
             ImGui.PopStyleVar();
             return contentBegun;
         }
@@ -1333,10 +1513,12 @@ public static partial class SpheneUI
         /// <summary>Ends the content area opened by <see cref="BeginNavContent"/>.</summary>
         public static void EndNavContent()
         {
-            var scrollable = NavContentScrollable.Count > 0 && NavContentScrollable.Pop();
+            var (scrollable, baseColor) = NavContentScrollable.Count > 0
+                ? NavContentScrollable.Pop()
+                : (true, (Vector4?)null);
             if (scrollable)
             {
-                EndScrollArea();
+                EndScrollArea(fadeBaseColor: baseColor);
             }
             else
             {
@@ -1351,15 +1533,20 @@ public static partial class SpheneUI
         /// <paramref name="special"/> paints the label in the accent color for
         /// highlighted entries. Returns true when clicked.
         /// </summary>
-        public static bool NavRailItem(string label, bool active, Vector4 accent, bool special = false)
+        public static bool NavRailItem(string label, bool active, Vector4 accent, bool special = false,
+            FontAwesomeIcon? icon = null)
         {
+            if (icon.HasValue)
+            {
+                return NavRailIconItem(label, icon.Value, active, accent);
+            }
             var scale = SpheneUI.Scale;
             var style = ImGui.GetStyle();
-            var padX = MathF.Max(4f * scale, style.FramePadding.X * 0.65f);
-            var buttonSize = new Vector2(-1f, 24f * scale);
+            var padX = MathF.Max(NavRailItemPadX * scale, style.FramePadding.X * 0.65f);
+            var buttonSize = new Vector2(-1f, NavRailItemHeight * scale);
             using var buttonPadding = ImRaii.PushStyle(ImGuiStyleVar.FramePadding,
                 new Vector2(padX, style.FramePadding.Y));
-            using var buttonRounding = ImRaii.PushStyle(ImGuiStyleVar.FrameRounding, 5f * scale);
+            using var buttonStyle = Controls.PushButtonStyle();
             var pushedColors = 0;
             if (active)
             {
@@ -1379,7 +1566,7 @@ public static partial class SpheneUI
                     pushedColors++;
                 }
             }
-            var clicked = Controls.Button(label, buttonSize);
+            var clicked = ImGui.Button(label, buttonSize);
             if (active)
             {
                 // Bright left accent bar + a soft top sheen give the active
@@ -1394,7 +1581,7 @@ public static partial class SpheneUI
                 var accentEdge = ColorUtils.LerpColor(accent, Vector4.One, 0.35f);
                 var edgeCol = ImGui.ColorConvertFloat4ToU32(accentEdge);
                 var fadeCol = ImGui.ColorConvertFloat4ToU32(ColorUtils.WithAlpha(accentEdge, 0f));
-                var buttonRadius = 5f * scale;
+                var buttonRadius = Metrics.ButtonRadius;
                 var fadeWidth = (itemMax.X - itemMin.X) * 0.35f;
                 drawList.AddRectFilled(itemMin, new Vector2(itemMin.X + buttonRadius, itemMax.Y),
                     edgeCol, buttonRadius, ImDrawFlags.RoundCornersLeft);
@@ -1407,6 +1594,121 @@ public static partial class SpheneUI
             {
                 ImGui.PopStyleColor(pushedColors);
             }
+            return clicked;
+        }
+
+        /// <summary>
+        /// Square icon button for <see cref="NavRailItem"/> in icon mode —
+        /// the standalone version of <see cref="NavRailSegmentItem"/>'s icon
+        /// zone: a gray rounded square idle with the glyph in accent color;
+        /// on hover it tints toward the accent and when active the whole
+        /// square lights up solid accent with a contrast glyph. The label is
+        /// shown as a tooltip so the rail can stay narrow.
+        /// </summary>
+        private static bool NavRailIconItem(string label, FontAwesomeIcon icon, bool active, Vector4 accent)
+        {
+            var availW = ImGui.GetContentRegionAvail().X;
+            ImGui.PushID(label);
+            var clicked = ImGui.InvisibleButton("##navrail-icon", new Vector2(availW, availW));
+            var hovered = ImGui.IsItemHovered();
+            var held = ImGui.IsItemActive();
+            var min = ImGui.GetItemRectMin();
+            var max = ImGui.GetItemRectMax();
+            ImGui.PopID();
+            Lint.CheckBounds(label);
+
+            var drawList = ImGui.GetWindowDrawList();
+            var fill = active ? ColorUtils.WithAlpha(accent, 0.92f)
+                : held ? ColorUtils.WithAlpha(accent, 0.34f)
+                : hovered ? ColorUtils.WithAlpha(accent, 0.24f)
+                : ColorUtils.WithAlpha(Vector4.One, 0.08f);
+            drawList.AddRectFilled(min, max, ColorUtils.ToU32(fill), Metrics.ButtonRadius);
+
+            var glyphColor = active ? ColorUtils.ContrastTextColor(accent)
+                : hovered ? ColorUtils.LerpColor(accent, Vector4.One, 0.3f)
+                : ColorUtils.LerpColor(accent, Vector4.One, 0.1f);
+            using (Icons.PushFont())
+            {
+                var glyph = icon.ToIconString();
+                var glyphSize = ImGui.CalcTextSize(glyph);
+                drawList.AddText(min + (max - min - glyphSize) * 0.5f,
+                    ColorUtils.ToU32(glyphColor), glyph);
+            }
+            SpheneUI.AttachTooltip(label);
+            return clicked;
+        }
+
+        /// <summary>
+        /// Segmented nav item: a square icon zone on the left separated from
+        /// the label by a thin seam. The zone carries the accent color — idle
+        /// as a faint tint, fully lit when the item is active — while the
+        /// label area only picks up a soft fill. Size the rail with
+        /// <see cref="NavRailSegmentedWidth"/>.
+        /// <paramref name="special"/> tints the idle label in the accent color
+        /// for highlighted entries (e.g. Supporter).
+        /// </summary>
+        public static bool NavRailSegmentItem(string label, FontAwesomeIcon icon, bool active, Vector4 accent,
+            bool special = false)
+        {
+            var scale = SpheneUI.Scale;
+            var radius = Metrics.ButtonRadius;
+            ImGui.PushID(label);
+            var clicked = ImGui.InvisibleButton("##navrail-seg",
+                new Vector2(-1f, NavRailItemHeight * scale));
+            var hovered = ImGui.IsItemHovered();
+            var held = ImGui.IsItemActive();
+            var min = ImGui.GetItemRectMin();
+            var max = ImGui.GetItemRectMax();
+            ImGui.PopID();
+            Lint.CheckBounds(label);
+
+            var drawList = ImGui.GetWindowDrawList();
+            var zoneW = NavRailItemHeight * scale;
+            var zoneMax = new Vector2(min.X + zoneW, max.Y);
+
+            var pillFill = active ? ColorUtils.WithAlpha(accent, 0.16f)
+                : held ? ColorUtils.WithAlpha(accent, 0.14f)
+                : hovered ? ColorUtils.WithAlpha(accent, 0.10f)
+                : ColorUtils.WithAlpha(Vector4.One, 0.045f);
+            drawList.AddRectFilled(min, max, ColorUtils.ToU32(pillFill), radius);
+
+            var zoneFill = active ? ColorUtils.WithAlpha(accent, 0.92f)
+                : held ? ColorUtils.WithAlpha(accent, 0.34f)
+                : hovered ? ColorUtils.WithAlpha(accent, 0.24f)
+                : ColorUtils.WithAlpha(Vector4.One, 0.08f);
+            drawList.AddRectFilled(min, zoneMax, ColorUtils.ToU32(zoneFill),
+                radius, ImDrawFlags.RoundCornersLeft);
+
+            var seamColor = active
+                ? ColorUtils.WithAlpha(ColorUtils.LerpColor(accent, Vector4.One, 0.5f), 0.55f)
+                : ColorUtils.WithAlpha(Vector4.One, 0.09f);
+            var seamInset = 6f * scale;
+            drawList.AddLine(new Vector2(zoneMax.X - 0.5f, min.Y + seamInset),
+                new Vector2(zoneMax.X - 0.5f, max.Y - seamInset), ColorUtils.ToU32(seamColor));
+
+            var glyphColor = active ? ColorUtils.ContrastTextColor(accent)
+                : hovered ? ColorUtils.LerpColor(accent, Vector4.One, 0.3f)
+                : ColorUtils.LerpColor(accent, Vector4.One, 0.1f);
+            using (Icons.PushFont())
+            {
+                var glyph = icon.ToIconString();
+                var glyphSize = ImGui.CalcTextSize(glyph);
+                drawList.AddText(new Vector2(min.X + (zoneW - glyphSize.X) * 0.5f,
+                    min.Y + (max.Y - min.Y - glyphSize.Y) * 0.5f),
+                    ColorUtils.ToU32(glyphColor), glyph);
+            }
+
+            var textPadX = NavRailItemPadX * scale;
+            var textX = zoneMax.X + textPadX;
+            var labelSize = ImGui.CalcTextSize(label);
+            var textColor = active
+                ? ColorUtils.ToU32(ColorUtils.LerpColor(accent, Vector4.One, 0.25f))
+                : special ? ColorUtils.ToU32(accent) : ImGui.GetColorU32(ImGuiCol.Text);
+            ImGui.PushClipRect(new Vector2(textX, min.Y),
+                new Vector2(max.X - textPadX * 0.5f, max.Y), true);
+            drawList.AddText(new Vector2(textX,
+                    min.Y + (max.Y - min.Y - labelSize.Y) * 0.5f), textColor, label);
+            ImGui.PopClipRect();
             return clicked;
         }
 

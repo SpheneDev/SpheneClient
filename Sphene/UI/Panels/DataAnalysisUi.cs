@@ -146,7 +146,7 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                     var elapsedMods = DateTime.UtcNow - _currentModStartedAt;
                     SpheneUI.Text.Plain($"Current mod elapsed: {elapsedMods:mm\\:ss}");
                 }
-                ImGui.Spacing();
+                SpheneUI.Layout.VerticalSpace();
                 if (!string.IsNullOrEmpty(_currentModName))
                     SpheneUI.Text.Plain($"Current mod: {_currentModName}");
                 var totalFiles = _currentModTotalFiles > 0 ? _currentModTotalFiles : _texturesToConvert.Count;
@@ -156,6 +156,7 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                 SpheneUI.Controls.ProgressBar(progressPercentage, new Vector2(-1, 0), $"{progressPercentage * 100:F1}%");
                 if (!string.IsNullOrEmpty(_conversionCurrentFileName))
                     SpheneUI.Text.Wrapped("Current file: " + _conversionCurrentFileName);
+                SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.Row);
                 if (SpheneUI.Icons.TextButton(FontAwesomeIcon.StopCircle, "Cancel conversion"))
                 {
                     try { _shrinkuConversionService.Cancel(); }
@@ -262,7 +263,7 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                 + "Sphene will automatically attach these after using them. If you disable associated mods in Penumbra, the associated entries here will also be deleted automatically.");
         });
 
-        ImGuiHelpers.ScaledDummy(5);
+        SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
 
         var config = _transientConfigService.Current.TransientConfigs;
         if (!string.IsNullOrWhiteSpace(_selectedStoredCharacter) && !config.ContainsKey(_selectedStoredCharacter))
@@ -279,7 +280,7 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
         {
             SpheneUI.Text.Plain("Character");
             SpheneUI.Layout.Separator();
-            ImGuiHelpers.ScaledDummy(3);
+            SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
             availableContentRegion = ImGui.GetContentRegionAvail();
             using (ImRaii.ListBox("##characters", new Vector2(200, availableContentRegion.Y)))
             {
@@ -309,7 +310,7 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
         {
             SpheneUI.Text.Plain("Job");
             SpheneUI.Layout.Separator();
-            ImGuiHelpers.ScaledDummy(3);
+            SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
             using (ImRaii.ListBox("##data", new Vector2(150, availableContentRegion.Y)))
             {
                 if (selectedData)
@@ -405,7 +406,7 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
             }
             SpheneUI.Text.Plain($"Attached Files (Total Files: {selectedList.Count})");
             SpheneUI.Layout.Separator();
-            ImGuiHelpers.ScaledDummy(3);
+            SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
             using (ImRaii.Disabled(string.IsNullOrEmpty(_selectedJobEntry)))
             {
 
@@ -426,7 +427,7 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                     });
                 }
                 ImGui.SameLine();
-                ImGuiHelpers.ScaledDummy(20, 1);
+                SpheneUI.Layout.Space(SpheneUI.Spacing.X20, SpheneUI.Spacing.Hairline);
                 ImGui.SameLine();
                 using (ImRaii.Disabled(!_storedPathsToRemove.Any() || isMinionMountSession))
                 {
@@ -461,8 +462,8 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                 }
                 SpheneUI.AttachTooltip("Hold CTRL to delete all game paths from the displayed list"
                     + SpheneUI.TooltipSeparator + "You usually do not need to do this. All animation and VFX data will be automatically handled through Sphene.");
-                ImGuiHelpers.ScaledDummy(5);
-                ImGuiHelpers.ScaledDummy(30);
+                SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
+                SpheneUI.Layout.Space(SpheneUI.Spacing.X32);
                 ImGui.SameLine();
                 ImGui.SetNextItemWidth((restContent - 30) / 2f);
                 SpheneUI.Controls.InputTextWithHint("##filterGamePath", "Filter by Game Path", ref _filterGamePath, 255);
@@ -536,14 +537,14 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                 + "To use this, start the recording, execute one or multiple emotes/animations you want to attempt to fix and check if new data appears in the table below." + Environment.NewLine
                 + "If it doesn't, Sphene is not able to catch the data or already has recorded the animation files (check 'Show previously added transient files' to see if not all is already present)." + Environment.NewLine + Environment.NewLine
                 + "For most animations, vfx, etc. it is enough to just run them once unless they have random variations. Longer animations do not require to play out in their entirety to be captured.");
-            ImGuiHelpers.ScaledDummy(5);
+            SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
             SpheneUI.Text.GroupedCentered("Important Note: If you need to fix an animation that should apply across multiple jobs, you need to repeat this process with at least one additional job, " +
                 "otherwise the animation will only be fixed for the currently active job. This goes primarily for emotes that are used across multiple jobs.",
                 ImGuiColors.DalamudYellow, 800);
-            ImGuiHelpers.ScaledDummy(5);
+            SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
             SpheneUI.Text.GroupedCentered("WARNING: WHILE RECORDING TRANSIENT DATA, DO NOT CHANGE YOUR APPEARANCE, ENABLED MODS OR ANYTHING. JUST DO THE ANIMATION(S) OR WHATEVER YOU NEED DOING AND STOP THE RECORDING.",
                 ImGuiColors.DalamudRed, 800);
-            ImGuiHelpers.ScaledDummy(5);
+            SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
         });
         using (ImRaii.Disabled(_transientResourceManager.IsTransientRecording))
         {
@@ -568,14 +569,14 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
         {
             ImGui.SameLine();
             SpheneUI.Text.Colored($"RECORDING - Time Remaining: {_transientResourceManager.RecordTimeRemaining.Value}", ImGuiColors.DalamudYellow);
-            ImGuiHelpers.ScaledDummy(5);
+            SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
             SpheneUI.Text.GroupedCentered("DO NOT CHANGE YOUR APPEARANCE OR MODS WHILE RECORDING, YOU CAN ACCIDENTALLY MAKE SOME OF YOUR APPEARANCE RELATED MODS PERMANENT.", ImGuiColors.DalamudRed, 800);
         }
 
-        ImGuiHelpers.ScaledDummy(5);
+        SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
         SpheneUI.Controls.Toggle("Show previously added transient files in the recording", ref _showAlreadyAddedTransients);
         SpheneUI.Controls.HelpText("Use this only if you want to see what was previously already caught by Sphene");
-        ImGuiHelpers.ScaledDummy(5);
+        SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
 
         using (ImRaii.Disabled(_transientResourceManager.IsTransientRecording || _transientResourceManager.RecordedTransients.All(k => !k.AddTransient) || !_acknowledgeReview))
         {
@@ -589,12 +590,12 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
         SpheneUI.Controls.Toggle("I acknowledge I have reviewed the recorded data", ref _acknowledgeReview);
         if (_transientResourceManager.RecordedTransients.Any(k => !k.AlreadyTransient))
         {
-            ImGuiHelpers.ScaledDummy(5);
+            SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
             SpheneUI.Text.GroupedCentered("Please review the recorded mod files before saving and deselect files that got into the recording on accident.", ImGuiColors.DalamudYellow);
-            ImGuiHelpers.ScaledDummy(5);
+            SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
         }
 
-        ImGuiHelpers.ScaledDummy(5);
+        SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
         var width = ImGui.GetContentRegionAvail();
         using var table = ImRaii.Table("Recorded Transients", 4, ImGuiTableFlags.ScrollY | ImGuiTableFlags.SizingFixedFit | ImGuiTableFlags.RowBg);
         if (table)
@@ -848,6 +849,7 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
             {
                 SpheneUI.Text.ColoredWrapped($"Found {availableBackups.Count} backed up texture(s) from current analysis that can be restored.", ImGuiColors.ParsedGreen);
                 
+                SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.Row);
                 if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Undo, $"Revert current textures ({availableBackups.Count})"))
                 {
                     StartTextureRevert(availableBackups);

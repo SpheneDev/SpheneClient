@@ -64,7 +64,7 @@ public class PermissionWindowUI : WindowMediatorSubscriberBase
         }
         SpheneUI.Controls.HelpText("Preferred Permissions, when enabled, will exclude this user from any permission changes on any syncshells you share with this user.");
 
-        ImGuiHelpers.ScaledDummy(1f);
+        SpheneUI.Layout.Space(SpheneUI.Spacing.Hairline);
 
 
         if (SpheneUI.Controls.Toggle("Pause Sync", ref paused))

@@ -177,7 +177,7 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
         else
         {
             SpheneUI.Text.Muted("Upload, download, reshare, and create backups from mod packages.");
-            ImGui.Spacing();
+            SpheneUI.Layout.VerticalSpace();
         }
 
         if (ImGui.BeginTabBar("ModHistoryTabs"))
@@ -430,7 +430,7 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
 
         if (_isRedownloadBusy)
         {
-            ImGui.Spacing();
+            SpheneUI.Layout.VerticalSpace();
             if (SpheneUI.Controls.SmallButton("Cancel re-download"))
             {
                 _redownloadCts?.Cancel();
@@ -1114,6 +1114,7 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
         SpheneUI.Layout.Separator();
         SpheneUI.Text.Big("From Uploaded Mod Packages");
 
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.Row);
         if (SpheneUI.Controls.Button("Load uploaded mod packages for selection"))
         {
             _modUploadHistoryTask = GetModUploadHistory(CancellationToken.None);
@@ -1205,6 +1206,7 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
         SpheneUI.Layout.Separator();
         SpheneUI.Text.Big("From Installed Penumbra Mods");
 
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.Row);
         if (SpheneUI.Controls.Button("Load installed Penumbra mods"))
         {
             LoadInstalledPenumbraMods();
@@ -1605,6 +1607,7 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
     {
         SpheneUI.Text.Big("Your Backups");
 
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.Row);
         if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Sync, "Refresh backup list"))
         {
             _backupListTask = GetBackupListAsync(CancellationToken.None);

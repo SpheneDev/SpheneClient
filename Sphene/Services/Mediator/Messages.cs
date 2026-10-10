@@ -122,7 +122,8 @@ public enum SpheneHubPage
     Syncshells = 2,
     CharacterData = 3,
     ModSharing = 4,
-    ProfileStyle = 5
+    ProfileStyle = 5,
+    Settings = 6
 }
 public record OpenSpheneHubMessage(SpheneHubPage? Page = null, string? GroupGid = null) : MessageBase;
 public record DownloadLimitChangedMessage() : SameThreadMessage;

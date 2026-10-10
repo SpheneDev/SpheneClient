@@ -174,7 +174,7 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
         ImGui.SameLine();
         SpheneUI.AttachTooltip("Toggle whether prerelease/testbuild releases are visible.");
 #endif
-        ImGui.Spacing();
+        SpheneUI.Layout.VerticalSpace();
 
         var footerHeight = ImGui.GetFrameHeightWithSpacing() + (ImGui.GetStyle().ItemSpacing.Y * 2f) + (ImGuiHelpers.GlobalScale * 6f);
         var changelogPaneHeight = SpheneUI.Layout.FillToViewBottomHeight(footerHeight);
@@ -232,7 +232,7 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
                             }
                             if (opened)
                             {
-                                ImGui.Dummy(new Vector2(0, 2));
+                                SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X2);
 
                                 if (!string.IsNullOrWhiteSpace(e.Description))
                                 {
@@ -246,7 +246,7 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
                                     }
                                 }
 
-                                ImGuiHelpers.ScaledDummy(2f);
+                                SpheneUI.Layout.Space(SpheneUI.Spacing.X2);
 
                                 using (ImRaii.PushIndent(10f))
                                 {
@@ -280,14 +280,14 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
                                             foreach (var section in groupedSubItems)
                                             {
                                                 if (!isFirstSection)
-                                                    ImGuiHelpers.ScaledDummy(2f);
+                                                    SpheneUI.Layout.Space(SpheneUI.Spacing.X2);
 
                                                 if (!string.IsNullOrWhiteSpace(section.Heading))
                                                 {
                                                     ImGui.PushStyleColor(ImGuiCol.Text, ImGuiColors.DalamudYellow);
                                                     SpheneUI.Text.Wrapped(section.Heading);
                                                     ImGui.PopStyleColor();
-                                                    ImGuiHelpers.ScaledDummy(1f);
+                                                    SpheneUI.Layout.Space(SpheneUI.Spacing.Hairline);
                                                 }
 
                                                 foreach (var subItem in section.Items)
@@ -306,16 +306,16 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
                                             }
                                             ImGui.Unindent(ImGuiHelpers.GlobalScale * 18f);
                                             // add gap only after structured entries with sub-items
-                                            ImGuiHelpers.ScaledDummy(3f);
+                                            SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
                                         }
                                         else
                                         {
-                                            ImGuiHelpers.ScaledDummy(2f);
+                                            SpheneUI.Layout.Space(SpheneUI.Spacing.X2);
                                         }
                                     }
                                 }
                             }
-                            ImGui.Spacing();
+                            SpheneUI.Layout.VerticalSpace();
                         }
 
                     }
@@ -325,6 +325,7 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
         }
 
         SpheneUI.Layout.Separator();
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.Row);
         if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Check, "Okay close!"))
         {
             // Close will persist the last seen version

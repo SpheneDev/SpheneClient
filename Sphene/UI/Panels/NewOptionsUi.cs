@@ -124,26 +124,26 @@ public class NewOptionsUi : WindowMediatorSubscriberBase
                 {
                     SpheneUI.Text.Colored(UpdateOptionPanel.GetTitle(link), SpheneUI.Palette.CrystalBlue);
                     UpdateOptionPanel.DrawByLink(link, _configService, _uiShared, Mediator, _apiController.SupporterFeaturesEnabled);
-                    ImGuiHelpers.ScaledDummy(0, 6);
+                    SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
                     SpheneUI.Layout.Separator();
-                    ImGuiHelpers.ScaledDummy(0, 4);
+                    SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
                 }
 
                 if (i < pendingReleaseGroups.Count - 1)
                 {
-                    ImGuiHelpers.ScaledDummy(0, 4);
+                    SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
                     SpheneUI.Layout.Separator();
-                    ImGuiHelpers.ScaledDummy(0, 4);
+                    SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
                 }
             }
         }
         SpheneUI.Layout.EndScrollArea();
 
-        ImGuiHelpers.ScaledDummy(0, 6);
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
         SpheneUI.Layout.Separator();
-        ImGuiHelpers.ScaledDummy(0, 4);
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
         SpheneUI.Text.MutedWrapped("After confirmation, this window will stay hidden untill new Settings have been added.");
-        ImGuiHelpers.ScaledDummy(0, 4);
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.Row);
         if (SpheneUI.Controls.Button("I reviewed everything, confirm", new Vector2(-1, 0)))
         {
             UpdateOptionPanel.MarkCurrentTagAsSeen(_configService, _apiController.SupporterFeaturesEnabled);

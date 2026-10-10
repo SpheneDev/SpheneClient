@@ -95,6 +95,21 @@ public static partial class SpheneUI
         public static void MutedWrapped(string text, float wrapPos = 0)
             => ColoredWrapped(text, Colors.TextMuted, wrapPos);
 
+        /// <summary>
+        /// One-line muted page blurb — ellipsized to the content width, the
+        /// full text rides the hover tooltip. The standard description line
+        /// on pages whose title already lives in the breadcrumb.
+        /// </summary>
+        public static void PageIntro(string text)
+        {
+            var shown = Ellipsize(text, ImGui.GetContentRegionAvail().X);
+            Muted(shown);
+            if (shown.Length != text.Length)
+            {
+                SpheneUI.AttachTooltip(text);
+            }
+        }
+
         /// <summary>Large display text in the shared UI font.</summary>
         public static void Big(string text, Vector4? color = null)
         {

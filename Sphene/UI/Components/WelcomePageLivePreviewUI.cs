@@ -67,7 +67,7 @@ public class WelcomePageLivePreviewUI : WindowMediatorSubscriberBase
             {
                 var imageWindowWidth = ImGui.GetWindowContentRegionMax().X - ImGui.GetWindowContentRegionMin().X;
                 SpheneUI.Media.Image(_welcomeImageTexture, new Vector2(imageWindowWidth, 200f), ImageFit.Fit);
-                ImGuiHelpers.ScaledDummy(2f);
+                SpheneUI.Layout.Space(SpheneUI.Spacing.X2);
             }
 
             // Display welcome text with Markdown support (same logic as SyncshellWelcomePageUI)
@@ -84,7 +84,7 @@ public class WelcomePageLivePreviewUI : WindowMediatorSubscriberBase
 
         // Sticky button area at the bottom
         SpheneUI.Layout.Separator();
-        ImGuiHelpers.ScaledDummy(2f);
+        SpheneUI.Layout.Space(SpheneUI.Spacing.X2);
 
         // Center the close button (same logic as SyncshellWelcomePageUI)
         var buttonSize = SpheneUI.Icons.TextButtonWidth(FontAwesomeIcon.Check, "Got it!");
@@ -98,11 +98,11 @@ public class WelcomePageLivePreviewUI : WindowMediatorSubscriberBase
         SpheneUI.Icons.TextButton(FontAwesomeIcon.Check, "Got it!");
         ImGui.EndDisabled();
         
-        ImGuiHelpers.ScaledDummy(1f);
+        SpheneUI.Layout.Space(SpheneUI.Spacing.Hairline);
         
         // Add preview note
         SpheneUI.Layout.Separator();
-        ImGuiHelpers.ScaledDummy(1f);
+        SpheneUI.Layout.Space(SpheneUI.Spacing.Hairline);
         
         var noteText = "This is a preview of how the welcome popup will appear to users.";
         var textSize = ImGui.CalcTextSize(noteText);

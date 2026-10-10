@@ -416,14 +416,14 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             ImGui.EndTable();
         }
 
-        ImGui.Spacing();
+        SpheneUI.Layout.VerticalSpace();
 
         if (SpheneUI.Controls.CollapsibleSection("Actions", defaultOpen: true))
         {
             DrawControlButtons();
         }
 
-        ImGui.Spacing();
+        SpheneUI.Layout.VerticalSpace();
 
         if (SpheneUI.Controls.CollapsibleSection("Health Details"))
         {
@@ -775,7 +775,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         ImGui.NextColumn();
         
         ImGui.Columns(1);
-        ImGui.Spacing();
+        SpheneUI.Layout.VerticalSpace();
         
         // Configuration settings
         if (SpheneUI.Controls.CollapsibleSection("Configuration"))
@@ -950,6 +950,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
     {
         SpheneUI.Text.Plain("Debug Controls:");
         
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.Row);
         if (SpheneUI.Controls.Button("Force Reconnect"))
         {
             LogCommunication("[DEBUG] Force reconnect triggered");
@@ -969,12 +970,13 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             ClearDebugLog();
         }
 
-        ImGui.Spacing();
+        SpheneUI.Layout.VerticalSpace();
         SpheneUI.Text.Plain("Disconnect Simulation:");
         _simulatedDisconnectSeconds = Math.Clamp(_simulatedDisconnectSeconds, 1, 300);
         ImGui.SetNextItemWidth(140f * ImGuiHelpers.GlobalScale);
         SpheneUI.Controls.SliderInt("Duration (seconds)##DisconnectSimulationDuration", ref _simulatedDisconnectSeconds, 1, 300);
 
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.Row);
         if (SpheneUI.Controls.Button("Simulate Real Disconnect"))
         {
             LogCommunication($"[DEBUG] Simulating real disconnect for {_simulatedDisconnectSeconds}s");
@@ -1011,7 +1013,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         SpheneUI.Text.Plain($"Time Since Last Success: {healthStatus.TimeSinceLastSuccess:hh\\:mm\\:ss}");
         SpheneUI.Text.Plain($"Last Health Check: {healthStatus.LastHealthCheck:HH:mm:ss}");
         
-        ImGui.Spacing();
+        SpheneUI.Layout.VerticalSpace();
         
         // Circuit Breaker Status
         SpheneUI.Text.Plain("Circuit Breaker:");
@@ -1036,7 +1038,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             SpheneUI.Text.Plain($"Half-Open Attempts: {circuitStatus.HalfOpenAttempts}");
         }
         
-        ImGui.Spacing();
+        SpheneUI.Layout.VerticalSpace();
         
         // Reset buttons
         if (SpheneUI.Controls.Button("Reset Circuit Breaker"))
@@ -1693,6 +1695,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         
         SpheneUI.Layout.Separator();
 
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.Row);
         if (SpheneUI.Controls.Button("Clear All Records"))
         {
             _mismatchTracker.Clear();
@@ -2016,7 +2019,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             SpheneUI.AttachTooltip(_lastReportPath);
         }
 
-        ImGui.Spacing();
+        SpheneUI.Layout.VerticalSpace();
 
         ImGui.SetNextItemWidth(150f * ImGuiHelpers.GlobalScale);
         if (ImGui.BeginCombo("Min Level", _debugLogMinLevel.ToString()))
@@ -2046,7 +2049,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         SpheneUI.Controls.Checkbox("Apply details", ref _includeApplyChangeDetails);
         SpheneUI.AttachTooltip("Includes APPLY details for Info/Debug entries (can add a lot of text).");
 
-        ImGui.Spacing();
+        SpheneUI.Layout.VerticalSpace();
         SpheneUI.Text.Plain("Show:");
         ImGui.SameLine();
         SpheneUI.Controls.Checkbox("Conn", ref _showConnections);

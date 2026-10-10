@@ -1202,6 +1202,11 @@ public static partial class SpheneUI
         /// </summary>
         public static void StatTile(string label, FontAwesomeIcon icon, int value,
             Vector4 accent, string? tooltip = null, Action? onClick = null)
+            => StatTile(label, icon, value.ToString(), accent, tooltip, onClick);
+
+        /// <inheritdoc cref="StatTile(string, FontAwesomeIcon, int, Vector4, string?, Action?)"/>
+        public static void StatTile(string label, FontAwesomeIcon icon, string value,
+            Vector4 accent, string? tooltip = null, Action? onClick = null)
         {
             var scale = Scale;
             var drawList = ImGui.GetWindowDrawList();
@@ -1238,7 +1243,7 @@ public static partial class SpheneUI
             }
 
             var lineH = ImGui.GetTextLineHeight();
-            var valueText = value.ToString();
+            var valueText = value;
             Vector2 valueSize;
             using (UidFont.Push())
             {

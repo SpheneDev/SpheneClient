@@ -60,12 +60,12 @@ public class SyncshellWelcomePageUI : WindowMediatorSubscriberBase
             {
                 var imageWindowWidth = ImGui.GetWindowContentRegionMax().X - ImGui.GetWindowContentRegionMin().X;
                 SpheneUI.Media.Image(welcomeImage, new Vector2(imageWindowWidth, 200f), ImageFit.Fit);
-                ImGuiHelpers.ScaledDummy(2f);
+                SpheneUI.Layout.Space(SpheneUI.Spacing.X2);
             }
             else if (!string.IsNullOrEmpty(_welcomePage.WelcomeImageBase64))
             {
                 SpheneUI.Media.Placeholder(new Vector2(ImGui.GetContentRegionAvail().X, 200f));
-                ImGuiHelpers.ScaledDummy(2f);
+                SpheneUI.Layout.Space(SpheneUI.Spacing.X2);
             }
 
             // Display welcome text with Markdown support
@@ -82,7 +82,7 @@ public class SyncshellWelcomePageUI : WindowMediatorSubscriberBase
 
         // Sticky button area at the bottom
         SpheneUI.Layout.Separator();
-        ImGuiHelpers.ScaledDummy(2f);
+        SpheneUI.Layout.Space(SpheneUI.Spacing.X2);
 
         // Add checkbox to disable future welcome messages
         var showWelcomeMessages = _configService.Current.ShowAreaBoundSyncshellWelcomeMessages;
@@ -93,7 +93,7 @@ public class SyncshellWelcomePageUI : WindowMediatorSubscriberBase
         }
         SpheneUI.AttachTooltip("Uncheck this to disable welcome messages for area-bound syncshells");
         
-        ImGuiHelpers.ScaledDummy(2f);
+        SpheneUI.Layout.Space(SpheneUI.Spacing.X2);
 
         // Center the close button
         var buttonSize = SpheneUI.Icons.TextButtonWidth(FontAwesomeIcon.Check, "Got it!");

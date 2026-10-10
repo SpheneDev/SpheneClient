@@ -240,6 +240,7 @@ public class PenumbraSendModUi : WindowMediatorSubscriberBase
                 SpheneUI.Controls.InputTextWithHint("##penumbraModFilter" + idSuffix, "Filter mods…", ref _sendPenumbraModFilter, 128);
                 SpheneUI.Text.Muted("Hold Ctrl to select multiple mods.");
 
+                SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.Row);
                 if (_selectedPenumbraModFolders.Count > 0 && SpheneUI.Controls.Button("Clear selection##clearMods" + idSuffix))
                 {
                     _selectedPenumbraModFolders.Clear();
@@ -369,7 +370,7 @@ public class PenumbraSendModUi : WindowMediatorSubscriberBase
                 ImGui.SameLine();
                 SpheneUI.Text.Plain("History & backups");
 
-                ImGui.Spacing();
+                SpheneUI.Layout.VerticalSpace();
                 SpheneUI.Text.Plain("Selected mods");
                 ImGui.SameLine();
                 SpheneUI.Text.Plain(selectedLabel);
@@ -388,7 +389,7 @@ public class PenumbraSendModUi : WindowMediatorSubscriberBase
                 ImGui.SameLine();
                 SpheneUI.Text.Wrapped("Mods will be uploaded to the Sphene server network and will be shared with the users you selected.");
 
-                ImGui.Spacing();
+                SpheneUI.Layout.VerticalSpace();
                 var shareButtonText = _selectedPenumbraModFolders.Count == 1 ? "Share Mod" : "Share Mods";
                 var sendCurrent = _sendCurrentModState;
                 if (SpheneUI.Controls.Checkbox("Send current mod state (temporary)##sendCurrent" + idSuffix, ref sendCurrent))

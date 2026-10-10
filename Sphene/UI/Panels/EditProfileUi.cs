@@ -291,6 +291,7 @@ public class EditProfileUi : WindowMediatorSubscriberBase
             }
             SpheneUI.Controls.HelpText("Comma-separated interests shown as chips on your profile, e.g. \"GPosing, Raiding, Venue RP\".");
 
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.Row);
             if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Save, "Save Status & Tags"))
             {
                 _ = _apiController.UserSetProfile(new UserProfileDto(new UserData(_apiController.UID),
@@ -420,6 +421,7 @@ public class EditProfileUi : WindowMediatorSubscriberBase
                 8f * scale);
             SpheneUI.Controls.HelpText("Banner shown on top of your profile page. PNG, up to 1200×400 — larger images are cropped to fit.");
 
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.Row);
             if (SpheneUI.Icons.TextButton(FontAwesomeIcon.FileUpload, "Upload banner"))
             {
                 PickAndCrop(ImageCropUi.CropKind.Banner);

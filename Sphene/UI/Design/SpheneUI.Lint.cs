@@ -151,10 +151,17 @@ public static partial class SpheneUI
     internal static class ThemeScopeTracker
     {
         private static int _depth;
+        private static int _compactDepth;
 
         public static int Depth => _depth;
 
+        /// <summary>Whether a <c>CompactThemeScope</c> is currently active.</summary>
+        public static bool InCompactScope => _compactDepth > 0;
+
         public static void Push() => _depth++;
         public static void Pop() => _depth--;
+
+        public static void PushCompact() { _depth++; _compactDepth++; }
+        public static void PopCompact() { _depth--; _compactDepth--; }
     }
 }

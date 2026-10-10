@@ -23,7 +23,7 @@ internal sealed partial class CharaDataHubUi
 
         if (dataDto == null)
         {
-            ImGuiHelpers.ScaledDummy(5);
+            SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
             SpheneUI.Text.GroupedCentered("Select an entry above to edit its data.", ImGuiColors.DalamudYellow);
             return;
         }
@@ -48,13 +48,13 @@ internal sealed partial class CharaDataHubUi
         bool canUpdate = updateDto.HasChanges;
         if (canUpdate || otherUpdates > 0 || (!_charaDataManager.CharaUpdateTask?.IsCompleted ?? false))
         {
-            ImGuiHelpers.ScaledDummy(5);
+            SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
         }
 
         var indent = ImRaii.PushIndent(10f);
         if (canUpdate || _charaDataManager.UploadTask != null)
         {
-            ImGuiHelpers.ScaledDummy(5);
+            SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
             SpheneUI.Layout.Group(() =>
             {
                 if (canUpdate)
@@ -109,7 +109,7 @@ internal sealed partial class CharaDataHubUi
 
         if (otherUpdates > 0)
         {
-            ImGuiHelpers.ScaledDummy(5);
+            SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
             SpheneUI.Layout.Group(() =>
             {
                 ImGui.AlignTextToFramePadding();
@@ -128,17 +128,17 @@ internal sealed partial class CharaDataHubUi
 
         if (canUpdate || otherUpdates > 0 || (!_charaDataManager.CharaUpdateTask?.IsCompleted ?? false))
         {
-            ImGuiHelpers.ScaledDummy(5);
+            SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
         }
 
         using var child = ImRaii.Child("editChild", new(0, 0), false, ImGuiWindowFlags.AlwaysAutoResize);
 
         DrawEditCharaDataGeneral(dataDto, updateDto);
-        ImGuiHelpers.ScaledDummy(5);
+        SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
         DrawEditCharaDataAccessAndSharing(updateDto);
-        ImGuiHelpers.ScaledDummy(5);
+        SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
         DrawEditCharaDataAppearance(dataDto, updateDto);
-        ImGuiHelpers.ScaledDummy(5);
+        SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
         DrawEditCharaDataPoses(updateDto);
     }
 
@@ -190,13 +190,14 @@ internal sealed partial class CharaDataHubUi
             + "Shared: People that are allowed through 'Access Restrictions' will have this character data entry displayed in 'Shared with You' (it can also be accessed through the code)" + SpheneUI.TooltipSeparator
             + "Note: Shared with Access Restriction 'Everyone' is the same as shared with Access Restriction 'All Pairs', it will not show up for everyone but just your pairs.");
 
-        ImGuiHelpers.ScaledDummy(10f);
+        SpheneUI.Layout.Space(SpheneUI.Spacing.X10);
     }
 
     private void DrawEditCharaDataAppearance(CharaDataFullExtendedDto dataDto, CharaDataExtendedUpdateDto updateDto)
     {
         SpheneUI.Text.Big("Appearance");
 
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.Row);
         if (SpheneUI.Icons.TextButton(FontAwesomeIcon.ArrowRight, "Set Appearance to Current Appearance"))
         {
             _charaDataManager.SetAppearanceData(dataDto.Id);
@@ -226,7 +227,7 @@ internal sealed partial class CharaDataHubUi
         if (hasFiles && updateDto.IsAppearanceEqual)
         {
             ImGui.SameLine();
-            ImGuiHelpers.ScaledDummy(20, 1);
+            SpheneUI.Layout.Space(SpheneUI.Spacing.X20, SpheneUI.Spacing.Hairline);
             ImGui.SameLine();
             var pos = ImGui.GetCursorPosX();
             ImGui.NewLine();
@@ -258,7 +259,7 @@ internal sealed partial class CharaDataHubUi
         else if (hasFiles && !updateDto.IsAppearanceEqual)
         {
             ImGui.SameLine();
-            ImGuiHelpers.ScaledDummy(20, 1);
+            SpheneUI.Layout.Space(SpheneUI.Spacing.X20, SpheneUI.Spacing.Hairline);
             ImGui.SameLine();
             SpheneUI.Text.ColoredWrapped("New data was set. It may contain files that require to be uploaded (will happen on Saving to server)", ImGuiColors.DalamudYellow);
         }
@@ -304,7 +305,7 @@ internal sealed partial class CharaDataHubUi
         ImGui.SameLine();
         SpheneUI.Text.Plain("Creation Date");
         ImGui.SameLine();
-        ImGuiHelpers.ScaledDummy(20);
+        SpheneUI.Layout.Space(SpheneUI.Spacing.X20);
         ImGui.SameLine();
         using (ImRaii.Disabled())
         {
@@ -314,7 +315,7 @@ internal sealed partial class CharaDataHubUi
         ImGui.SameLine();
         SpheneUI.Text.Plain("Last Update Date");
         ImGui.SameLine();
-        ImGuiHelpers.ScaledDummy(23);
+        SpheneUI.Layout.Space(SpheneUI.Spacing.X24);
         ImGui.SameLine();
         using (ImRaii.Disabled())
         {
@@ -387,7 +388,7 @@ internal sealed partial class CharaDataHubUi
                 ImGui.EndCombo();
             }
         }
-        ImGuiHelpers.ScaledDummy(5);
+        SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
 
         using (ImRaii.Disabled(!UiSharedService.CtrlPressed()))
         {
@@ -417,22 +418,22 @@ internal sealed partial class CharaDataHubUi
         ImGui.SameLine();
         using (ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.DalamudYellow, poseCount == maxPoses))
             SpheneUI.Text.Plain($"{poseCount}/{maxPoses} poses attached");
-        ImGuiHelpers.ScaledDummy(5);
+        SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
 
         using var indent = ImRaii.PushIndent(10f);
         int poseNumber = 1;
 
         if (!_uiSharedService.IsInGpose && _charaDataManager.BrioAvailable)
         {
-            ImGuiHelpers.ScaledDummy(5);
+            SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
             SpheneUI.Text.GroupedCentered("To attach pose and world data you need to be in GPose.", ImGuiColors.DalamudYellow);
-            ImGuiHelpers.ScaledDummy(5);
+            SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
         }
         else if (!_charaDataManager.BrioAvailable)
         {
-            ImGuiHelpers.ScaledDummy(5);
+            SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
             SpheneUI.Text.GroupedCentered("To attach pose and world data Brio requires to be installed.", ImGuiColors.DalamudRed);
-            ImGuiHelpers.ScaledDummy(5);
+            SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
         }
 
         foreach (var pose in updateDto.PoseList)
@@ -476,7 +477,7 @@ internal sealed partial class CharaDataHubUi
                 }
 
                 ImGui.SameLine();
-                ImGuiHelpers.ScaledDummy(10, 1);
+                SpheneUI.Layout.Space(SpheneUI.Spacing.X10, SpheneUI.Spacing.Hairline);
                 ImGui.SameLine();
                 bool hasPoseData = !string.IsNullOrEmpty(pose.PoseData);
                 SpheneUI.Icons.Icon(FontAwesomeIcon.Running, SpheneUI.Colors.Bool(hasPoseData));
@@ -507,7 +508,7 @@ internal sealed partial class CharaDataHubUi
                 }
 
                 ImGui.SameLine();
-                ImGuiHelpers.ScaledDummy(10, 1);
+                SpheneUI.Layout.Space(SpheneUI.Spacing.X10, SpheneUI.Spacing.Hairline);
                 ImGui.SameLine();
                 var worldData = pose.WorldData;
                 bool hasWorldData = worldData.HasValue;
@@ -569,7 +570,7 @@ internal sealed partial class CharaDataHubUi
             + "There would be a bit too much to explain here on what you can do here in its entirety, however, all elements in this tab have help texts attached what they are used for. Please review them carefully." + Environment.NewLine + Environment.NewLine
             + "Be mindful that when you share your Character Data with other people there is a chance that, with the help of unsanctioned 3rd party plugins, your appearance could be stolen irreversibly, just like when using MCDF.");
 
-        ImGuiHelpers.ScaledDummy(5);
+        SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
         using (ImRaii.Disabled((!_charaDataManager.GetAllDataTask?.IsCompleted ?? false)
             || (_charaDataManager.DataGetTimeoutTask != null && !_charaDataManager.DataGetTimeoutTask.IsCompleted)))
         {
@@ -777,7 +778,7 @@ internal sealed partial class CharaDataHubUi
             SpheneUI.Text.ColoredWrapped(_charaDataManager.DataCreationTask.Result.Output, color);
         }
 
-        ImGuiHelpers.ScaledDummy(10);
+        SpheneUI.Layout.Space(SpheneUI.Spacing.X10);
         SpheneUI.Layout.Separator();
 
         var charaDataEntries = _charaDataManager.OwnCharaData.Count;
@@ -865,7 +866,7 @@ internal sealed partial class CharaDataHubUi
                 }
             }
             ImGui.SameLine();
-            ImGuiHelpers.ScaledDummy(20);
+            SpheneUI.Layout.Space(SpheneUI.Spacing.X20);
             ImGui.SameLine();
 
             using (ImRaii.PushId("group"))
@@ -935,7 +936,7 @@ internal sealed partial class CharaDataHubUi
             }
 
             SpheneUI.Layout.Separator();
-            ImGuiHelpers.ScaledDummy(5);
+            SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
         });
     }
 

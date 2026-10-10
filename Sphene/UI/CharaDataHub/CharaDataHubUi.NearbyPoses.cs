@@ -78,9 +78,9 @@ internal partial class CharaDataHubUi
 
         if (!_uiSharedService.IsInGpose)
         {
-            ImGuiHelpers.ScaledDummy(5);
+            SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
             SpheneUI.Text.GroupedCentered("Spawning and applying pose data is only available in GPose.", ImGuiColors.DalamudYellow);
-            ImGuiHelpers.ScaledDummy(5);
+            SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
         }
 
         DrawUpdateSharedDataButton();
@@ -89,7 +89,7 @@ internal partial class CharaDataHubUi
 
         using var child = ImRaii.Child("nearbyPosesChild", new(0, 0), false, ImGuiWindowFlags.AlwaysAutoResize);
 
-        ImGuiHelpers.ScaledDummy(3f);
+        SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
 
         using var indent = ImRaii.PushIndent(5f);
         if (_charaDataNearbyManager.NearbyData.Count == 0)
@@ -183,7 +183,7 @@ internal partial class CharaDataHubUi
             var textSize = ImGui.CalcTextSize(distance);
             drawList.AddText(new Vector2(circleCenter.X - textSize.X / 2, circleCenter.Y + textSize.Y / 3f), SpheneUI.ColorUtils.U32(ImGuiColors.DalamudWhite), distance);
 
-            ImGuiHelpers.ScaledDummy(3);
+            SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
         }
 
         if (!wasAnythingHovered) _nearbyHovered = null;

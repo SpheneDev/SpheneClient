@@ -37,8 +37,15 @@ namespace Sphene.UI.Hub;
 /// </summary>
 internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
 {
-    private static readonly string[] _hubNavLabels =
-        ["My Profile", "Friends", "Syncshells", "Character Data", "Mod Sharing"];
+    private static readonly (FontAwesomeIcon Icon, string Label)[] _hubNavItems =
+    [
+        (FontAwesomeIcon.UserCircle, "My Profile"),
+        (FontAwesomeIcon.UserFriends, "Friends"),
+        (FontAwesomeIcon.Users, "Syncshells"),
+        (FontAwesomeIcon.IdCard, "Character Data"),
+        (FontAwesomeIcon.ShareAlt, "Mod Sharing"),
+        (FontAwesomeIcon.Cog, "Settings"),
+    ];
 
     private readonly ApiController _apiController;
     private readonly PairManager _pairManager;
@@ -48,6 +55,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
     private readonly EditProfileUi _editProfileUi;
     private readonly CharaDataHubUi _charaDataHubUi;
     private readonly ModSharingUi _modSharingUi;
+    private readonly SettingsUi _settingsUi;
     private readonly FileDialogManager _fileDialogManager;
     private readonly ImageCropUi _imageCropUi;
 
@@ -84,6 +92,12 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
     private bool _wasOpenBeforeGpose;
     private bool _suppressOpenStatePersist;
     private readonly SpheneConfigService _configService;
+    private readonly AreaBoundSyncshellService _areaBoundService;
+
+    // Rail swap animation: 0 = hub nav, 1 = settings nav. The hub list pans
+    // up and out of the rail while the settings list pans in from below.
+    private float _settingsRailAnim;
+    private float _hubNavBlockH;
 
     /// <summary>One location in the hub's back/forward history: page plus its detail context.</summary>
     private readonly record struct HubLocation(SpheneHubPage Page, string? GroupGid, Pair? Friend);
@@ -95,9 +109,9 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         ApiController apiController, PairManager pairManager,
         SpheneProfileManager spheneProfileManager, UiFactory uiFactory,
         DalamudUtilService dalamudUtilService, EditProfileUi editProfileUi,
-        CharaDataHubUi charaDataHubUi, ModSharingUi modSharingUi,
+        CharaDataHubUi charaDataHubUi, ModSharingUi modSharingUi, SettingsUi settingsUi,
         FileDialogManager fileDialogManager, ImageCropUi imageCropUi,
-        SpheneConfigService configService)
+        SpheneConfigService configService, AreaBoundSyncshellService areaBoundService)
         : base(logger, mediator, "Sphene Hub###SpheneHubUI", performanceCollectorService)
     {
         _apiController = apiController;
@@ -108,9 +122,11 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         _editProfileUi = editProfileUi;
         _charaDataHubUi = charaDataHubUi;
         _modSharingUi = modSharingUi;
+        _settingsUi = settingsUi;
         _fileDialogManager = fileDialogManager;
         _imageCropUi = imageCropUi;
         _configService = configService;
+        _areaBoundService = areaBoundService;
 
         IsOpen = configService.Current.ReopenSpheneHubOnStartup
             && configService.Current.SpheneHubWasOpen;
@@ -206,19 +222,38 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         }
     }
 
-    protected override FontAwesomeIcon? ChromeIcon => FontAwesomeIcon.Globe;
+    protected override bool ChromeHasTitleBar => false;
 
-    protected override IDalamudTextureWrap? ChromeIconTexture => SpheneBrandIcons.SpheneLogo();
+    protected override bool DrawCollapsedDuringFold => true;
 
-    protected override string? ChromeTrailingText
-        => !_apiController.IsConnected ? "Offline"
-            : _apiController.IsConnectionPaused ? "Paused" : "Online";
+    protected override float ChromeCollapsedHeight
+        => (CollapsedStripHeight + ImGui.GetStyle().WindowBorderSize * 2f) / SpheneUI.Scale;
 
-    protected override IReadOnlyList<SpheneUI.Chrome.TitleBarButton>? ChromeRightButtons
-        => ShowCloseButton
-            ? [new SpheneUI.Chrome.TitleBarButton(FontAwesomeIcon.Times,
-                "Close", () => IsOpen = false)]
-            : [];
+    /// <summary>
+    /// The rail eases between the hub width and the wider settings
+    /// vocabulary with the pan animation — a fixed max would leave a dead
+    /// strip of band color inside the content edge on every hub page.
+    /// </summary>
+    private float CurrentRailWidth => float.Lerp(
+        SpheneUI.Layout.NavRailSegmentedWidth(_hubNavItems),
+        SpheneUI.Layout.NavRailSegmentedWidth(SettingsUi.EmbeddedNavItems),
+        _settingsRailAnim);
+
+    protected override float ChromeCollapsedWidth
+    {
+        get
+        {
+            var scale = SpheneUI.Scale;
+            var railW = CurrentRailWidth;
+            var leftPad = ImGui.GetStyle().WindowPadding.X;
+            var buttonCount = ShowCloseButton ? 2f : 1f;
+            var buttons = buttonCount * 30f * scale + buttonCount * 8f * scale + 14f * scale;
+            var border = ImGui.GetStyle().WindowBorderSize * 2f;
+            return (leftPad + railW + buttons + border) / scale;
+        }
+    }
+
+    private static float CollapsedStripHeight => 52f * SpheneUI.Scale;
 
     private string AvatarKey => $"sphenehub:avatar:{_apiController.UID}";
     private string BannerKey => $"sphenehub:banner:{_apiController.UID}";
@@ -234,47 +269,87 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         var accentCommunity = theme.AccentBlue;
         var accentTools = SpheneUI.Palette.EtherealPurple;
 
-        var railWidth = MathF.Max(SpheneUI.Layout.NavRailWidth(_hubNavLabels), 236f * SpheneUI.Scale);
-        var bandHeight = 52f * SpheneUI.Scale;
-        var bandMin = new Vector2(ImGui.GetWindowPos().X,
-            ImGui.GetWindowPos().Y + SpheneUI.Chrome.TitleBarHeight);
+        // The rail pans between the hub nav and the settings nav — the hub
+        // list slides up and out while the settings list slides in from
+        // below, attached at its bottom edge. The anim advances before the
+        // rail width is sampled so the band eases with the pan.
+        var settingsMode = _activePage == SpheneHubPage.Settings;
+        var railTarget = settingsMode ? 1f : 0f;
+        if (!MathF.Equals(_settingsRailAnim, railTarget))
+        {
+            var step = ImGui.GetIO().DeltaTime / 0.22f;
+            _settingsRailAnim = settingsMode
+                ? MathF.Min(1f, _settingsRailAnim + step)
+                : MathF.Max(0f, _settingsRailAnim - step);
+        }
+
+        var railWidth = CurrentRailWidth;
+        var bandHeight = CollapsedStripHeight;
+        // No chrome title bar — the header band is the title bar and owns the
+        // fold/close buttons plus the drag region between its widgets.
+        var bandMin = ImGui.GetWindowPos();
         var railRightX = ImGui.GetCursorScreenPos().X + railWidth;
 
         // Reserve the full-width header band; the nav rail begins below it and
         // the band itself is painted after EndNavRail so both share one color.
+        // SetCursorScreenPos lands exactly on the band edge — a Dummy would
+        // trail ItemSpacing and leave a window-bg strip under the band.
         var reserve = bandMin.Y + bandHeight - ImGui.GetCursorScreenPos().Y;
         if (reserve > 0f)
         {
-            ImGui.Dummy(new Vector2(1f, reserve));
+            ImGui.SetCursorScreenPos(ImGui.GetCursorScreenPos() + new Vector2(0f, reserve));
         }
 
         SpheneUI.Layout.BeginNavRail("sphenehub", railWidth);
-        ImGuiHelpers.ScaledDummy(0, 6);
-        SpheneUI.Layout.NavRailCategory("Me", accentMe);
-        if (SpheneUI.Layout.NavRailItem("My Profile",
-                _activePage is SpheneHubPage.Profile or SpheneHubPage.ProfileStyle, accentMe))
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
+        var railAnim = _settingsRailAnim;
+        var slide = MathF.Max(_hubNavBlockH, 200f * SpheneUI.Scale);
+        if (railAnim < 1f)
         {
-            SetPage(SpheneHubPage.Profile);
+            var blockStart = ImGui.GetCursorScreenPos();
+            ImGui.SetCursorScreenPos(blockStart - new Vector2(0f, slide * railAnim));
+            if (SpheneUI.Layout.NavRailSegmentItem("My Profile", FontAwesomeIcon.UserCircle,
+                    _activePage is SpheneHubPage.Profile or SpheneHubPage.ProfileStyle, accentMe))
+            {
+                SetPage(SpheneHubPage.Profile);
+            }
+            if (SpheneUI.Layout.NavRailSegmentItem("Friends", FontAwesomeIcon.UserFriends,
+                    _activePage == SpheneHubPage.Friends, accentMe))
+            {
+                SetPage(SpheneHubPage.Friends);
+            }
+            SpheneUI.Layout.NavRailDivider(accentMe, accentCommunity);
+            if (SpheneUI.Layout.NavRailSegmentItem("Syncshells", FontAwesomeIcon.Users,
+                    _activePage == SpheneHubPage.Syncshells, accentCommunity))
+            {
+                SetPage(SpheneHubPage.Syncshells);
+            }
+            SpheneUI.Layout.NavRailDivider(accentCommunity, accentTools);
+            if (SpheneUI.Layout.NavRailSegmentItem("Character Data", FontAwesomeIcon.IdCard,
+                    _activePage == SpheneHubPage.CharacterData, accentTools))
+            {
+                SetPage(SpheneHubPage.CharacterData);
+            }
+            if (SpheneUI.Layout.NavRailSegmentItem("Mod Sharing", FontAwesomeIcon.ShareAlt,
+                    _activePage == SpheneHubPage.ModSharing, accentTools))
+            {
+                SetPage(SpheneHubPage.ModSharing);
+            }
+            SpheneUI.Layout.NavRailDivider(accentTools, accentMe);
+            if (SpheneUI.Layout.NavRailSegmentItem("Settings", FontAwesomeIcon.Cog,
+                    settingsMode, accentMe))
+            {
+                SetPage(SpheneHubPage.Settings);
+            }
+            _hubNavBlockH = ImGui.GetCursorScreenPos().Y - blockStart.Y + slide * railAnim;
+            ImGui.SetCursorScreenPos(blockStart);
         }
-        if (SpheneUI.Layout.NavRailItem("Friends", _activePage == SpheneHubPage.Friends, accentMe))
+        if (railAnim > 0f)
         {
-            SetPage(SpheneHubPage.Friends);
-        }
-        SpheneUI.Layout.NavRailDivider(accentMe, accentCommunity);
-        SpheneUI.Layout.NavRailCategory("Community", accentCommunity);
-        if (SpheneUI.Layout.NavRailItem("Syncshells", _activePage == SpheneHubPage.Syncshells, accentCommunity))
-        {
-            SetPage(SpheneHubPage.Syncshells);
-        }
-        SpheneUI.Layout.NavRailDivider(accentCommunity, accentTools);
-        SpheneUI.Layout.NavRailCategory("Tools", accentTools);
-        if (SpheneUI.Layout.NavRailItem("Character Data", _activePage == SpheneHubPage.CharacterData, accentTools))
-        {
-            SetPage(SpheneHubPage.CharacterData);
-        }
-        if (SpheneUI.Layout.NavRailItem("Mod Sharing", _activePage == SpheneHubPage.ModSharing, accentTools))
-        {
-            SetPage(SpheneHubPage.ModSharing);
+            var blockStart = ImGui.GetCursorScreenPos();
+            ImGui.SetCursorScreenPos(blockStart + new Vector2(0f, slide * (1f - railAnim)));
+            _settingsUi.DrawEmbeddedRail();
+            ImGui.SetCursorScreenPos(blockStart);
         }
         SpheneUI.Layout.EndNavRail();
 
@@ -306,6 +381,9 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                     break;
                 case SpheneHubPage.ModSharing:
                     _modSharingUi.DrawEmbedded();
+                    break;
+                case SpheneHubPage.Settings:
+                    _settingsUi.DrawEmbeddedContent();
                     break;
             }
         }
@@ -406,6 +484,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         _styleSeeded = false;
         _navBack.Clear();
         _navForward.Clear();
+        _settingsRailAnim = 0f;
         _heroEdit.AddingTag = false;
         ClearViewingFriend();
         DisposeEmbeddedAdminPanels();
@@ -432,26 +511,12 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         var railBgU32 = SpheneUI.ColorUtils.ToU32(railBg);
 
         var profile = _spheneProfileManager.GetSpheneProfile(new UserData(_apiController.UID));
-        var wrap = GetAvatarTexture(profile);
-        var bannerWrap = GetBannerTexture(profile);
 
         ImGui.PushClipRect(windowPos, windowPos + windowSize, false);
-        drawList.AddRectFilled(bandMin, bandMax, railBgU32);
-        // Backdrop: the user's banner image (or avatar as fallback) right of
-        // the rail edge; it fades out toward the rail so the transition
-        // stays seamless and the nav cluster keeps the pure rail color.
-        var backdrop = bannerWrap ?? wrap;
-        if (backdrop != null)
-        {
-            var imgMin = new Vector2(railRightX, bandMin.Y);
-            SpheneUI.Media.ImageInRect(drawList, backdrop, imgMin, bandMax,
-                ImageFit.Cover, new Vector4(1f, 1f, 1f, 0.85f));
-            drawList.AddRectFilledMultiColor(imgMin, bandMax,
-                railBgU32,
-                SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(railBg, 0.5f)),
-                SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(railBg, 0.5f)),
-                railBgU32);
-        }
+        var windowRounding = ImGui.GetStyle().WindowRounding;
+        drawList.AddRectFilled(bandMin, bandMax, railBgU32, windowRounding,
+            ImDrawFlags.RoundCornersTop);
+        DrawHeaderBackdrop(bandMin, bandMax, railRightX, railBg, profile);
         // Accent seam along the bottom edge of the band.
         drawList.AddRectFilledMultiColor(
             new Vector2(bandMin.X, bandMax.Y - 1f), bandMax,
@@ -467,12 +532,63 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         // mirror it on the right — one row, one height.
         var btnSize = 30f * scale;
         var btnY = bandMin.Y + (bandHeight - btnSize) * 0.5f;
-        var burgerX = bandMax.X - 14f * scale - btnSize;
-        var bellX = burgerX - 8f * scale - btnSize;
+        var bellX = bandMax.X - 14f * scale - btnSize * 4f - 8f * scale * 3f;
         DrawHeaderProfileCard(bandMin, bandHeight, railRightX, profile, accent);
         DrawHeaderNavCluster(new Vector2(railRightX + 12f * scale, btnY),
             btnSize, bellX);
         DrawHeaderActionsZone(bandMin, bandHeight, bandMax);
+    }
+
+    /// <summary>
+    /// The banner backdrop right of the rail edge inside the header band —
+    /// shared by the open band and the collapsed strip. Drawn flush to the
+    /// window top; the fade keeps the left transition seamless, and corner
+    /// spill is masked back to the window rounding so the frame edge stays
+    /// clean.
+    /// </summary>
+    private void DrawHeaderBackdrop(Vector2 bandMin, Vector2 bandMax, float railRightX,
+        Vector4 railBg, SpheneProfileData profile)
+    {
+        var backdrop = GetBannerTexture(profile) ?? GetAvatarTexture(profile);
+        if (backdrop == null)
+        {
+            return;
+        }
+
+        var drawList = ImGui.GetWindowDrawList();
+        var windowMax = ImGui.GetWindowPos() + ImGui.GetWindowSize();
+        var style = ImGui.GetStyle();
+        var borderSize = MathF.Max(style.WindowBorderSize, 0f);
+        // The band's window-side edges belong to the border ring — the image
+        // nests inside them and rounds only the corners sitting on the window
+        // silhouette, so the configured window arc survives the artwork. The
+        // bottom-right arc joins in only once the band reaches the window
+        // bottom (the collapsed strip); mid-fold it is an interior edge.
+        var reachesBottom = bandMax.Y >= windowMax.Y - 1f;
+        var imgMin = new Vector2(railRightX, bandMin.Y + borderSize);
+        var imgMax = new Vector2(bandMax.X - borderSize,
+            reachesBottom ? bandMax.Y - borderSize : bandMax.Y);
+        var imgCorners = ImDrawFlags.RoundCornersTopRight;
+        if (reachesBottom)
+        {
+            imgCorners |= ImDrawFlags.RoundCornersBottomRight;
+        }
+        var imgRounding = MathF.Max(0f, style.WindowRounding - borderSize);
+        var railBgU32 = SpheneUI.ColorUtils.ToU32(railBg);
+
+        SpheneUI.Media.ImageInRect(drawList, backdrop, imgMin, imgMax,
+            ImageFit.Cover, new Vector4(1f, 1f, 1f, 0.85f),
+            rounding: imgRounding, corners: imgCorners);
+        // The blend overlay is a square fill — it must stop short of the
+        // rounded corner column or it would repaint the notch the image
+        // just gave back.
+        var overlayMax = new Vector2(imgMax.X - imgRounding,
+            reachesBottom ? imgMax.Y - imgRounding : imgMax.Y);
+        drawList.AddRectFilledMultiColor(imgMin, overlayMax,
+            railBgU32,
+            SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(railBg, 0.5f)),
+            SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(railBg, 0.5f)),
+            railBgU32);
     }
 
     /// <summary>
@@ -481,7 +597,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
     /// plus name/status, hugging the rail width. Clicking opens the profile
     /// page. Lives in the parent window — no child covers the band area.
     /// </summary>
-    private void DrawHeaderProfileCard(Vector2 bandMin, float bandHeight, float railRightX,
+    private bool DrawHeaderProfileCard(Vector2 bandMin, float bandHeight, float railRightX,
         SpheneProfileData profile, Vector4 accent)
     {
         var scale = SpheneUI.Scale;
@@ -490,11 +606,14 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         var cardMax = new Vector2(railRightX - 4f * scale, bandMin.Y + bandHeight - 4f * scale);
         var cardW = cardMax.X - cardMin.X;
         var cardH = cardMax.Y - cardMin.Y;
+        // Inset by 4px, the card arc must run concentric with the window's
+        // corner — same center, radius minus the inset.
+        var cardRadius = MathF.Max(0f, ImGui.GetStyle().WindowRounding - 4f * scale);
 
         // same scrim + hairline language as the breadcrumb pill
         drawList.AddRectFilled(cardMin, cardMax,
             SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(
-                new Vector4(0.02f, 0.02f, 0.04f, 1f), 0.55f)), 10f * scale);
+                new Vector4(0.02f, 0.02f, 0.04f, 1f), 0.55f)), cardRadius);
 
         ImGui.SetCursorScreenPos(cardMin);
         var clicked = ImGui.InvisibleButton("##hub-header-profile", new Vector2(cardW, cardH));
@@ -504,11 +623,11 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
             drawList.AddRectFilled(cardMin, cardMax,
                 SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(Vector4.One, 0.06f)),
-                10f * scale);
+                cardRadius);
         }
         drawList.AddRect(cardMin, cardMax,
             SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(Vector4.One, 0.10f)),
-            10f * scale);
+            cardRadius);
         if (clicked)
         {
             SetPage(SpheneHubPage.Profile);
@@ -558,6 +677,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             }
             SpheneUI.AttachTooltip(tip + " — open your profile page");
         }
+        return clicked;
     }
 
     private static string HeaderStatusLine(SpheneProfileData profile, out Vector4 color)
@@ -583,7 +703,11 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         var scale = SpheneUI.Scale;
         var btnSize = 30f * scale;
         var gap = 8f * scale;
-        var burgerX = bandMax.X - 14f * scale - btnSize;
+        // Window controls live on the far right — fold, then close, matching
+        // the order the chrome title bar used.
+        var closeX = bandMax.X - 14f * scale - btnSize;
+        var foldX = closeX - gap - btnSize;
+        var burgerX = foldX - gap - btnSize;
         var bellX = burgerX - gap - btnSize;
         var btnY = bandMin.Y + (bandHeight - btnSize) * 0.5f;
 
@@ -632,10 +756,109 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             ImGui.Separator();
             if (ImGui.MenuItem("Settings###hub-menu-settings"))
             {
+                SetPage(SpheneHubPage.Settings);
+            }
+            if (ImGui.MenuItem("Pop out Settings###hub-menu-settings-popout"))
+            {
                 Mediator.Publish(new UiToggleMessage(typeof(SettingsUi)));
             }
             ImGui.EndPopup();
         }
+
+        var folded = SpheneUI.Chrome.FoldCollapsed(WindowName);
+        ImGui.SetCursorScreenPos(new Vector2(foldX, btnY));
+        if (SpheneUI.Icons.Button(
+                folded ? FontAwesomeIcon.ChevronDown : FontAwesomeIcon.ChevronUp,
+                btnSize, null, null, btnSize))
+        {
+            SpheneUI.Chrome.ToggleFold(WindowName);
+        }
+        SpheneUI.AttachTooltip(folded ? "Expand" : "Collapse");
+
+        if (ShowCloseButton)
+        {
+            ImGui.SetCursorScreenPos(new Vector2(closeX, btnY));
+            if (SpheneUI.Icons.Button(FontAwesomeIcon.Times, btnSize, null, null, btnSize))
+            {
+                IsOpen = false;
+            }
+            SpheneUI.AttachTooltip("Close");
+        }
+    }
+
+    /// <summary>
+    /// The folded strip: just the status card plus fold and close — the rest
+    /// of the hub is hidden while the window is collapsed.
+    /// </summary>
+    protected override void DrawCollapsedContent()
+    {
+        var scale = SpheneUI.Scale;
+        var theme = SpheneTheme.Current;
+        var profile = _spheneProfileManager.GetSpheneProfile(new UserData(_apiController.UID));
+        var accent = profile.ProfileTheme.Value.AccentColor(theme.AccentCyan);
+        var windowPos = ImGui.GetWindowPos();
+        var windowSize = ImGui.GetWindowSize();
+        var bandH = CollapsedStripHeight;
+        var drawList = ImGui.GetWindowDrawList();
+
+        // The window draw list clips to the content region — lift it to the
+        // full window rect or the strip stops WindowPadding short of the
+        // edges and the themed surface/blur peeks through the slivers.
+        ImGui.PushClipRect(windowPos, windowPos + windowSize, false);
+        // The strip is the whole window — the fill must reach the window
+        // bottom or the border-wide sliver below it shows the surface and
+        // the bottom arcs float above the frame edge.
+        var bandMax = windowPos + windowSize;
+        var railBg = SpheneUI.Layout.NavRailBandColor();
+        drawList.AddRectFilled(windowPos, bandMax,
+            SpheneUI.ColorUtils.ToU32(railBg),
+            ImGui.GetStyle().WindowRounding, ImDrawFlags.RoundCornersAll);
+
+        var railW = CurrentRailWidth;
+        var cardRightX = windowPos.X + ImGui.GetStyle().WindowPadding.X + railW;
+        // Same backdrop language as the open band — the banner folds along
+        // with the strip, cropped to the shrunken width.
+        DrawHeaderBackdrop(windowPos, bandMax, cardRightX, railBg, profile);
+        // The seam sits on the window's bottom edge — both ends pull back
+        // by the frame radius so they cannot jut past the corner arcs.
+        var seamInset = ImGui.GetStyle().WindowRounding;
+        drawList.AddRectFilledMultiColor(
+            new Vector2(windowPos.X + seamInset, bandMax.Y - 1f),
+            new Vector2(bandMax.X - seamInset, bandMax.Y),
+            SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(accent, 0.05f)),
+            SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(accent, 0.45f)),
+            SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(accent, 0.45f)),
+            SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(accent, 0.05f)));
+        if (DrawHeaderProfileCard(windowPos, bandH, cardRightX, profile, accent))
+        {
+            SpheneUI.Chrome.ToggleFold(WindowName);
+        }
+
+        var btnSize = 30f * scale;
+        var btnY = windowPos.Y + (bandH - btnSize) * 0.5f;
+        var closeX = windowPos.X + windowSize.X - 14f * scale - btnSize;
+        var foldX = closeX - 8f * scale - btnSize;
+        var folded = SpheneUI.Chrome.FoldCollapsed(WindowName);
+
+        ImGui.SetCursorScreenPos(new Vector2(foldX, btnY));
+        if (SpheneUI.Icons.Button(
+                folded ? FontAwesomeIcon.ChevronDown : FontAwesomeIcon.ChevronUp,
+                btnSize, null, null, btnSize))
+        {
+            SpheneUI.Chrome.ToggleFold(WindowName);
+        }
+        SpheneUI.AttachTooltip(folded ? "Expand" : "Collapse");
+
+        if (ShowCloseButton)
+        {
+            ImGui.SetCursorScreenPos(new Vector2(closeX, btnY));
+            if (SpheneUI.Icons.Button(FontAwesomeIcon.Times, btnSize, null, null, btnSize))
+            {
+                IsOpen = false;
+            }
+            SpheneUI.AttachTooltip("Close");
+        }
+        ImGui.PopClipRect();
     }
 
     /// <summary>
@@ -646,22 +869,18 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
     {
         var scale = SpheneUI.Scale;
         ImGui.SetCursorScreenPos(pos);
-        using (ImRaii.Disabled(_navBack.Count == 0))
+        if (SpheneUI.Icons.Button(FontAwesomeIcon.ArrowLeft, btnSize, null, null, btnSize,
+                enabled: _navBack.Count > 0))
         {
-            if (SpheneUI.Icons.Button(FontAwesomeIcon.ArrowLeft, btnSize, null, null, btnSize))
-            {
-                NavigateBack();
-            }
+            NavigateBack();
         }
         SpheneUI.AttachTooltip("Back");
 
         ImGui.SetCursorScreenPos(pos + new Vector2(btnSize + 4f * scale, 0f));
-        using (ImRaii.Disabled(_navForward.Count == 0))
+        if (SpheneUI.Icons.Button(FontAwesomeIcon.ArrowRight, btnSize, null, null, btnSize,
+                enabled: _navForward.Count > 0))
         {
-            if (SpheneUI.Icons.Button(FontAwesomeIcon.ArrowRight, btnSize, null, null, btnSize))
-            {
-                NavigateForward();
-            }
+            NavigateForward();
         }
         SpheneUI.AttachTooltip("Forward");
 
@@ -765,6 +984,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         SpheneHubPage.Syncshells => "Syncshells",
         SpheneHubPage.CharacterData => "Character Data",
         SpheneHubPage.ModSharing => "Mod Sharing",
+        SpheneHubPage.Settings => "Settings",
         SpheneHubPage.ProfileStyle => "Style",
         _ => "Hub",
     };
@@ -1043,12 +1263,37 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             }, "Row background", accent);
         }
 
-        // footer buttons dock to the panel's right edge
+        // ── sticky header ── drawn last so it layers over the scrolled
+        // settings, pinned between its reserved slot and the visible top
+        // edge (never leaving the page's own bounds)
+        var flowEnd = ImGui.GetCursorScreenPos();
+        var pad = ImGui.GetStyle().WindowPadding;
+        var childPos = ImGui.GetWindowPos();
+        var bottomLimit = MathF.Max(headerNatural.Y,
+            childPos.Y + ImGui.GetWindowSize().Y - pad.Y - _stylePreviewH);
+        var stickyY = MathF.Min(MathF.Max(headerNatural.Y, drawList.GetClipRectMin().Y),
+            bottomLimit);
+        var headerMin = new Vector2(childPos.X, stickyY);
+        // near-opaque panel tone so scrolled settings cannot bleed through —
+        // the strip covers the full child width so the content padding leaves
+        // no uncovered slivers beside it
+        var panelBg = Vector4.Lerp(ImGui.GetStyle().Colors[(int)ImGuiCol.WindowBg],
+            Vector4.One, 0.04f);
+        panelBg.W = 0.98f;
+        drawList.AddRectFilled(headerMin, headerMin + new Vector2(ImGui.GetWindowSize().X, _stylePreviewH),
+            SpheneUI.ColorUtils.ToU32(panelBg));
+        ImGui.SetCursorScreenPos(new Vector2(headerNatural.X, headerMin.Y));
+
+        _stylePreviewTab = SpheneUI.Layout.TabStrip("hubstyle_tabs",
+            _styleTabLabels, _stylePreviewTab);
+        // Save/Reset dock into the pinned tab row — primary actions stay
+        // reachable instead of hiding below the scrollable settings fold.
         var spacing = ImGui.GetStyle().ItemSpacing.X;
-        var footerW = SpheneUI.Icons.TextButtonWidth(FontAwesomeIcon.Save, "Save style")
+        var actionWidth = SpheneUI.Icons.TextButtonWidth(FontAwesomeIcon.Save, "Save style")
             + SpheneUI.Icons.TextButtonWidth(FontAwesomeIcon.Undo, "Reset") + spacing;
+        ImGui.SameLine();
         ImGui.SetCursorPosX(ImGui.GetCursorPosX()
-            + MathF.Max(0f, ImGui.GetContentRegionAvail().X - footerW));
+            + MathF.Max(0f, ImGui.GetContentRegionAvail().X - actionWidth));
         if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Save, "Save style"))
         {
             var theme = PreviewStyleTheme();
@@ -1067,28 +1312,6 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             _styleSeeded = false;
             LeaveStylePage();
         }
-
-        // ── sticky header ── drawn last so it layers over the scrolled
-        // settings, pinned between its reserved slot and the visible top
-        // edge (never leaving the page's own bounds)
-        var flowEnd = ImGui.GetCursorScreenPos();
-        var pad = ImGui.GetStyle().WindowPadding;
-        var childPos = ImGui.GetWindowPos();
-        var bottomLimit = MathF.Max(headerNatural.Y,
-            childPos.Y + ImGui.GetWindowSize().Y - pad.Y - _stylePreviewH);
-        var stickyY = MathF.Min(MathF.Max(headerNatural.Y, drawList.GetClipRectMin().Y),
-            bottomLimit);
-        var headerMin = new Vector2(headerNatural.X, stickyY);
-        // near-opaque panel tone so scrolled settings cannot bleed through
-        var panelBg = Vector4.Lerp(ImGui.GetStyle().Colors[(int)ImGuiCol.WindowBg],
-            Vector4.One, 0.04f);
-        panelBg.W = 0.98f;
-        drawList.AddRectFilled(headerMin, headerMin + new Vector2(headerW, _stylePreviewH),
-            SpheneUI.ColorUtils.ToU32(panelBg));
-        ImGui.SetCursorScreenPos(headerMin);
-
-        _stylePreviewTab = SpheneUI.Layout.TabStrip("hubstyle_tabs",
-            _styleTabLabels, _stylePreviewTab);
         if (_stylePreviewTab == 0)
         {
             // the complete profile card, live-bound to the unsaved buffers —
@@ -1301,9 +1524,8 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             return;
         }
 
-        SpheneUI.Text.PageHeader("Friends");
-        SpheneUI.Text.MutedWrapped(
-            "Everyone you are paired with. Click a friend to view their profile.");
+        SpheneUI.Text.PageIntro(
+            "Everyone you are paired with — click a friend to view their profile.");
         SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.Row);
 
         var directPairs = _pairManager.DirectPairs;
@@ -1556,56 +1778,304 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         DrawSyncshellList();
     }
 
-    private void DrawBackRailHeader()
-    {
-        if (SpheneUI.Icons.TextButton(FontAwesomeIcon.ArrowLeft, "All Syncshells",
-                ImGui.GetContentRegionAvail().X))
-        {
-            NavigateTo(new HubLocation(SpheneHubPage.Syncshells, null, null));
-        }
-        ImGuiHelpers.ScaledDummy(0, 4);
-    }
-
     private void DrawSyncshellList()
     {
-        SpheneUI.Text.PageHeader("Syncshells");
+        var theme = SpheneTheme.Current;
+        SpheneUI.Text.PageIntro(
+            "Syncshells keep your appearance synchronized with a whole group — " +
+            "everyone inside sees each other's mods automatically.");
 
-        var atCap = _pairManager.GroupPairs.Count >= _apiController.ServerInfo.MaxGroupsJoinedByUser;
-        using (var disabled = ImRaii.Disabled(atCap))
+        var shells = _pairManager.GroupPairs;
+        var shellCount = shells.Count;
+        var maxShells = _apiController.ServerInfo.MaxGroupsJoinedByUser;
+        var totalMembers = 0;
+        var onlineMembers = 0;
+        var managedCount = 0;
+        foreach (var kv in shells)
         {
-            if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Users, "Join existing Syncshell"))
+            var group = kv.Key;
+            // Area-bound syncshells carry no member info dict.
+            if (group.GroupPairUserInfos.Count > 0)
             {
-                Mediator.Publish(new UiToggleMessage(typeof(JoinSyncshellUI)));
+                totalMembers += group.GroupPairUserInfos.Count;
             }
+            foreach (var pair in kv.Value)
+            {
+                if (pair.IsOnline)
+                {
+                    onlineMembers++;
+                }
+            }
+            if (string.Equals(group.OwnerUID, _apiController.UID, StringComparison.Ordinal)
+                || group.GroupUserInfo.IsModerator())
+            {
+                managedCount++;
+            }
+        }
+
+        var atCap = shellCount >= maxShells;
+
+        // Dense overview strip — one accent-tinted line, not a stat tile grid.
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.Row);
+        SpheneUI.Layout.AccentCard(() =>
+        {
+            ImGui.AlignTextToFramePadding();
+            SpheneUI.Icons.Icon(FontAwesomeIcon.Users, theme.AccentBlue);
             ImGui.SameLine();
-            if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Plus, "Create Syncshell"))
-            {
-                Mediator.Publish(new UiToggleMessage(typeof(CreateSyncshellUI)));
-            }
+            SpheneUI.Text.Plain(shellCount == 0 ? "No Syncshells yet"
+                : maxShells > 0 ? $"{shellCount} of {maxShells} Syncshells"
+                : $"{shellCount} Syncshells");
+            ImGui.SameLine();
+            SpheneUI.Text.Muted(shellCount == 0
+                ? "· pick a way in below"
+                : $"· {totalMembers} members · {onlineMembers} online" +
+                  (managedCount > 0 ? $" · {managedCount} managed by you" : ""));
+        }, accentColor: theme.AccentBlue, animatedBackdrop: false, id: "syncshell-overview");
+
+        // Entry points sit side-by-side as tiles in the row language —
+        // the longer hint texts live on the info glyph's tooltip.
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.Row);
+        var tileGap = ImGui.GetStyle().ItemSpacing.X;
+        var tileW = MathF.Floor((ImGui.GetContentRegionAvail().X - tileGap) * 0.5f);
+        if (HubTile("join", FontAwesomeIcon.Users, theme.AccentBlue,
+                "Join an existing Syncshell", tileW))
+        {
+            Mediator.Publish(new UiToggleMessage(typeof(JoinSyncshellUI)));
+        }
+        SpheneUI.AttachTooltip("Enter the Syncshell ID and password a member gave you — IDs are case sensitive.");
+        ImGui.SameLine();
+        bool createClicked;
+        using (ImRaii.Disabled(atCap))
+        {
+            createClicked = HubTile("create", FontAwesomeIcon.Plus, SpheneUI.Palette.EtherealPurple,
+                "Create your own Syncshell", tileW);
+        }
+        if (!atCap)
+        {
+            SpheneUI.AttachTooltip(
+                "You become the owner — invites, permissions, the welcome page and member management live in its admin area.");
+        }
+        if (createClicked)
+        {
+            Mediator.Publish(new UiToggleMessage(typeof(CreateSyncshellUI)));
         }
         if (atCap)
         {
+            var limitText = $"Syncshell limit reached ({shellCount}/{maxShells})";
+            ImGui.AlignTextToFramePadding();
+            SpheneUI.Icons.Icon(FontAwesomeIcon.ExclamationTriangle, SpheneUI.Colors.Danger);
             ImGui.SameLine();
-            SpheneUI.Text.Muted("Syncshell limit reached");
+            SpheneUI.Text.Colored(limitText, SpheneUI.Colors.Danger);
         }
 
-        if (_pairManager.GroupPairs.Count == 0)
+        // Joined area-bound shells are grouped into their own section below —
+        // "Your Syncshells" stays classic member-driven shells only.
+        EnsureAreaBoundShellsLoaded();
+        var areaJoinedGids = new HashSet<string>(StringComparer.Ordinal);
+        if (_areaBoundShells != null)
         {
-            SpheneUI.Layout.Callout(
-                "You are not in any syncshell yet. Join one with an invite code or create your own.",
-                FontAwesomeIcon.InfoCircle, title: "No Syncshells");
+            foreach (var areaShell in _areaBoundShells)
+            {
+                if (areaShell.Group != null)
+                {
+                    areaJoinedGids.Add(areaShell.Group.GID);
+                }
+            }
         }
 
-        foreach (var kv in _pairManager.GroupPairs
-                     .OrderBy(k => k.Key.GroupAliasOrGID, StringComparer.OrdinalIgnoreCase))
+        var classicShells = shells
+            .Where(kv => kv.Key.Group != null && !areaJoinedGids.Contains(kv.Key.Group.GID))
+            .OrderBy(k => k.Key.GroupAliasOrGID, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (classicShells.Count > 0)
         {
-            DrawSyncshellCard(kv.Key, kv.Value);
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.Section);
+            SpheneUI.Text.SectionHeader("Your Syncshells");
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+            var first = true;
+            foreach (var kv in classicShells)
+            {
+                if (!first)
+                {
+                    SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.Inline);
+                }
+                first = false;
+                DrawSyncshellRow(kv.Key, kv.Value);
+            }
         }
 
-        DrawAreaBoundSection();
+        DrawAreaBoundSection(areaJoinedGids);
     }
 
-    private void DrawSyncshellCard(GroupFullInfoDto group, List<Pair> members)
+    /// <summary>
+    /// Full-width actionable row in the segmented-button language: icon zone on
+    /// the left, title, optional right-aligned meta plus a chevron, and an
+    /// optional muted description line. Used for landing-page entry points.
+    /// </summary>
+    private static bool HubRow(string id, FontAwesomeIcon icon, Vector4 accent,
+        string title, string? meta, Vector4 metaColor, string? description = null)
+    {
+        var scale = SpheneUI.Scale;
+        var zoneW = 30f * scale;
+        var padX = 10f * scale;
+        var lineH = ImGui.GetTextLineHeight();
+        var headH = zoneW;
+        var descH = description != null ? lineH + 4f * scale : 0f;
+        var rowH = headH + descH;
+
+        ImGui.PushID(id);
+        var clicked = ImGui.InvisibleButton("##hubrow", new Vector2(-1f, rowH));
+        var hovered = ImGui.IsItemHovered();
+        var held = ImGui.IsItemActive();
+        var min = ImGui.GetItemRectMin();
+        var max = ImGui.GetItemRectMax();
+        ImGui.PopID();
+        SpheneUI.Lint.CheckBounds(id);
+
+        var drawList = ImGui.GetWindowDrawList();
+        var radius = SpheneUI.Metrics.ButtonRadius;
+        var pillFill = held ? SpheneUI.ColorUtils.WithAlpha(accent, 0.14f)
+            : hovered ? SpheneUI.ColorUtils.WithAlpha(accent, 0.10f)
+            : SpheneUI.ColorUtils.WithAlpha(Vector4.One, 0.045f);
+        drawList.AddRectFilled(min, max, SpheneUI.ColorUtils.ToU32(pillFill), radius);
+
+        var zoneFill = held ? SpheneUI.ColorUtils.WithAlpha(accent, 0.34f)
+            : hovered ? SpheneUI.ColorUtils.WithAlpha(accent, 0.24f)
+            : SpheneUI.ColorUtils.WithAlpha(Vector4.One, 0.08f);
+        var zoneMax = new Vector2(min.X + zoneW, max.Y);
+        drawList.AddRectFilled(min, zoneMax, SpheneUI.ColorUtils.ToU32(zoneFill),
+            radius, ImDrawFlags.RoundCornersLeft);
+
+        var seamInset = 6f * scale;
+        drawList.AddLine(new Vector2(zoneMax.X - 0.5f, min.Y + seamInset),
+            new Vector2(zoneMax.X - 0.5f, max.Y - seamInset),
+            SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(Vector4.One, 0.09f)));
+
+        var glyphCol = SpheneUI.ColorUtils.ToU32(
+            hovered ? SpheneUI.ColorUtils.LerpColor(accent, Vector4.One, 0.3f)
+            : SpheneUI.ColorUtils.LerpColor(accent, Vector4.One, 0.1f));
+        using (SpheneUI.Icons.PushFont())
+        {
+            var glyph = icon.ToIconString();
+            var gSize = ImGui.CalcTextSize(glyph);
+            drawList.AddText(new Vector2(min.X + (zoneW - gSize.X) * 0.5f,
+                min.Y + (rowH - gSize.Y) * 0.5f), glyphCol, glyph);
+        }
+
+        var textX = zoneMax.X + padX;
+        var titleY = min.Y + (headH - lineH) * 0.5f;
+        drawList.AddText(new Vector2(textX, titleY),
+            ImGui.GetColorU32(ImGuiCol.Text), title);
+
+        var chev = FontAwesomeIcon.ChevronRight.ToIconString();
+        float chevW;
+        using (SpheneUI.Icons.PushFont())
+        {
+            chevW = ImGui.CalcTextSize(chev).X;
+        }
+        var chevX = max.X - padX - chevW;
+        using (SpheneUI.Icons.PushFont())
+        {
+            drawList.AddText(new Vector2(chevX, titleY),
+                ImGui.GetColorU32(ImGuiCol.TextDisabled), chev);
+        }
+
+        if (meta != null)
+        {
+            var mSize = ImGui.CalcTextSize(meta);
+            drawList.AddText(new Vector2(chevX - 6f * scale - mSize.X, titleY),
+                SpheneUI.ColorUtils.ToU32(metaColor), meta);
+        }
+
+        if (description != null)
+        {
+            ImGui.PushClipRect(new Vector2(textX, min.Y + headH),
+                new Vector2(max.X - padX, max.Y), true);
+            drawList.AddText(new Vector2(textX, min.Y + headH + 2f * scale),
+                ImGui.GetColorU32(ImGuiCol.TextDisabled), description);
+            ImGui.PopClipRect();
+        }
+        return clicked;
+    }
+
+    /// <summary>
+    /// Half-width entry tile in the HubRow language — icon zone, single title
+    /// line and a trailing info glyph; the explanatory text lives on the
+    /// caller-attached tooltip so two tiles share one row.
+    /// </summary>
+    private static bool HubTile(string id, FontAwesomeIcon icon, Vector4 accent,
+        string title, float width)
+    {
+        var scale = SpheneUI.Scale;
+        var zoneW = 30f * scale;
+        var padX = 10f * scale;
+        var lineH = ImGui.GetTextLineHeight();
+        var rowH = zoneW + 6f * scale;
+
+        ImGui.PushID(id);
+        var clicked = ImGui.InvisibleButton("##hubtile", new Vector2(width, rowH));
+        var hovered = ImGui.IsItemHovered();
+        var held = ImGui.IsItemActive();
+        var min = ImGui.GetItemRectMin();
+        var max = ImGui.GetItemRectMax();
+        ImGui.PopID();
+        SpheneUI.Lint.CheckBounds(id);
+
+        var drawList = ImGui.GetWindowDrawList();
+        var radius = SpheneUI.Metrics.ButtonRadius;
+        var pillFill = held ? SpheneUI.ColorUtils.WithAlpha(accent, 0.14f)
+            : hovered ? SpheneUI.ColorUtils.WithAlpha(accent, 0.10f)
+            : SpheneUI.ColorUtils.WithAlpha(Vector4.One, 0.045f);
+        drawList.AddRectFilled(min, max, SpheneUI.ColorUtils.ToU32(pillFill), radius);
+
+        var zoneFill = held ? SpheneUI.ColorUtils.WithAlpha(accent, 0.34f)
+            : hovered ? SpheneUI.ColorUtils.WithAlpha(accent, 0.24f)
+            : SpheneUI.ColorUtils.WithAlpha(Vector4.One, 0.08f);
+        var zoneMax = new Vector2(min.X + zoneW, max.Y);
+        drawList.AddRectFilled(min, zoneMax, SpheneUI.ColorUtils.ToU32(zoneFill),
+            radius, ImDrawFlags.RoundCornersLeft);
+
+        var seamInset = 6f * scale;
+        drawList.AddLine(new Vector2(zoneMax.X - 0.5f, min.Y + seamInset),
+            new Vector2(zoneMax.X - 0.5f, max.Y - seamInset),
+            SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(Vector4.One, 0.09f)));
+
+        var glyphCol = SpheneUI.ColorUtils.ToU32(
+            hovered ? SpheneUI.ColorUtils.LerpColor(accent, Vector4.One, 0.3f)
+            : SpheneUI.ColorUtils.LerpColor(accent, Vector4.One, 0.1f));
+        using (SpheneUI.Icons.PushFont())
+        {
+            var glyph = icon.ToIconString();
+            var gSize = ImGui.CalcTextSize(glyph);
+            drawList.AddText(new Vector2(min.X + (zoneW - gSize.X) * 0.5f,
+                min.Y + (rowH - gSize.Y) * 0.5f), glyphCol, glyph);
+        }
+
+        var textX = zoneMax.X + padX;
+        var titleY = min.Y + (rowH - lineH) * 0.5f;
+
+        var infoGlyph = FontAwesomeIcon.InfoCircle.ToIconString();
+        float infoW;
+        using (SpheneUI.Icons.PushFont())
+        {
+            infoW = ImGui.CalcTextSize(infoGlyph).X;
+        }
+        var infoX = max.X - padX - infoW;
+        using (SpheneUI.Icons.PushFont())
+        {
+            drawList.AddText(new Vector2(infoX, titleY),
+                ImGui.GetColorU32(ImGuiCol.TextDisabled), infoGlyph);
+        }
+
+        ImGui.PushClipRect(new Vector2(textX, min.Y),
+            new Vector2(infoX - 4f * scale, max.Y), true);
+        drawList.AddText(new Vector2(textX, titleY),
+            ImGui.GetColorU32(ImGuiCol.Text), title);
+        ImGui.PopClipRect();
+        return clicked;
+    }
+
+    private void DrawSyncshellRow(GroupFullInfoDto group, List<Pair> members, bool? areaBound = null)
     {
         if (group.Group == null)
         {
@@ -1613,101 +2083,97 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         }
         var isOwner = string.Equals(group.OwnerUID, _apiController.UID, StringComparison.Ordinal);
         var isModerator = group.GroupUserInfo.IsModerator();
-        // Area-bound syncshells (e.g. city syncshells) carry no member info dict.
-        var isAreaBound = group.GroupPairUserInfos.Count == 0;
-        var canAdmin = isOwner || isModerator;
+        // Area-bound syncshells (e.g. city syncshells) carry no member info
+        // dict — but an owner's bound shell does, so the section can force it.
+        var isAreaBound = areaBound ?? group.GroupPairUserInfos.Count == 0;
         var accent = isOwner ? SpheneUI.Palette.NetworkWarning
             : isModerator ? SpheneUI.Palette.EtherealPurple
+            : isAreaBound ? SpheneUI.Palette.CrystalBlue
             : SpheneUI.Palette.NetworkActive;
+        var role = isOwner ? "Owner" : isModerator ? "Moderator" : isAreaBound ? "Area-bound" : null;
+        var onlineCount = members.Count(p => p.IsOnline);
+        var desc = isAreaBound
+            ? "Joins automatically in its bound area"
+            : $"{group.GroupPairUserInfos.Count} members · {onlineCount} online";
 
-        SpheneUI.Layout.SectionCard(() =>
+        if (HubRow("shell-" + group.Group.GID,
+                isAreaBound ? FontAwesomeIcon.MapMarkedAlt : FontAwesomeIcon.Users, accent,
+                group.GroupAliasOrGID, role, accent, desc))
         {
-            var actionLabel = canAdmin ? "Manage" : "Open";
-            var actionIcon = canAdmin ? FontAwesomeIcon.Cog : FontAwesomeIcon.ArrowRight;
-            var actionWidth = SpheneUI.Icons.TextButtonWidth(actionIcon, actionLabel);
-
-            ImGui.AlignTextToFramePadding();
-            SpheneUI.Text.Plain(group.GroupAliasOrGID);
-            ImGui.SameLine();
-            if (isOwner)
-            {
-                SpheneUI.Text.Colored("Owner", SpheneUI.Palette.NetworkWarning);
-                ImGui.SameLine();
-            }
-            else if (isModerator)
-            {
-                SpheneUI.Text.Colored("Moderator", SpheneUI.Palette.EtherealPurple);
-                ImGui.SameLine();
-            }
-            if (isAreaBound)
-            {
-                SpheneUI.Text.Colored("Area-bound", SpheneUI.Palette.CrystalBlue);
-                ImGui.SameLine();
-            }
-            ImGui.SameLine(ImGui.GetContentRegionAvail().X - actionWidth);
-            if (SpheneUI.Icons.TextButton(actionIcon, actionLabel))
-            {
-                NavigateTo(new HubLocation(SpheneHubPage.Syncshells, group.Group.GID, null));
-            }
-
-            var onlineCount = members.Count(p => p.IsOnline);
-            if (isAreaBound)
-            {
-                SpheneUI.Text.Muted("Joins automatically in its bound area");
-            }
-            else
-            {
-                SpheneUI.Text.Muted($"{group.GroupPairUserInfos.Count} members · {onlineCount} online");
-            }
-        }, id: "hub-shell-" + group.Group.GID, accentColor: accent);
+            NavigateTo(new HubLocation(SpheneHubPage.Syncshells, group.Group.GID, null));
+        }
     }
 
-    private void DrawAreaBoundSection()
+    private void DrawAreaBoundSection(HashSet<string> areaJoinedGids)
     {
-        EnsureAreaBoundShellsLoaded();
-        SpheneUI.Layout.SectionCard(() =>
+        // Joined area-bound shells still live in GroupPairs — the fetched
+        // GID set just tells us which of them are location-bound.
+        var joinedArea = new List<KeyValuePair<GroupFullInfoDto, List<Pair>>>();
+        foreach (var kv in _pairManager.GroupPairs)
         {
-            if (_areaBoundLoading)
+            if (kv.Key.Group != null && areaJoinedGids.Contains(kv.Key.Group.GID))
             {
-                SpheneUI.Text.Muted("Loading…");
+                joinedArea.Add(kv);
             }
-            else if (_areaBoundShells == null || _areaBoundShells.Count == 0)
+        }
+        var activeHere = _areaBoundService.IsInAreaSyncshellInCurrentLocation();
+        var hasHere = _areaBoundService.HasAvailableAreaSyncshells();
+        if (joinedArea.Count == 0 && !activeHere && !hasHere)
+        {
+            // No joined area shells and nothing bound to this location —
+            // the section earns its place instead of sitting there empty.
+            return;
+        }
+
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.Section);
+        SpheneUI.Text.SectionHeader("Area-Bound Syncshells");
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+        SpheneUI.Text.PageIntro(
+            "Bound to in-game locations — they join automatically when you walk in. "
+            + "Each joined one opens its own page, just like a classic syncshell.");
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.Row);
+
+        // Location-aware status stays — it is the actually actionable bit:
+        // shells bound to where you are right now can be joined on the spot.
+        if (activeHere)
+        {
+            StatusLine(FontAwesomeIcon.MapMarkerAlt, SpheneUI.Colors.Success,
+                "Active here", "a bound syncshell is live in your current location");
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.Row);
+        }
+        else if (hasHere)
+        {
+            if (HubRow("area-here", FontAwesomeIcon.MapMarkerAlt, SpheneUI.Palette.CrystalBlue,
+                    "Syncshells bound to this area", null, default,
+                    "You're inside a bound location right now — pick one to join on the spot."))
             {
-                SpheneUI.Text.Muted(_apiController.IsConnected
-                    ? "No city or area-bound syncshells found."
-                    : "Connect to discover city syncshells.");
+                _areaBoundService.TriggerAreaSyncshellSelection();
             }
-            else
+            SpheneUI.AttachTooltip("Opens the area syncshell picker for your current location");
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.Row);
+        }
+
+        var first = true;
+        foreach (var kv in joinedArea
+                     .OrderBy(k => k.Key.GroupAliasOrGID, StringComparer.OrdinalIgnoreCase))
+        {
+            if (!first)
             {
-                var shown = 0;
-                foreach (var shell in _areaBoundShells
-                             .Where(s => s.Group != null)
-                             .OrderBy(s => s.Group.AliasOrGID, StringComparer.OrdinalIgnoreCase))
-                {
-                    if (shown >= 10)
-                    {
-                        SpheneUI.Text.Muted($"…and {_areaBoundShells.Count - shown} more");
-                        break;
-                    }
-                    var joined = _pairManager.GroupPairs.Keys.Any(g =>
-                        g.Group != null && string.Equals(g.Group.GID, shell.Group.GID, StringComparison.Ordinal));
-                    ImGui.AlignTextToFramePadding();
-                    SpheneUI.Text.Plain(shell.Group.AliasOrGID);
-                    ImGui.SameLine();
-                    if (joined)
-                    {
-                        SpheneUI.Text.Colored("Joined", SpheneUI.Colors.Success);
-                    }
-                    else
-                    {
-                        SpheneUI.Text.Muted($"{shell.BoundAreas?.Count ?? 0} bound area(s)");
-                    }
-                    shown++;
-                }
+                SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.Inline);
             }
-            SpheneUI.Text.MutedWrapped(
-                "City and area-bound syncshells join automatically when you enter their bound location.");
-        }, title: "City & Area-Bound Syncshells", accentColor: SpheneUI.Palette.CrystalBlue);
+            first = false;
+            DrawSyncshellRow(kv.Key, kv.Value, areaBound: true);
+        }
+    }
+
+    private static void StatusLine(FontAwesomeIcon icon, Vector4 color, string status, string meta)
+    {
+        ImGui.AlignTextToFramePadding();
+        SpheneUI.Icons.Icon(icon, color);
+        ImGui.SameLine();
+        SpheneUI.Text.Colored(status, color);
+        ImGui.SameLine();
+        SpheneUI.Text.Muted("— " + meta);
     }
 
     private void EnsureAreaBoundShellsLoaded()
@@ -1740,16 +2206,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         if (CanAdminister(group))
         {
             var panel = GetOrCreateAdminPanel(group);
-            // Back navigation lives inside the embedded admin rail so it
-            // visually belongs to the sub-navigation.
-            panel.EmbeddedRailHeader = DrawBackRailHeader;
             panel.DrawEmbedded();
-            return;
-        }
-
-        if (SpheneUI.Icons.TextButton(FontAwesomeIcon.ArrowLeft, "Back to Syncshells"))
-        {
-            NavigateTo(new HubLocation(SpheneHubPage.Syncshells, null, null));
             return;
         }
 
@@ -1765,15 +2222,22 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
 
         SpheneUI.Layout.SectionCard(() =>
         {
+            ImGui.AlignTextToFramePadding();
+            SpheneUI.Icons.Icon(isAreaBound ? FontAwesomeIcon.MapMarkedAlt : FontAwesomeIcon.Users,
+                SpheneUI.Palette.CrystalBlue);
+            ImGui.SameLine();
             SpheneUI.Text.Big(group.GroupAliasOrGID);
             SpheneUI.Text.Muted("GID: " + group.Group.GID);
             SpheneUI.Text.Plain("Owner: " + group.OwnerAliasOrUID);
             if (isAreaBound)
             {
-                SpheneUI.Text.Muted("Area-bound syncshell");
+                SpheneUI.Text.Muted("Area-bound syncshell — joins automatically in its bound location");
             }
             else
             {
+                ImGui.AlignTextToFramePadding();
+                SpheneUI.Icons.Icon(FontAwesomeIcon.Users, SpheneUI.Colors.TextSecondary);
+                ImGui.SameLine();
                 SpheneUI.Text.Muted($"{group.GroupPairUserInfos.Count} members · {onlineCount} online");
             }
 

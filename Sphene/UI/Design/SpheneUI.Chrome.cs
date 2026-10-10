@@ -29,7 +29,6 @@ public static partial class SpheneUI
         internal const float TitleBarBackgroundAlpha = 0.94f;
         internal const float TitleBarContentGap = 4f;
 
-        internal const float CardBorderPulseSpeed = 1.3f;
         internal const float CardBorderThickness = 1.5f;
 
         private const int SectionCardGlowRings = 8;
@@ -79,7 +78,16 @@ public static partial class SpheneUI
             public WindowSizeConstraints? SavedConstraints;
             public Vector2? SavedSize;
             public ImGuiCond SavedSizeCondition;
+            public Vector2? SavedPos;
+            public ImGuiCond SavedPosCondition;
             public ImGuiWindowFlags SavedFlags;
+            // Right edge + top of the window at toggle time — width-collapsing
+            // windows shrink toward this anchor so the fold control stays
+            // under the cursor.
+            public Vector2 AnchorRightTop;
+            // Set while the collapse animation forces the window position —
+            // released once the animation settles so the strip drags again.
+            public bool PositionPinned;
         }
 
         private const float CollapseDurationSeconds = 0.22f;
@@ -102,14 +110,17 @@ public static partial class SpheneUI
         /// <summary>
         /// Call in <c>PreDraw</c> of a collapsible window before
         /// <c>base.PreDraw()</c>. Animates the window height between its open
-        /// size and the title bar.
+        /// size and the title bar. <paramref name="collapsedWidthUnscaled"/>,
+        /// when positive, shrinks the width alongside the height toward that
+        /// collapsed size instead of keeping the open width.
         /// </summary>
         public static void UpdateCollapse(Window window, string windowName,
-            float collapsedHeightUnscaled)
+            float collapsedHeightUnscaled, float collapsedWidthUnscaled = 0f)
         {
             var fold = GetFold(windowName);
             var target = fold.Collapsed ? 1f : 0f;
-            if (!MathF.Equals(fold.Amount, target))
+            var animating = !MathF.Equals(fold.Amount, target);
+            if (animating)
             {
                 var step = ImGui.GetIO().DeltaTime / CollapseDurationSeconds;
                 fold.Amount = fold.Collapsed ? MathF.Min(1f, fold.Amount + step) : MathF.Max(0f, fold.Amount - step);
@@ -124,7 +135,10 @@ public static partial class SpheneUI
                     fold.SavedConstraints = null;
                     window.Size = fold.SavedSize;
                     window.SizeCondition = fold.SavedSizeCondition;
+                    window.Position = fold.SavedPos;
+                    window.PositionCondition = fold.SavedPosCondition;
                     window.Flags = fold.SavedFlags;
+                    fold.PositionPinned = false;
                 }
                 return;
             }
@@ -134,6 +148,8 @@ public static partial class SpheneUI
                 fold.SavedConstraints = window.SizeConstraints;
                 fold.SavedSize = window.Size;
                 fold.SavedSizeCondition = window.SizeCondition;
+                fold.SavedPos = window.Position;
+                fold.SavedPosCondition = window.PositionCondition;
                 fold.SavedFlags = window.Flags;
             }
             window.SizeConstraints = new WindowSizeConstraints
@@ -149,9 +165,28 @@ public static partial class SpheneUI
 
             var scale = SpheneUI.Scale;
             var height = float.Lerp(fold.OpenSize.Y, collapsedHeightUnscaled * scale, t);
-            var width = window.Size?.X * scale ?? fold.OpenSize.X;
+            var width = collapsedWidthUnscaled > 0f
+                ? float.Lerp(fold.OpenSize.X, collapsedWidthUnscaled * scale, t)
+                : window.Size?.X * scale ?? fold.OpenSize.X;
             window.Size = new Vector2(MathF.Max(width, 1f) / scale, MathF.Max(height, 1f) / scale);
             window.SizeCondition = ImGuiCond.Always;
+            // While the size animates, pin the window so its right edge stays
+            // on the toggle-time anchor — the fold button rides along under
+            // the cursor instead of sliding away to the left. Once the
+            // animation settles the position is released again so the
+            // collapsed strip stays draggable.
+            if (collapsedWidthUnscaled > 0f && animating && fold.AnchorRightTop != Vector2.Zero)
+            {
+                window.Position = new Vector2(fold.AnchorRightTop.X - width, fold.AnchorRightTop.Y);
+                window.PositionCondition = ImGuiCond.Always;
+                fold.PositionPinned = true;
+            }
+            else if (fold.PositionPinned)
+            {
+                window.Position = null;
+                window.PositionCondition = fold.SavedPosCondition;
+                fold.PositionPinned = false;
+            }
             window.Flags |= ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse;
         }
 
@@ -174,7 +209,31 @@ public static partial class SpheneUI
             {
                 fold.OpenSize = ImGui.GetWindowSize();
             }
+            var pos = ImGui.GetWindowPos();
+            fold.AnchorRightTop = new Vector2(pos.X + ImGui.GetWindowSize().X, pos.Y);
             fold.Collapsed = !fold.Collapsed;
+        }
+
+        /// <summary>
+        /// Restores a folded window instantly — reopening a window that was
+        /// closed while collapsed lands maximized, not mid-fold.
+        /// </summary>
+        public static void ResetFold(Window window, string windowName)
+        {
+            var fold = GetFold(windowName);
+            fold.Collapsed = false;
+            fold.Amount = 0f;
+            if (fold.SavedConstraints != null)
+            {
+                window.SizeConstraints = fold.SavedConstraints;
+                fold.SavedConstraints = null;
+                window.Size = fold.SavedSize;
+                window.SizeCondition = fold.SavedSizeCondition;
+                window.Position = fold.SavedPos;
+                window.PositionCondition = fold.SavedPosCondition;
+                window.Flags = fold.SavedFlags;
+                fold.PositionPinned = false;
+            }
         }
 
         /// <summary>
@@ -579,7 +638,7 @@ public static partial class SpheneUI
         /// touching the rounded frame. Each strip is tinted with the surface
         /// gradient at its Y.
         /// </summary>
-        private static void CornerCrescent(ImDrawListPtr drawList, Vector2 corner,
+        internal static void CornerCrescent(ImDrawListPtr drawList, Vector2 corner,
             float dirX, float dirY, float radius, Vector2 parentMin, Vector2 parentMax)
         {
             var rows = Math.Clamp((int)MathF.Ceiling(radius), 4, 48);
@@ -849,11 +908,28 @@ public static partial class SpheneUI
             var zoneTint = 0.10f + MathF.Min(t, 1f) * 0.45f + MathF.Max(0f, t - 1f) * 0.15f;
             var zoneColor = Vector4.Lerp(background, active, zoneTint);
             zoneColor.W = 1f;
-            drawList.AddTriangleFilled(
-                new Vector2(corner.X - stampSize, corner.Y),
-                corner,
-                new Vector2(corner.X, corner.Y - stampSize),
-                ColorUtils.ToU32(zoneColor));
+            var zoneU32 = ColorUtils.ToU32(zoneColor);
+            var rounding = style.WindowRounding;
+            if (rounding <= 0.01f)
+            {
+                drawList.AddTriangleFilled(
+                    new Vector2(corner.X - stampSize, corner.Y),
+                    corner,
+                    new Vector2(corner.X, corner.Y - stampSize), zoneU32);
+            }
+            else
+            {
+                // The stamp follows the window's rounded silhouette: right
+                // edge down to the arc, the quarter-circle corner, the bottom
+                // edge — the hypotenuse closes it. Same triangle minus the
+                // notch the rounding carved out.
+                var arcCenter = corner - new Vector2(rounding, rounding);
+                drawList.PathLineTo(new Vector2(corner.X, corner.Y - stampSize));
+                drawList.PathLineTo(new Vector2(corner.X, arcCenter.Y));
+                drawList.PathArcTo(arcCenter, rounding, 0f, MathF.PI * 0.5f);
+                drawList.PathLineTo(new Vector2(corner.X - stampSize, corner.Y));
+                drawList.PathFillConvex(zoneU32);
+            }
 
             var gripColor = t <= 1f
                 ? Vector4.Lerp(normal, hover, t)

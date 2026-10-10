@@ -15,16 +15,16 @@ internal sealed partial class CharaDataHubUi
     {
         if (!_charaDataManager.BrioAvailable)
         {
-            ImGuiHelpers.ScaledDummy(5);
+            SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
             SpheneUI.Text.GroupedCentered("BRIO IS MANDATORY FOR GPOSE TOGETHER.", ImGuiColors.DalamudRed);
-            ImGuiHelpers.ScaledDummy(5);
+            SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
         }
 
         if (!_uiSharedService.ApiController.IsConnected)
         {
-            ImGuiHelpers.ScaledDummy(5);
+            SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
             SpheneUI.Text.GroupedCentered("CANNOT USE GPOSE TOGETHER WHILE DISCONNECTED FROM THE SERVER.", ImGuiColors.DalamudRed);
-            ImGuiHelpers.ScaledDummy(5);
+            SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
         }
 
         SpheneUI.Text.Big("GPose Together");
@@ -45,9 +45,10 @@ internal sealed partial class CharaDataHubUi
             {
                 _charaDataGposeTogetherManager.CreateNewLobby();
             }
-            ImGuiHelpers.ScaledDummy(5);
+            SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
             SpheneUI.Layout.ScaledNextItemWidth(250);
             SpheneUI.Controls.InputTextWithHint("##lobbyId", "GPose Lobby Id", ref _joinLobbyId, 30);
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.Row);
             if (SpheneUI.Icons.TextButton(FontAwesomeIcon.ArrowRight, "Join GPose Together Lobby"))
             {
                 _charaDataGposeTogetherManager.JoinGPoseLobby(_joinLobbyId);
@@ -90,7 +91,7 @@ internal sealed partial class CharaDataHubUi
             SpheneUI.AttachTooltip("This will send your current appearance, pose and world data to all users in the lobby.");
             if (!_uiSharedService.IsInGpose)
             {
-                ImGuiHelpers.ScaledDummy(5);
+                SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
                 SpheneUI.Text.GroupedCentered("Assigning users to characters is only available in GPose.", ImGuiColors.DalamudYellow, 300);
             }
             SpheneUI.Layout.DistanceSeparator();
@@ -101,7 +102,7 @@ internal sealed partial class CharaDataHubUi
 
             using (ImRaii.Child("charaChild", new(0, 0), false, ImGuiWindowFlags.AlwaysAutoResize))
             {
-                ImGuiHelpers.ScaledDummy(3);
+                SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
 
                 if (!_charaDataGposeTogetherManager.UsersInLobby.Any() && !string.IsNullOrEmpty(_charaDataGposeTogetherManager.CurrentGPoseLobbyId))
                 {
@@ -223,6 +224,6 @@ internal sealed partial class CharaDataHubUi
                 }
             }
         }, 5, width);
-        ImGuiHelpers.ScaledDummy(5);
+        SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
     }
 }

@@ -293,6 +293,24 @@ public static partial class SpheneUI
         /// <summary>Corner radius of framed value controls.</summary>
         public static float ControlRadius => ImGui.GetFrameHeight() * ControlRadiusFactor;
 
+        /// <summary>
+        /// Corner radius of push buttons — the theme's frame rounding, so
+        /// every button (menus, pages, settings) matches the title-bar
+        /// buttons. Resolves to the compact token inside CompactUI scopes.
+        /// </summary>
+        public static float ButtonRadius => SpheneUI.ThemeScopeTracker.InCompactScope
+            ? Theme.Current.CompactFrameRounding
+            : Theme.Current.FrameRounding;
+
+        /// <summary>
+        /// Frame border thickness of push buttons — the theme's frame border,
+        /// so buttons carry no outline unless the theme defines one.
+        /// Resolves to the compact token inside CompactUI scopes.
+        /// </summary>
+        public static float ButtonBorderSize => SpheneUI.ThemeScopeTracker.InCompactScope
+            ? Theme.Current.CompactFrameBorderSize
+            : Theme.Current.FrameBorderSize;
+
         /// <summary>Frame corner radius relative to the control height.</summary>
         public const float ControlRadiusFactor = 0.35f;
 

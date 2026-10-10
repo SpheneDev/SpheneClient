@@ -138,7 +138,7 @@ public class UpdateNotificationUi : WindowMediatorSubscriberBase
             IsOpen = false;
         }
         
-        ImGui.Spacing();
+        SpheneUI.Layout.VerticalSpace();
 
         // Footer note
         SpheneUI.Icons.Icon(FontAwesomeIcon.InfoCircle, SpheneUI.Colors.TextMuted);

@@ -125,13 +125,13 @@ public static class ConnectivityOptionBlock
             var discordUser = serverConfigurationManager.GetDiscordUserFromToken(selectedServer);
             if (string.IsNullOrEmpty(discordUser))
             {
-                ImGuiHelpers.ScaledDummy(10f);
+                SpheneUI.Layout.Space(SpheneUI.Spacing.X10);
                 SpheneUI.Text.ColoredWrapped("You have enabled OAuth2 but it is not linked. Press the buttons Check, then Authenticate to link properly.", ImGuiColors.DalamudRed);
             }
 
             if (!string.IsNullOrEmpty(discordUser) && selectedServer.Authentications.TrueForAll(u => string.IsNullOrEmpty(u.UID)))
             {
-                ImGuiHelpers.ScaledDummy(10f);
+                SpheneUI.Layout.Space(SpheneUI.Spacing.X10);
                 SpheneUI.Text.ColoredWrapped("You have enabled OAuth2 but no characters configured. Set the correct UIDs for your characters in \"Character Management\".", ImGuiColors.DalamudRed);
             }
 

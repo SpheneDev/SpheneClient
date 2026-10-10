@@ -442,10 +442,13 @@ public static partial class SpheneUI
         /// <summary>
         /// Draws <paramref name="wrap"/> into the rect [min,max] with the given
         /// fit mode, optional tint, corner rounding and border.
+        /// <paramref name="corners"/> selects which corners
+        /// <paramref name="rounding"/> applies to.
         /// </summary>
         public static void ImageInRect(ImDrawListPtr drawList, IDalamudTextureWrap wrap,
             Vector2 min, Vector2 max, ImageFit fit = ImageFit.Fit, Vector4? tint = null,
-            float rounding = 0f, bool border = false)
+            float rounding = 0f, bool border = false,
+            ImDrawFlags corners = ImDrawFlags.RoundCornersAll)
         {
             FitRect(min, max, new Vector2(wrap.Width, wrap.Height), fit,
                 out var rectMin, out var rectMax, out var uv0, out var uv1);
@@ -455,7 +458,7 @@ public static partial class SpheneUI
             if (rounding > 0.5f)
             {
                 drawList.AddImageRounded(wrap.Handle, rectMin, rectMax, uv0, uv1,
-                    tintU32, rounding);
+                    tintU32, rounding, corners);
             }
             else
             {
@@ -464,7 +467,7 @@ public static partial class SpheneUI
             if (border)
             {
                 drawList.AddRect(rectMin, rectMax, ColorUtils.ToU32(Colors.Border with { W = 0.5f }),
-                    rounding, ImDrawFlags.RoundCornersAll, MathF.Max(1f, SpheneUI.Scale));
+                    rounding, corners, MathF.Max(1f, SpheneUI.Scale));
             }
         }
 

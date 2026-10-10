@@ -564,6 +564,7 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
                 else if (_discordOAuthGetCode != null && !_discordOAuthGetCode.IsCompleted)
                 {
                     SpheneUI.Text.Wrapped("A browser window has been opened, follow it to authenticate. Click the button below if you accidentally closed the window and need to restart the authentication.");
+                    SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.Row);
                     if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Ban, "Cancel Authentication"))
                     {
                         _discordOAuthGetCts = _discordOAuthGetCts.CancelRecreate();
@@ -620,7 +621,7 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
                     }
                 }
                 SpheneUI.Controls.HelpText("Hold CTRL to manually refresh your OAuth2 token. Normally you do not need to do this.");
-                ImGuiHelpers.ScaledDummy(10f);
+                SpheneUI.Layout.Space(SpheneUI.Spacing.X10);
 
                 if ((_discordOAuthUIDs == null || _discordOAuthUIDs.IsCompleted)
                     && SpheneUI.Icons.TextButton(FontAwesomeIcon.Question, "Check Discord Connection"))
@@ -653,6 +654,7 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
             else
             {
                 SpheneUI.Text.ColoredWrapped("The OAuth2 token is stale and expired. Please renew the OAuth2 connection.", ImGuiColors.DalamudRed);
+                SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.Row);
                 if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Exclamation, "Renew OAuth2 connection"))
                 {
                     selectedServer.OAuthToken = null;

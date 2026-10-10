@@ -77,12 +77,23 @@ public sealed class ModSharingUi : WindowMediatorSubscriberBase
     /// <summary>Renders the sharing tabs inside another window (Sphene Hub); the host provides the scroll area.</summary>
     internal void DrawEmbedded()
     {
-        DrawSharingContent(null);
+        DrawSharingContent(null, embedded: true);
     }
 
-    private void DrawSharingContent(ModSharingTab? requested)
+    private void DrawSharingContent(ModSharingTab? requested, bool embedded = false)
     {
-        SpheneUI.Text.PageHeader("Mod Sharing", "Share Penumbra mods with paired users, install received packages, and manage history & backups.");
+        // In the hub the breadcrumb already names the page — the standalone
+        // window keeps its full title header.
+        if (embedded)
+        {
+            SpheneUI.Text.PageIntro(
+                "Share Penumbra mods with paired users, install received packages, and manage history & backups.");
+        }
+        else
+        {
+            SpheneUI.Text.PageHeader("Mod Sharing",
+                "Share Penumbra mods with paired users, install received packages, and manage history & backups.");
+        }
 
         var allowPenumbraMods = _configService.Current.AllowReceivingPenumbraMods;
         if (SpheneUI.Controls.Toggle("Allow receiving Penumbra mod packages", ref allowPenumbraMods))
@@ -105,7 +116,7 @@ public sealed class ModSharingUi : WindowMediatorSubscriberBase
         {
             if (sendTab)
             {
-                ImGui.Spacing();
+                SpheneUI.Layout.VerticalSpace();
                 _penumbraSendModUi.DrawEmbedded();
             }
         }
@@ -114,11 +125,11 @@ public sealed class ModSharingUi : WindowMediatorSubscriberBase
         {
             if (receiveTab)
             {
-                ImGui.Spacing();
+                SpheneUI.Layout.VerticalSpace();
                 if (!allowPenumbraMods)
                 {
                     SpheneUI.Text.Muted("Receiving mod packages is currently disabled.");
-                    ImGui.Spacing();
+                    SpheneUI.Layout.VerticalSpace();
                 }
                 using (ImRaii.Disabled(!allowPenumbraMods))
                 {
@@ -131,7 +142,7 @@ public sealed class ModSharingUi : WindowMediatorSubscriberBase
         {
             if (historyTab)
             {
-                ImGui.Spacing();
+                SpheneUI.Layout.VerticalSpace();
                 _modPackageHistoryUi.DrawEmbedded();
             }
         }

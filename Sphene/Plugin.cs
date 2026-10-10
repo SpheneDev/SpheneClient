@@ -455,7 +455,8 @@ public sealed class Plugin : IAsyncDalamudPlugin
             collection.AddScoped<CacheMonitor>();
             collection.AddScoped<UiFactory>();
             collection.AddScoped<SelectTagForPairUi>();
-            collection.AddScoped<WindowMediatorSubscriberBase, SettingsUi>();
+            collection.AddScoped<SettingsUi>();
+            collection.AddScoped<WindowMediatorSubscriberBase>(s => s.GetRequiredService<SettingsUi>());
             collection.AddScoped<WindowMediatorSubscriberBase, CompactUi>();
             collection.AddScoped<WindowMediatorSubscriberBase, SpheneIcon>();
             collection.AddScoped<WindowMediatorSubscriberBase, IntroUi>();

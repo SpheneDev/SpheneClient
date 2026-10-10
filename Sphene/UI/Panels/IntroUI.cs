@@ -161,7 +161,7 @@ public partial class IntroUi : WindowMediatorSubscriberBase
 
         // Sticky button area at bottom
         SpheneUI.Layout.Separator();
-        ImGui.Spacing();
+        SpheneUI.Layout.VerticalSpace();
         DrawStickyButtons();
 
         DrawImportBackupModal();
@@ -176,11 +176,11 @@ public partial class IntroUi : WindowMediatorSubscriberBase
             SpheneUI.Text.Wrapped("Experience seamless character synchronization across the realm through the power of Living Memory. " +
                           "Share your complete appearance and glamour with trusted companions in real-time.");
 
-            ImGui.Spacing();
+            SpheneUI.Layout.VerticalSpace();
             SpheneUI.Layout.Callout("You'll need Penumbra and Glamourer installed to access the Network's full capabilities.",
                 Dalamud.Interface.FontAwesomeIcon.InfoCircle, ImGuiColors.HealerGreen, "Prerequisites");
 
-            ImGui.Spacing();
+            SpheneUI.Layout.VerticalSpace();
             SpheneUI.Layout.Callout("Only modifications channeled through Penumbra can be transmitted. " +
                                  "Ensure all your customizations flow through Penumbra's systems for perfect synchronization.",
                 Dalamud.Interface.FontAwesomeIcon.ExclamationTriangle, ImGuiColors.DalamudYellow, "Important");
@@ -188,12 +188,12 @@ public partial class IntroUi : WindowMediatorSubscriberBase
 
         _uiShared.DrawOtherPluginState();
 
-        ImGui.Spacing();
+        SpheneUI.Layout.VerticalSpace();
         SpheneUI.Layout.SectionCard(() =>
         {
             SpheneUI.Text.SectionHeader("Restore from Backup", icon: Dalamud.Interface.FontAwesomeIcon.FileImport);
             SpheneUI.Text.ColoredWrapped("Have a previous Sphene backup? Restore all your settings, pairs, and secret keys instantly.", ImGuiColors.DalamudGrey);
-            ImGui.Spacing();
+            SpheneUI.Layout.VerticalSpace();
             if (SpheneUI.Controls.HeroButton("intro-import-backup", "Import Config Backup",
                     Dalamud.Interface.FontAwesomeIcon.FileImport, new Vector2(200f, BUTTON_HEIGHT),
                     new Vector4(0.35f, 0.55f, 0.85f, 1.0f)))
@@ -217,15 +217,15 @@ public partial class IntroUi : WindowMediatorSubscriberBase
             SpheneUI.Text.SectionHeader("ShrinkU", icon: Dalamud.Interface.FontAwesomeIcon.Tools);
             SpheneUI.Text.Wrapped("Manage texture backups and convert formats to keep your Penumbra-based mods healthy. ShrinkU is bundled with Sphene and integrates with the same Window System.");
 
-            ImGui.Spacing();
+            SpheneUI.Layout.VerticalSpace();
             SpheneUI.Layout.Callout("Backups are stored under Sphene's cache in 'texture_backups'. First run will configure this automatically.",
                 Dalamud.Interface.FontAwesomeIcon.InfoCircle, ImGuiColors.HealerGreen, "Backup Location");
 
-            ImGui.Spacing();
+            SpheneUI.Layout.VerticalSpace();
             SpheneUI.Layout.Callout("You can enable or disable ShrinkU integration anytime in Settings → Appearance.",
                 Dalamud.Interface.FontAwesomeIcon.InfoCircle, ImGuiColors.DalamudGrey3, "Integration Toggle");
 
-            ImGui.Spacing();
+            SpheneUI.Layout.VerticalSpace();
         });
     }
 
@@ -246,7 +246,7 @@ public partial class IntroUi : WindowMediatorSubscriberBase
             SpheneUI.Text.SectionHeader(Strings.ToS.AgreementLabel);
             
             // Prominent warning
-            ImGui.Spacing();
+            SpheneUI.Layout.VerticalSpace();
             var warningText = Strings.ToS.ReadLabel;
             var warningSize = ImGui.CalcTextSize(warningText);
             ImGui.SetCursorPosX((ImGui.GetWindowSize().X - warningSize.X) * 0.5f);
@@ -258,7 +258,7 @@ public partial class IntroUi : WindowMediatorSubscriberBase
             }
             
             SpheneUI.Layout.Separator();
-            ImGui.Spacing();
+            SpheneUI.Layout.VerticalSpace();
             
             // Terms content area without scrollbars
             using (var child = ImRaii.Child("TermsContent", new Vector2(0, 300), true, ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse))
@@ -268,7 +268,7 @@ public partial class IntroUi : WindowMediatorSubscriberBase
                     foreach (var paragraph in _tosParagraphs!)
                     {
                         SpheneUI.Text.Wrapped(paragraph);
-                        ImGui.Spacing();
+                        SpheneUI.Layout.VerticalSpace();
                     }
                 }
             }
@@ -280,7 +280,7 @@ public partial class IntroUi : WindowMediatorSubscriberBase
         {
             SpheneUI.Text.SectionHeader("Memory Archive Configuration", icon: Dalamud.Interface.FontAwesomeIcon.Database);
 
-            ImGui.Spacing();
+            SpheneUI.Layout.VerticalSpace();
             if (!_uiShared.HasValidPenumbraModPath)
             {
                 SpheneUI.Layout.Callout("Please configure a valid Penumbra mod directory path before proceeding.",
@@ -290,14 +290,14 @@ public partial class IntroUi : WindowMediatorSubscriberBase
             {
                 SpheneUI.Text.Wrapped("The Network requires a local archive to store synchronized character data and must catalog your existing modifications for optimal transmission efficiency.");
 
-                ImGui.Spacing();
+                SpheneUI.Layout.VerticalSpace();
                 SpheneUI.Layout.Callout(
                     "• Initial cataloging may take time depending on your modification library\n" +
                     "• Do not remove FileCache.csv from your Dalamud Plugin Configurations\n" +
                     "• Ensure your Penumbra directory structure is properly configured",
                     Dalamud.Interface.FontAwesomeIcon.ExclamationTriangle, ImGuiColors.DalamudYellow, "Important Notes");
 
-                ImGui.Spacing();
+                SpheneUI.Layout.VerticalSpace();
                 _uiShared.DrawCacheDirectorySetting();
             }
         });
@@ -313,7 +313,7 @@ public partial class IntroUi : WindowMediatorSubscriberBase
         
         if (!_dalamudUtilService.IsWine)
         {
-            ImGui.Spacing();
+            SpheneUI.Layout.VerticalSpace();
             SpheneUI.Layout.SectionCard(() =>
             {
                 var useFileCompactor = _configService.Current.UseCompactor;
@@ -324,7 +324,7 @@ public partial class IntroUi : WindowMediatorSubscriberBase
                 }
                 SpheneUI.AttachTooltip("Saves significant disk space for downloads with minor CPU overhead. Recommended to keep enabled.");
                 
-                ImGui.Spacing();
+                SpheneUI.Layout.VerticalSpace();
                 SpheneUI.Text.ColoredWrapped("The File Compactor reduces storage requirements for downloaded content while providing faster loading times. " +
                     "This setting can be changed later in Sphene settings.", ImGuiColors.DalamudGrey3);
             });
@@ -339,17 +339,17 @@ public partial class IntroUi : WindowMediatorSubscriberBase
         {
             SpheneUI.Text.SectionHeader("Network Authentication", icon: Dalamud.Interface.FontAwesomeIcon.Shield);
 
-            ImGui.Spacing();
+            SpheneUI.Layout.VerticalSpace();
             SpheneUI.Text.Wrapped("Establish your identity within the Sphene Network to access synchronization services.");
 
-            ImGui.Spacing();
+            SpheneUI.Layout.VerticalSpace();
             SpheneUI.Layout.Callout(
                 $"For the primary Network node \"{WebAPI.ApiController.MainServer}\", authentication is managed through our Discord community. " +
                 "Join the Discord and follow the authentication protocols in #sphene-registration.",
                 Dalamud.Interface.FontAwesomeIcon.InfoCircle, ImGuiColors.HealerGreen, "Main Server Authentication");
         });
 
-        ImGui.Spacing();
+        SpheneUI.Layout.VerticalSpace();
         if (SpheneUI.Controls.HeroButton("intro-join-discord", "Join Discord Community",
                 Dalamud.Interface.FontAwesomeIcon.Users, new Vector2(200f, 50f),
                 new Vector4(0.44f, 0.47f, 0.78f, 1.0f), textScale: 0.5f))
@@ -357,7 +357,7 @@ public partial class IntroUi : WindowMediatorSubscriberBase
             Util.OpenLink("https://discord.gg/GbnwsP2XsF");
         }
 
-        ImGui.Spacing();
+        SpheneUI.Layout.VerticalSpace();
 
         // Network Configuration
         SpheneUI.Layout.SectionCard(() =>
@@ -382,12 +382,12 @@ public partial class IntroUi : WindowMediatorSubscriberBase
 
             if (_dalamudUtilService.IsWine)
             {
-                ImGui.Spacing();
+                SpheneUI.Layout.VerticalSpace();
                 ConnectivityOptionBlock.DrawWineForceWebSocketsOption(selectedServer, _serverConfigurationManager, _uiShared, "IntroWineForceWebSockets");
             }
         });
 
-        ImGui.Spacing();
+        SpheneUI.Layout.VerticalSpace();
         
         // Authentication Key Input
         if (_useLegacyLogin)
@@ -401,13 +401,13 @@ public partial class IntroUi : WindowMediatorSubscriberBase
 
                 if (_secretKey.Length > 0 && _secretKey.Length != 64)
                 {
-                    ImGui.Spacing();
+                    SpheneUI.Layout.VerticalSpace();
                     SpheneUI.Layout.Callout("Authentication key must be exactly 64 characters long. Do not use Lodestone credentials.",
                         Dalamud.Interface.FontAwesomeIcon.ExclamationCircle, ImGuiColors.DalamudRed, "Invalid Length");
                 }
                 else if (_secretKey.Length == 64 && !Base32Regex().IsMatch(_secretKey))
                 {
-                    ImGui.Spacing();
+                    SpheneUI.Layout.VerticalSpace();
                     SpheneUI.Layout.Callout("Authentication key may only contain letters A-Z and numbers 2-7.",
                         Dalamud.Interface.FontAwesomeIcon.ExclamationCircle, ImGuiColors.DalamudRed, "Invalid Format");
                 }
@@ -437,6 +437,7 @@ public partial class IntroUi : WindowMediatorSubscriberBase
                         var worldName = _dalamudUtilService.WorldData.Value.TryGetValue((ushort)playerWorld, out var world) ? world : "Unknown";
                         SpheneUI.Text.Wrapped($"Current Character: {playerName}@{worldName}");
                         
+                        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.Row);
                         if (SpheneUI.Icons.TextButton(FontAwesomeIcon.UserPlus, "Add Current Character"))
                         {
                             _serverConfigurationManager.AddCurrentCharacterToServer();
@@ -553,7 +554,7 @@ public partial class IntroUi : WindowMediatorSubscriberBase
             if (string.IsNullOrEmpty(_importFilePath))
             {
                 SpheneUI.Text.ColoredWrapped("Select a backup file to restore all your Sphene settings.", ImGuiColors.DalamudGrey);
-                ImGuiHelpers.ScaledDummy(5);
+                SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.Row);
                 if (SpheneUI.Controls.Button("Select Backup File", new Vector2(0, 0)))
                 {
                     _fileDialogManager.OpenFileDialog("Import Config Backup", ".json", (success, path) =>
@@ -579,17 +580,17 @@ public partial class IntroUi : WindowMediatorSubscriberBase
             else
             {
                 SpheneUI.Text.ColoredWrapped($"Selected: {Path.GetFileName(_importFilePath)}", ImGuiColors.ParsedGreen);
-                ImGuiHelpers.ScaledDummy(5);
+                SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
 
                 SpheneUI.Text.ColoredWrapped("If the backup is password-protected, enter the password below. Otherwise leave blank.", ImGuiColors.DalamudGrey);
                 SpheneUI.Text.Plain("Password (if encrypted):");
                 SpheneUI.Controls.InputText("##introImportPassword", ref _importPassword, 64, ImGuiInputTextFlags.Password);
-                ImGuiHelpers.ScaledDummy(10);
+                SpheneUI.Layout.Space(SpheneUI.Spacing.X10);
 
                 SpheneUI.Layout.Separator();
-                ImGuiHelpers.ScaledDummy(5);
+                SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
                 SpheneUI.Text.SectionHeader("Path Options", "Choose whether to restore folder paths from the backup or keep current paths.");
-                ImGuiHelpers.ScaledDummy(5);
+                SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
 
                 if (!string.IsNullOrEmpty(_backupCachePath))
                 {
@@ -607,7 +608,7 @@ public partial class IntroUi : WindowMediatorSubscriberBase
                     SpheneUI.Text.ColoredWrapped("No cache folder path in backup.", ImGuiColors.DalamudGrey);
                 }
 
-                ImGuiHelpers.ScaledDummy(5);
+                SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
 
                 var currentShrinkU = _shrinkUConfigService?.Current?.BackupFolderPath ?? "Not configured";
                 if (!string.IsNullOrEmpty(_backupShrinkUPath))
@@ -626,7 +627,7 @@ public partial class IntroUi : WindowMediatorSubscriberBase
                     SpheneUI.Text.ColoredWrapped("No ShrinkU backup folder path in backup.", ImGuiColors.DalamudGrey);
                 }
 
-                ImGuiHelpers.ScaledDummy(10);
+                SpheneUI.Layout.Space(SpheneUI.Spacing.X10);
 
                 var buttonSize = (ImGui.GetWindowContentRegionMax().X - ImGui.GetWindowContentRegionMin().X -
                                   ImGui.GetStyle().ItemSpacing.X) / 2;
@@ -667,7 +668,7 @@ public partial class IntroUi : WindowMediatorSubscriberBase
 
             if (!string.IsNullOrEmpty(_importResultMessage))
             {
-                ImGuiHelpers.ScaledDummy(5);
+                SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
                 var color = _importResultIsError ? ImGuiColors.DalamudRed : ImGuiColors.ParsedGreen;
                 SpheneUI.Text.Colored(_importResultMessage, color);
             }

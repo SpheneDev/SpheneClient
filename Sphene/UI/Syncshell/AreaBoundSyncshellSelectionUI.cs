@@ -133,7 +133,7 @@ public class AreaBoundSyncshellSelectionUI : WindowMediatorSubscriberBase
                     ImGui.TreePop();
                 }
                 
-                ImGui.Spacing();
+                SpheneUI.Layout.VerticalSpace();
             }
         }
         SpheneUI.Layout.EndScrollArea();
