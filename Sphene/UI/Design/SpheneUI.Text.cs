@@ -123,6 +123,23 @@ public static partial class SpheneUI
             }
         }
 
+        /// <summary>
+        /// Display-size heading text in the dedicated display font (~26px) —
+        /// the crisp way to render large text; never use
+        /// <c>SetWindowFontScale</c> for headings, it raster-scales glyphs.
+        /// </summary>
+        public static void Display(string text, Vector4? color = null)
+        {
+            if (SpheneUI.DisplayFont is { } font)
+            {
+                Font(font, text, color);
+            }
+            else
+            {
+                Colored(text, color);
+            }
+        }
+
         /// <summary>Text rendered in one of the shared font handles.</summary>
         internal static void Font(IFontHandle handle, string text, Vector4? color = null)
             => Font(handle, text, color.HasValue ? ColorUtils.ToU32(color.Value) : ImGui.GetColorU32(ImGuiCol.Text));

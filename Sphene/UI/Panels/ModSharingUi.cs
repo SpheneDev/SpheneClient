@@ -1,10 +1,13 @@
 using Dalamud.Bindings.ImGui;
+using Dalamud.Interface;
+using Dalamud.Interface.Colors;
 using Dalamud.Interface.Utility.Raii;
 using Microsoft.Extensions.Logging;
 using Sphene.SpheneConfiguration;
 using Sphene.Services;
 using Sphene.Services.Mediator;
 using Sphene.WebAPI;
+using System.Collections.Generic;
 using System.Numerics;
 using Sphene.UI.Design;
 
@@ -12,13 +15,40 @@ namespace Sphene.UI.Panels;
 
 public sealed class ModSharingUi : WindowMediatorSubscriberBase
 {
+    /// <summary>Flat sub-pages of the Mod Sharing section — shared by the standalone window rail and the Hub-embedded rail.</summary>
+    public enum ModSharingPage
+    {
+        Send,
+        Receive,
+        Activity
+    }
+
     private readonly ApiController _apiController;
     private readonly SpheneConfigService _configService;
     private readonly PenumbraSendModUi _penumbraSendModUi;
     private readonly PenumbraReceiveModUi _penumbraReceiveModUi;
     private readonly ModPackageHistoryUi _modPackageHistoryUi;
 
-    private ModSharingTab? _selectTabOnNextDraw;
+    private ModSharingPage _standalonePage = ModSharingPage.Send;
+    private ModSharingPage _embeddedPage = ModSharingPage.Send;
+    private ModSharingPage? _pendingStandalonePage;
+    private bool _embeddedScope;
+
+    private ModSharingPage _activePage
+    {
+        get => _embeddedScope ? _embeddedPage : _standalonePage;
+        set
+        {
+            if (_embeddedScope)
+            {
+                _embeddedPage = value;
+            }
+            else
+            {
+                _standalonePage = value;
+            }
+        }
+    }
 
     public ModSharingUi(
         ILogger<ModSharingUi> logger,
@@ -42,109 +72,204 @@ public sealed class ModSharingUi : WindowMediatorSubscriberBase
 
         Mediator.Subscribe<OpenModSharingWindow>(this, msg =>
         {
-            _selectTabOnNextDraw = msg.Tab;
+            _pendingStandalonePage = MapTab(msg.Tab);
             IsOpen = true;
         });
 
         Mediator.Subscribe<OpenSendPenumbraModWindow>(this, _ =>
         {
-            _selectTabOnNextDraw = ModSharingTab.Send;
+            _pendingStandalonePage = ModSharingPage.Send;
             IsOpen = true;
         });
 
         Mediator.Subscribe<OpenPenumbraReceiveModWindow>(this, _ =>
         {
-            _selectTabOnNextDraw = ModSharingTab.Receive;
+            _pendingStandalonePage = ModSharingPage.Receive;
             IsOpen = true;
         });
 
         IsOpen = false;
     }
 
-    protected override void DrawInternal()
+    private static ModSharingPage MapTab(ModSharingTab tab) => tab switch
     {
-        var requested = _selectTabOnNextDraw;
-        _selectTabOnNextDraw = null;
+        ModSharingTab.Send => ModSharingPage.Send,
+        ModSharingTab.Receive => ModSharingPage.Receive,
+        _ => ModSharingPage.Activity
+    };
 
-        if (SpheneUI.Layout.BeginScrollArea("mod-sharing-content", ImGui.GetContentRegionAvail(),
-                contentPadding: Vector2.Zero))
-        {
-            DrawSharingContent(requested);
-        }
-        SpheneUI.Layout.EndScrollArea();
+    /// <summary>Raised when the active mod sharing page changes through user navigation — args are (previous, next, embedded). The hub folds embedded-surface changes into its own breadcrumb/history.</summary>
+    internal event Action<ModSharingPage, ModSharingPage, bool>? SubPageChanged;
+
+    /// <summary>The page the Hub-embedded mod sharing shows — read by the hub for its crumb. The standalone window has its own page state.</summary>
+    internal ModSharingPage ActiveSubPageValue => _embeddedPage;
+
+    /// <summary>Label of the embedded mod sharing page for the hub breadcrumb.</summary>
+    internal string ActiveCrumbLabel => PageLabel(_embeddedPage);
+
+    /// <summary>Applies a page to the Hub-embedded mod sharing without recording it — used for hub-driven restores.</summary>
+    internal void ApplySubPageQuiet(ModSharingPage page)
+    {
+        _embeddedPage = page;
     }
 
-    /// <summary>Renders the sharing tabs inside another window (Sphene Hub); the host provides the scroll area.</summary>
-    internal void DrawEmbedded()
+    private void SetPage(ModSharingPage page)
     {
-        DrawSharingContent(null, embedded: true);
-    }
-
-    private void DrawSharingContent(ModSharingTab? requested, bool embedded = false)
-    {
-        // In the hub the breadcrumb already names the page — the standalone
-        // window keeps its full title header.
-        if (embedded)
-        {
-            SpheneUI.Text.PageIntro(
-                "Share Penumbra mods with paired users, install received packages, and manage history & backups.");
-        }
-        else
-        {
-            SpheneUI.Text.PageHeader("Mod Sharing",
-                "Share Penumbra mods with paired users, install received packages, and manage history & backups.");
-        }
-
-        var allowPenumbraMods = _configService.Current.AllowReceivingPenumbraMods;
-        if (SpheneUI.Controls.Toggle("Allow receiving Penumbra mod packages", ref allowPenumbraMods))
-        {
-            _configService.Current.AllowReceivingPenumbraMods = allowPenumbraMods;
-            _configService.Save();
-            _ = _apiController.UserUpdatePenumbraReceivePreference(allowPenumbraMods);
-        }
-        SpheneUI.Controls.HelpText("When disabled, incoming Penumbra mod packages are ignored and no install popups are shown.");
-
-        SpheneUI.Layout.Separator();
-
-        using var tabBar = ImRaii.TabBar("ModSharingTabs");
-        if (!tabBar)
+        if (page == _activePage)
         {
             return;
         }
+        var previous = _activePage;
+        _activePage = page;
+        SubPageChanged?.Invoke(previous, page, _embeddedScope);
+    }
 
-        using (var sendTab = ImRaii.TabItem("Send Mods", requested == ModSharingTab.Send ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None))
+    private static string PageLabel(ModSharingPage page) => page switch
+    {
+        ModSharingPage.Send => "Send Mods",
+        ModSharingPage.Receive => "Receive Mods",
+        ModSharingPage.Activity => "Activity",
+        _ => "Send Mods"
+    };
+
+    private void DrawNavItems(
+        List<(string Label, float CenterY, Vector4 Accent)>? pinnedCategories, float pinnedCenterY)
+    {
+        var accentSharing = SpheneUI.Palette.EtherealPurple;
+        var accentHistory = SpheneUI.Palette.NetworkActive;
+
+        void SidebarButton(string label, FontAwesomeIcon icon, ModSharingPage page, Vector4 accent)
         {
-            if (sendTab)
+            if (SpheneUI.Layout.NavRailSegmentItem(label, icon, _activePage == page, accent))
             {
-                SpheneUI.Layout.VerticalSpace();
+                SetPage(page);
+            }
+        }
+
+        SpheneUI.Layout.NavRailCategoryLabel("Sharing", accentSharing, pinnedCategories, pinnedCenterY);
+        SidebarButton("Send Mods", FontAwesomeIcon.PaperPlane, ModSharingPage.Send, accentSharing);
+        SidebarButton("Receive Mods", FontAwesomeIcon.Download, ModSharingPage.Receive, accentSharing);
+        SpheneUI.Layout.NavRailDivider(accentSharing, accentHistory);
+
+        SpheneUI.Layout.NavRailCategoryLabel("History", accentHistory, pinnedCategories, pinnedCenterY);
+        SidebarButton("Activity", FontAwesomeIcon.History, ModSharingPage.Activity, accentHistory);
+    }
+
+    /// <summary>
+    /// The mod sharing nav rendered inside the Sphene Hub rail — same items
+    /// as the standalone rail plus a pop-out shortcut so the windowed section
+    /// stays one click away.
+    /// </summary>
+    internal void DrawEmbeddedRail(
+        List<(string Label, float CenterY, Vector4 Accent)>? pinnedCategories = null,
+        float pinnedCenterY = 0f)
+    {
+        var previousScope = _embeddedScope;
+        _embeddedScope = true;
+        try
+        {
+            DrawNavItems(pinnedCategories, pinnedCenterY);
+            var accent = SpheneUI.Palette.EtherealPurple;
+            SpheneUI.Layout.NavRailDivider(accent, accent);
+            if (SpheneUI.Layout.NavRailSegmentItem("Pop Out", FontAwesomeIcon.ExternalLinkAlt, false, accent))
+            {
+                Mediator.Publish(new UiToggleMessage(typeof(ModSharingUi)));
+            }
+            SpheneUI.AttachTooltip("Open Mod Sharing in a separate window");
+        }
+        finally
+        {
+            _embeddedScope = previousScope;
+        }
+    }
+
+    /// <summary>
+    /// The active mod sharing page rendered inside an already-scrollable
+    /// container (the Sphene Hub nav content child) — no own scroll area.
+    /// </summary>
+    internal void DrawEmbeddedContent()
+    {
+        var previousScope = _embeddedScope;
+        _embeddedScope = true;
+        try
+        {
+            DrawPageContent();
+        }
+        finally
+        {
+            _embeddedScope = previousScope;
+        }
+    }
+
+    private void DrawPageContent()
+    {
+        switch (_activePage)
+        {
+            case ModSharingPage.Send:
                 _penumbraSendModUi.DrawEmbedded();
+                break;
+            case ModSharingPage.Receive:
+                DrawReceivePage();
+                break;
+            case ModSharingPage.Activity:
+                _modPackageHistoryUi.DrawActivityPage();
+                break;
+        }
+    }
+
+    private void DrawReceivePage()
+    {
+        var accent = SpheneUI.Palette.NetworkActive;
+        SpheneUI.Layout.SectionCard(() =>
+        {
+            var allowPenumbraMods = _configService.Current.AllowReceivingPenumbraMods;
+            if (SpheneUI.Controls.Toggle("Allow receiving Penumbra mod packages", ref allowPenumbraMods))
+            {
+                _configService.Current.AllowReceivingPenumbraMods = allowPenumbraMods;
+                _configService.Save();
+                _ = _apiController.UserUpdatePenumbraReceivePreference(allowPenumbraMods);
             }
+            SpheneUI.Controls.HelpText("When disabled, incoming Penumbra mod packages are ignored and no install popups are shown.");
+        }, title: "Incoming Packages", accentColor: accent);
+
+        SpheneUI.Layout.VerticalSpace();
+
+        if (!_configService.Current.AllowReceivingPenumbraMods)
+        {
+            SpheneUI.Layout.Callout("Receiving mod packages is currently disabled — enable it above to review pending packages.",
+                FontAwesomeIcon.Inbox, ImGuiColors.DalamudGrey);
+            SpheneUI.Layout.VerticalSpace();
+        }
+        using (ImRaii.Disabled(!_configService.Current.AllowReceivingPenumbraMods))
+        {
+            _penumbraReceiveModUi.DrawEmbedded();
+        }
+    }
+
+    protected override void DrawInternal()
+    {
+        var requested = _pendingStandalonePage;
+        _pendingStandalonePage = null;
+        if (requested.HasValue)
+        {
+            _standalonePage = requested.Value;
         }
 
-        using (var receiveTab = ImRaii.TabItem("Receive Mods", requested == ModSharingTab.Receive ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None))
+        var railWidth = SpheneUI.Layout.NavRailSegmentedWidth([
+            (FontAwesomeIcon.PaperPlane, "Send Mods"),
+            (FontAwesomeIcon.Download, "Receive Mods"),
+            (FontAwesomeIcon.History, "Activity")
+        ]);
+        SpheneUI.Layout.BeginNavRail("mod-sharing", railWidth);
+        // Same top offset as the hub rail so the first button sits at the
+        // same height in both surfaces.
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
+        DrawNavItems(null, 0f);
+        SpheneUI.Layout.EndNavRail();
+        if (SpheneUI.Layout.BeginNavContent("mod-sharing"))
         {
-            if (receiveTab)
-            {
-                SpheneUI.Layout.VerticalSpace();
-                if (!allowPenumbraMods)
-                {
-                    SpheneUI.Text.Muted("Receiving mod packages is currently disabled.");
-                    SpheneUI.Layout.VerticalSpace();
-                }
-                using (ImRaii.Disabled(!allowPenumbraMods))
-                {
-                    _penumbraReceiveModUi.DrawEmbedded();
-                }
-            }
+            DrawPageContent();
         }
-
-        using (var historyTab = ImRaii.TabItem("Mod Packages", requested == ModSharingTab.History ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None))
-        {
-            if (historyTab)
-            {
-                SpheneUI.Layout.VerticalSpace();
-                _modPackageHistoryUi.DrawEmbedded();
-            }
-        }
+        SpheneUI.Layout.EndNavContent();
     }
 }

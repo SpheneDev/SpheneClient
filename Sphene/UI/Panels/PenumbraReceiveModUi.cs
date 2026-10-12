@@ -1,15 +1,18 @@
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface;
 using Dalamud.Interface.Colors;
+using Dalamud.Interface.Textures.TextureWraps;
 using Dalamud.Interface.Utility;
 using Dalamud.Interface.Utility.Raii;
 using Dalamud.Interface.Windowing;
 using Microsoft.Extensions.Logging;
+using Sphene.API.Data;
 using Sphene.API.Dto.Files;
 using Sphene.Services;
 using Sphene.Services.Mediator;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Numerics;
 using Sphene.WebAPI.Files;
@@ -26,6 +29,7 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
 {
     private readonly UiSharedService _uiSharedService;
     private readonly ShrinkU.Services.PenumbraIpc _shrinkuPenumbraIpc;
+    private readonly SpheneProfileManager _spheneProfileManager;
 
     private readonly List<FileTransferNotificationDto> _pendingNotifications = new();
     private FileTransferNotificationDto? _selectedNotification;
@@ -43,6 +47,12 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
     private int _batchTotal;
     private int _batchCurrent;
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, (bool IsInstalled, string? Version)> _modStatusCache = new(StringComparer.Ordinal);
+    // Lazily resolved metadata for locally installed mods (thumbnails, author).
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, Task<ShrinkU.Services.PenumbraIpc.ModMetadata?>> _modMetaTasks
+        = new(StringComparer.OrdinalIgnoreCase);
+    // Last decoded avatar bytes per user — a new array instance means the
+    // profile was (re)fetched and the cached texture must be evicted.
+    private readonly Dictionary<string, byte[]> _avatarBytes = new(StringComparer.Ordinal);
 
     // History Tab State
 
@@ -52,11 +62,13 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
         SpheneMediator mediator,
         UiSharedService uiSharedService,
         PerformanceCollectorService performanceCollectorService,
-        ShrinkU.Services.PenumbraIpc shrinkuPenumbraIpc)
+        ShrinkU.Services.PenumbraIpc shrinkuPenumbraIpc,
+        SpheneProfileManager spheneProfileManager)
         : base(logger, mediator, "Receive Mods###SpheneReceiveMods", performanceCollectorService)
     {
         _uiSharedService = uiSharedService;
         _shrinkuPenumbraIpc = shrinkuPenumbraIpc;
+        _spheneProfileManager = spheneProfileManager;
 
         SizeConstraints = new WindowSizeConstraints
         {
@@ -391,21 +403,12 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
 
     protected override void DrawInternal()
     {
-        if (ImGui.BeginTabBar("PenumbraReceiveModTabs"))
+        if (SpheneUI.Layout.BeginScrollArea("ReceiveModsRootWindow",
+                ImGui.GetContentRegionAvail(), contentPadding: Vector2.Zero))
         {
-            if (ImGui.BeginTabItem("Pending"))
-            {
-                if (SpheneUI.Layout.BeginScrollArea("ReceiveModsRootWindow",
-                        ImGui.GetContentRegionAvail(), contentPadding: Vector2.Zero))
-                {
-                    DrawPendingTab(isEmbedded: false);
-                }
-                SpheneUI.Layout.EndScrollArea();
-                ImGui.EndTabItem();
-            }
-
-            ImGui.EndTabBar();
+            DrawPendingTab(isEmbedded: false);
         }
+        SpheneUI.Layout.EndScrollArea();
     }
 
     internal void DrawEmbedded()
@@ -483,260 +486,274 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
             }
         }
 
-        if (ImGui.BeginTable("MainLayout", 2, ImGuiTableFlags.Resizable | ImGuiTableFlags.BordersInnerV))
+        var accent = SpheneUI.Palette.NetworkActive;
+        var colBottom = ImGui.GetCursorScreenPos().Y + ImGui.GetContentRegionAvail().Y;
+
+        if (ImGui.BeginTable("MainLayout", 2, ImGuiTableFlags.Resizable | ImGuiTableFlags.SizingStretchProp))
         {
-            ImGui.TableSetupColumn("ModList", ImGuiTableColumnFlags.WidthFixed, 250f * scale);
+            ImGui.TableSetupColumn("Inbox", ImGuiTableColumnFlags.WidthStretch, 0.40f);
             ImGui.TableSetupColumn("ModDetails", ImGuiTableColumnFlags.WidthStretch);
-            
+
             ImGui.TableNextRow();
             ImGui.TableSetColumnIndex(0);
 
-            // LEFT COLUMN: List
+            // LEFT COLUMN: Inbox card — filter, select-toolbar, scroll list, action footer.
             var buttonHeight = ImGui.GetFrameHeightWithSpacing();
-            var listHeight = -(buttonHeight * 2f + (ImGui.GetStyle().ItemSpacing.Y * 2f));
+            var footerReserve = buttonHeight + ImGui.GetStyle().ItemSpacing.Y * 3f
+                + SpheneUI.Spacing.X8.Scaled;
 
-            using (ImRaii.Child("LeftList", new Vector2(0f, listHeight), false))
+            SpheneUI.Layout.SectionCard(() =>
             {
-                SpheneUI.Text.Colored($"Received Mods ({displayed.Count})", ImGuiColors.DalamudWhite);
-                SpheneUI.Layout.Separator();
                 ImGui.SetNextItemWidth(-1);
                 SpheneUI.Controls.InputTextWithHint("##pendingFilter", "Filter mods or sender…", ref _pendingFilter, 64);
-                SpheneUI.Layout.VerticalSpace();
 
-                if (_pendingNotifications.Count == 0)
+                var hasPending = pending.Count > 0;
+                using (ImRaii.Disabled(_isInstalling || !hasPending))
                 {
-                    SpheneUI.Text.Muted("No mods pending.");
+                    SpheneUI.Text.Muted("Select:");
+                    ImGui.SameLine(0f, SpheneUI.Spacing.X4.Scaled);
+                    if (SpheneUI.Controls.SmallButton("All")) SelectAll();
+                    ImGui.SameLine(0f, SpheneUI.Spacing.X4.Scaled);
+                    if (SpheneUI.Controls.SmallButton("Installed")) SelectInstalled();
+                    ImGui.SameLine(0f, SpheneUI.Spacing.X4.Scaled);
+                    if (SpheneUI.Controls.SmallButton("New")) SelectNew();
                 }
-                else if (displayed.Count == 0)
+                ImGui.SameLine();
+                SpheneUI.Controls.DockToRightEdge(ImGui.CalcTextSize("Discard all").X + SpheneUI.Spacing.X16.Scaled);
+                using (ImRaii.Disabled(_isInstalling || !hasPending))
                 {
-                    SpheneUI.Text.Muted("No matches.");
-                }
-                else
-                {
-                    void DrawNotificationEntry(FileTransferNotificationDto notif)
+                    if (SpheneUI.Controls.SmallButton($"Discard all ({pending.Count})"))
                     {
-                        using var id = ImRaii.PushId(notif.Hash ?? string.Empty);
+                        DiscardAll();
+                    }
+                }
 
-                        bool isChecked;
-                        lock (_pendingLock)
+                var listHeight = MathF.Max(80f * scale,
+                    colBottom - ImGui.GetCursorScreenPos().Y - footerReserve);
+                if (SpheneUI.Layout.BeginScrollArea("LeftList", new Vector2(0f, listHeight)))
+                {
+                    if (_pendingNotifications.Count == 0)
+                    {
+                        SpheneUI.Text.Muted("No packages pending — mods shared with you appear here.");
+                    }
+                    else if (displayed.Count == 0)
+                    {
+                        SpheneUI.Text.Muted("No matches.");
+                    }
+                    else
+                    {
+                        void DrawNotificationEntry(FileTransferNotificationDto notif)
                         {
-                            isChecked = _selectedForBatch.Contains(notif);
-                        }
-                        if (SpheneUI.Controls.Checkbox("##check", ref isChecked))
-                        {
-                            lock (_pendingLock)
+                            using var id = ImRaii.PushId(notif.Hash ?? string.Empty);
+
+                            var name = notif.ModFolderName ?? "Unknown";
+                            var modInfo = notif.ModInfo?.FirstOrDefault();
+                            var senderName = _uiSharedService.GetPreferredUserDisplayName(
+                                notif.Sender?.UID ?? string.Empty, notif.Sender?.AliasOrUID ?? string.Empty);
+
+                            Vector4 color;
+                            var icon = FontAwesomeIcon.Plus;
+                            var statusTip = "New mod";
+
+                            if (_modStatusCache.TryGetValue(name, out var status) && status.IsInstalled)
                             {
-                                if (isChecked) _selectedForBatch.Add(notif);
-                                else _selectedForBatch.Remove(notif);
-                            }
-                        }
-                        ImGui.SameLine();
-
-                        var name = notif.ModFolderName ?? "Unknown";
-
-                        Vector4 color;
-                        var icon = FontAwesomeIcon.Plus;
-                        var tooltip = string.Empty;
-
-                        if (_modStatusCache.TryGetValue(name, out var status) && status.IsInstalled)
-                        {
-                            var receivedVer = notif.ModInfo?.FirstOrDefault()?.Version;
-                            if (receivedVer != null && status.Version != null)
-                            {
-                                var comparison = CompareVersions(receivedVer, status.Version);
-                                if (comparison > 0)
+                                var receivedVer = modInfo?.Version;
+                                if (receivedVer != null && status.Version != null)
                                 {
-                                    color = ImGuiColors.DalamudYellow;
-                                    icon = FontAwesomeIcon.ArrowCircleUp;
-                                    tooltip = $"Upgrade available: {status.Version} -> {receivedVer}";
-                                }
-                                else if (comparison < 0)
-                                {
-                                    color = ImGuiColors.DalamudOrange;
-                                    icon = FontAwesomeIcon.ArrowCircleDown;
-                                    tooltip = $"Downgrade warning: {status.Version} -> {receivedVer}";
+                                    var comparison = CompareVersions(receivedVer, status.Version);
+                                    if (comparison > 0)
+                                    {
+                                        color = ImGuiColors.DalamudYellow;
+                                        icon = FontAwesomeIcon.ArrowCircleUp;
+                                        statusTip = $"Upgrade: {status.Version} → {receivedVer}";
+                                    }
+                                    else if (comparison < 0)
+                                    {
+                                        color = ImGuiColors.DalamudOrange;
+                                        icon = FontAwesomeIcon.ArrowCircleDown;
+                                        statusTip = $"Downgrade: {status.Version} → {receivedVer}";
+                                    }
+                                    else
+                                    {
+                                        color = ImGuiColors.HealerGreen;
+                                        icon = FontAwesomeIcon.Check;
+                                        statusTip = $"Installed: {status.Version}";
+                                    }
                                 }
                                 else
                                 {
                                     color = ImGuiColors.HealerGreen;
                                     icon = FontAwesomeIcon.Check;
-                                    tooltip = $"Same version installed: {status.Version}";
+                                    statusTip = "Already installed";
                                 }
                             }
                             else
                             {
-                                color = ImGuiColors.HealerGreen;
-                                icon = FontAwesomeIcon.Check;
-                                tooltip = "Mod is already installed";
+                                color = ImGuiColors.TankBlue;
                             }
-                        }
-                        else
-                        {
-                            color = ImGuiColors.TankBlue;
-                            tooltip = "New mod";
-                        }
 
-                        using (ImRaii.PushColor(ImGuiCol.Text, color))
-                        {
+                            var meta = MetaOf(name);
+                            var thumb = meta?.ImagePath is { } imgPath
+                                ? SpheneUI.Media.Texture($"modthumb:{name}", () => ReadModImage(imgPath))
+                                : null;
+                            // Packages are usually not installed yet → fall back
+                            // to the sender's avatar instead of a bare icon.
+                            thumb ??= notif.Sender == null ? null : AvatarFor(notif.Sender);
+                            var title = string.IsNullOrWhiteSpace(modInfo?.Name) ? name : modInfo!.Name;
+                            var metaText = ModListRows.Meta(
+                                string.IsNullOrWhiteSpace(senderName) ? "Unknown sender" : senderName,
+                                modInfo?.Version is { } v ? $"v{v}" : null,
+                                modInfo?.Author);
+
+                            var trailW = ImGui.GetFrameHeight() + 26f * scale;
+                            var row = ModListRows.Draw(notif.Hash ?? name, title, metaText,
+                                thumb, FontAwesomeIcon.BoxOpen, currentSelected == notif,
+                                accent, trailingReserve: trailW);
+
+                            // trailing: status icon + batch checkbox (drawn after the row →
+                            // the checkbox wins input inside its own rect)
+                            ImGui.SetCursorScreenPos(row.TrailingPos);
                             using (SpheneUI.IconFont.Push())
                             {
-                                SpheneUI.Text.Plain(icon.ToIconString());
+                                using (ImRaii.PushColor(ImGuiCol.Text, color))
+                                {
+                                    SpheneUI.Text.Plain(icon.ToIconString());
+                                }
                             }
-                            if (ImGui.IsItemHovered())
-                            {
-                                ImGui.SetTooltip(tooltip);
-                            }
-                            ImGui.SameLine();
+                            if (ImGui.IsItemHovered()) ImGui.SetTooltip(statusTip);
+                            ImGui.SameLine(0f, 6f * scale);
 
-                            var isSelected = currentSelected == notif;
-                            if (SpheneUI.Controls.Selectable($"{name}##select", isSelected))
+                            bool isChecked;
+                            lock (_pendingLock)
+                            {
+                                isChecked = _selectedForBatch.Contains(notif);
+                            }
+                            if (SpheneUI.Controls.Checkbox("##check", ref isChecked))
+                            {
+                                lock (_pendingLock)
+                                {
+                                    if (isChecked) _selectedForBatch.Add(notif);
+                                    else _selectedForBatch.Remove(notif);
+                                }
+                            }
+                            ImGui.SetCursorScreenPos(row.RowEnd);
+
+                            if (row.Clicked)
                             {
                                 lock (_pendingLock)
                                 {
                                     _selectedNotification = notif;
                                 }
                             }
-                            if (ImGui.IsItemHovered())
+                        }
+
+                        var senderGroups = new Dictionary<string, List<FileTransferNotificationDto>>(StringComparer.Ordinal);
+                        var senderLabels = new Dictionary<string, string>(StringComparer.Ordinal);
+
+                        foreach (var notif in displayed)
+                        {
+                            var uid = notif.Sender?.UID ?? string.Empty;
+                            var aliasOrUid = notif.Sender?.AliasOrUID ?? string.Empty;
+                            var key = string.IsNullOrWhiteSpace(uid) ? (string.IsNullOrWhiteSpace(aliasOrUid) ? "Unknown" : aliasOrUid) : uid;
+                            if (!senderGroups.TryGetValue(key, out var list))
                             {
-                                ImGui.SetTooltip(tooltip);
+                                list = new List<FileTransferNotificationDto>();
+                                senderGroups[key] = list;
+                                var label = _uiSharedService.GetPreferredUserDisplayName(uid, aliasOrUid);
+                                senderLabels[key] = string.IsNullOrWhiteSpace(label) ? "Unknown" : label;
                             }
+                            list.Add(notif);
                         }
-                    }
 
-                    var senderGroups = new Dictionary<string, List<FileTransferNotificationDto>>(StringComparer.Ordinal);
-                    var senderLabels = new Dictionary<string, string>(StringComparer.Ordinal);
-
-                    foreach (var notif in displayed)
-                    {
-                        var uid = notif.Sender?.UID ?? string.Empty;
-                        var aliasOrUid = notif.Sender?.AliasOrUID ?? string.Empty;
-                        var key = string.IsNullOrWhiteSpace(uid) ? (string.IsNullOrWhiteSpace(aliasOrUid) ? "Unknown" : aliasOrUid) : uid;
-                        if (!senderGroups.TryGetValue(key, out var list))
+                        if (senderGroups.Count > 1)
                         {
-                            list = new List<FileTransferNotificationDto>();
-                            senderGroups[key] = list;
-                            var label = _uiSharedService.GetPreferredUserDisplayName(uid, aliasOrUid);
-                            senderLabels[key] = string.IsNullOrWhiteSpace(label) ? "Unknown" : label;
-                        }
-                        list.Add(notif);
-                    }
-
-                    if (senderGroups.Count > 1)
-                    {
-                        foreach (var key in senderGroups.Keys.OrderBy(k => senderLabels[k], StringComparer.OrdinalIgnoreCase))
-                        {
-                            var senderLabel = senderLabels[key];
-                            var list = senderGroups[key];
-
-                            var containsSelected = false;
-                            if (currentSelected != null)
+                            foreach (var key in senderGroups.Keys.OrderBy(k => senderLabels[k], StringComparer.OrdinalIgnoreCase))
                             {
-                                foreach (var n in list)
+                                var senderLabel = senderLabels[key];
+                                var list = senderGroups[key];
+
+                                var containsSelected = false;
+                                if (currentSelected != null)
                                 {
-                                    if (ReferenceEquals(n, currentSelected))
+                                    foreach (var n in list)
                                     {
-                                        containsSelected = true;
-                                        break;
+                                        if (ReferenceEquals(n, currentSelected))
+                                        {
+                                            containsSelected = true;
+                                            break;
+                                        }
                                     }
                                 }
-                            }
 
-                            var flags = ImGuiTreeNodeFlags.SpanAvailWidth | ImGuiTreeNodeFlags.OpenOnArrow;
-                            if (containsSelected) flags |= ImGuiTreeNodeFlags.DefaultOpen | ImGuiTreeNodeFlags.Selected;
+                                var flags = ImGuiTreeNodeFlags.SpanAvailWidth | ImGuiTreeNodeFlags.OpenOnArrow;
+                                if (containsSelected) flags |= ImGuiTreeNodeFlags.DefaultOpen | ImGuiTreeNodeFlags.Selected;
 
-                            using var id = ImRaii.PushId("sender" + key);
-                            var isOpen = ImGui.TreeNodeEx($"{senderLabel} ({list.Count})##node", flags);
-                            if (isOpen)
-                            {
-                                foreach (var notif in list.OrderBy(n => n.ModFolderName ?? string.Empty, StringComparer.OrdinalIgnoreCase))
+                                using var id = ImRaii.PushId("sender" + key);
+                                var isOpen = ImGui.TreeNodeEx($"{senderLabel} ({list.Count})##node", flags);
+                                if (isOpen)
                                 {
-                                    DrawNotificationEntry(notif);
+                                    foreach (var notif in list.OrderBy(n => n.ModFolderName ?? string.Empty, StringComparer.OrdinalIgnoreCase))
+                                    {
+                                        DrawNotificationEntry(notif);
+                                    }
+                                    ImGui.TreePop();
                                 }
-                                ImGui.TreePop();
+                            }
+                        }
+                        else
+                        {
+                            foreach (var notif in displayed.OrderBy(n => n.ModFolderName ?? string.Empty, StringComparer.OrdinalIgnoreCase))
+                            {
+                                DrawNotificationEntry(notif);
                             }
                         }
                     }
-                    else
-                    {
-                        foreach (var notif in displayed.OrderBy(n => n.ModFolderName ?? string.Empty, StringComparer.OrdinalIgnoreCase))
-                        {
-                            DrawNotificationEntry(notif);
-                        }
-                    }
                 }
-            }
+                SpheneUI.Layout.EndScrollArea(SpheneUI.Layout.NavRailBandColor());
 
-            SpheneUI.Layout.Separator();
+                SpheneUI.Layout.Separator();
 
-            var hasPending = pending.Count > 0;
-            using (ImRaii.Disabled(_isInstalling || !hasPending))
-            {
-                if (SpheneUI.Controls.Button("Select All"))
+                var selectedCount = _selectedForBatch.Count;
+                using (ImRaii.Disabled(_isInstalling || selectedCount == 0))
                 {
-                    SelectAll();
-                }
-                ImGui.SameLine();
-                if (SpheneUI.Controls.Button("Select Installed"))
-                {
-                    SelectInstalled();
-                }
-                ImGui.SameLine();
-                if (SpheneUI.Controls.Button("Select New"))
-                {
-                    SelectNew();
-                }
-            }
-
-            var selectedCount = _selectedForBatch.Count;
-            using (ImRaii.Disabled(_isInstalling))
-            {
-                using (ImRaii.Disabled(selectedCount == 0))
-                {
-                    if (SpheneUI.Controls.Button($"Install Selected ({selectedCount})"))
+                    if (SpheneUI.Controls.Button($"Install selected ({selectedCount})"))
                     {
                         StartBatchInstall();
                     }
                     ImGui.SameLine();
-                    if (SpheneUI.Controls.Button($"Discard Selected ({selectedCount})"))
+                    if (SpheneUI.Controls.SmallButton($"Discard selected ({selectedCount})"))
                     {
                         BatchDiscard();
                     }
                 }
-                ImGui.SameLine();
-                using (ImRaii.Disabled(!hasPending))
-                {
-                    if (SpheneUI.Controls.Button($"Discard All ({pending.Count})"))
-                    {
-                        DiscardAll();
-                    }
-                }
-            }
+            }, title: $"Inbox ({pending.Count})", accentColor: accent);
 
             ImGui.TableSetColumnIndex(1);
 
-            // RIGHT COLUMN: Details
-            using (ImRaii.Child("RightDetails", new Vector2(0f, 0f), false))
+            // RIGHT COLUMN: Package details card
+            SpheneUI.Layout.SectionCard(() =>
             {
-                DrawRightPanel(scale, isEmbedded);
-            }
+                DrawRightPanel(scale, isEmbedded, colBottom);
+            }, title: "Package Details", accentColor: accent);
 
             ImGui.EndTable();
         }
     }
 
-    private void DrawRightPanel(float scale, bool isEmbedded)
+    private void DrawRightPanel(float scale, bool isEmbedded, float colBottom)
     {
-        var statusHeight = 90f * scale;
-        var buttonAreaHeight = ImGui.GetFrameHeight() + (20f * scale); 
-        var contentHeight = ImGui.GetContentRegionAvail().Y - statusHeight - buttonAreaHeight;
-        
+        var statusHeight = 60f * scale;
+        var buttonAreaHeight = ImGui.GetFrameHeight() + SpheneUI.Spacing.X16.Scaled;
+        var contentHeight = colBottom - ImGui.GetCursorScreenPos().Y - statusHeight - buttonAreaHeight;
+
         if (contentHeight < 100f * scale) contentHeight = 100f * scale;
 
-        using (ImRaii.Child("MainContent", new Vector2(0f, contentHeight), false))
+        if (SpheneUI.Layout.BeginScrollArea("MainContent", new Vector2(0f, contentHeight)))
         {
             if (_selectedNotification == null)
             {
-                SpheneUI.Text.Colored("No mod selected.", ImGuiColors.DalamudRed);
+                SpheneUI.Layout.Callout("Select a package on the left to review its details.",
+                    FontAwesomeIcon.Inbox, ImGuiColors.DalamudGrey);
             }
             else
             {
@@ -745,99 +762,119 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
                 var sender = _uiSharedService.GetPreferredUserDisplayName(senderUid, senderAliasOrUid);
                 var modFolderName = _selectedNotification.ModFolderName ?? string.Empty;
                 var modInfo = _selectedNotification.ModInfo?.FirstOrDefault();
+                var isInstalled = _shrinkuPenumbraIpc.ModExists(modFolderName);
 
-                SpheneUI.Text.Colored("Mod Details", ImGuiColors.DalamudWhite);
-                SpheneUI.Layout.Separator();
-                SpheneUI.Layout.VerticalSpace();
-
-                var detailsHeight = modInfo != null ? 150f * scale : 80f * scale;
-                using (ImRaii.Child("Details", new Vector2(0f, detailsHeight), true))
+                // Local artwork is only known once the mod exists in Penumbra —
+                // then the resolved meta.json Image renders as the package icon.
+                var localMeta = isInstalled ? MetaOf(modFolderName) : null;
+                var thumbWrap = localMeta?.ImagePath is { } imgPath
+                    ? SpheneUI.Media.Texture($"modthumb:{modFolderName}", () => ReadModImage(imgPath))
+                    : null;
+                var thumbSize = 64f * scale;
+                if (thumbWrap != null)
                 {
-                    SpheneUI.Text.Plain("Sender");
-                    ImGui.SameLine(140f * scale);
-                    SpheneUI.Text.Colored(string.IsNullOrWhiteSpace(sender) ? "Unknown" : sender, ImGuiColors.HealerGreen);
-
-                    var name = modInfo?.Name ?? modFolderName;
-                    SpheneUI.Text.Plain("Mod");
-                    ImGui.SameLine(140f * scale);
-                    SpheneUI.Text.Colored(string.IsNullOrWhiteSpace(name) ? "<Unknown>" : name, ImGuiColors.DalamudYellow);
-
-                    if (modInfo != null)
+                    SpheneUI.Media.Image(thumbWrap, new Vector2(thumbSize), ImageFit.Cover,
+                        rounding: SpheneUI.Spacing.X2, border: true);
+                }
+                else
+                {
+                    SpheneUI.Media.Placeholder(new Vector2(thumbSize), FontAwesomeIcon.BoxOpen);
+                }
+                ImGui.SameLine(0f, SpheneUI.Spacing.X8.Scaled);
+                using (ImRaii.Group())
+                {
+                    SpheneUI.Text.Big(string.IsNullOrWhiteSpace(modInfo?.Name ?? modFolderName)
+                        ? "<Unknown>" : modInfo?.Name ?? modFolderName);
+                    var subLine = ModListRows.Meta(modInfo?.Author,
+                        modInfo?.Version is { } dv ? $"v{dv}" : null);
+                    if (!string.IsNullOrEmpty(subLine))
                     {
-                        if (!string.IsNullOrWhiteSpace(modInfo.Author))
-                        {
-                            SpheneUI.Text.Plain("Author");
-                            ImGui.SameLine(140f * scale);
-                            SpheneUI.Text.Plain(modInfo.Author);
-                        }
-                        if (!string.IsNullOrWhiteSpace(modInfo.Version))
-                        {
-                            SpheneUI.Text.Plain("Version");
-                            ImGui.SameLine(140f * scale);
-                            SpheneUI.Text.Plain(modInfo.Version);
-                        }
-                        if (!string.IsNullOrWhiteSpace(modInfo.Website))
-                        {
-                            SpheneUI.Text.Plain("Website");
-                            ImGui.SameLine(140f * scale);
-                            SpheneUI.Text.Plain(modInfo.Website);
-                        }
+                        SpheneUI.Text.Muted(subLine);
+                    }
+                    if (!string.IsNullOrWhiteSpace(modInfo?.Website))
+                    {
+                        SpheneUI.Text.Muted(modInfo.Website);
                     }
                 }
 
                 SpheneUI.Layout.VerticalSpace();
+                // Sender chip: profile picture + resolved display name.
+                var senderAvatarSize = 22f * scale;
+                SpheneUI.Text.Muted("Sender");
+                ImGui.SameLine(90f * scale);
+                using (ImRaii.Group())
+                {
+                    var senderAvatarY = ImGui.GetCursorScreenPos().Y;
+                    ImGui.SetCursorScreenPos(new Vector2(ImGui.GetCursorScreenPos().X,
+                        senderAvatarY + (ImGui.GetTextLineHeight() - senderAvatarSize) * 0.5f));
+                    SpheneUI.Media.Avatar(_selectedNotification.Sender == null
+                        ? null : AvatarFor(_selectedNotification.Sender), senderAvatarSize);
+                    ImGui.SetCursorScreenPos(new Vector2(ImGui.GetCursorScreenPos().X, senderAvatarY));
+                    ImGui.SameLine(0f, SpheneUI.Spacing.X4.Scaled);
+                    SpheneUI.Text.Colored(string.IsNullOrWhiteSpace(sender) ? "Unknown" : sender,
+                        ImGuiColors.HealerGreen);
+                }
+                DrawDetailRow("Mod folder", string.IsNullOrWhiteSpace(modFolderName) ? "<Unknown>" : modFolderName, ImGuiColors.DalamudYellow);
 
-                var isInstalled = _shrinkuPenumbraIpc.ModExists(modFolderName);
+                if (!string.IsNullOrWhiteSpace(modInfo?.Description))
+                {
+                    SpheneUI.Layout.VerticalSpace();
+                    SpheneUI.Text.MutedWrapped(modInfo.Description.Trim());
+                }
+
+                // Status badge — the same signal the inbox icons carry.
+                SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+                var receivedVer0 = modInfo?.Version;
+                if (!isInstalled)
+                {
+                    SpheneUI.Layout.Badge("NEW", ImGuiColors.TankBlue);
+                    ImGui.SameLine();
+                    SpheneUI.Text.Muted("Not installed in Penumbra yet.");
+                }
+                else if (receivedVer0 != null && _installedVersion != null)
+                {
+                    var comparison = CompareVersions(receivedVer0, _installedVersion);
+                    if (comparison > 0)
+                    {
+                        SpheneUI.Layout.Badge("UPGRADE", ImGuiColors.HealerGreen);
+                        ImGui.SameLine();
+                        SpheneUI.Text.Muted($"Installed {_installedVersion} → Received {receivedVer0}");
+                    }
+                    else if (comparison < 0)
+                    {
+                        SpheneUI.Layout.Badge("DOWNGRADE", ImGuiColors.DalamudOrange);
+                        ImGui.SameLine();
+                        SpheneUI.Text.Muted($"Installed {_installedVersion} is newer than {receivedVer0}");
+                    }
+                    else
+                    {
+                        SpheneUI.Layout.Badge("INSTALLED", ImGuiColors.DalamudGrey);
+                        ImGui.SameLine();
+                        SpheneUI.Text.Muted($"Same version installed: {_installedVersion}");
+                    }
+                }
+                else
+                {
+                    SpheneUI.Layout.Badge("INSTALLED", ImGuiColors.DalamudGrey);
+                    ImGui.SameLine();
+                    SpheneUI.Text.Muted("Already in Penumbra — installing overwrites it.");
+                }
 
                 if (isInstalled)
                 {
                     SpheneUI.Layout.VerticalSpace();
-                    using (ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.DalamudOrange))
-                    {
-                        SpheneUI.Text.Wrapped($"This mod is already installed in Penumbra ('{modFolderName}'). Installing it again will overwrite the existing mod.");
-                    }
-
-                    if (_installedVersion != null && modInfo?.Version != null)
-                    {
-                        var installedVer = _installedVersion;
-                        var receivedVer = modInfo.Version;
-                        var comparison = CompareVersions(receivedVer, installedVer);
-
-                        SpheneUI.Layout.VerticalSpace();
-                        if (comparison > 0)
-                        {
-                            using (ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.HealerGreen))
-                            {
-                                SpheneUI.Text.Wrapped($"Upgrade available! Installed: {installedVer} → Received: {receivedVer}");
-                            }
-                        }
-                        else if (comparison < 0)
-                        {
-                            using (ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.DalamudOrange))
-                            {
-                                SpheneUI.Text.Wrapped($"Warning: The received version ({receivedVer}) is older than the installed version ({installedVer}).");
-                            }
-                        }
-                        else
-                        {
-                            using (ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.DalamudGrey))
-                            {
-                                SpheneUI.Text.Wrapped($"Same version installed: {installedVer}");
-                            }
-                        }
-                    }
+                    SpheneUI.Layout.Callout(
+                        $"Already installed as '{modFolderName}' — installing again overwrites the existing mod.",
+                        FontAwesomeIcon.ExclamationTriangle, ImGuiColors.DalamudOrange);
                 }
 
                 SpheneUI.Layout.VerticalSpace();
-                using (ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.DalamudYellow))
-                {
-                    SpheneUI.Text.Wrapped("Only install mods from people you fully trust. Invalid or malicious mods can break your game or cause unexpected issues.");
-                }
-
-                SpheneUI.Layout.VerticalSpace();
-                SpheneUI.Text.Wrapped("Do you want to download and install this Penumbra mod package now?");
+                SpheneUI.Layout.Callout(
+                    "Only install mods from people you fully trust — invalid or malicious mods can break your game.",
+                    FontAwesomeIcon.ShieldAlt, ImGuiColors.DalamudYellow);
             }
         }
+        SpheneUI.Layout.EndScrollArea(SpheneUI.Layout.NavRailBandColor());
 
         SpheneUI.Layout.Separator();
         SpheneUI.Layout.VerticalSpace();
@@ -855,11 +892,11 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
 
             using (ImRaii.Disabled(_isInstalling))
             {
-                var btnText = isInstalled 
-                    ? (isUpgrade ? "Upgrade" : "Reinstall") 
+                var btnText = isInstalled
+                    ? (isUpgrade ? "Upgrade" : "Reinstall")
                     : "Download and install";
 
-                if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Download, btnText))
+                if (SpheneUI.Controls.Button(btnText))
                 {
                     _statusIsError = false;
                     _statusText = "Starting download and installation…";
@@ -869,7 +906,7 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
             }
 
             ImGui.SameLine();
-            if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Trash, "Discard"))
+            if (SpheneUI.Controls.SmallButton("Discard"))
             {
                 FileTransferNotificationDto? toDiscard;
                 bool closeWindow;
@@ -906,7 +943,7 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
             if (!isEmbedded)
             {
                 ImGui.SameLine();
-                if (SpheneUI.Icons.TextButton(FontAwesomeIcon.TimesCircle, "Close"))
+                if (SpheneUI.Controls.SmallButton("Close"))
                 {
                     IsOpen = false;
                 }
@@ -914,17 +951,19 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
         }
         else
         {
-            if (!isEmbedded && SpheneUI.Icons.TextButton(FontAwesomeIcon.TimesCircle, "Close"))
+            if (!isEmbedded && SpheneUI.Controls.SmallButton("Close"))
             {
                 IsOpen = false;
             }
         }
 
-        // Status Area
+        // Status Area — batch progress and the latest transfer message.
         using (ImRaii.Child("Status", new Vector2(0f, statusHeight), false))
         {
-            SpheneUI.Text.Colored("Status", ImGuiColors.DalamudWhite);
-
+            if (_progress.HasValue || !string.IsNullOrWhiteSpace(_statusText))
+            {
+                SpheneUI.Text.Muted("Status");
+            }
             if (_progress.HasValue)
             {
                 var clamped = Math.Clamp(_progress.Value, 0f, 1f);
@@ -940,6 +979,63 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
                 var color = _statusIsError ? ImGuiColors.DalamudRed : ImGuiColors.DalamudGrey;
                 SpheneUI.Text.Colored(_statusText, color);
             }
+        }
+    }
+
+    private static void DrawDetailRow(string label, string value, Vector4? valueColor = null)
+    {
+        var labelWidth = 90f * ImGuiHelpers.GlobalScale;
+        SpheneUI.Text.Muted(label);
+        ImGui.SameLine(labelWidth);
+        if (valueColor.HasValue)
+        {
+            SpheneUI.Text.Colored(value, valueColor.Value);
+        }
+        else
+        {
+            SpheneUI.Text.Plain(value);
+        }
+    }
+
+    /// <summary>
+    /// The user's Sphene profile picture as a cached texture — null while the
+    /// profile or texture is still loading. Evicts the cache entry when the
+    /// profile data instance changes (avatar updated/refetched).
+    /// </summary>
+    private IDalamudTextureWrap? AvatarFor(UserData userData)
+    {
+        var uid = userData.UID;
+        if (string.IsNullOrWhiteSpace(uid)) return null;
+        var bytes = _spheneProfileManager.GetSpheneProfile(userData).ImageData.Value;
+        if (bytes.Length == 0) return null;
+        var key = $"modshare:avatar:{uid}";
+        if (!_avatarBytes.TryGetValue(uid, out var cached) || !ReferenceEquals(cached, bytes))
+        {
+            _avatarBytes[uid] = bytes;
+            SpheneUI.Media.Evict(key);
+        }
+        return SpheneUI.Media.Texture(key, bytes);
+    }
+
+    /// <summary>Requests local mod metadata once per folder; returns it once resolved.</summary>
+    private ShrinkU.Services.PenumbraIpc.ModMetadata? MetaOf(string modFolderName)
+    {
+        if (string.IsNullOrWhiteSpace(modFolderName)) return null;
+        var task = _modMetaTasks.GetOrAdd(modFolderName,
+            f => Task.Run(() => _shrinkuPenumbraIpc.GetModMetadataAsync(f)));
+        return task is { IsCompletedSuccessfully: true } ? task.Result : null;
+    }
+
+    /// <summary>Loads the mod's artwork bytes for the texture cache; null when absent/unreadable.</summary>
+    private static byte[]? ReadModImage(string? path)
+    {
+        try
+        {
+            return !string.IsNullOrWhiteSpace(path) && File.Exists(path) ? File.ReadAllBytes(path) : null;
+        }
+        catch
+        {
+            return null;
         }
     }
 

@@ -1,5 +1,6 @@
 using Dalamud.Bindings.ImGui;
 using Sphene.SpheneConfiguration;
+using Sphene.SpheneConfiguration.Configurations;
 using Sphene.Services.Mediator;
 using Sphene.UI.Design;
 
@@ -26,7 +27,10 @@ public static class UpdateOptionPanel
         PanelPairListSeparatorPadding,
         SupporterNameplateGlowColors,
         ReopenSpheneHubOnStartup,
-        ReleaseNotesPage
+        ReleaseNotesPage,
+        HubHomePage,
+        SupporterTitlePlacement,
+        SupporterIconLabelEdge
     }
 
     private static readonly IReadOnlySet<Link> SupporterFeatureLinks = new HashSet<Link>
@@ -35,7 +39,9 @@ public static class UpdateOptionPanel
         Link.SupporterNameplateCustomization,
         Link.SupporterNameplateStyleSync,
         Link.SupporterServerIcons,
-        Link.SupporterNameplateGlowColors
+        Link.SupporterNameplateGlowColors,
+        Link.SupporterTitlePlacement,
+        Link.SupporterIconLabelEdge
     };
 
     private static readonly ReleaseDefinition[] Releases =
@@ -45,7 +51,7 @@ public static class UpdateOptionPanel
         new("v.1.1.15", [Link.NotificationSoundsSpheneDefault]),
         new("v.1.1.16", [Link.SupporterNameplateIndicators, Link.SupporterNameplateCustomization, Link.SupporterNameplateStyleSync, Link.SupporterServerIcons]),
         new("v.1.1.17", [Link.PanelPairListSeparatorPadding, Link.SupporterNameplateGlowColors]),
-        new("v.1.1.18", [Link.ReopenSpheneHubOnStartup, Link.ReleaseNotesPage]),
+        new("v.1.1.18", [Link.ReopenSpheneHubOnStartup, Link.ReleaseNotesPage, Link.HubHomePage, Link.SupporterTitlePlacement, Link.SupporterIconLabelEdge]),
     ];
 
     private static readonly IReadOnlyDictionary<Link, string> LinkTitles = new Dictionary<Link, string>
@@ -64,7 +70,10 @@ public static class UpdateOptionPanel
         [Link.PanelPairListSeparatorPadding] = "Panel: Pair List Separator Padding (Default: 0)",
         [Link.SupporterNameplateGlowColors] = "Supporter: Symbol & Label Glow Colors (Default: Disabled)",
         [Link.ReopenSpheneHubOnStartup] = "Appearance: Reopen Sphene Hub on startup if it was open (Default: Disabled)",
-        [Link.ReleaseNotesPage] = "General: Release Notes page (browsable changelog in Settings & Hub)"
+        [Link.ReleaseNotesPage] = "General: Release Notes page (browsable changelog in Settings & Hub)",
+        [Link.HubHomePage] = "Sphene Hub: Home landing page & reworked Supporter page",
+        [Link.SupporterTitlePlacement] = "Supporter: Nameplate title placement (Default: Game default)",
+        [Link.SupporterIconLabelEdge] = "Supporter: Icon label text outline (Default: Enabled)"
     };
 
     private static readonly IReadOnlyDictionary<Link, Action<SpheneConfigService, UiSharedService, SpheneMediator>> LinkDrawers
@@ -122,6 +131,32 @@ public static class UpdateOptionPanel
         {
             SpheneUI.Text.Wrapped("Sphene release notes are now browsable at any time: the dedicated Release Notes page lists every release with its changelog, including testbuild entries when enabled.");
             SpheneUI.Controls.HelpText("Open Settings > Release Notes — also available inside the Sphene Hub's embedded settings.");
+        },
+        [Link.HubHomePage] = (_, _, _) =>
+        {
+            SpheneUI.Text.Wrapped("The Sphene Hub now opens on a Home page: live stats, quick access into every section, a news feed slot and a supporter overview — everything converges in one place.");
+            SpheneUI.Controls.HelpText("The Supporter settings page was reworked too and now lists every perk your supporter status unlocks.");
+        },
+        [Link.SupporterTitlePlacement] = (configService, _, _) =>
+        {
+            var placement = (int)configService.Current.SupporterTitlePlacement;
+            if (SpheneUI.Controls.LabeledCombo("Nameplate Title##UpdateOptionSupporterTitlePlacement", ref placement,
+                    "Game default\0Above name\0Below name\0Hidden\0"))
+            {
+                configService.Current.SupporterTitlePlacement = (SupporterTitlePlacement)placement;
+                configService.Save();
+            }
+            SpheneUI.Controls.HelpText("Where your game title appears on your nameplate. Game default keeps your in-game nameplate setting.");
+        },
+        [Link.SupporterIconLabelEdge] = (configService, _, _) =>
+        {
+            var enabled = configService.Current.SupporterIconLabelEdgeEnabled;
+            if (SpheneUI.Controls.Toggle("Icon Label Outline##UpdateOptionSupporterIconLabelEdge", ref enabled))
+            {
+                configService.Current.SupporterIconLabelEdgeEnabled = enabled;
+                configService.Save();
+            }
+            SpheneUI.Controls.HelpText("Draws a colored outline around the text next to the Sphene icon on nameplates. Configure text, fill and outline colors in Settings > Supporter.");
         }
     };
 

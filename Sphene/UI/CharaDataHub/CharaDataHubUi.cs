@@ -23,6 +23,18 @@ namespace Sphene.UI.CharaDataHub;
 
 internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
 {
+    /// <summary>Flat sub-pages of the Character Data section — shared by the standalone window rail and the Hub-embedded rail.</summary>
+    public enum CharaDataPage
+    {
+        GposeTogether,
+        GposeActors,
+        PosesNearby,
+        ApplyData,
+        McdOnline,
+        McdfExport,
+        Settings
+    }
+
     private const int maxPoses = 10;
     private readonly CharaDataManager _charaDataManager;
     private readonly CharaDataNearbyManager _charaDataNearbyManager;
@@ -49,7 +61,6 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
     private bool _isHandlingSelf = false;
     private DateTime _lastFavoriteUpdateTime = DateTime.UtcNow;
     private PoseEntryExtended? _nearbyHovered;
-    private bool _openMcdOnlineOnNextRun = false;
     private bool _readExport;
     private string _selectedDtoId = string.Empty;
     private string SelectedDtoId
@@ -76,6 +87,25 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
     private string? _openComboHybridId = null;
     private (string Id, string? Alias, string AliasOrId, string? Note)[]? _openComboHybridEntries = null;
     private bool _comboHybridUsedLastFrame = false;
+    private CharaDataPage _standalonePage = CharaDataPage.GposeTogether;
+    private CharaDataPage _embeddedPage = CharaDataPage.GposeTogether;
+    private bool _embeddedScope;
+
+    private CharaDataPage _activePage
+    {
+        get => _embeddedScope ? _embeddedPage : _standalonePage;
+        set
+        {
+            if (_embeddedScope)
+            {
+                _embeddedPage = value;
+            }
+            else
+            {
+                _standalonePage = value;
+            }
+        }
+    }
 
     public CharaDataHubUi(ILogger<CharaDataHubUi> logger, SpheneMediator mediator, PerformanceCollectorService performanceCollectorService,
                          CharaDataManager charaDataManager, CharaDataNearbyManager charaDataNearbyManager, CharaDataConfigService configService,
@@ -99,6 +129,7 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
         Mediator.Subscribe<OpenCharaDataHubWithFilterMessage>(this, (msg) =>
         {
             IsOpen = true;
+            _standalonePage = CharaDataPage.ApplyData;
             _openDataApplicationShared = true;
             _sharedWithYouOwnerFilter = msg.UserData.AliasOrUID;
             UpdateFilteredItems();
@@ -153,23 +184,140 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
         base.Dispose(disposing);
     }
 
-    protected override void DrawInternal()
-    {
-        DrawPrelude();
+    /// <summary>Raised when the active character data page changes through user navigation — args are (previous, next, embedded). The hub folds embedded-surface changes into its own breadcrumb/history.</summary>
+    internal event Action<CharaDataPage, CharaDataPage, bool>? SubPageChanged;
 
-        if (SpheneUI.Layout.BeginScrollArea("charadata-content", ImGui.GetContentRegionAvail(),
-                contentPadding: Vector2.Zero))
-        {
-            DrawHubContent();
-        }
-        SpheneUI.Layout.EndScrollArea();
+    /// <summary>The page the Hub-embedded character data shows — read by the hub for its crumb. The standalone window has its own page state.</summary>
+    internal CharaDataPage ActiveSubPageValue => _embeddedPage;
+
+    /// <summary>Label of the embedded character data page for the hub breadcrumb.</summary>
+    internal string ActiveCrumbLabel => PageLabel(_embeddedPage);
+
+    /// <summary>Applies a page to the Hub-embedded character data without recording it — used for hub-driven restores.</summary>
+    internal void ApplySubPageQuiet(CharaDataPage page)
+    {
+        _embeddedPage = page;
     }
 
-    /// <summary>Renders the data hub inside another window (Sphene Hub); the host provides the scroll area.</summary>
-    internal void DrawEmbedded()
+    private void SetPage(CharaDataPage page)
     {
-        DrawPrelude();
-        DrawHubContent();
+        if (page == _activePage)
+        {
+            return;
+        }
+        var previous = _activePage;
+        _activePage = page;
+        SubPageChanged?.Invoke(previous, page, _embeddedScope);
+    }
+
+    private static string PageLabel(CharaDataPage page) => page switch
+    {
+        CharaDataPage.GposeTogether => "GPose Together",
+        CharaDataPage.GposeActors => "GPose Actors",
+        CharaDataPage.PosesNearby => "Poses Nearby",
+        CharaDataPage.ApplyData => "Apply Data",
+        CharaDataPage.McdOnline => "MCD Online",
+        CharaDataPage.McdfExport => "MCDF Export",
+        CharaDataPage.Settings => "Settings",
+        _ => "GPose Together"
+    };
+
+    private void DrawNavItems(
+        List<(string Label, float CenterY, Vector4 Accent)>? pinnedCategories, float pinnedCenterY)
+    {
+        var accentPosing = SpheneUI.Palette.EtherealPurple;
+        var accentCreation = SpheneUI.Palette.SpheneGold;
+        var accentGeneral = SpheneTheme.Current.AccentBlue;
+
+        void SidebarButton(string label, FontAwesomeIcon icon, CharaDataPage page, Vector4 accent)
+        {
+            if (SpheneUI.Layout.NavRailSegmentItem(label, icon, _activePage == page, accent))
+            {
+                SetPage(page);
+            }
+        }
+
+        SpheneUI.Layout.NavRailCategoryLabel("Posing", accentPosing, pinnedCategories, pinnedCenterY);
+        SidebarButton("GPose Together", FontAwesomeIcon.Camera, CharaDataPage.GposeTogether, accentPosing);
+        using (ImRaii.Disabled(!_uiSharedService.IsInGpose))
+        {
+            SidebarButton("GPose Actors", FontAwesomeIcon.Users, CharaDataPage.GposeActors, accentPosing);
+        }
+        if (!_uiSharedService.IsInGpose)
+        {
+            SpheneUI.AttachTooltip("Only available in GPose");
+        }
+        SidebarButton("Poses Nearby", FontAwesomeIcon.StreetView, CharaDataPage.PosesNearby, accentPosing);
+        SidebarButton("Apply Data", FontAwesomeIcon.FileImport, CharaDataPage.ApplyData, accentPosing);
+        SpheneUI.Layout.NavRailDivider(accentPosing, accentCreation);
+
+        SpheneUI.Layout.NavRailCategoryLabel("Creation", accentCreation, pinnedCategories, pinnedCenterY);
+        using (ImRaii.Disabled(_isHandlingSelf))
+        {
+            SidebarButton("MCD Online", FontAwesomeIcon.Globe, CharaDataPage.McdOnline, accentCreation);
+            SidebarButton("MCDF Export", FontAwesomeIcon.FileExport, CharaDataPage.McdfExport, accentCreation);
+        }
+        if (_isHandlingSelf)
+        {
+            SpheneUI.AttachTooltip("Cannot use creation tools while having Character Data applied to self.");
+        }
+        SpheneUI.Layout.NavRailDivider(accentCreation, accentGeneral);
+
+        SpheneUI.Layout.NavRailCategoryLabel("General", accentGeneral, pinnedCategories, pinnedCenterY);
+        SidebarButton("Settings", FontAwesomeIcon.Cog, CharaDataPage.Settings, accentGeneral);
+    }
+
+    /// <summary>
+    /// The character data nav rendered inside the Sphene Hub rail — same
+    /// items as the standalone rail plus a pop-out shortcut so the windowed
+    /// section stays one click away.
+    /// </summary>
+    internal void DrawEmbeddedRail(
+        List<(string Label, float CenterY, Vector4 Accent)>? pinnedCategories = null,
+        float pinnedCenterY = 0f)
+    {
+        var previousScope = _embeddedScope;
+        _embeddedScope = true;
+        try
+        {
+            DrawNavItems(pinnedCategories, pinnedCenterY);
+            var accent = SpheneUI.Palette.EtherealPurple;
+            SpheneUI.Layout.NavRailDivider(accent, accent);
+            if (SpheneUI.Layout.NavRailSegmentItem("Pop Out", FontAwesomeIcon.ExternalLinkAlt, false, accent))
+            {
+                Mediator.Publish(new UiToggleMessage(typeof(CharaDataHubUi)));
+            }
+            SpheneUI.AttachTooltip("Open Character Data in a separate window");
+        }
+        finally
+        {
+            _embeddedScope = previousScope;
+        }
+    }
+
+    /// <summary>
+    /// The active character data page rendered inside an already-scrollable
+    /// container (the Sphene Hub nav content child) — no own scroll area.
+    /// </summary>
+    internal void DrawEmbeddedContent()
+    {
+        var previousScope = _embeddedScope;
+        _embeddedScope = true;
+        try
+        {
+            UpdateSharedState();
+            DrawBrioWarning();
+            using (ImRaii.Disabled(_disableUI))
+            {
+                DrawDataApplicationStatus();
+                DrawPageContent();
+            }
+            SetWindowSizeConstraints(IsCompactPage(_activePage));
+        }
+        finally
+        {
+            _embeddedScope = previousScope;
+        }
     }
 
     /// <summary>Cleans up embedded state when the host window/page hides the data hub content.</summary>
@@ -180,7 +328,12 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
         _openComboHybridEntries = null;
     }
 
-    private void DrawPrelude()
+    private static bool IsCompactPage(CharaDataPage page)
+        => page is CharaDataPage.GposeTogether or CharaDataPage.GposeActors
+            or CharaDataPage.PosesNearby or CharaDataPage.ApplyData;
+
+    /// <summary>Per-frame state refresh shared by both surfaces — no drawing, runs before rail and content.</summary>
+    private void UpdateSharedState()
     {
         if (!_comboHybridUsedLastFrame)
         {
@@ -197,7 +350,11 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
         }
 
         (_hasValidGposeTarget, _gposeTarget) = _charaDataManager.CanApplyInGpose().GetAwaiter().GetResult();
+        _isHandlingSelf = _charaDataManager.HandledCharaData.Any(c => c.IsSelf);
+    }
 
+    private void DrawBrioWarning()
+    {
         if (!_charaDataManager.BrioAvailable)
         {
             SpheneUI.Text.GroupedCentered("To utilize any features related to posing or spawning characters you require to have Brio installed.", ImGuiColors.DalamudRed);
@@ -205,10 +362,8 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
         }
     }
 
-    private void DrawHubContent()
+    private void DrawDataApplicationStatus()
     {
-        using var disabled = ImRaii.Disabled(_disableUI);
-
         DisableDisabled(() =>
         {
             if (_charaDataManager.DataApplicationTask != null)
@@ -232,133 +387,85 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
                 SpheneUI.Layout.Separator();
             }
         });
+    }
 
-        using var tabs = ImRaii.TabBar("TabsTopLevel");
-        bool smallUi = false;
-
-        _isHandlingSelf = _charaDataManager.HandledCharaData.Any(c => c.IsSelf);
-        if (_isHandlingSelf) _openMcdOnlineOnNextRun = false;
-
-        using (var gposeTogetherTabItem = ImRaii.TabItem("GPose Together"))
+    private void DrawPageContent()
+    {
+        _charaDataNearbyManager.ComputeNearbyData = _activePage == CharaDataPage.PosesNearby;
+        switch (_activePage)
         {
-            if (gposeTogetherTabItem)
-            {
-                smallUi = true;
-
+            case CharaDataPage.GposeTogether:
                 DrawGposeTogether();
-            }
-        }
-
-        using (var applicationTabItem = ImRaii.TabItem("Data Application", _openDataApplicationShared ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None))
-        {
-            if (applicationTabItem)
-            {
-                smallUi = true;
-                using var appTabs = ImRaii.TabBar("TabsApplicationLevel");
-
-                using (ImRaii.Disabled(!_uiSharedService.IsInGpose))
+                break;
+            case CharaDataPage.GposeActors:
+                using (ImRaii.PushId("gposeControls"))
                 {
-                    using (var gposeTabItem = ImRaii.TabItem("GPose Actors"))
-                    {
-                        if (gposeTabItem)
-                        {
-                            using var id = ImRaii.PushId("gposeControls");
-                            DrawGposeControls();
-                        }
-                    }
+                    DrawGposeControls();
                 }
-                if (!_uiSharedService.IsInGpose)
-                    SpheneUI.AttachTooltip("Only available in GPose");
-
-                using (var nearbyPosesTabItem = ImRaii.TabItem("Poses Nearby"))
+                break;
+            case CharaDataPage.PosesNearby:
+                using (ImRaii.PushId("nearbyPoseControls"))
                 {
-                    if (nearbyPosesTabItem)
-                    {
-                        using var id = ImRaii.PushId("nearbyPoseControls");
-                        _charaDataNearbyManager.ComputeNearbyData = true;
-
-                        DrawNearbyPoses();
-                    }
-                    else
-                    {
-                        _charaDataNearbyManager.ComputeNearbyData = false;
-                    }
+                    DrawNearbyPoses();
                 }
-
-                using (var gposeTabItem = ImRaii.TabItem("Apply Data", _openDataApplicationShared ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None))
+                break;
+            case CharaDataPage.ApplyData:
+                using (ImRaii.PushId("applyData"))
                 {
-                    if (gposeTabItem)
-                    {
-                        smallUi |= true;
-                        using var id = ImRaii.PushId("applyData");
-                        DrawDataApplication();
-                    }
+                    DrawDataApplication();
                 }
-            }
-            else
-            {
-                _charaDataNearbyManager.ComputeNearbyData = false;
-            }
-        }
-
-        using (ImRaii.Disabled(_isHandlingSelf))
-        {
-            ImGuiTabItemFlags flagsTopLevel = ImGuiTabItemFlags.None;
-            if (_openMcdOnlineOnNextRun)
-            {
-                flagsTopLevel = ImGuiTabItemFlags.SetSelected;
-                _openMcdOnlineOnNextRun = false;
-            }
-
-            using (var creationTabItem = ImRaii.TabItem("Data Creation", flagsTopLevel))
-            {
-                if (creationTabItem)
+                break;
+            case CharaDataPage.McdOnline:
+                using (ImRaii.PushId("mcdOnline"))
                 {
-                    using var creationTabs = ImRaii.TabBar("TabsCreationLevel");
-
-                    ImGuiTabItemFlags flags = ImGuiTabItemFlags.None;
-                    if (_openMcdOnlineOnNextRun)
-                    {
-                        flags = ImGuiTabItemFlags.SetSelected;
-                        _openMcdOnlineOnNextRun = false;
-                    }
-                    using (var mcdOnlineTabItem = ImRaii.TabItem("MCD Online", flags))
-                    {
-                        if (mcdOnlineTabItem)
-                        {
-                            using var id = ImRaii.PushId("mcdOnline");
-                            DrawMcdOnline();
-                        }
-                    }
-
-                    using (var mcdfTabItem = ImRaii.TabItem("MCDF Export"))
-                    {
-                        if (mcdfTabItem)
-                        {
-                            using var id = ImRaii.PushId("mcdfExport");
-                            DrawMcdfExport();
-                        }
-                    }
+                    DrawMcdOnline();
                 }
-            }
+                break;
+            case CharaDataPage.McdfExport:
+                using (ImRaii.PushId("mcdfExport"))
+                {
+                    DrawMcdfExport();
+                }
+                break;
+            case CharaDataPage.Settings:
+                using (ImRaii.PushId("settings"))
+                {
+                    DrawSettings();
+                }
+                break;
         }
-        if (_isHandlingSelf)
-        {
-            SpheneUI.AttachTooltip("Cannot use creation tools while having Character Data applied to self.");
-        }
+    }
 
-        using (var settingsTabItem = ImRaii.TabItem("Settings"))
+    protected override void DrawInternal()
+    {
+        UpdateSharedState();
+
+        var railWidth = SpheneUI.Layout.NavRailSegmentedWidth([
+            (FontAwesomeIcon.Camera, "GPose Together"),
+            (FontAwesomeIcon.Users, "GPose Actors"),
+            (FontAwesomeIcon.StreetView, "Poses Nearby"),
+            (FontAwesomeIcon.FileImport, "Apply Data"),
+            (FontAwesomeIcon.Globe, "MCD Online"),
+            (FontAwesomeIcon.FileExport, "MCDF Export"),
+            (FontAwesomeIcon.Cog, "Settings")
+        ]);
+        SpheneUI.Layout.BeginNavRail("charadata", railWidth);
+        // Same top offset as the hub rail so the first button sits at the
+        // same height in both surfaces.
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
+        DrawNavItems(null, 0f);
+        SpheneUI.Layout.EndNavRail();
+        if (SpheneUI.Layout.BeginNavContent("charadata"))
         {
-            if (settingsTabItem)
+            DrawBrioWarning();
+            using (ImRaii.Disabled(_disableUI))
             {
-                using var id = ImRaii.PushId("settings");
-                DrawSettings();
+                DrawDataApplicationStatus();
+                DrawPageContent();
             }
         }
-
-
-
-        SetWindowSizeConstraints(smallUi);
+        SpheneUI.Layout.EndNavContent();
+        SetWindowSizeConstraints(IsCompactPage(_activePage));
     }
 
 
@@ -996,7 +1103,7 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
                     if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Edit, "Open in MCD Online Editor"))
                     {
                         SelectedDtoId = data.Id;
-                        _openMcdOnlineOnNextRun = true;
+                        SetPage(CharaDataPage.McdOnline);
                     }
                 }
                 if (_isHandlingSelf)

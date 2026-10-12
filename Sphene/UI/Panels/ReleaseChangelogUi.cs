@@ -27,7 +27,7 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
     private List<ReleaseChangelogViewEntry> _entries = new();
     private bool _showAll;
     private bool _showTestBuildReleases;
-    private string _defaultExpandedVersion = string.Empty;
+    private string _pendingExpandVersion = string.Empty;
     private bool _embeddedInitialized;
     private bool _entriesRequested;
 
@@ -64,7 +64,7 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
             _loading = true;
             _entries = new List<ReleaseChangelogViewEntry>();
             _showAll = false;
-            _defaultExpandedVersion = string.Empty;
+            _pendingExpandVersion = string.Empty;
             IsOpen = true;
 
 #if IS_TEST_BUILD
@@ -82,7 +82,7 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
         _entriesRequested = true;
         _loading = true;
         _entries = new List<ReleaseChangelogViewEntry>();
-        _defaultExpandedVersion = string.Empty;
+        _pendingExpandVersion = string.Empty;
 
         _ = Task.Run(async () =>
         {
@@ -98,7 +98,7 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
                 _entries = filtered
                     .OrderByDescending(e => ParseVersionSafe(e.Version))
                     .ToList();
-                _defaultExpandedVersion = _entries.FirstOrDefault()?.Version ?? string.Empty;
+                _pendingExpandVersion = _entries.FirstOrDefault()?.Version ?? string.Empty;
             }
             catch (Exception ex)
             {
@@ -132,8 +132,11 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
 
         SpheneUI.Text.PageHeader("Release Notes");
 
-        DrawVersionInfoCard();
-        DrawControls();
+        SpheneUI.Layout.SectionCard(() =>
+        {
+            DrawReleaseSummary();
+            DrawControls();
+        }, animatedBackdrop: true);
 
         var footerHeight = ImGui.GetFrameHeightWithSpacing() + (ImGui.GetStyle().ItemSpacing.Y * 2f) + (ImGuiHelpers.GlobalScale * 6f);
         var changelogPaneHeight = SpheneUI.Layout.FillToViewBottomHeight(footerHeight);
@@ -146,7 +149,7 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
                 var childWindowPos = ImGui.GetWindowPos();
                 var childWindowSize = ImGui.GetWindowSize();
                 DrawSpheneWatermark(ImGui.GetWindowDrawList(), childWindowPos, childWindowPos + childWindowSize, 0.09f, -0.06f);
-                DrawEntryList();
+                DrawReleaseList();
             }
             SpheneUI.Layout.EndScrollArea();
         }
@@ -168,12 +171,17 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
             StartLoadingEntries();
         }
 
-        SpheneUI.Text.PageIntro("All Sphene releases and their changelogs.");
-        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
-
-        DrawVersionInfoCard();
-        DrawControls();
-        DrawEntryList();
+        SpheneUI.Layout.SectionCard(() =>
+        {
+            DrawReleaseSummary();
+            DrawControls();
+            SpheneUI.Layout.DistanceSeparator();
+            if (SpheneUI.Layout.BeginFillToBottomScrollArea("changelog_embedded_list"))
+            {
+                DrawReleaseList();
+            }
+            SpheneUI.Layout.EndScrollArea();
+        }, title: "Regulator Update History", animatedBackdrop: true);
     }
 
     private void EnsureEmbeddedDefaults()
@@ -206,192 +214,458 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
         }
     }
 
-    private void DrawVersionInfoCard()
+    private static readonly string[] RangeTabs = ["Latest 5", "All releases"];
+
+    private void DrawReleaseSummary()
     {
-        SpheneUI.Layout.SectionCard(() =>
+        var newCount = _loading ? 0 : CountNewEntries();
+        var sb = new StringBuilder("Installed ");
+        sb.Append(string.IsNullOrEmpty(_version) ? "unknown" : $"v{_version}");
+        if (!_loading && _entries.Count > 0)
         {
-            using (var table = ImRaii.Table("ReleaseInfo", 2, ImGuiTableFlags.None))
+            sb.Append("   \u00b7   ").Append(_entries.Count).Append(" releases");
+            if (newCount > 0)
             {
-                if (table)
-                {
-                    ImGui.TableSetupColumn("Label", ImGuiTableColumnFlags.WidthFixed, 120);
-                    ImGui.TableSetupColumn("Value", ImGuiTableColumnFlags.WidthStretch);
-
-                    ImGui.TableNextRow();
-                    ImGui.TableNextColumn();
-                    SpheneUI.Text.Muted("Last seen:");
-                    ImGui.TableNextColumn();
-                    var lastSeen = _lastSeenVersionBeforeUpdate;
-                    SpheneUI.Text.Colored(string.IsNullOrWhiteSpace(lastSeen) ? "Unknown" : lastSeen, ImGuiColors.DalamudGrey);
-
-                    ImGui.TableNextRow();
-                    ImGui.TableNextColumn();
-                    SpheneUI.Text.Muted("Version:");
-                    ImGui.TableNextColumn();
-                    SpheneUI.Text.Colored(string.IsNullOrEmpty(_version) ? "Unknown" : _version, ImGuiColors.HealerGreen);
-                }
+                sb.Append("   \u00b7   ").Append(newCount).Append(" new");
             }
-        });
+        }
+        SpheneUI.Text.Muted(sb.ToString());
+        if (newCount > 0 && !string.IsNullOrWhiteSpace(_lastSeenVersionBeforeUpdate))
+        {
+            SpheneUI.AttachTooltip($"{newCount} release(s) since last seen version {_lastSeenVersionBeforeUpdate}.");
+        }
     }
 
     private void DrawControls()
     {
-        if (SpheneUI.Icons.TextButton(_showAll ? FontAwesomeIcon.List : FontAwesomeIcon.ListOl, _showAll ? "Show last 5" : "Show all"))
-        {
-            _showAll = !_showAll;
-        }
-        ImGui.SameLine();
-        SpheneUI.AttachTooltip("Toggle between last five releases and all releases.");
+        var selected = SpheneUI.Layout.TabStrip("##rel_range", RangeTabs, _showAll ? 1 : 0);
+        _showAll = selected == 1;
+        SpheneUI.AttachTooltip("Limit the list to the five newest releases or show the full history.");
 
 #if !IS_TEST_BUILD
         ImGui.SameLine();
-        if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Eye, _showTestBuildReleases ? "Hide testbuild releases" : "Show testbuild releases"))
+        var showTest = _showTestBuildReleases;
+        if (SpheneUI.Controls.Toggle("Testbuilds##rel_testbuild", ref showTest))
         {
-            _showTestBuildReleases = !_showTestBuildReleases;
-            _configService.Current.ShowTestBuildChangelogs = _showTestBuildReleases;
+            _showTestBuildReleases = showTest;
+            _configService.Current.ShowTestBuildChangelogs = showTest;
             _configService.Save();
             StartLoadingEntries();
         }
-        ImGui.SameLine();
         SpheneUI.AttachTooltip("Toggle whether prerelease/testbuild releases are visible.");
 #endif
         SpheneUI.Layout.VerticalSpace();
     }
 
-    private void DrawEntryList()
+    private void DrawReleaseList()
     {
-        using (ImRaii.PushStyle(ImGuiStyleVar.FrameRounding, 6f))
-        using (ImRaii.PushStyle(ImGuiStyleVar.FramePadding, new Vector2(4, 3)))
-        using (ImRaii.PushStyle(ImGuiStyleVar.ItemSpacing, new Vector2(8, 4)))
+        ApplyPendingExpansion();
+        if (_loading)
         {
-            if (_loading)
+            SpheneUI.Text.Muted("Loading release notes...");
+            return;
+        }
+        if (_entries == null || _entries.Count == 0)
+        {
+            SpheneUI.Text.Muted("No release notes available.");
+            return;
+        }
+
+        var list = _showAll ? _entries : _entries.Take(5);
+        var first = true;
+        foreach (var e in list)
+        {
+            if (!first)
             {
-                SpheneUI.Text.Wrapped("Loading release notes...");
+                SpheneUI.Layout.DistanceSeparator();
             }
-            else if (_entries == null || _entries.Count == 0)
+            first = false;
+            DrawReleaseEntry(e, IsNewEntry(e));
+        }
+    }
+
+    private void ApplyPendingExpansion()
+    {
+        if (string.IsNullOrEmpty(_pendingExpandVersion))
+        {
+            return;
+        }
+        SpheneUI.Layout.SetExpanderOpen($"changelog_rel_{_pendingExpandVersion}", true);
+        _pendingExpandVersion = string.Empty;
+    }
+
+    private bool IsNewEntry(ReleaseChangelogViewEntry e)
+    {
+        var lastSeen = ParseVersionSafe(_lastSeenVersionBeforeUpdate);
+        if (lastSeen == new Version(0, 0, 0, 0))
+        {
+            return false;
+        }
+        return ParseVersionSafe(e.Version) > lastSeen;
+    }
+
+    private int CountNewEntries()
+    {
+        var count = 0;
+        foreach (var e in _entries)
+        {
+            if (IsNewEntry(e))
             {
-                SpheneUI.Text.Wrapped("No release notes available.");
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private static void DrawReleaseEntry(ReleaseChangelogViewEntry e, bool isNew)
+    {
+        var id = $"changelog_rel_{e.Version}";
+        var scale = ImGuiHelpers.GlobalScale;
+        var open = SpheneUI.Layout.IsExpanderOpen(id);
+        var drawList = ImGui.GetWindowDrawList();
+        var accent = SpheneUI.Theme.Current.AccentCyan;
+        var availW = MathF.Max(60f * scale, ImGui.GetContentRegionAvail().X);
+        var padX = 8f * scale;
+        var rowH = ImGui.GetFrameHeight() + 8f * scale;
+        var rowMin = ImGui.GetCursorScreenPos();
+        var rowMax = rowMin + new Vector2(availW, rowH);
+
+        var clicked = ImGui.InvisibleButton($"##row_{id}", new Vector2(availW, rowH));
+        var hovered = ImGui.IsItemHovered();
+        if (hovered)
+        {
+            var hoverAccent = e.IsPrerelease ? SpheneUI.Colors.Warning : accent;
+            drawList.AddRectFilled(rowMin, rowMax,
+                SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(hoverAccent, 0.07f)), 6f * scale);
+        }
+        if (clicked)
+        {
+            SpheneUI.Layout.ToggleExpander(id);
+        }
+        if (hovered)
+        {
+            SpheneUI.AttachTooltip(open ? "Collapse release notes." : "Expand release notes.");
+        }
+
+        var centerY = rowMin.Y + (rowH - ImGui.GetTextLineHeight()) * 0.5f;
+        var chipH = SpheneUI.Layout.BadgeHeight;
+        var rightX = rowMax.X - padX;
+
+        var chevron = open ? FontAwesomeIcon.ChevronDown : FontAwesomeIcon.ChevronRight;
+        var iconSize = SpheneUI.Icons.Size(chevron);
+        rightX -= iconSize.X;
+        ImGui.SetCursorScreenPos(new Vector2(rightX, rowMin.Y + (rowH - iconSize.Y) * 0.5f));
+        SpheneUI.Icons.Icon(chevron, SpheneUI.Colors.TextMuted);
+        rightX -= 8f * scale;
+
+        if (!string.IsNullOrWhiteSpace(e.Date))
+        {
+            rightX -= ImGui.CalcTextSize(e.Date).X;
+            ImGui.SetCursorScreenPos(new Vector2(rightX, centerY));
+            SpheneUI.Text.Muted(e.Date);
+            rightX -= 8f * scale;
+        }
+        if (e.IsPrerelease)
+        {
+            rightX -= SpheneUI.Layout.BadgeWidth("TEST");
+            ImGui.SetCursorScreenPos(new Vector2(rightX, rowMin.Y + (rowH - chipH) * 0.5f));
+            SpheneUI.Layout.Badge("TEST", SpheneUI.Colors.Warning);
+            rightX -= 6f * scale;
+        }
+        if (isNew)
+        {
+            rightX -= SpheneUI.Layout.BadgeWidth("NEW");
+            ImGui.SetCursorScreenPos(new Vector2(rightX, rowMin.Y + (rowH - chipH) * 0.5f));
+            SpheneUI.Layout.Badge("NEW", accent);
+            rightX -= 6f * scale;
+        }
+
+        ImGui.SetCursorScreenPos(new Vector2(rowMin.X + padX, centerY));
+        var versionColor = e.IsPrerelease ? SpheneUI.Colors.Warning
+            : (isNew ? accent : SpheneUI.Colors.TextPrimary);
+        SpheneUI.Text.Colored($"v{e.Version}", versionColor);
+        ImGui.SameLine();
+        var headerTitle = BuildHeaderTitle(e);
+        if (!string.IsNullOrWhiteSpace(headerTitle))
+        {
+            var titleMaxW = rightX - 8f * scale - ImGui.GetCursorScreenPos().X;
+            SpheneUI.Text.Colored(
+                SpheneUI.Text.Ellipsize(headerTitle, MathF.Max(24f * scale, titleMaxW)),
+                SpheneUI.Colors.TextMuted);
+        }
+
+        ImGui.SetCursorScreenPos(new Vector2(rowMin.X, rowMax.Y));
+
+        if (SpheneUI.Layout.BeginExpander(id))
+        {
+            DrawReleaseBody(e);
+            SpheneUI.Layout.EndExpander();
+        }
+    }
+
+    private static void DrawReleaseBody(ReleaseChangelogViewEntry e)
+    {
+        var drewContent = false;
+        if (!string.IsNullOrWhiteSpace(e.Version))
+        {
+            SpheneUI.Text.ColoredWrapped($"~/sphene/releases/v{e.Version}/",
+                SpheneUI.Colors.TextMuted);
+            drewContent = true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(e.Description))
+        {
+            var normalizedDescription = NormalizeDescription(e.Description);
+            if (!TryDrawImportantCallout(normalizedDescription))
+            {
+                if (drewContent)
+                {
+                    SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
+                }
+                SpheneUI.Text.MutedWrapped(normalizedDescription);
+            }
+            drewContent = true;
+        }
+
+        var firstGroup = true;
+        foreach (var change in e.Changes)
+        {
+            if (change == null)
+            {
+                continue;
+            }
+
+            var main = TrimBulletPrefix((change.Text ?? string.Empty).Trim());
+            var hasSubs = change.Sub is { Count: > 0 };
+            if (!hasSubs && string.IsNullOrWhiteSpace(main))
+            {
+                continue;
+            }
+
+            if (!firstGroup)
+            {
+                SpheneUI.Layout.Space(SpheneUI.Spacing.X10);
+            }
+            else if (drewContent)
+            {
+                SpheneUI.Layout.Space(SpheneUI.Spacing.X8);
+            }
+            firstGroup = false;
+            drewContent = true;
+
+            var isCategory = hasSubs && !string.IsNullOrWhiteSpace(main);
+            if (isCategory)
+            {
+                var color = ChangeCategoryColor(main);
+                var railX = DrawChangeCategory(main, color);
+                DrawChangeSections(change.Sub!, color, railX);
             }
             else
             {
-                var list = _showAll ? _entries : _entries.Take(5);
-                foreach (var e in list)
+                if (hasSubs)
                 {
-                    var flags = ImGuiTreeNodeFlags.None;
-                    if (!string.IsNullOrEmpty(_defaultExpandedVersion) && string.Equals(e.Version, _defaultExpandedVersion, StringComparison.Ordinal))
-                    {
-                        ImGui.SetNextItemOpen(true, ImGuiCond.Always);
-                        flags |= ImGuiTreeNodeFlags.DefaultOpen;
-                    }
-
-                    var headerTitle = BuildHeaderTitle(e);
-                    var headerLabel = string.IsNullOrWhiteSpace(headerTitle)
-                        ? $"{e.Version}###ch_{e.Version}"
-                        : $"{e.Version} - {headerTitle}###ch_{e.Version}";
-                    if (e.IsPrerelease)
-                    {
-                        var baseColor = ImGuiColors.DalamudYellow;
-                        ImGui.PushStyleColor(ImGuiCol.Text, baseColor);
-                        ImGui.PushStyleColor(ImGuiCol.Header, new Vector4(baseColor.X, baseColor.Y, baseColor.Z, 0.18f));
-                        ImGui.PushStyleColor(ImGuiCol.HeaderHovered, new Vector4(baseColor.X, baseColor.Y, baseColor.Z, 0.25f));
-                        ImGui.PushStyleColor(ImGuiCol.HeaderActive, new Vector4(baseColor.X, baseColor.Y, baseColor.Z, 0.30f));
-                    }
-                    var opened = ImGui.CollapsingHeader(headerLabel, flags);
-                    if (e.IsPrerelease)
-                    {
-                        ImGui.PopStyleColor(4);
-                        DrawTestBuildIndicator($"##testbuild_icon_{e.Version}", ImGuiColors.DalamudYellow, "Testbuild release notes.");
-                    }
-                    if (opened)
-                    {
-                        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X2);
-
-                        if (!string.IsNullOrWhiteSpace(e.Description))
-                        {
-                            using (ImRaii.PushIndent(ImGuiHelpers.GlobalScale * 10f))
-                            {
-                                var normalizedDescription = NormalizeDescription(e.Description);
-                                if (!DrawImportantDescriptionIfTagged(normalizedDescription))
-                                {
-                                    SpheneUI.Text.Wrapped(normalizedDescription);
-                                }
-                            }
-                        }
-
-                        SpheneUI.Layout.Space(SpheneUI.Spacing.X2);
-
-                        using (ImRaii.PushIndent(10f))
-                        {
-                            float bulletGap = ImGui.GetStyle().ItemInnerSpacing.X + ImGuiHelpers.GlobalScale * 8f;
-                            foreach (var change in e.Changes)
-                            {
-                                if (change == null)
-                                    continue;
-
-                                var trimmedMain = TrimBulletPrefix((change.Text ?? string.Empty).Trim());
-                                DrawDescriptionGradientBackground(trimmedMain);
-
-                                if (change.Sub is { Count: > 0 })
-                                {
-                                    var baseColor = ImGuiColors.ParsedBlue;
-                                    var textColor = new Vector4(baseColor.X, baseColor.Y, baseColor.Z, 0.90f);
-                                    ImGui.PushStyleColor(ImGuiCol.Text, textColor);
-                                    SpheneUI.Text.Wrapped(trimmedMain);
-                                    ImGui.PopStyleColor();
-                                }
-                                else
-                                {
-                                    SpheneUI.Text.Wrapped(trimmedMain);
-                                }
-
-                                if (change.Sub is { Count: > 0 })
-                                {
-                                    var groupedSubItems = GroupSubItems(change.Sub);
-                                    ImGui.Indent(ImGuiHelpers.GlobalScale * 18f);
-                                    var isFirstSection = true;
-                                    foreach (var section in groupedSubItems)
-                                    {
-                                        if (!isFirstSection)
-                                            SpheneUI.Layout.Space(SpheneUI.Spacing.X2);
-
-                                        if (!string.IsNullOrWhiteSpace(section.Heading))
-                                        {
-                                            ImGui.PushStyleColor(ImGuiCol.Text, ImGuiColors.DalamudYellow);
-                                            SpheneUI.Text.Wrapped(section.Heading);
-                                            ImGui.PopStyleColor();
-                                            SpheneUI.Layout.Space(SpheneUI.Spacing.Hairline);
-                                        }
-
-                                        foreach (var subItem in section.Items)
-                                        {
-                                            if (string.IsNullOrWhiteSpace(subItem))
-                                                continue;
-
-                                            var trimmedSub = TrimBulletPrefix(subItem.Trim());
-
-                                            ImGui.Bullet();
-                                            ImGui.SameLine(0, bulletGap);
-                                            SpheneUI.Text.Wrapped(trimmedSub);
-                                        }
-
-                                        isFirstSection = false;
-                                    }
-                                    ImGui.Unindent(ImGuiHelpers.GlobalScale * 18f);
-                                    // add gap only after structured entries with sub-items
-                                    SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
-                                }
-                                else
-                                {
-                                    SpheneUI.Layout.Space(SpheneUI.Spacing.X2);
-                                }
-                            }
-                        }
-                    }
-                    SpheneUI.Layout.VerticalSpace();
+                    DrawChangeSections(change.Sub!, SpheneUI.Colors.Accent, null);
                 }
-
+                else
+                {
+                    DrawChangeFileItem(main, 0f, null, SpheneUI.Colors.TextMuted);
+                }
             }
         }
+
+        if (!drewContent)
+        {
+            SpheneUI.Text.Muted("No detailed changes listed.");
+        }
+    }
+
+    private static float DrawChangeCategory(string label, Vector4 color)
+    {
+        var scale = ImGuiHelpers.GlobalScale;
+        var iconSize = SpheneUI.Icons.Size(FontAwesomeIcon.FolderOpen);
+        var labelHeight = MathF.Max(ImGui.GetTextLineHeight(), iconSize.Y);
+        var markerX = ImGui.GetCursorScreenPos().X;
+        var markerY = ImGui.GetCursorScreenPos().Y;
+        var iconCenter = new Vector2(markerX + iconSize.X * 0.5f,
+            markerY + labelHeight * 0.5f);
+        ImGui.SetCursorScreenPos(new Vector2(
+            iconCenter.X - iconSize.X * 0.5f,
+            iconCenter.Y - iconSize.Y * 0.5f));
+        SpheneUI.Icons.Icon(FontAwesomeIcon.FolderOpen, color);
+        ImGui.SetCursorScreenPos(new Vector2(markerX + iconSize.X + 8f * scale, markerY));
+        SpheneUI.Text.Colored($"{label.TrimEnd('/')}/", color);
+        return iconCenter.X;
+    }
+
+    private static void DrawChangeSections(List<string> sub, Vector4 color, float? railX)
+    {
+        var scale = ImGuiHelpers.GlobalScale;
+        var sections = GroupSubItems(sub);
+        if (sections.Count == 0)
+        {
+            return;
+        }
+
+        var drawList = ImGui.GetWindowDrawList();
+        var railCol = SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(color, 0.30f));
+        var railW = MathF.Max(1f, 1.5f * scale);
+        var indent1 = 22f * scale;
+        var indent2 = 20f * scale;
+        var halfLine = ImGui.GetTextLineHeight() * 0.5f;
+        var folderIconSize = SpheneUI.Icons.Size(FontAwesomeIcon.FolderOpen);
+        var folderColor = SpheneUI.Palette.SpheneGold;
+
+        var railTop = ImGui.GetCursorScreenPos().Y + 3f * scale;
+        SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
+
+        var railBottom = -1f;
+        for (var i = 0; i < sections.Count; i++)
+        {
+            var section = sections[i];
+            if (i > 0)
+            {
+                SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
+            }
+
+            var hasHeading = !string.IsNullOrWhiteSpace(section.Heading);
+            var itemRailX = railX;
+            var itemRailTop = railTop;
+            if (hasHeading)
+            {
+                var rowMin = ImGui.GetCursorScreenPos();
+                var rowMidY = rowMin.Y + halfLine;
+                var iconX = rowMin.X + indent1;
+                var iconCenterX = iconX + folderIconSize.X * 0.5f;
+                if (railX is { } rx)
+                {
+                    drawList.AddLine(new Vector2(rx, rowMidY),
+                        new Vector2(iconX - 2f * scale, rowMidY), railCol, railW);
+                }
+                ImGui.SetCursorScreenPos(new Vector2(iconX,
+                    rowMidY - folderIconSize.Y * 0.5f));
+                SpheneUI.Icons.Icon(FontAwesomeIcon.FolderOpen, folderColor);
+                ImGui.SetCursorScreenPos(new Vector2(
+                    iconX + folderIconSize.X + 6f * scale, rowMin.Y));
+                SpheneUI.Text.Colored($"{section.Heading!.TrimEnd('/')}/",
+                    SpheneUI.Colors.TextSecondary);
+                railBottom = rowMidY;
+                itemRailX = iconCenterX;
+                itemRailTop = ImGui.GetCursorScreenPos().Y + 2f * scale;
+            }
+
+            var itemIndent = hasHeading ? indent1 + indent2 : indent1;
+            var lastItemRowY = -1f;
+            var firstItem = true;
+            foreach (var subItem in section.Items)
+            {
+                if (string.IsNullOrWhiteSpace(subItem))
+                {
+                    continue;
+                }
+                if (!firstItem)
+                {
+                    SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
+                }
+                firstItem = false;
+                var trimmed = TrimBulletPrefix(subItem.Trim());
+                lastItemRowY = DrawChangeFileItem(trimmed, itemIndent, itemRailX, color);
+            }
+
+            if (hasHeading && itemRailX is { } irx2 && lastItemRowY > itemRailTop)
+            {
+                drawList.AddLine(new Vector2(irx2, itemRailTop),
+                    new Vector2(irx2, lastItemRowY), railCol, railW);
+            }
+            else if (!hasHeading && lastItemRowY > railBottom)
+            {
+                railBottom = lastItemRowY;
+            }
+        }
+
+        if (railX is { } rail0 && railBottom > railTop)
+        {
+            drawList.AddLine(new Vector2(rail0, railTop),
+                new Vector2(rail0, railBottom), railCol, railW);
+        }
+    }
+
+    private static float DrawChangeFileItem(string text, float indent,
+        float? railX, Vector4 accent)
+    {
+        var scale = ImGuiHelpers.GlobalScale;
+        var drawList = ImGui.GetWindowDrawList();
+        var padX = 8f * scale;
+        var padY = 5f * scale;
+        var railW = MathF.Max(1f, 1.5f * scale);
+        var rowMin = ImGui.GetCursorScreenPos();
+        var itemX = rowMin.X + indent;
+        var cardW = MathF.Max(60f * scale, ImGui.GetContentRegionAvail().X - indent);
+        var cardMin = new Vector2(itemX, rowMin.Y);
+        var textW = MathF.Max(24f * scale, cardW - padX * 2f);
+        var textH = ImGui.CalcTextSize(text, false, textW).Y;
+        var cardMax = new Vector2(cardMin.X + cardW, cardMin.Y + textH + padY * 2f);
+
+        var hovered = ImGui.IsMouseHoveringRect(cardMin, cardMax);
+        var rounding = 5f * scale;
+        drawList.AddRectFilled(cardMin, cardMax, SpheneUI.ColorUtils.ToU32(
+            SpheneUI.ColorUtils.WithAlpha(Vector4.One, hovered ? 0.075f : 0.045f)), rounding);
+        drawList.AddRect(cardMin, cardMax, SpheneUI.ColorUtils.ToU32(
+            SpheneUI.ColorUtils.WithAlpha(accent, hovered ? 0.24f : 0.10f)), rounding);
+
+        var midY = cardMin.Y + (cardMax.Y - cardMin.Y) * 0.5f;
+        if (railX is { } rx)
+        {
+            drawList.AddLine(new Vector2(rx, midY), new Vector2(cardMin.X - 1f, midY),
+                SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(accent, 0.30f)), railW);
+        }
+
+        var wrapLocal = cardMax.X - padX - ImGui.GetWindowPos().X;
+        ImGui.SetCursorScreenPos(new Vector2(cardMin.X + padX, cardMin.Y + padY));
+        SpheneUI.Text.Wrapped(text, wrapLocal);
+        ImGui.SetCursorScreenPos(new Vector2(rowMin.X, cardMax.Y));
+        return midY;
+    }
+
+    private static Vector4 ChangeCategoryColor(string label)
+    {
+        var lower = label.Trim().ToLowerInvariant();
+        if (lower.Contains("add") || lower.Contains("new") || lower.Contains("feature"))
+        {
+            return SpheneUI.Colors.Success;
+        }
+        if (lower.Contains("fix") || lower.Contains("improv") || lower.Contains("bug"))
+        {
+            return ImGuiColors.ParsedBlue;
+        }
+        if (lower.Contains("remov") || lower.Contains("delet") || lower.Contains("drop"))
+        {
+            return SpheneUI.Colors.Danger;
+        }
+        if (lower.Contains("secur") || lower.Contains("patch"))
+        {
+            return ImGuiColors.DalamudViolet;
+        }
+        if (lower.Contains("chang") || lower.Contains("updat")
+            || lower.Contains("refactor") || lower.Contains("tweak"))
+        {
+            return SpheneUI.Colors.Warning;
+        }
+        return SpheneUI.Colors.Accent;
+    }
+
+    private static bool TryDrawImportantCallout(string description)
+    {
+        const string token = "!!IMPORTANT!!";
+        if (string.IsNullOrWhiteSpace(description)
+            || !description.Contains(token, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var text = description.Replace(token, string.Empty, StringComparison.Ordinal).Trim();
+        SpheneUI.Layout.Callout(text, FontAwesomeIcon.ExclamationTriangle,
+            SpheneUI.Colors.Warning, "Important");
+        return true;
     }
 
     private void DrawSpheneWatermark(ImDrawListPtr drawList, Vector2 rectMin, Vector2 rectMax, float alpha, float verticalOffsetFactor)
@@ -457,35 +731,6 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
         }
     }
 
-    private static void DrawTestBuildIndicator(string id, Vector4 color, string tooltip)
-    {
-        var iconText = FontAwesomeIcon.Bug.ToIconString();
-        Vector2 iconSize;
-        using (ImRaii.PushFont(UiBuilder.IconFont))
-            iconSize = ImGui.CalcTextSize(iconText);
-
-        var headerMin = ImGui.GetItemRectMin();
-        var headerMax = ImGui.GetItemRectMax();
-        var padding = ImGui.GetStyle().FramePadding;
-        var iconPos = new Vector2(
-            headerMax.X - padding.X - iconSize.X,
-            headerMin.Y + (headerMax.Y - headerMin.Y - iconSize.Y) * 0.5f);
-
-        ImGui.GetWindowDrawList().AddText(
-            UiBuilder.IconFont,
-            UiBuilder.IconFont.FontSize,
-            iconPos,
-            ImGui.GetColorU32(color),
-            iconText);
-
-        var cursor = ImGui.GetCursorScreenPos();
-        ImGui.SetCursorScreenPos(iconPos);
-        ImGui.InvisibleButton(id, iconSize);
-        if (ImGui.IsItemHovered())
-            SpheneUI.AttachTooltip(tooltip);
-        ImGui.SetCursorScreenPos(cursor);
-    }
-
     private static string NormalizeDescription(string description)
     {
         var normalized = description.Replace("\r\n", "\n").Trim();
@@ -509,65 +754,6 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
         }
 
         return sb.ToString();
-    }
-
-    private static bool DrawImportantDescriptionIfTagged(string description)
-    {
-        const string token = "!!IMPORTANT!!";
-        if (string.IsNullOrWhiteSpace(description) || description.IndexOf(token, StringComparison.Ordinal) < 0)
-        {
-            return false;
-        }
-
-        var text = description.Replace(token, string.Empty, StringComparison.Ordinal).TrimStart();
-        var avail = Math.Max(1f, ImGui.GetContentRegionAvail().X);
-        var padX = ImGuiHelpers.GlobalScale * 8f;
-        var padY = ImGuiHelpers.GlobalScale * 6f;
-        var start = ImGui.GetCursorScreenPos();
-        var icon = FontAwesomeIcon.ExclamationTriangle.ToIconString();
-        Vector2 iconSize;
-        using (ImRaii.PushFont(UiBuilder.IconFont))
-            iconSize = ImGui.CalcTextSize(icon);
-        var textSize = ImGui.CalcTextSize(text, false, avail - iconSize.X - padX * 2 - ImGui.GetStyle().ItemInnerSpacing.X);
-        var rectMin = new Vector2(start.X - padX, start.Y - padY);
-        var rectMax = new Vector2(start.X + avail, start.Y + Math.Max(iconSize.Y, textSize.Y) + padY);
-        var baseCol = ImGuiColors.DalamudYellow;
-        var bg = ImGui.GetColorU32(new Vector4(baseCol.X, baseCol.Y, baseCol.Z, 0.12f));
-        var border = ImGui.GetColorU32(new Vector4(baseCol.X, baseCol.Y, baseCol.Z, 0.55f));
-        ImGui.GetWindowDrawList().AddRectFilled(rectMin, rectMax, bg, ImGui.GetStyle().FrameRounding);
-        ImGui.GetWindowDrawList().AddRect(rectMin, rectMax, border, ImGui.GetStyle().FrameRounding);
-
-        using (ImRaii.PushFont(UiBuilder.IconFont))
-        using (ImRaii.PushColor(ImGuiCol.Text, baseCol))
-        {
-            SpheneUI.Text.Plain(icon);
-        }
-        ImGui.SameLine();
-        SpheneUI.Text.Wrapped(text);
-        ImGui.Dummy(new Vector2(0, ImGui.GetTextLineHeightWithSpacing() * 0.5f));
-        return true;
-    }
-
-    private static void DrawDescriptionGradientBackground(string text)
-    {
-        if (string.IsNullOrWhiteSpace(text))
-            return;
-
-        var wrapWidth = Math.Max(1f, ImGui.GetContentRegionAvail().X);
-        var textSize = ImGui.CalcTextSize(text, false, wrapWidth);
-        if (textSize.X <= 0f || textSize.Y <= 0f)
-            return;
-
-        var start = ImGui.GetCursorScreenPos();
-        var padX = ImGuiHelpers.GlobalScale * 8f;
-        var padY = ImGuiHelpers.GlobalScale * 4f;
-        var rectMin = new Vector2(start.X - padX, start.Y - padY);
-        var rectMax = new Vector2(start.X + wrapWidth, start.Y + textSize.Y + padY);
-
-        var baseColor = ImGuiColors.ParsedBlue;
-        var left = ImGui.GetColorU32(new Vector4(baseColor.X, baseColor.Y, baseColor.Z, 0.18f));
-        var right = ImGui.GetColorU32(new Vector4(baseColor.X, baseColor.Y, baseColor.Z, 0.00f));
-        ImGui.GetWindowDrawList().AddRectFilledMultiColor(rectMin, rectMax, left, right, right, left);
     }
 
     private static string TrimBulletPrefix(string value)
@@ -637,15 +823,7 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
     }
 
     private static string BuildHeaderTitle(ReleaseChangelogViewEntry entry)
-    {
-        if (!string.IsNullOrWhiteSpace(entry.Title))
-            return entry.Title.Trim();
-
-        if (!string.IsNullOrWhiteSpace(entry.Date))
-            return $"[{entry.Date.Trim()}]";
-
-        return string.Empty;
-    }
+        => string.IsNullOrWhiteSpace(entry.Title) ? string.Empty : entry.Title.Trim();
 
     private sealed class SubItemSection
     {

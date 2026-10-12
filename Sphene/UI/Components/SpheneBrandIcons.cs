@@ -271,37 +271,33 @@ public static class SpheneBrandIcons
     /// <summary>Computes the width of a brand icon + text button.</summary>
     public static float GetIconTextButtonSize(string text)
     {
-        var iconSize = ImGui.GetTextLineHeight();
-        var gap = 3f * ImGuiHelpers.GlobalScale;
-        return iconSize + gap + ImGui.CalcTextSize(text).X + ImGui.GetStyle().FramePadding.X * 2f;
+        var scale = ImGuiHelpers.GlobalScale;
+        return ImGui.GetFrameHeight() + 10f * scale
+            + ImGui.CalcTextSize(text).X + 12f * scale;
     }
 
-    /// <summary>Draws a brand-colored button with the brand glyph and a text label.</summary>
+    /// <summary>
+    /// Brand-colored segmented button: the brand glyph sits in the icon zone
+    /// (solid brand fill) next to the label — the shared button language
+    /// tinted with the brand color.
+    /// </summary>
     /// <returns>True when the button was clicked.</returns>
     public static bool IconTextButton(Brand brand, string text,
         string id, float? width = null, string? tooltip = null)
     {
         ImGui.PushID(id);
         var iconSize = ImGui.GetTextLineHeight();
-        var gap = 3f * ImGuiHelpers.GlobalScale;
-        var framePad = ImGui.GetStyle().FramePadding;
-        var buttonWidth = width ?? (iconSize + gap + ImGui.CalcTextSize(text).X + framePad.X * 2f);
         var buttonHeight = ImGui.GetFrameHeight();
+        var buttonWidth = width ?? GetIconTextButtonSize(text);
+        var accent = GetBrandColor(brand);
+        var glyphInset = (buttonHeight - iconSize) * 0.5f;
 
-        ImGui.PushStyleColor(ImGuiCol.Button, GetBrandColor(brand));
-        ImGui.PushStyleColor(ImGuiCol.ButtonHovered, GetBrandHoverColor(brand));
-        ImGui.PushStyleColor(ImGuiCol.ButtonActive, GetBrandHoverColor(brand));
-        var result = SpheneUI.Controls.Button($"##brandTextBtn{id}", new Vector2(buttonWidth, buttonHeight));
-        ImGui.PopStyleColor(3);
-
-        var pos = ImGui.GetItemRectMin();
-        var iconPos = new Vector2(pos.X + framePad.X, pos.Y + (buttonHeight - iconSize) * 0.5f);
-        DrawIcon(ImGui.GetWindowDrawList(), brand,
-            iconPos, iconPos + new Vector2(iconSize, iconSize), Vector4.One);
-
-        var textPos = new Vector2(iconPos.X + iconSize + gap,
-            pos.Y + (buttonHeight - ImGui.GetTextLineHeight()) * 0.5f);
-        ImGui.GetWindowDrawList().AddText(textPos, ImGui.GetColorU32(ImGuiCol.Text), text);
+        var result = SpheneUI.Controls.SegCore($"##brandTextBtn{id}", text, null,
+            new Vector2(buttonWidth, buttonHeight), accent, solidFill: true,
+            labelColor: Vector4.One,
+            zoneContent: (dl, zn, zx) => DrawIcon(dl, brand,
+                zn + new Vector2(glyphInset), zx - new Vector2(glyphInset),
+                Vector4.One));
 
         if (tooltip != null && ImGui.IsItemHovered())
             SpheneUI.AttachTooltip(tooltip);

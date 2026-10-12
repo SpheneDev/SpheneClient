@@ -6,6 +6,7 @@ using Dalamud.Interface.Textures.TextureWraps;
 using Dalamud.Interface.Utility;
 using Dalamud.Interface.Utility.Raii;
 using Dalamud.Interface.Windowing;
+using Dalamud.Utility;
 using Sphene.API.Data;
 using Sphene.API.Data.Enum;
 using Sphene.API.Data.Extensions;
@@ -49,7 +50,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
     private readonly FileDialogManager _fileDialogManager;
     private readonly ImageCropUi _imageCropUi;
 
-    private SpheneHubPage _activePage = SpheneHubPage.Profile;
+    private SpheneHubPage _activePage = SpheneHubPage.Home;
     private bool _profileEditMode;
     private readonly SpheneUI.Profile.HeroEdit _heroEdit = new();
     private bool _styleUseAccent, _styleUseTop, _styleUseBottom;
@@ -86,17 +87,17 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
 
     // Rail swap animation: 0 = hub nav, 1 = settings nav. The hub list pans
     // up and out of the rail while the settings list pans in from below.
-    private float _settingsRailAnim;
+    private float _sectionRailAnim;
     private float _hubNavBlockH;
 
-    /// <summary>The last non-settings location — the fixed "Back to Hub" strip on the settings
-    /// page jumps straight here instead of walking the back stack.</summary>
-    private HubLocation _lastHubLocation = new(SpheneHubPage.Profile, null, null);
+    /// <summary>The last non-section location — the fixed "Back to Hub" strip inside a section
+    /// (Settings, Mod Sharing, Character Data) jumps straight here instead of walking the back stack.</summary>
+    private HubLocation _lastHubLocation = new(SpheneHubPage.Home, null, null);
 
-    /// <summary>One location in the hub's back/forward history: page plus its detail context — on the
-    /// settings page it also carries the active settings sub-page so back/forward walks through it.</summary>
+    /// <summary>One location in the hub's back/forward history: page plus its detail context — on
+    /// section pages it also carries the active sub-page so back/forward walks through it.</summary>
     private readonly record struct HubLocation(SpheneHubPage Page, string? GroupGid, Pair? Friend,
-        SettingsUi.SettingsPage? Settings = null);
+        int? SubPage = null);
     private readonly List<HubLocation> _navBack = [];
     private readonly List<HubLocation> _navForward = [];
 
@@ -124,6 +125,8 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         _configService = configService;
         _areaBoundService = areaBoundService;
         _settingsUi.SettingsPageChanged += OnSettingsPageChanged;
+        _modSharingUi.SubPageChanged += OnModSharingPageChanged;
+        _charaDataHubUi.SubPageChanged += OnCharaDataPageChanged;
 
         IsOpen = configService.Current.ReopenSpheneHubOnStartup
             && configService.Current.SpheneHubWasOpen;
@@ -268,18 +271,18 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         var accentCommunity = theme.AccentBlue;
         var accentTools = SpheneUI.Palette.EtherealPurple;
 
-        // The rail pans between the hub nav and the settings nav — the hub
-        // list slides up and out while the settings list slides in from
-        // below, attached at its bottom edge. The anim advances before the
-        // rail width is sampled so the band eases with the pan.
-        var settingsMode = _activePage == SpheneHubPage.Settings;
-        var railTarget = settingsMode ? 1f : 0f;
-        if (!MathF.Equals(_settingsRailAnim, railTarget))
+        // The rail pans between the hub nav and the active section nav —
+        // the hub list slides up and out while the section list slides in
+        // from below, attached at its bottom edge. The anim advances before
+        // the rail width is sampled so the band eases with the pan.
+        var sectionMode = IsSectionPage(_activePage);
+        var railTarget = sectionMode ? 1f : 0f;
+        if (!MathF.Equals(_sectionRailAnim, railTarget))
         {
             var step = ImGui.GetIO().DeltaTime / 0.22f;
-            _settingsRailAnim = settingsMode
-                ? MathF.Min(1f, _settingsRailAnim + step)
-                : MathF.Max(0f, _settingsRailAnim - step);
+            _sectionRailAnim = sectionMode
+                ? MathF.Min(1f, _sectionRailAnim + step)
+                : MathF.Max(0f, _sectionRailAnim - step);
         }
 
         var railWidth = CurrentRailWidth;
@@ -299,9 +302,9 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             ImGui.SetCursorScreenPos(ImGui.GetCursorScreenPos() + new Vector2(0f, reserve));
         }
 
-        var railAnim = _settingsRailAnim;
+        var railAnim = _sectionRailAnim;
         var slide = MathF.Max(_hubNavBlockH, 200f * SpheneUI.Scale);
-        // Pinned zone at the rail top while the settings rail is shown: the
+        // Pinned zone at the rail top while a section rail is shown: the
         // "Back to Hub" item plus a pinned category band — same anatomy as the
         // standalone settings sidebar. The scroll top-inset clips items below
         // it and eases in with the pan.
@@ -325,6 +328,11 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         {
             var blockStart = ImGui.GetCursorScreenPos();
             ImGui.SetCursorScreenPos(blockStart - new Vector2(0f, slide * railAnim));
+            if (SpheneUI.Layout.NavRailSegmentItem("Home", FontAwesomeIcon.Home,
+                    _activePage == SpheneHubPage.Home, accentMe))
+            {
+                SetPage(SpheneHubPage.Home);
+            }
             if (SpheneUI.Layout.NavRailSegmentItem("My Profile", FontAwesomeIcon.UserCircle,
                     _activePage is SpheneHubPage.Profile or SpheneHubPage.ProfileStyle, accentMe))
             {
@@ -354,7 +362,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             }
             SpheneUI.Layout.NavRailDivider(accentTools, accentMe);
             if (SpheneUI.Layout.NavRailSegmentItem("Settings", FontAwesomeIcon.Cog,
-                    settingsMode, accentMe))
+                    _activePage == SpheneHubPage.Settings, accentMe))
             {
                 SetPage(SpheneHubPage.Settings);
             }
@@ -371,7 +379,18 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             ImGui.Dummy(new Vector2(1f,
                 pinItemH + pinDividerH - SpheneUI.Spacing.X8.Value * SpheneUI.Scale));
             pinnedCategories = [];
-            _settingsUi.DrawEmbeddedRail(pinnedCategories, pinnedCenterY);
+            switch (_activePage)
+            {
+                case SpheneHubPage.Settings:
+                    _settingsUi.DrawEmbeddedRail(pinnedCategories, pinnedCenterY);
+                    break;
+                case SpheneHubPage.ModSharing:
+                    _modSharingUi.DrawEmbeddedRail(pinnedCategories, pinnedCenterY);
+                    break;
+                case SpheneHubPage.CharacterData:
+                    _charaDataHubUi.DrawEmbeddedRail(pinnedCategories, pinnedCenterY);
+                    break;
+            }
             ImGui.SetCursorScreenPos(blockStart);
         }
         SpheneUI.Layout.EndNavRail(fadeMinY: railItemOrigin.Y + pinZoneH * railAnim);
@@ -432,6 +451,9 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         {
             switch (_activePage)
             {
+                case SpheneHubPage.Home:
+                    DrawHomePage(accentMe);
+                    break;
                 case SpheneHubPage.Profile:
                     DrawProfilePage(accentMe);
                     break;
@@ -446,10 +468,10 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                     break;
                 case SpheneHubPage.CharacterData:
                     _charaDataVisible = true;
-                    _charaDataHubUi.DrawEmbedded();
+                    _charaDataHubUi.DrawEmbeddedContent();
                     break;
                 case SpheneHubPage.ModSharing:
-                    _modSharingUi.DrawEmbedded();
+                    _modSharingUi.DrawEmbeddedContent();
                     break;
                 case SpheneHubPage.Settings:
                     _settingsUi.DrawEmbeddedContent();
@@ -474,15 +496,40 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
     }
 
     private HubLocation CurrentLocation => new(_activePage, _selectedGroupGid, _viewingFriend,
-        _activePage == SpheneHubPage.Settings ? _settingsUi.ActiveSettingsPageValue : null);
+        _activePage switch
+        {
+            SpheneHubPage.Settings => (int)_settingsUi.ActiveSettingsPageValue,
+            SpheneHubPage.ModSharing => (int)_modSharingUi.ActiveSubPageValue,
+            SpheneHubPage.CharacterData => (int)_charaDataHubUi.ActiveSubPageValue,
+            _ => null
+        });
 
-    /// <summary>Folds a settings-page switch into the hub history — only while the hub actually shows
-    /// the settings page, so a standalone Settings window change never hijacks hub navigation. The page
-    /// is already applied when the event fires, so the previous location is pushed directly.</summary>
-    private void OnSettingsPageChanged(SettingsUi.SettingsPage previous, SettingsUi.SettingsPage next)
+    /// <summary>Folds a settings-page switch into the hub history — only for changes that happened on
+    /// the embedded surface while the hub shows the settings page, so the standalone Settings window
+    /// never hijacks hub navigation. The page is already applied when the event fires, so the previous
+    /// location is pushed directly.</summary>
+    private void OnSettingsPageChanged(SettingsUi.SettingsPage previous, SettingsUi.SettingsPage next, bool embedded)
     {
-        if (_activePage != SpheneHubPage.Settings) return;
-        _navBack.Add(new HubLocation(SpheneHubPage.Settings, null, null, previous));
+        if (!embedded || _activePage != SpheneHubPage.Settings) return;
+        _navBack.Add(new HubLocation(SpheneHubPage.Settings, null, null, (int)previous));
+        _navForward.Clear();
+    }
+
+    /// <summary>Same fold as <see cref="OnSettingsPageChanged"/> for the mod sharing section.</summary>
+    private void OnModSharingPageChanged(ModSharingUi.ModSharingPage previous,
+        ModSharingUi.ModSharingPage next, bool embedded)
+    {
+        if (!embedded || _activePage != SpheneHubPage.ModSharing) return;
+        _navBack.Add(new HubLocation(SpheneHubPage.ModSharing, null, null, (int)previous));
+        _navForward.Clear();
+    }
+
+    /// <summary>Same fold as <see cref="OnSettingsPageChanged"/> for the character data section.</summary>
+    private void OnCharaDataPageChanged(CharaDataHubUi.CharaDataPage previous,
+        CharaDataHubUi.CharaDataPage next, bool embedded)
+    {
+        if (!embedded || _activePage != SpheneHubPage.CharacterData) return;
+        _navBack.Add(new HubLocation(SpheneHubPage.CharacterData, null, null, (int)previous));
         _navForward.Clear();
     }
 
@@ -545,15 +592,29 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         }
         _activePage = target.Page;
         _selectedGroupGid = target.Page == SpheneHubPage.Syncshells ? target.GroupGid : null;
-        if (target.Page != SpheneHubPage.Settings)
+        if (!IsSectionPage(target.Page))
         {
             _lastHubLocation = target;
         }
-        if (target.Settings is { } settingsPage)
+        if (target.SubPage is { } subPage)
         {
-            _settingsUi.ApplySettingsPageQuiet(settingsPage);
+            switch (target.Page)
+            {
+                case SpheneHubPage.Settings:
+                    _settingsUi.ApplySettingsPageQuiet((SettingsUi.SettingsPage)subPage);
+                    break;
+                case SpheneHubPage.ModSharing:
+                    _modSharingUi.ApplySubPageQuiet((ModSharingUi.ModSharingPage)subPage);
+                    break;
+                case SpheneHubPage.CharacterData:
+                    _charaDataHubUi.ApplySubPageQuiet((CharaDataHubUi.CharaDataPage)subPage);
+                    break;
+            }
         }
     }
+
+    private static bool IsSectionPage(SpheneHubPage page)
+        => page is SpheneHubPage.Settings or SpheneHubPage.ModSharing or SpheneHubPage.CharacterData;
 
     private static bool IsProfileFamily(SpheneHubPage page)
         => page is SpheneHubPage.Profile or SpheneHubPage.ProfileStyle;
@@ -572,7 +633,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         _styleSeeded = false;
         _navBack.Clear();
         _navForward.Clear();
-        _settingsRailAnim = 0f;
+        _sectionRailAnim = 0f;
         _heroEdit.AddingTag = false;
         ClearViewingFriend();
         DisposeEmbeddedAdminPanels();
@@ -591,6 +652,8 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
     protected override void Dispose(bool disposing)
     {
         _settingsUi.SettingsPageChanged -= OnSettingsPageChanged;
+        _modSharingUi.SubPageChanged -= OnModSharingPageChanged;
+        _charaDataHubUi.SubPageChanged -= OnCharaDataPageChanged;
         base.Dispose(disposing);
     }
 
@@ -1022,8 +1085,20 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         else if (_activePage == SpheneHubPage.Settings)
         {
             parentLabel = PageCrumbLabel(SpheneHubPage.Settings);
-            parentTarget = new HubLocation(SpheneHubPage.Settings, null, null, SettingsUi.SettingsPage.Home);
+            parentTarget = new HubLocation(SpheneHubPage.Settings, null, null, (int)SettingsUi.SettingsPage.Home);
             currentLabel = _settingsUi.ActiveCrumbLabel;
+        }
+        else if (_activePage == SpheneHubPage.ModSharing)
+        {
+            parentLabel = PageCrumbLabel(SpheneHubPage.ModSharing);
+            parentTarget = new HubLocation(SpheneHubPage.ModSharing, null, null, (int)ModSharingUi.ModSharingPage.Send);
+            currentLabel = _modSharingUi.ActiveCrumbLabel;
+        }
+        else if (_activePage == SpheneHubPage.CharacterData)
+        {
+            parentLabel = PageCrumbLabel(SpheneHubPage.CharacterData);
+            parentTarget = new HubLocation(SpheneHubPage.CharacterData, null, null, (int)CharaDataHubUi.CharaDataPage.GposeTogether);
+            currentLabel = _charaDataHubUi.ActiveCrumbLabel;
         }
 
         SpheneUI.Chrome.CrumbPill(pillMin, maxWidth, parentLabel, currentLabel,
@@ -1542,6 +1617,339 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
     }
 
     /// <summary>Friends list of paired users; selecting one shows their themed profile inline.</summary>
+    /// <summary>
+    /// Landing page: banner hero with avatar and status, live stats, quick
+    /// access into every hub section, a community/news area and the supporter
+    /// promo — the single place where the hub converges.
+    /// </summary>
+    private void DrawHomePage(Vector4 accent)
+    {
+        var profile = _spheneProfileManager.GetSpheneProfile(new UserData(_apiController.UID));
+
+        DrawHomeHero(profile, accent);
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
+        DrawHomeNewsCard(accent);
+    }
+
+    /// <summary>
+    /// The landing hero: the user's own banner bleeds across the card (with a
+    /// scrim for readability), a big avatar with presence dot carries the
+    /// greeting and status line — the community-page masthead.
+    /// </summary>
+    private void DrawHomeHero(SpheneProfileData profile, Vector4 accent)
+    {
+        var avatar = GetAvatarTexture(profile);
+        var supporter = _apiController.IsSupporter;
+        var gold = SpheneUI.Palette.SpheneGold;
+        SpheneUI.Layout.AccentCard(() =>
+        {
+            var scale = SpheneUI.Scale;
+            var drawList = ImGui.GetWindowDrawList();
+            // ringPad keeps the avatar's outer ring inside the content clip —
+            // the table cell clips at the content origin and would cut the
+            // ring's top/left edge.
+            var ringPad = 3f * scale;
+            var avatarSize = 58f * scale;
+            var avatarPos = ImGui.GetCursorScreenPos() + new Vector2(ringPad, ringPad);
+
+            var connected = _apiController.IsConnected;
+            var paused = _apiController.IsConnectionPaused;
+            var connColor = !connected ? SpheneUI.Palette.NetworkDisconnected
+                : paused ? SpheneUI.Palette.NetworkWarning
+                : SpheneUI.Palette.NetworkActive;
+            var connText = !connected ? "Offline" : paused ? "Paused" : "Online";
+
+            var avatarCenter = avatarPos + new Vector2(avatarSize * 0.5f);
+            var ringRadius = avatarSize * 0.5f + 2.5f * scale;
+            drawList.AddCircleFilled(avatarCenter, ringRadius,
+                SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(
+                    supporter ? gold : accent, supporter ? 0.55f : 0.35f)));
+            if (supporter)
+            {
+                drawList.AddCircle(avatarCenter, ringRadius,
+                    SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(gold, 0.9f)),
+                    0, 1.2f * scale);
+            }
+            ImGui.SetCursorScreenPos(avatarPos);
+            SpheneUI.Media.Avatar(avatar, avatarSize);
+            SpheneUI.Media.PresenceDot(drawList, avatarPos, avatarSize, connColor);
+
+            var lineH = ImGui.GetTextLineHeight();
+            var textX = avatarPos.X + avatarSize + 14f * scale;
+            var statusLine = HeaderStatusLine(profile, out _);
+
+            // card's inner right edge — measured from the content region, not
+            // the window, so pinned controls never overhang the card
+            var rightX = ImGui.GetCursorScreenPos().X + ImGui.GetContentRegionAvail().X;
+
+            var titleY = avatarPos.Y;
+            ImGui.SetCursorScreenPos(new Vector2(textX, titleY));
+            var ctaW = SpheneBrandIcons.GetIconTextButtonSize("Discord")
+                + SpheneBrandIcons.GetIconTextButtonSize("Support on Ko-fi")
+                + SpheneUI.Spacing.X8.Scaled;
+            var supporterExtraW = supporter
+                ? SpheneUI.Layout.BadgeWidth("SUPPORTER") + 28f * scale : 0f;
+            var greetMaxW = MathF.Max(60f * scale,
+                rightX - textX - ctaW - 14f * scale - supporterExtraW);
+            using (SpheneUI.DisplayFont.Push())
+            {
+                SpheneUI.Text.Colored(
+                    $"Welcome back, {SpheneUI.Text.Ellipsize(HeaderDisplayName(), greetMaxW)}",
+                    SpheneUI.Colors.TextPrimary);
+            }
+            var titleMax = ImGui.GetItemRectMax();
+            if (supporter)
+            {
+                var iconY = titleMax.Y - lineH - 2f * scale;
+                ImGui.SetCursorScreenPos(new Vector2(titleMax.X + 8f * scale, iconY));
+                SpheneUI.Icons.Icon(FontAwesomeIcon.Crown, gold);
+                var crownMax = ImGui.GetItemRectMax();
+                ImGui.SetCursorScreenPos(new Vector2(crownMax.X + 6f * scale,
+                    titleMax.Y - SpheneUI.Layout.BadgeHeight - 2f * scale));
+                SpheneUI.Layout.Badge("SUPPORTER", gold);
+            }
+
+            ImGui.SetCursorScreenPos(new Vector2(textX, titleMax.Y + 4f * scale));
+            SpheneUI.Text.Colored($"\u25CF {connText}", connColor);
+            ImGui.SameLine();
+            var statusMaxW = rightX - ImGui.GetCursorScreenPos().X - ctaW - 14f * scale;
+            SpheneUI.Text.Muted($"· {SpheneUI.Text.Ellipsize(statusLine, MathF.Max(40f * scale, statusMaxW))}");
+            var statusMax = ImGui.GetItemRectMax();
+
+            // version number doubles as the door into the update history
+            var version = System.Reflection.Assembly.GetExecutingAssembly()
+                .GetName().Version?.ToString() ?? "unknown";
+            var versionPos = new Vector2(textX, statusMax.Y + 2f * scale);
+            ImGui.SetCursorScreenPos(versionPos);
+            SpheneUI.Text.Muted($"v{version}");
+            var versionMax = ImGui.GetItemRectMax();
+            ImGui.SetCursorScreenPos(versionPos);
+            if (ImGui.InvisibleButton("##hero-version", versionMax - versionPos))
+            {
+                NavigateTo(new HubLocation(SpheneHubPage.Settings, null, null,
+                    (int)SettingsUi.SettingsPage.ReleaseNotes));
+            }
+            if (ImGui.IsItemHovered())
+            {
+                ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
+                drawList.AddLine(versionPos + new Vector2(0f, versionMax.Y - versionPos.Y - 1f),
+                    new Vector2(versionMax.X, versionMax.Y - 1f),
+                    SpheneUI.ColorUtils.ToU32(SpheneUI.Colors.TextMuted), 1f);
+            }
+            SpheneUI.AttachTooltip("Open the Regulator update history");
+
+            // right-pinned community buttons — same brand style as the
+            // supporter page and the settings title bar
+            var frameH = ImGui.GetFrameHeight();
+            var ctaY = avatarPos.Y + (avatarSize - frameH) * 0.5f;
+            var rightBottom = ctaY + frameH;
+            ImGui.SetCursorScreenPos(new Vector2(rightX - ctaW, ctaY));
+            if (SpheneBrandIcons.IconTextButton(SpheneBrandIcons.Brand.Discord,
+                    "Discord", "home-discord",
+                    tooltip: "Join the Sphene Discord"))
+            {
+                Util.OpenLink("https://discord.gg/GbnwsP2XsF");
+            }
+            ImGui.SameLine(0, SpheneUI.Spacing.X8.Scaled);
+            if (SpheneBrandIcons.IconTextButton(SpheneBrandIcons.Brand.Kofi,
+                    "Support on Ko-fi", "home-kofi",
+                    tooltip: "See what supporting Sphene unlocks"))
+            {
+                if (_apiController.SupporterFeaturesEnabled)
+                {
+                    NavigateTo(new HubLocation(SpheneHubPage.Settings, null, null,
+                        (int)SettingsUi.SettingsPage.Supporter));
+                }
+                else
+                {
+                    Util.OpenLink("https://ko-fi.com/sphenedev");
+                }
+            }
+
+            // friends strip — online friends live inside the hero itself
+            var stripY = MathF.Max(avatarPos.Y + avatarSize,
+                MathF.Max(versionMax.Y, rightBottom)) + 12f * scale;
+            var stripLeft = avatarPos.X - ringPad;
+            drawList.AddLine(new Vector2(stripLeft, stripY - 6f * scale),
+                new Vector2(rightX, stripY - 6f * scale),
+                SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(
+                    SpheneUI.Colors.TextPrimary, 0.08f)), 1f);
+            ImGui.SetCursorScreenPos(new Vector2(stripLeft, stripY));
+            DrawHeroFriendsStrip(rightX);
+        }, accentColor: supporter ? gold : accent, id: "home-hero");
+    }
+
+    /// <summary>
+    /// Online friends woven into the hero banner: a mini avatar cluster
+    /// (click one to open their profile), the online count, and a right-pinned
+    /// "View all" link — the landing page's community signal without a tile.
+    /// </summary>
+    private void DrawHeroFriendsStrip(float rightX)
+    {
+        var scale = SpheneUI.Scale;
+        var drawList = ImGui.GetWindowDrawList();
+        var rowTop = ImGui.GetCursorScreenPos();
+        var online = 0;
+        for (var i = 0; i < _pairManager.DirectPairs.Count; i++)
+        {
+            if (_pairManager.DirectPairs[i].IsOnline)
+            {
+                online++;
+            }
+        }
+
+        var avatarSize = 26f * scale;
+        var gap = 5f * scale;
+        var clusterMaxW = rightX - rowTop.X;
+
+        if (online == 0)
+        {
+            var emptyText = _pairManager.DirectPairs.Count == 0
+                ? "No paired users yet — pair with someone to build your circle."
+                : "No friends online right now.";
+            var textY = rowTop.Y + (avatarSize - ImGui.GetTextLineHeight()) * 0.5f;
+            DrawHeroTextLink(new Vector2(rowTop.X, textY), emptyText,
+                "Open your friends list", () => SetPage(SpheneHubPage.Friends));
+            ImGui.SetCursorScreenPos(new Vector2(rowTop.X, rowTop.Y + avatarSize));
+            return;
+        }
+
+        var chipW = 30f * scale;
+        var maxAvatars = Math.Max(1, Math.Min(10,
+            (int)((clusterMaxW - chipW) / (avatarSize + gap))));
+        var drawn = 0;
+        for (var i = 0; i < _pairManager.DirectPairs.Count && drawn < maxAvatars; i++)
+        {
+            var pair = _pairManager.DirectPairs[i];
+            if (!pair.IsOnline)
+            {
+                continue;
+            }
+            var pos = rowTop + new Vector2(drawn * (avatarSize + gap), 0f);
+            ImGui.SetCursorScreenPos(pos);
+            var clicked = ImGui.InvisibleButton(
+                $"##home-friend-{pair.UserData.UID}", new Vector2(avatarSize, avatarSize));
+            var hovered = ImGui.IsItemHovered();
+            ImGui.SetCursorScreenPos(pos);
+            var fProfile = _spheneProfileManager.GetSpheneProfile(pair.UserData);
+            SpheneUI.Media.Avatar(FriendListAvatar(pair.UserData.UID, fProfile), avatarSize);
+            SpheneUI.Media.PresenceDot(drawList, pos, avatarSize,
+                SpheneUI.Palette.NetworkActive);
+            if (hovered)
+            {
+                ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
+                drawList.AddCircle(pos + new Vector2(avatarSize * 0.5f),
+                    avatarSize * 0.5f - 0.5f,
+                    SpheneUI.ColorUtils.ToU32(CommunityAccent), 0, 1.5f * scale);
+                SpheneUI.AttachTooltip($"{pair.UserData.AliasOrUID} — online");
+            }
+            if (clicked)
+            {
+                NavigateTo(new HubLocation(SpheneHubPage.Friends, null, pair));
+                return;
+            }
+            drawn++;
+        }
+
+        var textX = rowTop.X + drawn * (avatarSize + gap);
+        var rest = online - drawn;
+        if (rest > 0)
+        {
+            ImGui.SetCursorScreenPos(new Vector2(textX,
+                rowTop.Y + (avatarSize - SpheneUI.Layout.BadgeHeight) * 0.5f));
+            SpheneUI.Layout.Badge($"+{rest}", SpheneUI.Colors.TextMuted);
+            textX += chipW;
+        }
+        var countText = online == 1 ? "1 friend online" : $"{online} friends online";
+        DrawHeroTextLink(new Vector2(textX,
+                rowTop.Y + (avatarSize - ImGui.GetTextLineHeight()) * 0.5f),
+            countText, "Open your friends list", () => SetPage(SpheneHubPage.Friends));
+        ImGui.SetCursorScreenPos(new Vector2(rowTop.X, rowTop.Y + avatarSize));
+    }
+
+    /// <summary>
+    /// Muted inline text with a text-width-only invisible button: hover lifts
+    /// the background like a toggle row — no visible chrome, still clickable.
+    /// </summary>
+    private static void DrawHeroTextLink(Vector2 pos, string text, string tooltip, Action onClick)
+    {
+        var scale = SpheneUI.Scale;
+        var drawList = ImGui.GetWindowDrawList();
+        var textSize = ImGui.CalcTextSize(text);
+        var pad = new Vector2(4f * scale, 1f * scale);
+        ImGui.SetCursorScreenPos(pos - new Vector2(pad.X, pad.Y));
+        var clicked = ImGui.InvisibleButton($"##hero-link-{text}",
+            textSize + pad * 2f);
+        var hovered = ImGui.IsItemHovered();
+        if (hovered)
+        {
+            ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
+            drawList.AddRectFilled(pos - pad, pos + textSize + pad,
+                SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(
+                    SpheneUI.Colors.TextPrimary, 0.07f)), 4f * scale);
+        }
+        ImGui.SetCursorScreenPos(pos);
+        SpheneUI.Text.Colored(text, hovered
+            ? SpheneUI.Colors.TextSecondary
+            : SpheneUI.Colors.TextMuted);
+        SpheneUI.AttachTooltip(tooltip);
+        if (clicked)
+        {
+            onClick();
+        }
+    }
+
+    /// <summary>
+    /// The news slot — today it surfaces the installed version and links into
+    /// release notes; future announcements/community entries plug in here.
+    /// </summary>
+    private void DrawHomeNewsCard(Vector4 accent)
+    {
+        SpheneUI.Layout.SectionCard(() =>
+        {
+            var version = System.Reflection.Assembly.GetExecutingAssembly()
+                .GetName().Version?.ToString() ?? "unknown";
+            var titleText = $"Sphene v{version} installed";
+            var descText = "Release notes, announcements and community updates land in this feed.";
+
+            var scale = SpheneUI.Scale;
+            var drawList = ImGui.GetWindowDrawList();
+            var pos = ImGui.GetCursorScreenPos();
+            var availW = ImGui.GetContentRegionAvail().X;
+            var gap = 3f * scale;
+            var titleSize = ImGui.CalcTextSize(titleText);
+            var descSize = ImGui.CalcTextSize(descText, false, availW);
+            var pad = new Vector2(6f * scale, 4f * scale);
+            var blockSize = new Vector2(
+                MathF.Max(titleSize.X, descSize.X) + pad.X * 2f,
+                titleSize.Y + gap + descSize.Y + pad.Y * 2f);
+
+            ImGui.SetCursorScreenPos(pos - pad);
+            var clicked = ImGui.InvisibleButton("##home-news-version", blockSize);
+            var hovered = ImGui.IsItemHovered();
+            if (hovered)
+            {
+                ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
+                drawList.AddRectFilled(pos - pad, pos - pad + blockSize,
+                    SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(
+                        SpheneUI.Colors.TextPrimary, 0.07f)), 5f * scale);
+            }
+            ImGui.SetCursorScreenPos(pos);
+            SpheneUI.Text.Colored(titleText,
+                hovered ? SpheneUI.Colors.TextPrimary : SpheneUI.Colors.TextSecondary);
+            ImGui.SetCursorScreenPos(pos + new Vector2(0f, titleSize.Y + gap));
+            SpheneUI.Text.MutedWrapped(descText);
+            SpheneUI.AttachTooltip("Open the Regulator update history");
+            if (clicked)
+            {
+                NavigateTo(new HubLocation(SpheneHubPage.Settings, null, null,
+                    (int)SettingsUi.SettingsPage.ReleaseNotes));
+            }
+        }, title: "News & Updates", accentColor: accent);
+    }
+
+    private static Vector4 CommunityAccent => SpheneUI.Theme.Current.AccentBlue;
+
     private void DrawFriendsPage(Vector4 accent)
     {
         if (_viewingFriend != null && !IsStillPaired(_viewingFriend))

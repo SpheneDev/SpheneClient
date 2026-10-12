@@ -141,7 +141,10 @@ public sealed class ReleaseChangelogStartupService : IHostedService, IMediatorSu
             return true;
 
         var lastSeenNormalized = NormalizeVersion(parsed);
-        return current > lastSeenNormalized;
+        var currentNormalized = NormalizeVersion(current);
+        var lastSeenCore = new Version(lastSeenNormalized.Major, lastSeenNormalized.Minor, lastSeenNormalized.Build);
+        var currentCore = new Version(currentNormalized.Major, currentNormalized.Minor, currentNormalized.Build);
+        return currentCore > lastSeenCore;
     }
 
     private static Version NormalizeVersion(Version? v)

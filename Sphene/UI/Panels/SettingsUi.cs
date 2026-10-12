@@ -69,6 +69,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
     private readonly ShrinkUHostService _shrinkUHostService;
     private readonly ReleaseChangelogUi _releaseChangelogUi;
     private readonly SupporterIconService _supporterIconService;
+    private readonly SupporterNameplateService _supporterNameplateService;
     private readonly GameSoundManager _gameSoundManager;
     private readonly FileDialogManager _fileDialogManager;
     private readonly string _shrinkUVersion;
@@ -119,9 +120,37 @@ public class SettingsUi : WindowMediatorSubscriberBase
         ReleaseNotes,
         Debug
     }
-    private SettingsPage _activeSettingsPage = SettingsPage.Home;
-    private readonly List<SettingsPage> _settingsNavBack = [];
-    private readonly List<SettingsPage> _settingsNavForward = [];
+    private SettingsPage _standaloneSettingsPage = SettingsPage.Home;
+    private SettingsPage _embeddedSettingsPage = SettingsPage.Home;
+    private readonly List<SettingsPage> _standaloneNavBack = [];
+    private readonly List<SettingsPage> _standaloneNavForward = [];
+    private readonly List<SettingsPage> _embeddedNavBack = [];
+    private readonly List<SettingsPage> _embeddedNavForward = [];
+    private bool _embeddedScope;
+
+    /// <summary>
+    /// The active page of the surface currently drawing or navigating — the
+    /// standalone window and the Hub-embedded settings each keep their own
+    /// page and back/forward history so neither hijacks the other.
+    /// </summary>
+    private SettingsPage _activeSettingsPage
+    {
+        get => _embeddedScope ? _embeddedSettingsPage : _standaloneSettingsPage;
+        set
+        {
+            if (_embeddedScope)
+            {
+                _embeddedSettingsPage = value;
+            }
+            else
+            {
+                _standaloneSettingsPage = value;
+            }
+        }
+    }
+
+    private List<SettingsPage> _settingsNavBack => _embeddedScope ? _embeddedNavBack : _standaloneNavBack;
+    private List<SettingsPage> _settingsNavForward => _embeddedScope ? _embeddedNavForward : _standaloneNavForward;
     private int _settingsCardIndex;
     private string? _preferThemeTab = null;
     private bool _preferButtonStylesTab = false;
@@ -172,6 +201,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         DalamudUtilService dalamudUtilService, HttpClient httpClient,
         ReleaseChangelogUi releaseChangelogUi,
         SupporterIconService supporterIconService,
+        SupporterNameplateService supporterNameplateService,
         GameSoundManager gameSoundManager,
         FileDialogManager fileDialogManager,
         ConfigBackupService configBackupService,
@@ -195,6 +225,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         _shrinkUHostService = shrinkUHostService;
         _releaseChangelogUi = releaseChangelogUi;
         _supporterIconService = supporterIconService;
+        _supporterNameplateService = supporterNameplateService;
         _gameSoundManager = gameSoundManager;
         _fileDialogManager = fileDialogManager;
         _configBackupService = configBackupService;
@@ -341,10 +372,6 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
     protected override IReadOnlyList<SpheneUI.Chrome.TitleBarButton>? ChromeRightButtons =>
     [
-        new SpheneUI.Chrome.TitleBarButton(FontAwesomeIcon.None, "Join the Sphene Discord",
-            () => Util.OpenLink("https://discord.gg/GbnwsP2XsF"), BrandIcon: SpheneBrandIcons.Brand.Discord),
-        new SpheneUI.Chrome.TitleBarButton(FontAwesomeIcon.None, "Support Sphene on Ko-fi",
-            () => Util.OpenLink("https://ko-fi.com/sphenedev"), BrandIcon: SpheneBrandIcons.Brand.Kofi),
         new SpheneUI.Chrome.TitleBarButton(FontAwesomeIcon.Times, "Close", () => IsOpen = false),
     ];
 
@@ -1824,7 +1851,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         (FontAwesomeIcon.Palette, "Appearance"),
         (FontAwesomeIcon.Brush, "Theme"),
         (FontAwesomeIcon.Bell, "Notifications"),
-        (FontAwesomeIcon.Scroll, "Release Notes"),
+        (FontAwesomeIcon.History, "Update"),
         (FontAwesomeIcon.TachometerAlt, "Performance"),
         (FontAwesomeIcon.ExchangeAlt, "Transfers"),
         (FontAwesomeIcon.Hdd, "Storage"),
@@ -1905,6 +1932,9 @@ public class SettingsUi : WindowMediatorSubscriberBase
         SpheneUI.Layout.BeginScrollArea("settings-content",
             new Vector2(available.X - sidebarWidth, available.Y),
             windowFlags: ImGuiWindowFlags.NoBackground, noPadding: true);
+        // The wrapper owns the top inset (mirroring the Hub's NavContent
+        // PagePadding) so embedded pages can start flush in both hosts.
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
         DrawSettingsPageContent();
 
         SpheneUI.Layout.EndScrollArea(
@@ -1930,48 +1960,9 @@ public class SettingsUi : WindowMediatorSubscriberBase
         var accentAdvanced = new Vector4(0.93f, 0.68f, 0.38f, 1f);
 
         void SidebarCategory(string label, Vector4 accent)
-        {
-            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
-            var text = label.ToUpperInvariant();
-            var drawnInBand = false;
-            if (pinnedCategories != null)
-            {
-                var labelTop = ImGui.GetCursorScreenPos().Y;
-                var labelCenter = labelTop + ImGui.GetTextLineHeight() * 0.5f;
-                pinnedCategories.Add((text, labelCenter, accent));
-                // The band owns the first label plus every label whose
-                // center has reached the pin; an approaching label is drawn
-                // in-flow so the band can ride on its top edge while it
-                // pushes in.
-                drawnInBand = pinnedCategories.Count == 1 || labelCenter <= pinnedCenterY;
-            }
-            if (drawnInBand)
-            {
-                ImGui.Dummy(new Vector2(1f, ImGui.GetTextLineHeight()));
-            }
-            else
-            {
-                var availWidth = ImGui.GetContentRegionAvail().X;
-                var textWidth = ImGui.CalcTextSize(text).X;
-                ImGui.SetCursorPosX(ImGui.GetCursorPosX() + MathF.Max(0f, (availWidth - textWidth) * 0.5f));
-                SpheneUI.Text.Colored(text, accent);
-            }
-            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
-        }
+            => SpheneUI.Layout.NavRailCategoryLabel(label, accent, pinnedCategories, pinnedCenterY);
 
-        void SidebarDivider(Vector4 from, Vector4 to)
-        {
-            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
-            var drawList = ImGui.GetWindowDrawList();
-            var pos = ImGui.GetCursorScreenPos();
-            var lineHeight = MathF.Max(1f, 1.5f * ImGuiHelpers.GlobalScale);
-            var span = pos.X + ImGui.GetContentRegionAvail().X;
-            var fromCol = ImGui.ColorConvertFloat4ToU32(SpheneUI.ColorUtils.WithAlpha(from, 0.4f));
-            var toCol = ImGui.ColorConvertFloat4ToU32(SpheneUI.ColorUtils.WithAlpha(to, 0.4f));
-            drawList.AddRectFilledMultiColor(new Vector2(pos.X, pos.Y),
-                new Vector2(span, pos.Y + lineHeight), fromCol, toCol, toCol, fromCol);
-            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
-        }
+        void SidebarDivider(Vector4 from, Vector4 to) => SpheneUI.Layout.NavRailDivider(from, to);
 
         void SidebarButton(string label, FontAwesomeIcon icon, SettingsPage page, Vector4 accent, bool special = false)
         {
@@ -1986,7 +1977,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         SidebarButton("Connectivity", FontAwesomeIcon.Wifi, SettingsPage.Connectivity, accentGeneral);
         SidebarButton("People & Notes", FontAwesomeIcon.AddressBook, SettingsPage.PeopleNotes, accentGeneral);
         SidebarButton("Notifications", FontAwesomeIcon.Bell, SettingsPage.Alerts, accentGeneral);
-        SidebarButton("Release Notes", FontAwesomeIcon.Scroll, SettingsPage.ReleaseNotes, accentGeneral);
+        SidebarButton("Update", FontAwesomeIcon.History, SettingsPage.ReleaseNotes, accentGeneral);
         if (_apiController.SupporterFeaturesEnabled)
         {
             SidebarButton("Supporter", FontAwesomeIcon.Crown, SettingsPage.Supporter, SpheneUI.Palette.SpheneGold, special: true);
@@ -2022,15 +2013,24 @@ public class SettingsUi : WindowMediatorSubscriberBase
         List<(string Label, float CenterY, Vector4 Accent)>? pinnedCategories = null,
         float pinnedCenterY = 0f)
     {
-        DrawSettingsNavButtons(pinnedCategories, pinnedCenterY);
-        var theme = SpheneTheme.Current;
-        SpheneUI.Layout.NavRailDivider(theme.AccentBlue, theme.AccentBlue);
-        if (SpheneUI.Layout.NavRailSegmentItem("Pop Out", FontAwesomeIcon.ExternalLinkAlt,
-                false, theme.AccentBlue))
+        var previousScope = _embeddedScope;
+        _embeddedScope = true;
+        try
         {
-            Mediator.Publish(new UiToggleMessage(typeof(SettingsUi)));
+            DrawSettingsNavButtons(pinnedCategories, pinnedCenterY);
+            var theme = SpheneTheme.Current;
+            SpheneUI.Layout.NavRailDivider(theme.AccentBlue, theme.AccentBlue);
+            if (SpheneUI.Layout.NavRailSegmentItem("Pop Out", FontAwesomeIcon.ExternalLinkAlt,
+                    false, theme.AccentBlue))
+            {
+                Mediator.Publish(new UiToggleMessage(typeof(SettingsUi)));
+            }
+            SpheneUI.AttachTooltip("Open Settings in a separate window");
         }
-        SpheneUI.AttachTooltip("Open Settings in a separate window");
+        finally
+        {
+            _embeddedScope = previousScope;
+        }
     }
 
     /// <summary>
@@ -2039,12 +2039,21 @@ public class SettingsUi : WindowMediatorSubscriberBase
     /// </summary>
     internal void DrawEmbeddedContent()
     {
-        UpdateCompactUiThemeStick();
-        DrawSettingsPageContent();
-        DrawThemeSavePrompt();
-        DrawUnsavedCustomThemePrompt();
-        DrawExportBackupModal();
-        DrawImportBackupModal();
+        var previousScope = _embeddedScope;
+        _embeddedScope = true;
+        try
+        {
+            UpdateCompactUiThemeStick();
+            DrawSettingsPageContent();
+            DrawThemeSavePrompt();
+            DrawUnsavedCustomThemePrompt();
+            DrawExportBackupModal();
+            DrawImportBackupModal();
+        }
+        finally
+        {
+            _embeddedScope = previousScope;
+        }
     }
 
     private void UpdateCompactUiThemeStick()
@@ -2076,8 +2085,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
         }
     }
 
-    private (string Category, string Label) SettingsCrumbInfo(string diagnosticsPageLabel)
-        => _activeSettingsPage switch
+    private static (string Category, string Label) SettingsCrumbInfo(string diagnosticsPageLabel, SettingsPage page)
+        => page switch
         {
             SettingsPage.Home => ("General", "Home"),
             SettingsPage.Connectivity => ("General", "Connectivity"),
@@ -2091,14 +2100,16 @@ public class SettingsUi : WindowMediatorSubscriberBase
             SettingsPage.SyncBehavior => ("Sync & Data", "Sync"),
             SettingsPage.Acknowledgment => ("Sync & Data", "Acknowledgment"),
             SettingsPage.Supporter => ("General", "Supporter"),
-            SettingsPage.ReleaseNotes => ("General", "Release Notes"),
+            SettingsPage.ReleaseNotes => ("General", "Update"),
             SettingsPage.Debug => ("Advanced", diagnosticsPageLabel),
             _ => ("General", "Home")
         };
 
     private void DrawSettingsPageContent()
     {
-        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
+        // Pages start flush — the host provides the top inset (the Hub's
+        // NavContent applies PagePadding; the standalone window adds the
+        // equivalent space in its scroll area before this runs).
         var contentAvail = ImGui.GetContentRegionAvail().X;
         var safeContentWidth = MathF.Max(220f * ImGuiHelpers.GlobalScale, contentAvail);
         var maxPageWidth = MathF.Min(safeContentWidth, 1040f * ImGuiHelpers.GlobalScale);
@@ -2599,7 +2610,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 
             DrawPluginListRow("Sphene", "Advanced character synchronization and networking.", versionString, true, true,
                 onOpenSettings: () => SetSettingsPage(SettingsPage.ReleaseNotes),
-                settingsLabel: "Release Notes");
+                settingsLabel: "Update");
 
             // 2. ShrinkU (Built-in)
             bool shrinkUEnabled = _configService.Current.EnableShrinkUIntegration;
@@ -2764,83 +2775,98 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
     private void DrawSupporterPage()
     {
-        DrawSettingsPageHeader("Supporter", "Supporter perks. Support Sphene on Ko-fi to unlock your own nameplate indicator.");
+        DrawSettingsPageHeader("Supporter");
 
-        if (!_apiController.IsSupporter)
+        DrawSupporterHeroCard();
+
+        if (_apiController.IsSupporter)
         {
-            DrawSupporterLockedCard();
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
+            DrawSupporterNameplateSettings();
+
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
+            DrawSupporterSection(() =>
+            {
+                if (SpheneUI.Controls.CollapsibleSection("What you unlock"))
+                {
+                    SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+                    SpheneUI.Layout.SectionCard(
+                        () => SupporterPerks.DrawList(),
+                        accentColor: SpheneUI.Palette.SpheneGold,
+                        description: "Supporter status is synced from the server automatically once your Ko-fi donation is linked to your Discord account.");
+                }
+            });
         }
         else
         {
-            DrawSupporterStatusCard();
             SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
-            DrawSupporterNameplateSettings();
+            DrawSupporterSection(() =>
+                SpheneUI.Layout.SectionCard(
+                    () => SupporterPerks.DrawList(),
+                    title: "What you unlock",
+                    accentColor: SpheneUI.Palette.SpheneGold,
+                    description: "Supporter status is synced from the server automatically once your Ko-fi donation is linked to your Discord account."));
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
+            DrawSupporterSection(() =>
+                SpheneUI.Layout.Callout(
+                    "Include your Discord username or ID in the donation message so your supporter status can be linked to your account. Linking is checked periodically — re-login refreshes it immediately.",
+                    FontAwesomeIcon.InfoCircle, SpheneUI.Palette.CrystalBlue,
+                    title: "How linking works"));
         }
-
-        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
-        DrawSupporterLinksCard();
     }
 
-    private void DrawSupporterLinksCard()
+    private void DrawSupporterHeroCard()
     {
+        var supporter = _apiController.IsSupporter;
         DrawSupporterCard(() =>
         {
-            SpheneUI.Text.Colored("Community & Support", SpheneUI.Palette.LuminousGold);
+            var gold = SpheneUI.Palette.SpheneGold;
+            var titlePos = ImGui.GetCursorScreenPos();
+            var titleY = titlePos.Y;
+            var crownSize = SpheneUI.Icons.Size(FontAwesomeIcon.Crown);
+            ImGui.SetCursorScreenPos(titlePos + new Vector2(0, 5f * ImGuiHelpers.GlobalScale));
+            SpheneUI.Icons.Icon(FontAwesomeIcon.Crown, gold);
+            ImGui.SetCursorScreenPos(new Vector2(
+                titlePos.X + crownSize.X + 8f * ImGuiHelpers.GlobalScale, titleY));
+            SpheneUI.Text.Display("Sphene Supporter", gold);
+            var titleMaxY = MathF.Max(ImGui.GetItemRectMax().Y,
+                titleY + ImGui.GetFrameHeight());
+            ImGui.SameLine(0, 10f * ImGuiHelpers.GlobalScale);
+            ImGui.SetCursorScreenPos(new Vector2(ImGui.GetCursorScreenPos().X,
+                titleY + (titleMaxY - titleY - SpheneUI.Layout.BadgeHeight) * 0.5f));
+            SpheneUI.Layout.Badge(supporter ? "ACTIVE" : "LOCKED",
+                supporter ? SpheneUI.Palette.NetworkActive : SpheneUI.Colors.TextMuted);
+
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+            SpheneUI.Text.MutedWrapped(supporter
+                ? "Thank you for supporting Sphene — your supporter perks are active and visible to other users."
+                : "Every donation keeps Sphene's development and servers running — and unlocks the personal perks listed below for your account.");
             SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
-            SpheneBrandIcons.BrandStrip("supporterLinks", new[]
+
+            if (SpheneBrandIcons.IconTextButton(SpheneBrandIcons.Brand.Kofi,
+                    supporter ? "Support again on Ko-fi" : "Support on Ko-fi",
+                    "supporter_kofi",
+                    tooltip: "Open Sphene's Ko-fi page in your browser."))
             {
-                new SpheneBrandIcons.StripSegment(SpheneBrandIcons.Brand.Discord,
-                    "Join Discord", "Get support, updates, and connect with other users",
-                    () => Util.OpenLink("https://discord.gg/GbnwsP2XsF")),
-                new SpheneBrandIcons.StripSegment(SpheneBrandIcons.Brand.Kofi,
-                    "Support on Ko-fi", "Support Sphene's development on Ko-fi",
-                    () => Util.OpenLink("https://ko-fi.com/sphenedev")),
-            }, ImGui.GetFrameHeight() * 1.5f, SpheneUI.Controls.BoundedAvailX());
+                Util.OpenLink("https://ko-fi.com/sphenedev");
+            }
         });
     }
 
-    private void DrawSupporterCard(Action content)
+    /// <summary>Unindents to the card edge, runs the draw, re-indents — the shared
+    /// wrapper for every block on the supporter page.</summary>
+    private void DrawSupporterSection(Action content)
     {
         var settingsOptionsIndentX = GetSettingsOptionsIndentX(_activeSettingsPage);
         if (_activeSettingsPage != SettingsPage.Home)
             ImGui.Unindent(settingsOptionsIndentX);
-        SpheneUI.Layout.AccentCard(content);
+        content();
         if (_activeSettingsPage != SettingsPage.Home)
             ImGui.Indent(settingsOptionsIndentX);
     }
 
-    private void DrawSupporterLockedCard()
-    {
-        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X10);
-        DrawSupporterCard(() =>
-        {
-            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
-            DrawCenteredSupporterIcon(FontAwesomeIcon.Crown, SpheneUI.Palette.SpheneGold, 2.4f);
-            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X10);
-            DrawCenteredSupporterHeadline("Unlock Supporter Perks");
-            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
-            SpheneUI.Text.ColoredWrapped("Support Sphene on Ko-fi and your nameplate gets a personal supporter indicator that other Sphene users can see in game.", ImGuiColors.DalamudGrey);
-            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X12);
-
-            DrawSupporterPerkLine("Personal supporter indicator on your nameplate");
-            DrawSupporterPerkLine("Custom symbol, text or the Sphene icon");
-            DrawSupporterPerkLine("Visible to everyone using Sphene");
-            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
-            SpheneUI.Text.ColoredWrapped("Include your Discord username or ID in the donation message so your supporter status can be linked.", ImGuiColors.DalamudGrey3);
-            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
-        });
-    }
-
-    private void DrawSupporterStatusCard()
-    {
-        DrawSupporterCard(() =>
-        {
-            SpheneUI.Icons.Icon(FontAwesomeIcon.Crown, SpheneUI.Palette.SpheneGold);
-            ImGui.SameLine();
-            SpheneUI.Text.Big("Supporter Status: Active", SpheneUI.Palette.SpheneGold);
-            SpheneUI.Text.ColoredWrapped("Thank you for supporting Sphene! Your nameplate indicator is visible to other users.", ImGuiColors.DalamudGrey);
-        });
-    }
+    private void DrawSupporterCard(Action content)
+        => DrawSupporterSection(() => SpheneUI.Layout.AccentCard(content));
 
     private void DrawSupporterNameplateSettings()
     {
@@ -2859,69 +2885,27 @@ public class SettingsUi : WindowMediatorSubscriberBase
         }
 
         SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
-        DrawSupporterCard(() =>
-        {
-            SpheneUI.Text.Colored("Symbol & Label", SpheneUI.Palette.LuminousGold);
-            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
+        DrawSupporterSection(() =>
+            SpheneUI.Layout.SectionCard(() =>
+            {
+            DrawSupporterNameplatePreview();
+            SpheneUI.Layout.DistanceSeparator();
 
-            BeginSupporterRow("Symbol & Color");
-            DrawSupporterSymbolPicker("supporterSymbol");
-            ImGui.SameLine();
+            BeginSupporterRow("Symbol");
+            BeginSupporterSwatchCluster(3);
+            DrawSupporterSymbolPicker("supporterSymbol", dockRight: false);
+            ImGui.SameLine(0, SpheneUI.Metrics.Gap);
             DrawSupporterColorKeyPicker("supporterSymbolColor", _configService.Current.SupporterColorKey,
-                key => _configService.Current.SupporterColorKey = key);
-            SpheneUI.AttachTooltip("Game UI foreground color for the symbol. Default: gold (key 43).");
-
-            BeginSupporterRow("Symbol Glow", true);
+                key => _configService.Current.SupporterColorKey = key, dockRight: false);
+            ImGui.SameLine(0, SpheneUI.Metrics.Gap);
             DrawSupporterGlowKeyPicker("supporterSymbolGlow",
                 _configService.Current.SupporterSymbolGlowEnabled, _configService.Current.SupporterSymbolGlowKey,
                 (enabled, key) =>
                 {
                     _configService.Current.SupporterSymbolGlowEnabled = enabled;
                     _configService.Current.SupporterSymbolGlowKey = key;
-                });
-            SpheneUI.AttachTooltip("Edge glow color around the symbol — the outline that looks like a colored halo behind it.");
-
-            var textEnabled = _configService.Current.SupporterTextEnabled;
-            if (SpheneUI.Controls.Toggle("Text Label##supporterTextEnabled", ref textEnabled))
-            {
-                _configService.Current.SupporterTextEnabled = textEnabled;
-                _configService.Save();
-            }
-
-            if (textEnabled)
-            {
-                BeginSupporterRow("Label Text", true);
-                var labelText = _configService.Current.SupporterLabelText ?? string.Empty;
-                if (SpheneUI.Controls.InputText("##supporterLabelText", ref labelText, 30,
-                        dockRight: true))
-                {
-                    _configService.Current.SupporterLabelText = labelText;
-                    _configService.Save();
-                }
-
-                BeginSupporterRow("Label Order", true);
-                var labelOrder = (int)_configService.Current.SupporterLabelOrder;
-                if (SpheneUI.Controls.LabeledCombo("##supporterLabelOrder", ref labelOrder, "Symbol then Text\0Text then Symbol\0"))
-                {
-                    _configService.Current.SupporterLabelOrder = (SupporterLabelOrder)labelOrder;
-                    _configService.Save();
-                }
-
-                BeginSupporterRow("Label Color", true);
-                DrawSupporterColorKeyPicker("supporterLabelColor", _configService.Current.SupporterLabelColorKey,
-                    key => _configService.Current.SupporterLabelColorKey = key);
-                SpheneUI.AttachTooltip("Game UI foreground color for the label text. Default: gold (key 43).");
-
-                BeginSupporterRow("Label Glow", true);
-                DrawSupporterGlowKeyPicker("supporterLabelGlow",
-                    _configService.Current.SupporterLabelGlowEnabled, _configService.Current.SupporterLabelGlowKey,
-                    (enabled, key) =>
-                    {
-                        _configService.Current.SupporterLabelGlowEnabled = enabled;
-                        _configService.Current.SupporterLabelGlowKey = key;
-                    });
-                SpheneUI.AttachTooltip("Edge glow color around the label text — the outline that looks like a colored halo behind it.");
-            }
+                }, dockRight: false);
+            SpheneUI.AttachTooltip("Glyph, text color and optional edge glow for the mark next to your name.");
 
             BeginSupporterRow("Position");
             var position = (int)_configService.Current.SupporterSymbolPosition;
@@ -2930,16 +2914,68 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 _configService.Current.SupporterSymbolPosition = (SupporterSymbolPosition)position;
                 _configService.Save();
             }
-        });
+            SpheneUI.AttachTooltip("Where the mark sits relative to your name. Both repeats the symbol on the right.");
 
-        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
-        DrawSupporterCard(() =>
-        {
-            SpheneUI.Text.Colored("Sphene Icon", SpheneUI.Palette.LuminousGold);
-            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
+            BeginSupporterRow("Title");
+            var titleMode = (int)_configService.Current.SupporterTitlePlacement;
+            if (SpheneUI.Controls.LabeledCombo("##supporterTitlePlacement", ref titleMode,
+                    "Game default\0Above name\0Below name\0Hidden\0"))
+            {
+                _configService.Current.SupporterTitlePlacement = (SupporterTitlePlacement)titleMode;
+                _configService.Save();
+            }
+            SpheneUI.AttachTooltip("Where your game title appears on your nameplate. Game default keeps your in-game nameplate setting.");
+
+            SpheneUI.Layout.DistanceSeparator();
+
+            var textEnabled = _configService.Current.SupporterTextEnabled;
+            if (SpheneUI.Controls.Toggle("Text label##supporterTextEnabled", ref textEnabled))
+            {
+                _configService.Current.SupporterTextEnabled = textEnabled;
+                _configService.Save();
+            }
+            SpheneUI.AttachTooltip("Show a custom text together with the symbol on your nameplate.");
+
+            if (textEnabled)
+            {
+                BeginSupporterRow("Text", true);
+                var labelText = _configService.Current.SupporterLabelText ?? string.Empty;
+                if (SpheneUI.Controls.InputText("##supporterLabelText", ref labelText, 30,
+                        dockRight: true))
+                {
+                    _configService.Current.SupporterLabelText = labelText;
+                    _configService.Save();
+                }
+
+                BeginSupporterRow("Order", true);
+                var labelOrder = (int)_configService.Current.SupporterLabelOrder;
+                if (SpheneUI.Controls.LabeledCombo("##supporterLabelOrder", ref labelOrder, "Symbol then Text\0Text then Symbol\0",
+                        trailingWidth: SpheneUI.Metrics.TrailingIconReserve
+                            + 2f * SpheneUI.Metrics.SwatchSize + 2f * SpheneUI.Metrics.Gap))
+                {
+                    _configService.Current.SupporterLabelOrder = (SupporterLabelOrder)labelOrder;
+                    _configService.Save();
+                }
+                SpheneUI.AttachTooltip("Whether the symbol or the label text comes first.");
+
+                ImGui.SameLine();
+                BeginSupporterSwatchCluster(2);
+                DrawSupporterColorKeyPicker("supporterLabelColor", _configService.Current.SupporterLabelColorKey,
+                    key => _configService.Current.SupporterLabelColorKey = key, dockRight: false);
+                ImGui.SameLine(0, SpheneUI.Metrics.Gap);
+                DrawSupporterGlowKeyPicker("supporterLabelGlow",
+                    _configService.Current.SupporterLabelGlowEnabled, _configService.Current.SupporterLabelGlowKey,
+                    (enabled, key) =>
+                    {
+                        _configService.Current.SupporterLabelGlowEnabled = enabled;
+                        _configService.Current.SupporterLabelGlowKey = key;
+                    }, dockRight: false);
+            }
+
+            SpheneUI.Layout.DistanceSeparator();
 
             var iconEnabled = _configService.Current.SupporterIconEnabled;
-            if (SpheneUI.Controls.Toggle("Icon##supporterIconEnabled", ref iconEnabled))
+            if (SpheneUI.Controls.Toggle("Sphene icon##supporterIconEnabled", ref iconEnabled))
             {
                 _configService.Current.SupporterIconEnabled = iconEnabled;
                 _configService.Save();
@@ -2951,54 +2987,294 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 DrawSupporterIconPicker();
 
                 var iconLabelEnabled = _configService.Current.SupporterIconLabelEnabled;
-                if (SpheneUI.Controls.Toggle("Icon Label##supporterIconLabelEnabled", ref iconLabelEnabled,
-                    indented: true, menuPopupId: iconLabelEnabled ? "SupporterIconLabelMenu" : null))
+                if (SpheneUI.Controls.Toggle("Icon label##supporterIconLabelEnabled", ref iconLabelEnabled,
+                    indented: true))
                 {
                     _configService.Current.SupporterIconLabelEnabled = iconLabelEnabled;
                     _configService.Save();
                 }
                 SpheneUI.AttachTooltip("Draws the configured label text next to the Sphene icon (overlay, not part of the nameplate).");
 
-                if (iconLabelEnabled && SpheneUI.Popups.BeginStyled("SupporterIconLabelMenu"))
+                if (iconLabelEnabled)
                 {
-                    // Popups live outside card bounds — lay out with manual
-                    // label text + hidden-label controls instead of the
-                    // right-docking labeled wrappers.
+                    BeginSupporterRow("Text", true);
                     var iconLabelText = _configService.Current.SupporterIconLabelText ?? string.Empty;
-                    ImGui.AlignTextToFramePadding();
-                    SpheneUI.Text.Colored("Label Text", ImGuiColors.DalamudGrey);
-                    ImGui.SameLine();
-                    ImGui.SetNextItemWidth(150f * ImGuiHelpers.GlobalScale);
-                    if (SpheneUI.Controls.InputText("##supporterIconLabelText", ref iconLabelText, 30))
+                    if (SpheneUI.Controls.InputText("##supporterIconLabelText", ref iconLabelText, 30,
+                            dockRight: true))
                     {
                         _configService.Current.SupporterIconLabelText = iconLabelText;
                         _configService.Save();
                     }
                     SpheneUI.AttachTooltip("Text drawn next to the Sphene icon. Set independently from the nameplate label.");
 
-                    ImGui.AlignTextToFramePadding();
-                    SpheneUI.Text.Colored("Label Color", ImGuiColors.DalamudGrey);
-                    ImGui.SameLine();
-                    var iconLabelColor = ImGui.ColorConvertU32ToFloat4(_configService.Current.SupporterIconLabelColor);
-                    if (SpheneUI.Controls.ColorSwatch("##supporterIconLabelColor", iconLabelColor))
-                    {
-                        ImGui.OpenPopup("supporterIconLabelColorPicker");
-                    }
-                    SpheneUI.AttachTooltip("Custom color for the icon label text (free RGBA picker).");
-                    if (SpheneUI.Popups.BeginStyled("supporterIconLabelColorPicker"))
-                    {
-                        if (ImGui.ColorPicker4("##supporterIconLabelColorPicker", ref iconLabelColor,
-                            ImGuiColorEditFlags.AlphaBar | ImGuiColorEditFlags.NoLabel))
+                    BeginSupporterRow("Colors", true);
+                    BeginSupporterSwatchCluster(2);
+                    DrawIconLabelColorPicker("supporterIconLabelFg",
+                        _configService.Current.SupporterIconLabelColor,
+                        color => _configService.Current.SupporterIconLabelColor = color);
+                    ImGui.SameLine(0, SpheneUI.Metrics.Gap);
+                    DrawIconLabelEdgePicker("supporterIconLabelEdge",
+                        _configService.Current.SupporterIconLabelEdgeEnabled,
+                        _configService.Current.SupporterIconLabelEdgeColor,
+                        (enabled, color) =>
                         {
-                            _configService.Current.SupporterIconLabelColor = ImGui.ColorConvertFloat4ToU32(iconLabelColor);
-                            _configService.Save();
-                        }
-                        SpheneUI.Popups.EndStyled();
-                    }
-                    SpheneUI.Popups.EndStyled();
+                            _configService.Current.SupporterIconLabelEdgeEnabled = enabled;
+                            _configService.Current.SupporterIconLabelEdgeColor = color;
+                        });
                 }
             }
-        });
+            }, title: "Nameplate", accentColor: SpheneUI.Palette.LuminousGold,
+            description: "How your name appears to other Sphene users in game."));
+    }
+
+    /// <summary>
+    /// Mock nameplate strip inside the settings card: renders the configured
+    /// mark, label, icon and colors around the player's name so every control
+    /// below shows its effect immediately.
+    /// </summary>
+    private void DrawSupporterNameplatePreview()
+    {
+        var cfg = _configService.Current;
+        var scale = SpheneUI.Scale;
+        var symbol = cfg.SupporterSymbolChar ?? string.Empty;
+        var label = cfg.SupporterTextEnabled ? cfg.SupporterLabelText ?? string.Empty : string.Empty;
+
+        // Real nameplate data captured by the service — formatted display name,
+        // quoted title + FC tag and the actual nameplate text/edge colors.
+        var plate = _supporterNameplateService.LocalPlate;
+        var name = plate?.Name;
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            name = _uiShared.PlayerName;
+        }
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            name = "Player Name";
+        }
+        var fcTag = plate?.QuotedFreeCompanyTag ?? string.Empty;
+        var title = plate?.QuotedTitle ?? string.Empty;
+        var titleShown = title.Length > 0 && cfg.SupporterTitlePlacement switch
+        {
+            SupporterTitlePlacement.AboveName or SupporterTitlePlacement.BelowName => true,
+            SupporterTitlePlacement.Hidden => false,
+            _ => plate?.DisplayTitle ?? false,
+        };
+        var titleAbove = cfg.SupporterTitlePlacement switch
+        {
+            SupporterTitlePlacement.AboveName => true,
+            SupporterTitlePlacement.BelowName => false,
+            _ => plate?.IsPrefixTitle ?? true,
+        };
+        var textColor = plate.HasValue ? PlateColor(plate.Value.TextColor) : SpheneUI.Colors.TextPrimary;
+        var edgeColor = plate.HasValue ? (Vector4?)PlateColor(plate.Value.EdgeColor) : null;
+        var nameFg = plate?.NameColors.Foreground is { } nf ? PlateColor(nf) : textColor;
+        var nameEdge = plate?.NameColors.Edge is { } ne ? (Vector4?)PlateColor(ne) : edgeColor;
+        var titleFg = plate?.TitleColors.Foreground is { } tf ? PlateColor(tf) : textColor;
+        var titleEdge = plate?.TitleColors.Edge is { } te ? (Vector4?)PlateColor(te) : edgeColor;
+        var fcFg = plate?.FreeCompanyColors.Foreground is { } ff ? PlateColor(ff) : textColor;
+        var fcEdge = plate?.FreeCompanyColors.Edge is { } fe ? (Vector4?)PlateColor(fe) : edgeColor;
+
+        // Key 0 disables the color payload — the part renders in the
+        // nameplate's own text color.
+        var symbolFg = cfg.SupporterColorKey == 0 ? textColor : ResolveUiForegroundColor(cfg.SupporterColorKey);
+        var labelFg = cfg.SupporterLabelColorKey == 0 ? textColor : ResolveUiForegroundColor(cfg.SupporterLabelColorKey);
+        // Without an explicit glow the game renders supporter parts with the
+        // regular nameplate text edge.
+        var symbolGlow = cfg.SupporterSymbolGlowEnabled ? ResolveUiGlowColor(cfg.SupporterSymbolGlowKey) : edgeColor;
+        var labelGlow = cfg.SupporterLabelGlowEnabled ? ResolveUiGlowColor(cfg.SupporterLabelGlowKey) : edgeColor;
+        var symbolFirst = cfg.SupporterLabelOrder == SupporterLabelOrder.SymbolThenText;
+        var position = cfg.SupporterSymbolPosition;
+        var showLeft = position != SupporterSymbolPosition.Right;
+        var showRight = position != SupporterSymbolPosition.Left;
+
+        var icon = cfg.SupporterIconEnabled
+            ? _supporterIconService.GetIcon(cfg.SupporterIconId ?? string.Empty) : null;
+        // The default Sphene icon is not a catalog entry — it lives in the
+        // nameplate service's embedded texture.
+        IDalamudTextureWrap? defaultIconWrap = null;
+        if (cfg.SupporterIconEnabled && icon == null)
+        {
+            _ = _supporterNameplateService.TryGetDefaultIconWrap(out defaultIconWrap);
+        }
+        var iconLabel = cfg.SupporterIconLabelEnabled
+            ? cfg.SupporterIconLabelText ?? string.Empty : string.Empty;
+        var iconLabelFg = ImGui.ColorConvertU32ToFloat4(cfg.SupporterIconLabelColor);
+        var iconLabelEdge = cfg.SupporterIconLabelEdgeEnabled
+            ? (Vector4?)ImGui.ColorConvertU32ToFloat4(cfg.SupporterIconLabelEdgeColor)
+            : null;
+
+        var textH = ImGui.GetTextLineHeight();
+        var spaceW = ImGui.CalcTextSize(" ").X;
+        var markGap = 8f * scale;
+        var iconHeight = textH * 1.15f;
+        var iconSize = icon != null ? icon.AspectSize(iconHeight)
+            : defaultIconWrap != null ? new Vector2(iconHeight) : Vector2.Zero;
+
+        float PartW(string s) => s.Length == 0 ? 0f : ImGui.CalcTextSize(s).X;
+        float MarkW(bool withLabel)
+        {
+            var w = (symbol.Length > 0 ? PartW(symbol) : 0f)
+                + (withLabel && label.Length > 0 ? PartW(label) : 0f);
+            if (w > 0f && symbol.Length > 0 && withLabel && label.Length > 0)
+            {
+                w += spaceW;
+            }
+            return w;
+        }
+
+        var leftW = showLeft ? MarkW(withLabel: true) : 0f;
+        // "Both" repeats only the symbol on the right, mirroring the service.
+        var rightW = showRight ? MarkW(withLabel: position == SupporterSymbolPosition.Right) : 0f;
+        var fcW = PartW(fcTag);
+        var titleW = PartW(title);
+        var iconLabelW = PartW(iconLabel);
+        var totalW = leftW + PartW(name) + rightW + fcW + iconSize.X + iconLabelW
+            + (leftW > 0f ? markGap : 0f)
+            + (rightW > 0f ? markGap : 0f)
+            + (fcW > 0f ? markGap : 0f)
+            + (iconSize.X > 0f ? markGap : 0f)
+            + (iconLabelW > 0f && iconSize.X > 0f ? spaceW : 0f);
+
+        var drawList = ImGui.GetWindowDrawList();
+        var stripMin = ImGui.GetCursorScreenPos();
+        var stripW = MathF.Max(0f, SpheneUI.Controls.BoundedAvailX());
+        var padY = 7f * scale;
+        var lineGap = 3f * scale;
+        var stripH = textH + padY * 2f + (titleShown ? textH + lineGap : 0f);
+        var radius = 6f * scale;
+        drawList.AddRectFilled(stripMin, stripMin + new Vector2(stripW, stripH),
+            ImGui.ColorConvertFloat4ToU32(SpheneUI.Colors.FrameBg with { W = 0.55f }), radius);
+        drawList.AddRect(stripMin, stripMin + new Vector2(stripW, stripH),
+            ImGui.ColorConvertFloat4ToU32(SpheneUI.Colors.Border with { W = 0.6f }), radius);
+        ImGui.Dummy(new Vector2(stripW, stripH));
+
+        var nameLineY = stripMin.Y + padY + (titleShown && titleAbove ? textH + lineGap : 0f);
+        var x = stripMin.X + MathF.Max(8f * scale, (stripW - totalW) * 0.5f);
+        var y = nameLineY;
+        var glowOff = MathF.Max(1f, scale);
+
+        void DrawPart(string text, Vector4 fg, Vector4? glow)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                return;
+            }
+            if (glow.HasValue)
+            {
+                var glowU32 = ImGui.ColorConvertFloat4ToU32(glow.Value);
+                drawList.AddText(new Vector2(x + glowOff, y), glowU32, text);
+                drawList.AddText(new Vector2(x - glowOff, y), glowU32, text);
+                drawList.AddText(new Vector2(x, y + glowOff), glowU32, text);
+                drawList.AddText(new Vector2(x, y - glowOff), glowU32, text);
+            }
+            drawList.AddText(new Vector2(x, y), ImGui.ColorConvertFloat4ToU32(fg), text);
+            x += PartW(text);
+        }
+
+        void DrawMark(bool withLabel)
+        {
+            var drew = false;
+            void Part(string text, Vector4 fg, Vector4? glow)
+            {
+                if (string.IsNullOrEmpty(text))
+                {
+                    return;
+                }
+                if (drew)
+                {
+                    x += spaceW;
+                }
+                DrawPart(text, fg, glow);
+                drew = true;
+            }
+            if (symbolFirst)
+            {
+                Part(symbol, symbolFg, symbolGlow);
+                if (withLabel)
+                {
+                    Part(label, labelFg, labelGlow);
+                }
+            }
+            else
+            {
+                if (withLabel)
+                {
+                    Part(label, labelFg, labelGlow);
+                }
+                Part(symbol, symbolFg, symbolGlow);
+            }
+        }
+
+        if (titleShown)
+        {
+            var titleY = titleAbove
+                ? stripMin.Y + padY
+                : stripMin.Y + padY + textH + lineGap;
+            var savedPos = new Vector2(x, y);
+            x = stripMin.X + MathF.Max(8f * scale, (stripW - titleW) * 0.5f);
+            y = titleY;
+            DrawPart(title, titleFg, titleEdge);
+            x = savedPos.X;
+            y = savedPos.Y;
+        }
+
+        if (leftW > 0f)
+        {
+            DrawMark(withLabel: true);
+            x += markGap;
+        }
+        DrawPart(name, nameFg, nameEdge);
+        if (rightW > 0f)
+        {
+            x += markGap;
+            DrawMark(withLabel: position == SupporterSymbolPosition.Right);
+        }
+        if (fcW > 0f)
+        {
+            x += markGap;
+            DrawPart(fcTag, fcFg, fcEdge);
+        }
+        // Small down-bias like GetNameplateIconPosition's 0.55 line factor —
+        // glyphs sit baseline-low, so the icon centers a hair below the
+        // geometric line center.
+        var iconAnchorY = nameLineY + (textH - iconSize.Y) * 0.5f + textH * 0.05f;
+        if (icon != null)
+        {
+            x += markGap;
+            var (handle, uv0, uv1) = icon.GetFrame(ImGui.GetTime());
+            SpheneUI.Media.SpriteInRect(drawList, handle,
+                new Vector2(x, iconAnchorY), new Vector2(x + iconSize.X, iconAnchorY + iconSize.Y), uv0, uv1);
+            x += iconSize.X;
+        }
+        else if (defaultIconWrap != null)
+        {
+            x += markGap;
+            SpheneUI.Media.ImageInRect(drawList, defaultIconWrap,
+                new Vector2(x, iconAnchorY), new Vector2(x + iconSize.X, iconAnchorY + iconSize.Y));
+            x += iconSize.X;
+        }
+        if (iconLabelW > 0f && (icon != null || defaultIconWrap != null))
+        {
+            x += spaceW;
+            DrawPart(iconLabel, iconLabelFg, iconLabelEdge);
+        }
+    }
+
+    /// <summary>
+    /// Positions the cursor so <paramref name="count"/> swatches drawn via
+    /// SameLine end flush at the shared control edge, vertically centered on
+    /// the current frame row.
+    /// </summary>
+    private static void BeginSupporterSwatchCluster(int count)
+    {
+        var swatch = SpheneUI.Metrics.SwatchSize;
+        var gap = SpheneUI.Metrics.Gap;
+        var width = count * swatch + (count - 1) * gap;
+        var cursor = ImGui.GetCursorScreenPos();
+        var right = cursor.X + SpheneUI.Controls.BoundedAvailX()
+            - SpheneUI.Metrics.TrailingIconReserve;
+        ImGui.SetCursorScreenPos(new Vector2(right - width,
+            cursor.Y + (ImGui.GetFrameHeight() - swatch) * 0.5f));
     }
 
     private static void BeginSupporterRow(string label, bool indented = false)
@@ -3076,7 +3352,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
     private const int UiForegroundKeyExtendedMax = 511;
     private const int UiForegroundPaletteMaxIndex = UiForegroundKeyInlineMax + (UiForegroundKeyExtendedMax - UiForegroundKeyExtendedStart + 1);
 
-    private void DrawSupporterColorKeyPicker(string id, ushort colorKey, Action<ushort> apply)
+    private void DrawSupporterColorKeyPicker(string id, ushort colorKey, Action<ushort> apply,
+        bool dockRight = true)
     {
         var preview = ResolveUiForegroundColor(colorKey);
         var swatchSize = SpheneUI.Metrics.SwatchSize;
@@ -3084,32 +3361,45 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
         // Dock the swatch flush with the shared control edge (bound minus the
         // help column so it aligns with every other value control on the page).
-        SpheneUI.Controls.DockToRightEdge(swatchSize);
+        if (dockRight)
+        {
+            SpheneUI.Controls.DockToRightEdge(swatchSize);
+        }
 
-        if (SpheneUI.Controls.ColorSwatch(popupId + "_btn", preview))
+        var clicked = colorKey == 0
+            ? SpheneUI.Controls.GlyphSwatch(popupId + "_btn", "–", swatchSize)
+            : SpheneUI.Controls.ColorSwatch(popupId + "_btn", preview);
+        if (clicked)
         {
             ImGui.OpenPopup(popupId);
         }
-        SpheneUI.AttachTooltip(
-            $"Game UI foreground color (key {colorKey}). Click to choose a color.");
+        SpheneUI.AttachTooltip(colorKey == 0
+            ? "No text color — the nameplate default is used. Click to pick a color."
+            : $"Game UI foreground color (key {colorKey}). Click to choose a color.");
 
         if (SpheneUI.Popups.BeginStyled(popupId))
         {
+            // Key 0 is the payload's disabled state — the transparent cell
+            // offers it as "no color, keep the default nameplate color".
             DrawSupporterPaletteCells(SortedUiForegroundKeys(), ResolveUiForegroundColor,
-                colorKey, true, apply);
+                colorKey, colorKey != 0, apply, applyNone: () => apply(0));
             SpheneUI.Popups.EndStyled();
         }
     }
 
-    private void DrawSupporterGlowKeyPicker(string id, bool enabled, ushort colorKey, Action<bool, ushort> apply)
+    private void DrawSupporterGlowKeyPicker(string id, bool enabled, ushort colorKey,
+        Action<bool, ushort> apply, bool dockRight = true)
     {
         var swatchSize = SpheneUI.Metrics.SwatchSize;
         var popupId = "##" + id + "_palette";
 
-        SpheneUI.Controls.DockToRightEdge(swatchSize);
+        if (dockRight)
+        {
+            SpheneUI.Controls.DockToRightEdge(swatchSize);
+        }
 
         var clicked = enabled
-            ? SpheneUI.Controls.ColorSwatch(popupId + "_btn", ResolveUiGlowColor(colorKey))
+            ? SpheneUI.Controls.FrameSwatch(popupId + "_btn", ResolveUiGlowColor(colorKey))
             : SpheneUI.Controls.GlyphSwatch(popupId + "_btn", "–", swatchSize);
         if (clicked)
         {
@@ -3121,33 +3411,106 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
         if (SpheneUI.Popups.BeginStyled(popupId))
         {
+            DrawSupporterPaletteCells(SortedUiGlowKeys(), ResolveUiGlowColor,
+                colorKey, enabled, key => apply(true, key), frame: true,
+                applyNone: () => apply(false, colorKey));
+            SpheneUI.Popups.EndStyled();
+        }
+    }
+
+    /// <summary>
+    /// Free RGBA picker for the icon label fill — a regular filled swatch,
+    /// since the color is what fills the letters.
+    /// </summary>
+    private void DrawIconLabelColorPicker(string id, uint color, Action<uint> apply)
+    {
+        var preview = ImGui.ColorConvertU32ToFloat4(color);
+        var popupId = "##" + id + "_picker";
+        if (SpheneUI.Controls.ColorSwatch(popupId + "_btn", preview))
+        {
+            ImGui.OpenPopup(popupId);
+        }
+        SpheneUI.AttachTooltip("Fill color of the icon label text. Click to pick a color.");
+        if (SpheneUI.Popups.BeginStyled(popupId))
+        {
+            if (ImGui.ColorPicker4(popupId, ref preview,
+                ImGuiColorEditFlags.AlphaBar | ImGuiColorEditFlags.NoLabel))
+            {
+                apply(ImGui.ColorConvertFloat4ToU32(preview));
+                _configService.Save();
+            }
+            SpheneUI.Popups.EndStyled();
+        }
+    }
+
+    /// <summary>
+    /// Free RGBA picker for the icon label outline — rendered as a frame ring
+    /// so the swatch reads as "edge" rather than fill. Disabled state shows a
+    /// dash like the glow pickers; the popup offers None + the color picker.
+    /// </summary>
+    private void DrawIconLabelEdgePicker(string id, bool enabled, uint color, Action<bool, uint> apply)
+    {
+        var popupId = "##" + id + "_picker";
+        var clicked = enabled
+            ? SpheneUI.Controls.FrameSwatch(popupId + "_btn", ImGui.ColorConvertU32ToFloat4(color))
+            : SpheneUI.Controls.GlyphSwatch(popupId + "_btn", "–");
+        if (clicked)
+        {
+            ImGui.OpenPopup(popupId);
+        }
+        SpheneUI.AttachTooltip(enabled
+            ? "Outline color drawn as a frame around the icon label text. Click to change or disable."
+            : "Label outline disabled. Click to pick a color.");
+        if (SpheneUI.Popups.BeginStyled(popupId))
+        {
             if (SpheneUI.Controls.Selectable("None", !enabled))
             {
-                apply(false, colorKey);
+                apply(false, color);
                 _configService.Save();
                 ImGui.CloseCurrentPopup();
             }
-            DrawSupporterPaletteCells(SortedUiGlowKeys(), ResolveUiGlowColor,
-                colorKey, enabled, key => apply(true, key));
+            var preview = ImGui.ColorConvertU32ToFloat4(color);
+            if (ImGui.ColorPicker4(popupId, ref preview,
+                ImGuiColorEditFlags.AlphaBar | ImGuiColorEditFlags.NoLabel))
+            {
+                apply(true, ImGui.ColorConvertFloat4ToU32(preview));
+                _configService.Save();
+            }
             SpheneUI.Popups.EndStyled();
         }
     }
 
     private void DrawSupporterPaletteCells(List<ushort> palette, Func<ushort, Vector4> resolveColor,
-        ushort selectedKey, bool hasSelection, Action<ushort> apply)
+        ushort selectedKey, bool hasSelection, Action<ushort> apply,
+        bool frame = false, Action? applyNone = null)
     {
         const int columns = 8;
         var cell = ImGui.GetFrameHeight() + 2f * ImGuiHelpers.GlobalScale;
+        var leadingNone = applyNone != null ? 1 : 0;
+        if (applyNone != null)
+        {
+            if (SpheneUI.Controls.TransparentSwatch("swNone", cell, !hasSelection))
+            {
+                applyNone();
+                _configService.Save();
+                ImGui.CloseCurrentPopup();
+            }
+            SpheneUI.AttachTooltip("None — no color.");
+        }
         for (var i = 0; i < palette.Count; i++)
         {
             var key = palette[i];
-            if (i % columns != 0)
+            if ((i + leadingNone) % columns != 0)
             {
                 ImGui.SameLine(0, SpheneUI.Metrics.Gap);
             }
             using var swatchId = ImRaii.PushId("sw" + i);
-            if (SpheneUI.Controls.ColorSwatch("swatch",
-                resolveColor(key), cell, hasSelection && key == selectedKey))
+            var clicked = frame
+                ? SpheneUI.Controls.FrameSwatch("swatch",
+                    resolveColor(key), cell, hasSelection && key == selectedKey)
+                : SpheneUI.Controls.ColorSwatch("swatch",
+                    resolveColor(key), cell, hasSelection && key == selectedKey);
+            if (clicked)
             {
                 apply(key);
                 _configService.Save();
@@ -3158,7 +3521,6 @@ public class SettingsUi : WindowMediatorSubscriberBase
     }
 
     private static List<ushort>? _sortedUiForegroundKeys;
-    private static List<ushort>? _sortedUiGlowKeys;
 
     /// <summary>
     /// The UI-foreground color keys in palette order: greys first (light to
@@ -3169,11 +3531,12 @@ public class SettingsUi : WindowMediatorSubscriberBase
         => _sortedUiForegroundKeys ??= SortedUiColorKeys(ResolveUiForegroundColor);
 
     /// <summary>
-    /// The UI-glow color keys in palette order, following the same ordering
-    /// rules as the foreground palette.
+    /// Glow pickers show the same key set in the same order as the foreground
+    /// palette — only the resolved cell colors differ. Sorting the glow
+    /// palette by its own colors produced a diverging order.
     /// </summary>
     private static List<ushort> SortedUiGlowKeys()
-        => _sortedUiGlowKeys ??= SortedUiColorKeys(ResolveUiGlowColor);
+        => SortedUiForegroundKeys();
 
     private static List<ushort> SortedUiColorKeys(Func<ushort, Vector4> resolveColor)
     {
@@ -3182,6 +3545,13 @@ public class SettingsUi : WindowMediatorSubscriberBase
         for (var i = 0; i <= UiForegroundPaletteMaxIndex; i++)
         {
             var key = UiForegroundPaletteIndexToColorKey(i);
+            // Key 0 has no UIColor row — it is the "color off" state, not a
+            // color. Rendered as a black cell it picks a disabled payload and
+            // the nameplate falls back to the default text color.
+            if (key == 0)
+            {
+                continue;
+            }
             var color = resolveColor(key);
             if (!seen.Add(ImGui.ColorConvertFloat4ToU32(color)))
             {
@@ -3250,7 +3620,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         h = (h * 60f + 360f) % 360f;
     }
 
-    private void DrawSupporterSymbolPicker(string id)
+    private void DrawSupporterSymbolPicker(string id, bool dockRight = true)
     {
         var symbolChar = _configService.Current.SupporterSymbolChar ?? string.Empty;
         var popupId = "##" + id + "_palette";
@@ -3260,8 +3630,11 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
         // Reserve the color swatch slot that follows on the same row so both
         // controls end flush at the shared right edge together.
-        SpheneUI.Controls.DockToRightEdge(buttonSize,
-            SpheneUI.Metrics.Gap + SpheneUI.Metrics.SwatchSize);
+        if (dockRight)
+        {
+            SpheneUI.Controls.DockToRightEdge(buttonSize,
+                SpheneUI.Metrics.Gap + SpheneUI.Metrics.SwatchSize);
+        }
         if (SpheneUI.Controls.GlyphSwatch(popupId + "_btn",
                 symbolChar.Length > 0 ? symbolChar : "–", buttonSize))
         {
@@ -3312,6 +3685,14 @@ public class SettingsUi : WindowMediatorSubscriberBase
         }
     }
 
+    /// <summary>
+    /// Converts a packed nameplate color (<c>0xRRGGBBAA</c>, as stored in the
+    /// nameplate info object) to a <see cref="Vector4"/>.
+    /// </summary>
+    private static Vector4 PlateColor(uint c)
+        => new(((c >> 24) & 0xFF) / 255f, ((c >> 16) & 0xFF) / 255f,
+            ((c >> 8) & 0xFF) / 255f, (c & 0xFF) / 255f);
+
     private static Vector4 ResolveUiForegroundColor(ushort colorKey)
     {
         try
@@ -3345,46 +3726,6 @@ public class SettingsUi : WindowMediatorSubscriberBase
         return index <= UiForegroundKeyInlineMax
             ? (ushort)index
             : (ushort)(UiForegroundKeyExtendedStart + index - UiForegroundKeyInlineMax - 1);
-    }
-
-    private static void CenterSupporterCursorX(float contentWidth)
-    {
-        var offset = MathF.Max(0f, (SpheneUI.Controls.BoundedAvailX() - contentWidth) * 0.5f);
-        ImGui.SetCursorPosX(ImGui.GetCursorPosX() + offset);
-    }
-
-    private static void DrawCenteredSupporterIcon(FontAwesomeIcon icon, Vector4 color, float scale)
-    {
-        var iconText = icon.ToIconString();
-        Vector2 iconSize;
-        using (SpheneUI.IconFont.Push())
-        {
-            ImGui.SetWindowFontScale(scale);
-            iconSize = ImGui.CalcTextSize(iconText);
-            ImGui.SetWindowFontScale(1f);
-        }
-        CenterSupporterCursorX(iconSize.X);
-        ImGui.SetWindowFontScale(scale);
-        SpheneUI.Icons.Icon(icon, color);
-        ImGui.SetWindowFontScale(1f);
-    }
-
-    private static void DrawCenteredSupporterHeadline(string text)
-    {
-        float textWidth;
-        using (SpheneUI.UidFont.Push())
-        {
-            textWidth = ImGui.CalcTextSize(text).X;
-        }
-        CenterSupporterCursorX(textWidth);
-        SpheneUI.Text.Big(text, SpheneUI.Palette.LuminousGold);
-    }
-
-    private static void DrawSupporterPerkLine(string text)
-    {
-        SpheneUI.Icons.Icon(FontAwesomeIcon.CheckCircle, SpheneUI.Palette.SpheneGold);
-        ImGui.SameLine();
-        SpheneUI.Text.ColoredWrapped(text, ImGuiColors.DalamudGrey);
     }
 
     private void DrawExportBackupModal()
@@ -5193,25 +5534,25 @@ public class SettingsUi : WindowMediatorSubscriberBase
         {
             return;
         }
-        var (category, label) = SettingsCrumbInfo(DiagnosticsPageLabel);
+        var (category, label) = SettingsCrumbInfo(DiagnosticsPageLabel, _activeSettingsPage);
         SpheneUI.Chrome.CrumbPill(
             new Vector2(crumbX, zoneMin.Y + (zoneHeight - pillH) * 0.5f),
             zoneMax.X - crumbX, category, label, null);
     }
 
-    /// <summary>Raised when the active settings page changes through user navigation — args are (previous, next); the hub folds it into its own breadcrumb/history.</summary>
-    internal event Action<SettingsPage, SettingsPage>? SettingsPageChanged;
+    /// <summary>Raised when the active settings page changes through user navigation — args are (previous, next, embedded). The hub folds embedded-surface changes into its own breadcrumb/history.</summary>
+    internal event Action<SettingsPage, SettingsPage, bool>? SettingsPageChanged;
 
-    /// <summary>The currently shown settings page — read by the hub for its crumb.</summary>
-    internal SettingsPage ActiveSettingsPageValue => _activeSettingsPage;
+    /// <summary>The page the Hub-embedded settings shows — read by the hub for its crumb. The standalone window has its own page state.</summary>
+    internal SettingsPage ActiveSettingsPageValue => _embeddedSettingsPage;
 
-    /// <summary>Label of the active settings page for breadcrumb rendering.</summary>
-    internal string ActiveCrumbLabel => SettingsCrumbInfo(DiagnosticsPageLabel).Label;
+    /// <summary>Label of the embedded settings page for the hub breadcrumb.</summary>
+    internal string ActiveCrumbLabel => SettingsCrumbInfo(DiagnosticsPageLabel, _embeddedSettingsPage).Label;
 
-    /// <summary>Applies a page without recording it in either history — used for hub-driven restores.</summary>
+    /// <summary>Applies a page to the Hub-embedded settings without recording it in history — used for hub-driven restores.</summary>
     internal void ApplySettingsPageQuiet(SettingsPage page)
     {
-        _activeSettingsPage = page;
+        _embeddedSettingsPage = page;
     }
 
     /// <summary>Switches the active settings page and records it in the title bar back/forward history.</summary>
@@ -5225,7 +5566,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         _settingsNavForward.Clear();
         var previous = _activeSettingsPage;
         _activeSettingsPage = page;
-        SettingsPageChanged?.Invoke(previous, page);
+        SettingsPageChanged?.Invoke(previous, page, _embeddedScope);
     }
 
     private void SettingsNavigateBack()

@@ -40,6 +40,7 @@ public sealed class ChangelogService
             {
                 var requestedNormalized = ParseVersionSafe(version);
                 JsonElement? normalizedMatch = null;
+                JsonElement? coreMatch = null;
                 foreach (var item in changelogs.EnumerateArray())
                 {
                     if (item.ValueKind != JsonValueKind.Object)
@@ -55,16 +56,18 @@ public sealed class ChangelogService
                         break;
                     }
 
-                    if (normalizedMatch == null && ParseVersionSafe(v).Equals(requestedNormalized))
+                    var parsedCandidate = ParseVersionSafe(v);
+                    if (normalizedMatch == null && parsedCandidate.Equals(requestedNormalized))
                     {
                         normalizedMatch = item;
                     }
+                    if (coreMatch == null && SameCoreVersion(parsedCandidate, requestedNormalized))
+                    {
+                        coreMatch = item;
+                    }
                 }
 
-                if (selected == null && normalizedMatch != null)
-                {
-                    selected = normalizedMatch;
-                }
+                selected ??= normalizedMatch ?? coreMatch;
             }
             else
             {
@@ -96,7 +99,14 @@ public sealed class ChangelogService
 
             if (selected is null)
             {
-                _logger.LogWarning("No matching or fallback changelog entry found");
+                if (requireExactVersion)
+                {
+                    _logger.LogDebug("No changelog entry found for version {version}", version);
+                }
+                else
+                {
+                    _logger.LogWarning("No matching or fallback changelog entry found");
+                }
                 return null;
             }
 
@@ -206,6 +216,7 @@ public async Task<List<ReleaseChangelogViewEntry>> GetChangelogEntriesAsync(Canc
                     ? (dProp.GetString() ?? string.Empty).Trim()
                     : string.Empty;
                 entry.IsPrerelease = item.TryGetProperty("isPrerelease", out var prProp) && prProp.ValueKind == JsonValueKind.True;
+                ExtractLegacyTitleDate(entry);
 
                 if (item.TryGetProperty("changes", out var changesProp) && changesProp.ValueKind == JsonValueKind.Array)
                 {
@@ -323,6 +334,38 @@ public async Task<List<ReleaseChangelogViewEntry>> GetChangelogEntriesAsync(Canc
 
         return lines;
     }
+
+    // Legacy v1-era entries carry the date inside the title as "[YY-MM-DD]"
+    // or "[YYYY-MM-DD]" — move it into Date and keep only the trailing title.
+    private static void ExtractLegacyTitleDate(ReleaseChangelogViewEntry entry)
+    {
+        if (!string.IsNullOrWhiteSpace(entry.Date) || string.IsNullOrWhiteSpace(entry.Title))
+            return;
+        var t = entry.Title.Trim();
+        if (!t.StartsWith('['))
+            return;
+        var end = t.IndexOf(']');
+        if (end <= 1)
+            return;
+        var parts = t.Substring(1, end - 1).Trim().Split('-');
+        if (parts.Length != 3)
+            return;
+        foreach (var p in parts)
+        {
+            if (p.Length == 0 || p.Length > 4 || !p.All(char.IsDigit))
+            {
+                return;
+            }
+        }
+        if (parts[0].Length != 2 && parts[0].Length != 4)
+            return;
+        var year = parts[0].Length == 2 ? $"20{parts[0]}" : parts[0];
+        entry.Date = $"{year}-{parts[1].PadLeft(2, '0')}-{parts[2].PadLeft(2, '0')}";
+        entry.Title = t[(end + 1)..].Trim();
+    }
+
+    private static bool SameCoreVersion(Version a, Version b)
+        => a.Major == b.Major && a.Minor == b.Minor && a.Build == b.Build;
 
     private static Version ParseVersionSafe(string? v)
     {

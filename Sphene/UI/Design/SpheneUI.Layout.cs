@@ -111,7 +111,10 @@ public static partial class SpheneUI
                     }
                 }
                 ImGui.TableNextColumn();
-                ImGui.PushTextWrapPos(width);
+                // Wrap at the cell's right edge — PushTextWrapPos takes a
+                // window-local X, not a width, so starting mid-row (side-by-
+                // side regions) must add the column's own offset.
+                ImGui.PushTextWrapPos(ImGui.GetCursorPosX() + ImGui.GetContentRegionAvail().X);
                 content();
                 ImGui.PopTextWrapPos();
                 ImGui.EndTable();
@@ -559,7 +562,15 @@ public static partial class SpheneUI
             _activeExpander = null;
             var bottom = ImGui.GetCursorScreenPos().Y;
             var pad = ImGui.GetStyle().WindowPadding.Y;
-            st.ContentH = bottom - st.TopY + pad;
+            // Measure only while animating (or until first content arrives):
+            // re-measuring a fully-open, possibly clipped child each frame can
+            // feed a jittering content height back into BeginExpander's size —
+            // the enclosing scroll area then oscillates and clamps ScrollY,
+            // which is the "scroll snaps back to top" symptom.
+            if (st.T < 1f || st.ContentH <= 0f)
+            {
+                st.ContentH = bottom - st.TopY + pad;
+            }
             ImGui.EndChild();
             ImGui.PopStyleColor(2);
             ImGui.PopStyleVar(4);
@@ -1108,6 +1119,38 @@ public static partial class SpheneUI
             }
 
             ImGui.SetCursorScreenPos(new Vector2(startPos.X, boxMax.Y + Spacing.X4.Scaled));
+        }
+
+        /// <summary>Width <see cref="Badge"/> occupies for <paramref name="text"/>.</summary>
+        public static float BadgeWidth(string text)
+            => ImGui.CalcTextSize(text).X + 14f * SpheneUI.Scale;
+
+        /// <summary>Height <see cref="Badge"/> occupies on the row.</summary>
+        public static float BadgeHeight => ImGui.GetTextLineHeight() + 4f * SpheneUI.Scale;
+
+        /// <summary>
+        /// Inline tag pill: tinted rounded chip drawn at the cursor (soft
+        /// accent underlay + hairline border) — e.g. "NEW"/"BETA" markers on
+        /// list rows. Advances the cursor by the chip width and returns it.
+        /// </summary>
+        public static float Badge(string text, Vector4 color)
+        {
+            var scale = SpheneUI.Scale;
+            var drawList = ImGui.GetWindowDrawList();
+            var pos = ImGui.GetCursorScreenPos();
+            var chipW = BadgeWidth(text);
+            var chipH = BadgeHeight;
+            var padX = 7f * scale;
+            var padY = 2f * scale;
+            var chipMax = pos + new Vector2(chipW, chipH);
+            drawList.AddRectFilled(pos, chipMax,
+                ColorUtils.ToU32(ColorUtils.WithAlpha(color, 0.14f)), chipH * 0.5f);
+            drawList.AddRect(pos, chipMax,
+                ColorUtils.ToU32(ColorUtils.WithAlpha(color, 0.35f)), chipH * 0.5f);
+            drawList.AddText(pos + new Vector2(padX, padY),
+                ColorUtils.ToU32(Colors.TextPrimary), text);
+            ImGui.SetCursorScreenPos(pos + new Vector2(chipW, 0f));
+            return chipW;
         }
 
         /// <summary>Draws <paramref name="imguiDrawAction"/> inside a group with a rounded frame.</summary>
@@ -1747,6 +1790,44 @@ public static partial class SpheneUI
             drawList.AddRectFilledMultiColor(new Vector2(pos.X, pos.Y),
                 new Vector2(span, pos.Y + lineHeight), fromCol, toCol, toCol, fromCol);
             ImGuiHelpers.ScaledDummy(0, 5);
+        }
+
+        /// <summary>
+        /// Uppercase centered category label inside a nav rail that cooperates
+        /// with the pinned band: when <paramref name="pinnedCategories"/> is
+        /// supplied the label's center is recorded and the label either draws
+        /// in-flow or reserves its slot once the pinned band covers it. Pass
+        /// null to always draw in-flow.
+        /// </summary>
+        public static void NavRailCategoryLabel(string label, Vector4 accent,
+            List<(string Label, float CenterY, Vector4 Accent)>? pinnedCategories, float pinnedCenterY)
+        {
+            VerticalSpace(Spacing.X4);
+            var text = label.ToUpperInvariant();
+            var drawnInBand = false;
+            if (pinnedCategories != null)
+            {
+                var labelTop = ImGui.GetCursorScreenPos().Y;
+                var labelCenter = labelTop + ImGui.GetTextLineHeight() * 0.5f;
+                pinnedCategories.Add((text, labelCenter, accent));
+                // The band owns the first label plus every label whose
+                // center has reached the pin; an approaching label is drawn
+                // in-flow so the band can ride on its top edge while it
+                // pushes in.
+                drawnInBand = pinnedCategories.Count == 1 || labelCenter <= pinnedCenterY;
+            }
+            if (drawnInBand)
+            {
+                ImGui.Dummy(new Vector2(1f, ImGui.GetTextLineHeight()));
+            }
+            else
+            {
+                var availWidth = ImGui.GetContentRegionAvail().X;
+                var textWidth = ImGui.CalcTextSize(text).X;
+                ImGui.SetCursorPosX(ImGui.GetCursorPosX() + MathF.Max(0f, (availWidth - textWidth) * 0.5f));
+                Text.Colored(text, accent);
+            }
+            VerticalSpace(Spacing.X4);
         }
     }
 }

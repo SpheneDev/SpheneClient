@@ -506,6 +506,18 @@ public static partial class SpheneUI
         }
 
         /// <summary>
+        /// Atlas/sprite image with explicit UVs drawn into a caller-owned rect —
+        /// the drawList counterpart of <see cref="Sprite"/> for manual layouts
+        /// (previews, composed rows) that position content themselves.
+        /// </summary>
+        public static void SpriteInRect(ImDrawListPtr drawList, ImTextureID handle,
+            Vector2 min, Vector2 max, Vector2 uv0, Vector2 uv1, Vector4? tint = null)
+        {
+            var tintU32 = tint.HasValue ? ColorUtils.ToU32(tint.Value) : uint.MaxValue;
+            drawList.AddImage(handle, min, max, uv0, uv1, tintU32);
+        }
+
+        /// <summary>
         /// Circular avatar image: cover-cropped, bordered, with a centered
         /// placeholder glyph while the texture is unavailable. Avatars are
         /// always circles so decorations (presence dots, rings) can rely on

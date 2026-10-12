@@ -20,6 +20,7 @@ public static partial class SpheneUI
 {
     private static IFontHandle? _iconFont;
     private static IFontHandle? _uidFont;
+    private static IFontHandle? _displayFont;
     private static IFontHandle? _gameFont;
     private static ILogger? _logger;
     private static SpheneMediator? _mediator;
@@ -32,6 +33,11 @@ public static partial class SpheneUI
     public static IFontHandle UidFont => _uidFont
         ?? throw new InvalidOperationException("SpheneUI.Initialize has not run yet.");
 
+    /// <summary>Display/heading font (~26px) — crisp large text without bitmap
+    /// scaling. Throws until <see cref="Initialize"/> runs.</summary>
+    public static IFontHandle DisplayFont => _displayFont
+        ?? throw new InvalidOperationException("SpheneUI.Initialize has not run yet.");
+
     /// <summary>Game font handle. Throws until <see cref="Initialize"/> runs.</summary>
     public static IFontHandle GameFont => _gameFont
         ?? throw new InvalidOperationException("SpheneUI.Initialize has not run yet.");
@@ -42,12 +48,13 @@ public static partial class SpheneUI
     /// owning and disposing the handles.
     /// </summary>
     internal static void Initialize(ILogger logger, SpheneMediator mediator, IFontHandle iconFont,
-        IFontHandle uidFont, IFontHandle gameFont)
+        IFontHandle uidFont, IFontHandle displayFont, IFontHandle gameFont)
     {
         _logger = logger;
         _mediator = mediator;
         _iconFont = iconFont;
         _uidFont = uidFont;
+        _displayFont = displayFont;
         _gameFont = gameFont;
     }
 

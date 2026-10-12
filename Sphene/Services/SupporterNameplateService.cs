@@ -3,6 +3,7 @@ using Dalamud.Game.ClientState.Objects.Enums;
 using Dalamud.Game.ClientState.Objects.SubKinds;
 using Dalamud.Game.Gui.NamePlate;
 using Dalamud.Game.Text.SeStringHandling;
+using Dalamud.Game.Text.SeStringHandling.Payloads;
 using Dalamud.Interface.Textures;
 using Dalamud.Interface.Textures.TextureWraps;
 using Dalamud.Interface.Utility;
@@ -15,11 +16,13 @@ using FFXIVClientStructs.FFXIV.Component.GUI;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Sphene.API.Dto.User;
+using Sphene.Interop.Ipc;
 using Sphene.PlayerData.Pairs;
 using Sphene.SpheneConfiguration;
 using Sphene.SpheneConfiguration.Configurations;
 using Sphene.WebAPI;
 using System.Numerics;
+using System.Text.Json;
 
 namespace Sphene.Services;
 
@@ -34,7 +37,7 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
     private const int OccGridRows = 2;
     private const int FullOccMask = (1 << (OccGridCols * OccGridRows)) - 1;
 
-    private readonly record struct IconDrawPosition(Vector2 Anchor, Vector3 TargetWorldPos, Vector3 CharPos, int PlateIndex, nint Owner, string IconLabel, uint IconLabelColor, string IconId);
+    private readonly record struct IconDrawPosition(Vector2 Anchor, Vector3 TargetWorldPos, Vector3 CharPos, int PlateIndex, nint Owner, string IconLabel, uint IconLabelColor, string IconId, uint IconLabelEdgeColor);
 
     private readonly record struct ResolvedStyle(
         bool IndicatorsEnabled,
@@ -44,7 +47,8 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
         ushort SymbolColorKey, ushort LabelColorKey,
         bool SymbolGlowEnabled, ushort SymbolGlowKey,
         bool LabelGlowEnabled, ushort LabelGlowKey,
-        bool IconEnabled, string IconId, bool IconLabelEnabled, string IconLabelText, uint IconLabelColor);
+        bool IconEnabled, string IconId, bool IconLabelEnabled, string IconLabelText, uint IconLabelColor,
+        bool IconLabelEdgeEnabled, uint IconLabelEdgeColor);
 
     private readonly INamePlateGui _namePlateGui;
     private readonly IObjectTable _objectTable;
@@ -55,6 +59,7 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
     private readonly ApiController _apiController;
     private readonly SpheneConfigService _configService;
     private readonly PairManager _pairManager;
+    private readonly IpcCallerHonorific _honorificIpc;
     private readonly ILogger<SupporterNameplateService> _logger;
     private ISharedImmediateTexture? _iconTexture;
     private IReadOnlyList<IconDrawPosition> _iconPositions = [];
@@ -82,6 +87,7 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
         ApiController apiController,
         SpheneConfigService configService,
         PairManager pairManager,
+        IpcCallerHonorific honorificIpc,
         ILogger<SupporterNameplateService> logger)
     {
         _namePlateGui = namePlateGui;
@@ -93,6 +99,7 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
         _apiController = apiController;
         _configService = configService;
         _pairManager = pairManager;
+        _honorificIpc = honorificIpc;
         _logger = logger;
         _namePlateGui.OnDataUpdate += OnDataUpdate;
         _namePlateGui.OnNamePlateUpdate += OnNamePlateTextUpdate;
@@ -199,7 +206,8 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
             c.SupporterSymbolGlowEnabled, c.SupporterSymbolGlowKey,
             c.SupporterLabelGlowEnabled, c.SupporterLabelGlowKey,
             c.SupporterIconEnabled, c.SupporterIconId ?? string.Empty,
-            c.SupporterIconLabelEnabled, c.SupporterIconLabelText ?? string.Empty, c.SupporterIconLabelColor);
+            c.SupporterIconLabelEnabled, c.SupporterIconLabelText ?? string.Empty, c.SupporterIconLabelColor,
+            c.SupporterIconLabelEdgeEnabled, c.SupporterIconLabelEdgeColor);
     }
 
     private static ResolvedStyle FromDto(SupporterStyleDto s)
@@ -217,7 +225,10 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
             s.SymbolGlowEnabled, (ushort)Math.Clamp(s.SymbolGlowKey, 0, ushort.MaxValue),
             s.LabelGlowEnabled, (ushort)Math.Clamp(s.LabelGlowKey, 0, ushort.MaxValue),
             s.IconEnabled, s.IconId ?? string.Empty,
-            s.IconLabelEnabled, s.IconLabelText ?? string.Empty, s.IconLabelColor);
+            s.IconLabelEnabled, s.IconLabelText ?? string.Empty, s.IconLabelColor,
+            // Remote styles carry no edge — default dark outline like the
+            // nameplate text edge every other supporter part falls back to.
+            IconLabelEdgeEnabled: true, IconLabelEdgeColor: 0xFF000000u);
     }
 
     private SupporterStyleDto BuildOwnStyle()
@@ -245,8 +256,250 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
         };
     }
 
+    /// <summary>Foreground/edge color extracted from a nameplate SeString's
+    /// payloads — plugins like Honorific color title, name or FC tag via
+    /// UIForeground/UIGlow payloads rather than the plate color fields.</summary>
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    public readonly record struct PlateTextColors(uint? Foreground, uint? Edge);
+
+    /// <summary>
+    /// Snapshot of the local player's real nameplate data (name as displayed,
+    /// quoted title + FC tag, title flags, payload colors and text colors)
+    /// captured during nameplate updates. Used by the settings preview to
+    /// mirror the actual in-game nameplate.
+    /// </summary>
+    public readonly record struct LocalPlateInfo(
+        string Name,
+        PlateTextColors NameColors,
+        string QuotedTitle,
+        PlateTextColors TitleColors,
+        bool DisplayTitle,
+        bool IsPrefixTitle,
+        string QuotedFreeCompanyTag,
+        PlateTextColors FreeCompanyColors,
+        uint TextColor,
+        uint EdgeColor);
+
+    private LocalPlateInfo? _localPlate;
+    private string? _parsedHonorificJson;
+    private PlateTextColors? _honorificTitleColors;
+    private bool? _honorificTitleIsPrefix;
+    private bool _honorificTitleRequested;
+
+    /// <summary>The most recent local-player nameplate snapshot, if the self
+    /// plate was present in a recent nameplate update.</summary>
+    public LocalPlateInfo? LocalPlate => _localPlate;
+
+    /// <summary>The embedded default supporter icon wrap, if loaded.</summary>
+    public bool TryGetDefaultIconWrap(out IDalamudTextureWrap? wrap)
+    {
+        wrap = null;
+        return _iconTexture != null && _iconTexture.TryGetWrap(out wrap, out _);
+    }
+
+    /// <summary>
+    /// Reads the effective foreground/glow color a nameplate field renders its
+    /// text in. Handler fields keep their last-rendered contents, so plugin
+    /// colors (e.g. Honorific) are visible here — but so are our own injected
+    /// supporter marks, which is why the state is tracked across payloads and
+    /// sampled at the payload carrying the field's real text, skipping any
+    /// text belonging to our supporter mark.
+    /// </summary>
+    private PlateTextColors SeStringColors(SeString? s, string needle)
+    {
+        if (s == null)
+        {
+            return new PlateTextColors(null, null);
+        }
+        uint? curFg = null;
+        uint? curGlow = null;
+        uint? fbFg = null;
+        uint? fbGlow = null;
+        foreach (var payload in s.Payloads)
+        {
+            if (payload is UIForegroundPayload fg)
+            {
+                curFg = fg.IsEnabled && fg.RGBA != 0 ? fg.RGBA : null;
+            }
+            else if (payload is UIGlowPayload glow)
+            {
+                curGlow = glow.IsEnabled && glow.RGBA != 0 ? glow.RGBA : null;
+            }
+            else if (payload is RawPayload raw)
+            {
+                // Color/EdgeColor macros (Honorific writes these via
+                // PushColorRgba) have no dedicated payload class in this
+                // Dalamud version — they decode as RawPayload.
+                if (TryDecodeMacroColor(raw, MacroColor, out var macroFg))
+                {
+                    curFg = macroFg;
+                }
+                else if (TryDecodeMacroColor(raw, MacroEdgeColor, out var macroEdge))
+                {
+                    curGlow = macroEdge;
+                }
+            }
+            else if (payload is TextPayload text)
+            {
+                var t = text.Text ?? string.Empty;
+                if (needle.Length > 0 && t.Contains(needle, StringComparison.Ordinal))
+                {
+                    return new PlateTextColors(curFg, curGlow);
+                }
+                if (!fbFg.HasValue && !fbGlow.HasValue && !IsSupporterPartText(t))
+                {
+                    fbFg = curFg;
+                    fbGlow = curGlow;
+                }
+            }
+        }
+        return new PlateTextColors(fbFg, fbGlow);
+    }
+
+    private const byte MacroColor = 0x13;
+    private const byte MacroEdgeColor = 0x14;
+    private const byte ExprStackColor = 0xEC;
+
+    /// <summary>
+    /// Decodes a Color (0x13) / EdgeColor (0x14) macro RawPayload into an
+    /// RRGGBBAA color. The macro data is a single integer expression holding
+    /// a B8G8R8A8 value; a stackcolor placeholder pops the color (null out).
+    /// Returns false when the payload is not the requested macro, or when the
+    /// expression means "reuse current" (0) — the caller keeps its state.
+    /// </summary>
+    private static bool TryDecodeMacroColor(RawPayload raw, byte macro, out uint? color)
+    {
+        color = null;
+        var data = raw.Data; // 0x02 <macro> <lenExpr> <expr> 0x03
+        if (data.Length < 5 || data[0] != 0x02 || data[1] != macro)
+        {
+            return false;
+        }
+        var i = 2 + ExpressionLength(data, 2);
+        if (i >= data.Length - 1)
+        {
+            return false;
+        }
+        if (data[i] == ExprStackColor)
+        {
+            return true; // pop → color stays null
+        }
+        if (!TryDecodeIntExpression(data, i, out var v) || v == 0)
+        {
+            return false;
+        }
+        // B8G8R8A8 packed uint (0xAARRGGBB) → RRGGBBAA
+        color = ((v & 0x00FF0000u) << 8) | (v & 0x0000FF00u)
+            | ((v & 0x000000FFu) << 8) | (v >> 24);
+        return true;
+    }
+
+    private static int ExpressionLength(byte[] data, int i)
+    {
+        if (i >= data.Length)
+        {
+            return 0;
+        }
+        var b = data[i];
+        if (b < 0xD0 || b == ExprStackColor || (b >= 0xD0 && b <= 0xDF))
+        {
+            return 1;
+        }
+        if (b >= 0xF0 && b <= 0xFE)
+        {
+            return 1 + (b & 0x0F);
+        }
+        return 1;
+    }
+
+    private static bool TryDecodeIntExpression(byte[] data, int i, out uint value)
+    {
+        value = 0;
+        if (i >= data.Length)
+        {
+            return false;
+        }
+        var b = data[i];
+        if (b < 0xD0)
+        {
+            value = (uint)(b - 1);
+            return true;
+        }
+        if (b >= 0xF0 && b <= 0xFE)
+        {
+            var n = b & 0x0F;
+            if (i + 1 + n > data.Length)
+            {
+                return false;
+            }
+            for (var k = 0; k < n; k++)
+            {
+                value = (value << 8) | data[i + 1 + k];
+            }
+            return true;
+        }
+        return false;
+    }
+
+    private bool IsSupporterPartText(string text)
+    {
+        var current = _configService.Current;
+        return string.IsNullOrWhiteSpace(text)
+            || string.Equals(text, current.SupporterSymbolChar, StringComparison.Ordinal)
+            || string.Equals(text, current.SupporterLabelText, StringComparison.Ordinal);
+    }
+
+    private void CaptureLocalPlate(IReadOnlyList<INamePlateUpdateHandler> handlers)
+    {
+        var localAddr = _objectTable.LocalPlayer?.Address ?? IntPtr.Zero;
+        if (localAddr == IntPtr.Zero)
+        {
+            return;
+        }
+        for (int i = 0; i < handlers.Count; i++)
+        {
+            var h = handlers[i];
+            if (h.GameObject is IPlayerCharacter pc && pc.Address == localAddr)
+            {
+                var view = h.InfoView;
+                var prev = _localPlate;
+                var nameText = view.Name?.TextValue ?? pc.Name.TextValue;
+                _localPlate = new LocalPlateInfo(
+                    nameText,
+                    MergeColors(SeStringColors(h.Name, nameText), prev?.NameColors ?? default),
+                    view.QuotedTitle?.TextValue ?? string.Empty,
+                    _honorificTitleColors ?? MergeColors(SeStringColors(h.Title, view.Title?.TextValue ?? string.Empty), prev?.TitleColors ?? default),
+                    h.DisplayTitle, _honorificTitleIsPrefix ?? h.IsPrefixTitle,
+                    view.QuotedFreeCompanyTag?.TextValue ?? string.Empty,
+                    MergeColors(SeStringColors(h.FreeCompanyTag, view.FreeCompanyTag?.TextValue ?? string.Empty), prev?.FreeCompanyColors ?? default),
+                    h.TextColor, h.EdgeColor);
+                return;
+            }
+        }
+    }
+
+    private void ApplyTitlePlacement(INamePlateUpdateHandler h)
+    {
+        switch (_configService.Current.SupporterTitlePlacement)
+        {
+            case SupporterTitlePlacement.AboveName:
+                h.DisplayTitle = true;
+                h.IsPrefixTitle = true;
+                break;
+            case SupporterTitlePlacement.BelowName:
+                h.DisplayTitle = true;
+                h.IsPrefixTitle = false;
+                break;
+            case SupporterTitlePlacement.Hidden:
+                h.DisplayTitle = false;
+                break;
+        }
+    }
+
     private void OnDataUpdate(INamePlateUpdateContext ctx, IReadOnlyList<INamePlateUpdateHandler> handlers)
     {
+        RefreshHonorificTitleColors();
+        CaptureLocalPlate(handlers);
         RequestRedrawIfSettingsChanged();
 
         if (!_configService.Current.ShowSupporterNameplate || !_apiController.SupporterFeaturesEnabled)
@@ -314,7 +567,7 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
 
             if (style.IconEnabled)
             {
-                var platePos = GetNameplateIconPosition(h);
+                var platePos = GetNameplateIconPosition(h, isSelf);
                 if (platePos.HasValue)
                 {
                     var charPos = pc.Position;
@@ -323,7 +576,8 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
                         charPos + Vector3.UnitY * OcclusionProbeHeight, charPos,
                         h.NamePlateIndex, pc.Address,
                         style.IconLabelEnabled ? style.IconLabelText : string.Empty,
-                        style.IconLabelColor, style.IconId));
+                        style.IconLabelColor, style.IconId,
+                        style.IconLabelEdgeEnabled ? style.IconLabelEdgeColor : 0u));
                 }
                 if (logThisTick && iconDbg == null)
                 {
@@ -350,6 +604,141 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
         }
     }
 
+    /// <summary>
+    /// Refreshes the color portion of the local plate snapshot from the
+    /// handler's live string fields. Fields at this point carry whatever the
+    /// game and earlier-ran plugins (e.g. Honorific) wrote this pass — the
+    /// InfoView snapshot taken in OnDataUpdate never contains their payloads.
+    /// </summary>
+    /// <summary>
+    /// Color fields can be pristine in one event and carry plugin payloads in
+    /// the other, so an empty extraction never overwrites a previously
+    /// captured color.
+    /// </summary>
+    private static PlateTextColors MergeColors(PlateTextColors next, PlateTextColors fallback)
+        => next.Foreground.HasValue || next.Edge.HasValue ? next : fallback;
+
+    /// <summary>
+    /// Keeps <see cref="_honorificTitleColors"/> in sync with Honorific's IPC
+    /// data. Only re-parses when the reported TitleData JSON changed; kicks off
+    /// a one-shot fetch when Honorific is up but nothing was reported yet
+    /// (Honorific loaded before this plugin).
+    /// </summary>
+    private void RefreshHonorificTitleColors()
+    {
+        if (!_honorificIpc.APIAvailable)
+        {
+            _honorificTitleColors = null;
+            _honorificTitleIsPrefix = null;
+            _parsedHonorificJson = null;
+            _honorificTitleRequested = false;
+            return;
+        }
+        var json = _honorificIpc.LastLocalTitleJson;
+        if (json.Length == 0)
+        {
+            if (!_honorificTitleRequested)
+            {
+                _honorificTitleRequested = true;
+                _ = FetchHonorificTitleJsonAsync();
+            }
+            return;
+        }
+        if (string.Equals(json, _parsedHonorificJson, StringComparison.Ordinal))
+            return;
+        _parsedHonorificJson = json;
+        _honorificTitleColors = ParseHonorificTitleData(json, out var isPrefix);
+        _honorificTitleIsPrefix = isPrefix;
+    }
+
+    private async Task FetchHonorificTitleJsonAsync()
+    {
+        try
+        {
+            await _honorificIpc.GetLocalTitleJsonAsync().ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "[Nameplate] Honorific title fetch failed");
+        }
+    }
+
+    private PlateTextColors? ParseHonorificTitleData(string json, out bool? isPrefix)
+    {
+        isPrefix = null;
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("IsOriginal", out var orig) && orig.ValueKind == JsonValueKind.True)
+                return null;
+            if (root.TryGetProperty("IsPrefix", out var pref) && pref.ValueKind is JsonValueKind.True or JsonValueKind.False)
+                isPrefix = pref.GetBoolean();
+            var fg = ReadHonorificColor(root, "Color");
+            var edge = ReadHonorificColor(root, "Glow");
+            return fg.HasValue || edge.HasValue ? new PlateTextColors(fg, edge) : null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "[Nameplate] Failed to parse Honorific title data");
+            return null;
+        }
+    }
+
+    private static uint? ReadHonorificColor(JsonElement root, string name)
+    {
+        if (!root.TryGetProperty(name, out var vec) || vec.ValueKind != JsonValueKind.Object)
+            return null;
+        if (!vec.TryGetProperty("X", out var x) || !vec.TryGetProperty("Y", out var y) || !vec.TryGetProperty("Z", out var z))
+            return null;
+        static uint Channel(JsonElement e) => (uint)Math.Clamp((int)MathF.Round(e.GetSingle() * 255f), 0, 255);
+        return (Channel(x) << 24) | (Channel(y) << 16) | (Channel(z) << 8) | 0xFFu;
+    }
+
+    private void CaptureLocalPlateColors(INamePlateUpdateHandler h)
+    {
+        if (_localPlate is not { } plate)
+        {
+            return;
+        }
+        var view = h.InfoView;
+        if (ShouldLogTrace())
+        {
+            _logger.LogDebug("[Nameplate] Self fields: title=[{title}] name=[{name}] fc=[{fc}]",
+                DescribeSeString(h.Title), DescribeSeString(h.Name), DescribeSeString(h.FreeCompanyTag));
+        }
+        _localPlate = plate with
+        {
+            NameColors = MergeColors(SeStringColors(h.Name, view.Name?.TextValue ?? string.Empty), plate.NameColors),
+            TitleColors = _honorificTitleColors ?? MergeColors(SeStringColors(h.Title, view.Title?.TextValue ?? string.Empty), plate.TitleColors),
+            FreeCompanyColors = MergeColors(SeStringColors(h.FreeCompanyTag, view.FreeCompanyTag?.TextValue ?? string.Empty), plate.FreeCompanyColors),
+        };
+    }
+
+    private static string DescribeSeString(SeString? s)
+    {
+        if (s == null)
+        {
+            return "null";
+        }
+        var sb = new System.Text.StringBuilder();
+        foreach (var p in s.Payloads)
+        {
+            if (sb.Length > 0) sb.Append('|');
+            sb.Append(p switch
+            {
+                TextPayload t => $"T:{t.Text}",
+                UIForegroundPayload f => $"FG:{f.RGBA:X8}:{f.IsEnabled}",
+                UIGlowPayload g => $"GL:{g.RGBA:X8}:{g.IsEnabled}",
+                RawPayload r when TryDecodeMacroColor(r, MacroColor, out var c) => $"MC:{c?.ToString("X8") ?? "pop"}",
+                RawPayload r when TryDecodeMacroColor(r, MacroEdgeColor, out var c) => $"ME:{c?.ToString("X8") ?? "pop"}",
+                RawPayload r => $"RAW:{(r.Data.Length > 1 ? r.Data[1] : 0):X2}",
+                _ => p.Type.ToString(),
+            });
+        }
+        return sb.ToString();
+    }
+
     private void OnNamePlateTextUpdate(INamePlateUpdateContext ctx, IReadOnlyList<INamePlateUpdateHandler> handlers)
     {
         if (!_configService.Current.ShowSupporterNameplate || !_apiController.SupporterFeaturesEnabled)
@@ -366,6 +755,12 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
             var h = handlers[i];
             if (h.GameObject is not IPlayerCharacter pc)
                 continue;
+
+            if (pc.Address == localAddr)
+            {
+                CaptureLocalPlateColors(h);
+                ApplyTitlePlacement(h);
+            }
 
             var name = pc.Name.TextValue;
             if (!IsSupporter(name))
@@ -456,7 +851,7 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
     private void RequestRedrawIfSettingsChanged()
     {
         var current = _configService.Current;
-        var key = $"{current.ShowSupporterNameplate}|{current.SupporterSymbolChar}|{current.SupporterTextEnabled}|{current.SupporterLabelText}|{current.SupporterLabelOrder}|{current.SupporterSymbolPosition}|{current.SupporterColorKey}|{current.SupporterLabelColorKey}|{current.SupporterSymbolGlowEnabled}|{current.SupporterSymbolGlowKey}|{current.SupporterLabelGlowEnabled}|{current.SupporterLabelGlowKey}|{current.SupporterIconEnabled}|{current.SupporterIconId}|{current.SupporterIconLabelEnabled}|{current.SupporterIconLabelText}|{current.SupporterIconLabelColor}|{_apiController.SupporterFeaturesEnabled}|{string.Join(",", _supporterNameCache.OrderBy(n => n, StringComparer.OrdinalIgnoreCase))}|{_supporterStyleFingerprint}";
+        var key = $"{current.ShowSupporterNameplate}|{current.SupporterSymbolChar}|{current.SupporterTextEnabled}|{current.SupporterLabelText}|{current.SupporterLabelOrder}|{current.SupporterSymbolPosition}|{current.SupporterColorKey}|{current.SupporterLabelColorKey}|{current.SupporterSymbolGlowEnabled}|{current.SupporterSymbolGlowKey}|{current.SupporterLabelGlowEnabled}|{current.SupporterLabelGlowKey}|{current.SupporterIconEnabled}|{current.SupporterIconId}|{current.SupporterIconLabelEnabled}|{current.SupporterIconLabelText}|{current.SupporterIconLabelColor}|{current.SupporterIconLabelEdgeEnabled}|{current.SupporterIconLabelEdgeColor}|{current.SupporterTitlePlacement}|{_apiController.SupporterFeaturesEnabled}|{string.Join(",", _supporterNameCache.OrderBy(n => n, StringComparer.OrdinalIgnoreCase))}|{_supporterStyleFingerprint}";
 
         var publishKey = _apiController.IsConnected && _apiController.IsSupporter && _apiController.SupporterFeaturesEnabled
             ? key
@@ -481,7 +876,27 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
         }
     }
 
-    private unsafe Vector2? GetNameplateIconPosition(INamePlateUpdateHandler handler)
+    /// <summary>
+    /// Effective title layout for a plate — for the local player our
+    /// title-placement override wins over the game flag, so the icon anchors
+    /// to the line the name actually renders on.
+    /// </summary>
+    private (bool Display, bool Prefix) EffectiveTitleLayout(INamePlateUpdateHandler handler, bool isSelf)
+    {
+        if (!isSelf)
+        {
+            return (handler.DisplayTitle, handler.IsPrefixTitle);
+        }
+        return _configService.Current.SupporterTitlePlacement switch
+        {
+            SupporterTitlePlacement.AboveName => (true, true),
+            SupporterTitlePlacement.BelowName => (true, false),
+            SupporterTitlePlacement.Hidden => (false, handler.IsPrefixTitle),
+            _ => (handler.DisplayTitle, handler.IsPrefixTitle),
+        };
+    }
+
+    private unsafe Vector2? GetNameplateIconPosition(INamePlateUpdateHandler handler, bool isSelf)
     {
         if (handler.NamePlateIndex is < 0 or >= MaxNamePlateObjects)
             return null;
@@ -513,9 +928,24 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
                 ? text->FontSize * textNode->GetScaleY()
                 : collisionH * 0.5f;
             nameLineH = MathF.Min(nameLineH, collisionH);
-            centerY = handler.IsPrefixTitle
-                ? collision->ScreenY + collisionH - nameLineH * 0.5f
-                : collision->ScreenY + nameLineH * 0.5f;
+            // The game's own name-icon slot tracks the name line through any
+            // title layout; its center sits a touch above the visual text
+            // center, so nudge down by a fraction of the line height.
+            var nameIcon = (AtkResNode*)plate->NameIcon;
+            if (nameIcon != null && nameIcon->Height > 0)
+            {
+                centerY = nameIcon->ScreenY + nameIcon->Height * nameIcon->GetScaleY() * 0.5f
+                    + nameLineH * 0.1f;
+            }
+            else
+            {
+                var (displayTitle, prefixTitle) = EffectiveTitleLayout(handler, isSelf);
+                centerY = !displayTitle
+                    ? collision->ScreenY + collisionH * 0.5f
+                    : prefixTitle
+                        ? collision->ScreenY + collisionH - nameLineH * 0.45f
+                        : collision->ScreenY + nameLineH * 0.55f;
+            }
         }
         else
         {
@@ -866,7 +1296,7 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
                 continue;
             if (occMask == 0)
             {
-                DrawIconAndLabel(drawList, handle, uv0, uv1, min, size, label, labelColor, labelSize, entry.Anchor.Y, scale);
+                DrawIconAndLabel(drawList, handle, uv0, uv1, min, size, label, labelColor, entry.IconLabelEdgeColor, labelSize, entry.Anchor.Y, scale);
                 continue;
             }
             var cellW = (right - min.X) / OccGridCols;
@@ -880,7 +1310,7 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
                         continue;
                     var cellMin = new Vector2(min.X + cellW * col, min.Y + cellH * row);
                     drawList.PushClipRect(cellMin, cellMin + new Vector2(cellW, cellH), true);
-                    DrawIconAndLabel(drawList, handle, uv0, uv1, min, size, label, labelColor, labelSize, entry.Anchor.Y, scale);
+                    DrawIconAndLabel(drawList, handle, uv0, uv1, min, size, label, labelColor, entry.IconLabelEdgeColor, labelSize, entry.Anchor.Y, scale);
                     drawList.PopClipRect();
                 }
             }
@@ -888,15 +1318,21 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
     }
 
     private static void DrawIconAndLabel(ImDrawListPtr drawList, ImTextureID texHandle,
-        Vector2 uv0, Vector2 uv1, Vector2 min, Vector2 size, string label, uint labelColor, Vector2 labelSize, float anchorY, float scale)
+        Vector2 uv0, Vector2 uv1, Vector2 min, Vector2 size, string label, uint labelColor, uint labelEdgeColor, Vector2 labelSize, float anchorY, float scale)
     {
         drawList.AddImage(texHandle, min, min + size, uv0, uv1);
         if (labelSize != Vector2.Zero)
         {
-            drawList.AddText(
-                new Vector2(min.X + size.X + IconGap * scale, anchorY - labelSize.Y * 0.5f),
-                labelColor,
-                label);
+            var textPos = new Vector2(min.X + size.X + IconGap * scale, anchorY - labelSize.Y * 0.5f);
+            if ((labelEdgeColor & 0xFF000000u) != 0)
+            {
+                var edgeOff = MathF.Max(1f, scale);
+                drawList.AddText(textPos + new Vector2(edgeOff, 0f), labelEdgeColor, label);
+                drawList.AddText(textPos + new Vector2(-edgeOff, 0f), labelEdgeColor, label);
+                drawList.AddText(textPos + new Vector2(0f, edgeOff), labelEdgeColor, label);
+                drawList.AddText(textPos + new Vector2(0f, -edgeOff), labelEdgeColor, label);
+            }
+            drawList.AddText(textPos, labelColor, label);
         }
     }
 

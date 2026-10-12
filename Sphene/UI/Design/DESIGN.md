@@ -18,21 +18,25 @@ SpheneUI
 ├─ Colors       theme-resolved semantic colors (TextMuted, FrameBg, Accent…)
 ├─ Metrics      control metrics (ControlHeight, ControlRadius, SwatchSize…)
 ├─ Text         Plain/Wrapped/Colored/ColoredWrapped/Muted/Big/Bullet/Outlined/
-│               PageHeader/SectionHeader/Header/GroupedCentered/
+│               Display (crisp ~26px headings via the DisplayFont handle —
+│               never SetWindowFontScale)/PageHeader/SectionHeader/Header/
+│               GroupedCentered/
 │               PageIntro (one-line muted blurb: ellipsized, full text on
 │               hover — for pages whose title lives in the breadcrumb)
 ├─ Icons        Icon/BoolIcon/Button/TextButton/ActionButton + sizing
 ├─ Controls     Toggle/ToggleChip/Checkbox/SmallButton/Slider*/Drag*/Input*/
 │               Combo/LabeledCombo/Button/HeroButton/IconButton/DialogButtons/
 │               Selectable/CollapsibleSection/
-│               ColorEdit/ColorSwatch/GlyphSwatch/StatusDot/ProgressBar/
+│               ColorEdit/ColorSwatch/GlyphSwatch/FrameSwatch/
+│               TransparentSwatch/StatusDot/ProgressBar/
 │               TransmissionBar/HelpText/InputTextWithButtons (+InputButtonSpec)
 ├─ Layout       AccentCard/SectionCard/ContentRegion/ScrollAreas/TabStrip/
-│               NavRail(BeginNavRail[embedded]/NavRailItem/NavRailCategory/
-│               NavRailDivider/EndNavRail/BeginNavContent[scrollable]/
-│               EndNavContent)/
+│               NavRail(BeginNavRail[embedded]/NavRailItem/NavRailSegmentItem/
+│               NavRailCategory/NavRailCategoryLabel/NavRailDivider/
+│               EndNavRail/BeginNavContent[scrollable]/EndNavContent)/
 │               VerticalTabNav/Separator/SectionSeparator/DistanceSeparator/
-│               Section/Callout(+title)/Group/VerticalSpace/Space/
+│               Section/Callout(+title)/Badge/Group/Expander(Begin/End/
+│               Toggle/SetOpen/IsOpen)/VerticalSpace/Space/
 │               HorizontalSpace/IndentScope/Tree/
 │               ScaledNextItemWidth/ScaledSameLine/WindowContentWidth/
 │               CenterNextWindow/SetScaledWindowSize
@@ -142,10 +146,12 @@ same-row neighbors. The rules that keep pages uniform:
 ## Initialization
 
 `UiSharedService`'s constructor calls `SpheneUI.Initialize(logger, mediator,
-iconFont, uidFont, gameFont)` and `SpheneUI.Media.SetTextureProvider(...)`.
+iconFont, uidFont, displayFont, gameFont)` and `SpheneUI.Media.SetTextureProvider(...)`.
 The service keeps owning and disposing the font handles; the facade only
-holds references. `IconFont`/`UidFont`/`GameFont` throw if accessed before
-`Initialize`.
+holds references. `IconFont`/`UidFont`/`DisplayFont`/`GameFont` throw if
+accessed before `Initialize`. `UidFont` is Lato 35px (UIDs, big stat
+numbers); `DisplayFont` is Lato 26px — use `Text.Display` for headings
+instead of `SetWindowFontScale`, which raster-scales glyphs and blurs.
 
 ## Spacing grid
 
@@ -258,6 +264,10 @@ same language as nav rails and the header band:
 - Animated effects live on `Profile.RowFx`/`ProfileRowFx` layers (ListRows,
   hero cards), not on container outlines. Keep effects inside surfaces; do
   not reintroduce outlined group boxes.
+- `Layout.Badge(text, color)` draws an inline tag pill (accent underlay α
+  0.14 + hairline α 0.35) at the cursor — the standard marker for "NEW",
+  "TEST", "BETA"-style flags on rows; use `Controls.TagChips` for
+  comma-separated tag lists.
 
 ## Content bounds
 
@@ -476,7 +486,9 @@ use `Controls.Checkbox` (compact themed box, label flows inline) there.
   `ImageInRect(drawList, …, rounding, corners)` for draw-list placement —
   pass `ImDrawFlags` corner flags to round only the edges that sit on a
   window/child silhouette (e.g. `RoundCornersRight` for a backdrop that
-  hugs the frame); `Sprite(handle, uv0, uv1)` for atlas regions.
+  hugs the frame); `Sprite(handle, uv0, uv1)` for atlas regions;
+  `SpriteInRect(drawList, handle, min, max, uv0, uv1)` for draw-list
+  placement in manually composed previews/rows.
 - `Media.Avatar(wrap, size)` — profile images with rounding/badge support.
 - `Media.Placeholder(size)` / `PlaceholderInRect` — empty-state tile while
   textures resolve.
@@ -628,7 +640,10 @@ identically to the page.
 Used by the hub hero's "Style" panel: the preview switches between the
 live profile card and the friends-list row demo via `Layout.TabStrip`,
 and the settings cards stack at full width below it, filtered to the
-controls that apply to the active preview tab.
+controls that apply to the active preview tab. Also used by the Release
+Notes page: each changelog row toggles `changelog_rel_{version}` so the
+newest release opens once via `SetExpanderOpen` while every entry stays
+user-collapsible.
 
 ### Flyouts (`Popups.BeginFlyout`)
 

@@ -133,10 +133,31 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
                 }
             });
         });
+        DisplayFont = _pluginInterface.UiBuilder.FontAtlas.NewDelegateFontHandle(e =>
+        {
+            e.OnPreBuild(tk =>
+            {
+                var fontPath = Path.Combine(_pluginInterface.AssemblyLocation.Directory?.FullName ?? string.Empty, "Resources", "Fonts", "Lato-Regular.ttf");
+                if (File.Exists(fontPath))
+                {
+                     tk.AddFontFromFile(fontPath, new SafeFontConfig
+                     {
+                         SizePx = 26
+                     });
+                }
+                else
+                {
+                    tk.AddDalamudAssetFont(Dalamud.DalamudAsset.NotoSansCjkMedium, new()
+                    {
+                        SizePx = 26
+                    });
+                }
+            });
+        });
         GameFont = _pluginInterface.UiBuilder.FontAtlas.NewGameFontHandle(new(GameFontFamilyAndSize.Axis12));
         IconFont = _pluginInterface.UiBuilder.IconFontFixedWidthHandle;
 
-        SpheneUI.Initialize(logger, Mediator, IconFont, UidFont, GameFont);
+        SpheneUI.Initialize(logger, Mediator, IconFont, UidFont, DisplayFont, GameFont);
         SpheneUI.Media.SetTextureProvider(textureProvider);
     }
 
@@ -147,6 +168,8 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
 
     public IFontHandle GameFont { get; init; }
     public bool HasValidPenumbraModPath => !(_ipcManager.Penumbra.ModDirectory ?? string.Empty).IsNullOrEmpty() && Directory.Exists(_ipcManager.Penumbra.ModDirectory);
+
+    public IFontHandle DisplayFont { get; init; }
 
     public IFontHandle IconFont { get; init; }
     public bool IsInGpose => _dalamudUtil.IsInGpose;

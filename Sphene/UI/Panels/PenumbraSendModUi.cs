@@ -1,10 +1,12 @@
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface;
 using Dalamud.Interface.Colors;
+using Dalamud.Interface.Textures.TextureWraps;
 using Dalamud.Interface.Utility;
 using Dalamud.Interface.Utility.Raii;
 using Dalamud.Interface.Windowing;
 using Microsoft.Extensions.Logging;
+using Sphene.API.Data;
 using Sphene.API.Data.Comparer;
 using Sphene.FileCache;
 using Sphene.PlayerData.Pairs;
@@ -39,6 +41,7 @@ public class PenumbraSendModUi : WindowMediatorSubscriberBase
     private readonly ShrinkU.Services.TextureBackupService _shrinkuBackupService;
     private readonly FileUploadManager _fileUploadManager;
     private readonly FileCacheManager _fileCacheManager;
+    private readonly SpheneProfileManager _spheneProfileManager;
 
     private string _sendPenumbraModFilter = string.Empty;
     private string _recipientFilter = string.Empty;
@@ -57,6 +60,12 @@ public class PenumbraSendModUi : WindowMediatorSubscriberBase
     private int _reloadPenumbraModsRequested = 1;
     private DateTime _nextPenumbraModListValidationUtc = DateTime.MinValue;
     private readonly Dictionary<string, string> _lastKnownPenumbraModMap = new(StringComparer.OrdinalIgnoreCase);
+    // Lazily resolved per visible mod row: meta.json details + optional artwork.
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, Task<ShrinkU.Services.PenumbraIpc.ModMetadata?>> _modMetaTasks
+        = new(StringComparer.OrdinalIgnoreCase);
+    // Last decoded avatar bytes per user — a new array instance means the
+    // profile was (re)fetched and the cached texture must be evicted.
+    private readonly Dictionary<string, byte[]> _avatarBytes = new(StringComparer.Ordinal);
 
     public PenumbraSendModUi(
         ILogger<PenumbraSendModUi> logger,
@@ -68,6 +77,7 @@ public class PenumbraSendModUi : WindowMediatorSubscriberBase
         ShrinkU.Services.TextureBackupService shrinkuBackupService,
         FileUploadManager fileUploadManager,
         FileCacheManager fileCacheManager,
+        SpheneProfileManager spheneProfileManager,
         PerformanceCollectorService performanceCollectorService)
         : base(logger, mediator, "Send Mods###SpheneSendMods", performanceCollectorService)
     {
@@ -78,6 +88,7 @@ public class PenumbraSendModUi : WindowMediatorSubscriberBase
         _shrinkuBackupService = shrinkuBackupService;
         _fileUploadManager = fileUploadManager;
         _fileCacheManager = fileCacheManager;
+        _spheneProfileManager = spheneProfileManager;
 
         SizeConstraints = new WindowSizeConstraints
         {
@@ -147,6 +158,7 @@ public class PenumbraSendModUi : WindowMediatorSubscriberBase
     {
         var scale = ImGuiHelpers.GlobalScale;
         var idSuffix = isEmbedded ? "Embedded" : "Window";
+        var accent = SpheneUI.Palette.EtherealPurple;
 
         if (SpheneUI.Layout.BeginScrollArea("SendModsRoot" + idSuffix,
                 ImGui.GetContentRegionAvail(), contentPadding: Vector2.Zero))
@@ -154,334 +166,407 @@ public class PenumbraSendModUi : WindowMediatorSubscriberBase
             if (!isEmbedded)
             {
                 SpheneUI.Text.PageHeader("Send Mods",
-                    "Select one or more Penumbra mods, then choose who should receive them.");
+                    "Pick the Penumbra mods to package, choose the recipients, then share.");
             }
             else
             {
                 SpheneUI.Text.SectionHeader("Send Mods",
-                    "Select one or more Penumbra mods, then choose who should receive them.");
+                    "Pick the Penumbra mods to package, choose the recipients, then share.");
             }
             SpheneUI.Layout.Separator();
 
             if (!_shrinkuPenumbraIpc.APIAvailable)
             {
                 SpheneUI.Layout.Callout("Penumbra API not available.", FontAwesomeIcon.ExclamationCircle, SpheneUI.Colors.Danger);
-                return;
-            }
-
-            ValidatePenumbraModListSnapshot();
-
-            if (ShouldReloadPenumbraMods() || _penumbraMods.Count == 0)
-            {
-                LoadPenumbraMods();
-            }
-
-            var existingModFolderNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var mod in _penumbraMods)
-            {
-                existingModFolderNames.Add(mod.ModFolderName);
-            }
-
-            if (_selectedPenumbraModFolder != null && !existingModFolderNames.Contains(_selectedPenumbraModFolder))
-            {
-                _selectedPenumbraModFolder = null;
-            }
-
-            if (_selectedPenumbraModFolder == null && _penumbraMods.Count > 0)
-            {
-                _selectedPenumbraModFolder = _penumbraMods[0].ModFolderName;
-            }
-
-            if (_selectedPenumbraModFolders.Count > 0)
-            {
-                var toRemove = new List<string>();
-                foreach (var selected in _selectedPenumbraModFolders)
-                {
-                    if (!existingModFolderNames.Contains(selected))
-                    {
-                        toRemove.Add(selected);
-                    }
-                }
-
-                foreach (var remove in toRemove)
-                {
-                    _selectedPenumbraModFolders.Remove(remove);
-                }
-            }
-
-            string selectedLabel;
-            if (_selectedPenumbraModFolders.Count == 0)
-            {
-                selectedLabel = "None";
-            }
-            else if (_selectedPenumbraModFolders.Count == 1)
-            {
-                var only = _selectedPenumbraModFolders.First();
-                selectedLabel = _penumbraMods.FirstOrDefault(m => string.Equals(m.ModFolderName, only, StringComparison.OrdinalIgnoreCase)).DisplayName ?? only;
             }
             else
             {
-                selectedLabel = $"{_selectedPenumbraModFolders.Count} selected";
-            }
-
-            var filtered = GetFilteredPenumbraMods();
-
-            if (ImGui.BeginTable("SendModLayout" + idSuffix, 3, ImGuiTableFlags.Resizable | ImGuiTableFlags.BordersInnerV | ImGuiTableFlags.SizingStretchProp))
-            {
-                ImGui.TableSetupColumn("Mods", ImGuiTableColumnFlags.WidthStretch, 0.34f);
-                ImGui.TableSetupColumn("Recipients", ImGuiTableColumnFlags.WidthStretch, 0.33f);
-                ImGui.TableSetupColumn("Summary", ImGuiTableColumnFlags.WidthStretch, 0.33f);
-
-                ImGui.TableNextRow();
-
-                ImGui.TableSetColumnIndex(0);
-                SpheneUI.Text.Colored("Mods", ImGuiColors.DalamudWhite);
-                ImGui.SetNextItemWidth(-1);
-                SpheneUI.Controls.InputTextWithHint("##penumbraModFilter" + idSuffix, "Filter mods…", ref _sendPenumbraModFilter, 128);
-                SpheneUI.Text.Muted("Hold Ctrl to select multiple mods.");
-
-                SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.Row);
-                if (_selectedPenumbraModFolders.Count > 0 && SpheneUI.Controls.Button("Clear selection##clearMods" + idSuffix))
-                {
-                    _selectedPenumbraModFolders.Clear();
-                }
-
-                using (ImRaii.Child("ModList" + idSuffix, new Vector2(0f, 0f), true))
-                {
-                    if (filtered.Count == 0)
-                    {
-                        SpheneUI.Text.Colored("No mods found.", ImGuiColors.DalamudGrey);
-                    }
-                    else
-                    {
-                        foreach (var mod in filtered)
-                        {
-                            var isSelected = _selectedPenumbraModFolders.Contains(mod.ModFolderName);
-                            if (SpheneUI.Controls.Selectable($"{mod.DisplayName}##{mod.ModFolderName}{idSuffix}", isSelected))
-                            {
-                                _selectedPenumbraModFolder = mod.ModFolderName;
-                                if (UiSharedService.CtrlPressed())
-                                {
-                                    if (!_selectedPenumbraModFolders.Add(mod.ModFolderName))
-                                    {
-                                        _selectedPenumbraModFolders.Remove(mod.ModFolderName);
-                                    }
-                                }
-                                else
-                                {
-                                    _selectedPenumbraModFolders.Clear();
-                                    _selectedPenumbraModFolders.Add(mod.ModFolderName);
-                                }
-                            }
-                        }
-                    }
-                }
-
-                ImGui.TableSetColumnIndex(1);
-                SpheneUI.Text.Colored("Recipients", ImGuiColors.DalamudWhite);
-                ImGui.SetNextItemWidth(-1);
-                SpheneUI.Controls.InputTextWithHint("##recipientFilter" + idSuffix, "Filter recipients…", ref _recipientFilter, 64);
-                SpheneUI.Text.ColoredWrapped("Only individually paired users can receive mod packages.", ImGuiColors.DalamudGrey);
-
-                var candidatePairs = _pairManager.DirectPairs
-                    .Where(p => p.IndividualPairStatus == API.Data.Enum.IndividualPairStatus.Bidirectional)
-                    .Select(p =>
-                    {
-                        var uid = p.UserData.UID ?? string.Empty;
-                        var aliasOrUid = p.UserData.AliasOrUID;
-                        var displayName = _uiSharedService.GetPreferredUserDisplayName(uid, aliasOrUid);
-                        return (Pair: p, Uid: uid, AliasOrUid: aliasOrUid, DisplayName: displayName);
-                    })
-                    .OrderBy(p => p.DisplayName, StringComparer.OrdinalIgnoreCase)
-                    .ToList();
-
-                using (ImRaii.Child("RecipientList" + idSuffix, new Vector2(0f, 0f), true))
-                {
-                    if (candidatePairs.Count == 0)
-                    {
-                        SpheneUI.Text.Colored("No paired users available for mod delivery.", ImGuiColors.DalamudGrey);
-                    }
-                    else
-                    {
-                        foreach (var entry in candidatePairs)
-                        {
-                            var uid = entry.Uid;
-                            if (string.IsNullOrWhiteSpace(uid))
-                            {
-                                continue;
-                            }
-
-                            var displayName = entry.DisplayName;
-                            if (!string.IsNullOrWhiteSpace(_recipientFilter) &&
-                                !displayName.Contains(_recipientFilter, StringComparison.OrdinalIgnoreCase) &&
-                                !entry.AliasOrUid.Contains(_recipientFilter, StringComparison.OrdinalIgnoreCase) &&
-                                !uid.Contains(_recipientFilter, StringComparison.OrdinalIgnoreCase))
-                            {
-                                continue;
-                            }
-
-                            var allowsMods = entry.Pair.OtherAllowsReceivingPenumbraMods;
-                            if (!allowsMods)
-                            {
-                                displayName += " (mods disabled)";
-                            }
-
-                            var isSelected = _selectedPenumbraRecipients.Contains(uid);
-                            using (ImRaii.Disabled(!allowsMods))
-                            {
-                                if (SpheneUI.Controls.Checkbox(displayName + "##" + uid + idSuffix, ref isSelected))
-                                {
-                                    if (isSelected)
-                                    {
-                                        _selectedPenumbraRecipients.Add(uid);
-                                    }
-                                    else
-                                    {
-                                        _selectedPenumbraRecipients.Remove(uid);
-                                    }
-                                }
-                            }
-
-                            if (!allowsMods)
-                            {
-                                _selectedPenumbraRecipients.Remove(uid);
-                            }
-                        }
-                    }
-                }
-
-                ImGui.TableSetColumnIndex(2);
-                SpheneUI.Text.Colored("Summary", ImGuiColors.DalamudWhite);
-
-                using (ImRaii.PushFont(UiBuilder.IconFont))
-                {
-                    if (SpheneUI.Controls.Button(FontAwesomeIcon.History.ToIconString() + "##openModPackageHistorySend" + idSuffix))
-                    {
-                        if (isEmbedded)
-                        {
-                            Mediator.Publish(new OpenModSharingWindow(ModSharingTab.History));
-                        }
-                        else
-                        {
-                            Mediator.Publish(new UiToggleMessage(typeof(ModPackageHistoryUi)));
-                        }
-                    }
-                }
-                ImGui.SameLine();
-                SpheneUI.Text.Plain("History & backups");
-
-                SpheneUI.Layout.VerticalSpace();
-                SpheneUI.Text.Plain("Selected mods");
-                ImGui.SameLine();
-                SpheneUI.Text.Plain(selectedLabel);
-
-                SpheneUI.Text.Plain("Selected recipients");
-                ImGui.SameLine();
-                SpheneUI.Text.Plain(_selectedPenumbraRecipients.Count.ToString());
-
-                SpheneUI.Layout.Separator();
-
-                SpheneUI.Icons.Icon(FontAwesomeIcon.ExclamationCircle);
-                if (ImGui.IsItemHovered())
-                {
-                    ImGui.SetTooltip("Mods will be uploaded to the Sphene server network and stored as backups.");
-                }
-                ImGui.SameLine();
-                SpheneUI.Text.Wrapped("Mods will be uploaded to the Sphene server network and will be shared with the users you selected.");
-
-                SpheneUI.Layout.VerticalSpace();
-                var shareButtonText = _selectedPenumbraModFolders.Count == 1 ? "Share Mod" : "Share Mods";
-                var sendCurrent = _sendCurrentModState;
-                if (SpheneUI.Controls.Checkbox("Send current mod state (temporary)##sendCurrent" + idSuffix, ref sendCurrent))
-                {
-                    _sendCurrentModState = sendCurrent;
-                }
-                if (ImGui.IsItemHovered())
-                {
-                    ImGui.SetTooltip("When enabled, Sphene packages the current Penumbra mod folder contents into a temporary .pmp, uploads it, then deletes the temporary file. When disabled, Sphene prefers existing ShrinkU backups.");
-                }
-
-                using (ImRaii.Disabled(_isSendingPenumbraMod || _selectedPenumbraModFolders.Count == 0 || _selectedPenumbraRecipients.Count == 0))
-                {
-                    if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Share, shareButtonText))
-                    {
-                        StartSendPenumbraMods(_selectedPenumbraModFolders.ToList(), _sendCurrentModState);
-                    }
-                }
-
-                if (_isSendingPenumbraMod && _sendPenumbraModCts != null)
-                {
-                    ImGui.SameLine();
-                    if (SpheneUI.Icons.TextButton(FontAwesomeIcon.TimesCircle, "Cancel"))
-                    {
-                        try { _sendPenumbraModCts.Cancel(); }
-                        catch (Exception ex) { _logger.LogDebug(ex, "Failed to cancel SendPenumbraMod"); }
-                    }
-                }
-
-                SpheneUI.Layout.Separator();
-                SpheneUI.Text.Colored("Status", ImGuiColors.DalamudWhite);
-
-                if (!string.IsNullOrWhiteSpace(_sendPenumbraModStatusText))
-                {
-                    var color = _sendPenumbraModStatusIsError ? ImGuiColors.DalamudRed : ImGuiColors.DalamudGrey;
-                    SpheneUI.Text.ColoredWrapped(_sendPenumbraModStatusText, color);
-                }
-
-                if (_isSendingPenumbraMod)
-                {
-                    var currentUploads = _fileUploadManager.CurrentUploads.ToList();
-                    HashSet<string>? uploadHashes = null;
-                    DateTime? uploadStartTime;
-                    lock (_uploadStateLock)
-                    {
-                        uploadStartTime = _uploadStartTime;
-                        if (_currentUploadHashes.Count > 0)
-                        {
-                            uploadHashes = new HashSet<string>(_currentUploadHashes, StringComparer.OrdinalIgnoreCase);
-                        }
-                    }
-
-                    if (uploadHashes != null && uploadHashes.Count > 0)
-                    {
-                        currentUploads = currentUploads
-                            .Where(c => uploadHashes.Contains(c.Hash))
-                            .ToList();
-                    }
-
-                    if (currentUploads.Any())
-                    {
-                        var totalUploaded = currentUploads.Sum(c => c.Transferred);
-                        var totalToUpload = currentUploads.Sum(c => c.Total);
-                        var uploadProgress = totalToUpload > 0 ? (float)totalUploaded / totalToUpload : 0f;
-                        var uploadText = $"{UiSharedService.ByteToString(totalUploaded)}/{UiSharedService.ByteToString(totalToUpload)}";
-
-                        if (uploadStartTime.HasValue)
-                        {
-                            var elapsed = DateTime.UtcNow - uploadStartTime.Value;
-                            if (elapsed.TotalSeconds > 0)
-                            {
-                                var bytesPerSecond = totalUploaded / elapsed.TotalSeconds;
-                                if (bytesPerSecond > 0)
-                                {
-                                    uploadText += $" ({UiSharedService.ByteToString((long)bytesPerSecond)}/s)";
-                                }
-                            }
-                        }
-
-                        var barWidth = ImGui.GetContentRegionAvail().X;
-                        var cursor = ImGui.GetCursorPos();
-                        var barSize = new Vector2(barWidth, 20f * scale);
-                        SpheneUI.Controls.ProgressBar(uploadProgress, barSize);
-                        ImGui.SetCursorPos(cursor + new Vector2(0f, barSize.Y + 4f * scale));
-                        SpheneUI.Text.Colored(uploadText, ImGuiColors.DalamudGrey);
-                    }
-                }
-
-                ImGui.EndTable();
+                DrawSendBody(idSuffix, accent, scale);
             }
         }
         SpheneUI.Layout.EndScrollArea();
+    }
+
+    /// <summary>Library picker on the left, recipients + share panel stacked on the right.</summary>
+    private void DrawSendBody(string idSuffix, Vector4 accent, float scale)
+    {
+        ValidatePenumbraModListSnapshot();
+
+        if (ShouldReloadPenumbraMods() || _penumbraMods.Count == 0)
+        {
+            LoadPenumbraMods();
+        }
+
+        var existingModFolderNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var mod in _penumbraMods)
+        {
+            existingModFolderNames.Add(mod.ModFolderName);
+        }
+
+        if (_selectedPenumbraModFolder != null && !existingModFolderNames.Contains(_selectedPenumbraModFolder))
+        {
+            _selectedPenumbraModFolder = null;
+        }
+
+        if (_selectedPenumbraModFolder == null && _penumbraMods.Count > 0)
+        {
+            _selectedPenumbraModFolder = _penumbraMods[0].ModFolderName;
+        }
+
+        if (_selectedPenumbraModFolders.Count > 0)
+        {
+            var toRemove = new List<string>();
+            foreach (var selected in _selectedPenumbraModFolders)
+            {
+                if (!existingModFolderNames.Contains(selected))
+                {
+                    toRemove.Add(selected);
+                }
+            }
+
+            foreach (var remove in toRemove)
+            {
+                _selectedPenumbraModFolders.Remove(remove);
+            }
+        }
+
+        string selectedLabel;
+        if (_selectedPenumbraModFolders.Count == 0)
+        {
+            selectedLabel = "None";
+        }
+        else if (_selectedPenumbraModFolders.Count == 1)
+        {
+            var only = _selectedPenumbraModFolders.First();
+            selectedLabel = _penumbraMods.FirstOrDefault(m => string.Equals(m.ModFolderName, only, StringComparison.OrdinalIgnoreCase)).DisplayName ?? only;
+        }
+        else
+        {
+            selectedLabel = $"{_selectedPenumbraModFolders.Count} selected";
+        }
+
+        var filtered = GetFilteredPenumbraMods();
+
+        var candidatePairs = _pairManager.DirectPairs
+            .Where(p => p.IndividualPairStatus == API.Data.Enum.IndividualPairStatus.Bidirectional)
+            .Select(p =>
+            {
+                var uid = p.UserData.UID ?? string.Empty;
+                var aliasOrUid = p.UserData.AliasOrUID;
+                var displayName = _uiSharedService.GetPreferredUserDisplayName(uid, aliasOrUid);
+                return (Pair: p, Uid: uid, AliasOrUid: aliasOrUid, DisplayName: displayName);
+            })
+            .OrderBy(p => p.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var colBottom = ImGui.GetCursorScreenPos().Y + ImGui.GetContentRegionAvail().Y;
+        if (ImGui.BeginTable("SendModLayout" + idSuffix, 2, ImGuiTableFlags.Resizable | ImGuiTableFlags.SizingStretchProp))
+        {
+            ImGui.TableSetupColumn("Library", ImGuiTableColumnFlags.WidthStretch, 0.55f);
+            ImGui.TableSetupColumn("Send", ImGuiTableColumnFlags.WidthStretch, 0.45f);
+
+            ImGui.TableNextRow();
+
+            ImGui.TableSetColumnIndex(0);
+            SpheneUI.Layout.SectionCard(
+                () => DrawModLibrary(filtered, colBottom, accent, idSuffix),
+                title: "1 · Mod Library", accentColor: accent);
+
+            ImGui.TableSetColumnIndex(1);
+            var rightColumnTop = ImGui.GetCursorScreenPos().Y;
+            var recipientsCardBottom = rightColumnTop + MathF.Max(170f * scale,
+                (colBottom - rightColumnTop) * 0.52f);
+            SpheneUI.Layout.SectionCard(
+                () => DrawRecipientPicker(candidatePairs, recipientsCardBottom, accent, idSuffix),
+                title: "2 · Recipients", accentColor: accent);
+
+            SpheneUI.Layout.VerticalSpace();
+            SpheneUI.Layout.SectionCard(
+                () => DrawReviewAndSend(selectedLabel, scale, accent, idSuffix),
+                title: "3 · Share", accentColor: accent);
+
+            ImGui.EndTable();
+        }
+    }
+
+    /// <summary>
+    /// The user's Sphene profile picture as a cached texture — null while the
+    /// profile or texture is still loading. Evicts the cache entry when the
+    /// profile data instance changes (avatar updated/refetched).
+    /// </summary>
+    private IDalamudTextureWrap? AvatarFor(UserData userData)
+    {
+        var uid = userData.UID;
+        if (string.IsNullOrWhiteSpace(uid)) return null;
+        var bytes = _spheneProfileManager.GetSpheneProfile(userData).ImageData.Value;
+        if (bytes.Length == 0) return null;
+        var key = $"modshare:avatar:{uid}";
+        if (!_avatarBytes.TryGetValue(uid, out var cached) || !ReferenceEquals(cached, bytes))
+        {
+            _avatarBytes[uid] = bytes;
+            SpheneUI.Media.Evict(key);
+        }
+        return SpheneUI.Media.Texture(key, bytes);
+    }
+
+    /// <summary>Requests mod metadata once per folder; returns it once the task resolved.</summary>
+    private ShrinkU.Services.PenumbraIpc.ModMetadata? MetaOf(string modFolderName)
+    {
+        var task = _modMetaTasks.GetOrAdd(modFolderName,
+            f => Task.Run(() => _shrinkuPenumbraIpc.GetModMetadataAsync(f)));
+        return task is { IsCompletedSuccessfully: true } ? task.Result : null;
+    }
+
+    /// <summary>Loads the mod's artwork bytes for the texture cache; null when absent/unreadable.</summary>
+    private static byte[]? ReadModImage(string? path)
+    {
+        try
+        {
+            return !string.IsNullOrWhiteSpace(path) && File.Exists(path) ? File.ReadAllBytes(path) : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>The pickable mod library: filter, selection toolbar, scroll-faded rich rows.</summary>
+    private void DrawModLibrary(List<(string ModFolderName, string DisplayName)> filtered,
+        float colBottom, Vector4 accent, string idSuffix)
+    {
+        ImGui.SetNextItemWidth(-1);
+        SpheneUI.Controls.InputTextWithHint("##penumbraModFilter" + idSuffix,
+            "Filter mods…", ref _sendPenumbraModFilter, 128);
+        DrawCardToolbar(
+            $"{_selectedPenumbraModFolders.Count} selected · click a row to toggle",
+            _selectedPenumbraModFolders.Count > 0 ? "Clear" : null,
+            () => _selectedPenumbraModFolders.Clear());
+
+        var listH = MathF.Max(80f * SpheneUI.Scale,
+            colBottom - ImGui.GetCursorScreenPos().Y - SpheneUI.Spacing.CardPadding.Scaled);
+        if (SpheneUI.Layout.BeginScrollArea("ModList" + idSuffix, new Vector2(0f, listH)))
+        {
+            if (filtered.Count == 0)
+            {
+                SpheneUI.Text.Muted(_penumbraMods.Count == 0
+                    ? "No Penumbra mods found."
+                    : "No mods match the filter.");
+            }
+            else
+            {
+                foreach (var mod in filtered)
+                {
+                    var meta = MetaOf(mod.ModFolderName);
+                    var metaText = meta == null
+                        ? (string.Equals(mod.DisplayName, mod.ModFolderName, StringComparison.Ordinal) ? null : mod.ModFolderName)
+                        : ModListRows.Meta(meta.Author,
+                            string.IsNullOrWhiteSpace(meta.Version) ? null : $"v{meta.Version}");
+                    var thumb = meta?.ImagePath is { } imgPath
+                        ? SpheneUI.Media.Texture($"modthumb:{mod.ModFolderName}", () => ReadModImage(imgPath))
+                        : null;
+
+                    var isSelected = _selectedPenumbraModFolders.Contains(mod.ModFolderName);
+                    var row = ModListRows.Draw(mod.ModFolderName + idSuffix, mod.DisplayName, metaText,
+                        thumb, FontAwesomeIcon.PuzzlePiece, isSelected, accent, checkIndicator: true);
+                    if (row.Clicked)
+                    {
+                        _selectedPenumbraModFolder = mod.ModFolderName;
+                        if (!_selectedPenumbraModFolders.Add(mod.ModFolderName))
+                        {
+                            _selectedPenumbraModFolders.Remove(mod.ModFolderName);
+                        }
+                    }
+                }
+            }
+        }
+        SpheneUI.Layout.EndScrollArea(SpheneUI.Layout.NavRailBandColor());
+    }
+
+    /// <summary>The recipient picker: filter, selection toolbar, scroll-faded rich rows.</summary>
+    private void DrawRecipientPicker(
+        List<(Pair Pair, string Uid, string AliasOrUid, string DisplayName)> candidatePairs,
+        float colBottom, Vector4 accent, string idSuffix)
+    {
+        ImGui.SetNextItemWidth(-1);
+        SpheneUI.Controls.InputTextWithHint("##recipientFilter" + idSuffix,
+            "Filter recipients…", ref _recipientFilter, 64);
+        DrawCardToolbar(
+            $"{_selectedPenumbraRecipients.Count} selected · paired users only",
+            _selectedPenumbraRecipients.Count > 0 ? "Clear" : null,
+            () => _selectedPenumbraRecipients.Clear());
+
+        var listH = MathF.Max(80f * SpheneUI.Scale,
+            colBottom - ImGui.GetCursorScreenPos().Y - SpheneUI.Spacing.CardPadding.Scaled);
+        if (SpheneUI.Layout.BeginScrollArea("RecipientList" + idSuffix, new Vector2(0f, listH)))
+        {
+            if (candidatePairs.Count == 0)
+            {
+                SpheneUI.Text.Muted("No paired users available for mod delivery.");
+            }
+            else
+            {
+                foreach (var entry in candidatePairs)
+                {
+                    var uid = entry.Uid;
+                    if (string.IsNullOrWhiteSpace(uid))
+                    {
+                        continue;
+                    }
+
+                    var displayName = entry.DisplayName;
+                    if (!string.IsNullOrWhiteSpace(_recipientFilter) &&
+                        !displayName.Contains(_recipientFilter, StringComparison.OrdinalIgnoreCase) &&
+                        !entry.AliasOrUid.Contains(_recipientFilter, StringComparison.OrdinalIgnoreCase) &&
+                        !uid.Contains(_recipientFilter, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    var allowsMods = entry.Pair.OtherAllowsReceivingPenumbraMods;
+                    if (!allowsMods)
+                    {
+                        _selectedPenumbraRecipients.Remove(uid);
+                    }
+
+                    var isSelected = _selectedPenumbraRecipients.Contains(uid);
+                    var metaText = allowsMods ? entry.AliasOrUid : "receiving disabled";
+                    var row = ModListRows.Draw(uid + idSuffix, displayName, metaText,
+                        thumb: AvatarFor(entry.Pair.UserData), placeholderIcon: FontAwesomeIcon.User,
+                        selected: isSelected, accent,
+                        checkIndicator: true, enabled: allowsMods);
+                    if (row.Clicked && !_selectedPenumbraRecipients.Add(uid))
+                    {
+                        _selectedPenumbraRecipients.Remove(uid);
+                    }
+                }
+            }
+        }
+        SpheneUI.Layout.EndScrollArea(SpheneUI.Layout.NavRailBandColor());
+    }
+
+    /// <summary>Summary, send options and progress of the current share.</summary>
+    private void DrawReviewAndSend(string selectedLabel, float scale, Vector4 accent, string idSuffix)
+    {
+        DrawReviewRow("Mods", selectedLabel);
+        DrawReviewRow("Recipients", _selectedPenumbraRecipients.Count.ToString());
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+        SpheneUI.Layout.Callout(
+            "Packages upload to the Sphene server network and are shared with the selected users.",
+            FontAwesomeIcon.InfoCircle, accent);
+
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+        var sendCurrent = _sendCurrentModState;
+        if (SpheneUI.Controls.Checkbox("Send current mod state (temporary)##sendCurrent" + idSuffix, ref sendCurrent))
+        {
+            _sendCurrentModState = sendCurrent;
+        }
+        SpheneUI.AttachTooltip("When enabled, Sphene packages the current Penumbra mod folder contents into a temporary .pmp, uploads it, then deletes the temporary file. When disabled, Sphene prefers existing ShrinkU backups.");
+
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+        var canShare = !_isSendingPenumbraMod && _selectedPenumbraModFolders.Count > 0 && _selectedPenumbraRecipients.Count > 0;
+        var shareButtonText = _selectedPenumbraModFolders.Count <= 1
+            ? "Share Mod"
+            : $"Share {_selectedPenumbraModFolders.Count} Mods";
+        if (SpheneUI.Controls.HeroButton("##shareMods" + idSuffix, shareButtonText,
+                FontAwesomeIcon.Share, color: accent, enabled: canShare))
+        {
+            StartSendPenumbraMods(_selectedPenumbraModFolders.ToList(), _sendCurrentModState);
+        }
+
+        if (_isSendingPenumbraMod && _sendPenumbraModCts != null
+            && SpheneUI.Controls.SmallButton("Cancel"))
+        {
+            try { _sendPenumbraModCts.Cancel(); }
+            catch (Exception ex) { _logger.LogDebug(ex, "Failed to cancel SendPenumbraMod"); }
+        }
+
+        if (!string.IsNullOrWhiteSpace(_sendPenumbraModStatusText))
+        {
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+            var color = _sendPenumbraModStatusIsError ? ImGuiColors.DalamudRed : ImGuiColors.DalamudGrey;
+            SpheneUI.Text.ColoredWrapped(_sendPenumbraModStatusText, color);
+        }
+
+        if (_isSendingPenumbraMod)
+        {
+            DrawUploadProgress(scale);
+        }
+    }
+
+    /// <summary>Muted status line plus an optional right-aligned text action inside a card header.</summary>
+    private static void DrawCardToolbar(string status, string? actionLabel, Action? onAction)
+    {
+        SpheneUI.Text.Muted(status);
+        if (actionLabel != null && onAction != null)
+        {
+            ImGui.SameLine();
+            SpheneUI.Controls.DockToRightEdge(ImGui.CalcTextSize(actionLabel).X);
+            if (SpheneUI.Controls.SmallButton(actionLabel))
+            {
+                onAction();
+            }
+        }
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+    }
+
+    private static void DrawReviewRow(string label, string value)
+    {
+        SpheneUI.Text.Muted(label);
+        ImGui.SameLine();
+        SpheneUI.Controls.DockToRightEdge(ImGui.CalcTextSize(value).X);
+        SpheneUI.Text.Plain(value);
+    }
+
+    private void DrawUploadProgress(float scale)
+    {
+        var currentUploads = _fileUploadManager.CurrentUploads.ToList();
+        HashSet<string>? uploadHashes = null;
+        DateTime? uploadStartTime;
+        lock (_uploadStateLock)
+        {
+            uploadStartTime = _uploadStartTime;
+            if (_currentUploadHashes.Count > 0)
+            {
+                uploadHashes = new HashSet<string>(_currentUploadHashes, StringComparer.OrdinalIgnoreCase);
+            }
+        }
+
+        if (uploadHashes != null && uploadHashes.Count > 0)
+        {
+            currentUploads = currentUploads
+                .Where(c => uploadHashes.Contains(c.Hash))
+                .ToList();
+        }
+
+        if (!currentUploads.Any())
+        {
+            return;
+        }
+
+        var totalUploaded = currentUploads.Sum(c => c.Transferred);
+        var totalToUpload = currentUploads.Sum(c => c.Total);
+        var uploadProgress = totalToUpload > 0 ? (float)totalUploaded / totalToUpload : 0f;
+        var uploadText = $"{UiSharedService.ByteToString(totalUploaded)}/{UiSharedService.ByteToString(totalToUpload)}";
+
+        if (uploadStartTime.HasValue)
+        {
+            var elapsed = DateTime.UtcNow - uploadStartTime.Value;
+            if (elapsed.TotalSeconds > 0)
+            {
+                var bytesPerSecond = totalUploaded / elapsed.TotalSeconds;
+                if (bytesPerSecond > 0)
+                {
+                    uploadText += $" ({UiSharedService.ByteToString((long)bytesPerSecond)}/s)";
+                }
+            }
+        }
+
+        var barWidth = ImGui.GetContentRegionAvail().X;
+        var cursor = ImGui.GetCursorPos();
+        var barSize = new Vector2(barWidth, 20f * scale);
+        SpheneUI.Controls.ProgressBar(uploadProgress, barSize);
+        ImGui.SetCursorPos(cursor + new Vector2(0f, barSize.Y + 4f * scale));
+        SpheneUI.Text.Colored(uploadText, ImGuiColors.DalamudGrey);
     }
 
     private void LoadPenumbraMods()

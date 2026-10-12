@@ -44,6 +44,25 @@ public sealed class IpcCallerHonorific : IIpcCaller
 
     public bool APIAvailable { get; private set; } = false;
 
+    private volatile string _lastLocalTitleJson = string.Empty;
+
+    /// <summary>The most recent TitleData JSON Honorific reported for the local
+    /// character, or empty when Honorific has none or never reported one.</summary>
+    public string LastLocalTitleJson => _lastLocalTitleJson;
+
+    /// <summary>Fetches the local character's TitleData JSON from Honorific and
+    /// caches it in <see cref="LastLocalTitleJson"/>.</summary>
+    public async Task<string> GetLocalTitleJsonAsync()
+    {
+        var result = await TryGetTitleAsync().ConfigureAwait(false);
+        if (result.Success)
+        {
+            _lastLocalTitleJson = result.Title;
+            return result.Title;
+        }
+        return string.Empty;
+    }
+
     public void CheckAPI()
     {
         try
@@ -121,11 +140,13 @@ public sealed class IpcCallerHonorific : IIpcCaller
 
     private void OnHonorificDisposing()
     {
+        _lastLocalTitleJson = string.Empty;
         _spheneMediator.Publish(new HonorificMessage(string.Empty));
     }
 
     private void OnHonorificLocalCharacterTitleChanged(string titleJson)
     {
+        _lastLocalTitleJson = titleJson ?? string.Empty;
         string titleData = string.IsNullOrEmpty(titleJson) ? string.Empty : Convert.ToBase64String(Encoding.UTF8.GetBytes(titleJson));
         _spheneMediator.Publish(new HonorificMessage(titleData));
     }
@@ -141,6 +162,7 @@ public sealed class IpcCallerHonorific : IIpcCaller
     {
         var result = await TryGetTitleAsync().ConfigureAwait(false);
         if (!result.Success) return;
+        _lastLocalTitleJson = result.Title;
         string titleData = string.IsNullOrEmpty(result.Title) ? string.Empty : Convert.ToBase64String(Encoding.UTF8.GetBytes(result.Title));
         _spheneMediator.Publish(new HonorificMessage(titleData));
     }

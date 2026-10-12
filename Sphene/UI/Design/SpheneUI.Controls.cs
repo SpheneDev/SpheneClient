@@ -938,17 +938,20 @@ public static partial class SpheneUI
         /// </summary>
         internal static bool SegCore(string id, string? label, FontAwesomeIcon? icon,
             Vector2? size, Vector4 accent, bool active = false, bool enabled = true,
-            float iconScale = 1f)
+            float iconScale = 1f,
+            Action<ImDrawListPtr, Vector2, Vector2>? zoneContent = null,
+            bool solidFill = false, Vector4? labelColor = null)
         {
             var scale = SpheneUI.Scale;
             var display = StripLabelId(label);
             var hasLabel = !string.IsNullOrEmpty(display);
             // Every labeled button carries a zone — the semantic icon when
             // given, otherwise a subdued default chevron marking it as an
-            // actionable button.
+            // actionable button. zoneContent swaps the glyph for caller-drawn
+            // content (e.g. a brand texture glyph).
             var glyph = icon?.ToIconString()
                 ?? (hasLabel ? FontAwesomeIcon.ChevronRight.ToIconString() : null);
-            var hasZone = glyph != null;
+            var hasZone = glyph != null || zoneContent != null;
             var isDefaultGlyph = !icon.HasValue && hasLabel;
             var h = size?.Y is > 0f ? size.Value.Y : ImGui.GetFrameHeight();
             var w = size?.X is > 0f or < 0f ? size.Value.X : SegAutoWidth(display, icon, h);
@@ -975,7 +978,11 @@ public static partial class SpheneUI
                 new Vector4(0.02f, 0.02f, 0.035f, 1f), SegScrimDarken);
             scrim.W = MathF.Max(scrim.W, SegScrimAlpha) * dim;
             drawList.AddRectFilled(min, max, ColorUtils.ToU32(scrim), radius);
-            var pillFill = active ? ColorUtils.WithAlpha(accent, SegPillActive)
+            // solidFill: the whole pill carries the accent (brand buttons) —
+            // hover/held only brighten it instead of tinting a neutral fill.
+            var pillFill = solidFill
+                ? ColorUtils.WithAlpha(accent, held ? 1f : hovered ? 0.95f : 0.85f)
+                : active ? ColorUtils.WithAlpha(accent, SegPillActive)
                 : held ? ColorUtils.WithAlpha(accent, SegPillHeld)
                 : hovered ? ColorUtils.WithAlpha(accent, SegPillHover)
                 : ColorUtils.WithAlpha(Vector4.One, SegPillIdle);
@@ -986,7 +993,10 @@ public static partial class SpheneUI
             if (hasZone)
             {
                 var zoneMax = hasLabel ? new Vector2(min.X + zoneW, max.Y) : max;
-                var zoneFill = active ? ColorUtils.WithAlpha(accent, SegZoneActive)
+                var zoneFill = solidFill
+                    ? ColorUtils.WithAlpha(ColorUtils.LerpColor(accent, Vector4.Zero,
+                        hovered ? 0.10f : 0.20f), 0.95f)
+                    : active ? ColorUtils.WithAlpha(accent, SegZoneActive)
                     : held ? ColorUtils.WithAlpha(accent, SegZoneHeld)
                     : hovered ? ColorUtils.WithAlpha(accent, SegZoneHover)
                     : ColorUtils.WithAlpha(Vector4.One, SegZoneIdle);
@@ -1002,27 +1012,34 @@ public static partial class SpheneUI
                     drawList.AddLine(new Vector2(zoneMax.X - 0.5f, min.Y + seamInset),
                         new Vector2(zoneMax.X - 0.5f, max.Y - seamInset), seamCol);
                 }
-                var glyphColor = active ? ColorUtils.ContrastTextColor(accent)
-                    : hovered ? ColorUtils.LerpColor(accent, Vector4.One, 0.3f)
-                    : ColorUtils.LerpColor(accent, Vector4.One, 0.1f);
-                // The default chevron stays quieter than a semantic icon so
-                // real iconography keeps standing out.
-                glyphColor.W *= dim * (isDefaultGlyph ? 0.55f : 1f);
-                using (PushIconFont())
+                if (zoneContent != null)
                 {
-                    if (MathF.Abs(iconScale - 1f) > 0.0001f)
+                    zoneContent(drawList, min, zoneMax);
+                }
+                else
+                {
+                    var glyphColor = active ? ColorUtils.ContrastTextColor(accent)
+                        : hovered ? ColorUtils.LerpColor(accent, Vector4.One, 0.3f)
+                        : ColorUtils.LerpColor(accent, Vector4.One, 0.1f);
+                    // The default chevron stays quieter than a semantic icon so
+                    // real iconography keeps standing out.
+                    glyphColor.W *= dim * (isDefaultGlyph ? 0.55f : 1f);
+                    using (PushIconFont())
                     {
-                        ImGui.SetWindowFontScale(iconScale);
-                    }
-                    var glyphSize = ImGui.CalcTextSize(glyph!);
-                    var zoneCenter = hasLabel
-                        ? new Vector2(min.X + zoneW * 0.5f, (min.Y + max.Y) * 0.5f)
-                        : (min + max) * 0.5f;
-                    drawList.AddText(zoneCenter - glyphSize * 0.5f,
-                        ColorUtils.ToU32(glyphColor), glyph);
-                    if (MathF.Abs(iconScale - 1f) > 0.0001f)
-                    {
-                        ImGui.SetWindowFontScale(1f);
+                        if (MathF.Abs(iconScale - 1f) > 0.0001f)
+                        {
+                            ImGui.SetWindowFontScale(iconScale);
+                        }
+                        var glyphSize = ImGui.CalcTextSize(glyph!);
+                        var zoneCenter = hasLabel
+                            ? new Vector2(min.X + zoneW * 0.5f, (min.Y + max.Y) * 0.5f)
+                            : (min + max) * 0.5f;
+                        drawList.AddText(zoneCenter - glyphSize * 0.5f,
+                            ColorUtils.ToU32(glyphColor), glyph);
+                        if (MathF.Abs(iconScale - 1f) > 0.0001f)
+                        {
+                            ImGui.SetWindowFontScale(1f);
+                        }
                     }
                 }
             }
@@ -1031,17 +1048,20 @@ public static partial class SpheneUI
                 : held ? SegBorderHeld
                 : hovered ? SegBorderHover
                 : SegBorderIdle) * dim;
-            drawList.AddRect(min, max,
-                ColorUtils.ToU32(ColorUtils.WithAlpha(Colors.Border, borderAlpha)), radius);
+            var borderCol = solidFill
+                ? ColorUtils.WithAlpha(ColorUtils.LerpColor(accent, Vector4.One, 0.25f), borderAlpha)
+                : ColorUtils.WithAlpha(Colors.Border, borderAlpha);
+            drawList.AddRect(min, max, ColorUtils.ToU32(borderCol), radius);
 
             if (hasLabel)
             {
                 var labelSize = ImGui.CalcTextSize(display!);
                 var textPadX = SegTextPadX * scale;
                 var textX = min.X + zoneW + textPadX;
-                var textBase = active
-                    ? ColorUtils.LerpColor(accent, Vector4.One, 0.25f)
-                    : ImGui.ColorConvertU32ToFloat4(ImGui.GetColorU32(ImGuiCol.Text));
+                var textBase = labelColor
+                    ?? (solidFill ? ColorUtils.ContrastTextColor(accent)
+                    : active ? ColorUtils.LerpColor(accent, Vector4.One, 0.25f)
+                    : ImGui.ColorConvertU32ToFloat4(ImGui.GetColorU32(ImGuiCol.Text)));
                 textBase.W *= dim;
                 ImGui.PushClipRect(new Vector2(textX, min.Y),
                     new Vector2(max.X - textPadX * 0.5f, max.Y), true);
@@ -1372,6 +1392,97 @@ public static partial class SpheneUI
                 drawList.AddText(new Vector2(pos.X + (size - textSize.X) * 0.5f,
                     pos.Y + (size - textSize.Y) * 0.5f), ImGui.GetColorU32(ImGuiCol.Text), glyph);
             }
+            Lint.CheckBounds(id);
+            return clicked;
+        }
+
+        /// <summary>
+        /// Same swatch button as <see cref="GlyphSwatch"/> but renders a thick
+        /// colored frame instead of a glyph — the interior keeps the neutral
+        /// control background. Used for pickers where the color acts as an
+        /// outline or edge rather than the glyph fill.
+        /// </summary>
+        public static bool FrameSwatch(string id, Vector4 color, float size = -1f, bool selected = false)
+        {
+            var scale = SpheneUI.Scale;
+            if (size < 0f)
+            {
+                size = Metrics.SwatchSize;
+            }
+            var pos = ImGui.GetCursorScreenPos();
+            var clicked = ImGui.InvisibleButton(id, new Vector2(size, size));
+            var hovered = ImGui.IsItemHovered();
+            var style = ImGui.GetStyle();
+            var fill = hovered
+                ? style.Colors[(int)ImGuiCol.FrameBgHovered]
+                : style.Colors[(int)ImGuiCol.FrameBg];
+            var ring = hovered
+                ? new Vector4(
+                    MathF.Min(1f, color.X * Metrics.SwatchHoverBrighten + Metrics.SwatchHoverBrightenAdd),
+                    MathF.Min(1f, color.Y * Metrics.SwatchHoverBrighten + Metrics.SwatchHoverBrightenAdd),
+                    MathF.Min(1f, color.Z * Metrics.SwatchHoverBrighten + Metrics.SwatchHoverBrightenAdd), color.W)
+                : color;
+            var rounding = Metrics.SwatchRadius(size);
+            var max = pos + new Vector2(size, size);
+            var drawList = ImGui.GetWindowDrawList();
+            drawList.AddRectFilled(pos, max, ColorUtils.ToU32(fill), rounding);
+            drawList.AddRect(pos, max, ColorUtils.ToU32(ring), rounding,
+                ImDrawFlags.None, MathF.Max(2f, 2.5f * scale));
+            if (selected)
+            {
+                var accent = Colors.Accent;
+                var outer = new Vector2(1.5f * scale, 1.5f * scale);
+                drawList.AddRect(pos - outer, max + outer,
+                    ColorUtils.ToU32(accent with { W = Metrics.SwatchBorderAlphaSelected }),
+                    rounding, ImDrawFlags.None, 1f * scale);
+            }
+            Lint.CheckBounds(id);
+            return clicked;
+        }
+
+        /// <summary>
+        /// Swatch button rendered as a transparency checkerboard — the
+        /// "no color / none" entry in palette pickers.
+        /// </summary>
+        public static bool TransparentSwatch(string id, float size = -1f, bool selected = false)
+        {
+            var scale = SpheneUI.Scale;
+            if (size < 0f)
+            {
+                size = Metrics.SwatchSize;
+            }
+            var pos = ImGui.GetCursorScreenPos();
+            var clicked = ImGui.InvisibleButton(id, new Vector2(size, size));
+            var hovered = ImGui.IsItemHovered();
+            var rounding = Metrics.SwatchRadius(size);
+            var max = pos + new Vector2(size, size);
+            var drawList = ImGui.GetWindowDrawList();
+            var light = new Vector4(0.72f, 0.72f, 0.72f, 1f);
+            var dark = new Vector4(0.38f, 0.38f, 0.38f, 1f);
+            var cell = size / 4f;
+            drawList.PushClipRect(pos, max, true);
+            drawList.AddRectFilled(pos, max, ColorUtils.ToU32(light), rounding);
+            for (var row = 0; row < 4; row++)
+            {
+                for (var col = 0; col < 4; col++)
+                {
+                    if (((row + col) & 1) == 0)
+                    {
+                        var cellMin = pos + new Vector2(col * cell, row * cell);
+                        drawList.AddRectFilled(cellMin, cellMin + new Vector2(cell, cell),
+                            ColorUtils.ToU32(dark));
+                    }
+                }
+            }
+            drawList.PopClipRect();
+            var accent = Colors.Accent;
+            var border = selected
+                ? new Vector4(accent.X, accent.Y, accent.Z, Metrics.SwatchBorderAlphaSelected)
+                : hovered
+                    ? new Vector4(accent.X, accent.Y, accent.Z, Metrics.SwatchBorderAlphaHover)
+                    : new Vector4(1f, 1f, 1f, Metrics.SwatchBorderAlpha);
+            drawList.AddRect(pos, max, ColorUtils.ToU32(border), rounding,
+                ImDrawFlags.None, selected ? Metrics.SwatchSelectedThickness * scale : 1f * scale);
             Lint.CheckBounds(id);
             return clicked;
         }
