@@ -57,6 +57,7 @@ public class ThemeConfiguration
     // CompactUI Specific Tooltip and Context Menu Settings
     public float CompactTooltipRounding { get; set; } = 8.0f;
     public float CompactTooltipBorderSize { get; set; } = 1.0f;
+    public Vector2 CompactTooltipPadding { get; set; } = new(10.0f, 8.0f);
     public float CompactContextMenuRounding { get; set; } = 8.0f;
     public float CompactContextMenuBorderSize { get; set; } = 1.0f;
     

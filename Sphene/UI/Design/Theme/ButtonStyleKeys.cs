@@ -42,6 +42,7 @@ public static class ButtonStyleKeys
     public const string Pair_OpenPermissions = "GroupPair.OpenPermissions";
     public const string Pair_Menu = "GroupPair.Menu";
     public const string Pair_Pause = "GroupPair.Pause";
+    public const string Pair_Profile = "GroupPair.Profile";
     public const string Pair_Reload = "GroupPair.Reload";
     public const string Pair_Pin = "GroupPair.Pin";
     public const string Pair_Remove = "GroupPair.Remove";

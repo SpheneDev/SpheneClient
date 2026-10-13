@@ -1,6 +1,7 @@
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface;
 using Dalamud.Interface.Colors;
+using Dalamud.Interface.Textures.TextureWraps;
 using Dalamud.Interface.Utility;
 using Dalamud.Interface.Utility.Raii;
 using Sphene.API.Data.Extensions;
@@ -44,6 +45,9 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
     private readonly PairManager _pairManager;
     private readonly SpheneConfigService _configService;
     private readonly LocalPairEmoteForceSyncService _localPairEmoteForceSyncService;
+    private readonly SpheneProfileManager _spheneProfileManager;
+    private byte[] _avatarBytes = [];
+    private byte[] _rowImageBytes = [];
     private float _menuWidth = -1;
     private bool _wasHovered = false;
     private static readonly Vector4 SoftToggleEnabledColor = new(0.56f, 0.82f, 0.62f, 1f);
@@ -57,7 +61,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         ServerConfigurationManager serverConfigurationManager,
         UiSharedService uiSharedService, PlayerPerformanceConfigService performanceConfigService,
         CharaDataManager charaDataManager, PairManager pairManager, SpheneConfigService configService,
-        LocalPairEmoteForceSyncService localPairEmoteForceSyncService)
+        LocalPairEmoteForceSyncService localPairEmoteForceSyncService, SpheneProfileManager spheneProfileManager)
     {
         _id = id;
         _pair = entry;
@@ -74,6 +78,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         _pairManager = pairManager;
         _configService = configService;
         _localPairEmoteForceSyncService = localPairEmoteForceSyncService;
+        _spheneProfileManager = spheneProfileManager;
         _mediator.Subscribe<PenumbraModTransferAvailableMessage>(this, OnPenumbraModTransferAvailable);
         _mediator.Subscribe<PenumbraModTransferCompletedMessage>(this, OnPenumbraModTransferCompleted);
         _mediator.Subscribe<PenumbraModTransferDiscardedMessage>(this, OnPenumbraModTransferDiscarded);
@@ -138,41 +143,52 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         }
         var hasTimingSyncTarget = _localPairEmoteForceSyncService.IsTargetSelected(_pair.UserData.UID);
         var hasTimingLeader = _localPairEmoteForceSyncService.IsLeader(_pair.UserData.UID);
-        var color = ImRaii.PushColor(ImGuiCol.ChildBg, ImGui.GetColorU32(ImGuiCol.FrameBgHovered), _wasHovered && !hasOfflineGrace);
+        var color = ImRaii.PushColor(ImGuiCol.ChildBg, ImGui.GetColorU32(ImGuiCol.FrameBgHovered), _wasHovered);
         var baseFolderWidth = UiSharedService.GetBaseFolderWidth() + 9.0f;
-        using (ImRaii.Child(GetType() + _id, new System.Numerics.Vector2(baseFolderWidth, ImGui.GetFrameHeight()), false, ImGuiWindowFlags.NoScrollbar))
+        var rowHeight = ImGui.GetFrameHeight() + 6f * SpheneUI.Scale;
+        using (ImRaii.Child(GetType() + _id, new System.Numerics.Vector2(baseFolderWidth, rowHeight), false, ImGuiWindowFlags.NoScrollbar))
         {
-            if (hasOfflineGrace)
+            var drawList = ImGui.GetWindowDrawList();
+            var rowMin = ImGui.GetWindowPos();
+            var rowMax = rowMin + new Vector2(baseFolderWidth, rowHeight);
+
+            // the pair's own list-row styling: theme effects plus the
+            // supporter row image strip, identical to the hub friends list
+            var profile = _spheneProfileManager.GetSpheneProfile(_pair.UserData);
+            var profileTheme = profile.ProfileTheme.Value;
+            var accent = profileTheme.AccentColor(SpheneUI.Palette.SpheneGold);
+            var hoverT = SpheneUI.Fx.HoverT(ImGui.GetID("##pairrowfx"), _wasHovered);
+            var rowImage = _pair.UserData.IsSupporter && profile.RowImageData.Value.Length > 0
+                ? PairRowImage(profile)
+                : null;
+            if (profileTheme.RowHover != ProfileRowFx.None || profileTheme.RowIdle != ProfileRowFx.None
+                || rowImage != null)
             {
-                var rowStart = ImGui.GetCursorScreenPos();
-                var gradientWidth = baseFolderWidth * 0.42f;
-                var rowEnd = new Vector2(rowStart.X + gradientWidth, rowStart.Y + ImGui.GetFrameHeight());
-                var startColor = new Vector4(1.0f, 0.66f, 0.26f, _wasHovered ? 0.46f : 0.36f);
-                var endColor = new Vector4(1.0f, 0.66f, 0.26f, 0.0f);
-                DrawRowGradient(rowStart, rowEnd, startColor, endColor);
+                SpheneUI.Profile.RowBackdrop(drawList, rowMin, rowMax, accent, _wasHovered, hoverT,
+                    profileTheme.RowHover, profileTheme.RowIdle, rowImage, rowHeight * 0.38f);
             }
 
             if (hasTimingSyncTarget)
             {
                 var rowStart = ImGui.GetCursorScreenPos();
                 var gradientWidth = baseFolderWidth * 0.42f;
-                var rowEnd = new Vector2(rowStart.X + gradientWidth, rowStart.Y + ImGui.GetFrameHeight());
+                var rowEnd = new Vector2(rowStart.X + gradientWidth, rowStart.Y + rowHeight);
                 var startColor = new Vector4(0.60f, 0.34f, 1.0f, _wasHovered ? 0.42f : 0.30f);
                 var endColor = new Vector4(0.60f, 0.34f, 1.0f, 0.0f);
-                DrawRowGradient(rowStart, rowEnd, startColor, endColor);
+                DrawRowGradient(rowStart, rowEnd, startColor, endColor, rowHeight);
             }
 
             if (hasTimingLeader)
             {
                 var rowStart = ImGui.GetCursorScreenPos();
                 var gradientWidth = baseFolderWidth * 0.50f;
-                var rowEnd = new Vector2(rowStart.X + gradientWidth, rowStart.Y + ImGui.GetFrameHeight());
+                var rowEnd = new Vector2(rowStart.X + gradientWidth, rowStart.Y + rowHeight);
                 var startColor = new Vector4(1.0f, 0.30f, 0.76f, _wasHovered ? 0.48f : 0.34f);
                 var endColor = new Vector4(1.0f, 0.30f, 0.76f, 0.0f);
-                DrawRowGradient(rowStart, rowEnd, startColor, endColor);
+                DrawRowGradient(rowStart, rowEnd, startColor, endColor, rowHeight);
             }
 
-            DrawLeftSide();
+            DrawLeftSide(profile, accent, rowHeight, hasOfflineGrace);
             ImGui.SameLine();
             var posX = ImGui.GetCursorPosX();
             var rightSide = DrawRightSide();
@@ -182,13 +198,39 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         color.Dispose();
     }
 
-    private static void DrawRowGradient(Vector2 rowStart, Vector2 rowEnd, Vector4 startColor, Vector4 endColor)
+    /// <summary>Pair's cached avatar texture — reloads from the media cache when the profile bytes change.</summary>
+    private IDalamudTextureWrap? PairAvatar(SpheneProfileData profile)
+    {
+        var data = profile.ImageData.Value;
+        var key = $"compact:avatar:{_pair.UserData.UID}";
+        if (!ReferenceEquals(_avatarBytes, data) && !_avatarBytes.AsSpan().SequenceEqual(data))
+        {
+            _avatarBytes = data;
+            SpheneUI.Media.Evict(key);
+        }
+        return data.Length == 0 ? null : SpheneUI.Media.Texture(key, data);
+    }
+
+    /// <summary>Pair's cached row strip image (supporter perk) for the row backdrop.</summary>
+    private SpheneUI.Media.AnimatedImage? PairRowImage(SpheneProfileData profile)
+    {
+        var data = profile.RowImageData.Value;
+        var key = $"compact:row:{_pair.UserData.UID}";
+        if (!ReferenceEquals(_rowImageBytes, data) && !_rowImageBytes.AsSpan().SequenceEqual(data))
+        {
+            _rowImageBytes = data;
+            SpheneUI.Media.Evict(key);
+        }
+        return SpheneUI.Media.Animated(key, data);
+    }
+
+    private static void DrawRowGradient(Vector2 rowStart, Vector2 rowEnd, Vector4 startColor, Vector4 endColor, float rowHeight)
     {
         var drawList = ImGui.GetWindowDrawList();
         var width = rowEnd.X - rowStart.X;
         var slices = Math.Clamp((int)(width / 8.0f), 8, 64);
         var step = width / slices;
-        var rounding = ImGui.GetFrameHeight() * 0.38f;
+        var rounding = rowHeight * 0.38f;
         for (int i = 0; i < slices; i++)
         {
             var x0 = rowStart.X + step * i;
@@ -551,201 +593,175 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         }
     }
 
-    private void DrawLeftSide()
+    private void DrawLeftSide(SpheneProfileData profile, Vector4 accent, float rowHeight, bool hasOfflineGrace)
     {
         var tooltipTitle = _pair.UserData.AliasOrUID;
         string? tooltipMeta = null;
-        var tooltipLines = new List<string>(4);
-        var showUserPairTooltip = false;
+        var tooltipLines = new List<TooltipSpecRow>(8);
 
-        ImGui.AlignTextToFramePadding();
+        var scale = SpheneUI.Scale;
+        var drawList = ImGui.GetWindowDrawList();
+        var contentMin = ImGui.GetCursorScreenPos();
+        var rowCenterY = contentMin.Y + rowHeight * 0.5f;
 
         var isVisibleForIcon = _pair.IsMutuallyVisible || (_uiSharedService.IsInGpose && _pair.WasMutuallyVisibleInGpose);
         var suppressAckUi = _pair.IsInDuty;
         var isTimingSyncTarget = _localPairEmoteForceSyncService.IsTargetSelected(_pair.UserData.UID);
         var isAutoResetActiveForTargets = _localPairEmoteForceSyncService.AutoResetOnLocalEmoteEnabled;
 
-        // Use combined state to prevent race conditions between separate calls
+        // the avatar ring colors by sync state: incoming pending (their change
+        // still applying on this client) pulses yellow, any failed direction
+        // reads red — outgoing pending stays green since the icon covers it
         var (incomingStateForIcon, outgoingStateForIcon) = _pair.GetCombinedAckV3State();
-        var stateForIcon = GetMostSevereAckState(incomingStateForIcon, outgoingStateForIcon);
 
-        if (_pair.IsPaused)
-        {
-            using var _ = ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.DalamudYellow);
-            SpheneUI.Icons.Icon(FontAwesomeIcon.PauseCircle);
-            showUserPairTooltip = ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled);
-            tooltipLines.Add("Paused");
-        }
-        else if (!_pair.IsOnline)
-        {
-            using var _ = ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.DalamudRed);
-            SpheneUI.Icons.Icon(_pair.IndividualPairStatus == API.Data.Enum.IndividualPairStatus.OneSided
-                ? FontAwesomeIcon.ArrowsLeftRight
-                : (_pair.IndividualPairStatus == API.Data.Enum.IndividualPairStatus.Bidirectional
-                    ? FontAwesomeIcon.User : FontAwesomeIcon.Users));
-            showUserPairTooltip = ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled);
-            tooltipLines.Add("Offline");
-        }
-        else if (isVisibleForIcon)
-        {
-            if (_pair.UserPair.Groups.Any() && _pair.IndividualPairStatus != API.Data.Enum.IndividualPairStatus.Bidirectional)
-            {
-                using var _ = ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.ParsedGreen);
-                SpheneUI.Icons.Icon(FontAwesomeIcon.Link);
-                ImGui.SameLine();
-            }
-            
-            var iconColor = suppressAckUi ? ImGuiColors.ParsedGreen : stateForIcon.Outcome switch
-            {
-                Pair.AckV3Outcome.Success => ImGuiColors.ParsedGreen,
-                Pair.AckV3Outcome.Fail => ImGuiColors.DalamudRed,
-                Pair.AckV3Outcome.Pending => ImGuiColors.DalamudYellow,
-                _ => ImGuiColors.ParsedGreen
-            };
-            var icon = (_uiSharedService.IsInGpose || _pair.IsInGpose) ? FontAwesomeIcon.Camera : FontAwesomeIcon.Eye;
-            SpheneUI.Icons.Icon(icon, iconColor);
-            showUserPairTooltip = ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled);
-            tooltipLines.Add(string.IsNullOrWhiteSpace(_pair.PlayerName) ? "Visible" : $"Visible: {_pair.PlayerName}");
-            
-            if (ImGui.IsItemClicked())
-            {
-                _mediator.Publish(new TargetPairMessage(_pair));
-            }
-        }
-        else
-        {
-            using var _ = ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.HealerGreen);
-            if (_pair.IsInGpose)
-            {
-                SpheneUI.Icons.Icon(FontAwesomeIcon.Camera);
-                showUserPairTooltip = ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled);
-                tooltipLines.Add("GPose (no data shared)");
-            }
-            else
-            {
-                SpheneUI.Icons.Icon(_pair.IndividualPairStatus == API.Data.Enum.IndividualPairStatus.Bidirectional
-                    ? FontAwesomeIcon.User : FontAwesomeIcon.Users);
-                showUserPairTooltip = ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled);
-                tooltipLines.Add("Online");
-            }
-        }
-
-        if (_pair.IsOnline && _pair.IsMutuallyVisible && !suppressAckUi)
-        {
-            ImGui.SameLine();
-            var outgoing = _pair.GetOutgoingAckV3State();
-            if (outgoing.Outcome == Pair.AckV3Outcome.Pending)
-            {
-                using var _ = ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.DalamudYellow);
-                SpheneUI.Icons.Icon(FontAwesomeIcon.Clock);
-                SpheneUI.AttachTooltip("Sync in progress...");
-            }
-            else if (outgoing.Outcome == Pair.AckV3Outcome.Success)
-            {
-                using var _ = ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.ParsedGreen);
-                SpheneUI.Icons.Icon(FontAwesomeIcon.CheckCircle);
-                var timeAgo = outgoing.Time.HasValue
-                    ? $" ({(DateTimeOffset.UtcNow - outgoing.Time.Value).TotalSeconds:F0}s ago)"
-                    : string.Empty;
-                SpheneUI.AttachTooltip($"Synced{timeAgo}");
-            }
-            else if (outgoing.Outcome == Pair.AckV3Outcome.Fail)
-            {
-                using var _ = ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.DalamudRed);
-                SpheneUI.Icons.Icon(FontAwesomeIcon.ExclamationTriangle);
-                var timeAgo = outgoing.Time.HasValue
-                    ? $" ({(DateTimeOffset.UtcNow - outgoing.Time.Value).TotalSeconds:F0}s ago)"
-                    : string.Empty;
-                var reason = GetFriendlyAckFailureReason(outgoing.ErrorCode, outgoing.ErrorMessage);
-                SpheneUI.AttachTooltip($"Sync failed{timeAgo}{Environment.NewLine}{reason}");
-            }
-        }
-
-        if (isTimingSyncTarget && isAutoResetActiveForTargets)
-        {
-            ImGui.SameLine();
-            using var _ = ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.DalamudYellow);
-            SpheneUI.Icons.Icon(FontAwesomeIcon.PersonCircleCheck);
-            SpheneUI.AttachTooltip("Auto reset on your emote is active for this timing-sync target. Their current emote timing resets to 0 when your emote updates.");
-        }
-
-        if (_pair.IndividualPairStatus == API.Data.Enum.IndividualPairStatus.OneSided)
-        {
-            tooltipLines.Add("One-sided individual pair");
-        }
-        else if (_pair.IndividualPairStatus == API.Data.Enum.IndividualPairStatus.Bidirectional)
-        {
-            tooltipLines.Add("Direct pair");
-        }
-        else if (_syncedGroups.Any())
-        {
-            if (_syncedGroups.Count == 1)
-            {
-                var entry = _syncedGroups[0];
-                var groupNote = _serverConfigurationManager.GetNoteForGid(entry.GID);
-                var groupString = string.IsNullOrEmpty(groupNote) ? entry.GroupAliasOrGID : $"{groupNote} ({entry.GroupAliasOrGID})";
-                tooltipLines.Add($"Syncshell: {groupString}");
-            }
-            else
-            {
-                tooltipLines.Add($"Syncshells: {_syncedGroups.Count}");
-            }
-        }
-
-        if (!string.IsNullOrWhiteSpace(UserPair.RemoteClientVersion))
-        {
-            tooltipMeta = $"v{FormatRemoteClientVersion(UserPair.RemoteClientVersion)}";
-        }
-
-        if (_pair.LastAppliedDataBytes >= 0)
-        {
-            var labelPrefix = _pair.IsPaired ? string.Empty : "Last ";
-            tooltipLines.Add($"{labelPrefix}Mods: {UiSharedService.ByteToString(_pair.LastAppliedDataBytes, true)}");
-
-            if (_pair.LastAppliedApproximateVRAMBytes >= 0)
-            {
-                tooltipLines.Add($"VRAM: {UiSharedService.ByteToString(_pair.LastAppliedApproximateVRAMBytes, true)}");
-            }
-
-            if (_pair.LastAppliedDataTris >= 0)
-            {
-                tooltipLines.Add($"Tris: {FormatTriangleCountCompact(_pair.LastAppliedDataTris)}");
-            }
-        }
-
-        if (_pair.IsOnline && _pair.IsMutuallyVisible && !suppressAckUi)
-        {
-            var incoming = _pair.GetIncomingAckV3State();
-            var outgoing = _pair.GetOutgoingAckV3State();
-            if (incoming.Outcome != Pair.AckV3Outcome.Success || outgoing.Outcome != Pair.AckV3Outcome.Success)
-            {
-                var summary = GetCompactSyncSummary(incoming, outgoing);
-                if (!string.IsNullOrWhiteSpace(summary))
-                {
-                    tooltipLines.Add(summary);
-                }
-            }
-        }
-
-        if (_pair.IsInDuty)
-        {
-            tooltipLines.Add("In duty (sync hidden)");
-        }
-
-        DrawTooltipForHoveredItem(showUserPairTooltip, tooltipTitle, tooltipMeta, tooltipLines);
-
-        if (_performanceConfigService.Current.ShowPerformanceIndicator
+        var showPerfWarning = _performanceConfigService.Current.ShowPerformanceIndicator
             && !_performanceConfigService.Current.UIDsToIgnore
                 .Exists(uid => string.Equals(uid, UserPair.User.Alias, StringComparison.Ordinal) || string.Equals(uid, UserPair.User.UID, StringComparison.Ordinal))
             && ((_performanceConfigService.Current.VRAMSizeWarningThresholdMiB > 0 && _performanceConfigService.Current.VRAMSizeWarningThresholdMiB * 1024 * 1024 < _pair.LastAppliedApproximateVRAMBytes)
                 || (_performanceConfigService.Current.TrisWarningThresholdThousands > 0 && _performanceConfigService.Current.TrisWarningThresholdThousands * 1000 < _pair.LastAppliedDataTris))
             && (!_pair.UserPair.OwnPermissions.IsSticky()
-                || _performanceConfigService.Current.WarnOnPreferredPermissionsExceedingThresholds))
+                || _performanceConfigService.Current.WarnOnPreferredPermissionsExceedingThresholds);
+
+        // grace period reads as an orange dot — "offline, but may return" —
+        // instead of the former full-row orange highlight. The pair keeps its
+        // CachedPlayer during grace so IsOnline stays true the whole window.
+        var offlineGrace = hasOfflineGrace;
+        var presenceText = _pair.IsPaused ? "Paused"
+            : offlineGrace ? "Offline (grace)"
+            : !_pair.IsOnline ? "Offline"
+            : isVisibleForIcon ? (string.IsNullOrWhiteSpace(_pair.PlayerName) ? "Visible" : $"Visible: {_pair.PlayerName}")
+            : _pair.IsInGpose ? "GPose (no data shared)"
+            : "Online";
+        var presenceColor = _pair.IsPaused ? ImGuiColors.DalamudYellow
+            : offlineGrace ? new Vector4(1.0f, 0.66f, 0.26f, 1f)
+            : !_pair.IsOnline ? ImGuiColors.DalamudRed
+            : isVisibleForIcon ? ImGuiColors.ParsedGreen
+            : ImGuiColors.HealerGreen;
+
+        // compact presence block: the avatar carries online state (dot,
+        // bottom-right), mutual visibility (ring) and gpose context (camera
+        // pip, bottom-left) — one slot instead of a row of state icons
+        var avatarSize = MathF.Max(12f * scale, rowHeight - 4f * scale);
+        var avatarPos = contentMin + new Vector2(1f * scale, MathF.Max(0f, (rowHeight - avatarSize) * 0.5f));
+        ImGui.SetCursorScreenPos(avatarPos);
+        var avatarWrap = PairAvatar(profile);
+        SpheneUI.Media.Avatar(avatarWrap, avatarSize);
+        var showUserPairTooltip = ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled);
+        if (ImGui.IsItemClicked() && isVisibleForIcon)
         {
-            ImGui.SameLine();
+            _mediator.Publish(new TargetPairMessage(_pair));
+        }
 
-            SpheneUI.Icons.Icon(FontAwesomeIcon.ExclamationTriangle, ImGuiColors.DalamudYellow);
+        var avatarCenter = avatarPos + new Vector2(avatarSize * 0.5f);
+        // ring = visibility + sync state: accent while the pair isn't sharing
+        // data; once mutually visible it colors by acknowledgment outcome —
+        // green synced, yellow while their change still applies here, red failed
+        var ringAlpha = 0.30f;
+        var ringWidth = 1f;
+        var ringColor = accent;
+        if (_pair.IsOnline && isVisibleForIcon && !suppressAckUi)
+        {
+            var syncFailed = incomingStateForIcon.Outcome == Pair.AckV3Outcome.Fail
+                || outgoingStateForIcon.Outcome == Pair.AckV3Outcome.Fail;
+            var applyingTheirChange = incomingStateForIcon.Outcome == Pair.AckV3Outcome.Pending;
+            ringColor = syncFailed ? ImGuiColors.DalamudRed
+                : applyingTheirChange ? ImGuiColors.DalamudYellow
+                : ImGuiColors.ParsedGreen;
+            ringAlpha = applyingTheirChange
+                ? 0.55f + 0.35f * MathF.Sin((float)ImGui.GetTime() * 4f)
+                : 0.9f;
+            ringWidth = syncFailed ? 1.8f : 1.4f;
+        }
+        else if (isVisibleForIcon)
+        {
+            ringColor = ImGuiColors.ParsedGreen;
+            ringAlpha = 0.9f;
+            ringWidth = 1.4f;
+        }
+        drawList.AddCircle(avatarCenter, avatarSize * 0.5f - 0.5f * scale,
+            SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(ringColor, ringAlpha)), 0,
+            MathF.Max(1f, ringWidth * scale));
+        SpheneUI.Media.PresenceDot(drawList, avatarPos, avatarSize, presenceColor);
 
+        var gposeContext = _pair.IsOnline
+            && (_pair.IsInGpose || (_uiSharedService.IsInGpose && isVisibleForIcon));
+        if (gposeContext)
+        {
+            var pipRadius = MathF.Max(4.5f * scale, avatarSize * 0.16f);
+            var pipCenter = avatarPos + new Vector2(avatarSize * 0.1464f, avatarSize * 0.8536f);
+            drawList.AddCircleFilled(pipCenter, pipRadius + 1.5f * scale,
+                SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(Vector4.Zero, 0.75f)));
+            var camGlyph = FontAwesomeIcon.Camera.ToIconString();
+            using (SpheneUI.Icons.PushFont())
+            {
+                ImGui.SetWindowFontScale(0.62f);
+                var glyphSize = ImGui.CalcTextSize(camGlyph);
+                drawList.AddText(pipCenter - glyphSize * 0.5f,
+                    SpheneUI.ColorUtils.ToU32(ImGuiColors.DalamudWhite), camGlyph);
+                ImGui.SetWindowFontScale(1f);
+            }
+        }
+
+        // outgoing sync rides as a tiny top-right pip in the camera pip's
+        // language — only attention states get one: a synced pair already
+        // reads green via the ring and needs no extra chrome
+        if (_pair.IsOnline && _pair.IsMutuallyVisible && !suppressAckUi
+            && outgoingStateForIcon.Outcome is Pair.AckV3Outcome.Pending or Pair.AckV3Outcome.Fail)
+        {
+            var syncPending = outgoingStateForIcon.Outcome == Pair.AckV3Outcome.Pending;
+            var pipRadius = MathF.Max(4.5f * scale, avatarSize * 0.16f);
+            var pipCenter = avatarPos + new Vector2(avatarSize * 0.8536f, avatarSize * 0.1464f);
+            var pipColor = syncPending ? ImGuiColors.DalamudYellow : ImGuiColors.DalamudRed;
+            var pipAlpha = syncPending
+                ? 0.60f + 0.30f * MathF.Sin((float)ImGui.GetTime() * 4f)
+                : 0.9f;
+            drawList.AddCircleFilled(pipCenter, pipRadius + 1.5f * scale,
+                SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(Vector4.Zero, 0.75f)));
+            var syncGlyph = (syncPending ? FontAwesomeIcon.Clock : FontAwesomeIcon.ExclamationTriangle).ToIconString();
+            using (SpheneUI.Icons.PushFont())
+            {
+                ImGui.SetWindowFontScale(0.52f);
+                var glyphSize = ImGui.CalcTextSize(syncGlyph);
+                drawList.AddText(pipCenter - glyphSize * 0.5f,
+                    SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(pipColor, pipAlpha)), syncGlyph);
+                ImGui.SetWindowFontScale(1f);
+            }
+        }
+
+        if (_pair.IsPaused)
+        {
+            tooltipLines.Add(new(FontAwesomeIcon.PauseCircle, "Sync paused", null, ImGuiColors.DalamudYellow));
+        }
+        else if (!_pair.IsOnline && _pair.IndividualPairStatus == API.Data.Enum.IndividualPairStatus.OneSided)
+        {
+            tooltipLines.Add(new(FontAwesomeIcon.UserSlash, "One-sided pair is offline", null, ImGuiColors.DalamudRed));
+        }
+
+        // status glyphs sit on an explicit X cursor drawn vertically centered
+        // on the row — icon-font baseline metrics otherwise offset them from
+        // the name's text line and the avatar
+        var glyphGap = ImGui.GetStyle().ItemSpacing.X;
+        var iconsX = avatarPos.X + avatarSize + glyphGap;
+
+        if (isVisibleForIcon && _pair.IsOnline
+            && _pair.UserPair.Groups.Any()
+            && _pair.IndividualPairStatus != API.Data.Enum.IndividualPairStatus.Bidirectional)
+        {
+            iconsX = DrawCenteredGlyph(iconsX, rowCenterY, FontAwesomeIcon.Link,
+                ImGuiColors.ParsedGreen, "Visible via shared syncshell") + glyphGap;
+        }
+
+
+
+        if (isTimingSyncTarget && isAutoResetActiveForTargets)
+        {
+            iconsX = DrawCenteredGlyph(iconsX, rowCenterY, FontAwesomeIcon.PersonCircleCheck,
+                ImGuiColors.DalamudYellow,
+                "Auto reset on your emote is active for this timing-sync target. Their current emote timing resets to 0 when your emote updates.") + glyphGap;
+        }
+
+        if (showPerfWarning)
+        {
             string userWarningText = "WARNING: This user exceeds one or more of your defined thresholds:" + SpheneUI.TooltipSeparator;
             bool shownVram = false;
             if (_performanceConfigService.Current.VRAMSizeWarningThresholdMiB > 0
@@ -761,10 +777,113 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
                 userWarningText += $"Approx. Triangle count: Used: {_pair.LastAppliedDataTris}, Threshold: {_performanceConfigService.Current.TrisWarningThresholdThousands * 1000}";
             }
 
-            SpheneUI.AttachTooltip(userWarningText);
+            iconsX = DrawCenteredGlyph(iconsX, rowCenterY, FontAwesomeIcon.ExclamationTriangle,
+                ImGuiColors.DalamudYellow, userWarningText) + glyphGap;
         }
 
-        ImGui.SameLine();
+        // park a zero-size item at the pseudo line top: the following SameLine
+        // restores this Y so frame-height buttons and name text stay centered
+        var lineTopY = contentMin.Y + MathF.Max(0f, (rowHeight - ImGui.GetFrameHeight()) * 0.5f);
+        ImGui.SetCursorScreenPos(new Vector2(iconsX, lineTopY));
+        ImGui.Dummy(Vector2.Zero);
+
+        if (_pair.IndividualPairStatus == API.Data.Enum.IndividualPairStatus.OneSided)
+        {
+            tooltipLines.Add(new(FontAwesomeIcon.UserSlash, "Pairing", "One-sided", null));
+        }
+        else if (_pair.IndividualPairStatus == API.Data.Enum.IndividualPairStatus.Bidirectional)
+        {
+            tooltipLines.Add(new(FontAwesomeIcon.Link, "Pairing", "Direct pair", ImGuiColors.HealerGreen));
+        }
+        else if (_syncedGroups.Any())
+        {
+            if (_syncedGroups.Count == 1)
+            {
+                var entry = _syncedGroups[0];
+                var groupNote = _serverConfigurationManager.GetNoteForGid(entry.GID);
+                var groupString = string.IsNullOrEmpty(groupNote) ? entry.GroupAliasOrGID : $"{groupNote} ({entry.GroupAliasOrGID})";
+                tooltipLines.Add(new(FontAwesomeIcon.Users, "Syncshell", groupString, null));
+            }
+            else
+            {
+                tooltipLines.Add(new(FontAwesomeIcon.Users, "Syncshells", _syncedGroups.Count.ToString(), null));
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(UserPair.RemoteClientVersion))
+        {
+            tooltipMeta = $"v{FormatRemoteClientVersion(UserPair.RemoteClientVersion)}";
+        }
+
+        if (_pair.LastAppliedDataBytes >= 0)
+        {
+            var labelPrefix = _pair.IsPaired ? string.Empty : "Last ";
+            tooltipLines.Add(new(FontAwesomeIcon.BoxOpen, $"{labelPrefix}Mods",
+                UiSharedService.ByteToString(_pair.LastAppliedDataBytes, true), null));
+
+            if (_pair.LastAppliedApproximateVRAMBytes >= 0)
+            {
+                tooltipLines.Add(new(FontAwesomeIcon.Hdd, "VRAM",
+                    UiSharedService.ByteToString(_pair.LastAppliedApproximateVRAMBytes, true), null));
+            }
+
+            if (_pair.LastAppliedDataTris >= 0)
+            {
+                tooltipLines.Add(new(FontAwesomeIcon.ChartLine, "Tris",
+                    FormatTriangleCountCompact(_pair.LastAppliedDataTris), null));
+            }
+        }
+
+        if (_pair.IsOnline && _pair.IsMutuallyVisible && !suppressAckUi)
+        {
+            var incoming = incomingStateForIcon;
+            var outgoing = outgoingStateForIcon;
+            if (incoming.Outcome != Pair.AckV3Outcome.Success || outgoing.Outcome != Pair.AckV3Outcome.Success)
+            {
+                var (summary, summaryTint, summaryIcon) = GetCompactSyncSummary(incoming, outgoing);
+                if (!string.IsNullOrWhiteSpace(summary))
+                {
+                    tooltipLines.Add(new(summaryIcon, "Sync", summary, summaryTint));
+                }
+            }
+            else if (outgoing.Time.HasValue)
+            {
+                tooltipLines.Add(new(FontAwesomeIcon.CheckCircle, "Synced",
+                    $"{(DateTimeOffset.UtcNow - outgoing.Time.Value).TotalSeconds:F0}s ago", ImGuiColors.ParsedGreen));
+            }
+        }
+
+        if (_pair.IsInDuty)
+        {
+            tooltipLines.Add(new(FontAwesomeIcon.ShieldAlt, "In duty", "sync hidden", ImGuiColors.DalamudYellow));
+        }
+
+        DrawTooltipForHoveredItem(showUserPairTooltip, avatarWrap, tooltipTitle, presenceText,
+            presenceColor, profile, tooltipMeta, tooltipLines);
+    }
+
+    /// <summary>
+    /// Draws a FontAwesome glyph vertically centered on the row via the draw
+    /// list with a Dummy hitbox for hover/tooltips — icon-font baseline
+    /// metrics otherwise shift glyphs off the name's text line.
+    /// </summary>
+    private static float DrawCenteredGlyph(float x, float centerY, FontAwesomeIcon icon, Vector4 color, string tooltip)
+    {
+        var glyph = icon.ToIconString();
+        Vector2 glyphSize;
+        using (SpheneUI.Icons.PushFont())
+        {
+            glyphSize = ImGui.CalcTextSize(glyph);
+        }
+        var pos = new Vector2(x, centerY - glyphSize.Y * 0.5f);
+        ImGui.SetCursorScreenPos(pos);
+        ImGui.Dummy(glyphSize);
+        using (SpheneUI.Icons.PushFont())
+        {
+            ImGui.GetWindowDrawList().AddText(pos, SpheneUI.ColorUtils.ToU32(color), glyph);
+        }
+        SpheneUI.AttachTooltip(tooltip);
+        return x + glyphSize.X;
     }
 
     private static string GetFriendlyAckFailureReason(Sphene.API.Dto.User.AcknowledgmentErrorCode code, string? message)
@@ -823,35 +942,86 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         return $"{baseReason} {cleaned}";
     }
 
-    private static void DrawTooltipForHoveredItem(bool isHovered, string title, string? meta, IReadOnlyList<string> lines)
+    private readonly record struct TooltipSpecRow(FontAwesomeIcon Icon, string Label, string? Value, Vector4? Tint);
+
+    private static void DrawTooltipForHoveredItem(bool isHovered, IDalamudTextureWrap? avatar,
+        string title, string presenceText, Vector4 presenceColor, SpheneProfileData profile,
+        string? meta, IReadOnlyList<TooltipSpecRow> rows)
     {
         if (!isHovered) return;
         using (SpheneUI.Theme.TooltipScope())
         {
             ImGui.BeginTooltip();
-            ImGui.PushTextWrapPos(ImGui.GetFontSize() * 35f);
-            SpheneUI.Text.Plain(title);
+            ImGui.PushTextWrapPos(ImGui.GetFontSize() * 30f);
 
-            if (lines.Count > 0)
+            // header card: avatar + dot, then name/version, presence and status
+            var scale = SpheneUI.Scale;
+            var headerAvatarSize = 32f * scale;
+            var headerPos = ImGui.GetCursorScreenPos();
+            SpheneUI.Media.Avatar(avatar, headerAvatarSize);
+            SpheneUI.Media.PresenceDot(ImGui.GetWindowDrawList(), headerPos,
+                headerAvatarSize, presenceColor);
+            ImGui.SameLine(0, SpheneUI.Spacing.X10.Scaled);
+            using (ImRaii.Group())
             {
-                ImGui.Separator();
-                for (int i = 0; i < lines.Count; i++)
+                SpheneUI.Text.Plain(title);
+                if (!string.IsNullOrWhiteSpace(meta))
                 {
-                    SpheneUI.Text.Plain(lines[i]);
+                    ImGui.SameLine(0, SpheneUI.Spacing.X8.Scaled);
+                    SpheneUI.Text.Muted(meta);
+                }
+                if (profile.IsNSFW)
+                {
+                    ImGui.SameLine(0, SpheneUI.Spacing.X8.Scaled);
+                    SpheneUI.Layout.Badge("NSFW", ImGuiColors.DalamudYellow);
+                    // Badge draws via the draw list and parks the cursor on the
+                    // chip's end — the dummy turns it into a proper line break
+                    ImGui.Dummy(new Vector2(0f, SpheneUI.Layout.BadgeHeight));
+                }
+                SpheneUI.Text.Colored($"● {presenceText}", presenceColor);
+                if (!string.IsNullOrWhiteSpace(profile.StatusMessage))
+                {
+                    SpheneUI.Text.MutedWrapped($"\"{profile.StatusMessage.Trim()}\"");
                 }
             }
 
-            if (!string.IsNullOrWhiteSpace(meta))
+            if (rows.Count > 0)
             {
-                ImGui.PopTextWrapPos();
-                SpheneUI.Layout.VerticalSpace();
+                var padX = ImGui.GetStyle().WindowPadding.X;
+                var iconWidth = 0f;
+                var labelWidth = 0f;
+                for (var i = 0; i < rows.Count; i++)
+                {
+                    var row = rows[i];
+                    iconWidth = MathF.Max(iconWidth, SpheneUI.Icons.Size(row.Icon).X);
+                    if (row.Value != null)
+                    {
+                        labelWidth = MathF.Max(labelWidth, ImGui.CalcTextSize(row.Label).X);
+                    }
+                }
 
-                var textSize = ImGui.CalcTextSize(meta);
-                var cursorStartX = ImGui.GetCursorPosX();
-                var availableWidth = SpheneUI.Controls.BoundedAvailX();
-                ImGui.SetCursorPosX(cursorStartX + Math.Max(0, availableWidth - textSize.X));
-                SpheneUI.Text.Colored(meta, ImGuiColors.DalamudGrey2);
-                ImGui.PushTextWrapPos(ImGui.GetFontSize() * 35f);
+                var labelColX = padX + iconWidth + SpheneUI.Spacing.Inline.Scaled;
+                var valueColX = labelColX + labelWidth + SpheneUI.Spacing.X10.Scaled;
+
+                SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.Inline);
+                SpheneUI.Layout.Separator();
+
+                for (var i = 0; i < rows.Count; i++)
+                {
+                    var row = rows[i];
+                    SpheneUI.Icons.Icon(row.Icon, row.Tint ?? ImGuiColors.DalamudGrey);
+                    ImGui.SameLine(labelColX);
+                    if (row.Value == null)
+                    {
+                        SpheneUI.Text.Colored(row.Label, row.Tint);
+                    }
+                    else
+                    {
+                        SpheneUI.Text.Muted(row.Label);
+                        ImGui.SameLine(valueColX);
+                        SpheneUI.Text.Colored(row.Value, row.Tint);
+                    }
+                }
             }
 
             ImGui.PopTextWrapPos();
@@ -880,21 +1050,30 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         return formatted;
     }
 
-    private static string GetCompactSyncSummary(Pair.AckV3State incoming, Pair.AckV3State outgoing)
+    private static (string Text, Vector4 Tint, FontAwesomeIcon Icon) GetCompactSyncSummary(
+        Pair.AckV3State incoming, Pair.AckV3State outgoing)
     {
         if (incoming.Outcome == Pair.AckV3Outcome.Fail || outgoing.Outcome == Pair.AckV3Outcome.Fail)
         {
-            var failedState = outgoing.Outcome == Pair.AckV3Outcome.Fail ? outgoing : incoming;
+            var outgoingFailed = outgoing.Outcome == Pair.AckV3Outcome.Fail;
+            var failedState = outgoingFailed ? outgoing : incoming;
             var reason = GetFriendlyAckFailureReason(failedState.ErrorCode, failedState.ErrorMessage);
-            return TrimWithEllipsis($"Sync: Failed ({reason})", 110);
+            var direction = outgoingFailed ? "Sending" : "Applying";
+            return (TrimWithEllipsis($"{direction} failed — {reason}", 110),
+                ImGuiColors.DalamudRed, FontAwesomeIcon.ExclamationTriangle);
         }
 
-        if (incoming.Outcome == Pair.AckV3Outcome.Pending || outgoing.Outcome == Pair.AckV3Outcome.Pending)
+        if (outgoing.Outcome == Pair.AckV3Outcome.Pending)
         {
-            return "Sync: In progress";
+            return ("Sending your update", ImGuiColors.DalamudYellow, FontAwesomeIcon.Sync);
         }
 
-        return string.Empty;
+        if (incoming.Outcome == Pair.AckV3Outcome.Pending)
+        {
+            return ("Applying their update", ImGuiColors.DalamudYellow, FontAwesomeIcon.Sync);
+        }
+
+        return (string.Empty, Vector4.One, FontAwesomeIcon.Sync);
     }
 
     private static string TrimWithEllipsis(string value, int maxLength)
@@ -905,30 +1084,6 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         }
 
         return value[..Math.Max(0, maxLength - 1)] + "…";
-    }
-
-    private static Pair.AckV3State GetMostSevereAckState(Pair.AckV3State incoming, Pair.AckV3State outgoing)
-    {
-        var incomingSeverity = GetAckOutcomeSeverity(incoming.Outcome);
-        var outgoingSeverity = GetAckOutcomeSeverity(outgoing.Outcome);
-        if (outgoingSeverity > incomingSeverity)
-        {
-            return outgoing;
-        }
-
-        return incoming;
-    }
-
-    private static int GetAckOutcomeSeverity(Pair.AckV3Outcome outcome)
-    {
-        return outcome switch
-        {
-            Pair.AckV3Outcome.Fail => 3,
-            Pair.AckV3Outcome.Pending => 2,
-            Pair.AckV3Outcome.Unknown => 1,
-            Pair.AckV3Outcome.Success => 0,
-            _ => 1
-        };
     }
 
     private static string FormatTriangleCountCompact(long triangleCount)
@@ -1000,7 +1155,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         {
             if (isOneSidedIndividualListEntry)
             {
-                _displayHandler.OpenProfile(_pair);
+                _mediator.Publish(new OpenSpheneHubMessage(SpheneHubPage.Friends, null, _pair));
             }
             else
             {
@@ -1008,8 +1163,20 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
             }
         }
         SpheneUI.AttachTooltip(isOneSidedIndividualListEntry
-            ? "Open profile of " + _pair.UserData.AliasOrUID
+            ? "Open profile of " + _pair.UserData.AliasOrUID + " in the Sphene Hub"
             : "Open user menu");
+
+        if (!isOneSidedIndividualListEntry)
+        {
+            var profileButtonSize = SpheneUI.Icons.ButtonSize(FontAwesomeIcon.IdCard);
+            currentRightSide -= (profileButtonSize.X + spacingX);
+            ImGui.SameLine(currentRightSide);
+            if (SpheneUI.Icons.Button(FontAwesomeIcon.IdCard, null, null, null, null, ButtonStyleKeys.Pair_Profile))
+            {
+                _mediator.Publish(new OpenSpheneHubMessage(SpheneHubPage.Friends, null, _pair));
+            }
+            SpheneUI.AttachTooltip("Open profile of " + _pair.UserData.AliasOrUID + " in the Sphene Hub");
+        }
 
         // Reload button (only if pair is visible)
         if (_pair.IsVisible)

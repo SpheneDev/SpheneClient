@@ -87,6 +87,7 @@ public static class ButtonStyleManagerUI
         // Group & Pair
         // (ButtonStyleKeys.Pair_Sync, "Pair Sync", FontAwesomeIcon.Sync, "Pairs"), // Temporarily disabled until functionality is implemented
         (ButtonStyleKeys.Pair_Reload, "Pair Reload", FontAwesomeIcon.Sync, "Pairs"),
+        (ButtonStyleKeys.Pair_Profile, "Pair Profile", FontAwesomeIcon.IdCard, "Pairs"),
         (ButtonStyleKeys.Pair_Pause, "Pair Pause/Play", FontAwesomeIcon.Pause, "Pairs"),
         (ButtonStyleKeys.Pair_Menu, "Pair Menu", FontAwesomeIcon.EllipsisV, "Pairs"),
         (ButtonStyleKeys.GroupSyncshell_Menu, "Syncshell Menu", FontAwesomeIcon.EllipsisV, "Synchsell"),

@@ -126,7 +126,7 @@ public enum SpheneHubPage
     Settings = 6,
     Home = 7
 }
-public record OpenSpheneHubMessage(SpheneHubPage? Page = null, string? GroupGid = null) : MessageBase;
+public record OpenSpheneHubMessage(SpheneHubPage? Page = null, string? GroupGid = null, Pair? Friend = null) : MessageBase;
 public record DownloadLimitChangedMessage() : SameThreadMessage;
 public record CensusUpdateMessage(byte Gender, byte RaceId, byte TribeId) : MessageBase;
 public record TargetPairMessage(Pair Pair) : MessageBase;

@@ -293,6 +293,8 @@ internal sealed class TooltipThemeScope : ThemeStyleScope
         PushStyleVar(ImGuiStyleVar.WindowRounding, theme.CompactTooltipRounding);
         PushStyleVar(ImGuiStyleVar.PopupBorderSize, theme.CompactTooltipBorderSize);
         PushStyleVar(ImGuiStyleVar.PopupRounding, theme.CompactTooltipRounding);
+        PushStyleVar(ImGuiStyleVar.WindowPadding,
+            SpheneUI.ThemeScopeTracker.InCompactScope ? theme.CompactTooltipPadding : theme.WindowPadding);
     }
 }
 

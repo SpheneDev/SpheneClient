@@ -4768,11 +4768,32 @@ public class SettingsUi : WindowMediatorSubscriberBase
             theme.CompactPairListSeparatorPadding = compactPairListSeparatorPadding;
             themeChanged = true;
         }
-        
+
+        var compactFramePadding = theme.CompactFramePadding;
+        if (SpheneUI.Controls.SliderFloat2("Control Inner Padding", ref compactFramePadding, 0.0f, 16.0f, "%.1f"))
+        {
+            theme.CompactFramePadding = compactFramePadding;
+            themeChanged = true;
+        }
+
+        var compactItemInnerSpacing = theme.CompactItemInnerSpacing;
+        if (SpheneUI.Controls.SliderFloat2("Inner Item Spacing", ref compactItemInnerSpacing, 0.0f, 16.0f, "%.1f"))
+        {
+            theme.CompactItemInnerSpacing = compactItemInnerSpacing;
+            themeChanged = true;
+        }
+
+        var compactScrollbarSize = theme.CompactScrollbarSize;
+        if (SpheneUI.Controls.SliderFloat("Scrollbar Width", ref compactScrollbarSize, 6.0f, 24.0f, "%.1f"))
+        {
+            theme.CompactScrollbarSize = compactScrollbarSize;
+            themeChanged = true;
+        }
+
         SpheneUI.Layout.VerticalSpace();
         SpheneUI.Text.Plain("Panel Border and Rounding");
         SpheneUI.Layout.Separator();
-        
+
         var compactWindowBorderSize = theme.CompactWindowBorderSize;
         if (SpheneUI.Controls.SliderFloat("Panel Window Border Size", ref compactWindowBorderSize, 0.0f, 5.0f, "%.1f"))
         {
@@ -4784,6 +4805,27 @@ public class SettingsUi : WindowMediatorSubscriberBase
         if (SpheneUI.Controls.SliderFloat("Corner Rounding", ref compactWindowRounding, 0.0f, 30.0f, "%.1f"))
         {
             theme.CompactWindowRounding = compactWindowRounding;
+            themeChanged = true;
+        }
+
+        var compactChildRounding = theme.CompactChildRounding;
+        if (SpheneUI.Controls.SliderFloat("Child Surface Rounding", ref compactChildRounding, 0.0f, 30.0f, "%.1f"))
+        {
+            theme.CompactChildRounding = compactChildRounding;
+            themeChanged = true;
+        }
+
+        var compactChildBorderSize = theme.CompactChildBorderSize;
+        if (SpheneUI.Controls.SliderFloat("Child Surface Border Size", ref compactChildBorderSize, 0.0f, 5.0f, "%.1f"))
+        {
+            theme.CompactChildBorderSize = compactChildBorderSize;
+            themeChanged = true;
+        }
+
+        var compactScrollbarRounding = theme.CompactScrollbarRounding;
+        if (SpheneUI.Controls.SliderFloat("Scrollbar Rounding", ref compactScrollbarRounding, 0.0f, 30.0f, "%.1f"))
+        {
+            theme.CompactScrollbarRounding = compactScrollbarRounding;
             themeChanged = true;
         }
 
@@ -4829,6 +4871,12 @@ public class SettingsUi : WindowMediatorSubscriberBase
             theme.CompactControlPanelBg = compactControlPanelBg;
             themeChanged = true;
         }
+        var compactChildBg = theme.CompactChildBg;
+        if (SpheneUI.Controls.ColorEdit("Child Surface Background", ref compactChildBg))
+        {
+            theme.CompactChildBg = compactChildBg;
+            themeChanged = true;
+        }
 
         SpheneUI.Layout.VerticalSpace();
         SpheneUI.Text.Plain("General Text");
@@ -4861,6 +4909,24 @@ public class SettingsUi : WindowMediatorSubscriberBase
             theme.CompactSeparator = separator;
             themeChanged = true;
         }
+        var compactAccent = theme.CompactAccent;
+        if (SpheneUI.Controls.ColorEdit("Accent", ref compactAccent))
+        {
+            theme.CompactAccent = compactAccent;
+            themeChanged = true;
+        }
+        var compactHover = theme.CompactHover;
+        if (SpheneUI.Controls.ColorEdit("Hover Highlight", ref compactHover))
+        {
+            theme.CompactHover = compactHover;
+            themeChanged = true;
+        }
+        var compactActive = theme.CompactActive;
+        if (SpheneUI.Controls.ColorEdit("Active Highlight", ref compactActive))
+        {
+            theme.CompactActive = compactActive;
+            themeChanged = true;
+        }
 
         }
 
@@ -4878,6 +4944,30 @@ public class SettingsUi : WindowMediatorSubscriberBase
             if (SpheneUI.Controls.SliderFloat("Panel Tooltip Border Size", ref compactTooltipBorderSize, 0.0f, 5.0f, "%.1f"))
             {
                 theme.CompactTooltipBorderSize = compactTooltipBorderSize;
+                themeChanged = true;
+            }
+            var compactTooltipPadding = theme.CompactTooltipPadding;
+            if (SpheneUI.Controls.SliderFloat2("Panel Tooltip Padding", ref compactTooltipPadding, 0.0f, 24.0f, "%.1f"))
+            {
+                theme.CompactTooltipPadding = compactTooltipPadding;
+                themeChanged = true;
+            }
+            var compactPopupBg = theme.CompactPopupBg;
+            if (SpheneUI.Controls.ColorEdit("Popup Background", ref compactPopupBg))
+            {
+                theme.CompactPopupBg = compactPopupBg;
+                themeChanged = true;
+            }
+            var compactPopupRounding = theme.CompactPopupRounding;
+            if (SpheneUI.Controls.SliderFloat("Popup Rounding", ref compactPopupRounding, 0.0f, 30.0f, "%.1f"))
+            {
+                theme.CompactPopupRounding = compactPopupRounding;
+                themeChanged = true;
+            }
+            var compactPopupBorderSize = theme.CompactPopupBorderSize;
+            if (SpheneUI.Controls.SliderFloat("Popup Border Size", ref compactPopupBorderSize, 0.0f, 5.0f, "%.1f"))
+            {
+                theme.CompactPopupBorderSize = compactPopupBorderSize;
                 themeChanged = true;
             }
             var compactContextMenuRounding = theme.CompactContextMenuRounding;
@@ -4980,13 +5070,14 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 theme.NotifyThemeChanged();
             }
             var desiredMenuWidth = 200.0f * ImGuiHelpers.GlobalScale;
-            var padding = theme.CompactChildPadding;
+            var tooltipPadding = theme.CompactTooltipPadding;
+            var contextPadding = theme.CompactChildPadding;
             var spacingX = ImGui.GetStyle().ItemSpacing.X;
             var spacingY = ImGui.GetStyle().ItemSpacing.Y;
             var contextBorder = theme.CompactContextMenuBorderSize;
             var tooltipBorder = theme.CompactTooltipBorderSize;
-            var contextPreviewWidth = desiredMenuWidth + (padding.X * 2.0f) + (contextBorder * 2.0f);
-            var tooltipPreviewWidth = desiredMenuWidth + (padding.X * 2.0f) + (tooltipBorder * 2.0f);
+            var contextPreviewWidth = desiredMenuWidth + (contextPadding.X * 2.0f) + (contextBorder * 2.0f);
+            var tooltipPreviewWidth = desiredMenuWidth + (tooltipPadding.X * 2.0f) + (tooltipBorder * 2.0f);
             var previewHeight = 96.0f;
             var start = ImGui.GetCursorScreenPos();
             var dl = ImGui.GetWindowDrawList();
@@ -5006,17 +5097,17 @@ public class SettingsUi : WindowMediatorSubscriberBase
             dl.AddRectFilled(contextStart, contextEnd, ImGui.ColorConvertFloat4ToU32(theme.CompactPopupBg), theme.CompactContextMenuRounding);
             dl.AddRect(contextStart, contextEnd, ImGui.ColorConvertFloat4ToU32(theme.CompactBorder), theme.CompactContextMenuRounding, ImDrawFlags.None, contextBorder);
             var menuWidth = desiredMenuWidth;
-            ImGui.SetCursorScreenPos(new Vector2(tooltipStart.X + padding.X + tooltipBorder, tooltipStart.Y + padding.Y + tooltipBorder));
-            ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, padding);
-            if (ImGui.BeginChild("##tooltip-preview", new Vector2(desiredMenuWidth + padding.X * 2.0f, previewHeight - tooltipBorder * 2.0f), false, ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse | ImGuiWindowFlags.NoBackground))
+            ImGui.SetCursorScreenPos(new Vector2(tooltipStart.X + tooltipPadding.X + tooltipBorder, tooltipStart.Y + tooltipPadding.Y + tooltipBorder));
+            ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, tooltipPadding);
+            if (ImGui.BeginChild("##tooltip-preview", new Vector2(desiredMenuWidth + tooltipPadding.X * 2.0f, previewHeight - tooltipBorder * 2.0f), false, ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse | ImGuiWindowFlags.NoBackground))
             {
                 SpheneUI.Text.Plain("Tooltip text");
             }
             ImGui.EndChild();
             ImGui.PopStyleVar();
-            ImGui.SetCursorScreenPos(new Vector2(contextStart.X + padding.X + contextBorder, contextStart.Y + padding.Y + contextBorder));
-            ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, padding);
-            if (ImGui.BeginChild("##context-preview", new Vector2(desiredMenuWidth + padding.X * 2.0f, previewHeight - contextBorder * 2.0f), false, ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse | ImGuiWindowFlags.NoBackground))
+            ImGui.SetCursorScreenPos(new Vector2(contextStart.X + contextPadding.X + contextBorder, contextStart.Y + contextPadding.Y + contextBorder));
+            ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, contextPadding);
+            if (ImGui.BeginChild("##context-preview", new Vector2(desiredMenuWidth + contextPadding.X * 2.0f, previewHeight - contextBorder * 2.0f), false, ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse | ImGuiWindowFlags.NoBackground))
             {
                 SpheneUI.Text.Plain("Common Pair Functions");
                 SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.Row);
@@ -5486,13 +5577,6 @@ public class SettingsUi : WindowMediatorSubscriberBase
             }
             SpheneUI.Layout.VerticalSpace();
         }
-        
-        // Apply changes in real-time
-        if (themeChanged)
-        {
-            theme.NotifyThemeChanged();
-        }
-        
         
         // Apply changes in real-time
         if (themeChanged)

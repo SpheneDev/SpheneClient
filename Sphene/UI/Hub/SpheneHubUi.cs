@@ -144,6 +144,10 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             {
                 NavigateTo(new HubLocation(SpheneHubPage.Syncshells, msg.GroupGid, null));
             }
+            else if (msg.Friend != null)
+            {
+                NavigateTo(new HubLocation(SpheneHubPage.Friends, null, msg.Friend));
+            }
             else if (msg.Page is { } page)
             {
                 SetPage(page);

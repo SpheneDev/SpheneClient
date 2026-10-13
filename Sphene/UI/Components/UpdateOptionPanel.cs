@@ -30,7 +30,8 @@ public static class UpdateOptionPanel
         ReleaseNotesPage,
         HubHomePage,
         SupporterTitlePlacement,
-        SupporterIconLabelEdge
+        SupporterIconLabelEdge,
+        PanelTooltipPadding
     }
 
     private static readonly IReadOnlySet<Link> SupporterFeatureLinks = new HashSet<Link>
@@ -52,6 +53,7 @@ public static class UpdateOptionPanel
         new("v.1.1.16", [Link.SupporterNameplateIndicators, Link.SupporterNameplateCustomization, Link.SupporterNameplateStyleSync, Link.SupporterServerIcons]),
         new("v.1.1.17", [Link.PanelPairListSeparatorPadding, Link.SupporterNameplateGlowColors]),
         new("v.1.1.18", [Link.ReopenSpheneHubOnStartup, Link.ReleaseNotesPage, Link.HubHomePage, Link.SupporterTitlePlacement, Link.SupporterIconLabelEdge]),
+        new("v.1.1.19", [Link.PanelTooltipPadding]),
     ];
 
     private static readonly IReadOnlyDictionary<Link, string> LinkTitles = new Dictionary<Link, string>
@@ -73,7 +75,8 @@ public static class UpdateOptionPanel
         [Link.ReleaseNotesPage] = "General: Release Notes page (browsable changelog in Settings & Hub)",
         [Link.HubHomePage] = "Sphene Hub: Home landing page & reworked Supporter page",
         [Link.SupporterTitlePlacement] = "Supporter: Nameplate title placement (Default: Game default)",
-        [Link.SupporterIconLabelEdge] = "Supporter: Icon label text outline (Default: Enabled)"
+        [Link.SupporterIconLabelEdge] = "Supporter: Icon label text outline (Default: Enabled)",
+        [Link.PanelTooltipPadding] = "Panel: Tooltip Padding & more Panel Theme options (Default: 10/8)"
     };
 
     private static readonly IReadOnlyDictionary<Link, Action<SpheneConfigService, UiSharedService, SpheneMediator>> LinkDrawers
@@ -157,6 +160,17 @@ public static class UpdateOptionPanel
                 configService.Save();
             }
             SpheneUI.Controls.HelpText("Draws a colored outline around the text next to the Sphene icon on nameplates. Configure text, fill and outline colors in Settings > Supporter.");
+        },
+        [Link.PanelTooltipPadding] = (_, _, _) =>
+        {
+            var theme = SpheneTheme.Current;
+            var tooltipPadding = theme.CompactTooltipPadding;
+            if (SpheneUI.Controls.SliderFloat2("Panel Tooltip Padding##UpdateOptionPanelTooltipPadding", ref tooltipPadding, 0.0f, 24.0f, "%.1f"))
+            {
+                theme.CompactTooltipPadding = tooltipPadding;
+                theme.NotifyThemeChanged();
+            }
+            SpheneUI.Controls.HelpText("Content padding of tooltips inside the Panel, independent from the general theme. The Panel Theme settings also expose popup background, accent, hover/active and additional spacing options now.");
         }
     };
 
