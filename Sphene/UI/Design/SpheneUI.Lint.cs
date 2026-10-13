@@ -67,6 +67,32 @@ public static partial class SpheneUI
         }
 
         /// <summary>
+        /// Validates a fill-to-bottom layout right after its last element: the
+        /// item's bottom edge should land on the caller's bound. A positive
+        /// delta means scroll overflow, a negative one means dead space.
+        /// </summary>
+        public static void CheckFillBottom(float bound, string context)
+        {
+            if (!Enabled)
+            {
+                return;
+            }
+            var bottom = ImGui.GetItemRectMax().Y;
+            var delta = bottom - bound;
+            if (MathF.Abs(delta) <= Tolerance)
+            {
+                return;
+            }
+            var left = ContentBounds.CurrentLeft > 0f ? ContentBounds.CurrentLeft : ImGui.GetWindowPos().X;
+            var right = ContentBounds.CurrentRight > 0f ? ContentBounds.CurrentRight
+                : ImGui.GetWindowPos().X + ImGui.GetWindowSize().X;
+            _violations.Add(new Violation(
+                delta > 0f ? "fill-overflow" : "fill-gap", context,
+                new Vector2(left, bound), new Vector2(right, bound + 2f),
+                $"content bottom {(delta > 0f ? "overruns" : "falls short of")} the bound by {MathF.Abs(delta):0.#}px"));
+        }
+
+        /// <summary>
         /// Validates a caller-supplied spacing/size value against the grid.
         /// </summary>
         public static void CheckSpacing(float scaledPixels, string context)

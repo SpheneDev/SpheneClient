@@ -64,6 +64,7 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
     private int _historyItemsPerPage = 25;
     private ActivityKind? _activityKindFilter;
     private string _activityTextFilter = string.Empty;
+    private float _activityTailReserve = -1f;
 
     public ModPackageHistoryUi(
         ILogger<ModPackageHistoryUi> logger,
@@ -100,39 +101,6 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
         IsOpen = false;
     }
 
-    private static void DrawPaginationControls(string idSuffix, int totalItems, ref int currentPage, ref int itemsPerPage)
-    {
-        var totalPages = (int)Math.Ceiling((double)totalItems / itemsPerPage);
-        if (totalPages < 1) totalPages = 1;
-        if (currentPage > totalPages) currentPage = totalPages;
-        if (currentPage < 1) currentPage = 1;
-
-        ImGui.AlignTextToFramePadding();
-        SpheneUI.Text.Plain($"Total: {totalItems} items | Page {currentPage} of {totalPages}");
-        
-        ImGui.SameLine();
-        if (ImGui.ArrowButton($"##prev{idSuffix}", ImGuiDir.Left) && currentPage > 1)
-        {
-            currentPage--;
-        }
-        
-        ImGui.SameLine();
-        if (ImGui.ArrowButton($"##next{idSuffix}", ImGuiDir.Right) && currentPage < totalPages)
-        {
-            currentPage++;
-        }
-
-        ImGui.SameLine();
-        ImGui.SetNextItemWidth(100);
-        if (ImGui.BeginCombo($"##perPage{idSuffix}", $"{itemsPerPage} per page"))
-        {
-            if (SpheneUI.Controls.Selectable($"25##{idSuffix}", itemsPerPage == 25)) itemsPerPage = 25;
-            if (SpheneUI.Controls.Selectable($"50##{idSuffix}", itemsPerPage == 50)) itemsPerPage = 50;
-            if (SpheneUI.Controls.Selectable($"100##{idSuffix}", itemsPerPage == 100)) itemsPerPage = 100;
-            ImGui.EndCombo();
-        }
-    }
-
     /// <summary>Which history source an activity row came from.</summary>
     private enum ActivityKind
     {
@@ -156,14 +124,16 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
         string? OtherAlias,
         object Entry);
 
-    internal void DrawActivityPage() => DrawActivity();
+    internal void DrawActivityPage() => DrawActivity(isEmbedded: true);
 
     protected override void DrawInternal()
     {
         if (SpheneUI.Layout.BeginScrollArea("modhistory-content", ImGui.GetContentRegionAvail(),
                 contentPadding: Vector2.Zero))
         {
-            DrawActivity();
+            SpheneUI.Text.PageHeader("Mod Activity",
+                "Everything you sent, received, uploaded and downloaded — newest first.");
+            DrawActivity(isEmbedded: false);
         }
         SpheneUI.Layout.EndScrollArea();
     }
@@ -177,25 +147,6 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
         ActivityKind.Uploaded => ("UPLOADED", FontAwesomeIcon.CloudUploadAlt, SpheneUI.Palette.SpheneGold),
         _ => ("UNKNOWN", FontAwesomeIcon.Box, SpheneUI.Palette.NetworkInactive)
     };
-
-    /// <summary>Header row of a history page — title, description and a right-aligned refresh button.</summary>
-    private void DrawHistoryPageHeader(string title, string description, Action onRefresh)
-    {
-        var scale = ImGuiHelpers.GlobalScale;
-        SpheneUI.Text.Big(title);
-        ImGui.SameLine();
-        var refreshWidth = ImGui.CalcTextSize("Refresh").X + 28f * scale;
-        SpheneUI.Controls.DockToRightEdge(refreshWidth);
-        using (ImRaii.Disabled(!_fileTransferOrchestrator.IsInitialized))
-        {
-            if (SpheneUI.Icons.TextButton(FontAwesomeIcon.RedoAlt, "Refresh"))
-            {
-                onRefresh();
-            }
-        }
-        SpheneUI.Text.MutedWrapped(description);
-        SpheneUI.Layout.VerticalSpace();
-    }
 
     private bool DrawTransferNotReady()
     {
@@ -319,22 +270,26 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
 
     /// <summary>
     /// The unified activity feed — merges all four history sources into one
-    /// chronological list with kind chips, text search and per-kind actions.
+    /// chronological list. Layout: intro line, toolbar, scroll-faded feed in a
+    /// fixed clip region, pinned pagination bar — same skeleton as the send page.
     /// </summary>
-    private void DrawActivity()
+    private void DrawActivity(bool isEmbedded)
     {
         var scale = ImGuiHelpers.GlobalScale;
 
-        DrawHistoryPageHeader("Mod Activity",
-            "Everything you sent, received, uploaded and downloaded — newest first. Right-click a row for actions.",
-            RefreshAllHistories);
+        if (isEmbedded)
+        {
+            // The page title lives in the hub breadcrumb — the uniform page
+            // intro is a single muted line.
+            SpheneUI.Text.PageIntro(
+                "Everything you sent, received, uploaded and downloaded — newest first. Right-click a row for actions.");
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
+        }
 
         if (DrawTransferNotReady())
         {
             return;
         }
-
-        DrawRedownloadStatus();
 
         // All four sources fetch lazily and independently — the feed shows
         // whatever has resolved already.
@@ -343,54 +298,150 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
         _modShareHistoryTask ??= GetModShareHistory(CancellationToken.None);
         _modReceivedHistoryTask ??= GetModReceivedHistory(CancellationToken.None);
 
-        var failedSources = FailedHistorySources();
-        if (failedSources.Count > 0)
-        {
-            SpheneUI.Layout.Callout(
-                $"Failed to load the {string.Join(", ", failedSources)} history — hit Refresh to retry.",
-                FontAwesomeIcon.ExclamationCircle, ImGuiColors.DalamudRed);
-            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
-        }
+        var feed = BuildFilteredFeed();
+        var stillLoading = IsAnyHistoryLoading();
+        var style = ImGui.GetStyle();
+        var navAvail = ImGui.GetContentRegionAvail().Y - ImGui.GetScrollY();
+        // The tail reserve below the region is self-measured — the estimate
+        // only seeds the first frame (see _activityTailReserve update below).
+        var tailReserve = _activityTailReserve > 0f
+            ? _activityTailReserve
+            : ImGui.GetFrameHeightWithSpacing() + style.ItemSpacing.Y * 6f
+                + SpheneUI.Layout.ScrollAreaContentInset * scale;
+        var regionH = MathF.Max(ImGui.GetTextLineHeightWithSpacing() * 2f,
+            navAvail - tailReserve);
 
+        // Fixed clip region: the feed scrolls internally, the page itself can
+        // never take residual scroll.
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, Vector2.Zero);
+        var regionBegun = ImGui.BeginChild("ActivityRegion", new Vector2(0f, regionH), false,
+            ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse
+                | ImGuiWindowFlags.AlwaysUseWindowPadding);
+        ImGui.PopStyleVar();
+        if (regionBegun)
+        {
+            DrawActivityToolbar(scale);
+            DrawRedownloadStatus();
+
+            var failedSources = FailedHistorySources();
+            if (failedSources.Count > 0)
+            {
+                SpheneUI.Layout.Callout(
+                    $"Failed to load the {string.Join(", ", failedSources)} history — hit Refresh to retry.",
+                    FontAwesomeIcon.ExclamationCircle, ImGuiColors.DalamudRed);
+            }
+
+            // The feed is the region's last element — its child height stops one
+            // ItemSpacing above the clip edge so no residual scrollMax survives.
+            var feedH = MathF.Max(80f * scale,
+                ImGui.GetContentRegionAvail().Y - style.ItemSpacing.Y - scale);
+            if (SpheneUI.Layout.BeginScrollArea("ActivityFeed", new Vector2(0f, feedH)))
+            {
+                if (feed.Count == 0)
+                {
+                    if (stillLoading)
+                    {
+                        SpheneUI.Text.Muted("Loading history…");
+                    }
+                    else if (failedSources.Count == 0)
+                    {
+                        SpheneUI.Layout.Callout(
+                            "No mod activity yet — packages you send or receive appear here.",
+                            FontAwesomeIcon.Inbox, ImGuiColors.DalamudGrey);
+                    }
+                }
+                else
+                {
+                    var totalPages = Math.Max(1, (int)Math.Ceiling((double)feed.Count / _historyItemsPerPage));
+                    if (_activityCurrentPage > totalPages) _activityCurrentPage = totalPages;
+                    var startIndex = (_activityCurrentPage - 1) * _historyItemsPerPage;
+                    foreach (var row in feed.Skip(startIndex).Take(_historyItemsPerPage))
+                    {
+                        DrawActivityRow(row);
+                    }
+                }
+            }
+            SpheneUI.Layout.EndScrollArea();
+        }
+        ImGui.EndChild();
+
+        DrawActivityPagination(feed.Count);
+        var leftover = ImGui.GetContentRegionAvail().Y - ImGui.GetScrollY();
+        var targetTail = style.ItemSpacing.Y
+            + SpheneUI.Layout.ScrollAreaContentInset * scale + 2f * scale;
+        _activityTailReserve = Math.Clamp(
+            tailReserve + (targetTail - leftover), 0f, MathF.Max(0f, navAvail));
+    }
+
+    /// <summary>Search field, kind chips and the refresh icon — one toolbar row.</summary>
+    private void DrawActivityToolbar(float scale)
+    {
         ImGui.SetNextItemWidth(200f * scale);
         if (SpheneUI.Controls.InputTextWithHint("##activityTextFilter",
                 "Search name, author or user…", ref _activityTextFilter, 128))
         {
             _activityCurrentPage = 1;
         }
-        ImGui.SameLine(0f, SpheneUI.Spacing.X12.Scaled);
+        ImGui.SameLine(0f, SpheneUI.Spacing.X8.Scaled);
         ActivityKindChip("All", null);
         foreach (var kind in Enum.GetValues<ActivityKind>())
         {
             ImGui.SameLine(0f, SpheneUI.Spacing.X4.Scaled);
             ActivityKindChip(KindStyle(kind).Label, kind);
         }
-        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
 
-        var stillLoading = IsAnyHistoryLoading();
-        if (stillLoading)
+        ImGui.SameLine();
+        SpheneUI.Controls.DockToCardEdge(SpheneUI.Metrics.ControlHeight);
+        using (ImRaii.Disabled(!_fileTransferOrchestrator.IsInitialized))
         {
-            SpheneUI.Text.Muted("Loading history…");
-        }
-
-        var feed = BuildFilteredFeed();
-        if (feed.Count == 0)
-        {
-            if (!stillLoading && failedSources.Count == 0)
+            if (SpheneUI.Controls.IconButton("##activityRefresh", FontAwesomeIcon.RedoAlt))
             {
-                SpheneUI.Layout.Callout(
-                    "No mod activity yet — packages you send or receive appear here.",
-                    FontAwesomeIcon.Inbox, ImGuiColors.DalamudGrey);
+                RefreshAllHistories();
             }
-            return;
         }
+        SpheneUI.AttachTooltip("Refresh history");
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
+    }
 
-        DrawPaginationControls("Activity", feed.Count, ref _activityCurrentPage, ref _historyItemsPerPage);
+    /// <summary>Pinned pagination bar under the feed — counts left, arrows and page size right.</summary>
+    private void DrawActivityPagination(int totalItems)
+    {
+        var scale = SpheneUI.Scale;
+        var totalPages = Math.Max(1, (int)Math.Ceiling((double)totalItems / _historyItemsPerPage));
+        if (_activityCurrentPage > totalPages) _activityCurrentPage = totalPages;
+        if (_activityCurrentPage < 1) _activityCurrentPage = 1;
 
-        var startIndex = (_activityCurrentPage - 1) * _historyItemsPerPage;
-        foreach (var row in feed.Skip(startIndex).Take(_historyItemsPerPage))
+        SpheneUI.Layout.Separator();
+        ImGui.AlignTextToFramePadding();
+        SpheneUI.Text.Muted($"{totalItems} items · Page {_activityCurrentPage} of {totalPages}");
+
+        var arrow = SpheneUI.Metrics.ControlHeight;
+        var comboW = 110f * scale;
+        var spacing = ImGui.GetStyle().ItemSpacing.X;
+        ImGui.SameLine();
+        SpheneUI.Controls.DockToCardEdge(arrow * 2f + comboW + spacing * 2f);
+        if (SpheneUI.Controls.IconButton("##activityPrev", FontAwesomeIcon.ChevronLeft,
+                enabled: _activityCurrentPage > 1))
         {
-            DrawActivityRow(row);
+            _activityCurrentPage--;
+        }
+        ImGui.SameLine(0f, spacing);
+        if (SpheneUI.Controls.IconButton("##activityNext", FontAwesomeIcon.ChevronRight,
+                enabled: _activityCurrentPage < totalPages))
+        {
+            _activityCurrentPage++;
+        }
+        ImGui.SameLine(0f, spacing);
+        ImGui.SetNextItemWidth(comboW);
+        using (var controlStyle = SpheneUI.Controls.PushValueControlStyle())
+        {
+            if (ImGui.BeginCombo("##activityPerPage", $"{_historyItemsPerPage} per page"))
+            {
+                if (SpheneUI.Controls.Selectable("25##activity", _historyItemsPerPage == 25)) _historyItemsPerPage = 25;
+                if (SpheneUI.Controls.Selectable("50##activity", _historyItemsPerPage == 50)) _historyItemsPerPage = 50;
+                if (SpheneUI.Controls.Selectable("100##activity", _historyItemsPerPage == 100)) _historyItemsPerPage = 100;
+                ImGui.EndCombo();
+            }
         }
     }
 
@@ -610,6 +661,7 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
 
 
 
+    /// <summary>Slim inline status row while a re-download runs or after it finished.</summary>
     private void DrawRedownloadStatus()
     {
         if (string.IsNullOrWhiteSpace(_redownloadStatusText) && !_isRedownloadBusy)
@@ -617,26 +669,26 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
             return;
         }
 
-        if (!string.IsNullOrWhiteSpace(_redownloadStatusText))
-        {
-            SpheneUI.Text.ColoredWrapped(_redownloadStatusText, _redownloadStatusIsError ? ImGuiColors.DalamudRed : ImGuiColors.DalamudGrey);
-        }
-
+        var scale = SpheneUI.Scale;
         if (_redownloadProgress is >= 0f and <= 1f)
         {
-            SpheneUI.Controls.ProgressBar(_redownloadProgress.Value, new Vector2(-1, 0), string.Empty);
+            SpheneUI.Controls.ProgressBar(_redownloadProgress.Value,
+                new Vector2(140f * scale, ImGui.GetFrameHeight() * 0.5f), string.Empty);
+            ImGui.SameLine(0f, SpheneUI.Spacing.X8.Scaled);
         }
+        SpheneUI.Text.Colored(_redownloadStatusText,
+            _redownloadStatusIsError ? ImGuiColors.DalamudRed : ImGuiColors.DalamudGrey);
 
         if (_isRedownloadBusy)
         {
-            SpheneUI.Layout.VerticalSpace();
-            if (SpheneUI.Controls.SmallButton("Cancel re-download"))
+            var cancelW = ImGui.CalcTextSize("Cancel").X + ImGui.GetStyle().FramePadding.X * 4f;
+            ImGui.SameLine();
+            SpheneUI.Controls.DockToCardEdge(cancelW);
+            if (SpheneUI.Controls.SmallButton("Cancel##redownload"))
             {
                 _redownloadCts?.Cancel();
             }
         }
-
-        SpheneUI.Layout.Separator();
     }
 
     private void StartRedownload(ModDownloadHistoryEntryDto entry)

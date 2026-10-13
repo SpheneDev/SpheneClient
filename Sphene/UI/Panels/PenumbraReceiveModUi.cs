@@ -37,6 +37,9 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
     private bool _statusIsError;
     private bool _isInstalling;
     private float? _progress;
+    // Measured height of the footer bar plus host trailing chrome — calibrated
+    // each frame so the clip region never leaves residual scrollMax behind.
+    private float _receiveTailReserve = -1f;
     private string? _installedVersion;
     private FileTransferNotificationDto? _lastSelectedNotification;
     private string _pendingFilter = string.Empty;
@@ -401,25 +404,9 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
         _progress = message.Progress;
     }
 
-    protected override void DrawInternal()
-    {
-        if (SpheneUI.Layout.BeginScrollArea("ReceiveModsRootWindow",
-                ImGui.GetContentRegionAvail(), contentPadding: Vector2.Zero))
-        {
-            DrawPendingTab(isEmbedded: false);
-        }
-        SpheneUI.Layout.EndScrollArea();
-    }
+    protected override void DrawInternal() => DrawPendingTab(isEmbedded: false);
 
-    internal void DrawEmbedded()
-    {
-        if (SpheneUI.Layout.BeginScrollArea("ReceiveModsRootEmbedded",
-                ImGui.GetContentRegionAvail(), contentPadding: Vector2.Zero))
-        {
-            DrawPendingTab(isEmbedded: true);
-        }
-        SpheneUI.Layout.EndScrollArea();
-    }
+    internal void DrawEmbedded() => DrawPendingTab(isEmbedded: true);
 
     private void DrawPendingTab(bool isEmbedded)
     {
@@ -487,21 +474,75 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
         }
 
         var accent = SpheneUI.Palette.NetworkActive;
-        var colBottom = ImGui.GetCursorScreenPos().Y + ImGui.GetContentRegionAvail().Y;
-
-        if (ImGui.BeginTable("MainLayout", 2, ImGuiTableFlags.Resizable | ImGuiTableFlags.SizingStretchProp))
+        var style = ImGui.GetStyle();
+        // Fixed clip region sized to the host's remaining space minus the
+        // footer bar — same skeleton as the send page. The reserve is
+        // self-measured below: after one frame it equals the real tail height,
+        // so the host never keeps a scrollable residue.
+        var navAvail = ImGui.GetContentRegionAvail().Y - ImGui.GetScrollY();
+        var tailReserve = _receiveTailReserve > 0f ? _receiveTailReserve
+            : ImGui.GetFrameHeightWithSpacing() + style.ItemSpacing.Y * 4f
+                + SpheneUI.Layout.ScrollAreaContentInset * scale;
+        var regionH = MathF.Max(ImGui.GetTextLineHeightWithSpacing() * 2f,
+            navAvail - tailReserve);
+        // The page is a fixed clip region, not a scroll area: the cards fill
+        // it exactly and their inner lists own the scrolling. NoScrollWithMouse
+        // keeps stray wheel deltas from jittering the host for a frame.
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, Vector2.Zero);
+        var regionBegun = ImGui.BeginChild("ReceiveModsRegion", new Vector2(0f, regionH), false,
+            ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse
+                | ImGuiWindowFlags.AlwaysUseWindowPadding);
+        ImGui.PopStyleVar();
+        if (regionBegun)
         {
-            ImGui.TableSetupColumn("Inbox", ImGuiTableColumnFlags.WidthStretch, 0.40f);
-            ImGui.TableSetupColumn("ModDetails", ImGuiTableColumnFlags.WidthStretch);
+            // EndTable appends ItemSpacing — keep the bound that far inside
+            // the clip edge or the region retains a few px of scrollMax.
+            var colBottom = ImGui.GetCursorScreenPos().Y + regionH - style.ItemSpacing.Y - scale;
+
+            if (!isEmbedded)
+            {
+                SpheneUI.Text.PageHeader("Receive Mods",
+                    "Mods shared with you by paired users — install or discard them here.");
+            }
+            // Embedded: ModSharingUi draws the intro line above the receive-options card.
+
+            DrawReceiveBody(pending, displayed, currentSelected, scale, accent, isEmbedded, colBottom);
+        }
+        ImGui.EndChild();
+
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+        SpheneUI.Layout.Separator();
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+        DrawReceiveFooterBar(scale, accent, pending.Count);
+
+        // Self-calibrating reserve: the leftover under the last row must cover
+        // the host scroll area's trailing inset — anything less leaves a few
+        // px of scrollMax that shows as a scroll/snap jitter on wheel input.
+        var leftover = ImGui.GetContentRegionAvail().Y - ImGui.GetScrollY();
+        var targetTail = style.ItemSpacing.Y
+            + SpheneUI.Layout.ScrollAreaContentInset * scale + 2f * scale;
+        _receiveTailReserve = Math.Clamp(
+            tailReserve + (targetTail - leftover), 0f, MathF.Max(0f, navAvail));
+    }
+
+    /// <summary>Inbox card on the left, package details on the right — both filling the bound.</summary>
+    private void DrawReceiveBody(List<FileTransferNotificationDto> pending,
+        List<FileTransferNotificationDto> displayed, FileTransferNotificationDto? currentSelected,
+        float scale, Vector4 accent, bool isEmbedded, float colBottom)
+    {
+        // Unique table ID: "MainLayout" collides with stored column ratios
+        // in imgui.ini — a stale Resizable entry silently overrides the weights.
+        if (ImGui.BeginTable("ReceiveModLayout" + (isEmbedded ? "Embedded" : "Standalone"),
+                2, ImGuiTableFlags.Resizable | ImGuiTableFlags.SizingStretchProp))
+        {
+            ImGui.TableSetupColumn("Inbox", ImGuiTableColumnFlags.WidthStretch, 0.45f);
+            ImGui.TableSetupColumn("ModDetails", ImGuiTableColumnFlags.WidthStretch, 0.55f);
 
             ImGui.TableNextRow();
             ImGui.TableSetColumnIndex(0);
 
-            // LEFT COLUMN: Inbox card — filter, select-toolbar, scroll list, action footer.
-            var buttonHeight = ImGui.GetFrameHeightWithSpacing();
-            var footerReserve = buttonHeight + ImGui.GetStyle().ItemSpacing.Y * 3f
-                + SpheneUI.Spacing.X8.Scaled;
-
+            // LEFT COLUMN: Inbox card — filter, select-toolbar, scroll-faded
+            // list. Batch actions live in the page footer; no inner card footer.
             SpheneUI.Layout.SectionCard(() =>
             {
                 ImGui.SetNextItemWidth(-1);
@@ -518,27 +559,21 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
                     ImGui.SameLine(0f, SpheneUI.Spacing.X4.Scaled);
                     if (SpheneUI.Controls.SmallButton("New")) SelectNew();
                 }
-                ImGui.SameLine();
-                SpheneUI.Controls.DockToRightEdge(ImGui.CalcTextSize("Discard all").X + SpheneUI.Spacing.X16.Scaled);
-                using (ImRaii.Disabled(_isInstalling || !hasPending))
-                {
-                    if (SpheneUI.Controls.SmallButton($"Discard all ({pending.Count})"))
-                    {
-                        DiscardAll();
-                    }
-                }
 
                 var listHeight = MathF.Max(80f * scale,
-                    colBottom - ImGui.GetCursorScreenPos().Y - footerReserve);
+                    colBottom - ImGui.GetCursorScreenPos().Y - FillReserve);
                 if (SpheneUI.Layout.BeginScrollArea("LeftList", new Vector2(0f, listHeight)))
                 {
                     if (_pendingNotifications.Count == 0)
                     {
-                        SpheneUI.Text.Muted("No packages pending — mods shared with you appear here.");
+                        SpheneUI.Layout.Callout(
+                            "No packages pending — mods shared with you appear here.",
+                            FontAwesomeIcon.Inbox, ImGuiColors.DalamudGrey);
                     }
                     else if (displayed.Count == 0)
                     {
-                        SpheneUI.Text.Muted("No matches.");
+                        SpheneUI.Layout.Callout("No matches for the current filter.",
+                            FontAwesomeIcon.Search, ImGuiColors.DalamudGrey);
                     }
                     else
                     {
@@ -710,43 +745,31 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
                     }
                 }
                 SpheneUI.Layout.EndScrollArea(SpheneUI.Layout.NavRailBandColor());
-
-                SpheneUI.Layout.Separator();
-
-                var selectedCount = _selectedForBatch.Count;
-                using (ImRaii.Disabled(_isInstalling || selectedCount == 0))
-                {
-                    if (SpheneUI.Controls.Button($"Install selected ({selectedCount})"))
-                    {
-                        StartBatchInstall();
-                    }
-                    ImGui.SameLine();
-                    if (SpheneUI.Controls.SmallButton($"Discard selected ({selectedCount})"))
-                    {
-                        BatchDiscard();
-                    }
-                }
-            }, title: $"Inbox ({pending.Count})", accentColor: accent);
+            }, title: $"1 · Inbox ({pending.Count})", accentColor: accent);
 
             ImGui.TableSetColumnIndex(1);
 
             // RIGHT COLUMN: Package details card
             SpheneUI.Layout.SectionCard(() =>
             {
-                DrawRightPanel(scale, isEmbedded, colBottom);
-            }, title: "Package Details", accentColor: accent);
+                DrawRightPanel(scale, isEmbedded, colBottom, accent);
+            }, title: "2 · Package Details", accentColor: accent);
 
             ImGui.EndTable();
+            SpheneUI.Lint.CheckFillBottom(colBottom, "ReceiveMods.Table");
         }
     }
 
-    private void DrawRightPanel(float scale, bool isEmbedded, float colBottom)
+    private void DrawRightPanel(float scale, bool isEmbedded, float colBottom, Vector4 accent)
     {
-        var statusHeight = 60f * scale;
-        var buttonAreaHeight = ImGui.GetFrameHeight() + SpheneUI.Spacing.X16.Scaled;
-        var contentHeight = colBottom - ImGui.GetCursorScreenPos().Y - statusHeight - buttonAreaHeight;
-
-        if (contentHeight < 100f * scale) contentHeight = 100f * scale;
+        var style = ImGui.GetStyle();
+        // Per-package actions sit in this card's own footer — reserve their
+        // row plus separator so the details scroll fills the rest cleanly.
+        var cardFooterH = _selectedNotification != null
+            ? ImGui.GetFrameHeight() + style.ItemSpacing.Y * 3f + scale
+            : 0f;
+        var contentHeight = MathF.Max(80f * scale,
+            colBottom - ImGui.GetCursorScreenPos().Y - cardFooterH - FillReserve);
 
         if (SpheneUI.Layout.BeginScrollArea("MainContent", new Vector2(0f, contentHeight)))
         {
@@ -876,33 +899,31 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
         }
         SpheneUI.Layout.EndScrollArea(SpheneUI.Layout.NavRailBandColor());
 
-        SpheneUI.Layout.Separator();
-        SpheneUI.Layout.VerticalSpace();
-
-        // Button Area
+        // Per-package actions — they act on the package under review, so they
+        // stay in this card; batch actions live in the page footer bar. No
+        // selection → no footer separator, the scroll area fills the card.
         if (_selectedNotification != null)
         {
+            SpheneUI.Layout.Separator();
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
             var isInstalled = _shrinkuPenumbraIpc.ModExists(_selectedNotification.ModFolderName ?? string.Empty);
             var isUpgrade = false;
-            
+
             if (isInstalled && _installedVersion != null && _selectedNotification.ModInfo?.FirstOrDefault()?.Version is { } receivedVer)
             {
                  isUpgrade = CompareVersions(receivedVer, _installedVersion) > 0;
             }
 
-            using (ImRaii.Disabled(_isInstalling))
+            var btnText = isInstalled
+                ? (isUpgrade ? "Upgrade" : "Reinstall")
+                : "Download and install";
+            if (SpheneUI.Controls.SegmentButton(btnText, FontAwesomeIcon.Download,
+                    accent: accent, enabled: !_isInstalling))
             {
-                var btnText = isInstalled
-                    ? (isUpgrade ? "Upgrade" : "Reinstall")
-                    : "Download and install";
-
-                if (SpheneUI.Controls.Button(btnText))
-                {
-                    _statusIsError = false;
-                    _statusText = "Starting download and installation…";
-                    _isInstalling = true;
-                    Mediator.Publish(new InstallReceivedPenumbraModMessage(_selectedNotification!));
-                }
+                _statusIsError = false;
+                _statusText = "Starting download and installation…";
+                _isInstalling = true;
+                Mediator.Publish(new InstallReceivedPenumbraModMessage(_selectedNotification!));
             }
 
             ImGui.SameLine();
@@ -949,36 +970,82 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
                 }
             }
         }
-        else
+        else if (!isEmbedded && SpheneUI.Controls.SmallButton("Close"))
         {
-            if (!isEmbedded && SpheneUI.Controls.SmallButton("Close"))
-            {
-                IsOpen = false;
-            }
+            IsOpen = false;
+        }
+    }
+
+    /// <summary>Reserve below a list child so its card border closes flush on the bound.</summary>
+    private static float FillReserve
+        => SpheneUI.Spacing.CardPadding.Scaled + SpheneUI.Scale;
+
+    /// <summary>Pinned bottom bar: batch status on the left, batch actions on the right.</summary>
+    private void DrawReceiveFooterBar(float scale, Vector4 accent, int pendingCount)
+    {
+        var style = ImGui.GetStyle();
+        int selectedCount;
+        lock (_pendingLock)
+        {
+            selectedCount = _selectedForBatch.Count;
         }
 
-        // Status Area — batch progress and the latest transfer message.
-        using (ImRaii.Child("Status", new Vector2(0f, statusHeight), false))
+        // Left zone: live install progress, the last status line, or an idle hint.
+        if (_isInstalling)
         {
-            if (_progress.HasValue || !string.IsNullOrWhiteSpace(_statusText))
+            if (_progress is { } p)
             {
-                SpheneUI.Text.Muted("Status");
+                SpheneUI.Controls.ProgressBar(Math.Clamp(p, 0f, 1f),
+                    new Vector2(160f * scale, ImGui.GetFrameHeight() * 0.5f), string.Empty);
+                ImGui.SameLine(0f, SpheneUI.Spacing.X8.Scaled);
             }
-            if (_progress.HasValue)
-            {
-                var clamped = Math.Clamp(_progress.Value, 0f, 1f);
-                var barWidth = ImGui.GetContentRegionAvail().X;
-                var cursor = ImGui.GetCursorPos();
-                var barSize = new Vector2(barWidth, 20f * scale);
-                SpheneUI.Controls.ProgressBar(clamped, barSize);
-                ImGui.SetCursorPos(cursor + new Vector2(0f, barSize.Y + 4f * scale));
-            }
+            SpheneUI.Text.Muted(string.IsNullOrWhiteSpace(_statusText)
+                ? "Installing packages…" : _statusText);
+        }
+        else if (!string.IsNullOrWhiteSpace(_statusText))
+        {
+            SpheneUI.Text.Colored(_statusText,
+                _statusIsError ? ImGuiColors.DalamudRed : ImGuiColors.DalamudGrey);
+        }
+        else
+        {
+            SpheneUI.Text.Muted(selectedCount > 0
+                ? $"{selectedCount} selected · {pendingCount} pending"
+                : "Check packages to batch-install, or pick one to review.");
+        }
 
-            if (!string.IsNullOrWhiteSpace(_statusText))
+        // Right zone: batch actions — primary last.
+        var discardAllText = $"Discard all ({pendingCount})";
+        var discardSelText = $"Discard ({selectedCount})";
+        var installText = $"Install selected ({selectedCount})";
+        var totalW = ImGui.CalcTextSize(discardAllText).X + style.FramePadding.X * 4f
+            + ImGui.CalcTextSize(discardSelText).X + style.FramePadding.X * 4f
+            + ImGui.CalcTextSize(installText).X + ImGui.GetFrameHeight() + style.FramePadding.X * 4f
+            + style.ItemSpacing.X * 2f;
+
+        ImGui.SameLine();
+        SpheneUI.Controls.DockToCardEdge(totalW);
+
+        using (ImRaii.Disabled(_isInstalling || pendingCount == 0))
+        {
+            if (SpheneUI.Controls.SmallButton(discardAllText))
             {
-                var color = _statusIsError ? ImGuiColors.DalamudRed : ImGuiColors.DalamudGrey;
-                SpheneUI.Text.Colored(_statusText, color);
+                DiscardAll();
             }
+        }
+        ImGui.SameLine();
+        using (ImRaii.Disabled(_isInstalling || selectedCount == 0))
+        {
+            if (SpheneUI.Controls.SmallButton(discardSelText))
+            {
+                BatchDiscard();
+            }
+        }
+        ImGui.SameLine();
+        if (SpheneUI.Controls.SegmentButton(installText, FontAwesomeIcon.Download,
+                accent: accent, enabled: !_isInstalling && selectedCount > 0))
+        {
+            StartBatchInstall();
         }
     }
 

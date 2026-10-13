@@ -429,7 +429,11 @@ public static partial class SpheneUI
                     + 1f * scale;
             }
             var minHeight = ImGui.GetTextLineHeightWithSpacing() * 2f;
-            return MathF.Max(minHeight, ImGui.GetContentRegionAvail().Y - bottomReserve);
+            // GetContentRegionAvail is inflated by the window's scroll offset —
+            // subtract it or fill-height elements grow with the scroll and keep
+            // a few pixels of residual scrollMax alive forever.
+            return MathF.Max(minHeight,
+                ImGui.GetContentRegionAvail().Y - ImGui.GetScrollY() - bottomReserve);
         }
 
         /// <summary>
@@ -638,10 +642,17 @@ public static partial class SpheneUI
                     if (MathF.Abs(wheel) > 0.001f && ((wheel < 0f && atBottom) || (wheel > 0f && atTop))
                         && !IsNavRailHost(ImGui.GetWindowPos(), ImGui.GetWindowSize()))
                     {
+                        // Only chain into a parent with a meaningful scroll
+                        // range — a fit or near-fit host (fixed clip regions,
+                        // cards at the fill bound) would otherwise receive
+                        // micro SetScrollY writes that jitter it by a few px.
                         var parentMaxY = ImGui.GetScrollMaxY();
-                        var parentTarget = ImGui.GetScrollY()
-                            - wheel * ImGui.GetTextLineHeightWithSpacing() * 4f;
-                        ImGui.SetScrollY(Math.Clamp(parentTarget, 0f, parentMaxY));
+                        if (parentMaxY > ImGui.GetTextLineHeightWithSpacing())
+                        {
+                            var parentTarget = ImGui.GetScrollY()
+                                - wheel * ImGui.GetTextLineHeightWithSpacing() * 4f;
+                            ImGui.SetScrollY(Math.Clamp(parentTarget, 0f, parentMaxY));
+                        }
                     }
                 }
 
@@ -1201,6 +1212,131 @@ public static partial class SpheneUI
             {
                 drawOnOpened();
             }
+        }
+
+        /// <summary>
+        /// Collapsible section in the segmented-pill language: a tonal header
+        /// row (square chevron zone + seam + label, optional icon and a muted
+        /// right-aligned hint) that toggles a bordered body sharing the
+        /// header's bottom hairline. State persists per window via
+        /// <see cref="ImGui.GetStateStorage"/> keyed on <paramref name="label"/>.
+        /// <paramref name="setOpen"/> force-opens the section for the frame —
+        /// the deep-link equivalent of SetNextItemOpen; the user can still
+        /// close it afterwards. An "##id" suffix on the label is hidden.
+        /// </summary>
+        public static bool Collapsible(string label, Action drawContent,
+            FontAwesomeIcon? icon = null, string? hint = null,
+            Vector4? accent = null, bool defaultOpen = false, bool setOpen = false)
+        {
+            var acc = accent ?? Colors.Accent;
+            var scale = SpheneUI.Scale;
+            var w = Controls.BoundedAvailX();
+            var h = ImGui.GetFrameHeight();
+            var radius = Metrics.ButtonRadius;
+            var padX = ImGui.GetStyle().ItemInnerSpacing.X;
+            var displayIdx = label.IndexOf("##", StringComparison.Ordinal);
+            var display = displayIdx >= 0 ? label[..displayIdx] : label;
+
+            var storage = ImGui.GetStateStorage();
+            var key = ImGui.GetID($"collapsible:{label}");
+            var open = storage.GetBool(key, defaultOpen);
+            if (setOpen)
+            {
+                open = true;
+                storage.SetBool(key, true);
+            }
+
+            var min = ImGui.GetCursorScreenPos();
+            var max = min + new Vector2(w, h);
+            var drawList = ImGui.GetWindowDrawList();
+
+            ImGui.PushID(label);
+            var clicked = ImGui.InvisibleButton("##collapsible", new Vector2(w, h));
+            ImGui.PopID();
+            if (clicked)
+            {
+                open = !open;
+                storage.SetBool(key, open);
+            }
+            var hovered = ImGui.IsItemHovered();
+
+            var corners = open ? ImDrawFlags.RoundCornersTop : ImDrawFlags.RoundCornersAll;
+            var scrim = ColorUtils.LerpColor(Colors.FrameBg,
+                new Vector4(0.02f, 0.02f, 0.035f, 1f), 0.5f);
+            scrim.W = MathF.Max(scrim.W, 0.66f);
+            var fill = hovered
+                ? ColorUtils.WithAlpha(acc, 0.11f)
+                : ColorUtils.WithAlpha(Vector4.One, open ? 0.085f : 0.055f);
+            drawList.AddRectFilled(min, max, ColorUtils.ToU32(scrim), radius, corners);
+            drawList.AddRectFilled(min, max, ColorUtils.ToU32(fill), radius, corners);
+            drawList.AddRect(min, max, ColorUtils.ToU32(
+                ColorUtils.WithAlpha(Colors.Border, hovered ? 0.5f : 0.3f)), radius, corners);
+
+            // Chevron zone + seam — the same left-zone language as SegCore.
+            var zoneW = h;
+            using (SpheneUI.IconFont.Push())
+            {
+                var glyph = (open ? FontAwesomeIcon.ChevronDown : FontAwesomeIcon.ChevronRight).ToIconString();
+                var glyphSize = ImGui.CalcTextSize(glyph);
+                var glyphCol = open || hovered
+                    ? ColorUtils.WithAlpha(acc, 0.95f)
+                    : ColorUtils.WithAlpha(Colors.TextMuted, 0.9f);
+                drawList.AddText(min + new Vector2((zoneW - glyphSize.X) * 0.5f,
+                        (h - glyphSize.Y) * 0.5f), ColorUtils.ToU32(glyphCol), glyph);
+            }
+            var seamInset = h * 0.22f;
+            drawList.AddLine(new Vector2(min.X + zoneW - 0.5f, min.Y + seamInset),
+                new Vector2(min.X + zoneW - 0.5f, max.Y - seamInset),
+                ColorUtils.ToU32(ColorUtils.WithAlpha(Vector4.One, open ? 0.18f : 0.13f)));
+
+            var textX = min.X + zoneW + 10f * scale;
+            if (icon.HasValue)
+            {
+                using (SpheneUI.IconFont.Push())
+                {
+                    var iconGlyph = icon.Value.ToIconString();
+                    var iconSize = ImGui.CalcTextSize(iconGlyph);
+                    drawList.AddText(new Vector2(textX, min.Y + (h - iconSize.Y) * 0.5f),
+                        ColorUtils.ToU32(ColorUtils.WithAlpha(acc, 0.9f)), iconGlyph);
+                    textX += iconSize.X + 6f * scale;
+                }
+            }
+
+            var labelSize = ImGui.CalcTextSize(display);
+            var textY = min.Y + (h - labelSize.Y) * 0.5f;
+            drawList.AddText(new Vector2(textX, textY),
+                ColorUtils.ToU32(open ? ColorUtils.LerpColor(acc, Vector4.One, 0.25f) : Colors.TextPrimary), display);
+
+            if (!string.IsNullOrEmpty(hint))
+            {
+                var hintW = ImGui.CalcTextSize(hint).X;
+                drawList.AddText(new Vector2(max.X - padX * 2f - hintW, textY),
+                    ColorUtils.ToU32(Colors.TextMuted), hint);
+            }
+
+            if (!open)
+            {
+                return false;
+            }
+
+            // Body: bordered region sharing the header's bottom hairline. The
+            // stroke is deferred until after the content so the group reports
+            // its real height — fills stay header-only so nothing overpaints.
+            var bodyTop = max.Y;
+            var padY = ImGui.GetStyle().ItemInnerSpacing.Y;
+            ImGui.SetCursorScreenPos(new Vector2(min.X + padX, bodyTop + padY));
+            ContentBounds.Push(new Vector2(min.X + padX, max.X - padX));
+            using (ImRaii.Group())
+            {
+                drawContent();
+            }
+            ContentBounds.Pop();
+            var bodyMax = new Vector2(max.X, ImGui.GetItemRectMax().Y + padY);
+            drawList.AddRect(new Vector2(min.X, bodyTop), bodyMax,
+                ColorUtils.ToU32(ColorUtils.WithAlpha(Colors.Border, 0.3f)),
+                radius, ImDrawFlags.RoundCornersBottom);
+            ImGui.SetCursorScreenPos(new Vector2(min.X, bodyMax.Y));
+            return true;
         }
 
         /// <summary>SetNextItemWidth in unscaled units (multiplied by the UI scale).</summary>
@@ -1802,7 +1938,14 @@ public static partial class SpheneUI
         public static void NavRailCategoryLabel(string label, Vector4 accent,
             List<(string Label, float CenterY, Vector4 Accent)>? pinnedCategories, float pinnedCenterY)
         {
-            VerticalSpace(Spacing.X4);
+            // The banded first label carries no top spacer of its own — the
+            // pinned band's padding already covers that gap. Keeping one
+            // would drop the first button an extra ItemSpacing+space below
+            // the drawn label compared to every later category.
+            if (pinnedCategories == null || pinnedCategories.Count > 0)
+            {
+                VerticalSpace(Spacing.X4);
+            }
             var text = label.ToUpperInvariant();
             var drawnInBand = false;
             if (pinnedCategories != null)

@@ -62,6 +62,29 @@ public static partial class SpheneUI
         }
 
         /// <summary>
+        /// Moves the cursor so an item/group of <paramref name="width"/> ends
+        /// flush at the card-aligned edge: inside cards the pushed content
+        /// bound (the card's inner content edge), at page level the shared
+        /// card edge (<see cref="Layout.CardAlignedAvailX"/>). The tighter of
+        /// the two wins — the scroll area pushes its own wider bound, so the
+        /// min is required on both sides. Unlike <see cref="DockToRightEdge"/>
+        /// no trailing icon column is reserved, so docked clusters close on
+        /// the same edge help icons use.
+        /// </summary>
+        public static void DockToCardEdge(float width)
+        {
+            var cursor = ImGui.GetCursorScreenPos();
+            var rightEdge = cursor.X + Layout.CardAlignedAvailX();
+            var bound = Layout.ContentRightBound;
+            if (bound > 0f)
+            {
+                rightEdge = MathF.Min(rightEdge, bound);
+            }
+            ImGui.SetCursorScreenPos(new Vector2(
+                MathF.Max(cursor.X, rightEdge - width), cursor.Y));
+        }
+
+        /// <summary>
         /// SameLine only when the next item of the given width still fits
         /// inside the real content bound; otherwise stays on the new line so
         /// the item is never clipped at the card edge.
@@ -1127,12 +1150,17 @@ public static partial class SpheneUI
 
             var col = enabled
                 ? (active ? baseCol * 0.9f : hovered ? baseCol * 1.1f : baseCol)
-                : new Vector4(baseCol.X, baseCol.Y, baseCol.Z, baseCol.W * 0.6f);
+                : Colors.FrameBg;
             drawList.AddRectFilled(start, end, ImGui.ColorConvertFloat4ToU32(col),
                 Metrics.ButtonRadius);
 
-            var textCol = enabled ? new Vector4(0.1f, 0.1f, 0.1f, 1.0f)
-                : new Vector4(0.25f, 0.25f, 0.25f, 0.7f);
+            if (!enabled)
+            {
+                drawList.AddRect(start, end, ImGui.ColorConvertFloat4ToU32(Colors.Border),
+                    Metrics.ButtonRadius);
+            }
+
+            var textCol = enabled ? ColorUtils.ContrastTextColor(baseCol) : Colors.TextMuted;
             var spacing = icon.HasValue ? 3f * scale : 0f;
             var iconSize = Vector2.Zero;
             if (icon.HasValue)

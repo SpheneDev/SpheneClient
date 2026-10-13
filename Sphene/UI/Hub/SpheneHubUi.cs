@@ -374,10 +374,14 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         {
             var blockStart = ImGui.GetCursorScreenPos();
             ImGui.SetCursorScreenPos(blockStart + new Vector2(0f, pinSlide));
-            // Reserve the back item + divider — the first category's own in-flow
-            // slot already covers the pinned band beneath it.
+            // Reserve the back item + divider so the first category's slot
+            // center lands exactly on the band. The X8 spacer and this dummy
+            // each carry a trailing ItemSpacing, and the banded label skips
+            // its own top spacer — a plain height would park the label's
+            // slot below the band and open a gap before the first button.
             ImGui.Dummy(new Vector2(1f,
-                pinItemH + pinDividerH - SpheneUI.Spacing.X8.Value * SpheneUI.Scale));
+                pinItemH + pinDividerH - SpheneUI.Spacing.X4.Value * SpheneUI.Scale
+                - ImGui.GetStyle().ItemSpacing.Y * 2f));
             pinnedCategories = [];
             switch (_activePage)
             {

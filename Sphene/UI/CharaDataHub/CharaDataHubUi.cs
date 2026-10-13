@@ -57,6 +57,9 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
     private bool _filterWorldOnly = false;
     private string _gposeTarget = string.Empty;
     private bool _hasValidGposeTarget;
+    private nint _gposeTargetAddress;
+    private DateTime _lastGposeTargetPoll = DateTime.MinValue;
+    private Task<(nint Address, bool CanApply, string Name)>? _gposeTargetPollTask;
     private string _importCode = string.Empty;
     private bool _isHandlingSelf = false;
     private DateTime _lastFavoriteUpdateTime = DateTime.UtcNow;
@@ -90,6 +93,9 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
     private CharaDataPage _standalonePage = CharaDataPage.GposeTogether;
     private CharaDataPage _embeddedPage = CharaDataPage.GposeTogether;
     private bool _embeddedScope;
+
+    private enum ApplySourceTab { Favorites, Code, Own, Shared, Mcdf }
+    private ApplySourceTab _applySourceTab = ApplySourceTab.Favorites;
 
     private CharaDataPage _activePage
     {
@@ -142,8 +148,16 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
     {
         if (_abbreviateCharaName)
         {
-            var split = name.Split(" ");
-            return split[0].First() + ". " + split[1].First() + ".";
+            var split = name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            // Single-word names (pets, Brio actors) have no second part — abbreviate what exists.
+            if (split.Length >= 2 && split[0].Length > 0 && split[1].Length > 0)
+            {
+                return split[0][0] + ". " + split[1][0] + ".";
+            }
+            if (split.Length == 1 && split[0].Length > 0)
+            {
+                return split[0][0] + ".";
+            }
         }
 
         return name;
@@ -163,6 +177,8 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
         _sharedWithYouOwnerFilter = string.Empty;
         _importCode = string.Empty;
         _charaDataNearbyManager.ComputeNearbyData = false;
+        _charaDataNearbyManager.SetHoveredVfx(null);
+        _nearbyHovered = null;
         _openComboHybridId = null;
         _openComboHybridEntries = null;
     }
@@ -324,6 +340,8 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
     internal void OnEmbeddedHidden()
     {
         _charaDataNearbyManager.ComputeNearbyData = false;
+        _charaDataNearbyManager.SetHoveredVfx(null);
+        _nearbyHovered = null;
         _openComboHybridId = null;
         _openComboHybridEntries = null;
     }
@@ -349,16 +367,55 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
             UpdateFilteredFavorites();
         }
 
-        (_hasValidGposeTarget, _gposeTarget) = _charaDataManager.CanApplyInGpose().GetAwaiter().GetResult();
+        // The GPose target lookup crosses the framework thread — blocking the
+        // UI thread on it every frame stutters. Poll asynchronously instead:
+        // the result is consumed on the UI thread once the task completes.
+        if (_gposeTargetPollTask?.IsCompletedSuccessfully == true)
+        {
+            var (address, canApply, name) = _gposeTargetPollTask.Result;
+            _gposeTargetAddress = address;
+            _hasValidGposeTarget = canApply;
+            _gposeTarget = name;
+            _gposeTargetPollTask = null;
+        }
+        else if (_gposeTargetPollTask is { IsCompleted: true, IsCompletedSuccessfully: false })
+        {
+            _logger.LogDebug(_gposeTargetPollTask.Exception, "Failed to poll GPose target state");
+            _gposeTargetAddress = nint.Zero;
+            _hasValidGposeTarget = false;
+            _gposeTarget = string.Empty;
+            _gposeTargetPollTask = null;
+        }
+
+        if (_gposeTargetPollTask == null
+            && DateTime.UtcNow - _lastGposeTargetPoll > TimeSpan.FromMilliseconds(250))
+        {
+            _lastGposeTargetPoll = DateTime.UtcNow;
+            _gposeTargetPollTask = PollGposeTargetAsync();
+        }
         _isHandlingSelf = _charaDataManager.HandledCharaData.Any(c => c.IsSelf);
+    }
+
+    /// <summary>
+    /// Single round-trip GPose target probe — mirrors CanApplyInGpose but also
+    /// reports the object address so the actor list can mark the live target.
+    /// </summary>
+    private async Task<(nint Address, bool CanApply, string Name)> PollGposeTargetAsync()
+    {
+        var obj = await _dalamudUtilService.GetGposeTargetGameObjectAsync().ConfigureAwait(false);
+        var canApply = _dalamudUtilService.IsInGpose && obj != null
+            && obj.ObjectKind == Dalamud.Game.ClientState.Objects.Enums.ObjectKind.Pc;
+        return (obj?.Address ?? nint.Zero, canApply,
+            canApply ? obj!.Name.TextValue : "Invalid Target");
     }
 
     private void DrawBrioWarning()
     {
         if (!_charaDataManager.BrioAvailable)
         {
-            SpheneUI.Text.GroupedCentered("To utilize any features related to posing or spawning characters you require to have Brio installed.", ImGuiColors.DalamudRed);
-            SpheneUI.Layout.DistanceSeparator();
+            SpheneUI.Layout.Callout("To use any features related to posing or spawning characters, Brio must be installed.",
+                FontAwesomeIcon.ExclamationTriangle, ImGuiColors.DalamudRed, "Brio not available");
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
         }
     }
 
@@ -369,9 +426,9 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
             if (_charaDataManager.DataApplicationTask != null)
             {
                 ImGui.AlignTextToFramePadding();
-                SpheneUI.Text.Plain("Applying Data to Actor");
-                ImGui.SameLine();
-                if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Ban, "Cancel Application"))
+                SpheneUI.Text.Muted("Applying data to actor");
+                ImGui.SameLine(0f, SpheneUI.Spacing.X8.Scaled);
+                if (SpheneUI.Controls.SmallButton("Cancel Application"))
                 {
                     _charaDataManager.CancelDataApplication();
                 }
@@ -382,9 +439,9 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
             }
             if (_charaDataManager.DataApplicationTask != null)
             {
-                SpheneUI.Text.ColoredWrapped("WARNING: During the data application avoid interacting with this actor to prevent potential crashes.", ImGuiColors.DalamudRed);
-                SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
-                SpheneUI.Layout.Separator();
+                SpheneUI.Layout.Callout("During the data application avoid interacting with this actor to prevent potential crashes.",
+                    FontAwesomeIcon.ExclamationTriangle, ImGuiColors.DalamudRed);
+                SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
             }
         });
     }
@@ -504,527 +561,624 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
 
     private void DrawGposeControls()
     {
-        SpheneUI.Text.Big("GPose Actors");
-        SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
-        using var indent = ImRaii.PushIndent(10f);
+        DrawPageTitle("GPose Actors",
+            "The actors currently in your GPose — target them, review applied data, or revert.");
 
-        foreach (var actor in _dalamudUtilService.GetGposeCharactersFromObjectTable())
+        var actors = _dalamudUtilService.GetGposeCharactersFromObjectTable()
+            .Where(a => a != null).ToList();
+        if (actors.Count == 0)
         {
-            if (actor == null) continue;
-            using var actorId = ImRaii.PushId(actor.Name.TextValue);
+            SpheneUI.Layout.Callout("No actors in GPose yet — spawn or possess characters to manage them here.",
+                FontAwesomeIcon.Users, ImGuiColors.DalamudGrey);
+            return;
+        }
+
+        var iconBtn = ImGui.GetFrameHeight();
+        var spacingX = ImGui.GetStyle().ItemSpacing.X;
+        var rowInset = ImGui.GetStyle().ItemInnerSpacing.X;
+
+        foreach (var actor in actors)
+        {
+            using var actorId = ImRaii.PushId($"{actor!.Name.TextValue}#{actor.Address}");
+            var handled = _charaDataManager.HandledCharaData
+                .FirstOrDefault(c => string.Equals(c.Name, actor.Name.TextValue, StringComparison.Ordinal));
+            var isCurrentTarget = actor.Address == _gposeTargetAddress;
+            var canDelete = !actor.Name.TextValue.StartsWith("Brio ", StringComparison.Ordinal);
+            // info + [trash] + undo — only present for handled actors
+            var actionCount = handled == null ? 0 : (canDelete ? 3 : 2);
+
             SpheneUI.Layout.Group(() =>
             {
-                if (SpheneUI.Icons.Button(FontAwesomeIcon.Crosshairs))
+                var rowStartX = ImGui.GetCursorPosX();
+                // Line 1: target button + actor name; actions docked right.
+                if (SpheneUI.Controls.IconButton("##target", FontAwesomeIcon.Crosshairs, size: iconBtn))
                 {
                     unsafe
                     {
                         DalamudUtilService.GposeTarget = (FFXIVClientStructs.FFXIV.Client.Game.Object.GameObject*)actor.Address;
                     }
                 }
-                ImGui.SameLine();
-                SpheneUI.AttachTooltip($"Target the GPose Character {CharaName(actor.Name.TextValue)}");
+                SpheneUI.AttachTooltip($"Target the GPose character {CharaName(actor.Name.TextValue)}");
+                ImGui.SameLine(0f, SpheneUI.Spacing.X8.Scaled);
                 ImGui.AlignTextToFramePadding();
-                var pos = ImGui.GetCursorPosX();
-                using (ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.HealerGreen, actor.Address == (_dalamudUtilService.GetGposeTargetGameObjectAsync().GetAwaiter().GetResult()?.Address ?? nint.Zero)))
+                SpheneUI.Text.Colored(CharaName(actor.Name.TextValue),
+                    isCurrentTarget ? ImGuiColors.HealerGreen : ImGuiColors.DalamudWhite);
+                if (isCurrentTarget)
                 {
-                    SpheneUI.Text.Plain(CharaName(actor.Name.TextValue));
+                    ImGui.SameLine(0f, SpheneUI.Spacing.X4.Scaled);
+                    SpheneUI.Layout.Badge("TARGET", ImGuiColors.HealerGreen);
                 }
-                ImGui.SameLine(250);
-                var handled = _charaDataManager.HandledCharaData.FirstOrDefault(c => string.Equals(c.Name, actor.Name.TextValue, StringComparison.Ordinal));
-                using (ImRaii.Disabled(handled == null))
-                {
-                    SpheneUI.Icons.Icon(FontAwesomeIcon.InfoCircle);
-                    var id = string.IsNullOrEmpty(handled?.MetaInfo.Uploader.UID) ? handled?.MetaInfo.Id : handled.MetaInfo.FullId;
-                    SpheneUI.AttachTooltip($"Applied Data: {id ?? "No data applied"}");
 
+                if (handled != null)
+                {
                     ImGui.SameLine();
-                    // maybe do this better, check with brio for handled charas or sth
-                    using (ImRaii.Disabled(!actor.Name.TextValue.StartsWith("Brio ", StringComparison.Ordinal)))
+                    // Dock inside the row frame — the group box's inner padding
+                    // is the trailing margin, not the label-icon reserve.
+                    SpheneUI.Controls.DockToCardEdge(actionCount * iconBtn
+                        + (actionCount - 1) * spacingX + rowInset);
+                    var id = string.IsNullOrEmpty(handled.MetaInfo.Uploader.UID) ? handled.MetaInfo.Id : handled.MetaInfo.FullId;
+                    SpheneUI.Icons.Icon(FontAwesomeIcon.InfoCircle, ImGuiColors.DalamudGrey);
+                    SpheneUI.AttachTooltip($"Applied data: {id ?? "No data applied"}");
+                    ImGui.SameLine();
+
+                    if (canDelete)
                     {
-                        if (SpheneUI.Icons.Button(FontAwesomeIcon.Trash))
+                        if (SpheneUI.Controls.IconButton("##remove", FontAwesomeIcon.Trash, size: iconBtn))
                         {
                             _charaDataManager.RemoveChara(actor.Name.TextValue);
                         }
                         SpheneUI.AttachTooltip($"Remove character {CharaName(actor.Name.TextValue)}");
+                        ImGui.SameLine();
                     }
-                    ImGui.SameLine();
-                    if (SpheneUI.Icons.Button(FontAwesomeIcon.Undo))
+                    if (SpheneUI.Controls.IconButton("##revert", FontAwesomeIcon.Undo, size: iconBtn))
                     {
                         _charaDataManager.RevertChara(handled);
                     }
                     SpheneUI.AttachTooltip($"Revert applied data from {CharaName(actor.Name.TextValue)}");
-                    ImGui.SetCursorPosX(pos);
-                    DrawPoseData(handled?.MetaInfo, actor.Name.TextValue, true);
                 }
-            });
 
-            SpheneUI.Layout.Space(SpheneUI.Spacing.X2);
+                // Line 2: poses stored on the applied data.
+                if (handled != null)
+                {
+                    ImGui.SetCursorPosX(rowStartX + iconBtn + SpheneUI.Spacing.X8.Scaled);
+                    DrawPoseData(handled.MetaInfo, actor.Name.TextValue, true);
+                }
+            }, 5, SpheneUI.Layout.CardAlignedAvailX());
+
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
         }
     }
 
     private void DrawDataApplication()
     {
-        SpheneUI.Text.Big("Apply Character Appearance");
+        DrawPageTitle("Apply Character Appearance",
+            "Apply character data to a GPose actor — from favorites, codes, your own sets, shared data, or MCDF.");
 
-        SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
-
+        // Target status strip — the action context every apply action binds to.
         if (_uiSharedService.IsInGpose)
         {
-            SpheneUI.Text.Plain("GPose Target");
-            ImGui.SameLine(200);
-            SpheneUI.Text.Colored(CharaName(_gposeTarget), SpheneUI.Colors.Bool(_hasValidGposeTarget));
+            var rowInset = ImGui.GetStyle().ItemInnerSpacing.X;
+            var hint = _hasValidGposeTarget ? "actions apply to this actor" : "select an actor in GPose";
+            var hintW = ImGui.CalcTextSize(hint).X + rowInset;
+            SpheneUI.Layout.Group(() =>
+            {
+                ImGui.AlignTextToFramePadding();
+                SpheneUI.Icons.Icon(FontAwesomeIcon.Crosshairs,
+                    _hasValidGposeTarget ? ImGuiColors.HealerGreen : ImGuiColors.DalamudRed);
+                ImGui.SameLine(0f, SpheneUI.Spacing.X8.Scaled);
+                SpheneUI.Text.Muted("GPose Target");
+                ImGui.SameLine(0f, SpheneUI.Spacing.X8.Scaled);
+                SpheneUI.Text.Colored(CharaName(_gposeTarget), SpheneUI.Colors.Bool(_hasValidGposeTarget));
+                if (_hasValidGposeTarget)
+                {
+                    ImGui.SameLine(0f, SpheneUI.Spacing.X4.Scaled);
+                    SpheneUI.Layout.Badge("ACTIVE", ImGuiColors.HealerGreen);
+                }
+                ImGui.SameLine();
+                SpheneUI.Controls.DockToCardEdge(hintW);
+                ImGui.AlignTextToFramePadding();
+                SpheneUI.Text.Muted(hint);
+            }, 5f, SpheneUI.Layout.CardAlignedAvailX());
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
         }
 
         if (!_hasValidGposeTarget)
         {
-            SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
-            SpheneUI.Text.GroupedCentered("Applying data is only available in GPose with a valid selected GPose target.", ImGuiColors.DalamudYellow, 350);
+            SpheneUI.Layout.Callout("Applying data requires an active GPose with a selected target actor.",
+                FontAwesomeIcon.Crosshairs, ImGuiColors.DalamudYellow);
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
         }
 
-        SpheneUI.Layout.Space(SpheneUI.Spacing.X10);
-
-        using var tabs = ImRaii.TabBar("Tabs");
-
-        using (var byFavoriteTabItem = ImRaii.TabItem("Favorites"))
+        if (_openDataApplicationShared)
         {
-            if (byFavoriteTabItem)
+            _applySourceTab = ApplySourceTab.Shared;
+        }
+
+        DrawApplySourceTabs();
+
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
+
+        switch (_applySourceTab)
+        {
+            case ApplySourceTab.Favorites: DrawApplyTabFavorites(); break;
+            case ApplySourceTab.Code: DrawApplyTabCode(); break;
+            case ApplySourceTab.Own: DrawApplyTabOwn(); break;
+            case ApplySourceTab.Shared: DrawApplyTabShared(); break;
+            case ApplySourceTab.Mcdf: DrawApplyTabMcdf(); break;
+        }
+    }
+
+    /// <summary>
+    /// Segmented source switcher — replaces the old ImGui tab bar with the
+    /// design-system pill row the other hub pages use.
+    /// </summary>
+    private void DrawApplySourceTabs()
+    {
+        var accent = SpheneUI.Palette.EtherealPurple;
+        (ApplySourceTab Tab, string Label, FontAwesomeIcon Icon)[] sources =
+        [
+            (ApplySourceTab.Favorites, "Favorites", FontAwesomeIcon.Star),
+            (ApplySourceTab.Code, "Code", FontAwesomeIcon.Key),
+            (ApplySourceTab.Own, "Your Own", FontAwesomeIcon.User),
+            (ApplySourceTab.Shared, "Shared With You", FontAwesomeIcon.Users),
+            (ApplySourceTab.Mcdf, "MCDF", FontAwesomeIcon.File),
+        ];
+
+        bool first = true;
+        foreach (var (tab, label, icon) in sources)
+        {
+            if (!first) ImGui.SameLine(0f, SpheneUI.Spacing.X4.Scaled);
+            first = false;
+            if (SpheneUI.Controls.SegmentButton(label, icon, accent: accent,
+                    active: _applySourceTab == tab))
             {
-                using var id = ImRaii.PushId("byFavorite");
-
-                SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
-
-                var max = ImGui.GetWindowContentRegionMax();
-                SpheneUI.Layout.Tree("Filters", () =>
-                {
-                    var maxIndent = ImGui.GetWindowContentRegionMax();
-                    ImGui.SetNextItemWidth(maxIndent.X - ImGui.GetCursorPosX());
-                    SpheneUI.Controls.InputTextWithHint("##ownFilter", "Code/Owner Filter", ref _filterCodeNote, 100);
-                    ImGui.SetNextItemWidth(maxIndent.X - ImGui.GetCursorPosX());
-                    SpheneUI.Controls.InputTextWithHint("##descFilter", "Custom Description Filter", ref _filterDescription, 100);
-                    SpheneUI.Controls.Toggle("Only show entries with pose data", ref _filterPoseOnly);
-                    SpheneUI.Controls.Toggle("Only show entries with world data", ref _filterWorldOnly);
-                    SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.Row);
-                    if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Ban, "Reset Filter"))
-                    {
-                        _filterCodeNote = string.Empty;
-                        _filterDescription = string.Empty;
-                        _filterPoseOnly = false;
-                        _filterWorldOnly = false;
-                    }
-                });
-
-                SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
-                SpheneUI.Layout.Separator();
-                using var scrollableChild = ImRaii.Child("favorite");
-                SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
-                using var totalIndent = ImRaii.PushIndent(5f);
-                var cursorPos = ImGui.GetCursorPos();
-                max = ImGui.GetWindowContentRegionMax();
-                foreach (var favorite in _filteredFavorites.OrderByDescending(k => k.Value.Favorite.LastDownloaded))
-                {
-                    SpheneUI.Layout.Group(() =>
-                    {
-                        using var tableid = ImRaii.PushId(favorite.Key);
-                        ImGui.AlignTextToFramePadding();
-                        DrawFavorite(favorite.Key);
-                        using var innerIndent = ImRaii.PushIndent(25f);
-                        ImGui.SameLine();
-                        var xPos = ImGui.GetCursorPosX();
-                        var maxPos = (max.X - cursorPos.X);
-
-                        bool metaInfoDownloaded = favorite.Value.DownloadedMetaInfo;
-                        var metaInfo = favorite.Value.MetaInfo;
-
-                        ImGui.AlignTextToFramePadding();
-                        using (ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.DalamudGrey, !metaInfoDownloaded))
-                        using (ImRaii.PushColor(ImGuiCol.Text, SpheneUI.Colors.Bool(metaInfo != null), metaInfoDownloaded))
-                            SpheneUI.Text.Plain(favorite.Key);
-
-                        var iconSize = SpheneUI.Icons.Size(FontAwesomeIcon.Check);
-                        var refreshButtonSize = SpheneUI.Icons.ButtonSize(FontAwesomeIcon.ArrowsSpin);
-                        var applyButtonSize = SpheneUI.Icons.ButtonSize(FontAwesomeIcon.ArrowRight);
-                        var addButtonSize = SpheneUI.Icons.ButtonSize(FontAwesomeIcon.Plus);
-                        var offsetFromRight = maxPos - (iconSize.X + refreshButtonSize.X + applyButtonSize.X + addButtonSize.X + (ImGui.GetStyle().ItemSpacing.X * 3.5f));
-
-                        ImGui.SameLine();
-                        ImGui.SetCursorPosX(offsetFromRight);
-                        if (metaInfoDownloaded)
-                        {
-                            SpheneUI.Icons.BoolIcon(metaInfo != null, false);
-                            if (metaInfo != null)
-                            {
-                                SpheneUI.AttachTooltip("Metainfo present" + SpheneUI.TooltipSeparator
-                                    + $"Last Updated: {metaInfo!.UpdatedDate}" + Environment.NewLine
-                                    + $"Description: {metaInfo!.Description}" + Environment.NewLine
-                                    + $"Poses: {metaInfo!.PoseData.Count}");
-                            }
-                            else
-                            {
-                                SpheneUI.AttachTooltip("Metainfo could not be downloaded." + SpheneUI.TooltipSeparator
-                                    + "The data associated with the code is either not present on the server anymore or you have no access to it");
-                            }
-                        }
-                        else
-                        {
-                            SpheneUI.Icons.Icon(FontAwesomeIcon.QuestionCircle, ImGuiColors.DalamudGrey);
-                            SpheneUI.AttachTooltip("Unknown accessibility state. Click the button on the right to refresh.");
-                        }
-
-                        ImGui.SameLine();
-                        bool isInTimeout = _charaDataManager.IsInTimeout(favorite.Key);
-                        using (ImRaii.Disabled(isInTimeout))
-                        {
-                            if (SpheneUI.Icons.Button(FontAwesomeIcon.ArrowsSpin))
-                            {
-                                _charaDataManager.DownloadMetaInfo(favorite.Key, false);
-                                UpdateFilteredItems();
-                            }
-                        }
-                        SpheneUI.AttachTooltip(isInTimeout ? "Timeout for refreshing active, please wait before refreshing again."
-                            : "Refresh data for this entry from the Server.");
-
-                        ImGui.SameLine();
-                        GposeMetaInfoAction((meta) =>
-                        {
-                            if (SpheneUI.Icons.Button(FontAwesomeIcon.ArrowRight))
-                            {
-                                _ = _charaDataManager.ApplyCharaDataToGposeTarget(metaInfo!);
-                            }
-                        }, "Apply Character Data to GPose Target", metaInfo, _hasValidGposeTarget, false);
-                        ImGui.SameLine();
-                        GposeMetaInfoAction((meta) =>
-                        {
-                            if (SpheneUI.Icons.Button(FontAwesomeIcon.Plus))
-                            {
-                                _ = _charaDataManager.SpawnAndApplyData(meta!);
-                            }
-                        }, "Spawn Actor with Brio and apply Character Data", metaInfo, _hasValidGposeTarget, true);
-
-                        string uidText = string.Empty;
-                        var uid = favorite.Key.Split(":")[0];
-                        if (metaInfo != null)
-                        {
-                            uidText = metaInfo.Uploader.AliasOrUID;
-                        }
-                        else
-                        {
-                            uidText = uid;
-                        }
-
-                        var note = _serverConfigurationManager.GetNoteForUid(uid);
-                        if (note != null)
-                        {
-                            uidText = $"{note} ({uidText})";
-                        }
-                        SpheneUI.Text.Plain(uidText);
-
-                        SpheneUI.Text.Plain("Last Use: ");
-                        ImGui.SameLine();
-                        SpheneUI.Text.Plain(favorite.Value.Favorite.LastDownloaded == DateTime.MaxValue ? "Never" : favorite.Value.Favorite.LastDownloaded.ToString());
-
-                        var desc = favorite.Value.Favorite.CustomDescription;
-                        ImGui.SetNextItemWidth(maxPos - xPos);
-                        if (SpheneUI.Controls.InputTextWithHint("##desc", "Custom Description for Favorite", ref desc, 100))
-                        {
-                            favorite.Value.Favorite.CustomDescription = desc;
-                            _configService.Save();
-                        }
-
-                        DrawPoseData(metaInfo, _gposeTarget, _hasValidGposeTarget);
-                    });
-
-                    SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
-                }
-
-                if (_configService.Current.FavoriteCodes.Count == 0)
-                {
-                    SpheneUI.Text.ColoredWrapped("You have no favorites added. Add Favorites through the other tabs before you can use this tab.", ImGuiColors.DalamudYellow);
-                }
+                _applySourceTab = tab;
             }
         }
+    }
 
-        using (var byCodeTabItem = ImRaii.TabItem("Code"))
+    private void DrawApplyTabFavorites()
+    {
+        using var id = ImRaii.PushId("byFavorite");
+
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+
+        int favFilters = 0;
+        if (!string.IsNullOrEmpty(_filterCodeNote)) favFilters++;
+        if (!string.IsNullOrEmpty(_filterDescription)) favFilters++;
+        if (_filterPoseOnly) favFilters++;
+        if (_filterWorldOnly) favFilters++;
+        SpheneUI.Layout.Collapsible("Filters", () =>
         {
-            using var id = ImRaii.PushId("byCodeTab");
-            if (byCodeTabItem)
+            ImGui.SetNextItemWidth(SpheneUI.Controls.BoundedAvailX());
+            SpheneUI.Controls.InputTextWithHint("##ownFilter", "Code/Owner Filter", ref _filterCodeNote, 100);
+            ImGui.SetNextItemWidth(SpheneUI.Controls.BoundedAvailX());
+            SpheneUI.Controls.InputTextWithHint("##descFilter", "Custom Description Filter", ref _filterDescription, 100);
+            SpheneUI.Controls.Toggle("Only show entries with pose data", ref _filterPoseOnly);
+            SpheneUI.Controls.Toggle("Only show entries with world data", ref _filterWorldOnly);
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.Row);
+            if (SpheneUI.Controls.SmallButton("Reset Filter"))
             {
-                using var child = ImRaii.Child("sharedWithYouByCode", new(0, 0), false, ImGuiWindowFlags.AlwaysAutoResize);
-                DrawHelpFoldout("You can apply character data you have a code for in this tab. Provide the code in it's given format \"OwnerUID:DataId\" into the field below and click on " +
-                                "\"Get Info from Code\". This will provide you basic information about the data behind the code. Afterwards select an actor in GPose and press on \"Download and apply to <actor>\"." + Environment.NewLine + Environment.NewLine
-                                + "Description: as set by the owner of the code to give you more or additional information of what this code may contain." + Environment.NewLine
-                                + "Last Update: the date and time the owner of the code has last updated the data." + Environment.NewLine
-                                + "Is Downloadable: whether or not the code is downloadable and applicable. If the code is not downloadable, contact the owner so they can attempt to fix it." + Environment.NewLine + Environment.NewLine
-                                + "To download a code the code requires correct access permissions to be set by the owner. If getting info from the code fails, contact the owner to make sure they set their Access Permissions for the code correctly.");
+                _filterCodeNote = string.Empty;
+                _filterDescription = string.Empty;
+                _filterPoseOnly = false;
+                _filterWorldOnly = false;
+            }
+        }, icon: FontAwesomeIcon.Filter,
+            hint: favFilters == 0 ? null : $"{favFilters} active");
 
-                SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
-                SpheneUI.Controls.InputTextWithHint("##importCode", "Enter Data Code", ref _importCode, 100);
-                using (ImRaii.Disabled(string.IsNullOrEmpty(_importCode)))
-                {
-                    if (SpheneUI.Icons.TextButton(FontAwesomeIcon.ArrowCircleDown, "Get Info from Code"))
-                    {
-                        _charaDataManager.DownloadMetaInfo(_importCode);
-                    }
-                }
-                GposeMetaInfoAction((meta) =>
-                {
-                    if (SpheneUI.Icons.TextButton(FontAwesomeIcon.ArrowRight, $"Download and Apply"))
-                    {
-                        _ = _charaDataManager.ApplyCharaDataToGposeTarget(meta!);
-                    }
-                }, "Apply this Character Data to the current GPose actor", _charaDataManager.LastDownloadedMetaInfo, _hasValidGposeTarget, false);
-                ImGui.SameLine();
-                GposeMetaInfoAction((meta) =>
-                {
-                    if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Plus, $"Download and Spawn"))
-                    {
-                        _ = _charaDataManager.SpawnAndApplyData(meta!);
-                    }
-                }, "Spawn a new Brio actor and apply this Character Data", _charaDataManager.LastDownloadedMetaInfo, _hasValidGposeTarget, true);
-                ImGui.SameLine();
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+
+        foreach (var favorite in _filteredFavorites.OrderByDescending(k => k.Value.Favorite.LastDownloaded))
+        {
+            SpheneUI.Layout.Group(() =>
+            {
+                using var tableid = ImRaii.PushId(favorite.Key);
+                var rowInset = ImGui.GetStyle().ItemInnerSpacing.X;
+                var iconBtn = ImGui.GetFrameHeight();
+
+                // Line 1: favorite star + code, action cluster docked right.
                 ImGui.AlignTextToFramePadding();
-                DrawAddOrRemoveFavorite(_charaDataManager.LastDownloadedMetaInfo);
+                DrawFavorite(favorite.Key);
+                ImGui.SameLine(0f, SpheneUI.Spacing.X8.Scaled);
+                bool metaInfoDownloaded = favorite.Value.DownloadedMetaInfo;
+                var metaInfo = favorite.Value.MetaInfo;
+                using (ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.DalamudGrey, !metaInfoDownloaded))
+                using (ImRaii.PushColor(ImGuiCol.Text, SpheneUI.Colors.Bool(metaInfo != null), metaInfoDownloaded))
+                    SpheneUI.Text.Plain(favorite.Key);
 
-                ImGui.NewLine();
-                if (!_charaDataManager.DownloadMetaInfoTask?.IsCompleted ?? false)
+                var statusIconW = SpheneUI.Icons.Size(FontAwesomeIcon.Check).X;
+                var clusterW = statusIconW + iconBtn * 3f
+                    + ImGui.GetStyle().ItemSpacing.X * 3f + rowInset;
+                ImGui.SameLine();
+                SpheneUI.Controls.DockToCardEdge(clusterW);
+                if (metaInfoDownloaded)
                 {
-                    SpheneUI.Text.ColoredWrapped("Downloading meta info. Please wait.", ImGuiColors.DalamudYellow);
-                }
-                if ((_charaDataManager.DownloadMetaInfoTask?.IsCompleted ?? false) && !_charaDataManager.DownloadMetaInfoTask.Result.Success)
-                {
-                    SpheneUI.Text.ColoredWrapped(_charaDataManager.DownloadMetaInfoTask.Result.Result, ImGuiColors.DalamudRed);
-                }
-
-                using (ImRaii.Disabled(_charaDataManager.LastDownloadedMetaInfo == null))
-                {
-                    SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
-                    var metaInfo = _charaDataManager.LastDownloadedMetaInfo;
-                    SpheneUI.Text.Plain("Description");
-                    ImGui.SameLine(150);
-                    SpheneUI.Text.Wrapped(string.IsNullOrEmpty(metaInfo?.Description) ? "-" : metaInfo.Description);
-                    SpheneUI.Text.Plain("Last Update");
-                    ImGui.SameLine(150);
-                    SpheneUI.Text.Plain(metaInfo?.UpdatedDate.ToLocalTime().ToString() ?? "-");
-                    SpheneUI.Text.Plain("Is Downloadable");
-                    ImGui.SameLine(150);
-                    SpheneUI.Icons.BoolIcon(metaInfo?.CanBeDownloaded ?? false, inline: false);
-                    SpheneUI.Text.Plain("Poses");
-                    ImGui.SameLine(150);
-                    if (metaInfo?.HasPoses ?? false)
-                        DrawPoseData(metaInfo, _gposeTarget, _hasValidGposeTarget);
+                    SpheneUI.Icons.BoolIcon(metaInfo != null, false);
+                    if (metaInfo != null)
+                    {
+                        SpheneUI.AttachTooltip("Metainfo present" + SpheneUI.TooltipSeparator
+                            + $"Last Updated: {metaInfo!.UpdatedDate}" + Environment.NewLine
+                            + $"Description: {metaInfo!.Description}" + Environment.NewLine
+                            + $"Poses: {metaInfo!.PoseData.Count}");
+                    }
                     else
-                        SpheneUI.Icons.BoolIcon(false, false);
-                }
-            }
-        }
-
-        using (var yourOwnTabItem = ImRaii.TabItem("Your Own"))
-        {
-            using var id = ImRaii.PushId("yourOwnTab");
-            if (yourOwnTabItem)
-            {
-                DrawHelpFoldout("You can apply character data you created yourself in this tab. If the list is not populated press on \"Download your Character Data\"." + Environment.NewLine + Environment.NewLine
-                                 + "To create new and edit your existing character data use the \"MCD Online\" tab.");
-
-                SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
-
-                using (ImRaii.Disabled(_charaDataManager.GetAllDataTask != null
-                    || (_charaDataManager.DataGetTimeoutTask != null && !_charaDataManager.DataGetTimeoutTask.IsCompleted)))
-                {
-                    if (SpheneUI.Icons.TextButton(FontAwesomeIcon.ArrowCircleDown, "Download your Character Data"))
                     {
-                        var token = _disposalCts?.Token ?? CancellationToken.None;
-                        _ = _charaDataManager.GetAllData(token);
-                    }
-                }
-                if (_charaDataManager.DataGetTimeoutTask != null && !_charaDataManager.DataGetTimeoutTask.IsCompleted)
-                {
-                    SpheneUI.AttachTooltip("You can only refresh all character data from server every minute. Please wait.");
-                }
-
-                SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
-                SpheneUI.Layout.Separator();
-
-                using var child = ImRaii.Child("ownDataChild", new(0, 0), false, ImGuiWindowFlags.AlwaysAutoResize);
-                using var indent = ImRaii.PushIndent(10f);
-                foreach (var data in _charaDataManager.OwnCharaData.Values)
-                {
-                    var hasMetaInfo = _charaDataManager.TryGetMetaInfo(data.FullId, out var metaInfo);
-                    if (!hasMetaInfo) continue;
-                    DrawMetaInfoData(_gposeTarget, _hasValidGposeTarget, metaInfo!, true);
-                }
-
-                SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
-            }
-        }
-
-        using (var sharedWithYouTabItem = ImRaii.TabItem("Shared With You", _openDataApplicationShared ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None))
-        {
-            using var id = ImRaii.PushId("sharedWithYouTab");
-            if (sharedWithYouTabItem)
-            {
-                DrawHelpFoldout("You can apply character data shared with you implicitly in this tab. Shared Character Data are Character Data entries that have \"Sharing\" set to \"Shared\" and you have access through those by meeting the access restrictions, " +
-                                "i.e. you were specified by your UID to gain access or are paired with the other user according to the Access Restrictions setting." + Environment.NewLine + Environment.NewLine
-                                + "Filter if needed to find a specific entry, then just press on \"Apply to <actor>\" and it will download and apply the Character Data to the currently targeted GPose actor." + Environment.NewLine + Environment.NewLine
-                                + "Note: Shared Data of Pairs you have paused will not be shown here.");
-
-                SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
-
-                DrawUpdateSharedDataButton();
-
-                int activeFilters = 0;
-                if (!string.IsNullOrEmpty(_sharedWithYouOwnerFilter)) activeFilters++;
-                if (!string.IsNullOrEmpty(_sharedWithYouDescriptionFilter)) activeFilters++;
-                if (_sharedWithYouDownloadableFilter) activeFilters++;
-                string filtersText = activeFilters == 0 ? "Filters" : $"Filters ({activeFilters} active)";
-                SpheneUI.Layout.Tree($"{filtersText}##filters", () =>
-                {
-                    var filterWidth = ImGui.GetWindowContentRegionMax().X - ImGui.GetWindowContentRegionMin().X;
-                    ImGui.SetNextItemWidth(filterWidth);
-                    if (SpheneUI.Controls.InputTextWithHint("##filter", "Filter by UID/Note", ref _sharedWithYouOwnerFilter, 30))
-                    {
-                        UpdateFilteredItems();
-                    }
-                    ImGui.SetNextItemWidth(filterWidth);
-                    if (SpheneUI.Controls.InputTextWithHint("##filterDesc", "Filter by Description", ref _sharedWithYouDescriptionFilter, 50))
-                    {
-                        UpdateFilteredItems();
-                    }
-                    if (SpheneUI.Controls.Toggle("Only show downloadable", ref _sharedWithYouDownloadableFilter))
-                    {
-                        UpdateFilteredItems();
-                    }
-                });
-
-                if (_filteredDict == null && _charaDataManager.GetSharedWithYouTask == null)
-                {
-                    _filteredDict = _charaDataManager.SharedWithYouData
-                        .ToDictionary(k =>
-                        {
-                            var note = _serverConfigurationManager.GetNoteForUid(k.Key.UID);
-                            if (note == null) return k.Key.AliasOrUID;
-                            return $"{note} ({k.Key.AliasOrUID})";
-                        }, k => k.Value, StringComparer.OrdinalIgnoreCase)
-                        .Where(k => string.IsNullOrEmpty(_sharedWithYouOwnerFilter) || k.Key.Contains(_sharedWithYouOwnerFilter))
-                        .OrderBy(k => k.Key, StringComparer.OrdinalIgnoreCase).ToDictionary();
-                }
-
-                SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
-                SpheneUI.Layout.Separator();
-                using var child = ImRaii.Child("sharedWithYouChild", new(0, 0), false, ImGuiWindowFlags.AlwaysAutoResize);
-
-                SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
-                foreach (var entry in _filteredDict ?? [])
-                {
-                    bool isFilteredAndHasToBeOpened = entry.Key.Contains(_sharedWithYouOwnerFilter) && _openDataApplicationShared;
-                    if (isFilteredAndHasToBeOpened)
-                        ImGui.SetNextItemOpen(isFilteredAndHasToBeOpened);
-                    SpheneUI.Layout.Tree($"{entry.Key} - [{entry.Value.Count} Character Data Sets]##{entry.Key}", () =>
-                    {
-                        foreach (var data in entry.Value)
-                        {
-                            DrawMetaInfoData(_gposeTarget, _hasValidGposeTarget, data);
-                        }
-                        SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
-                    });
-                    if (isFilteredAndHasToBeOpened)
-                        _openDataApplicationShared = false;
-                }
-            }
-        }
-
-        using (var mcdfTabItem = ImRaii.TabItem("From MCDF"))
-        {
-            using var id = ImRaii.PushId("applyMcdfTab");
-            if (mcdfTabItem)
-            {
-                using var child = ImRaii.Child("applyMcdf", new(0, 0), false, ImGuiWindowFlags.AlwaysAutoResize);
-                DrawHelpFoldout("You can apply character data shared with you using a MCDF file in this tab." + Environment.NewLine + Environment.NewLine
-                                + "Load the MCDF first via the \"Load MCDF\" button which will give you the basic description that the owner has set during export." + Environment.NewLine
-                                + "You can then apply it to any handled GPose actor." + Environment.NewLine + Environment.NewLine
-                                + "MCDF to share with others can be generated using the \"MCDF Export\" tab at the top.");
-
-                SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
-
-                if (_charaDataManager.LoadedMcdfHeader == null || _charaDataManager.LoadedMcdfHeader.IsCompleted)
-                {
-                    if (SpheneUI.Icons.TextButton(FontAwesomeIcon.FolderOpen, "Load MCDF"))
-                    {
-                        _fileDialogManager.OpenFileDialog("Pick MCDF file", ".mcdf", (success, paths) =>
-                        {
-                            if (!success) return;
-                            if (paths.FirstOrDefault() is not string path) return;
-
-                            _configService.Current.LastSavedCharaDataLocation = Path.GetDirectoryName(path) ?? string.Empty;
-                            _configService.Save();
-
-                            _charaDataManager.LoadMcdf(path);
-                        }, 1, Directory.Exists(_configService.Current.LastSavedCharaDataLocation) ? _configService.Current.LastSavedCharaDataLocation : null);
-                    }
-                    SpheneUI.AttachTooltip("Load MCDF Metadata into memory");
-                    if ((_charaDataManager.LoadedMcdfHeader?.IsCompleted ?? false))
-                    {
-                        SpheneUI.Text.Plain("Loaded file");
-                        ImGui.SameLine(200);
-                        SpheneUI.Text.Wrapped(_charaDataManager.LoadedMcdfHeader.Result.LoadedFile.FilePath);
-                        SpheneUI.Text.Plain("Description");
-                        ImGui.SameLine(200);
-                        SpheneUI.Text.Wrapped(_charaDataManager.LoadedMcdfHeader.Result.LoadedFile.CharaFileData.Description);
-
-                        SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
-
-                        using (ImRaii.Disabled(!_hasValidGposeTarget))
-                        {
-                            if (SpheneUI.Icons.TextButton(FontAwesomeIcon.ArrowRight, "Apply"))
-                            {
-                                _ = _charaDataManager.McdfApplyToGposeTarget();
-                            }
-                            SpheneUI.AttachTooltip($"Apply to {_gposeTarget}");
-                            ImGui.SameLine();
-                            using (ImRaii.Disabled(!_charaDataManager.BrioAvailable))
-                            {
-                                if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Plus, "Spawn Actor and Apply"))
-                                {
-                                    _charaDataManager.McdfSpawnApplyToGposeTarget();
-                                }
-                            }
-                        }
-                    }
-                    if ((_charaDataManager.LoadedMcdfHeader?.IsFaulted ?? false) || (_charaDataManager.McdfApplicationTask?.IsFaulted ?? false))
-                    {
-                        SpheneUI.Text.ColoredWrapped("Failure to read MCDF file. MCDF file is possibly corrupt. Re-export the MCDF file and try again.",
-                            ImGuiColors.DalamudRed);
-                        SpheneUI.Text.ColoredWrapped("Note: if this is your MCDF, try redrawing yourself, wait and re-export the file. " +
-                            "If you received it from someone else have them do the same.", ImGuiColors.DalamudYellow);
+                        SpheneUI.AttachTooltip("Metainfo could not be downloaded." + SpheneUI.TooltipSeparator
+                            + "The data associated with the code is either not present on the server anymore or you have no access to it");
                     }
                 }
                 else
                 {
-                    SpheneUI.Text.ColoredWrapped("Loading Character...", ImGuiColors.DalamudYellow);
+                    SpheneUI.Icons.Icon(FontAwesomeIcon.QuestionCircle, ImGuiColors.DalamudGrey);
+                    SpheneUI.AttachTooltip("Unknown accessibility state. Click the button on the right to refresh.");
                 }
+
+                ImGui.SameLine();
+                bool isInTimeout = _charaDataManager.IsInTimeout(favorite.Key);
+                using (ImRaii.Disabled(isInTimeout))
+                {
+                    if (SpheneUI.Controls.IconButton("##refresh", FontAwesomeIcon.ArrowsSpin, size: iconBtn))
+                    {
+                        _charaDataManager.DownloadMetaInfo(favorite.Key, false);
+                        UpdateFilteredItems();
+                    }
+                }
+                SpheneUI.AttachTooltip(isInTimeout ? "Timeout for refreshing active, please wait before refreshing again."
+                    : "Refresh data for this entry from the Server.");
+
+                ImGui.SameLine();
+                GposeMetaInfoAction((meta) =>
+                {
+                    if (SpheneUI.Controls.IconButton("##apply", FontAwesomeIcon.ArrowRight, size: iconBtn))
+                    {
+                        _ = _charaDataManager.ApplyCharaDataToGposeTarget(metaInfo!);
+                    }
+                }, "Apply Character Data to GPose Target", metaInfo, _hasValidGposeTarget, false);
+                ImGui.SameLine();
+                GposeMetaInfoAction((meta) =>
+                {
+                    if (SpheneUI.Controls.IconButton("##spawn", FontAwesomeIcon.Plus, size: iconBtn))
+                    {
+                        _ = _charaDataManager.SpawnAndApplyData(meta!);
+                    }
+                }, "Spawn Actor with Brio and apply Character Data", metaInfo, _hasValidGposeTarget, true);
+
+                // Line 2: muted owner + last use.
+                var uid = favorite.Key;
+                var sep = uid.IndexOf(':');
+                if (sep > 0) uid = uid[..sep];
+                var uidText = metaInfo != null ? metaInfo.Uploader.AliasOrUID : uid;
+                var note = _serverConfigurationManager.GetNoteForUid(uid);
+                if (note != null)
+                {
+                    uidText = $"{note} ({uidText})";
+                }
+                var lastUse = favorite.Value.Favorite.LastDownloaded == DateTime.MaxValue
+                    ? "never" : favorite.Value.Favorite.LastDownloaded.ToString("g");
+                SpheneUI.Text.Muted($"{uidText} · Last use: {lastUse}");
+
+                var desc = favorite.Value.Favorite.CustomDescription;
+                ImGui.SetNextItemWidth(SpheneUI.Controls.BoundedAvailX());
+                if (SpheneUI.Controls.InputTextWithHint("##desc", "Custom description for this favorite…", ref desc, 100))
+                {
+                    favorite.Value.Favorite.CustomDescription = desc;
+                    _configService.Save();
+                }
+
+                DrawPoseData(metaInfo, _gposeTarget, _hasValidGposeTarget);
+            }, 5f, SpheneUI.Layout.CardAlignedAvailX());
+
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+        }
+
+        if (_configService.Current.FavoriteCodes.Count == 0)
+        {
+            SpheneUI.Layout.Callout(
+                "No favorites yet — star entries on the other tabs and they show up here.",
+                FontAwesomeIcon.Star, ImGuiColors.DalamudGrey);
+        }
+    }
+
+    private void DrawApplyTabCode()
+    {
+        using var id = ImRaii.PushId("byCodeTab");
+        DrawHelpFoldout("You can apply character data you have a code for in this tab. Provide the code in it's given format \"OwnerUID:DataId\" into the field below and click on " +
+                        "\"Get Info from Code\". This will provide you basic information about the data behind the code. Afterwards select an actor in GPose and press on \"Download and apply to <actor>\"." + Environment.NewLine + Environment.NewLine
+                        + "Description: as set by the owner of the code to give you more or additional information of what this code may contain." + Environment.NewLine
+                        + "Last Update: the date and time the owner of the code has last updated the data." + Environment.NewLine
+                        + "Is Downloadable: whether or not the code is downloadable and applicable. If the code is not downloadable, contact the owner so they can attempt to fix it." + Environment.NewLine + Environment.NewLine
+                        + "To download a code the code requires correct access permissions to be set by the owner. If getting info from the code fails, contact the owner to make sure they set their Access Permissions for the code correctly.");
+
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+        ImGui.SetNextItemWidth(SpheneUI.Controls.BoundedAvailX());
+        SpheneUI.Controls.InputTextWithHint("##importCode", "Enter data code — OwnerUID:DataId", ref _importCode, 100);
+        using (ImRaii.Disabled(string.IsNullOrEmpty(_importCode)))
+        {
+            if (SpheneUI.Controls.SmallButton("Get Info from Code"))
+            {
+                _charaDataManager.DownloadMetaInfo(_importCode);
             }
+        }
+
+        var metaDownload = _charaDataManager.DownloadMetaInfoTask;
+        if (metaDownload is { IsCompleted: false })
+        {
+            SpheneUI.Text.Muted("Downloading meta info. Please wait.");
+        }
+        else if (metaDownload is { IsCompletedSuccessfully: true } && !metaDownload.Result.Success)
+        {
+            SpheneUI.Layout.Callout(metaDownload.Result.Result,
+                FontAwesomeIcon.ExclamationTriangle, ImGuiColors.DalamudRed);
+        }
+        else if (metaDownload is { IsFaulted: true })
+        {
+            SpheneUI.Layout.Callout("Meta info download failed — check the log and try again.",
+                FontAwesomeIcon.ExclamationTriangle, ImGuiColors.DalamudRed);
+        }
+
+        var metaInfo = _charaDataManager.LastDownloadedMetaInfo;
+        if (metaInfo != null)
+        {
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+            SpheneUI.Layout.SectionCard(() =>
+            {
+                DrawInfoRow("Description", () => SpheneUI.Text.Wrapped(
+                    string.IsNullOrEmpty(metaInfo.Description) ? "-" : metaInfo.Description));
+                DrawInfoRow("Last Update",
+                    () => SpheneUI.Text.Plain(metaInfo.UpdatedDate.ToLocalTime().ToString()));
+                DrawInfoRow("Downloadable",
+                    () => SpheneUI.Icons.BoolIcon(metaInfo.CanBeDownloaded, false));
+                DrawInfoRow("Poses", () =>
+                {
+                    if (metaInfo.HasPoses)
+                        DrawPoseData(metaInfo, _gposeTarget, _hasValidGposeTarget);
+                    else
+                        SpheneUI.Icons.BoolIcon(false, false);
+                });
+
+                SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+                SpheneUI.Layout.Separator();
+                SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+                GposeMetaInfoAction((meta) =>
+                {
+                    if (SpheneUI.Controls.SegmentButton("Download and Apply", FontAwesomeIcon.ArrowRight,
+                            accent: SpheneUI.Palette.EtherealPurple))
+                    {
+                        _ = _charaDataManager.ApplyCharaDataToGposeTarget(meta!);
+                    }
+                }, "Apply this Character Data to the current GPose actor", metaInfo, _hasValidGposeTarget, false);
+                ImGui.SameLine();
+                GposeMetaInfoAction((meta) =>
+                {
+                    if (SpheneUI.Controls.SmallButton("Download and Spawn"))
+                    {
+                        _ = _charaDataManager.SpawnAndApplyData(meta!);
+                    }
+                }, "Spawn a new Brio actor and apply this Character Data", metaInfo, _hasValidGposeTarget, true);
+                ImGui.SameLine();
+                ImGui.AlignTextToFramePadding();
+                DrawAddOrRemoveFavorite(metaInfo);
+            }, title: "Code Info", accentColor: SpheneUI.Palette.EtherealPurple);
+        }
+    }
+
+    private void DrawApplyTabOwn()
+    {
+        using var id = ImRaii.PushId("yourOwnTab");
+        DrawHelpFoldout("You can apply character data you created yourself in this tab. If the list is not populated press on \"Download your Character Data\"." + Environment.NewLine + Environment.NewLine
+                         + "To create new and edit your existing character data use the \"MCD Online\" tab.");
+
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+
+        using (ImRaii.Disabled(_charaDataManager.GetAllDataTask != null
+            || (_charaDataManager.DataGetTimeoutTask != null && !_charaDataManager.DataGetTimeoutTask.IsCompleted)))
+        {
+            if (SpheneUI.Controls.SegmentButton("Download your Character Data", FontAwesomeIcon.ArrowCircleDown))
+            {
+                var token = _disposalCts?.Token ?? CancellationToken.None;
+                _ = _charaDataManager.GetAllData(token);
+            }
+        }
+        if (_charaDataManager.DataGetTimeoutTask != null && !_charaDataManager.DataGetTimeoutTask.IsCompleted)
+        {
+            SpheneUI.AttachTooltip("You can only refresh all character data from server every minute. Please wait.");
+        }
+
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+
+        foreach (var data in _charaDataManager.OwnCharaData.Values)
+        {
+            var hasMetaInfo = _charaDataManager.TryGetMetaInfo(data.FullId, out var metaInfo);
+            if (!hasMetaInfo) continue;
+            DrawMetaInfoData(_gposeTarget, _hasValidGposeTarget, metaInfo!, true);
+        }
+
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+    }
+
+    private void DrawApplyTabShared()
+    {
+        using var id = ImRaii.PushId("sharedWithYouTab");
+        DrawHelpFoldout("You can apply character data shared with you implicitly in this tab. Shared Character Data are Character Data entries that have \"Sharing\" set to \"Shared\" and you have access through those by meeting the access restrictions, " +
+                        "i.e. you were specified by your UID to gain access or are paired with the other user according to the Access Restrictions setting." + Environment.NewLine + Environment.NewLine
+                        + "Filter if needed to find a specific entry, then just press on \"Apply to <actor>\" and it will download and apply the Character Data to the currently targeted GPose actor." + Environment.NewLine + Environment.NewLine
+                        + "Note: Shared Data of Pairs you have paused will not be shown here.");
+
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+
+        DrawUpdateSharedDataButton();
+
+        int activeFilters = 0;
+        if (!string.IsNullOrEmpty(_sharedWithYouOwnerFilter)) activeFilters++;
+        if (!string.IsNullOrEmpty(_sharedWithYouDescriptionFilter)) activeFilters++;
+        if (_sharedWithYouDownloadableFilter) activeFilters++;
+        SpheneUI.Layout.Collapsible("Filters##shared", () =>
+        {
+            ImGui.SetNextItemWidth(SpheneUI.Controls.BoundedAvailX());
+            if (SpheneUI.Controls.InputTextWithHint("##filter", "Filter by UID/Note", ref _sharedWithYouOwnerFilter, 30))
+            {
+                UpdateFilteredItems();
+            }
+            ImGui.SetNextItemWidth(SpheneUI.Controls.BoundedAvailX());
+            if (SpheneUI.Controls.InputTextWithHint("##filterDesc", "Filter by Description", ref _sharedWithYouDescriptionFilter, 50))
+            {
+                UpdateFilteredItems();
+            }
+            if (SpheneUI.Controls.Toggle("Only show downloadable", ref _sharedWithYouDownloadableFilter))
+            {
+                UpdateFilteredItems();
+            }
+        }, icon: FontAwesomeIcon.Filter,
+            hint: activeFilters == 0 ? null : $"{activeFilters} active");
+
+        if (_filteredDict == null && _charaDataManager.GetSharedWithYouTask == null)
+        {
+            _filteredDict = _charaDataManager.SharedWithYouData
+                .ToDictionary(k =>
+                {
+                    var note = _serverConfigurationManager.GetNoteForUid(k.Key.UID);
+                    if (note == null) return k.Key.AliasOrUID;
+                    return $"{note} ({k.Key.AliasOrUID})";
+                }, k => k.Value, StringComparer.OrdinalIgnoreCase)
+                .Where(k => string.IsNullOrEmpty(_sharedWithYouOwnerFilter) || k.Key.Contains(_sharedWithYouOwnerFilter))
+                .OrderBy(k => k.Key, StringComparer.OrdinalIgnoreCase).ToDictionary();
+        }
+
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+
+        foreach (var entry in _filteredDict ?? [])
+        {
+            bool isFilteredAndHasToBeOpened = !string.IsNullOrEmpty(_sharedWithYouOwnerFilter)
+                && entry.Key.Contains(_sharedWithYouOwnerFilter, StringComparison.OrdinalIgnoreCase)
+                && _openDataApplicationShared;
+            SpheneUI.Layout.Collapsible($"{entry.Key}##{entry.Key}", () =>
+            {
+                foreach (var data in entry.Value)
+                {
+                    DrawMetaInfoData(_gposeTarget, _hasValidGposeTarget, data);
+                }
+                SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+            }, icon: FontAwesomeIcon.User, hint: $"{entry.Value.Count} sets",
+                setOpen: isFilteredAndHasToBeOpened);
+            if (isFilteredAndHasToBeOpened)
+                _openDataApplicationShared = false;
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+        }
+    }
+
+    private void DrawApplyTabMcdf()
+    {
+        using var id = ImRaii.PushId("applyMcdfTab");
+        DrawHelpFoldout("You can apply character data shared with you using a MCDF file in this tab." + Environment.NewLine + Environment.NewLine
+                        + "Load the MCDF first via the \"Load MCDF\" button which will give you the basic description that the owner has set during export." + Environment.NewLine
+                        + "You can then apply it to any handled GPose actor." + Environment.NewLine + Environment.NewLine
+                        + "MCDF to share with others can be generated using the \"MCDF Export\" tab at the top.");
+
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+
+        if (_charaDataManager.LoadedMcdfHeader == null || _charaDataManager.LoadedMcdfHeader.IsCompleted)
+        {
+            if (SpheneUI.Controls.SmallButton("Load MCDF"))
+            {
+                _fileDialogManager.OpenFileDialog("Pick MCDF file", ".mcdf", (success, paths) =>
+                {
+                    if (!success) return;
+                    if (paths.FirstOrDefault() is not string path) return;
+
+                    _configService.Current.LastSavedCharaDataLocation = Path.GetDirectoryName(path) ?? string.Empty;
+                    _configService.Save();
+
+                    _charaDataManager.LoadMcdf(path);
+                }, 1, Directory.Exists(_configService.Current.LastSavedCharaDataLocation) ? _configService.Current.LastSavedCharaDataLocation : null);
+            }
+            SpheneUI.AttachTooltip("Load MCDF Metadata into memory");
+            if ((_charaDataManager.LoadedMcdfHeader?.IsCompletedSuccessfully ?? false))
+            {
+                var loaded = _charaDataManager.LoadedMcdfHeader.Result.LoadedFile;
+                SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+                SpheneUI.Layout.SectionCard(() =>
+                {
+                    DrawInfoRow("File", () => SpheneUI.Text.Wrapped(loaded.FilePath));
+                    DrawInfoRow("Description", () => SpheneUI.Text.Wrapped(
+                        string.IsNullOrEmpty(loaded.CharaFileData.Description) ? "-" : loaded.CharaFileData.Description));
+
+                    SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+                    SpheneUI.Layout.Separator();
+                    SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+                    using (ImRaii.Disabled(!_hasValidGposeTarget))
+                    {
+                        if (SpheneUI.Controls.SegmentButton("Apply", FontAwesomeIcon.ArrowRight,
+                                accent: SpheneUI.Palette.EtherealPurple))
+                        {
+                            _ = _charaDataManager.McdfApplyToGposeTarget();
+                        }
+                        SpheneUI.AttachTooltip($"Apply to {_gposeTarget}");
+                        ImGui.SameLine();
+                        using (ImRaii.Disabled(!_charaDataManager.BrioAvailable))
+                        {
+                            if (SpheneUI.Controls.SmallButton("Spawn Actor and Apply"))
+                            {
+                                _charaDataManager.McdfSpawnApplyToGposeTarget();
+                            }
+                        }
+                    }
+                }, title: "Loaded MCDF", accentColor: SpheneUI.Palette.EtherealPurple);
+            }
+            if ((_charaDataManager.LoadedMcdfHeader?.IsFaulted ?? false) || (_charaDataManager.McdfApplicationTask?.IsFaulted ?? false))
+            {
+                SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+                SpheneUI.Layout.Callout("Failure to read MCDF file. MCDF file is possibly corrupt. Re-export the MCDF file and try again. "
+                    + "If this is your MCDF, try redrawing yourself, wait and re-export the file — if you received it from someone else have them do the same.",
+                    FontAwesomeIcon.ExclamationTriangle, ImGuiColors.DalamudRed);
+            }
+        }
+        else
+        {
+            SpheneUI.Text.Muted("Loading character…");
         }
     }
 
     private void DrawMcdfExport()
     {
-        SpheneUI.Text.Big("Sphene Character Data File Export");
+        DrawPageTitle("MCDF Export",
+            "Pack your current character into a portable file to share manually.");
 
         DrawHelpFoldout("This feature allows you to pack your character into a MCDF file and manually send it to other people. MCDF files can officially only be imported during GPose through Sphene. " +
             "Be aware that the possibility exists that people write unofficial custom exporters to extract the containing data.");
 
-        SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
+        SpheneUI.Layout.Callout(
+            "Exporting your character data into a file gives away your current appearance irrevocably — recipients can share it further without limitations.",
+            FontAwesomeIcon.ExclamationTriangle, ImGuiColors.DalamudYellow, "Sharing is permanent");
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
 
-        SpheneUI.Controls.Checkbox("##readExport", ref _readExport);
-        ImGui.SameLine();
-        SpheneUI.Text.Wrapped("I understand that by exporting my character data into a file and sending it to other people I am giving away my current character appearance irrevocably. People I am sharing my data with have the ability to share it with other people without limitations.");
-
-        if (_readExport)
+        SpheneUI.Layout.SectionCard(() =>
         {
-            ImGui.Indent();
+            // Numbered flow — same step language as the mod sharing pages.
+            SpheneUI.Text.Muted("1 · Consent");
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+            SpheneUI.Controls.Toggle("I understand and want to export my character data", ref _readExport);
+            SpheneUI.Controls.HelpText("Required — a MCDF file contains your full appearance and cannot be taken back once shared.");
 
-            SpheneUI.Controls.InputTextWithHint("Export Descriptor", "This description will be shown on loading the data", ref _exportDescription, 255);
-            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.Row);
-            if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Save, "Export Character as MCDF"))
+            if (!_readExport) return;
+
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
+            SpheneUI.Layout.Separator();
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
+
+            SpheneUI.Text.Muted("2 · Descriptor");
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+            ImGui.SetNextItemWidth(SpheneUI.Controls.BoundedAvailX());
+            SpheneUI.Controls.InputTextWithHint("##exportDesc", "e.g. my summer glam — shown when the file is loaded", ref _exportDescription, 255);
+
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
+            SpheneUI.Layout.Separator();
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
+
+            SpheneUI.Text.Muted("3 · Export");
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+            if (SpheneUI.Controls.SegmentButton("Export Character as MCDF", FontAwesomeIcon.Save,
+                    accent: SpheneUI.Palette.EtherealPurple))
             {
                 string defaultFileName = string.IsNullOrEmpty(_exportDescription)
                     ? "export.mcdf"
@@ -1040,47 +1194,42 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
                     _exportDescription = string.Empty;
                 }, Directory.Exists(_configService.Current.LastSavedCharaDataLocation) ? _configService.Current.LastSavedCharaDataLocation : null);
             }
-            SpheneUI.Text.ColoredWrapped("Note: For best results make sure you have everything you want to be shared as well as the correct character appearance" +
-                " equipped and redraw your character before exporting.", ImGuiColors.DalamudYellow);
-
-            ImGui.Unindent();
-        }
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+            SpheneUI.Text.MutedWrapped("For best results, have everything you want shared equipped and redraw your character before exporting.");
+        }, title: "Export your character", accentColor: SpheneUI.Palette.EtherealPurple);
     }
 
     private void DrawMetaInfoData(string selectedGposeActor, bool hasValidGposeTarget, CharaDataMetaInfoExtendedDto data, bool canOpen = false)
     {
-        SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
         using var entryId = ImRaii.PushId(data.FullId);
 
-        var startPos = ImGui.GetCursorPosX();
-        var maxPos = ImGui.GetWindowContentRegionMax().X;
-        var availableWidth = maxPos - startPos;
+        var rowInset = ImGui.GetStyle().ItemInnerSpacing.X;
+        var iconBtn = ImGui.GetFrameHeight();
+        var spacingX = ImGui.GetStyle().ItemSpacing.X;
         SpheneUI.Layout.Group(() =>
         {
+            // Line 1: favorite star + full id, meta actions docked right.
             ImGui.AlignTextToFramePadding();
             DrawAddOrRemoveFavorite(data);
-
-            ImGui.SameLine();
-            var favPos = ImGui.GetCursorPosX();
-            ImGui.AlignTextToFramePadding();
+            ImGui.SameLine(0f, SpheneUI.Spacing.X8.Scaled);
             SpheneUI.Text.Colored(data.FullId, SpheneUI.Colors.Bool(data.CanBeDownloaded));
             if (!data.CanBeDownloaded)
             {
                 SpheneUI.AttachTooltip("This data is incomplete on the server and cannot be downloaded. Contact the owner so they can fix it. If you are the owner, review the data in the MCD Online tab.");
             }
 
-            var offsetFromRight = availableWidth - SpheneUI.Icons.Size(FontAwesomeIcon.Calendar).X - SpheneUI.Icons.ButtonSize(FontAwesomeIcon.ArrowRight).X
-                - SpheneUI.Icons.ButtonSize(FontAwesomeIcon.Plus).X - ImGui.GetStyle().ItemSpacing.X * 2;
-
             ImGui.SameLine();
-            ImGui.SetCursorPosX(offsetFromRight);
-            SpheneUI.Icons.Icon(FontAwesomeIcon.Calendar);
+            SpheneUI.Controls.DockToCardEdge(
+                SpheneUI.Icons.Size(FontAwesomeIcon.Calendar).X + iconBtn * 2f
+                + spacingX * 2f + rowInset);
+            SpheneUI.Icons.Icon(FontAwesomeIcon.Calendar, ImGuiColors.DalamudGrey);
             SpheneUI.AttachTooltip($"Last Update: {data.UpdatedDate}");
 
             ImGui.SameLine();
             GposeMetaInfoAction((meta) =>
             {
-                if (SpheneUI.Icons.Button(FontAwesomeIcon.ArrowRight))
+                if (SpheneUI.Controls.IconButton("##apply", FontAwesomeIcon.ArrowRight, size: iconBtn))
                 {
                     _ = _charaDataManager.ApplyCharaDataToGposeTarget(meta!);
                 }
@@ -1088,19 +1237,27 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
             ImGui.SameLine();
             GposeMetaInfoAction((meta) =>
             {
-                if (SpheneUI.Icons.Button(FontAwesomeIcon.Plus))
+                if (SpheneUI.Controls.IconButton("##spawn", FontAwesomeIcon.Plus, size: iconBtn))
                 {
                     _ = _charaDataManager.SpawnAndApplyData(meta!);
                 }
             }, "Spawn and Apply Character data", data, hasValidGposeTarget, true);
 
-            using var indent = ImRaii.PushIndent(favPos - startPos);
+            // Line 2: description + optional editor link.
+            if (string.IsNullOrEmpty(data.Description))
+            {
+                SpheneUI.Text.Muted("No description set");
+            }
+            else
+            {
+                SpheneUI.Text.MutedWrapped(data.Description);
+            }
 
             if (canOpen)
             {
                 using (ImRaii.Disabled(_isHandlingSelf))
                 {
-                    if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Edit, "Open in MCD Online Editor"))
+                    if (SpheneUI.Controls.SmallButton("Open in MCD Online Editor"))
                     {
                         SelectedDtoId = data.Id;
                         SetPage(CharaDataPage.McdOnline);
@@ -1112,17 +1269,8 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
                 }
             }
 
-            if (string.IsNullOrEmpty(data.Description))
-            {
-                SpheneUI.Text.ColoredWrapped("No description set", ImGuiColors.DalamudGrey, availableWidth);
-            }
-            else
-            {
-                SpheneUI.Text.Wrapped(data.Description, availableWidth);
-            }
-
             DrawPoseData(data, selectedGposeActor, hasValidGposeTarget);
-        });
+        }, 5f, SpheneUI.Layout.CardAlignedAvailX());
     }
 
 
@@ -1190,57 +1338,104 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
 
     private void DrawSettings()
     {
-        SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
-        SpheneUI.Text.Big("Settings");
-        SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
-        bool openInGpose = _configService.Current.OpenSpheneHubOnGposeStart;
-        if (SpheneUI.Controls.Toggle("Open Character Data Hub when GPose loads", ref openInGpose))
-        {
-            _configService.Current.OpenSpheneHubOnGposeStart = openInGpose;
-            _configService.Save();
-        }
-        SpheneUI.Controls.HelpText("This will automatically open the import menu when loading into Gpose. If unchecked you can open the menu manually with /sphene gpose");
-        bool downloadDataOnConnection = _configService.Current.DownloadMcdDataOnConnection;
-        if (SpheneUI.Controls.Toggle("Download MCD Online Data on connecting", ref downloadDataOnConnection))
-        {
-            _configService.Current.DownloadMcdDataOnConnection = downloadDataOnConnection;
-            _configService.Save();
-        }
-        SpheneUI.Controls.HelpText("This will automatically download MCD Online data (Your Own and Shared with You) once a connection is established to the server.");
+        DrawPageTitle("Settings", "Character data hub preferences.");
+        var accent = SpheneUI.Palette.EtherealPurple;
 
-        bool showHelpTexts = _configService.Current.ShowHelpTexts;
-        if (SpheneUI.Controls.Toggle("Show \"What is this? (Explanation / Help)\" foldouts", ref showHelpTexts))
+        SpheneUI.Layout.SectionCard(() =>
         {
-            _configService.Current.ShowHelpTexts = showHelpTexts;
-            _configService.Save();
-        }
+            bool openInGpose = _configService.Current.OpenSpheneHubOnGposeStart;
+            if (SpheneUI.Controls.Toggle("Open Character Data Hub when GPose loads", ref openInGpose))
+            {
+                _configService.Current.OpenSpheneHubOnGposeStart = openInGpose;
+                _configService.Save();
+            }
+            SpheneUI.Controls.HelpText("Automatically open the import menu when loading into GPose. If unchecked you can open the menu manually with /sphene gpose.");
 
-        SpheneUI.Controls.Toggle("Abbreviate Chara Names", ref _abbreviateCharaName);
-        SpheneUI.Controls.HelpText("This setting will abbreviate displayed names. This setting is not persistent and will reset between restarts.");
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
 
-        ImGui.AlignTextToFramePadding();
-        SpheneUI.Text.Plain("Last Export Folder");
-        ImGui.SameLine(300);
-        ImGui.AlignTextToFramePadding();
-        SpheneUI.Text.Plain(string.IsNullOrEmpty(_configService.Current.LastSavedCharaDataLocation) ? "Not set" : _configService.Current.LastSavedCharaDataLocation);
-        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.Row);
-        if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Ban, "Clear Last Export Folder"))
+            bool downloadDataOnConnection = _configService.Current.DownloadMcdDataOnConnection;
+            if (SpheneUI.Controls.Toggle("Download MCD Online data on connecting", ref downloadDataOnConnection))
+            {
+                _configService.Current.DownloadMcdDataOnConnection = downloadDataOnConnection;
+                _configService.Save();
+            }
+            SpheneUI.Controls.HelpText("Automatically download MCD Online data (Your Own and Shared with You) once a connection is established.");
+        }, title: "Behavior", accentColor: accent);
+
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
+
+        SpheneUI.Layout.SectionCard(() =>
         {
-            _configService.Current.LastSavedCharaDataLocation = string.Empty;
-            _configService.Save();
-        }
-        SpheneUI.Controls.HelpText("Use this if the Load or Save MCDF file dialog does not open");
+            bool showHelpTexts = _configService.Current.ShowHelpTexts;
+            if (SpheneUI.Controls.Toggle("Show \"What is this? (Explanation / Help)\" foldouts", ref showHelpTexts))
+            {
+                _configService.Current.ShowHelpTexts = showHelpTexts;
+                _configService.Save();
+            }
+
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+
+            SpheneUI.Controls.Toggle("Abbreviate character names", ref _abbreviateCharaName);
+            SpheneUI.Controls.HelpText("Abbreviate displayed names (e.g. F. L.). Not persistent — resets on restart.");
+        }, title: "Display", accentColor: accent);
+
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
+
+        SpheneUI.Layout.SectionCard(() =>
+        {
+            var lastExport = _configService.Current.LastSavedCharaDataLocation;
+            SpheneUI.Text.Muted("Last export folder");
+            SpheneUI.Text.ColoredWrapped(string.IsNullOrEmpty(lastExport) ? "Not set" : lastExport,
+                string.IsNullOrEmpty(lastExport) ? ImGuiColors.DalamudGrey : ImGuiColors.DalamudWhite);
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+            using (ImRaii.Disabled(string.IsNullOrEmpty(lastExport)))
+            {
+                if (SpheneUI.Controls.SmallButton("Clear Last Export Folder"))
+                {
+                    _configService.Current.LastSavedCharaDataLocation = string.Empty;
+                    _configService.Save();
+                }
+            }
+            SpheneUI.Controls.HelpText("Use this if the Load or Save MCDF file dialog does not open.");
+        }, title: "File Dialogs", accentColor: accent);
     }
 
     private void DrawHelpFoldout(string text)
     {
         if (_configService.Current.ShowHelpTexts)
         {
-            SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
-            SpheneUI.Layout.Tree("What is this? (Explanation / Help)", () =>
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+            SpheneUI.Layout.Collapsible("What is this? (Explanation / Help)", () =>
             {
-                SpheneUI.Text.Wrapped(text);
-            });
+                SpheneUI.Text.MutedWrapped(text);
+            }, icon: FontAwesomeIcon.QuestionCircle);
+        }
+    }
+
+    /// <summary>Muted label column plus an inline value — the shared info-row
+    /// look for the hub's detail blocks.</summary>
+    private static void DrawInfoRow(string label, Action drawValue)
+    {
+        SpheneUI.Text.Muted(label);
+        ImGui.SameLine(140f * SpheneUI.Scale);
+        drawValue();
+    }
+
+    /// <summary>
+    /// Uniform page title for every character data page: embedded pages draw
+    /// the compact one-line intro (the hub breadcrumb carries the title),
+    /// the standalone window draws the full page header.
+    /// </summary>
+    private void DrawPageTitle(string title, string intro)
+    {
+        if (_embeddedScope)
+        {
+            SpheneUI.Text.PageIntro(intro);
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
+        }
+        else
+        {
+            SpheneUI.Text.PageHeader(title, intro);
         }
     }
 

@@ -220,6 +220,10 @@ public sealed class ModSharingUi : WindowMediatorSubscriberBase
     private void DrawReceivePage()
     {
         var accent = SpheneUI.Palette.NetworkActive;
+        // The page intro belongs above everything — including this options card.
+        SpheneUI.Text.PageIntro(
+            "Mods shared with you by paired users — install or discard them here.");
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
         SpheneUI.Layout.SectionCard(() =>
         {
             var allowPenumbraMods = _configService.Current.AllowReceivingPenumbraMods;

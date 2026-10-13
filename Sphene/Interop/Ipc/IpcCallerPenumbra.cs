@@ -5,7 +5,6 @@ using Sphene.Services;
 using Sphene.Services.Mediator;
 using Microsoft.Extensions.Logging;
 using Penumbra.Api.Enums;
-using Penumbra.Api.Helpers;
 using Penumbra.Api.IpcSubscribers;
 using System.Collections.Concurrent;
 
@@ -36,11 +35,11 @@ public sealed class IpcCallerPenumbra : DisposableMediatorSubscriberBase, IIpcCa
     private readonly HashSet<Guid> _activeTemporaryCollections = new();
     private bool _isDisposed;
 
-    private readonly EventSubscriber _penumbraDispose;
-    private readonly EventSubscriber<nint, string, string> _penumbraGameObjectResourcePathResolved;
-    private readonly EventSubscriber _penumbraInit;
-    private readonly EventSubscriber<ModSettingChange, Guid, string, bool> _penumbraModSettingChanged;
-    private readonly EventSubscriber<nint, int> _penumbraObjectIsRedrawn;
+    private readonly IDisposable _penumbraDispose;
+    private readonly IDisposable _penumbraGameObjectResourcePathResolved;
+    private readonly IDisposable _penumbraInit;
+    private readonly IDisposable _penumbraModSettingChanged;
+    private readonly IDisposable _penumbraObjectIsRedrawn;
 
     private readonly AddTemporaryMod _penumbraAddTemporaryMod;
     private readonly AssignTemporaryCollection _penumbraAssignTemporaryCollection;

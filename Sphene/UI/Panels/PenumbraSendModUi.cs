@@ -66,6 +66,9 @@ public class PenumbraSendModUi : WindowMediatorSubscriberBase
     // Last decoded avatar bytes per user — a new array instance means the
     // profile was (re)fetched and the cached texture must be evicted.
     private readonly Dictionary<string, byte[]> _avatarBytes = new(StringComparer.Ordinal);
+    private float _sendTailReserve = -1f;
+    private float _debugHostScroll;
+    private float _debugHostScrollMax = -1f;
 
     public PenumbraSendModUi(
         ILogger<PenumbraSendModUi> logger,
@@ -160,9 +163,46 @@ public class PenumbraSendModUi : WindowMediatorSubscriberBase
         var idSuffix = isEmbedded ? "Embedded" : "Window";
         var accent = SpheneUI.Palette.EtherealPurple;
 
-        if (SpheneUI.Layout.BeginScrollArea("SendModsRoot" + idSuffix,
-                ImGui.GetContentRegionAvail(), contentPadding: Vector2.Zero))
+        var style = ImGui.GetStyle();
+        var navAvail = ImGui.GetContentRegionAvail().Y - ImGui.GetScrollY();
+        // Diagnostics: a nonzero host scroll range here is the residual scroll
+        // behind the wheel jitter — logged on change so /xllog shows it.
+        var hostScroll = ImGui.GetScrollY();
+        var hostMax = ImGui.GetScrollMaxY();
+        if (MathF.Abs(hostScroll - _debugHostScroll) > 0.5f
+            || MathF.Abs(hostMax - _debugHostScrollMax) > 0.5f)
         {
+            _debugHostScroll = hostScroll;
+            _debugHostScrollMax = hostMax;
+            _logger.LogDebug("SendMods host scroll {Scroll:F1}/{Max:F1} navAvail {Avail:F1} tailReserve {Reserve:F1}",
+                hostScroll, hostMax, navAvail, _sendTailReserve);
+        }
+        // The bottom reserve is measured, not estimated: after the first frame
+        // _sendTailReserve holds the real footer chrome height plus the host
+        // scroll area's trailing inset, so no residual scrollMax can survive.
+        var footerReserve = _sendTailReserve > 0f
+            ? _sendTailReserve
+            : ImGui.GetFrameHeightWithSpacing() * 2f
+                + style.ItemSpacing.Y * 6f
+                + SpheneUI.Layout.ScrollAreaContentInset * scale;
+        var regionH = MathF.Max(ImGui.GetTextLineHeightWithSpacing() * 2f,
+            navAvail - footerReserve);
+        // The page is a fixed clip region, not a scroll area: the cards fill it
+        // exactly and their inner lists own the scrolling. NoScrollWithMouse
+        // keeps stray wheel deltas from jittering the host for a frame.
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, Vector2.Zero);
+        var regionBegun = ImGui.BeginChild("SendModsRegion" + idSuffix,
+            new Vector2(0f, regionH), false,
+            ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse
+                | ImGuiWindowFlags.AlwaysUseWindowPadding);
+        ImGui.PopStyleVar();
+        if (regionBegun)
+        {
+            // EndTable appends ItemSpacing after the last row — keep the bound
+            // that far inside the clip edge or the region's own scrollMax
+            // stays a few px positive and chaining can nudge it.
+            var colBottom = ImGui.GetCursorScreenPos().Y + regionH - style.ItemSpacing.Y - scale;
+
             if (!isEmbedded)
             {
                 SpheneUI.Text.PageHeader("Send Mods",
@@ -170,10 +210,12 @@ public class PenumbraSendModUi : WindowMediatorSubscriberBase
             }
             else
             {
-                SpheneUI.Text.SectionHeader("Send Mods",
+                // Embedded: the page title already lives in the hub breadcrumb —
+                // the uniform page intro is a single muted line.
+                SpheneUI.Text.PageIntro(
                     "Pick the Penumbra mods to package, choose the recipients, then share.");
+                SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
             }
-            SpheneUI.Layout.Separator();
 
             if (!_shrinkuPenumbraIpc.APIAvailable)
             {
@@ -181,14 +223,28 @@ public class PenumbraSendModUi : WindowMediatorSubscriberBase
             }
             else
             {
-                DrawSendBody(idSuffix, accent, scale);
+                DrawSendBody(idSuffix, accent, scale, colBottom);
             }
         }
-        SpheneUI.Layout.EndScrollArea();
+        ImGui.EndChild();
+
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+        SpheneUI.Layout.Separator();
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+        DrawSendFooterBar(scale, accent, idSuffix);
+
+        // Self-calibrating reserve: the leftover under the last row must cover
+        // the host scroll area's trailing inset — anything less leaves a few
+        // px of scrollMax that shows as a scroll/snap jitter on wheel input.
+        var leftover = ImGui.GetContentRegionAvail().Y - ImGui.GetScrollY();
+        var targetTail = style.ItemSpacing.Y
+            + SpheneUI.Layout.ScrollAreaContentInset * scale + 2f * scale;
+        _sendTailReserve = Math.Clamp(
+            footerReserve + (targetTail - leftover), 0f, MathF.Max(0f, navAvail));
     }
 
     /// <summary>Library picker on the left, recipients + share panel stacked on the right.</summary>
-    private void DrawSendBody(string idSuffix, Vector4 accent, float scale)
+    private void DrawSendBody(string idSuffix, Vector4 accent, float scale, float colBottom)
     {
         ValidatePenumbraModListSnapshot();
 
@@ -230,21 +286,6 @@ public class PenumbraSendModUi : WindowMediatorSubscriberBase
             }
         }
 
-        string selectedLabel;
-        if (_selectedPenumbraModFolders.Count == 0)
-        {
-            selectedLabel = "None";
-        }
-        else if (_selectedPenumbraModFolders.Count == 1)
-        {
-            var only = _selectedPenumbraModFolders.First();
-            selectedLabel = _penumbraMods.FirstOrDefault(m => string.Equals(m.ModFolderName, only, StringComparison.OrdinalIgnoreCase)).DisplayName ?? only;
-        }
-        else
-        {
-            selectedLabel = $"{_selectedPenumbraModFolders.Count} selected";
-        }
-
         var filtered = GetFilteredPenumbraMods();
 
         var candidatePairs = _pairManager.DirectPairs
@@ -259,7 +300,6 @@ public class PenumbraSendModUi : WindowMediatorSubscriberBase
             .OrderBy(p => p.DisplayName, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        var colBottom = ImGui.GetCursorScreenPos().Y + ImGui.GetContentRegionAvail().Y;
         if (ImGui.BeginTable("SendModLayout" + idSuffix, 2, ImGuiTableFlags.Resizable | ImGuiTableFlags.SizingStretchProp))
         {
             ImGui.TableSetupColumn("Library", ImGuiTableColumnFlags.WidthStretch, 0.55f);
@@ -269,23 +309,17 @@ public class PenumbraSendModUi : WindowMediatorSubscriberBase
 
             ImGui.TableSetColumnIndex(0);
             SpheneUI.Layout.SectionCard(
-                () => DrawModLibrary(filtered, colBottom, accent, idSuffix),
+                () => DrawModLibrary(filtered, accent, idSuffix, colBottom),
                 title: "1 · Mod Library", accentColor: accent);
 
             ImGui.TableSetColumnIndex(1);
-            var rightColumnTop = ImGui.GetCursorScreenPos().Y;
-            var recipientsCardBottom = rightColumnTop + MathF.Max(170f * scale,
-                (colBottom - rightColumnTop) * 0.52f);
+            var recipientsCardBottom = MathF.Max(ImGui.GetCursorScreenPos().Y + 170f * scale, colBottom);
             SpheneUI.Layout.SectionCard(
                 () => DrawRecipientPicker(candidatePairs, recipientsCardBottom, accent, idSuffix),
                 title: "2 · Recipients", accentColor: accent);
 
-            SpheneUI.Layout.VerticalSpace();
-            SpheneUI.Layout.SectionCard(
-                () => DrawReviewAndSend(selectedLabel, scale, accent, idSuffix),
-                title: "3 · Share", accentColor: accent);
-
             ImGui.EndTable();
+            SpheneUI.Lint.CheckFillBottom(colBottom, "SendMods.Table");
         }
     }
 
@@ -330,9 +364,13 @@ public class PenumbraSendModUi : WindowMediatorSubscriberBase
         }
     }
 
+    /// <summary>Reserve below a list child so its card border closes flush on the bound.</summary>
+    private static float FillReserve
+        => SpheneUI.Spacing.CardPadding.Scaled + SpheneUI.Scale;
+
     /// <summary>The pickable mod library: filter, selection toolbar, scroll-faded rich rows.</summary>
     private void DrawModLibrary(List<(string ModFolderName, string DisplayName)> filtered,
-        float colBottom, Vector4 accent, string idSuffix)
+        Vector4 accent, string idSuffix, float colBottom)
     {
         ImGui.SetNextItemWidth(-1);
         SpheneUI.Controls.InputTextWithHint("##penumbraModFilter" + idSuffix,
@@ -343,7 +381,7 @@ public class PenumbraSendModUi : WindowMediatorSubscriberBase
             () => _selectedPenumbraModFolders.Clear());
 
         var listH = MathF.Max(80f * SpheneUI.Scale,
-            colBottom - ImGui.GetCursorScreenPos().Y - SpheneUI.Spacing.CardPadding.Scaled);
+            colBottom - ImGui.GetCursorScreenPos().Y - FillReserve);
         if (SpheneUI.Layout.BeginScrollArea("ModList" + idSuffix, new Vector2(0f, listH)))
         {
             if (filtered.Count == 0)
@@ -396,7 +434,7 @@ public class PenumbraSendModUi : WindowMediatorSubscriberBase
             () => _selectedPenumbraRecipients.Clear());
 
         var listH = MathF.Max(80f * SpheneUI.Scale,
-            colBottom - ImGui.GetCursorScreenPos().Y - SpheneUI.Spacing.CardPadding.Scaled);
+            colBottom - ImGui.GetCursorScreenPos().Y - FillReserve);
         if (SpheneUI.Layout.BeginScrollArea("RecipientList" + idSuffix, new Vector2(0f, listH)))
         {
             if (candidatePairs.Count == 0)
@@ -444,52 +482,86 @@ public class PenumbraSendModUi : WindowMediatorSubscriberBase
         SpheneUI.Layout.EndScrollArea(SpheneUI.Layout.NavRailBandColor());
     }
 
-    /// <summary>Summary, send options and progress of the current share.</summary>
-    private void DrawReviewAndSend(string selectedLabel, float scale, Vector4 accent, string idSuffix)
+    /// <summary>Label summarizing the current mod selection for the footer bar.</summary>
+    private string SelectedModsLabel()
     {
-        DrawReviewRow("Mods", selectedLabel);
-        DrawReviewRow("Recipients", _selectedPenumbraRecipients.Count.ToString());
-        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
-        SpheneUI.Layout.Callout(
-            "Packages upload to the Sphene server network and are shared with the selected users.",
-            FontAwesomeIcon.InfoCircle, accent);
+        if (_selectedPenumbraModFolders.Count == 0)
+        {
+            return "None";
+        }
+        if (_selectedPenumbraModFolders.Count == 1)
+        {
+            var only = _selectedPenumbraModFolders.First();
+            return _penumbraMods.FirstOrDefault(m => string.Equals(m.ModFolderName, only, StringComparison.OrdinalIgnoreCase)).DisplayName ?? only;
+        }
+        return $"{_selectedPenumbraModFolders.Count} selected";
+    }
 
-        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+    /// <summary>Page-level status bar pinned to the bottom: share context, status/progress and actions.</summary>
+    private void DrawSendFooterBar(float scale, Vector4 accent, string idSuffix)
+    {
+        SpheneUI.Text.Muted("Mods:");
+        ImGui.SameLine();
+        SpheneUI.Text.Plain(SelectedModsLabel());
+        ImGui.SameLine();
+        SpheneUI.Text.Muted("· Recipients:");
+        ImGui.SameLine();
+        SpheneUI.Text.Plain(_selectedPenumbraRecipients.Count.ToString());
+        ImGui.SameLine();
+        SpheneUI.Icons.Icon(FontAwesomeIcon.InfoCircle, accent);
+        SpheneUI.AttachTooltip("Packages upload to the Sphene server network and are shared with the selected users.");
+
+        const string sendStateLabel = "Send current mod state (temporary)";
+        var checkboxW = ImGui.CalcTextSize(sendStateLabel).X + ImGui.GetFrameHeight();
+        ImGui.SameLine();
+        SpheneUI.Controls.DockToCardEdge(checkboxW);
         var sendCurrent = _sendCurrentModState;
-        if (SpheneUI.Controls.Checkbox("Send current mod state (temporary)##sendCurrent" + idSuffix, ref sendCurrent))
+        if (SpheneUI.Controls.Checkbox(sendStateLabel + "##sendCurrent" + idSuffix, ref sendCurrent))
         {
             _sendCurrentModState = sendCurrent;
         }
         SpheneUI.AttachTooltip("When enabled, Sphene packages the current Penumbra mod folder contents into a temporary .pmp, uploads it, then deletes the temporary file. When disabled, Sphene prefers existing ShrinkU backups.");
 
-        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
         var canShare = !_isSendingPenumbraMod && _selectedPenumbraModFolders.Count > 0 && _selectedPenumbraRecipients.Count > 0;
         var shareButtonText = _selectedPenumbraModFolders.Count <= 1
             ? "Share Mod"
             : $"Share {_selectedPenumbraModFolders.Count} Mods";
-        if (SpheneUI.Controls.HeroButton("##shareMods" + idSuffix, shareButtonText,
-                FontAwesomeIcon.Share, color: accent, enabled: canShare))
-        {
-            StartSendPenumbraMods(_selectedPenumbraModFolders.ToList(), _sendCurrentModState);
-        }
 
-        if (_isSendingPenumbraMod && _sendPenumbraModCts != null
-            && SpheneUI.Controls.SmallButton("Cancel"))
-        {
-            try { _sendPenumbraModCts.Cancel(); }
-            catch (Exception ex) { _logger.LogDebug(ex, "Failed to cancel SendPenumbraMod"); }
-        }
+        var style = ImGui.GetStyle();
+        var spacing = style.ItemSpacing.X;
+        var cancelW = _isSendingPenumbraMod ? ImGui.CalcTextSize("Cancel").X + style.FramePadding.X * 4f : 0f;
+        var shareW = ImGui.CalcTextSize(shareButtonText).X + ImGui.GetFrameHeight() + style.FramePadding.X * 4f;
 
-        if (!string.IsNullOrWhiteSpace(_sendPenumbraModStatusText))
-        {
-            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
-            var color = _sendPenumbraModStatusIsError ? ImGuiColors.DalamudRed : ImGuiColors.DalamudGrey;
-            SpheneUI.Text.ColoredWrapped(_sendPenumbraModStatusText, color);
-        }
-
+        ImGui.AlignTextToFramePadding();
         if (_isSendingPenumbraMod)
         {
             DrawUploadProgress(scale);
+        }
+        else if (!string.IsNullOrWhiteSpace(_sendPenumbraModStatusText))
+        {
+            var color = _sendPenumbraModStatusIsError ? ImGuiColors.DalamudRed : ImGuiColors.DalamudGrey;
+            SpheneUI.Text.Colored(_sendPenumbraModStatusText, color);
+        }
+        else
+        {
+            SpheneUI.Text.Muted("Select mods and recipients, then share.");
+        }
+
+        ImGui.SameLine();
+        SpheneUI.Controls.DockToCardEdge(shareW + cancelW + (cancelW > 0f ? spacing : 0f));
+        if (_isSendingPenumbraMod && _sendPenumbraModCts != null)
+        {
+            if (SpheneUI.Controls.SmallButton("Cancel"))
+            {
+                try { _sendPenumbraModCts.Cancel(); }
+                catch (Exception ex) { _logger.LogDebug(ex, "Failed to cancel SendPenumbraMod"); }
+            }
+            ImGui.SameLine();
+        }
+        if (SpheneUI.Controls.SegmentButton(shareButtonText, FontAwesomeIcon.Share,
+                accent: accent, enabled: canShare))
+        {
+            StartSendPenumbraMods(_selectedPenumbraModFolders.ToList(), _sendCurrentModState);
         }
     }
 
@@ -500,21 +572,13 @@ public class PenumbraSendModUi : WindowMediatorSubscriberBase
         if (actionLabel != null && onAction != null)
         {
             ImGui.SameLine();
-            SpheneUI.Controls.DockToRightEdge(ImGui.CalcTextSize(actionLabel).X);
+            SpheneUI.Controls.DockToCardEdge(ImGui.CalcTextSize(actionLabel).X);
             if (SpheneUI.Controls.SmallButton(actionLabel))
             {
                 onAction();
             }
         }
         SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
-    }
-
-    private static void DrawReviewRow(string label, string value)
-    {
-        SpheneUI.Text.Muted(label);
-        ImGui.SameLine();
-        SpheneUI.Controls.DockToRightEdge(ImGui.CalcTextSize(value).X);
-        SpheneUI.Text.Plain(value);
     }
 
     private void DrawUploadProgress(float scale)
@@ -540,6 +604,15 @@ public class PenumbraSendModUi : WindowMediatorSubscriberBase
 
         if (!currentUploads.Any())
         {
+            if (!string.IsNullOrWhiteSpace(_sendPenumbraModStatusText))
+            {
+                SpheneUI.Text.Colored(_sendPenumbraModStatusText,
+                    _sendPenumbraModStatusIsError ? ImGuiColors.DalamudRed : ImGuiColors.DalamudGrey);
+            }
+            else
+            {
+                SpheneUI.Text.Muted("Preparing packages…");
+            }
             return;
         }
 
@@ -561,11 +634,14 @@ public class PenumbraSendModUi : WindowMediatorSubscriberBase
             }
         }
 
-        var barWidth = ImGui.GetContentRegionAvail().X;
-        var cursor = ImGui.GetCursorPos();
-        var barSize = new Vector2(barWidth, 20f * scale);
-        SpheneUI.Controls.ProgressBar(uploadProgress, barSize);
-        ImGui.SetCursorPos(cursor + new Vector2(0f, barSize.Y + 4f * scale));
+        var rowY = ImGui.GetCursorPos().Y;
+        var barH = ImGui.GetFrameHeight() * 0.5f;
+        var barW = MathF.Min(160f * scale, ImGui.GetContentRegionAvail().X * 0.35f);
+        ImGui.SetCursorPosY(rowY + (ImGui.GetFrameHeight() - barH) * 0.5f);
+        SpheneUI.Controls.ProgressBar(uploadProgress, new Vector2(barW, barH));
+        ImGui.SameLine();
+        ImGui.SetCursorPosY(rowY);
+        ImGui.AlignTextToFramePadding();
         SpheneUI.Text.Colored(uploadText, ImGuiColors.DalamudGrey);
     }
 

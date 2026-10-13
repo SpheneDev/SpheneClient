@@ -3,9 +3,9 @@
   <PropertyGroup>
     <Authors></Authors>
     <Company></Company>
-    <Version>1.1.16.627</Version>
-    <AssemblyVersion>1.1.16.627</AssemblyVersion>
-    <FileVersion>1.1.16.627</FileVersion>
+    <Version>1.1.16.673</Version>
+    <AssemblyVersion>1.1.16.673</AssemblyVersion>
+    <FileVersion>1.1.16.673</FileVersion>
     <Description>Through the power of Living Memory, this plugin harmonizes your Penumbra modifications and Glamourer configurations across all connected souls, ensuring endless synchronization in your shared digital realm.</Description>
     <Copyright></Copyright>
     <PackageProjectUrl>https://github.com/SpheneDev/client</PackageProjectUrl>
@@ -49,9 +49,9 @@
     <BuildDate>$([System.DateTime]::Now.ToString("ddMM"))</BuildDate>
     <BuildTime>$([System.DateTime]::Now.ToString("HHMM"))</BuildTime>
     <BuildTimestamp>$([System.DateTime]::Now.ToString("dd-MM-yy HH:mm:ss"))</BuildTimestamp>
-    <Version>1.1.16.627</Version>
-    <AssemblyVersion>1.1.16.627</AssemblyVersion>
-    <FileVersion>1.1.16.627</FileVersion>
+    <Version>1.1.16.673</Version>
+    <AssemblyVersion>1.1.16.673</AssemblyVersion>
+    <FileVersion>1.1.16.673</FileVersion>
     <DefineConstants>$(DefineConstants);BUILD_TIMESTAMP</DefineConstants>
   </PropertyGroup>
   
@@ -98,10 +98,10 @@
     <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.*" />
     <PackageReference Include="Microsoft.AspNetCore.SignalR.Protocols.MessagePack" Version="10.0.*" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.*" />
-    <PackageReference Include="Glamourer.Api" Version="2.8.0" />
+    <PackageReference Include="Glamourer.Api" Version="2.8.2" />
     <PackageReference Include="NReco.Logging.File" Version="1.2.2" />
-    <PackageReference Include="Penumbra.Api" Version="5.13.1" />
-    <PackageReference Include="Penumbra.String" Version="1.0.7" />
+    <PackageReference Include="Penumbra.Api" Version="5.19.2" />
+    <PackageReference Include="Penumbra.String" Version="1.0.8" />
     <PackageReference Include="SixLabors.ImageSharp" Version="3.1.12" />
     <PackageReference Include="SonarAnalyzer.CSharp" Version="10.17.0.131074">
       <PrivateAssets>all</PrivateAssets>

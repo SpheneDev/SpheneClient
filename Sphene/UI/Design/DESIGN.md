@@ -616,6 +616,17 @@ connected to their trigger — and over `Layout.BeginExpander` only when the
 menu genuinely has to float *above* other content instead of living in the
 page flow.
 
+## Collapsible sections (`Layout.Collapsible`)
+
+The designed replacement for raw `ImGui.TreeNode` / `Layout.Tree` foldouts:
+a tonal header pill (square chevron zone + seam + label, optional icon and
+muted right-aligned `hint`, e.g. "2 active") that opens a bordered body
+sharing the header's bottom hairline. State persists per window via
+`ImGui.GetStateStorage()` keyed on the label; `"##id"` suffixes stay hidden.
+`setOpen:` force-opens for deep links (SetNextItemOpen equivalent),
+`defaultOpen:` seeds the closed-state default. Use it for filters, help
+foldouts and grouped settings — CharaDataHub is the reference.
+
 ## Inline expanders (`Layout.BeginExpander`)
 
 An expanding panel rendered **inside** the host window's layout flow —

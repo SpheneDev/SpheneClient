@@ -193,6 +193,9 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
             _hasUpdate = false;
         }
 
+        SpheneUI.Text.PageHeader("Character Data Analysis",
+            "Inspect the files attached to your character — analysis, transient data, and recordings.");
+
         if (SpheneUI.Layout.BeginScrollArea("analysis-content", ImGui.GetContentRegionAvail(),
                 contentPadding: Vector2.Zero))
         {
@@ -254,16 +257,16 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
 
     private void DrawStoredData()
     {
-        SpheneUI.Layout.Tree("What is this? (Explanation / Help)", () =>
+        SpheneUI.Layout.Collapsible("What is this? (Explanation / Help)", () =>
         {
             SpheneUI.Text.Wrapped("This tab allows you to see which transient files are attached to your character.");
             SpheneUI.Text.Wrapped("Transient files are files that cannot be resolved to your character permanently. Sphene gathers these files in the background while you execute animations, VFX, sound effects, etc.");
             SpheneUI.Text.Wrapped("When sending your character data to others, Sphene will combine the files listed in \"All Jobs\" and the corresponding currently used job.");
             SpheneUI.Text.Wrapped("The purpose of this tab is primarily informational for you to see which files you are carrying with you. You can remove added game paths, however if you are using the animations etc. again, "
                 + "Sphene will automatically attach these after using them. If you disable associated mods in Penumbra, the associated entries here will also be deleted automatically.");
-        });
+        }, icon: FontAwesomeIcon.QuestionCircle);
 
-        SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
 
         var config = _transientConfigService.Current.TransientConfigs;
         if (!string.IsNullOrWhiteSpace(_selectedStoredCharacter) && !config.ContainsKey(_selectedStoredCharacter))
@@ -276,13 +279,14 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
             _filterGamePath = string.Empty;
         }
         Vector2 availableContentRegion = Vector2.Zero;
+        var scale = SpheneUI.Scale;
         using (ImRaii.Group())
         {
-            SpheneUI.Text.Plain("Character");
+            SpheneUI.Text.Muted("Character");
             SpheneUI.Layout.Separator();
-            SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
             availableContentRegion = ImGui.GetContentRegionAvail();
-            using (ImRaii.ListBox("##characters", new Vector2(200, availableContentRegion.Y)))
+            using (ImRaii.ListBox("##characters", new Vector2(200 * scale, availableContentRegion.Y)))
             {
                 foreach (var entry in config)
                 {
@@ -308,10 +312,10 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
         bool selectedData = !string.IsNullOrWhiteSpace(_selectedStoredCharacter) && transientStorage != null;
         using (ImRaii.Group())
         {
-            SpheneUI.Text.Plain("Job");
+            SpheneUI.Text.Muted("Job");
             SpheneUI.Layout.Separator();
-            SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
-            using (ImRaii.ListBox("##data", new Vector2(150, availableContentRegion.Y)))
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+            using (ImRaii.ListBox("##data", new Vector2(150 * scale, availableContentRegion.Y)))
             {
                 if (selectedData)
                 {
@@ -404,13 +408,13 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
             {
                 selectedList = [];
             }
-            SpheneUI.Text.Plain($"Attached Files (Total Files: {selectedList.Count})");
+            SpheneUI.Text.Muted($"Attached Files · {selectedList.Count}");
             SpheneUI.Layout.Separator();
-            SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
             using (ImRaii.Disabled(string.IsNullOrEmpty(_selectedJobEntry)))
             {
 
-                var restContent = availableContentRegion.X - ImGui.GetCursorPosX();
+                var restContent = ImGui.GetContentRegionAvail().X;
                 using var group = ImRaii.Group();
                 if (SpheneUI.Icons.TextButton(FontAwesomeIcon.ArrowRight, "Resolve Game Paths to used File Paths"))
                 {
@@ -462,22 +466,22 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                 }
                 SpheneUI.AttachTooltip("Hold CTRL to delete all game paths from the displayed list"
                     + SpheneUI.TooltipSeparator + "You usually do not need to do this. All animation and VFX data will be automatically handled through Sphene.");
-                SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
-                SpheneUI.Layout.Space(SpheneUI.Spacing.X32);
-                ImGui.SameLine();
-                ImGui.SetNextItemWidth((restContent - 30) / 2f);
+                SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+                var checkW = 30f * scale;
+                var filterW = (restContent - checkW - ImGui.GetStyle().ItemSpacing.X) / 2f;
+                ImGui.SetNextItemWidth(filterW);
                 SpheneUI.Controls.InputTextWithHint("##filterGamePath", "Filter by Game Path", ref _filterGamePath, 255);
                 ImGui.SameLine();
-                ImGui.SetNextItemWidth((restContent - 30) / 2f);
+                ImGui.SetNextItemWidth(filterW);
                 SpheneUI.Controls.InputTextWithHint("##filterFilePath", "Filter by File Path", ref _filterFilePath, 255);
 
                 using (var dataTable = ImRaii.Table("##table", 3, ImGuiTableFlags.SizingFixedFit | ImGuiTableFlags.ScrollY | ImGuiTableFlags.RowBg))
                 {
                     if (dataTable)
                     {
-                        ImGui.TableSetupColumn("", ImGuiTableColumnFlags.WidthFixed, 30);
-                        ImGui.TableSetupColumn("Game Path", ImGuiTableColumnFlags.WidthFixed, (restContent - 30) / 2f);
-                        ImGui.TableSetupColumn("File Path", ImGuiTableColumnFlags.WidthFixed, (restContent - 30) / 2f);
+                        ImGui.TableSetupColumn("", ImGuiTableColumnFlags.WidthFixed, checkW);
+                        ImGui.TableSetupColumn("Game Path", ImGuiTableColumnFlags.WidthFixed, (restContent - checkW) / 2f);
+                        ImGui.TableSetupColumn("File Path", ImGuiTableColumnFlags.WidthFixed, (restContent - checkW) / 2f);
                         ImGui.TableSetupScrollFreeze(0, 1);
                         ImGui.TableHeadersRow();
                         int id = 0;
@@ -531,21 +535,21 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
 
     private void DrawRecording()
     {
-        SpheneUI.Layout.Tree("What is this? (Explanation / Help)", () =>
+        SpheneUI.Layout.Collapsible("What is this? (Explanation / Help)", () =>
         {
             SpheneUI.Text.Wrapped("This tab allows you to attempt to fix mods that do not sync correctly, especially those with modded models and animations." + Environment.NewLine + Environment.NewLine
                 + "To use this, start the recording, execute one or multiple emotes/animations you want to attempt to fix and check if new data appears in the table below." + Environment.NewLine
                 + "If it doesn't, Sphene is not able to catch the data or already has recorded the animation files (check 'Show previously added transient files' to see if not all is already present)." + Environment.NewLine + Environment.NewLine
                 + "For most animations, vfx, etc. it is enough to just run them once unless they have random variations. Longer animations do not require to play out in their entirety to be captured.");
-            SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
-            SpheneUI.Text.GroupedCentered("Important Note: If you need to fix an animation that should apply across multiple jobs, you need to repeat this process with at least one additional job, " +
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+            SpheneUI.Layout.Callout("If you need to fix an animation that should apply across multiple jobs, you need to repeat this process with at least one additional job, " +
                 "otherwise the animation will only be fixed for the currently active job. This goes primarily for emotes that are used across multiple jobs.",
-                ImGuiColors.DalamudYellow, 800);
-            SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
-            SpheneUI.Text.GroupedCentered("WARNING: WHILE RECORDING TRANSIENT DATA, DO NOT CHANGE YOUR APPEARANCE, ENABLED MODS OR ANYTHING. JUST DO THE ANIMATION(S) OR WHATEVER YOU NEED DOING AND STOP THE RECORDING.",
-                ImGuiColors.DalamudRed, 800);
-            SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
-        });
+                FontAwesomeIcon.ExclamationTriangle, ImGuiColors.DalamudYellow);
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+            SpheneUI.Layout.Callout("While recording transient data, do not change your appearance, enabled mods or anything else. Just do the animation(s) you need and stop the recording.",
+                FontAwesomeIcon.ExclamationTriangle, ImGuiColors.DalamudRed, "Important");
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+        }, icon: FontAwesomeIcon.QuestionCircle);
         using (ImRaii.Disabled(_transientResourceManager.IsTransientRecording))
         {
             if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Play, "Start Transient Recording"))
@@ -569,14 +573,15 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
         {
             ImGui.SameLine();
             SpheneUI.Text.Colored($"RECORDING - Time Remaining: {_transientResourceManager.RecordTimeRemaining.Value}", ImGuiColors.DalamudYellow);
-            SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
-            SpheneUI.Text.GroupedCentered("DO NOT CHANGE YOUR APPEARANCE OR MODS WHILE RECORDING, YOU CAN ACCIDENTALLY MAKE SOME OF YOUR APPEARANCE RELATED MODS PERMANENT.", ImGuiColors.DalamudRed, 800);
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+            SpheneUI.Layout.Callout("Do not change your appearance or mods while recording — you can accidentally make some of your appearance related mods permanent.",
+                FontAwesomeIcon.ExclamationTriangle, ImGuiColors.DalamudRed, "Recording active");
         }
 
-        SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
         SpheneUI.Controls.Toggle("Show previously added transient files in the recording", ref _showAlreadyAddedTransients);
         SpheneUI.Controls.HelpText("Use this only if you want to see what was previously already caught by Sphene");
-        SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
 
         using (ImRaii.Disabled(_transientResourceManager.IsTransientRecording || _transientResourceManager.RecordedTransients.All(k => !k.AddTransient) || !_acknowledgeReview))
         {
@@ -590,21 +595,24 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
         SpheneUI.Controls.Toggle("I acknowledge I have reviewed the recorded data", ref _acknowledgeReview);
         if (_transientResourceManager.RecordedTransients.Any(k => !k.AlreadyTransient))
         {
-            SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
-            SpheneUI.Text.GroupedCentered("Please review the recorded mod files before saving and deselect files that got into the recording on accident.", ImGuiColors.DalamudYellow);
-            SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+            SpheneUI.Layout.Callout("Please review the recorded mod files before saving and deselect files that got into the recording on accident.",
+                FontAwesomeIcon.InfoCircle, ImGuiColors.DalamudYellow);
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
         }
 
-        SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
         var width = ImGui.GetContentRegionAvail();
         using var table = ImRaii.Table("Recorded Transients", 4, ImGuiTableFlags.ScrollY | ImGuiTableFlags.SizingFixedFit | ImGuiTableFlags.RowBg);
         if (table)
         {
             int id = 0;
-            ImGui.TableSetupColumn("", ImGuiTableColumnFlags.WidthFixed, 30);
-            ImGui.TableSetupColumn("Owner", ImGuiTableColumnFlags.WidthFixed, 100);
-            ImGui.TableSetupColumn("Game Path", ImGuiTableColumnFlags.WidthFixed, (width.X - 30 - 100) / 2f);
-            ImGui.TableSetupColumn("File Path", ImGuiTableColumnFlags.WidthFixed, (width.X - 30 - 100) / 2f);
+            var checkW = 30f * SpheneUI.Scale;
+            var ownerW = 100f * SpheneUI.Scale;
+            ImGui.TableSetupColumn("", ImGuiTableColumnFlags.WidthFixed, checkW);
+            ImGui.TableSetupColumn("Owner", ImGuiTableColumnFlags.WidthFixed, ownerW);
+            ImGui.TableSetupColumn("Game Path", ImGuiTableColumnFlags.WidthFixed, (width.X - checkW - ownerW) / 2f);
+            ImGui.TableSetupColumn("File Path", ImGuiTableColumnFlags.WidthFixed, (width.X - checkW - ownerW) / 2f);
             ImGui.TableSetupScrollFreeze(0, 1);
             ImGui.TableHeadersRow();
             var transients = _transientResourceManager.RecordedTransients.ToList();
@@ -643,10 +651,10 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
 
     private void DrawAnalysis()
     {
-        SpheneUI.Layout.Tree("What is this? (Explanation / Help)", () =>
+        SpheneUI.Layout.Collapsible("What is this? (Explanation / Help)", () =>
         {
             SpheneUI.Text.Wrapped("This tab shows you all files and their sizes that are currently in use through your character and associated entities in Sphene");
-        });
+        }, icon: FontAwesomeIcon.QuestionCircle);
 
         if (_cachedAnalysis!.Count == 0) return;
 
@@ -840,119 +848,83 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                                 SpheneUI.Text.ColoredWrapped("Using full-mod PMP backups increases required storage, but enables safer complete mod restoration.", ImGuiColors.DalamudYellow);
                             }
                             
-                            // Revert functionality
-            SpheneUI.Layout.Separator();
-            SpheneUI.Text.Plain("Backup Management:");
-            
-            var availableBackups = GetCachedBackupsForCurrentAnalysis();
-            if (availableBackups.Count > 0)
-            {
-                SpheneUI.Text.ColoredWrapped($"Found {availableBackups.Count} backed up texture(s) from current analysis that can be restored.", ImGuiColors.ParsedGreen);
-                
-                SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.Row);
-                if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Undo, $"Revert current textures ({availableBackups.Count})"))
-                {
-                    StartTextureRevert(availableBackups);
-                }
-                                
-                                ImGui.SameLine();
-                                if (SpheneUI.Icons.TextButton(FontAwesomeIcon.FolderOpen, "Open backup folder"))
+                            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
+                            SpheneUI.Layout.SectionCard(() =>
+                            {
+                                var availableBackups = GetCachedBackupsForCurrentAnalysis();
+                                if (availableBackups.Count > 0)
                                 {
-                                    try
+                                    SpheneUI.Text.Muted($"{availableBackups.Count} backed up texture(s) from the current analysis can be restored.");
+                                    SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+                                    if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Undo, $"Revert current textures ({availableBackups.Count})"))
                                     {
-                                        var overview = _shrinkuBackupService.GetBackupOverviewAsync().GetAwaiter().GetResult();
-                                        var firstPath = overview.FirstOrDefault()?.SourcePath;
-                                        var backupDirectory = string.IsNullOrEmpty(firstPath) ? _textureBackupService.GetBackupDirectory() : Path.GetDirectoryName(firstPath)!;
-                                        if (!string.IsNullOrEmpty(backupDirectory) && Directory.Exists(backupDirectory))
-                                        {
-                                            System.Diagnostics.Process.Start("explorer.exe", backupDirectory);
-                                        }
+                                        StartTextureRevert(availableBackups);
                                     }
-                                    catch
+                                    ImGui.SameLine();
+                                    if (SpheneUI.Icons.TextButton(FontAwesomeIcon.FolderOpen, "Open backup folder"))
                                     {
-                                        var fallback = _textureBackupService.GetBackupDirectory();
-                                        if (Directory.Exists(fallback))
-                                            System.Diagnostics.Process.Start("explorer.exe", fallback);
+                                        _ = OpenBackupFolderAsync();
                                     }
                                 }
-                            }
-                            else
+                                else
+                                {
+                                    SpheneUI.Text.Muted("No texture backups found.");
+                                }
+                            }, title: "Backup Management");
+
+                            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
+                            SpheneUI.Layout.SectionCard(() =>
                             {
-                                SpheneUI.Text.ColoredWrapped("No texture backups found.", ImGuiColors.DalamudGrey);
-                            }
-                            
-                            // Storage information and cleanup
-                            SpheneUI.Layout.Separator();
-                            SpheneUI.Text.Plain("Storage Management:");
-                            
-                            // Update storage info every 5 seconds or if task is null
-                            var now = DateTime.UtcNow;
-                            if (_storageInfoTask == null || (((now - _lastStorageInfoUpdate).TotalSeconds > 5) && _storageInfoTask.IsCompleted))
-                            {
-                                _storageInfoTask = GetShrinkUStorageInfoAsync();
-                                _lastStorageInfoUpdate = now;
-                            }
-                            
-                            // Display storage info
-                            if (_storageInfoTask != null && _storageInfoTask.IsCompleted)
-                            {
-                                _cachedStorageInfo = _storageInfoTask.Result;
+                                // Refresh storage info every 5 seconds once the previous task finished.
+                                var now = DateTime.UtcNow;
+                                if (_storageInfoTask == null || (((now - _lastStorageInfoUpdate).TotalSeconds > 5) && _storageInfoTask.IsCompleted))
+                                {
+                                    _storageInfoTask = GetShrinkUStorageInfoAsync();
+                                    _lastStorageInfoUpdate = now;
+                                }
+
+                                if (_storageInfoTask != null && _storageInfoTask.IsCompleted)
+                                {
+                                    _cachedStorageInfo = _storageInfoTask.Result;
+                                }
+
                                 var (totalSize, fileCount) = _cachedStorageInfo;
-                                
                                 if (fileCount > 0)
                                 {
                                     var sizeInMB = totalSize / (1024.0 * 1024.0);
-                                    SpheneUI.Text.ColoredWrapped($"Total backup storage: {sizeInMB:F2} MB ({fileCount} files)", ImGuiColors.DalamudYellow);
-                                    
-                                    // Time-based backup cleanup removed
+                                    var updating = _storageInfoTask?.IsCompleted == false ? " — updating…" : string.Empty;
+                                    SpheneUI.Text.Muted($"Total backup storage: {sizeInMB:F2} MB ({fileCount} files){updating}");
                                 }
                                 else
                                 {
-                                    SpheneUI.Text.ColoredWrapped("No backup files found.", ImGuiColors.DalamudGrey);
+                                    SpheneUI.Text.Muted(_storageInfoTask?.IsCompleted == false
+                                        ? "Calculating storage usage…" : "No backup files found.");
                                 }
-                            }
-                            else
-                            {
-                                // Show cached info if available, otherwise show loading
-                                if (_cachedStorageInfo.fileCount > 0)
-                                {
-                                    var sizeInMB = _cachedStorageInfo.totalSize / (1024.0 * 1024.0);
-                                    SpheneUI.Text.ColoredWrapped($"Total backup storage: {sizeInMB:F2} MB ({_cachedStorageInfo.fileCount} files) [Updating...]", ImGuiColors.DalamudGrey);
-                                }
-                                else
-                                {
-                                    SpheneUI.Text.ColoredWrapped("Calculating storage usage...", ImGuiColors.DalamudGrey);
-                                }
-                            }
-                            
-                            SpheneUI.Text.Colored("BC7 CONVERSION INFO:", ImGuiColors.DalamudYellow);
-                            ImGui.SameLine();
-                            SpheneUI.Text.Colored("Backups are created automatically for revert functionality!", ImGuiColors.ParsedGreen);
-                            SpheneUI.Text.ColoredWrapped("- Converting textures to BC7 will reduce their size (compressed and uncompressed) drastically. It is recommended to be used for large (4k+) textures." +
-                            Environment.NewLine + "- Some textures, especially ones utilizing colorsets, might not be suited for BC7 conversion and might produce visual artifacts." +
-                            Environment.NewLine + "- Original textures are automatically backed up before conversion and can be restored using the 'Revert current textures' button above." +
-                            Environment.NewLine + "- Conversion will convert all found texture duplicates (entries with more than 1 file path) automatically." +
-                            Environment.NewLine + "- Converting textures to BC7 is a very expensive operation and, depending on the amount of textures to convert, will take a while to complete."
-                                , ImGuiColors.DalamudYellow);
-                            
-                            // One-click conversion button
+                            }, title: "Storage");
+
+                            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
+                            SpheneUI.Layout.Callout("Converting textures to BC7 reduces their size drastically and is recommended for large (4k+) textures. "
+                                + "Textures utilizing colorsets may produce visual artifacts. Originals are backed up automatically before conversion. "
+                                + "All texture duplicates (entries with more than one file path) are converted — this is an expensive operation that can take a while.",
+                                FontAwesomeIcon.InfoCircle, ImGuiColors.DalamudYellow, "BC7 conversion");
+
+                            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+
                             var nonBc7Textures = GetNonBc7Textures(fileGroup);
                             if (nonBc7Textures.Count > 0 && SpheneUI.Icons.TextButton(FontAwesomeIcon.Compress, $"Convert all {nonBc7Textures.Count} non-BC7 textures"))
                             {
                                 _logger.LogDebug("One-click conversion button clicked. Found {Count} non-BC7 textures", nonBc7Textures.Count);
-                                // Add all non-BC7 textures to conversion list without clearing existing selections
                                 foreach (var texture in nonBc7Textures)
                                 {
-                                    // Use the first file path as the primary texture to convert
                                     var primaryPath = texture.FilePaths[0];
                                     var duplicatePaths = texture.FilePaths.Skip(1).ToArray();
                                     _texturesToConvert[primaryPath] = duplicatePaths;
-                                    _logger.LogDebug("Added texture {PrimaryPath} with {DuplicateCount} duplicates to conversion list", primaryPath, duplicatePaths.Length);
                                 }
-                                _logger.LogDebug("Total textures in conversion list: {Count}", _texturesToConvert.Count);
                             }
-                            
-                            if (_texturesToConvert.Count > 0 && SpheneUI.Icons.TextButton(FontAwesomeIcon.PlayCircle, "Start conversion of " + _texturesToConvert.Count + " texture(s)"))
+
+                            if (_texturesToConvert.Count > 0 && SpheneUI.Controls.SegmentButton(
+                                    $"Start conversion of {_texturesToConvert.Count} texture(s)", FontAwesomeIcon.PlayCircle,
+                                    accent: SpheneUI.Palette.EtherealPurple))
                             {
                                 _conversionTask = Task.Run(async () =>
                                 {
@@ -978,7 +950,8 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
         ImGui.SameLine();
         SpheneUI.Text.Colored(_selectedHash, ImGuiColors.DalamudYellow);
 
-        if (_cachedAnalysis[_selectedObjectTab].TryGetValue(_selectedHash, out CharacterAnalyzer.FileDataEntry? item))
+        if (_cachedAnalysis.TryGetValue(_selectedObjectTab, out var selectedEntries)
+            && selectedEntries.TryGetValue(_selectedHash, out CharacterAnalyzer.FileDataEntry? item))
         {
             var filePaths = item.FilePaths;
             SpheneUI.Text.Plain("Local file path:");
@@ -1035,6 +1008,36 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
     {
         _conversionCurrentFileName = e.Item1;
         _conversionCurrentFileProgress = e.Item2;
+    }
+
+    private async Task OpenBackupFolderAsync()
+    {
+        try
+        {
+            var overview = await _shrinkuBackupService.GetBackupOverviewAsync().ConfigureAwait(false);
+            var firstPath = overview.FirstOrDefault()?.SourcePath;
+            var backupDirectory = string.IsNullOrEmpty(firstPath)
+                ? _textureBackupService.GetBackupDirectory()
+                : Path.GetDirectoryName(firstPath)!;
+            if (!string.IsNullOrEmpty(backupDirectory) && Directory.Exists(backupDirectory))
+            {
+                System.Diagnostics.Process.Start("explorer.exe", backupDirectory);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to resolve backup folder via ShrinkU, falling back to local directory");
+            try
+            {
+                var fallback = _textureBackupService.GetBackupDirectory();
+                if (Directory.Exists(fallback))
+                    System.Diagnostics.Process.Start("explorer.exe", fallback);
+            }
+            catch (Exception ex2)
+            {
+                _logger.LogDebug(ex2, "Failed to open backup folder");
+            }
+        }
     }
 
     private async Task<Dictionary<string, string[]>> BuildFullModConversionDictionaryFromSelection()
