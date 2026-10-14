@@ -1073,10 +1073,10 @@ public static partial class SpheneUI
 
         /// <summary>
         /// Info callout — accent icon + wrapped text inside a tonal rounded
-        /// box with a left accent spine, spanning the content width. Pass
-        /// <paramref name="title"/> for a colored title line above neutral
-        /// body text (info/warning/error boxes). The universal "hint/note"
-        /// element of the design system — borderless like the cards.
+        /// box, spanning the content width. Pass <paramref name="title"/> for
+        /// a colored title line above neutral body text
+        /// (info/warning/error boxes). The universal "hint/note" element of
+        /// the design system — borderless like the cards.
         /// </summary>
         public static void Callout(string text, FontAwesomeIcon icon = FontAwesomeIcon.InfoCircle,
             Vector4? color = null, string? title = null)
@@ -1092,9 +1092,8 @@ public static partial class SpheneUI
             var boxWidth = CardAlignedAvailX();
             var padX = 12.0f * scale;
             var padY = 8.0f * scale;
-            var spine = 3.0f * scale;
             var radius = AccentCardRounding * scale;
-            var wrapWidth = MathF.Max(1f, boxWidth - padX * 2f - spine);
+            var wrapWidth = MathF.Max(1f, boxWidth - padX * 2f);
 
             var textSize = ImGui.CalcTextSize(text, wrapWidth: wrapWidth);
             var boxHeight = padY * 2f + textSize.Y
@@ -1103,11 +1102,8 @@ public static partial class SpheneUI
 
             drawList.AddRectFilled(startPos, boxMax,
                 ColorUtils.ToU32(ColorUtils.WithAlpha(accent, 0.07f)), radius);
-            drawList.AddRectFilled(startPos, new Vector2(startPos.X + spine, boxMax.Y),
-                ColorUtils.ToU32(ColorUtils.WithAlpha(accent, 0.8f)), radius,
-                ImDrawFlags.RoundCornersLeft);
 
-            var innerMin = startPos + new Vector2(padX + spine, padY);
+            var innerMin = startPos + new Vector2(padX, padY);
             ImGui.SetCursorScreenPos(innerMin);
             SpheneUI.Icons.Icon(icon, accent);
             ImGui.SameLine();

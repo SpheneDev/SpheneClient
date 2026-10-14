@@ -28,38 +28,56 @@ public class DrawGroupedGroupFolder : IDrawFolder
 
         string _id = "__folder_syncshells";
         using var id = ImRaii.PushId(_id);
-        // Use the same width calculation as DrawFolderBase for consistency
-        var baseFolderWidth = UiSharedService.GetBaseFolderWidth();
-        using (ImRaii.Child("folder__" + _id, new System.Numerics.Vector2(baseFolderWidth, ImGui.GetFrameHeight()), false, ImGuiWindowFlags.NoScrollbar))
+        var theme = SpheneTheme.Current;
+        var scale = SpheneUI.Scale;
+        var width = MathF.Max(1f, SpheneUI.Controls.BoundedAvailX());
+        var headerH = ImGui.GetFrameHeight() + 4f * scale;
+
+        using (ImRaii.Child("folder__" + _id, new Vector2(width, headerH), false, ImGuiWindowFlags.NoScrollbar))
         {
-            
-            ImGui.Dummy(new Vector2(0f, ImGui.GetFrameHeight()));
-            using (ImRaii.PushStyle(ImGuiStyleVar.ItemSpacing, new Vector2(0f, 0f)))
-                ImGui.SameLine();
+            var dl = ImGui.GetWindowDrawList();
+            var min = ImGui.GetCursorScreenPos();
+            var rowHovered = ImGui.IsWindowHovered();
+            var open = _tagHandler.IsTagOpen(_id);
 
-            var icon = _tagHandler.IsTagOpen(_id) ? FontAwesomeIcon.CaretDown : FontAwesomeIcon.CaretRight;
-            ImGui.AlignTextToFramePadding();
+            var rounding = MathF.Min(theme.CompactChildRounding, headerH * 0.5f);
+            dl.AddRectFilled(min, min + new Vector2(width, headerH),
+                SpheneUI.ColorUtils.ToU32(rowHovered
+                    ? SpheneUI.ColorUtils.WithAlpha(theme.CompactHover, 0.30f)
+                    : open
+                        ? SpheneUI.ColorUtils.WithAlpha(theme.CompactAccent, 0.08f)
+                        : SpheneUI.ColorUtils.WithAlpha(theme.CompactFrameBg, 0.45f)), rounding);
 
-            SpheneUI.Icons.Icon(icon);
-            if (ImGui.IsItemClicked())
-            {
-                _tagHandler.SetTagOpen(_id, !_tagHandler.IsTagOpen(_id));
-            }
+            var lineTop = min.Y + MathF.Max(0f, (headerH - ImGui.GetFrameHeight()) * 0.5f);
+            ImGui.SetCursorScreenPos(new Vector2(min.X + SpheneUI.Spacing.X8.Scaled, lineTop));
+            SpheneUI.Icons.Icon(open ? FontAwesomeIcon.CaretDown : FontAwesomeIcon.CaretRight,
+                theme.CompactTextSecondary);
 
             ImGui.SameLine();
             ImGui.AlignTextToFramePadding();
             SpheneUI.Icons.Icon(FontAwesomeIcon.UsersRectangle);
-            using (ImRaii.PushStyle(ImGuiStyleVar.ItemSpacing, ImGui.GetStyle().ItemSpacing with { X = ImGui.GetStyle().ItemSpacing.X / 2f }))
-            {
-                ImGui.SameLine();
-                ImGui.AlignTextToFramePadding();
-                SpheneUI.Text.Plain("[" + OnlinePairs.ToString() + "]");
-            }
+            ImGui.SameLine();
+
+            var countText = $"{OnlinePairs}/{TotalPairs}";
+            var pillW = SpheneUI.Layout.BadgeWidth(countText);
+            var pillH = SpheneUI.Layout.BadgeHeight;
+            var pillPos = ImGui.GetCursorScreenPos()
+                + new Vector2(0f, MathF.Max(0f, (ImGui.GetFrameHeight() - pillH) * 0.5f));
+            ImGui.Dummy(new Vector2(pillW, pillH));
+            ImGui.SetCursorScreenPos(pillPos);
+            SpheneUI.Layout.Badge(countText, theme.CompactAccent);
             SpheneUI.AttachTooltip(OnlinePairs + " online in all of your joined syncshells" + Environment.NewLine +
                 TotalPairs + " pairs combined in all of your joined syncshells");
+
             ImGui.SameLine();
             ImGui.AlignTextToFramePadding();
-            SpheneUI.Text.Colored("All Syncshells", SpheneTheme.Current.CompactAllSyncshellsText);
+            SpheneUI.Text.Colored("All Syncshells", theme.CompactAllSyncshellsText);
+
+            if (rowHovered && !ImGui.IsAnyItemHovered()
+                && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+            {
+                _tagHandler.SetTagOpen(_id, !open);
+            }
         }
 
         SpheneUI.Layout.ScrollAreaSeparator(

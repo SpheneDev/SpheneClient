@@ -48,6 +48,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
     private readonly SpheneProfileManager _spheneProfileManager;
     private byte[] _avatarBytes = [];
     private byte[] _rowImageBytes = [];
+    private byte[] _bannerBytes = [];
     private float _menuWidth = -1;
     private bool _wasHovered = false;
     private static readonly Vector4 SoftToggleEnabledColor = new(0.56f, 0.82f, 0.62f, 1f);
@@ -143,14 +144,23 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         }
         var hasTimingSyncTarget = _localPairEmoteForceSyncService.IsTargetSelected(_pair.UserData.UID);
         var hasTimingLeader = _localPairEmoteForceSyncService.IsLeader(_pair.UserData.UID);
-        var color = ImRaii.PushColor(ImGuiCol.ChildBg, ImGui.GetColorU32(ImGuiCol.FrameBgHovered), _wasHovered);
-        var baseFolderWidth = UiSharedService.GetBaseFolderWidth() + 9.0f;
+        var rowTheme = SpheneTheme.Current;
+        var color = ImRaii.PushColor(ImGuiCol.ChildBg,
+            ImGui.ColorConvertFloat4ToU32(rowTheme.CompactPairRowHover), _wasHovered);
+        var baseFolderWidth = SpheneUI.Controls.BoundedAvailX();
         var rowHeight = ImGui.GetFrameHeight() + 6f * SpheneUI.Scale;
+        var rowRounding = rowTheme.CompactPairRowRounding < 0f
+            ? rowTheme.CompactChildRounding
+            : rowTheme.CompactPairRowRounding;
+        using var roundingScope = ImRaii.PushStyle(ImGuiStyleVar.ChildRounding, rowRounding);
         using (ImRaii.Child(GetType() + _id, new System.Numerics.Vector2(baseFolderWidth, rowHeight), false, ImGuiWindowFlags.NoScrollbar))
         {
             var drawList = ImGui.GetWindowDrawList();
             var rowMin = ImGui.GetWindowPos();
             var rowMax = rowMin + new Vector2(baseFolderWidth, rowHeight);
+            // the row silhouette is the child bg — backdrop and gradients must
+            // share that radius or their corner arcs drift from the edge
+            var rowRadius = MathF.Min(rowRounding, rowHeight * 0.5f);
 
             // the pair's own list-row styling: theme effects plus the
             // supporter row image strip, identical to the hub friends list
@@ -165,7 +175,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
                 || rowImage != null)
             {
                 SpheneUI.Profile.RowBackdrop(drawList, rowMin, rowMax, accent, _wasHovered, hoverT,
-                    profileTheme.RowHover, profileTheme.RowIdle, rowImage, rowHeight * 0.38f);
+                    profileTheme.RowHover, profileTheme.RowIdle, rowImage, rowRadius);
             }
 
             if (hasTimingSyncTarget)
@@ -175,7 +185,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
                 var rowEnd = new Vector2(rowStart.X + gradientWidth, rowStart.Y + rowHeight);
                 var startColor = new Vector4(0.60f, 0.34f, 1.0f, _wasHovered ? 0.42f : 0.30f);
                 var endColor = new Vector4(0.60f, 0.34f, 1.0f, 0.0f);
-                DrawRowGradient(rowStart, rowEnd, startColor, endColor, rowHeight);
+                DrawRowGradient(rowStart, rowEnd, startColor, endColor, rowRadius);
             }
 
             if (hasTimingLeader)
@@ -185,7 +195,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
                 var rowEnd = new Vector2(rowStart.X + gradientWidth, rowStart.Y + rowHeight);
                 var startColor = new Vector4(1.0f, 0.30f, 0.76f, _wasHovered ? 0.48f : 0.34f);
                 var endColor = new Vector4(1.0f, 0.30f, 0.76f, 0.0f);
-                DrawRowGradient(rowStart, rowEnd, startColor, endColor, rowHeight);
+                DrawRowGradient(rowStart, rowEnd, startColor, endColor, rowRadius);
             }
 
             DrawLeftSide(profile, accent, rowHeight, hasOfflineGrace);
@@ -211,6 +221,19 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         return data.Length == 0 ? null : SpheneUI.Media.Texture(key, data);
     }
 
+    /// <summary>Pair's cached banner texture for the tooltip's profile strip.</summary>
+    private IDalamudTextureWrap? PairBanner(SpheneProfileData profile)
+    {
+        var data = profile.BannerImageData.Value;
+        var key = $"compact:banner:{_pair.UserData.UID}";
+        if (!ReferenceEquals(_bannerBytes, data) && !_bannerBytes.AsSpan().SequenceEqual(data))
+        {
+            _bannerBytes = data;
+            SpheneUI.Media.Evict(key);
+        }
+        return data.Length == 0 ? null : SpheneUI.Media.Texture(key, data);
+    }
+
     /// <summary>Pair's cached row strip image (supporter perk) for the row backdrop.</summary>
     private SpheneUI.Media.AnimatedImage? PairRowImage(SpheneProfileData profile)
     {
@@ -224,31 +247,23 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         return SpheneUI.Media.Animated(key, data);
     }
 
-    private static void DrawRowGradient(Vector2 rowStart, Vector2 rowEnd, Vector4 startColor, Vector4 endColor, float rowHeight)
+    private static void DrawRowGradient(Vector2 rowStart, Vector2 rowEnd, Vector4 startColor, Vector4 endColor, float rounding)
     {
         var drawList = ImGui.GetWindowDrawList();
         var width = rowEnd.X - rowStart.X;
-        var slices = Math.Clamp((int)(width / 8.0f), 8, 64);
-        var step = width / slices;
-        var rounding = rowHeight * 0.38f;
-        for (int i = 0; i < slices; i++)
+        // the corner slice must be at least twice the row radius wide or its
+        // own clamped arc falls short of the silhouette's curve
+        var firstW = MathF.Min(width, MathF.Max(8f * SpheneUI.Scale, rounding * 2f));
+        var restSlices = Math.Clamp((int)((width - firstW) / 8.0f), 8, 64);
+        var restStep = (width - firstW) / restSlices;
+        for (int i = 0; i <= restSlices; i++)
         {
-            var x0 = rowStart.X + step * i;
-            var x1 = i == slices - 1 ? rowEnd.X : rowStart.X + step * (i + 1);
-            var t = (float)i / (float)(slices - 1);
-            var gradientColor = Vector4.Lerp(startColor, endColor, t);
-            var flags = ImDrawFlags.None;
-            var cornerRadius = 0.0f;
-            if (i == 0)
-            {
-                flags = ImDrawFlags.RoundCornersLeft;
-                cornerRadius = rounding;
-            }
-            else if (i == slices - 1)
-            {
-                flags = ImDrawFlags.RoundCornersRight;
-                cornerRadius = rounding;
-            }
+            var x0 = i == 0 ? rowStart.X : rowStart.X + firstW + restStep * (i - 1);
+            var x1 = i == restSlices ? rowEnd.X : x0 + (i == 0 ? firstW : restStep);
+            var gradientColor = Vector4.Lerp(startColor, endColor, (x0 - rowStart.X) / width);
+            var flags = i == 0 ? ImDrawFlags.RoundCornersLeft
+                : i == restSlices ? ImDrawFlags.RoundCornersRight : ImDrawFlags.None;
+            var cornerRadius = flags == ImDrawFlags.None ? 0.0f : rounding;
             drawList.AddRectFilled(new Vector2(x0, rowStart.Y), new Vector2(x1, rowEnd.Y), ImGui.ColorConvertFloat4ToU32(gradientColor), cornerRadius, flags);
         }
     }
@@ -642,7 +657,9 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         // bottom-right), mutual visibility (ring) and gpose context (camera
         // pip, bottom-left) — one slot instead of a row of state icons
         var avatarSize = MathF.Max(12f * scale, rowHeight - 4f * scale);
-        var avatarPos = contentMin + new Vector2(1f * scale, MathF.Max(0f, (rowHeight - avatarSize) * 0.5f));
+        var avatarPos = contentMin + new Vector2(
+            SpheneTheme.Current.CompactPairRowContentPadding + 1f * scale,
+            MathF.Max(0f, (rowHeight - avatarSize) * 0.5f));
         ImGui.SetCursorScreenPos(avatarPos);
         var avatarWrap = PairAvatar(profile);
         SpheneUI.Media.Avatar(avatarWrap, avatarSize);
@@ -858,8 +875,8 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
             tooltipLines.Add(new(FontAwesomeIcon.ShieldAlt, "In duty", "sync hidden", ImGuiColors.DalamudYellow));
         }
 
-        DrawTooltipForHoveredItem(showUserPairTooltip, avatarWrap, tooltipTitle, presenceText,
-            presenceColor, profile, tooltipMeta, tooltipLines);
+        DrawTooltipForHoveredItem(showUserPairTooltip, avatarWrap, PairBanner(profile),
+            tooltipTitle, presenceText, presenceColor, profile, tooltipMeta, tooltipLines);
     }
 
     /// <summary>
@@ -945,26 +962,74 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
     private readonly record struct TooltipSpecRow(FontAwesomeIcon Icon, string Label, string? Value, Vector4? Tint);
 
     private static void DrawTooltipForHoveredItem(bool isHovered, IDalamudTextureWrap? avatar,
-        string title, string presenceText, Vector4 presenceColor, SpheneProfileData profile,
-        string? meta, IReadOnlyList<TooltipSpecRow> rows)
+        IDalamudTextureWrap? banner, string title, string presenceText, Vector4 presenceColor,
+        SpheneProfileData profile, string? meta, IReadOnlyList<TooltipSpecRow> rows)
     {
         if (!isHovered) return;
+        var scale = SpheneUI.Scale;
+        // fixed width: an auto-sized tooltip re-wraps while the cursor moves
+        // across the avatar, so the card visibly grows and shrinks
+        var tipW = 300f * scale;
+        var bannerH = 32f * scale;
+        var avatarSize = 30f * scale;
         using (SpheneUI.Theme.TooltipScope())
         {
+            ImGui.SetNextWindowSizeConstraints(new Vector2(tipW, 0f),
+                new Vector2(tipW, float.MaxValue));
             ImGui.BeginTooltip();
-            ImGui.PushTextWrapPos(ImGui.GetFontSize() * 30f);
+            var drawList = ImGui.GetWindowDrawList();
+            var winMin = ImGui.GetWindowPos();
+            var pad = ImGui.GetStyle().WindowPadding;
+            var rounding = ImGui.GetStyle().PopupRounding;
+            var contentW = tipW - pad.X * 2f;
+            var rightEdgeX = winMin.X + tipW - pad.X;
+            ImGui.PushTextWrapPos(tipW - pad.X);
 
-            // header card: avatar + dot, then name/version, presence and status
-            var scale = SpheneUI.Scale;
-            var headerAvatarSize = 32f * scale;
-            var headerPos = ImGui.GetCursorScreenPos();
-            SpheneUI.Media.Avatar(avatar, headerAvatarSize);
-            SpheneUI.Media.PresenceDot(ImGui.GetWindowDrawList(), headerPos,
-                headerAvatarSize, presenceColor);
-            ImGui.SameLine(0, SpheneUI.Spacing.X10.Scaled);
+            // slim profile banner strip bleeding to the edges — same renderer
+            // as the profile page (cover image or theme gradient + blends),
+            // dissolved into the popup background over its lower half
+            var theme = profile.ProfileTheme.Value;
+            var accent = theme.AccentColor(SpheneTheme.Current.CompactAccent);
+            var bMin = winMin;
+            var bMax = new Vector2(winMin.X + tipW, bMin.Y + bannerH);
+            // the window's default clip insets by ~half the padding — replace it
+            // for the strip so the banner truly bleeds to the window edges
+            ImGui.PushClipRect(winMin, winMin + ImGui.GetWindowSize(), false);
+            SpheneUI.Profile.Banner(drawList, bMin, bMax, banner, theme,
+                accent, accent, rounding: rounding, corners: ImDrawFlags.RoundCornersTop);
+            var bg = ImGui.ColorConvertU32ToFloat4(ImGui.GetColorU32(ImGuiCol.PopupBg));
+            var fadeH = (bMax.Y - bMin.Y) * 0.55f;
+            drawList.AddRectFilledMultiColor(new Vector2(bMin.X, bMax.Y - fadeH), bMax,
+                ImGui.ColorConvertFloat4ToU32(SpheneUI.ColorUtils.WithAlpha(bg, 0f)),
+                ImGui.ColorConvertFloat4ToU32(SpheneUI.ColorUtils.WithAlpha(bg, 0f)),
+                ImGui.ColorConvertFloat4ToU32(SpheneUI.ColorUtils.WithAlpha(bg, 0.85f)),
+                ImGui.ColorConvertFloat4ToU32(SpheneUI.ColorUtils.WithAlpha(bg, 0.85f)));
+            drawList.AddLine(new Vector2(bMin.X, bMax.Y), new Vector2(bMax.X, bMax.Y),
+                ImGui.ColorConvertFloat4ToU32(SpheneUI.ColorUtils.WithAlpha(accent, 0.30f)));
+            ImGui.PopClipRect();
+
+            // avatar rides half on the banner edge like the profile hero
+            var overlap = 8f * scale;
+            var avPos = new Vector2(winMin.X + pad.X, bMax.Y - overlap);
+            ImGui.SetCursorScreenPos(avPos);
+            SpheneUI.Media.Avatar(avatar, avatarSize);
+            SpheneUI.Media.PresenceDot(drawList, avPos, avatarSize, presenceColor);
+            var avatarBottom = avPos.Y + avatarSize;
+
+            var textX = winMin.X + pad.X + avatarSize + SpheneUI.Spacing.X10.Scaled;
+            ImGui.SetCursorScreenPos(new Vector2(textX, bMax.Y + SpheneUI.Spacing.X4.Scaled));
             using (ImRaii.Group())
             {
-                SpheneUI.Text.Plain(title);
+                var nameW = rightEdgeX - textX;
+                if (!string.IsNullOrWhiteSpace(meta))
+                {
+                    nameW -= ImGui.CalcTextSize(meta).X + SpheneUI.Spacing.X8.Scaled;
+                }
+                if (profile.IsNSFW)
+                {
+                    nameW -= SpheneUI.Layout.BadgeWidth("NSFW") + SpheneUI.Spacing.X8.Scaled;
+                }
+                SpheneUI.Text.Plain(SpheneUI.Text.Ellipsize(title, nameW));
                 if (!string.IsNullOrWhiteSpace(meta))
                 {
                     ImGui.SameLine(0, SpheneUI.Spacing.X8.Scaled);
@@ -984,10 +1049,10 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
                     SpheneUI.Text.MutedWrapped($"\"{profile.StatusMessage.Trim()}\"");
                 }
             }
+            var contentBottom = MathF.Max(ImGui.GetCursorScreenPos().Y, avatarBottom + SpheneUI.Spacing.X4.Scaled);
 
             if (rows.Count > 0)
             {
-                var padX = ImGui.GetStyle().WindowPadding.X;
                 var iconWidth = 0f;
                 var labelWidth = 0f;
                 for (var i = 0; i < rows.Count; i++)
@@ -999,11 +1064,13 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
                         labelWidth = MathF.Max(labelWidth, ImGui.CalcTextSize(row.Label).X);
                     }
                 }
+                labelWidth = MathF.Min(labelWidth, contentW * 0.45f);
 
-                var labelColX = padX + iconWidth + SpheneUI.Spacing.Inline.Scaled;
+                var labelColX = pad.X + iconWidth + SpheneUI.Spacing.Inline.Scaled;
                 var valueColX = labelColX + labelWidth + SpheneUI.Spacing.X10.Scaled;
+                var valueW = MathF.Max(0f, rightEdgeX - (winMin.X + valueColX));
 
-                SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.Inline);
+                ImGui.SetCursorScreenPos(new Vector2(winMin.X + pad.X, contentBottom + SpheneUI.Spacing.Inline.Scaled));
                 SpheneUI.Layout.Separator();
 
                 for (var i = 0; i < rows.Count; i++)
@@ -1013,13 +1080,13 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
                     ImGui.SameLine(labelColX);
                     if (row.Value == null)
                     {
-                        SpheneUI.Text.Colored(row.Label, row.Tint);
+                        SpheneUI.Text.Colored(SpheneUI.Text.Ellipsize(row.Label, rightEdgeX - (winMin.X + labelColX)), row.Tint);
                     }
                     else
                     {
-                        SpheneUI.Text.Muted(row.Label);
+                        SpheneUI.Text.Muted(SpheneUI.Text.Ellipsize(row.Label, labelWidth));
                         ImGui.SameLine(valueColX);
-                        SpheneUI.Text.Colored(row.Value, row.Tint);
+                        SpheneUI.Text.Colored(SpheneUI.Text.Ellipsize(row.Value, valueW), row.Tint);
                     }
                 }
             }
@@ -1146,7 +1213,8 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         
         // Adjust button positioning for grouped syncshell folders
         var buttonOffset = (_currentGroup != null && _configService.Current.GroupUpSyncshells) ? 20f : 0f;
-        float currentRightSide = actualWindowEndX - rightmostButtonSize.X - buttonOffset;
+        var rowInset = SpheneTheme.Current.CompactPairRowContentPadding;
+        float currentRightSide = actualWindowEndX - rightmostButtonSize.X - buttonOffset - rowInset;
 
         // Rightmost action button
         ImGui.SameLine(currentRightSide);

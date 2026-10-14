@@ -1586,8 +1586,12 @@ public class CompactUi : WindowMediatorSubscriberBase
                 using (ImRaii.PushId("pairlist")) DrawPairs();
                 
                 float pairlistEnd = ImGui.GetCursorPosY();
-                using (ImRaii.PushId("transfers")) DrawTransfers();
-                _transferPartHeight = ImGui.GetCursorPosY() - pairlistEnd - ImGui.GetTextLineHeight();
+                using (ImRaii.PushIndent(SpheneTheme.Current.CompactPairListContentPadding))
+                    using (ImRaii.PushId("transfers")) DrawTransfers();
+                // reserve exactly the consumed height — the trailing item
+                // spacing is dead space the list may reuse
+                _transferPartHeight = ImGui.GetCursorPosY() - pairlistEnd
+                    - ImGui.GetStyle().ItemSpacing.Y;
                 using (ImRaii.PushId("group-user-popup")) _selectPairsForGroupUi.Draw(_pairManager.DirectPairs);
                 using (ImRaii.PushId("grouping-popup")) _selectGroupForPairUi.Draw();
             }
@@ -1598,30 +1602,72 @@ public class CompactUi : WindowMediatorSubscriberBase
         {
             using (ImRaii.PushId("update-hint-footer"))
             {
-                var startY = ImGui.GetCursorPosY();
+                var hintTheme = Sphene.UI.Design.SpheneTheme.Current;
+                var accent = hintTheme.CompactUpdateHintColor;
                 var lineH = ImGui.GetTextLineHeight();
-                var h = Sphene.UI.Design.SpheneTheme.Current.CompactUpdateHintHeight;
-                var pad = Sphene.UI.Design.SpheneTheme.Current.CompactUpdateHintPaddingY;
-                var offset = Math.Max(0.0f, (h - lineH) * 0.5f);
-                ImGui.SetCursorPosY(startY + pad + offset);
-                using (var font = ImRaii.PushFont(UiBuilder.IconFont))
+                var h = MathF.Max(hintTheme.CompactUpdateHintHeight, lineH + SpheneUI.Spacing.X4.Scaled);
+                var pad = hintTheme.CompactUpdateHintPaddingY;
+                var drawList = ImGui.GetWindowDrawList();
+
+                using (ImRaii.PushIndent(hintTheme.CompactPairListContentPadding))
                 {
-                    ImGui.TextColored(Sphene.UI.Design.SpheneTheme.Current.CompactUpdateHintColor, FontAwesomeIcon.InfoCircle.ToIconString());
+                    var bandMin = ImGui.GetCursorScreenPos()
+                        + new Vector2(0f, pad);
+                    var bandW = MathF.Max(1f, SpheneUI.Controls.BoundedAvailX()
+                        - hintTheme.CompactPairListContentPadding);
+                    var bandMax = bandMin + new Vector2(bandW, h);
+                    var bandR = MathF.Min(h * 0.5f, hintTheme.CompactChildRounding);
+
+                    // whole band is the button
+                    ImGui.SetCursorScreenPos(bandMin);
+                    var clicked = ImGui.InvisibleButton("##updatehintband",
+                        new Vector2(bandW, h));
+                    var bandHover = ImGui.IsItemHovered();
+                    if (bandHover) ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
+                    if (clicked)
+                    {
+                        _logger.LogDebug("Update details button clicked, toggling UpdateNotificationUi");
+                        Mediator.Publish(new UiToggleMessage(typeof(UpdateNotificationUi)));
+                    }
+
+                    drawList.AddRectFilled(bandMin, bandMax,
+                        SpheneUI.ColorUtils.ToU32(
+                            SpheneUI.ColorUtils.WithAlpha(accent, bandHover ? 0.16f : 0.10f)), bandR);
+                    drawList.AddRect(bandMin, bandMax,
+                        SpheneUI.ColorUtils.ToU32(
+                            SpheneUI.ColorUtils.WithAlpha(accent, bandHover ? 0.45f : 0.28f)), bandR);
+
+                    var contentY = bandMin.Y + MathF.Max(0f, (h - lineH) * 0.5f);
+                    var iconX = bandMin.X + SpheneUI.Spacing.X8.Scaled;
+                    ImGui.SetCursorScreenPos(new Vector2(iconX, contentY));
+                    SpheneUI.Icons.Icon(FontAwesomeIcon.InfoCircle, accent);
+                    var iconW = SpheneUI.Icons.Size(FontAwesomeIcon.InfoCircle).X;
+
+                    var hintIconW = SpheneUI.Icons.Size(FontAwesomeIcon.Download).X;
+                    var hintTextW = ImGui.CalcTextSize("Open Details").X;
+                    var hintW = hintIconW + SpheneUI.Spacing.Inline.Scaled + hintTextW;
+
+                    var updateText = _updateBannerInfo?.LatestVersion != null
+                        ? _updateBannerInfo.IsTestBuildUpdate
+                            ? $"Testbuild update available: {_updateBannerInfo.LatestVersion}"
+                            : $"Update available: {_updateBannerInfo.LatestVersion}"
+                        : "Update available";
+
+                    var textX = iconX + iconW + SpheneUI.Spacing.Inline.Scaled;
+                    var textMaxX = bandMax.X - SpheneUI.Spacing.X8.Scaled - hintW;
+                    ImGui.SetCursorScreenPos(new Vector2(textX, contentY));
+                    SpheneUI.Text.Colored(
+                        SpheneUI.Text.Ellipsize(updateText, MathF.Max(0f, textMaxX - textX)),
+                        accent);
+
+                    var hintX = bandMax.X - SpheneUI.Spacing.X8.Scaled - hintW;
+                    ImGui.SetCursorScreenPos(new Vector2(hintX, contentY));
+                    SpheneUI.Icons.Icon(FontAwesomeIcon.Download, accent);
+                    ImGui.SameLine(0, SpheneUI.Spacing.Inline.Scaled);
+                    SpheneUI.Text.Colored("Open Details", accent);
+
+                    ImGui.SetCursorScreenPos(new Vector2(bandMin.X, bandMax.Y + pad));
                 }
-                ImGui.SameLine();
-                var updateText = _updateBannerInfo?.LatestVersion != null
-                    ? _updateBannerInfo.IsTestBuildUpdate
-                        ? $"Testbuild update available: {_updateBannerInfo.LatestVersion}"
-                        : $"Update available: {_updateBannerInfo.LatestVersion}"
-                    : "Update available";
-                SpheneUI.Text.ColoredWrapped(updateText, Sphene.UI.Design.SpheneTheme.Current.CompactUpdateHintColor);
-                ImGui.SameLine();
-                if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Download, "Open Details"))
-                {
-                    _logger.LogDebug("Update details button clicked, toggling UpdateNotificationUi");
-                    Mediator.Publish(new UiToggleMessage(typeof(UpdateNotificationUi)));
-                }
-                ImGui.SetCursorPosY(startY + h + pad * 2);
             }
         }
         
@@ -1730,11 +1776,13 @@ public class CompactUi : WindowMediatorSubscriberBase
                 - footerReserved
                 - (footerReserved > 0f ? style.WindowPadding.Y : 0f));
 
-        // The list content follows the panel window padding like everything
-        // else; fades and separators use their own edge padding instead.
-        var xSize = ImGui.GetContentRegionAvail().X;
+        // The list content insets by the configured horizontal padding: the
+        // child stops short on the right so button docks gain a real margin,
+        // and the indent carries the left side.
+        var listPadX = SpheneTheme.Current.CompactPairListContentPadding;
+        var xSize = MathF.Max(1f, ImGui.GetContentRegionAvail().X - listPadX);
         if (SpheneUI.Layout.BeginScrollArea("list", new Vector2(xSize, ySize),
-                noPadding: true, contentInset: 0f))
+                noPadding: true, contentInset: listPadX))
         {
             foreach (var item in _drawFolders)
             {
@@ -1945,37 +1993,29 @@ public class CompactUi : WindowMediatorSubscriberBase
         // Only show upload progress if there are active uploads
         if (currentUploads.Any())
         {
-            ImGui.AlignTextToFramePadding();
-            SpheneUI.Icons.Icon(FontAwesomeIcon.Upload);
-            ImGui.SameLine(35 * ImGuiHelpers.GlobalScale);
-            
             var totalUploads = currentUploads.Count;
             var doneUploads = currentUploads.Count(c => c.IsTransferred);
             var totalUploaded = currentUploads.Sum(c => c.Transferred);
             var totalToUpload = currentUploads.Sum(c => c.Total);
-            
+
             var uploadProgress = totalToUpload > 0 ? (float)totalUploaded / totalToUpload : 0f;
             var uploadText = $"{doneUploads}/{totalUploads} ({UiSharedService.ByteToString(totalUploaded)}/{UiSharedService.ByteToString(totalToUpload)})";
-            
-            SpheneUI.Controls.TransmissionBar("Transmitting", uploadProgress, uploadText, true);
+
+            DrawTransferRow(FontAwesomeIcon.Upload, "Transmitting", uploadProgress, uploadText, true);
         }
 
         // Only show download progress if there are active downloads
         if (currentDownloads.Any())
         {
-            ImGui.AlignTextToFramePadding();
-            SpheneUI.Icons.Icon(FontAwesomeIcon.Download);
-            ImGui.SameLine(35 * ImGuiHelpers.GlobalScale);
-            
             var totalDownloads = currentDownloads.Sum(c => c.TotalFiles);
             var doneDownloads = currentDownloads.Sum(c => c.TransferredFiles);
             var totalDownloaded = currentDownloads.Sum(c => c.TransferredBytes);
             var totalToDownload = currentDownloads.Sum(c => c.TotalBytes);
-            
+
             var downloadProgress = totalToDownload > 0 ? (float)totalDownloaded / totalToDownload : 0f;
             var downloadText = $"{doneDownloads}/{totalDownloads} ({UiSharedService.ByteToString(totalDownloaded)}/{UiSharedService.ByteToString(totalToDownload)})";
-            
-            SpheneUI.Controls.TransmissionBar("Receiving", downloadProgress, downloadText, false);
+
+            DrawTransferRow(FontAwesomeIcon.Download, "Receiving", downloadProgress, downloadText, false);
         }
 
         // Show transmission preview in-place when enabled
@@ -1984,22 +2024,57 @@ public class CompactUi : WindowMediatorSubscriberBase
         {
             if (!currentUploads.Any())
             {
-                ImGui.AlignTextToFramePadding();
-                SpheneUI.Icons.Icon(FontAwesomeIcon.Upload);
-                ImGui.SameLine(35 * ImGuiHelpers.GlobalScale);
                 var previewUpload = theme.TransmissionPreviewUploadFill / 100.0f;
-                SpheneUI.Controls.TransmissionBar("Transmitting", previewUpload, $"{theme.TransmissionPreviewUploadFill:F1}%", true);
+                DrawTransferRow(FontAwesomeIcon.Upload, "Transmitting", previewUpload,
+                    $"{theme.TransmissionPreviewUploadFill:F1}%", true);
             }
 
             if (!currentDownloads.Any())
             {
-                ImGui.AlignTextToFramePadding();
-                SpheneUI.Icons.Icon(FontAwesomeIcon.Download);
-                ImGui.SameLine(35 * ImGuiHelpers.GlobalScale);
                 var previewDownload = theme.TransmissionPreviewDownloadFill / 100.0f;
-                SpheneUI.Controls.TransmissionBar("Receiving", previewDownload, $"{theme.TransmissionPreviewDownloadFill:F1}%", false);
+                DrawTransferRow(FontAwesomeIcon.Download, "Receiving", previewDownload,
+                    $"{theme.TransmissionPreviewDownloadFill:F1}%", false);
+            }
         }
-        }
+    }
+
+    private static void DrawTransferRow(FontAwesomeIcon icon, string label,
+        float progress, string detail, bool isUpload)
+    {
+        var theme = Sphene.UI.Design.SpheneTheme.Current;
+        var barH = theme.SeparateTransmissionBarStyles
+            ? (isUpload ? theme.UploadTransmissionBarHeight : theme.DownloadTransmissionBarHeight)
+            : theme.CompactTransmissionBarHeight;
+        var lineH = ImGui.GetTextLineHeight();
+        progress = Math.Clamp(progress, 0f, 1f);
+
+        // label line: icon + label left, percentage right-aligned
+        SpheneUI.Icons.Icon(icon, theme.CompactTextSecondary);
+        ImGui.SameLine(0, SpheneUI.Spacing.Inline.Scaled);
+        SpheneUI.Text.Colored(label, theme.CompactText);
+        var pct = $"{progress * 100f:F0}%";
+        var pctW = ImGui.CalcTextSize(pct).X;
+        // Indent only pulls the left edge in — subtract the list padding again
+        // for the right bound so the bar aligns with pair rows
+        var availX = SpheneUI.Controls.BoundedAvailX()
+            - theme.CompactPairListContentPadding;
+        var lineRight = ImGui.GetCursorPosX() + availX;
+        ImGui.SameLine(MathF.Max(ImGui.GetCursorPosX() + SpheneUI.Spacing.X4.Scaled,
+            lineRight - pctW));
+        SpheneUI.Text.Muted(pct);
+
+        var barW = theme.AutoTransmissionBarWidth
+            ? MathF.Max(50f, availX)
+            : MathF.Min(theme.CompactTransmissionBarWidth, availX);
+        var barSize = new Vector2(barW, MathF.Max(2f, barH));
+        var barPos = ImGui.GetCursorScreenPos();
+        var overlay = barH >= lineH ? $"{detail} · {pct}" : null;
+
+        ImGui.Dummy(barSize);
+        if (overlay == null)
+            SpheneUI.AttachTooltip($"{label}: {detail} — {pct}");
+        ImGui.SetCursorScreenPos(barPos);
+        SpheneUI.Controls.TransmissionBar(progress, barSize, overlay, isUpload);
     }
 
     

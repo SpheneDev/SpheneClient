@@ -136,18 +136,27 @@ public sealed record GposeLobbyUserData(UserData UserData)
         if (WorldData == null)
         {
             WorldDataDescriptor = "No World Data found";
+            return;
         }
 
-        var worldData = WorldData!.Value;
+        var worldData = WorldData.Value;
+        if (!dalamudUtilService.MapData.Value.TryGetValue(worldData.LocationInfo.MapId, out var mapData))
+        {
+            WorldDataDescriptor = "Unknown map";
+            return;
+        }
+
+        Map = mapData.Map;
         MapCoordinates = await dalamudUtilService.RunOnFrameworkThread(() =>
-                MapUtil.WorldToMap(new Vector2(worldData.PositionX, worldData.PositionY), dalamudUtilService.MapData.Value[worldData.LocationInfo.MapId].Map))
+                MapUtil.WorldToMap(new Vector2(worldData.PositionX, worldData.PositionY), mapData.Map))
             .ConfigureAwait(false);
-        Map = dalamudUtilService.MapData.Value[worldData.LocationInfo.MapId].Map;
 
         StringBuilder sb = new();
-        sb.AppendLine("Server: " + dalamudUtilService.WorldData.Value[(ushort)worldData.LocationInfo.ServerId]);
-        sb.AppendLine("Territory: " + dalamudUtilService.TerritoryData.Value[worldData.LocationInfo.TerritoryId]);
-        sb.AppendLine("Map: " + dalamudUtilService.MapData.Value[worldData.LocationInfo.MapId].MapName);
+        sb.AppendLine("Server: " + (dalamudUtilService.WorldData.Value.TryGetValue((ushort)worldData.LocationInfo.ServerId, out var serverName)
+            ? serverName : worldData.LocationInfo.ServerId.ToString(CultureInfo.InvariantCulture)));
+        sb.AppendLine("Territory: " + (dalamudUtilService.TerritoryData.Value.TryGetValue(worldData.LocationInfo.TerritoryId, out var territoryName)
+            ? territoryName : worldData.LocationInfo.TerritoryId.ToString(CultureInfo.InvariantCulture)));
+        sb.AppendLine("Map: " + mapData.MapName);
 
         if (worldData.LocationInfo.WardId != 0)
             sb.AppendLine("Ward #: " + worldData.LocationInfo.WardId);

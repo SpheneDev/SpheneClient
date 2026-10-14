@@ -39,62 +39,7 @@ public class DrawFolderTag : DrawFolderBase
 
     protected override bool RenderMenu => false; // We'll draw the menu manually in DrawRightSide
 
-    public override void Draw()
-    {
-        if (!RenderIfEmpty && !DrawPairs.Any()) return;
-
-        using var id = ImRaii.PushId("folder_" + _id);
-        var folderWidth = FolderWidth + 38.0f;
-        using (ImRaii.Child("folder__" + _id, new System.Numerics.Vector2(folderWidth, ImGui.GetFrameHeight()), false, ImGuiWindowFlags.NoScrollbar))
-        {
-            
-            // draw opener
-            var icon = _tagHandler.IsTagOpen(_id) ? FontAwesomeIcon.CaretDown : FontAwesomeIcon.CaretRight;
-
-            ImGui.AlignTextToFramePadding();
-
-            SpheneUI.Icons.Icon(icon);
-            if (ImGui.IsItemClicked())
-            {
-                _tagHandler.SetTagOpen(_id, !_tagHandler.IsTagOpen(_id));
-            }
-
-            ImGui.SameLine();
-            var leftSideEnd = DrawIcon();
-
-            ImGui.SameLine();
-            var rightSideStart = DrawRightSideInternal();
-
-            // draw name
-            ImGui.SameLine(leftSideEnd);
-            DrawName(rightSideStart - leftSideEnd);
-        }
-
-        SpheneUI.Layout.ScrollAreaSeparator(
-            SpheneTheme.Current.CompactPairListSeparatorPadding);
-
-        // if opened draw content
-        if (_tagHandler.IsTagOpen(_id))
-        {
-            var baseIndent = SpheneUI.Icons.Size(FontAwesomeIcon.EllipsisV).X + ImGui.GetStyle().ItemSpacing.X;
-            var indentAmount = baseIndent;
-            using var indent = ImRaii.PushIndent(indentAmount, false);
-            if (DrawPairs.Any())
-            {
-                foreach (var item in DrawPairs)
-                {
-                    item.DrawPairedClient();
-                }
-            }
-            else
-            {
-                SpheneUI.Text.Plain("No users (online)");
-            }
-
-            SpheneUI.Layout.ScrollAreaSeparator(
-                SpheneTheme.Current.CompactPairListSeparatorPadding);
-        }
-    }
+    protected override bool ShowCountBadge => RenderCount;
 
     private bool RenderPause => _id switch
     {
@@ -136,18 +81,6 @@ public class DrawFolderTag : DrawFolderBase
 
         ImGui.AlignTextToFramePadding();
         SpheneUI.Icons.Icon(icon);
-
-        if (RenderCount)
-        {
-            using (ImRaii.PushStyle(ImGuiStyleVar.ItemSpacing, ImGui.GetStyle().ItemSpacing with { X = ImGui.GetStyle().ItemSpacing.X / 2f }))
-            {
-                ImGui.SameLine();
-                ImGui.AlignTextToFramePadding();
-
-                SpheneUI.Text.Plain("[" + OnlinePairs.ToString() + "]");
-            }
-            SpheneUI.AttachTooltip(OnlinePairs + " online" + Environment.NewLine + TotalPairs + " total");
-        }
         ImGui.SameLine();
         return ImGui.GetCursorPosX();
     }

@@ -682,8 +682,7 @@ primitives:
 - `Fx.HoverT(id, hovered, speed)` — eased 0..1 hover progress per widget id
   (`ImGui.GetID` with the widget label), smoothstepped ramp in/out.
 - `Fx.HoverRow(drawList, min, max, accent, t, radius)` — standard hover
-  treatment: tinted fill + accent border fading in plus an accent edge bar
-  growing out of the left edge.
+  treatment: tinted fill + accent border fading in.
 - `Fx.Sheen(drawList, min, max, phase, bandWidth, tint)` — clipped
   traveling light band; cycle `phase = (time * speed) % 1.5` for a sweep
   with a rest interval (phases outside 0..1 draw nothing).
@@ -701,12 +700,14 @@ owner's** chosen effects — not the viewer's settings:
   call. A flags-taking overload (`ProfileRowFx hover, ProfileRowFx idle`)
   serves ad-hoc surfaces like the style preview strip.
 - `ProfileRowFx` (Services, `[Flags]`) — every set bit draws one layer,
-  so owners stack effects freely: hover mask `Glow` (edge bar + fill),
-  `Sheen` (traveling light band), `Pulse` (fast breathing accent border),
-  `Sweep` (accent comet orbiting the border), `Lift` (drop shadow + top
-  edge highlight); idle mask `EdgeBar` (static accent edge), `Tint`
-  (subtle accent gradient), `Pulse` (slow breathing border), `Sparkle`
-  (twinkling accent sparks), `Wave` (continuous slow luminance drift).
+  so owners stack effects freely: hover mask `Glow` (fill + accent
+  border), `Sheen` (traveling light band), `Pulse` (fast breathing accent
+  border), `Sweep` (accent comet orbiting the border), `Lift` (drop shadow
+  + top edge highlight); idle mask `Tint` (subtle accent gradient),
+  `Pulse` (slow breathing border), `Sparkle` (twinkling accent sparks),
+  `Wave` (continuous slow luminance drift). The retired `EdgeBar` bit
+  stays in the enum so stored themes still parse — masks strip it and
+  nothing draws it.
   `HoverMask`/`IdleMask` bound what editors offer; rendering masks
   defensively too.
 - `SpheneProfileTheme` serializes the picks alongside the colors:

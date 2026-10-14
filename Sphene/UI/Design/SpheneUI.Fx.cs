@@ -33,9 +33,9 @@ public static partial class SpheneUI
 
         /// <summary>
         /// Standard row/card hover treatment driven by <see cref="HoverT"/>:
-        /// a light fill and accent border that fade in, plus an accent edge bar
-        /// that grows out of the left edge — personal accent colors make this
-        /// read as "their" color when used on friend/character rows.
+        /// a light fill and accent border that fade in — personal accent
+        /// colors make this read as "their" color when used on
+        /// friend/character rows.
         /// </summary>
         public static void HoverRow(ImDrawListPtr drawList, Vector2 min, Vector2 max,
             Vector4 accent, float t, float radius,
@@ -45,17 +45,6 @@ public static partial class SpheneUI
                 ColorUtils.ToU32(ColorUtils.WithAlpha(Vector4.One, 0.025f + 0.045f * t)), radius, corners);
             drawList.AddRect(min, max,
                 ColorUtils.ToU32(ColorUtils.WithAlpha(accent, 0.05f + 0.24f * t)), radius, corners);
-            if (t > 0.001f)
-            {
-                var edgeW = 3f * Scale;
-                var edgeH = (max.Y - min.Y - radius) * t;
-                var edgeMin = new Vector2(min.X + 1.5f * Scale,
-                    min.Y + (max.Y - min.Y - edgeH) * 0.5f);
-                drawList.PushClipRect(min, max, true);
-                drawList.AddRectFilled(edgeMin, edgeMin + new Vector2(edgeW, edgeH),
-                    ColorUtils.ToU32(ColorUtils.WithAlpha(accent, 0.85f * t)), edgeW * 0.5f);
-                drawList.PopClipRect();
-            }
         }
 
         /// <summary>

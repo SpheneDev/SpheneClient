@@ -7,6 +7,7 @@ using Sphene.Services.CharaData.Models;
 using Sphene.Services.Mediator;
 using Sphene.WebAPI;
 using Microsoft.Extensions.Logging;
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.Numerics;
 using System.Text.Json.Nodes;
@@ -21,7 +22,7 @@ public class CharaDataGposeTogetherManager : DisposableMediatorSubscriberBase
     private readonly CharaDataFileHandler _charaDataFileHandler;
     private readonly CharaDataManager _charaDataManager;
     private readonly DalamudUtilService _dalamudUtil;
-    private readonly Dictionary<string, GposeLobbyUserData> _usersInLobby = [];
+    private readonly ConcurrentDictionary<string, GposeLobbyUserData> _usersInLobby = [];
     private readonly VfxSpawnManager _vfxSpawnManager;
     private (CharacterData ApiData, CharaDataDownloadDto Dto)? _lastCreatedCharaData;
     private PoseData? _lastDeltaPoseData;
@@ -99,7 +100,7 @@ public class CharaDataGposeTogetherManager : DisposableMediatorSubscriberBase
 
     public (bool SameMap, bool SameServer, bool SameEverything) IsOnSameMapAndServer(GposeLobbyUserData data)
     {
-        return (data.Map.RowId == _lastWorldData?.LocationInfo.MapId, data.WorldData?.LocationInfo.ServerId == _lastWorldData?.LocationInfo.ServerId, data.WorldData?.LocationInfo == _lastWorldData?.LocationInfo);
+        return (data.WorldData?.LocationInfo.MapId == _lastWorldData?.LocationInfo.MapId, data.WorldData?.LocationInfo.ServerId == _lastWorldData?.LocationInfo.ServerId, data.WorldData?.LocationInfo == _lastWorldData?.LocationInfo);
     }
 
     public async Task PushCharacterDownloadDto()
@@ -465,37 +466,13 @@ public class CharaDataGposeTogetherManager : DisposableMediatorSubscriberBase
 
                 foreach (var entry in _usersInLobby)
                 {
-                    if (!entry.Value.HasWorldDataUpdate || _dalamudUtil.IsInGpose || entry.Value.WorldData == null) continue;
-
-                    var entryWorldData = entry.Value.WorldData!.Value;
-
-                    if (worldData.LocationInfo.MapId == entryWorldData.LocationInfo.MapId && worldData.LocationInfo.DivisionId == entryWorldData.LocationInfo.DivisionId
-                        && (worldData.LocationInfo.HouseId != entryWorldData.LocationInfo.HouseId
-                        || worldData.LocationInfo.WardId != entryWorldData.LocationInfo.WardId
-                        || entryWorldData.LocationInfo.ServerId != worldData.LocationInfo.ServerId))
+                    try
                     {
-                        if (entry.Value.SpawnedVfxId == null)
-                        {
-                            // spawn if it doesn't exist yet
-                            entry.Value.LastWorldPosition = new Vector3(entryWorldData.PositionX, entryWorldData.PositionY, entryWorldData.PositionZ);
-                            entry.Value.SpawnedVfxId = await _dalamudUtil.RunOnFrameworkThread(() => _vfxSpawnManager.SpawnObject(entry.Value.LastWorldPosition.Value,
-                                Quaternion.Identity, Vector3.One, 0.5f, 0.1f, 0.5f, 0.9f)).ConfigureAwait(false);
-                        }
-                        else
-                        {
-                            // move object via lerp if it does exist
-                            var newPosition = new Vector3(entryWorldData.PositionX, entryWorldData.PositionY, entryWorldData.PositionZ);
-                            if (newPosition != entry.Value.LastWorldPosition)
-                            {
-                                entry.Value.UpdateStart = DateTime.UtcNow;
-                                entry.Value.TargetWorldPosition = newPosition;
-                            }
-                        }
+                        await UpdateLobbyUserWorldVfx(entry.Value, worldData).ConfigureAwait(false);
                     }
-                    else
+                    catch (Exception ex) when (ex is not OperationCanceledException)
                     {
-                        await _dalamudUtil.RunOnFrameworkThread(() => _vfxSpawnManager.DespawnObject(entry.Value.SpawnedVfxId)).ConfigureAwait(false);
-                        entry.Value.SpawnedVfxId = null;
+                        Logger.LogWarning(ex, "World VFX update failed for lobby user {user}", entry.Key);
                     }
                 }
             }
@@ -507,6 +484,46 @@ public class CharaDataGposeTogetherManager : DisposableMediatorSubscriberBase
             {
                 Logger.LogWarning(ex, "Error during World Data Generation");
             }
+        }
+    }
+
+    /// <summary>
+    /// Spawns or moves the overworld wisp for a lobby user whose world data changed.
+    /// Users on the same map but in a different instance (server, ward or housing) get a
+    /// floating wisp at their position; users in the same instance or off-map lose it.
+    /// </summary>
+    private async Task UpdateLobbyUserWorldVfx(GposeLobbyUserData user, WorldData worldData)
+    {
+        if (!user.HasWorldDataUpdate || _dalamudUtil.IsInGpose || user.WorldData == null) return;
+
+        var entryWorldData = user.WorldData.Value;
+
+        if (worldData.LocationInfo.MapId == entryWorldData.LocationInfo.MapId && worldData.LocationInfo.DivisionId == entryWorldData.LocationInfo.DivisionId
+            && (worldData.LocationInfo.HouseId != entryWorldData.LocationInfo.HouseId
+            || worldData.LocationInfo.WardId != entryWorldData.LocationInfo.WardId
+            || entryWorldData.LocationInfo.ServerId != worldData.LocationInfo.ServerId))
+        {
+            if (user.SpawnedVfxId == null)
+            {
+                var spawnPosition = new Vector3(entryWorldData.PositionX, entryWorldData.PositionY, entryWorldData.PositionZ);
+                user.LastWorldPosition = spawnPosition;
+                user.SpawnedVfxId = await _dalamudUtil.RunOnFrameworkThread(() => _vfxSpawnManager.SpawnObject(spawnPosition,
+                    Quaternion.Identity, Vector3.One, 0.5f, 0.1f, 0.5f, 0.9f)).ConfigureAwait(false);
+            }
+            else
+            {
+                var newPosition = new Vector3(entryWorldData.PositionX, entryWorldData.PositionY, entryWorldData.PositionZ);
+                if (newPosition != user.LastWorldPosition)
+                {
+                    user.UpdateStart = DateTime.UtcNow;
+                    user.TargetWorldPosition = newPosition;
+                }
+            }
+        }
+        else
+        {
+            await _dalamudUtil.RunOnFrameworkThread(() => _vfxSpawnManager.DespawnObject(user.SpawnedVfxId)).ConfigureAwait(false);
+            user.SpawnedVfxId = null;
         }
     }
 
@@ -678,8 +695,11 @@ public class CharaDataGposeTogetherManager : DisposableMediatorSubscriberBase
 
     private void OnReceiveWorldData(UserData userData, WorldData worldData)
     {
-        _usersInLobby[userData.UID].WorldData = worldData;
-        _ = _usersInLobby[userData.UID].SetWorldDataDescriptor(_dalamudUtil);
+        if (!_usersInLobby.TryGetValue(userData.UID, out var lobbyData))
+            return;
+
+        lobbyData.WorldData = worldData;
+        _ = lobbyData.SetWorldDataDescriptor(_dalamudUtil);
     }
 
     private void OnUserJoinLobby(UserData userData)
@@ -692,7 +712,7 @@ public class CharaDataGposeTogetherManager : DisposableMediatorSubscriberBase
 
     private void OnUserLeaveLobby(UserData msg)
     {
-        _usersInLobby.Remove(msg.UID, out var existingData);
+        _usersInLobby.TryRemove(msg.UID, out var existingData);
         if (existingData != default)
         {
             _ = _dalamudUtil.RunOnFrameworkThread(() => _vfxSpawnManager.DespawnObject(existingData.SpawnedVfxId));

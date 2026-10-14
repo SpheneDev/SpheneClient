@@ -49,7 +49,7 @@ public class DrawFolderGroup : DrawFolderBase
     private bool IsPinned => _groupFullInfoDto.GroupUserInfo.IsPinned();
 
     // Override OnlinePairs to show total online users in syncshell, including visible pairs
-    public new int OnlinePairs
+    public override int OnlinePairs
     {
         get
         {
@@ -90,7 +90,7 @@ public class DrawFolderGroup : DrawFolderBase
     }
 
     // Override TotalPairs to show total users (visible pairs + syncshell members)
-    public new int TotalPairs
+    public override int TotalPairs
     {
         get
         {
@@ -115,68 +115,16 @@ public class DrawFolderGroup : DrawFolderBase
         }
     }
 
-    public override void Draw()
+    protected override void DrawEmptyFolderMessage()
     {
-        if (!RenderIfEmpty && !DrawPairs.Any()) return;
-
-        using var id = ImRaii.PushId("folder_" + _id);
-        var folderWidth = FolderWidth + 0.0f;
-        using (ImRaii.Child("folder__" + _id, new System.Numerics.Vector2(folderWidth, ImGui.GetFrameHeight()), false, ImGuiWindowFlags.NoScrollbar))
+        // more informative empty state for syncshells
+        if (TotalPairs > 0)
         {
-            
-            // draw opener
-            var icon = _tagHandler.IsTagOpen(_id) ? FontAwesomeIcon.CaretDown : FontAwesomeIcon.CaretRight;
-
-            ImGui.AlignTextToFramePadding();
-
-            SpheneUI.Icons.Icon(icon);
-            if (ImGui.IsItemClicked())
-            {
-                _tagHandler.SetTagOpen(_id, !_tagHandler.IsTagOpen(_id));
-            }
-
-            ImGui.SameLine();
-            var leftSideEnd = DrawIcon();
-
-            ImGui.SameLine();
-            var rightSideStart = DrawRightSideInternal();
-
-            // draw name
-            ImGui.SameLine(leftSideEnd);
-            DrawName(rightSideStart - leftSideEnd);
+            SpheneUI.Text.Muted($"No visible users ({OnlinePairs} online, {TotalPairs} total)");
         }
-
-        SpheneUI.Layout.ScrollAreaSeparator(
-            SpheneTheme.Current.CompactPairListSeparatorPadding);
-
-        // if opened draw content
-        if (_tagHandler.IsTagOpen(_id))
+        else
         {
-            var baseIndent = SpheneUI.Icons.Size(FontAwesomeIcon.EllipsisV).X + ImGui.GetStyle().ItemSpacing.X;
-            var indentAmount = baseIndent;
-            using var indent = ImRaii.PushIndent(indentAmount, false);
-            if (DrawPairs.Any())
-            {
-                foreach (var item in DrawPairs)
-                {
-                    item.DrawPairedClient();
-                }
-            }
-            else
-            {
-                // Show more informative message for syncshells
-                if (TotalPairs > 0)
-                {
-                    SpheneUI.Text.Plain($"No visible users ({OnlinePairs} online, {TotalPairs} total)");
-                }
-                else
-                {
-                    SpheneUI.Text.Plain("No users in syncshell");
-                }
-            }
-
-            SpheneUI.Layout.ScrollAreaSeparator(
-                SpheneTheme.Current.CompactPairListSeparatorPadding);
+            SpheneUI.Text.Muted("No users in syncshell");
         }
     }
 
@@ -218,15 +166,6 @@ public class DrawFolderGroup : DrawFolderBase
                 SpheneUI.AttachTooltip("Syncshell " + _groupFullInfoDto.GroupAliasOrGID + " is closed for invites");
             }
         }
-
-        using (ImRaii.PushStyle(ImGuiStyleVar.ItemSpacing, ImGui.GetStyle().ItemSpacing with { X = ImGui.GetStyle().ItemSpacing.X / 2f }))
-        {
-            ImGui.SameLine();
-            ImGui.AlignTextToFramePadding();
-
-            SpheneUI.Text.Plain("[" + OnlinePairs.ToString() + "]");
-        }
-        SpheneUI.AttachTooltip(OnlinePairs + " online" + Environment.NewLine + TotalPairs + " total");
 
         ImGui.SameLine();
         if (IsOwner)

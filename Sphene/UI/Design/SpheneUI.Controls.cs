@@ -1124,6 +1124,11 @@ public static partial class SpheneUI
         public static bool SmallButton(string label)
             => SegCore(label, label, null, null, Colors.Accent);
 
+        /// <summary>Rendered width of a <see cref="SmallButton"/> — zone plus
+        /// label padding, for callers that dock the button to a bound.</summary>
+        public static float SmallButtonWidth(string label)
+            => SegAutoWidth(label, null, ImGui.GetFrameHeight());
+
         /// <summary>
         /// Prominent call-to-action button: custom accent color, centered
         /// FontAwesome icon plus display-font label across the given rect.

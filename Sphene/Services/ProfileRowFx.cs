@@ -3,7 +3,7 @@ namespace Sphene.Services;
 /// <summary>
 /// Combinable list-row effects a profile owner picks for what viewers see.
 /// Effect subsets: hover offers Glow/Sheen/Pulse/Sweep/Lift, idle offers
-/// EdgeBar/Tint/Pulse/Sparkle/Wave — editors mask to the relevant subset via
+/// Tint/Pulse/Sparkle/Wave — editors mask to the relevant subset via
 /// <see cref="HoverMask"/>/<see cref="IdleMask"/>; bits stack independently.
 /// </summary>
 [Flags]
@@ -20,7 +20,8 @@ public enum ProfileRowFx
     Sweep = 1 << 3,
     /// <summary>Row lifts: soft drop shadow below plus a top edge highlight.</summary>
     Lift = 1 << 4,
-    /// <summary>Static accent bar on the row's left edge.</summary>
+    /// <summary>Removed left-edge accent bar — bit stays reserved so stored
+    /// themes still parse, but no layer draws it and masks strip it.</summary>
     EdgeBar = 1 << 5,
     /// <summary>Subtle accent gradient wash across the row.</summary>
     Tint = 1 << 6,
@@ -32,5 +33,5 @@ public enum ProfileRowFx
     /// <summary>Bits editors may offer for the hover layer.</summary>
     HoverMask = Glow | Sheen | Pulse | Sweep | Lift,
     /// <summary>Bits editors may offer for the idle layer.</summary>
-    IdleMask = EdgeBar | Tint | Pulse | Sparkle | Wave,
+    IdleMask = Tint | Pulse | Sparkle | Wave,
 }

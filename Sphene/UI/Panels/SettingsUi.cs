@@ -4769,6 +4769,20 @@ public class SettingsUi : WindowMediatorSubscriberBase
             themeChanged = true;
         }
 
+        var compactPairListContentPadding = theme.CompactPairListContentPadding;
+        if (SpheneUI.Controls.SliderFloat("Pair List Content Padding", ref compactPairListContentPadding, 0.0f, 24.0f, "%.1f"))
+        {
+            theme.CompactPairListContentPadding = compactPairListContentPadding;
+            themeChanged = true;
+        }
+
+        var compactPairRowContentPadding = theme.CompactPairRowContentPadding;
+        if (SpheneUI.Controls.SliderFloat("Pair Row Content Padding", ref compactPairRowContentPadding, 0.0f, 16.0f, "%.1f"))
+        {
+            theme.CompactPairRowContentPadding = compactPairRowContentPadding;
+            themeChanged = true;
+        }
+
         var compactFramePadding = theme.CompactFramePadding;
         if (SpheneUI.Controls.SliderFloat2("Control Inner Padding", ref compactFramePadding, 0.0f, 16.0f, "%.1f"))
         {
@@ -4814,6 +4828,14 @@ public class SettingsUi : WindowMediatorSubscriberBase
             theme.CompactChildRounding = compactChildRounding;
             themeChanged = true;
         }
+
+        var compactPairRowRounding = theme.CompactPairRowRounding;
+        if (SpheneUI.Controls.SliderFloat("Pair Row Rounding", ref compactPairRowRounding, -1.0f, 30.0f, "%.1f"))
+        {
+            theme.CompactPairRowRounding = compactPairRowRounding;
+            themeChanged = true;
+        }
+        SpheneUI.AttachTooltip("Corner radius of pair list rows. -1 follows Child Surface Rounding.");
 
         var compactChildBorderSize = theme.CompactChildBorderSize;
         if (SpheneUI.Controls.SliderFloat("Child Surface Border Size", ref compactChildBorderSize, 0.0f, 5.0f, "%.1f"))
@@ -4919,6 +4941,12 @@ public class SettingsUi : WindowMediatorSubscriberBase
         if (SpheneUI.Controls.ColorEdit("Hover Highlight", ref compactHover))
         {
             theme.CompactHover = compactHover;
+            themeChanged = true;
+        }
+        var compactPairRowHover = theme.CompactPairRowHover;
+        if (SpheneUI.Controls.ColorEdit("Pair Row Hover", ref compactPairRowHover))
+        {
+            theme.CompactPairRowHover = compactPairRowHover;
             themeChanged = true;
         }
         var compactActive = theme.CompactActive;

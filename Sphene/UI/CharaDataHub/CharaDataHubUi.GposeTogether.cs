@@ -216,7 +216,12 @@ internal sealed partial class CharaDataHubUi
                     _ = _charaDataGposeTogetherManager.ApplyCharaData(user);
                 }
             }
-            SpheneUI.AttachTooltip("Apply newly received character data to the assigned actor." + SpheneUI.TooltipSeparator + "Grayed out when there is nothing new to apply.");
+            var applyDisabledReason = !_uiSharedService.IsInGpose ? "You are not in GPose."
+                : user.CharaData == null ? "The user has not sent character data yet."
+                : user.Address == nint.Zero ? "No actor is assigned to this user."
+                : null;
+            SpheneUI.AttachTooltip("Apply newly received character data to the assigned actor."
+                + (applyDisabledReason != null ? SpheneUI.TooltipSeparator + "Disabled: " + applyDisabledReason : string.Empty));
             ImGui.SameLine();
             using (ImRaii.Disabled(!_uiSharedService.IsInGpose || user.CharaData == null || sameMapAndServer.SameEverything))
             {
@@ -225,8 +230,12 @@ internal sealed partial class CharaDataHubUi
                     _ = _charaDataGposeTogetherManager.SpawnAndApplyData(user);
                 }
             }
-            SpheneUI.AttachTooltip("Spawn a new actor, apply character data and assign it to this user." + SpheneUI.TooltipSeparator +
-                "Grayed out when the user has sent no data, or you are already on the same map, server and instance — then join a group and assign instead.");
+            var spawnDisabledReason = !_uiSharedService.IsInGpose ? "You are not in GPose."
+                : user.CharaData == null ? "The user has not sent character data yet."
+                : sameMapAndServer.SameEverything ? "You are on the same map, server and instance — assign a character instead."
+                : null;
+            SpheneUI.AttachTooltip("Spawn a new actor, apply character data and assign it to this user."
+                + (spawnDisabledReason != null ? SpheneUI.TooltipSeparator + "Disabled: " + spawnDisabledReason : string.Empty));
 
             // Line 2: actor assignment.
             using (ImRaii.Disabled(!_uiSharedService.IsInGpose))

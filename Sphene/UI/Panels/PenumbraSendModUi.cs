@@ -572,7 +572,8 @@ public class PenumbraSendModUi : WindowMediatorSubscriberBase
         if (actionLabel != null && onAction != null)
         {
             ImGui.SameLine();
-            SpheneUI.Controls.DockToCardEdge(ImGui.CalcTextSize(actionLabel).X);
+            SpheneUI.Controls.DockToCardEdge(
+                SpheneUI.Controls.SmallButtonWidth(actionLabel));
             if (SpheneUI.Controls.SmallButton(actionLabel))
             {
                 onAction();

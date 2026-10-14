@@ -971,16 +971,6 @@ public static partial class SpheneUI
                 Fx.Sheen(drawList, min, max, (float)((time * 0.16) % 1.35),
                     90f * scale, ColorUtils.WithAlpha(accent, 0.05f), radius, corners);
             }
-            if (idle.HasFlag(ProfileRowFx.EdgeBar))
-            {
-                var edgeW = 3f * scale;
-                drawList.PushClipRect(min, max, true);
-                drawList.AddRectFilled(
-                    new Vector2(min.X + 1.5f * scale, min.Y + radius * 0.5f),
-                    new Vector2(min.X + 1.5f * scale + edgeW, max.Y - radius * 0.5f),
-                    ColorUtils.ToU32(ColorUtils.WithAlpha(accent, 0.30f)), edgeW * 0.5f);
-                drawList.PopClipRect();
-            }
             if (idle.HasFlag(ProfileRowFx.Sparkle))
             {
                 FxSparkle(drawList, min, max, accent, time, scale);
@@ -1126,7 +1116,7 @@ public static partial class SpheneUI
         [
             (ProfileRowFx.Glow, "Glow"), (ProfileRowFx.Sheen, "Sheen"),
             (ProfileRowFx.Pulse, "Pulse"), (ProfileRowFx.Sweep, "Sweep"),
-            (ProfileRowFx.Lift, "Lift"), (ProfileRowFx.EdgeBar, "Edge bar"),
+            (ProfileRowFx.Lift, "Lift"),
             (ProfileRowFx.Tint, "Tint"), (ProfileRowFx.Sparkle, "Sparkle"),
             (ProfileRowFx.Wave, "Wave"),
         ];

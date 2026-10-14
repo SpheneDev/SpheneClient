@@ -40,6 +40,14 @@ public class ThemeConfiguration
     public Vector2 CompactCellPadding { get; set; } = new(4.0f, 2.0f);
     public Vector2 CompactChildPadding { get; set; } = new(8.0f, 8.0f);
     public float CompactPairListSeparatorPadding { get; set; } = 0.0f;
+    public float CompactPairListContentPadding { get; set; } = 8.0f;
+    // Horizontal inset of pair-row content (avatar, buttons) inside the row.
+    public float CompactPairRowContentPadding { get; set; } = 4.0f;
+    // Pair-row corner radius; -1 follows <see cref="CompactChildRounding"/>.
+    public float CompactPairRowRounding { get; set; } = -1.0f;
+    // Pair-row hover fill — kept independent from the global CompactHover so
+    // list rows can stay subtle while buttons keep a stronger highlight.
+    public Vector4 CompactPairRowHover { get; set; } = new(0.55f, 0.62f, 0.85f, 0.10f);
     public float CompactIndentSpacing { get; set; } = 21.0f;
     public float CompactScrollbarSize { get; set; } = 14.0f;
     public float CompactGrabMinSize { get; set; } = 10.0f;

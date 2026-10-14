@@ -31,7 +31,9 @@ public static class UpdateOptionPanel
         HubHomePage,
         SupporterTitlePlacement,
         SupporterIconLabelEdge,
-        PanelTooltipPadding
+        PanelTooltipPadding,
+        PanelPairListContentPadding,
+        PanelPairRowLayout
     }
 
     private static readonly IReadOnlySet<Link> SupporterFeatureLinks = new HashSet<Link>
@@ -53,7 +55,7 @@ public static class UpdateOptionPanel
         new("v.1.1.16", [Link.SupporterNameplateIndicators, Link.SupporterNameplateCustomization, Link.SupporterNameplateStyleSync, Link.SupporterServerIcons]),
         new("v.1.1.17", [Link.PanelPairListSeparatorPadding, Link.SupporterNameplateGlowColors]),
         new("v.1.1.18", [Link.ReopenSpheneHubOnStartup, Link.ReleaseNotesPage, Link.HubHomePage, Link.SupporterTitlePlacement, Link.SupporterIconLabelEdge]),
-        new("v.1.1.19", [Link.PanelTooltipPadding]),
+        new("v.1.1.19", [Link.PanelTooltipPadding, Link.PanelPairListContentPadding, Link.PanelPairRowLayout]),
     ];
 
     private static readonly IReadOnlyDictionary<Link, string> LinkTitles = new Dictionary<Link, string>
@@ -76,7 +78,9 @@ public static class UpdateOptionPanel
         [Link.HubHomePage] = "Sphene Hub: Home landing page & reworked Supporter page",
         [Link.SupporterTitlePlacement] = "Supporter: Nameplate title placement (Default: Game default)",
         [Link.SupporterIconLabelEdge] = "Supporter: Icon label text outline (Default: Enabled)",
-        [Link.PanelTooltipPadding] = "Panel: Tooltip Padding & more Panel Theme options (Default: 10/8)"
+        [Link.PanelTooltipPadding] = "Panel: Tooltip Padding & more Panel Theme options (Default: 10/8)",
+        [Link.PanelPairListContentPadding] = "Panel: Pair List Content Padding & redesigned folder headers (Default: 8)",
+        [Link.PanelPairRowLayout] = "Panel: Pair Row Padding, Rounding & Hover color (Defaults: 4 / inherit / subtle)"
     };
 
     private static readonly IReadOnlyDictionary<Link, Action<SpheneConfigService, UiSharedService, SpheneMediator>> LinkDrawers
@@ -171,6 +175,45 @@ public static class UpdateOptionPanel
                 theme.NotifyThemeChanged();
             }
             SpheneUI.Controls.HelpText("Content padding of tooltips inside the Panel, independent from the general theme. The Panel Theme settings also expose popup background, accent, hover/active and additional spacing options now.");
+        },
+        [Link.PanelPairListContentPadding] = (_, _, _) =>
+        {
+            var theme = SpheneTheme.Current;
+            var padding = theme.CompactPairListContentPadding;
+            if (SpheneUI.Controls.SliderFloat("Pair List Content Padding##UpdateOptionPanelPairListContentPadding", ref padding, 0.0f, 24.0f, "%.1f"))
+            {
+                theme.CompactPairListContentPadding = padding;
+                theme.NotifyThemeChanged();
+            }
+            SpheneUI.Controls.HelpText("Horizontal inset of the pair list: rows and folder headers gain breathing room to the window edges. Folder headers are also restyled bands now — hover-reactive, with a count pill, and clickable to collapse.");
+        },
+        [Link.PanelPairRowLayout] = (_, _, _) =>
+        {
+            var theme = SpheneTheme.Current;
+            var changed = false;
+            var rowPadding = theme.CompactPairRowContentPadding;
+            if (SpheneUI.Controls.SliderFloat("Pair Row Content Padding##UpdateOptionPanelPairRowPadding", ref rowPadding, 0.0f, 16.0f, "%.1f"))
+            {
+                theme.CompactPairRowContentPadding = rowPadding;
+                changed = true;
+            }
+            var rowRounding = theme.CompactPairRowRounding;
+            if (SpheneUI.Controls.SliderFloat("Pair Row Rounding##UpdateOptionPanelPairRowRounding", ref rowRounding, -1.0f, 30.0f, "%.1f"))
+            {
+                theme.CompactPairRowRounding = rowRounding;
+                changed = true;
+            }
+            var rowHover = theme.CompactPairRowHover;
+            if (SpheneUI.Controls.ColorEdit("Pair Row Hover##UpdateOptionPanelPairRowHover", ref rowHover))
+            {
+                theme.CompactPairRowHover = rowHover;
+                changed = true;
+            }
+            if (changed)
+            {
+                theme.NotifyThemeChanged();
+            }
+            SpheneUI.Controls.HelpText("Pair rows get their own styling: content padding insets avatar and buttons from the row edges, rounding shapes the row (use -1 to follow Child Surface Rounding), and the hover color is independent from the global Hover Highlight.");
         }
     };
 
