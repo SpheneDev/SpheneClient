@@ -754,19 +754,33 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
             tooltipLines.Add(new(FontAwesomeIcon.UserSlash, "One-sided pair is offline", null, ImGuiColors.DalamudRed));
         }
 
+        // syncshell-only membership rides as a tiny top-left link pip in the
+        // avatar chrome's language — a synced bidirectional pair needs no extra
+        // marker since the green ring already reads "connected"
+        if (isVisibleForIcon && _pair.IsOnline
+            && _pair.UserPair.Groups.Any()
+            && _pair.IndividualPairStatus != API.Data.Enum.IndividualPairStatus.Bidirectional)
+        {
+            var linkPipRadius = MathF.Max(4.5f * scale, avatarSize * 0.16f);
+            var linkPipCenter = avatarPos + new Vector2(avatarSize * 0.1464f, avatarSize * 0.1464f);
+            drawList.AddCircleFilled(linkPipCenter, linkPipRadius + 1.5f * scale,
+                SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(Vector4.Zero, 0.75f)));
+            var linkGlyph = FontAwesomeIcon.Link.ToIconString();
+            using (SpheneUI.Icons.PushFont())
+            {
+                ImGui.SetWindowFontScale(0.5f);
+                var linkGlyphSize = ImGui.CalcTextSize(linkGlyph);
+                drawList.AddText(linkPipCenter - linkGlyphSize * 0.5f,
+                    SpheneUI.ColorUtils.ToU32(ImGuiColors.ParsedGreen), linkGlyph);
+                ImGui.SetWindowFontScale(1f);
+            }
+        }
+
         // status glyphs sit on an explicit X cursor drawn vertically centered
         // on the row — icon-font baseline metrics otherwise offset them from
         // the name's text line and the avatar
         var glyphGap = ImGui.GetStyle().ItemSpacing.X;
         var iconsX = avatarPos.X + avatarSize + glyphGap;
-
-        if (isVisibleForIcon && _pair.IsOnline
-            && _pair.UserPair.Groups.Any()
-            && _pair.IndividualPairStatus != API.Data.Enum.IndividualPairStatus.Bidirectional)
-        {
-            iconsX = DrawCenteredGlyph(iconsX, rowCenterY, FontAwesomeIcon.Link,
-                ImGuiColors.ParsedGreen, "Visible via shared syncshell") + glyphGap;
-        }
 
 
 
