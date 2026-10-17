@@ -29,7 +29,6 @@ public static class UpdateOptionPanel
         ReopenSpheneHubOnStartup,
         ReleaseNotesPage,
         HubHomePage,
-        SupporterTitlePlacement,
         SupporterIconLabelEdge,
         PanelTooltipPadding,
         PanelPairListContentPadding,
@@ -44,7 +43,6 @@ public static class UpdateOptionPanel
         Link.SupporterNameplateStyleSync,
         Link.SupporterServerIcons,
         Link.SupporterNameplateGlowColors,
-        Link.SupporterTitlePlacement,
         Link.SupporterIconLabelEdge
     };
 
@@ -55,7 +53,7 @@ public static class UpdateOptionPanel
         new("v.1.1.15", [Link.NotificationSoundsSpheneDefault]),
         new("v.1.1.16", [Link.SupporterNameplateIndicators, Link.SupporterNameplateCustomization, Link.SupporterNameplateStyleSync, Link.SupporterServerIcons]),
         new("v.1.1.17", [Link.PanelPairListSeparatorPadding, Link.SupporterNameplateGlowColors]),
-        new("v.1.1.18", [Link.ReopenSpheneHubOnStartup, Link.ReleaseNotesPage, Link.HubHomePage, Link.SupporterTitlePlacement, Link.SupporterIconLabelEdge]),
+        new("v.1.1.18", [Link.ReopenSpheneHubOnStartup, Link.ReleaseNotesPage, Link.HubHomePage, Link.SupporterIconLabelEdge]),
         new("v.1.1.19", [Link.PanelTooltipPadding, Link.PanelPairListContentPadding, Link.PanelPairRowLayout]),
         new("v.1.1.20", [Link.ProfilePopoutRightClick]),
     ];
@@ -78,7 +76,6 @@ public static class UpdateOptionPanel
         [Link.ReopenSpheneHubOnStartup] = "Appearance: Reopen Sphene Hub on startup if it was open (Default: Disabled)",
         [Link.ReleaseNotesPage] = "General: Release Notes page (browsable changelog in Settings & Hub)",
         [Link.HubHomePage] = "Sphene Hub: Home landing page & reworked Supporter page",
-        [Link.SupporterTitlePlacement] = "Supporter: Nameplate title placement (Default: Game default)",
         [Link.SupporterIconLabelEdge] = "Supporter: Icon label text outline (Default: Enabled)",
         [Link.PanelTooltipPadding] = "Panel: Tooltip Padding & more Panel Theme options (Default: 10/8)",
         [Link.PanelPairListContentPadding] = "Panel: Pair List Content Padding & redesigned folder headers (Default: 8)",
@@ -146,17 +143,6 @@ public static class UpdateOptionPanel
         {
             SpheneUI.Text.Wrapped("The Sphene Hub now opens on a Home page: live stats, quick access into every section, a news feed slot and a supporter overview — everything converges in one place.");
             SpheneUI.Controls.HelpText("The Supporter settings page was reworked too and now lists every perk your supporter status unlocks.");
-        },
-        [Link.SupporterTitlePlacement] = (configService, _, _) =>
-        {
-            var placement = (int)configService.Current.SupporterTitlePlacement;
-            if (SpheneUI.Controls.LabeledCombo("Nameplate Title##UpdateOptionSupporterTitlePlacement", ref placement,
-                    "Game default\0Above name\0Below name\0Hidden\0"))
-            {
-                configService.Current.SupporterTitlePlacement = (SupporterTitlePlacement)placement;
-                configService.Save();
-            }
-            SpheneUI.Controls.HelpText("Where your game title appears on your nameplate. Game default keeps your in-game nameplate setting.");
         },
         [Link.SupporterIconLabelEdge] = (configService, _, _) =>
         {

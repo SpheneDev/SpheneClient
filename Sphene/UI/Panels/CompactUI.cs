@@ -1651,16 +1651,8 @@ public class CompactUi : WindowMediatorSubscriberBase
                 // Connected Pairs Section
                 var onlineCount = _pairManager.DirectPairs.Count(p => !p.IsEffectivelyOffline);
                 var totalCount = _pairManager.DirectPairs.Count;
-                var onlineText = $"Connected Pairs ({onlineCount} / {totalCount}) online";
-                
-                // Center the text
-                var textSize = ImGui.CalcTextSize(onlineText);
-                var availableWidthPairs = ImGui.GetContentRegionAvail().X;
-                var startX = (availableWidthPairs - textSize.X) / 2;
-                if (startX < 0) startX = 0;
-                
-                ImGui.SetCursorPosX(startX);
-                SpheneUI.Text.Colored(onlineText, SpheneTheme.Current.CompactHeaderText);
+                var onlineText = $"Connected Pairs · {onlineCount}/{totalCount} online";
+                DrawSectionDivider(onlineText);
                 
                 using (ImRaii.PushId("pairlist")) DrawPairs();
                 
@@ -1834,6 +1826,32 @@ public class CompactUi : WindowMediatorSubscriberBase
         }
     }
 
+    /// <summary>
+    /// Muted centered section label flanked by two hairlines matching the
+    /// separator color — the quiet divider look used above the pair list.
+    /// </summary>
+    private static void DrawSectionDivider(string text)
+    {
+        var drawList = ImGui.GetWindowDrawList();
+        var textSize = ImGui.CalcTextSize(text);
+        var avail = ImGui.GetContentRegionAvail().X;
+        var gap = SpheneUI.Spacing.X8.Scaled;
+        var minWing = 20f * SpheneUI.Scale;
+        var cursor = ImGui.GetCursorScreenPos();
+        var lineY = cursor.Y + textSize.Y * 0.5f;
+        var wing = MathF.Max(0f, (avail - textSize.X - gap * 2f) * 0.5f);
+        if (wing > minWing)
+        {
+            var sep = ImGui.GetColorU32(ImGuiCol.Separator);
+            drawList.AddLine(new Vector2(cursor.X, lineY),
+                new Vector2(cursor.X + wing, lineY), sep);
+            drawList.AddLine(new Vector2(cursor.X + avail - wing, lineY),
+                new Vector2(cursor.X + avail, lineY), sep);
+        }
+        ImGui.SetCursorPosX(ImGui.GetCursorPosX() + MathF.Max(0f, (avail - textSize.X) * 0.5f));
+        SpheneUI.Text.Muted(text);
+    }
+
     private void DrawPairs()
     {
         // Reserve additional space for update notification if available
@@ -1944,7 +1962,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         }
         _hadAvailableAreaSyncshells = hasAreaSyncshells;
         ImGui.SameLine();
-        ImGui.Dummy(new Vector2(10, 0));
+        ImGui.Dummy(new Vector2(SpheneUI.Spacing.X10.Scaled, 0));
         ImGui.SameLine();
         var now = DateTime.UtcNow;
         var drawAttention = hasAreaSyncshells && now < _areaSyncshellAttentionUntilUtc;
@@ -3016,8 +3034,13 @@ public class CompactUi : WindowMediatorSubscriberBase
         var bgMin = startScreenPos;
         // Force the width to match the calculated available width exactly
         var bgMax = new Vector2(bgMin.X + availableWidth, groupMax.Y + padding.Y);
-        
-        drawList.AddRectFilled(bgMin, bgMax, ImGui.GetColorU32(SpheneTheme.Current.CompactControlPanelBg), 10.0f);
+
+        var cardRounding = MathF.Min(SpheneTheme.Current.CompactChildRounding,
+            (bgMax.Y - bgMin.Y) * 0.5f);
+        drawList.AddRectFilled(bgMin, bgMax, ImGui.GetColorU32(SpheneTheme.Current.CompactControlPanelBg), cardRounding);
+        drawList.AddRect(bgMin, bgMax,
+            SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(
+                SpheneTheme.Current.CompactBorder, 0.22f)), cardRounding);
         
         drawList.ChannelsMerge();
         

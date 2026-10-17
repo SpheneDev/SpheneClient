@@ -256,7 +256,6 @@ public class SpheneConfig : ISpheneConfiguration
     public uint SupporterIconLabelColor { get; set; } = 0xFF40BEFFu;
     public bool SupporterIconLabelEdgeEnabled { get; set; } = true;
     public uint SupporterIconLabelEdgeColor { get; set; } = 0xFF000000u;
-    public SupporterTitlePlacement SupporterTitlePlacement { get; set; } = SupporterTitlePlacement.GameDefault;
 
 }
 

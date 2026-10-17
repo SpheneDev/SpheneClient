@@ -2912,16 +2912,6 @@ public class SettingsUi : WindowMediatorSubscriberBase
             }
             SpheneUI.AttachTooltip("Where the mark sits relative to your name. Both repeats the symbol on the right.");
 
-            BeginSupporterRow("Title");
-            var titleMode = (int)_configService.Current.SupporterTitlePlacement;
-            if (SpheneUI.Controls.LabeledCombo("##supporterTitlePlacement", ref titleMode,
-                    "Game default\0Above name\0Below name\0Hidden\0"))
-            {
-                _configService.Current.SupporterTitlePlacement = (SupporterTitlePlacement)titleMode;
-                _configService.Save();
-            }
-            SpheneUI.AttachTooltip("Where your game title appears on your nameplate. Game default keeps your in-game nameplate setting.");
-
             SpheneUI.Layout.DistanceSeparator();
 
             var textEnabled = _configService.Current.SupporterTextEnabled;
@@ -3049,18 +3039,10 @@ public class SettingsUi : WindowMediatorSubscriberBase
         }
         var fcTag = plate?.QuotedFreeCompanyTag ?? string.Empty;
         var title = plate?.QuotedTitle ?? string.Empty;
-        var titleShown = title.Length > 0 && cfg.SupporterTitlePlacement switch
-        {
-            SupporterTitlePlacement.AboveName or SupporterTitlePlacement.BelowName => true,
-            SupporterTitlePlacement.Hidden => false,
-            _ => plate?.DisplayTitle ?? false,
-        };
-        var titleAbove = cfg.SupporterTitlePlacement switch
-        {
-            SupporterTitlePlacement.AboveName => true,
-            SupporterTitlePlacement.BelowName => false,
-            _ => plate?.IsPrefixTitle ?? true,
-        };
+        // Title order in the preview mirrors the real plate: the game's own
+        // nameplate setting, or Honorific's override when it is installed.
+        var titleShown = title.Length > 0 && (plate?.DisplayTitle ?? false);
+        var titleAbove = plate?.IsPrefixTitle ?? true;
         var textColor = plate.HasValue ? PlateColor(plate.Value.TextColor) : SpheneUI.Colors.TextPrimary;
         var edgeColor = plate.HasValue ? (Vector4?)PlateColor(plate.Value.EdgeColor) : null;
         var nameFg = plate?.NameColors.Foreground is { } nf ? PlateColor(nf) : textColor;

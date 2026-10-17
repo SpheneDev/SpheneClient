@@ -478,24 +478,6 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
         }
     }
 
-    private void ApplyTitlePlacement(INamePlateUpdateHandler h)
-    {
-        switch (_configService.Current.SupporterTitlePlacement)
-        {
-            case SupporterTitlePlacement.AboveName:
-                h.DisplayTitle = true;
-                h.IsPrefixTitle = true;
-                break;
-            case SupporterTitlePlacement.BelowName:
-                h.DisplayTitle = true;
-                h.IsPrefixTitle = false;
-                break;
-            case SupporterTitlePlacement.Hidden:
-                h.DisplayTitle = false;
-                break;
-        }
-    }
-
     private void OnDataUpdate(INamePlateUpdateContext ctx, IReadOnlyList<INamePlateUpdateHandler> handlers)
     {
         RefreshHonorificTitleColors();
@@ -567,7 +549,7 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
 
             if (style.IconEnabled)
             {
-                var platePos = GetNameplateIconPosition(h, isSelf);
+                var platePos = GetNameplateIconPosition(h);
                 if (platePos.HasValue)
                 {
                     var charPos = pc.Position;
@@ -759,7 +741,6 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
             if (pc.Address == localAddr)
             {
                 CaptureLocalPlateColors(h);
-                ApplyTitlePlacement(h);
             }
 
             var name = pc.Name.TextValue;
@@ -851,7 +832,7 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
     private void RequestRedrawIfSettingsChanged()
     {
         var current = _configService.Current;
-        var key = $"{current.ShowSupporterNameplate}|{current.SupporterSymbolChar}|{current.SupporterTextEnabled}|{current.SupporterLabelText}|{current.SupporterLabelOrder}|{current.SupporterSymbolPosition}|{current.SupporterColorKey}|{current.SupporterLabelColorKey}|{current.SupporterSymbolGlowEnabled}|{current.SupporterSymbolGlowKey}|{current.SupporterLabelGlowEnabled}|{current.SupporterLabelGlowKey}|{current.SupporterIconEnabled}|{current.SupporterIconId}|{current.SupporterIconLabelEnabled}|{current.SupporterIconLabelText}|{current.SupporterIconLabelColor}|{current.SupporterIconLabelEdgeEnabled}|{current.SupporterIconLabelEdgeColor}|{current.SupporterTitlePlacement}|{_apiController.SupporterFeaturesEnabled}|{string.Join(",", _supporterNameCache.OrderBy(n => n, StringComparer.OrdinalIgnoreCase))}|{_supporterStyleFingerprint}";
+        var key = $"{current.ShowSupporterNameplate}|{current.SupporterSymbolChar}|{current.SupporterTextEnabled}|{current.SupporterLabelText}|{current.SupporterLabelOrder}|{current.SupporterSymbolPosition}|{current.SupporterColorKey}|{current.SupporterLabelColorKey}|{current.SupporterSymbolGlowEnabled}|{current.SupporterSymbolGlowKey}|{current.SupporterLabelGlowEnabled}|{current.SupporterLabelGlowKey}|{current.SupporterIconEnabled}|{current.SupporterIconId}|{current.SupporterIconLabelEnabled}|{current.SupporterIconLabelText}|{current.SupporterIconLabelColor}|{current.SupporterIconLabelEdgeEnabled}|{current.SupporterIconLabelEdgeColor}|{_apiController.SupporterFeaturesEnabled}|{string.Join(",", _supporterNameCache.OrderBy(n => n, StringComparer.OrdinalIgnoreCase))}|{_supporterStyleFingerprint}";
 
         var publishKey = _apiController.IsConnected && _apiController.IsSupporter && _apiController.SupporterFeaturesEnabled
             ? key
@@ -877,26 +858,14 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
     }
 
     /// <summary>
-    /// Effective title layout for a plate — for the local player our
-    /// title-placement override wins over the game flag, so the icon anchors
-    /// to the line the name actually renders on.
+    /// Effective title layout for a plate — whatever the game (or Honorific)
+    /// last wrote to the handler, so the icon anchors to the line the title
+    /// actually renders on.
     /// </summary>
-    private (bool Display, bool Prefix) EffectiveTitleLayout(INamePlateUpdateHandler handler, bool isSelf)
-    {
-        if (!isSelf)
-        {
-            return (handler.DisplayTitle, handler.IsPrefixTitle);
-        }
-        return _configService.Current.SupporterTitlePlacement switch
-        {
-            SupporterTitlePlacement.AboveName => (true, true),
-            SupporterTitlePlacement.BelowName => (true, false),
-            SupporterTitlePlacement.Hidden => (false, handler.IsPrefixTitle),
-            _ => (handler.DisplayTitle, handler.IsPrefixTitle),
-        };
-    }
+    private static (bool Display, bool Prefix) EffectiveTitleLayout(INamePlateUpdateHandler handler)
+        => (handler.DisplayTitle, handler.IsPrefixTitle);
 
-    private unsafe Vector2? GetNameplateIconPosition(INamePlateUpdateHandler handler, bool isSelf)
+    private unsafe Vector2? GetNameplateIconPosition(INamePlateUpdateHandler handler)
     {
         if (handler.NamePlateIndex is < 0 or >= MaxNamePlateObjects)
             return null;
@@ -939,7 +908,7 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
             }
             else
             {
-                var (displayTitle, prefixTitle) = EffectiveTitleLayout(handler, isSelf);
+                var (displayTitle, prefixTitle) = EffectiveTitleLayout(handler);
                 centerY = !displayTitle
                     ? collision->ScreenY + collisionH * 0.5f
                     : prefixTitle

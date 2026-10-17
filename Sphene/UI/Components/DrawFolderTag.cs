@@ -149,12 +149,15 @@ public class DrawFolderTag : DrawFolderBase
             _ => true,
         };
 
-        // Draw menu button first (rightmost position)
+        // Walk left from the row's right edge like the pair rows do — the
+        // caller already subtracted the content inset from currentRightSideX
         var menuButtonSize = SpheneUI.Icons.ButtonSize(FontAwesomeIcon.EllipsisV);
-        var menuButtonOffset = currentRightSideX - menuButtonSize.X;
-        
+        var rightEdge = currentRightSideX;
+        var leftmost = currentRightSideX;
+
         if (shouldRenderMenu)
         {
+            var menuButtonOffset = rightEdge - menuButtonSize.X;
             ImGui.SameLine(menuButtonOffset);
             // Apply brighter blue tint to tag buttons for better visibility
             using var menuButtonColor = ImRaii.PushColor(ImGuiCol.Button, new Vector4(0.3f, 0.5f, 0.9f, 0.4f));
@@ -173,16 +176,18 @@ public class DrawFolderTag : DrawFolderBase
                     SpheneUI.Popups.EndStyled();
                 }
             }
+
+            rightEdge = menuButtonOffset - spacingX;
+            leftmost = menuButtonOffset;
         }
 
-        if (!RenderPause) return shouldRenderMenu ? menuButtonOffset : currentRightSideX;
+        if (!RenderPause) return leftmost;
 
         var allArePaused = _allPairs.All(pair => pair.UserPair!.OwnPermissions.IsPaused());
         var pauseButton = allArePaused ? FontAwesomeIcon.Play : FontAwesomeIcon.Pause;
         var pauseButtonSize = SpheneUI.Icons.ButtonSize(pauseButton);
 
-        // Position pause button to the left of menu button
-        var buttonPauseOffset = (shouldRenderMenu ? menuButtonOffset : currentRightSideX) - pauseButtonSize.X - spacingX;
+        var buttonPauseOffset = rightEdge - pauseButtonSize.X;
         ImGui.SameLine(buttonPauseOffset);
         
         // Apply brighter blue tint to pause button for better visibility

@@ -81,10 +81,9 @@ public abstract class DrawFolderBase : IDrawFolder
 
     /// <summary>
     /// Draws the collapsible folder header band: a rounded, hover-reactive
-    /// surface spanning the padded content bound with an accent bar while
-    /// open, the caret, folder icons, count pill, name and right-side
-    /// buttons. Free areas of the band toggle the folder; real items keep
-    /// their own interactions.
+    /// surface spanning the padded content bound with the caret, folder
+    /// icons, count pill, name and right-side buttons. Free areas of the
+    /// band toggle the folder; real items keep their own interactions.
     /// </summary>
     protected void DrawFolderHeader()
     {
@@ -108,11 +107,14 @@ public abstract class DrawFolderBase : IDrawFolder
                     : open
                         ? SpheneUI.ColorUtils.WithAlpha(theme.CompactAccent, 0.08f)
                         : SpheneUI.ColorUtils.WithAlpha(theme.CompactFrameBg, 0.45f)), rounding);
+            dl.AddRect(min, max,
+                SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(theme.CompactBorder,
+                    open ? 0.35f : 0.14f)), rounding);
 
             var lineTop = min.Y + MathF.Max(0f, (headerH - ImGui.GetFrameHeight()) * 0.5f);
             ImGui.SetCursorScreenPos(new Vector2(min.X + SpheneUI.Spacing.X8.Scaled, lineTop));
             SpheneUI.Icons.Icon(open ? FontAwesomeIcon.CaretDown : FontAwesomeIcon.CaretRight,
-                theme.CompactTextSecondary);
+                open ? theme.CompactAccent : theme.CompactTextSecondary);
 
             ImGui.SameLine();
             var leftSideEnd = DrawIcon();
@@ -192,17 +194,18 @@ public abstract class DrawFolderBase : IDrawFolder
     protected float DrawRightSideInternal()
     {
         var barButtonSize = SpheneUI.Icons.ButtonSize(FontAwesomeIcon.EllipsisV);
-        var spacingX = ImGui.GetStyle().ItemSpacing.X;
-        // Use container-relative positioning for buttons
+        // Use container-relative positioning for buttons — the rightmost
+        // element keeps the same content inset the pair rows use
         var containerWidth = SpheneUI.Controls.BoundedAvailX();
         var actualWindowEndX = ImGui.GetCursorPosX() + containerWidth;
+        var rightEdge = actualWindowEndX - SpheneTheme.Current.CompactPairRowContentPadding;
+        var spacingX = ImGui.GetStyle().ItemSpacing.X;
 
-        // Flyout Menu
-        var rightSideStart = actualWindowEndX - (RenderMenu ? (barButtonSize.X + spacingX) : spacingX);
+        var rightSideStart = rightEdge - (RenderMenu ? barButtonSize.X + spacingX : 0f);
 
         if (RenderMenu)
         {
-            ImGui.SameLine(actualWindowEndX - barButtonSize.X);
+            ImGui.SameLine(rightEdge - barButtonSize.X);
             if (SpheneUI.Icons.Button(FontAwesomeIcon.EllipsisV))
             {
                 ImGui.OpenPopup("User Flyout Menu");

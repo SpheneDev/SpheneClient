@@ -347,11 +347,10 @@ public class DrawFolderGroup : DrawFolderBase
         var individualAnimDisabled = _groupFullInfoDto.GroupUserPermissions.IsDisableAnimations();
         var individualVFXDisabled = _groupFullInfoDto.GroupUserPermissions.IsDisableVFX();
 
-        // Use container-relative positioning for buttons
-        var containerWidth = SpheneUI.Controls.BoundedAvailX();
-        var actualWindowEndX = ImGui.GetCursorPosX() + containerWidth;
-        
-        var menuButtonOffset = actualWindowEndX - menuButtonSize.X;
+        // Walk left from the row's right edge — the caller already subtracted
+        // the shared content inset from currentRightSideX
+        var rightEdge = currentRightSideX;
+        var menuButtonOffset = rightEdge - menuButtonSize.X;
         ImGui.SameLine(menuButtonOffset);
         
         using var menuButtonColor = ImRaii.PushColor(ImGuiCol.Button, SpheneTheme.Current.CompactSyncshellButton);
@@ -376,8 +375,7 @@ public class DrawFolderGroup : DrawFolderBase
             }
         }
 
-        // Calculate pause button position (left of menu button) - MUST match menu button position
-        var pauseButtonOffset = actualWindowEndX - pauseButtonSize.X - spacingX - menuButtonSize.X;
+        var pauseButtonOffset = menuButtonOffset - spacingX - pauseButtonSize.X;
         ImGui.SameLine(pauseButtonOffset);
         
         // Draw pause button with brighter blue color styling
@@ -392,8 +390,7 @@ public class DrawFolderGroup : DrawFolderBase
             _ = _apiController.GroupChangeIndividualPermissionState(new GroupPairUserPermissionDto(_groupFullInfoDto.Group, new(_apiController.UID), perm));
         }
 
-        // Calculate info icon position (left of pause button) - MUST match other button positions
-        var infoIconOffset = actualWindowEndX - userCogButtonSize.X - spacingX - pauseButtonSize.X - spacingX - menuButtonSize.X;
+        var infoIconOffset = pauseButtonOffset - spacingX - userCogButtonSize.X;
         ImGui.SameLine(infoIconOffset);
 
         ImGui.AlignTextToFramePadding();

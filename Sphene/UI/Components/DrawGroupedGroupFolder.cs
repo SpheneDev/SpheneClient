@@ -47,11 +47,14 @@ public class DrawGroupedGroupFolder : IDrawFolder
                     : open
                         ? SpheneUI.ColorUtils.WithAlpha(theme.CompactAccent, 0.08f)
                         : SpheneUI.ColorUtils.WithAlpha(theme.CompactFrameBg, 0.45f)), rounding);
+            dl.AddRect(min, min + new Vector2(width, headerH),
+                SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(theme.CompactBorder,
+                    open ? 0.35f : 0.14f)), rounding);
 
             var lineTop = min.Y + MathF.Max(0f, (headerH - ImGui.GetFrameHeight()) * 0.5f);
             ImGui.SetCursorScreenPos(new Vector2(min.X + SpheneUI.Spacing.X8.Scaled, lineTop));
             SpheneUI.Icons.Icon(open ? FontAwesomeIcon.CaretDown : FontAwesomeIcon.CaretRight,
-                theme.CompactTextSecondary);
+                open ? theme.CompactAccent : theme.CompactTextSecondary);
 
             ImGui.SameLine();
             ImGui.AlignTextToFramePadding();
@@ -85,7 +88,10 @@ public class DrawGroupedGroupFolder : IDrawFolder
 
         if (_tagHandler.IsTagOpen(_id))
         {
-            using var indent = ImRaii.PushIndent(20f);
+            // same indent the base folders use — nested group headers align
+            // with the pair rows inside tag folders
+            using var indent = ImRaii.PushIndent(
+                SpheneUI.Icons.Size(FontAwesomeIcon.EllipsisV).X + ImGui.GetStyle().ItemSpacing.X, false);
             foreach (var entry in _groups)
             {
                 entry.Draw();

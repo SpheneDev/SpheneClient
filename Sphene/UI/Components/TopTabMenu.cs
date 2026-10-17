@@ -75,6 +75,14 @@ public class TopTabMenu
     /// CompactUI window instead of touching the window border.</summary>
     private const float HorizontalPad = 12f;
 
+    /// <summary>Bounds + interaction state of one rail cell, captured while the
+    /// button widget runs so the chrome channel can paint beneath it.</summary>
+    [System.Runtime.InteropServices.StructLayout(
+        System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private readonly record struct TabCell(Vector2 Min, Vector2 Max, bool Hovered, bool Selected);
+
+    private const int TabCellCount = 5;
+
     public void Draw(bool drawSeparator = true)
     {
         Draw(0, drawSeparator);
@@ -91,32 +99,43 @@ public class TopTabMenu
         var buttonY = SpheneUI.Icons.ButtonSize(FontAwesomeIcon.Pause).Y;
         var buttonSize = new Vector2(buttonX, buttonY);
         var drawList = ImGui.GetWindowDrawList();
-        var underlineColor = ImGui.GetColorU32(ImGuiCol.Separator);
-        var btncolor = ImRaii.PushColor(ImGuiCol.Button, ImGui.ColorConvertFloat4ToU32(new(0, 0, 0, 0)));
+        // The rail owns the visuals — keep every button state transparent.
+        var btncolor = ImRaii.PushColor(ImGuiCol.Button, 0u)
+            .Push(ImGuiCol.ButtonHovered, 0u)
+            .Push(ImGuiCol.ButtonActive, 0u);
 
         ImGuiHelpers.ScaledDummy(spacing.Y / 2f);
 
+        var rowStart = ImGui.GetCursorScreenPos();
+        drawList.ChannelsSplit(2);
+        drawList.ChannelsSetCurrent(1);
+
+        var cells = new TabCell[TabCellCount];
         using (ImRaii.PushFont(UiBuilder.IconFont))
-        DrawIndividualTabButton(buttonSize, spacing, underlineColor, drawList, pendingPairRequestCount);
+            cells[0] = DrawIndividualTabButton(buttonSize, drawList, pendingPairRequestCount);
         SpheneUI.AttachTooltip("Individual Pair Menu");
 
-        DrawTabButton(FontAwesomeIcon.Users, SelectedTab.Syncshell, ButtonStyleKeys.TopTab_Users, buttonSize, spacing, underlineColor, drawList);
+        cells[1] = DrawTabButton(FontAwesomeIcon.Users, SelectedTab.Syncshell, ButtonStyleKeys.TopTab_Users, buttonSize);
         SpheneUI.AttachTooltip("Syncshell Menu");
 
         ImGui.SameLine();
-        DrawModSharingButton(buttonSize, pendingModSharingCount, drawList);
+        cells[2] = DrawModSharingButton(buttonSize, pendingModSharingCount, drawList);
         SpheneUI.AttachTooltip("Open Mod Sharing");
 
         ImGui.SameLine();
-        DrawTabButton(FontAwesomeIcon.Filter, SelectedTab.Filter, ButtonStyleKeys.TopTab_Filter, buttonSize, spacing, underlineColor, drawList);
+        cells[3] = DrawTabButton(FontAwesomeIcon.Filter, SelectedTab.Filter, ButtonStyleKeys.TopTab_Filter, buttonSize);
         SpheneUI.AttachTooltip("Filter");
 
         ImGui.SameLine();
-        DrawTabButton(FontAwesomeIcon.UserCog, SelectedTab.UserConfig, ButtonStyleKeys.TopTab_Settings, buttonSize, spacing, underlineColor, drawList);
+        cells[4] = DrawTabButton(FontAwesomeIcon.UserCog, SelectedTab.UserConfig, ButtonStyleKeys.TopTab_Settings, buttonSize);
         SpheneUI.AttachTooltip("Your User Menu");
 
         ImGui.NewLine();
         btncolor.Dispose();
+
+        drawList.ChannelsSetCurrent(0);
+        DrawTabRail(drawList, rowStart, availableWidth, buttonSize.Y, cells);
+        drawList.ChannelsMerge();
 
 
         if (TabSelection == SelectedTab.Individual)
@@ -143,26 +162,22 @@ public class TopTabMenu
         if (drawSeparator) SpheneUI.Layout.Separator();
     }
 
-    private void DrawIndividualTabButton(Vector2 buttonSize, Vector2 spacing, uint underlineColor, ImDrawListPtr drawList, int pendingPairRequestCount)
+    private TabCell DrawIndividualTabButton(Vector2 buttonSize, ImDrawListPtr drawList, int pendingPairRequestCount)
     {
         var buttonStart = ImGui.GetCursorScreenPos();
         if (SpheneUI.Icons.Button(FontAwesomeIcon.User, buttonSize.Y, null, null, buttonSize.X, ButtonStyleKeys.TopTab_User))
         {
             TabSelection = TabSelection == SelectedTab.Individual ? SelectedTab.None : SelectedTab.Individual;
         }
+        var cell = new TabCell(ImGui.GetItemRectMin(), ImGui.GetItemRectMax(),
+            ImGui.IsItemHovered(), TabSelection == SelectedTab.Individual);
         ImGui.SameLine();
-        var xAfter = ImGui.GetCursorScreenPos();
-        if (TabSelection == SelectedTab.Individual)
-        {
-            drawList.AddLine(buttonStart with { Y = buttonStart.Y + buttonSize.Y + spacing.Y },
-                xAfter with { Y = xAfter.Y + buttonSize.Y + spacing.Y, X = xAfter.X - spacing.X },
-                underlineColor, 2);
-        }
 
         if (pendingPairRequestCount > 0)
         {
             DrawBadge(drawList, buttonStart, buttonSize, pendingPairRequestCount);
         }
+        return cell;
     }
 
     private void DrawPairRequestsButton(float availableWidth, ImDrawListPtr drawList)
@@ -197,24 +212,19 @@ public class TopTabMenu
         }
     }
 
-    private void DrawTabButton(FontAwesomeIcon icon, SelectedTab tab, string styleKey, Vector2 buttonSize, Vector2 spacing, uint underlineColor, ImDrawListPtr drawList)
+    private TabCell DrawTabButton(FontAwesomeIcon icon, SelectedTab tab, string styleKey, Vector2 buttonSize)
     {
-        var x = ImGui.GetCursorScreenPos();
         if (SpheneUI.Icons.Button(icon, buttonSize.Y, null, null, buttonSize.X, styleKey))
         {
             TabSelection = TabSelection == tab ? SelectedTab.None : tab;
         }
+        var cell = new TabCell(ImGui.GetItemRectMin(), ImGui.GetItemRectMax(),
+            ImGui.IsItemHovered(), TabSelection == tab);
         ImGui.SameLine();
-        var xAfter = ImGui.GetCursorScreenPos();
-        if (TabSelection == tab)
-        {
-            drawList.AddLine(x with { Y = x.Y + buttonSize.Y + spacing.Y },
-                xAfter with { Y = xAfter.Y + buttonSize.Y + spacing.Y, X = xAfter.X - spacing.X },
-                underlineColor, 2);
-        }
+        return cell;
     }
 
-    private void DrawModSharingButton(Vector2 buttonSize, int pendingModSharingCount, ImDrawListPtr drawList)
+    private TabCell DrawModSharingButton(Vector2 buttonSize, int pendingModSharingCount, ImDrawListPtr drawList)
     {
         var buttonStart = ImGui.GetCursorScreenPos();
         if (SpheneUI.Icons.Button(FontAwesomeIcon.Share, buttonSize.Y, null, null, buttonSize.X, ButtonStyleKeys.TopTab_ModSharing))
@@ -222,10 +232,54 @@ public class TopTabMenu
             var tab = pendingModSharingCount > 0 ? ModSharingTab.Receive : ModSharingTab.Send;
             _spheneMediator.Publish(new OpenModSharingWindow(tab));
         }
+        var cell = new TabCell(ImGui.GetItemRectMin(), ImGui.GetItemRectMax(),
+            ImGui.IsItemHovered(), false);
+        ImGui.SameLine();
 
         if (pendingModSharingCount > 0)
         {
             DrawBadge(drawList, buttonStart, buttonSize, pendingModSharingCount);
+        }
+        return cell;
+    }
+
+    /// <summary>
+    /// Chrome painted beneath the tab row: one rounded rail spanning the row
+    /// plus a per-cell pill for the active tab and a quiet hover fill.
+    /// </summary>
+    private static void DrawTabRail(ImDrawListPtr drawList, Vector2 rowStart,
+        float rowWidth, float rowHeight, TabCell[] cells)
+    {
+        var theme = SpheneTheme.Current;
+        var pad = 3f * SpheneUI.Scale;
+        var railMin = rowStart - new Vector2(pad, pad);
+        var railMax = rowStart + new Vector2(rowWidth + pad, rowHeight + pad);
+        var railRounding = MathF.Min(theme.CompactChildRounding, (railMax.Y - railMin.Y) * 0.5f);
+
+        drawList.AddRectFilled(railMin, railMax,
+            SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(theme.CompactFrameBg, 0.30f)), railRounding);
+        drawList.AddRect(railMin, railMax,
+            SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(theme.CompactBorder, 0.16f)), railRounding);
+
+        var cellInset = 2f * SpheneUI.Scale;
+        foreach (var cell in cells)
+        {
+            var pillMin = cell.Min + new Vector2(cellInset, cellInset);
+            var pillMax = cell.Max - new Vector2(cellInset, cellInset);
+            if (pillMax.X <= pillMin.X || pillMax.Y <= pillMin.Y) continue;
+            var pillRounding = MathF.Min(theme.CompactTabRounding, (pillMax.Y - pillMin.Y) * 0.5f);
+            if (cell.Selected)
+            {
+                drawList.AddRectFilled(pillMin, pillMax,
+                    SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(theme.CompactAccent, 0.22f)), pillRounding);
+                drawList.AddRect(pillMin, pillMax,
+                    SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(theme.CompactAccent, 0.45f)), pillRounding);
+            }
+            else if (cell.Hovered)
+            {
+                drawList.AddRectFilled(pillMin, pillMax,
+                    SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(theme.CompactHover, 0.16f)), pillRounding);
+            }
         }
     }
 
