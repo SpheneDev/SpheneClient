@@ -1429,12 +1429,17 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         }
         if (_stylePreviewTab == 0)
         {
-            // the complete profile card, live-bound to the unsaved buffers —
-            // exactly what viewers see (banner, avatar, name, status, tags)
+            // the complete profile surface, live-bound to the unsaved buffers —
+            // exactly what viewers see (banner, avatar, name, status, tags).
+            // Bounded to the preview column so the banner does not bleed
+            // mid-page.
+            var previewMin = ImGui.GetCursorScreenPos();
             SpheneUI.Profile.Hero(displayName, OwnHeroSubtitle(), profile,
                 GetAvatarTexture(profile), GetBannerTexture(profile), previewTheme,
                 pageAccent, SpheneTheme.Current.AccentBlue,
-                isNsfw: profile.IsNSFW, watermark: SpheneBrandIcons.SpheneLogo());
+                isNsfw: profile.IsNSFW, watermark: SpheneBrandIcons.SpheneLogo(),
+                host: new SpheneUI.Profile.HeroHost(previewMin,
+                    previewMin + new Vector2(ImGui.GetContentRegionAvail().X, 0f)));
         }
         else
         {
@@ -2104,19 +2109,14 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         var banner = GetFriendTexture(FriendBannerKey, profile.BannerImageData.Value, ref _friendBannerBytes);
         var vis = (ProfileVisibility)profile.Visibility;
 
-        if (SpheneUI.Icons.TextButton(FontAwesomeIcon.ChevronLeft, "Back to friends"))
-        {
-            NavigateTo(new HubLocation(SpheneHubPage.Friends, null, null));
-            return;
-        }
-        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.Row);
-
         var friendSubtitle = !string.IsNullOrWhiteSpace(pair.UserData.Alias)
             ? "@" + pair.UserData.Alias
             : string.Empty;
         SpheneUI.Profile.Hero(pair.UserData.PreferredName, friendSubtitle, profile,
             avatar, banner, friendTheme, accent, theme.AccentBlue,
-            isNsfw: profile.IsNSFW);
+            isNsfw: profile.IsNSFW,
+            presence: pair.IsMutuallyVisible || pair.IsOnline
+                ? SpheneUI.Palette.NetworkActive : (Vector4?)null);
 
         SpheneUI.Layout.SectionCard(() =>
         {

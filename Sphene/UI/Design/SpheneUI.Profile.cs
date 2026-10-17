@@ -5,6 +5,7 @@ using Dalamud.Interface.Textures.TextureWraps;
 using Dalamud.Interface.Utility.Raii;
 using Sphene.Services;
 using System.Numerics;
+using System.Runtime.InteropServices;
 
 namespace Sphene.UI.Design;
 
@@ -20,6 +21,17 @@ public static partial class SpheneUI
     {
         /// <summary>A clickable action button rendered in the hero's top-right corner.</summary>
         public sealed record HeroAction(FontAwesomeIcon Icon, string Label, string? Tooltip, Action OnClick);
+
+        /// <summary>
+        /// The surface a hero banner bleeds into: the banner fills
+        /// <see cref="Min"/>.X–<see cref="Max"/>.X starting at <see cref="Min"/>.Y,
+        /// optionally rounding the given top corners. When no host is passed,
+        /// the banner bleeds to the enclosing scroll child's full width — and
+        /// its top edge, when the hero opens the page.
+        /// </summary>
+        [StructLayout(LayoutKind.Auto)]
+        public readonly record struct HeroHost(Vector2 Min, Vector2 Max,
+            float CornerRounding = 0f, ImDrawFlags Corners = ImDrawFlags.RoundCornersNone);
 
         /// <summary>
         /// Edit-mode state for the hero of the user's own profile: enables
@@ -311,18 +323,21 @@ public static partial class SpheneUI
         }
 
         /// <summary>Banner strip height in unscaled pixels, shared across hero renderers.</summary>
-        public const float HeroBannerHeight = 64f;
+        public const float HeroBannerHeight = 92f;
 
         /// <summary>Avatar size in unscaled pixels, shared across hero renderers.</summary>
-        public const float HeroAvatarSize = 56f;
+        public const float HeroAvatarSize = 68f;
 
         /// <summary>Fraction of the banner height that dissolves into the
         /// card body via a fade of the card's own accent tint.</summary>
         private const float HeroBannerBodyFade = 0.45f;
 
         /// <summary>
-        /// The profile hero card: banner, avatar half-overlapping the banner
-        /// edge, name + meta + status + tags + optional stats row and actions.
+        /// The profile hero surface: a full-bleed banner dissolving into the
+        /// host surface, avatar half-overlapping the banner edge with a
+        /// surface-colored cut-out ring, name + meta + status + tags +
+        /// optional stats row and actions. No card chrome — the region is
+        /// anchored by a hairline when it opens a page.
         /// </summary>
         /// <param name="displayName">Primary name shown in the big font.</param>
         /// <param name="metaLine">Secondary line under the name — "@handle" renders white, anything else muted. In edit mode a "@" line becomes the handle-rename entry point.</param>
@@ -337,246 +352,294 @@ public static partial class SpheneUI
         /// <param name="actions">Buttons at the banner's bottom-right edge.</param>
         /// <param name="drawStats">Optional full-width content under the identity block (e.g. stat tiles).</param>
         /// <param name="edit">Own-profile edit mode: click overlays on banner/avatar + inline status/description inputs.</param>
+        /// <param name="host">Surface the banner bleeds into — a panel rect for
+        /// embedded hosts like the CompactUI popout; omit on full pages to bleed
+        /// to the enclosing scroll child's edges.</param>
+        /// <param name="presence">Optional presence dot on the avatar's bottom-right edge (community-style online marker).</param>
         public static void Hero(string displayName, string metaLine,
             SpheneProfileData profile, IDalamudTextureWrap? avatar, IDalamudTextureWrap? banner,
             SpheneProfileTheme theme, Vector4 fallbackAccentA, Vector4 fallbackAccentB,
             bool isNsfw = false, IDalamudTextureWrap? watermark = null,
             IReadOnlyList<HeroAction>? actions = null, Action<float>? drawStats = null,
-            HeroEdit? edit = null)
+            HeroEdit? edit = null, HeroHost? host = null, Vector4? presence = null)
         {
             var scale = Scale;
             var bannerHeight = HeroBannerHeight * scale;
             var avatarSize = HeroAvatarSize * scale;
             var accent = theme.AccentColor(fallbackAccentA);
-            var bleedHeight = bannerHeight + Spacing.CardPadding.Scaled;
-            var topRounding = Layout.AccentCardRounding * scale;
+            var drawList = ImGui.GetWindowDrawList();
+            var cursor = ImGui.GetCursorScreenPos();
+            var contentWidth = ImGui.GetContentRegionAvail().X;
+            var surface = ImGui.GetStyle().Colors[(int)ImGuiCol.WindowBg];
 
-            Layout.AccentCard(() =>
+            ResolveHeroHost(host, cursor, bannerHeight,
+                out var bannerMin, out var bannerMax,
+                out var bannerRounding, out var bannerCorners);
+
+            // Full-bleed banner straight onto the host surface — no card
+            // chrome; the bottom edge dissolves into the window surface.
+            drawList.PushClipRect(bannerMin, bannerMax, true);
+            Banner(drawList, bannerMin, bannerMax, banner, theme,
+                fallbackAccentA, fallbackAccentB, watermark,
+                rounding: bannerRounding, corners: bannerCorners);
+            drawList.PopClipRect();
+            var fadeH = bannerHeight * HeroBannerBodyFade;
+            drawList.AddRectFilledMultiColor(
+                new Vector2(bannerMin.X, bannerMax.Y - fadeH), bannerMax,
+                ColorUtils.ToU32(ColorUtils.WithAlpha(surface, 0f)),
+                ColorUtils.ToU32(ColorUtils.WithAlpha(surface, 0f)),
+                ColorUtils.ToU32(surface), ColorUtils.ToU32(surface));
+
+            ImGui.Dummy(new Vector2(contentWidth, bannerMax.Y - cursor.Y));
+            var editing = edit?.Enabled == true;
+
+            // The avatar punches out of the banner — a surface-colored ring
+            // reads as a cut-out, the thin rim keeps the silhouette crisp.
+            var avatarPos = cursor + new Vector2(10f * scale,
+                bannerMax.Y - cursor.Y - avatarSize * 0.45f);
+            ImGui.SetCursorScreenPos(avatarPos);
+            Media.Avatar(avatar, avatarSize);
+            var ringT = MathF.Max(2f, 3f * scale);
+            var ringMin = avatarPos - new Vector2(ringT * 0.5f);
+            drawList.AddRect(ringMin, ringMin + new Vector2(avatarSize + ringT),
+                ColorUtils.ToU32(surface), avatarSize * 0.5f + ringT * 0.5f,
+                ImDrawFlags.RoundCornersAll, ringT);
+            drawList.AddRect(avatarPos, avatarPos + new Vector2(avatarSize),
+                ColorUtils.ToU32(ColorUtils.WithAlpha(Palette.CrystalWhite, 0.30f)),
+                avatarSize * 0.5f, ImDrawFlags.RoundCornersAll, MathF.Max(1f, scale));
+            if (presence.HasValue)
             {
-                var cardMin = ImGui.GetCursorScreenPos();
-                var cardWidth = ImGui.GetContentRegionAvail().X;
-                var drawList = ImGui.GetWindowDrawList();
-
-                // Approximate banner rect in content coordinates — only used
-                // for the edit click zone, the chrome layer draws the exact one.
-                var padding = Spacing.CardPadding.Scaled;
-                var bannerMin = cardMin - new Vector2(padding);
-                var bannerMax = new Vector2(cardMin.X + cardWidth + padding,
-                    cardMin.Y + bannerHeight);
-
-                ImGui.Dummy(new Vector2(cardWidth, bannerHeight));
-
-                var editing = edit?.Enabled == true;
-
-                var avatarPos = cardMin + new Vector2(10f * scale, bannerHeight - avatarSize * 0.45f);
+                var dotR = 6f * scale;
+                var dotCenter = avatarPos + new Vector2(avatarSize * 0.82f);
+                drawList.AddCircleFilled(dotCenter, dotR + 2.5f * scale,
+                    ColorUtils.ToU32(surface));
+                drawList.AddCircleFilled(dotCenter, dotR,
+                    ColorUtils.ToU32(presence.Value));
+            }
+            if (editing && edit!.OnAvatarClicked != null)
+            {
                 ImGui.SetCursorScreenPos(avatarPos);
-                Media.Avatar(avatar, avatarSize);
-                drawList.AddRect(avatarPos, avatarPos + new Vector2(avatarSize),
-                    ColorUtils.ToU32(ColorUtils.WithAlpha(Palette.CrystalWhite, 0.55f)),
-                    avatarSize * 0.5f, ImDrawFlags.RoundCornersAll,
-                    MathF.Max(1.25f, 1.25f * scale));
-                if (editing && edit!.OnAvatarClicked != null)
+                if (ImGui.InvisibleButton($"##hero-avatar-edit-{displayName}",
+                        new Vector2(avatarSize)))
                 {
-                    ImGui.SetCursorScreenPos(avatarPos);
-                    if (ImGui.InvisibleButton($"##hero-avatar-edit-{displayName}",
-                            new Vector2(avatarSize)))
+                    edit.OnAvatarClicked();
+                }
+                if (ImGui.IsItemHovered())
+                {
+                    ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
+                    drawList.AddRectFilled(avatarPos, avatarPos + new Vector2(avatarSize),
+                        ColorUtils.ToU32(new Vector4(0f, 0f, 0f, 0.45f)),
+                        avatarSize * 0.5f);
+                    using (Icons.PushFont())
                     {
-                        edit.OnAvatarClicked();
-                    }
-                    if (ImGui.IsItemHovered())
-                    {
-                        ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
-                        drawList.AddRectFilled(avatarPos, avatarPos + new Vector2(avatarSize),
-                            ColorUtils.ToU32(new Vector4(0f, 0f, 0f, 0.45f)),
-                            avatarSize * 0.5f);
-                        using (Icons.PushFont())
-                        {
-                            var cam = FontAwesomeIcon.Camera.ToIconString();
-                            var camSize = ImGui.CalcTextSize(cam);
-                            drawList.AddText(
-                                avatarPos + (new Vector2(avatarSize) - camSize) * 0.5f,
-                                ColorUtils.ToU32(Vector4.One), cam);
-                        }
+                        var cam = FontAwesomeIcon.Camera.ToIconString();
+                        var camSize = ImGui.CalcTextSize(cam);
+                        drawList.AddText(
+                            avatarPos + (new Vector2(avatarSize) - camSize) * 0.5f,
+                            ColorUtils.ToU32(Vector4.One), cam);
                     }
                 }
+            }
 
-                var textMin = new Vector2(avatarPos.X + avatarSize + 10f * scale,
-                    cardMin.Y + bannerHeight + 4f * scale);
-                var textMaxX = cardMin.X + cardWidth - 10f * scale;
-                var lineH = ImGui.GetTextLineHeight();
-                var hasStatus = !string.IsNullOrWhiteSpace(profile.StatusMessage);
-                var hasTags = !string.IsNullOrWhiteSpace(profile.Tags);
-                var hasDesc = !string.IsNullOrWhiteSpace(profile.Description)
-                    && !string.Equals(profile.Description,
-                        SpheneProfileManager.NoDescriptionPlaceholder, StringComparison.Ordinal);
-                var textHeight = avatarSize * 0.55f + lineH * 1.2f + 6f * scale
-                    + (metaLine.Length > 0 ? lineH + 2f * scale : 0f)
-                    + ((editing || hasStatus) ? lineH + 6f * scale : 0f)
-                    + ((editing || hasTags) ? lineH + 12f * scale : 0f)
-                    + (editing ? lineH * 3f + 14f * scale : (hasDesc ? lineH * 2f : 0f))
-                    + (!string.IsNullOrEmpty(edit?.Feedback) ? lineH * 1.5f : 0f);
+            var textMin = new Vector2(avatarPos.X + avatarSize + 10f * scale,
+                bannerMax.Y + 4f * scale);
+            var textMaxX = cursor.X + contentWidth - 10f * scale;
+            var lineH = ImGui.GetTextLineHeight();
+            var hasStatus = !string.IsNullOrWhiteSpace(profile.StatusMessage);
+            var hasTags = !string.IsNullOrWhiteSpace(profile.Tags);
+            var hasDesc = !string.IsNullOrWhiteSpace(profile.Description)
+                && !string.Equals(profile.Description,
+                    SpheneProfileManager.NoDescriptionPlaceholder, StringComparison.Ordinal);
+            var textHeight = avatarSize * 0.55f + lineH * 1.2f + 6f * scale
+                + (metaLine.Length > 0 ? lineH + 2f * scale : 0f)
+                + ((editing || hasStatus) ? lineH + 6f * scale : 0f)
+                + ((editing || hasTags) ? lineH + 12f * scale : 0f)
+                + (editing ? lineH * 3f + 14f * scale : (hasDesc ? lineH * 2f : 0f))
+                + (!string.IsNullOrEmpty(edit?.Feedback) ? lineH * 1.5f : 0f);
 
-                ImGui.SetCursorScreenPos(textMin);
-                using (var textChild = ImRaii.Child("##profile-hero-text",
-                           new Vector2(MathF.Max(120f, textMaxX - textMin.X), textHeight),
-                           false, ImGuiWindowFlags.NoScrollbar))
-                {
-                    if (textChild)
-                    {
-                        var inputWidth = MathF.Max(140f, textMaxX - textMin.X);
-                        DrawHeroName(displayName, metaLine, accent, editing ? edit : null,
-                            inputWidth, scale);
-                        var onNsfw = edit?.OnNsfwToggled;
-                        var nsfwClickable = editing && onNsfw != null;
-                        if (isNsfw || nsfwClickable)
-                        {
-                            DrawNsfwChip(isNsfw, nsfwClickable, scale,
-                                () => onNsfw?.Invoke(!isNsfw));
-                        }
-                        if (editing)
-                        {
-                            var statusBuf = edit!.StatusBuffer;
-                            var statusCommit = Controls.InputTextWithHint("##hero-status",
-                                    "Set a status message…", ref statusBuf, 100,
-                                    ImGuiInputTextFlags.EnterReturnsTrue,
-                                    preferredWidth: inputWidth)
-                                || ImGui.IsItemDeactivatedAfterEdit();
-                            edit.StatusBuffer = statusBuf;
-                            if (statusCommit)
-                            {
-                                edit.OnStatusCommitted?.Invoke(statusBuf.Trim());
-                            }
-                        }
-                        else if (hasStatus)
-                        {
-                            Text.ColoredWrapped(profile.StatusMessage, Colors.TextSecondary);
-                        }
-                        if (editing || hasTags)
-                        {
-                            DrawHeroTags(profile.Tags, editing ? edit : null, accent, scale);
-                        }
-                        if (editing)
-                        {
-                            var descBuf = edit!.DescriptionBuffer;
-                            var descCommit = Controls.InputTextMultiline("##hero-desc",
-                                    ref descBuf, 2000,
-                                    new Vector2(inputWidth, lineH * 3f + 8f * scale))
-                                || ImGui.IsItemDeactivatedAfterEdit();
-                            edit.DescriptionBuffer = descBuf;
-                            if (descCommit)
-                            {
-                                edit.OnDescriptionCommitted?.Invoke(descBuf.Trim());
-                            }
-                        }
-                        else if (hasDesc)
-                        {
-                            var preview = profile.Description;
-                            if (preview.Length > 140) preview = preview[..140] + "…";
-                            Text.MutedWrapped(preview);
-                        }
-                    }
-                }
-
-                // Action buttons along the banner's bottom-right edge. Their
-                // bounding box is remembered so the banner edit zone can
-                // exclude it geometrically — HoveredId arbitration alone still
-                // lets the banner overlay bleed through under the buttons.
-                var hasActionsZone = false;
-                var actionsZoneMin = Vector2.Zero;
-                var actionsZoneMax = Vector2.Zero;
-                if (actions != null && actions.Count > 0)
-                {
-                    var x = textMaxX;
-                    var actionTop = cardMin.Y + bannerHeight - ImGui.GetFrameHeight() - 6f * scale;
-                    foreach (var action in actions)
-                    {
-                        var w = Icons.TextButtonWidth(action.Icon, action.Label) + 4f * scale;
-                        x -= w;
-                        ImGui.SetCursorScreenPos(new Vector2(x, actionTop));
-                        if (Icons.TextButton(action.Icon, action.Label))
-                        {
-                            action.OnClick();
-                        }
-                        if (action.Tooltip != null)
-                        {
-                            AttachTooltip(action.Tooltip);
-                        }
-                        x -= ImGui.GetStyle().ItemSpacing.X;
-                    }
-                    actionsZoneMin = new Vector2(
-                        x + ImGui.GetStyle().ItemSpacing.X - 2f * scale, actionTop - 2f * scale);
-                    actionsZoneMax = new Vector2(textMaxX + 2f * scale,
-                        actionTop + ImGui.GetFrameHeight() + 2f * scale);
-                    hasActionsZone = true;
-                }
-
-                // Banner click zone comes last so action buttons and the avatar
-                // keep hover/click priority where they overlap it.
-                if (editing && edit!.OnBannerClicked != null)
-                {
-                    var bannerSize = bannerMax - bannerMin;
-                    ImGui.SetCursorScreenPos(bannerMin);
-                    var clicked = ImGui.InvisibleButton($"##hero-banner-edit-{displayName}",
-                            bannerSize);
-                    var overInteractables =
-                        (edit!.OnAvatarClicked != null && ImGui.IsMouseHoveringRect(
-                            avatarPos, avatarPos + new Vector2(avatarSize)))
-                        || (hasActionsZone && ImGui.IsMouseHoveringRect(
-                            actionsZoneMin, actionsZoneMax));
-                    if (clicked && !overInteractables)
-                    {
-                        edit.OnBannerClicked();
-                    }
-                    if (ImGui.IsItemHovered() && !overInteractables)
-                    {
-                        ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
-                        drawList.AddRectFilled(bannerMin, bannerMax,
-                            ColorUtils.ToU32(new Vector4(0f, 0f, 0f, 0.30f)),
-                            topRounding, ImDrawFlags.RoundCornersTop);
-                        const string changeLabel = "Click to change banner";
-                        var labelSize = ImGui.CalcTextSize(changeLabel);
-                        var chipMin = bannerMin
-                            + (bannerSize - labelSize) * 0.5f
-                            - new Vector2(8f * scale, 0f);
-                        drawList.AddRectFilled(chipMin, chipMin + labelSize + new Vector2(16f * scale, 0f),
-                            ColorUtils.ToU32(new Vector4(0f, 0f, 0f, 0.60f)), 6f * scale);
-                        drawList.AddText(chipMin + new Vector2(8f * scale, 0f),
-                            ColorUtils.ToU32(Vector4.One), changeLabel);
-                    }
-                }
-
-                var contentBottom = MathF.Max(avatarPos.Y + avatarSize + 6f * scale,
-                    textMin.Y + textHeight + 4f * scale);
-                if (drawStats != null)
-                {
-                    ImGui.SetCursorScreenPos(new Vector2(cardMin.X + 6f * scale,
-                        contentBottom));
-                    drawStats(cardWidth - 12f * scale);
-                    contentBottom = ImGui.GetCursorScreenPos().Y;
-                }
-                ImGui.SetCursorScreenPos(new Vector2(cardMin.X, contentBottom));
-                ImGui.Dummy(Vector2.Zero);
-            }, accent, animatedBackdrop: false,
-            id: $"profile-hero-{displayName}",
-            fxHover: theme.CardHover, fxIdle: theme.CardIdle,
-            topBleed: (dl, cMin, cMax, cRounding) =>
+            ImGui.SetCursorScreenPos(textMin);
+            using (var textChild = ImRaii.Child("##profile-hero-text",
+                       new Vector2(MathF.Max(120f, textMaxX - textMin.X), textHeight),
+                       false, ImGuiWindowFlags.NoScrollbar))
             {
-                // Full-bleed banner: the rect comes from AccentCard's own outer
-                // bounds, so the image sits exactly on the card's top/side
-                // edges and its bottom dissolves into the card tint.
-                var bleedMax = new Vector2(cMax.X, cMin.Y + bleedHeight);
-                dl.PushClipRect(cMin, bleedMax, true);
-                Banner(dl, cMin, bleedMax, banner, theme,
-                    fallbackAccentA, fallbackAccentB, watermark,
-                    rounding: topRounding, corners: ImDrawFlags.RoundCornersTop);
-                dl.PopClipRect();
-                var fadeH = bleedHeight * HeroBannerBodyFade;
-                var fadeClear = ColorUtils.ToU32(ColorUtils.WithAlpha(
-                    Layout.AccentCardTint(accent), 0f));
-                var fadeSolid = ColorUtils.ToU32(Layout.AccentCardTint(accent));
-                dl.AddRectFilledMultiColor(new Vector2(cMin.X, bleedMax.Y - fadeH),
-                    bleedMax, fadeClear, fadeClear, fadeSolid, fadeSolid);
-            });
+                if (textChild)
+                {
+                    var inputWidth = MathF.Max(140f, textMaxX - textMin.X);
+                    DrawHeroName(displayName, metaLine, accent, editing ? edit : null,
+                        inputWidth, scale);
+                    var onNsfw = edit?.OnNsfwToggled;
+                    var nsfwClickable = editing && onNsfw != null;
+                    if (isNsfw || nsfwClickable)
+                    {
+                        DrawNsfwChip(isNsfw, nsfwClickable, scale,
+                            () => onNsfw?.Invoke(!isNsfw));
+                    }
+                    if (editing)
+                    {
+                        var statusBuf = edit!.StatusBuffer;
+                        var statusCommit = Controls.InputTextWithHint("##hero-status",
+                                "Set a status message…", ref statusBuf, 100,
+                                ImGuiInputTextFlags.EnterReturnsTrue,
+                                preferredWidth: inputWidth)
+                            || ImGui.IsItemDeactivatedAfterEdit();
+                        edit.StatusBuffer = statusBuf;
+                        if (statusCommit)
+                        {
+                            edit.OnStatusCommitted?.Invoke(statusBuf.Trim());
+                        }
+                    }
+                    else if (hasStatus)
+                    {
+                        Text.ColoredWrapped(profile.StatusMessage, Colors.TextSecondary);
+                    }
+                    if (editing || hasTags)
+                    {
+                        DrawHeroTags(profile.Tags, editing ? edit : null, accent, scale);
+                    }
+                    if (editing)
+                    {
+                        var descBuf = edit!.DescriptionBuffer;
+                        var descCommit = Controls.InputTextMultiline("##hero-desc",
+                                ref descBuf, 2000,
+                                new Vector2(inputWidth, lineH * 3f + 8f * scale))
+                            || ImGui.IsItemDeactivatedAfterEdit();
+                        edit.DescriptionBuffer = descBuf;
+                        if (descCommit)
+                        {
+                            edit.OnDescriptionCommitted?.Invoke(descBuf.Trim());
+                        }
+                    }
+                    else if (hasDesc)
+                    {
+                        var preview = profile.Description;
+                        if (preview.Length > 140) preview = preview[..140] + "…";
+                        Text.MutedWrapped(preview);
+                    }
+                }
+            }
+
+            // Action buttons along the banner's bottom-right edge. Their
+            // bounding box is remembered so the banner edit zone can
+            // exclude it geometrically — HoveredId arbitration alone still
+            // lets the banner overlay bleed through under the buttons.
+            var hasActionsZone = false;
+            var actionsZoneMin = Vector2.Zero;
+            var actionsZoneMax = Vector2.Zero;
+            if (actions != null && actions.Count > 0)
+            {
+                var x = textMaxX;
+                var actionTop = bannerMax.Y - ImGui.GetFrameHeight() - 6f * scale;
+                foreach (var action in actions)
+                {
+                    var w = Icons.TextButtonWidth(action.Icon, action.Label) + 4f * scale;
+                    x -= w;
+                    ImGui.SetCursorScreenPos(new Vector2(x, actionTop));
+                    if (Icons.TextButton(action.Icon, action.Label))
+                    {
+                        action.OnClick();
+                    }
+                    if (action.Tooltip != null)
+                    {
+                        AttachTooltip(action.Tooltip);
+                    }
+                    x -= ImGui.GetStyle().ItemSpacing.X;
+                }
+                actionsZoneMin = new Vector2(
+                    x + ImGui.GetStyle().ItemSpacing.X - 2f * scale, actionTop - 2f * scale);
+                actionsZoneMax = new Vector2(textMaxX + 2f * scale,
+                    actionTop + ImGui.GetFrameHeight() + 2f * scale);
+                hasActionsZone = true;
+            }
+
+            // Banner click zone comes last so action buttons and the avatar
+            // keep hover/click priority where they overlap it.
+            if (editing && edit!.OnBannerClicked != null)
+            {
+                var bannerSize = bannerMax - bannerMin;
+                ImGui.SetCursorScreenPos(bannerMin);
+                var clicked = ImGui.InvisibleButton($"##hero-banner-edit-{displayName}",
+                        bannerSize);
+                var overInteractables =
+                    (edit!.OnAvatarClicked != null && ImGui.IsMouseHoveringRect(
+                        avatarPos, avatarPos + new Vector2(avatarSize)))
+                    || (hasActionsZone && ImGui.IsMouseHoveringRect(
+                        actionsZoneMin, actionsZoneMax));
+                if (clicked && !overInteractables)
+                {
+                    edit.OnBannerClicked();
+                }
+                if (ImGui.IsItemHovered() && !overInteractables)
+                {
+                    ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
+                    drawList.AddRectFilled(bannerMin, bannerMax,
+                        ColorUtils.ToU32(new Vector4(0f, 0f, 0f, 0.30f)),
+                        bannerRounding, bannerCorners);
+                    const string changeLabel = "Click to change banner";
+                    var labelSize = ImGui.CalcTextSize(changeLabel);
+                    var chipMin = bannerMin
+                        + (bannerSize - labelSize) * 0.5f
+                        - new Vector2(8f * scale, 0f);
+                    drawList.AddRectFilled(chipMin, chipMin + labelSize + new Vector2(16f * scale, 0f),
+                        ColorUtils.ToU32(new Vector4(0f, 0f, 0f, 0.60f)), 6f * scale);
+                    drawList.AddText(chipMin + new Vector2(8f * scale, 0f),
+                        ColorUtils.ToU32(Vector4.One), changeLabel);
+                }
+            }
+
+            var contentBottom = MathF.Max(avatarPos.Y + avatarSize + 6f * scale,
+                textMin.Y + textHeight + 4f * scale);
+            if (drawStats != null)
+            {
+                // Stats/meta align to the avatar's left edge — one continuous
+                // margin for the hero column; hosts may indent further inside
+                // their callback.
+                ImGui.SetCursorScreenPos(new Vector2(cursor.X + 10f * scale,
+                    contentBottom));
+                drawStats(contentWidth - 14f * scale);
+                contentBottom = ImGui.GetCursorScreenPos().Y;
+            }
+            if (!host.HasValue)
+            {
+                // Full-width hairline anchors the cardless hero against the
+                // page sections below.
+                var divY = contentBottom + 6f * scale;
+                drawList.AddLine(new Vector2(bannerMin.X, divY),
+                    new Vector2(bannerMax.X, divY),
+                    ColorUtils.ToU32(ColorUtils.WithAlpha(Palette.CrystalWhite, 0.05f)), 1f);
+                contentBottom = divY + 6f * scale;
+            }
+            ImGui.SetCursorScreenPos(new Vector2(cursor.X, contentBottom));
+            ImGui.Dummy(Vector2.Zero);
+        }
+
+        /// <summary>
+        /// Resolves the banner's bleed rect: an explicit <paramref name="host"/>
+        /// when embedded in a drawn panel, otherwise the enclosing window's
+        /// client bounds — and the pane's top edge when the hero opens the page,
+        /// so the banner lands flush under the title area.
+        /// </summary>
+        private static void ResolveHeroHost(HeroHost? host, Vector2 cursor,
+            float bannerHeight, out Vector2 bannerMin, out Vector2 bannerMax,
+            out float rounding, out ImDrawFlags corners)
+        {
+            if (host.HasValue)
+            {
+                bannerMin = host.Value.Min;
+                bannerMax = new Vector2(host.Value.Max.X,
+                    host.Value.Min.Y + bannerHeight);
+                rounding = host.Value.CornerRounding;
+                corners = host.Value.Corners;
+                return;
+            }
+            var winPos = ImGui.GetWindowPos();
+            var paneTop = winPos.Y - ImGui.GetScrollY();
+            var padTop = ImGui.GetWindowContentRegionMin().Y;
+            bannerMin = new Vector2(winPos.X,
+                cursor.Y <= paneTop + padTop + 1f ? paneTop : cursor.Y);
+            bannerMax = new Vector2(winPos.X + ImGui.GetWindowSize().X,
+                bannerMin.Y + bannerHeight);
+            rounding = 0f;
+            corners = ImDrawFlags.RoundCornersNone;
         }
 
         /// <summary>
@@ -586,75 +649,73 @@ public static partial class SpheneUI
         /// fetch is in flight — when the real hero swaps in, geometry lines
         /// up so the transition does not jump.
         /// </summary>
-        /// <param name="accent">Tint for the banner placeholder and card ring.</param>
+        /// <param name="accent">Tint for the banner placeholder.</param>
         /// <param name="statsRows">Skeleton bars appended under the identity block, mirroring a caller's stats/meta lines.</param>
-        public static void HeroSkeleton(Vector4 accent, int statsRows = 0)
+        /// <param name="host">Same bleed host as <see cref="Hero"/> — pass the panel rect when embedded.</param>
+        public static void HeroSkeleton(Vector4 accent, int statsRows = 0, HeroHost? host = null)
         {
             var scale = Scale;
             var bannerHeight = HeroBannerHeight * scale;
             var avatarSize = HeroAvatarSize * scale;
-            var bleedHeight = bannerHeight + Spacing.CardPadding.Scaled;
-            var topRounding = Layout.AccentCardRounding * scale;
             var phase = (float)ImGui.GetTime();
+            var drawList = ImGui.GetWindowDrawList();
+            var cursor = ImGui.GetCursorScreenPos();
+            var contentWidth = ImGui.GetContentRegionAvail().X;
+            var surface = ImGui.GetStyle().Colors[(int)ImGuiCol.WindowBg];
+            var lineH = ImGui.GetTextLineHeight();
+            var barR = lineH * 0.30f;
 
-            Layout.AccentCard(() =>
+            ResolveHeroHost(host, cursor, bannerHeight,
+                out var bannerMin, out var bannerMax,
+                out var bannerRounding, out var bannerCorners);
+
+            drawList.PushClipRect(bannerMin, bannerMax, true);
+            Banner(drawList, bannerMin, bannerMax, null, SpheneProfileTheme.Default,
+                accent, accent, rounding: bannerRounding, corners: bannerCorners);
+            SkeletonSheen(drawList, bannerMin, bannerMax, phase);
+            drawList.PopClipRect();
+            var fadeH = bannerHeight * HeroBannerBodyFade;
+            drawList.AddRectFilledMultiColor(
+                new Vector2(bannerMin.X, bannerMax.Y - fadeH), bannerMax,
+                ColorUtils.ToU32(ColorUtils.WithAlpha(surface, 0f)),
+                ColorUtils.ToU32(ColorUtils.WithAlpha(surface, 0f)),
+                ColorUtils.ToU32(surface), ColorUtils.ToU32(surface));
+
+            ImGui.Dummy(new Vector2(contentWidth, bannerMax.Y - cursor.Y));
+
+            var avatarPos = cursor + new Vector2(10f * scale,
+                bannerMax.Y - cursor.Y - avatarSize * 0.45f);
+            ImGui.SetCursorScreenPos(avatarPos);
+            ImGui.Dummy(new Vector2(avatarSize));
+            SkeletonBlock(drawList, avatarPos, avatarPos + new Vector2(avatarSize),
+                avatarSize * 0.5f, phase);
+
+            var textX = avatarPos.X + avatarSize + 10f * scale;
+            var textW = MathF.Max(60f * scale, cursor.X + contentWidth - 10f * scale - textX);
+            var nameY = bannerMax.Y + 4f * scale;
+            SkeletonBlock(drawList, new Vector2(textX, nameY),
+                new Vector2(textX + textW * 0.55f, nameY + lineH * 1.15f), barR, phase + 0.12f);
+            var metaY = nameY + lineH * 1.15f + 3f * scale;
+            SkeletonBlock(drawList, new Vector2(textX, metaY),
+                new Vector2(textX + textW * 0.32f, metaY + lineH), barR, phase + 0.24f);
+            var statusY = metaY + lineH + 7f * scale;
+            SkeletonBlock(drawList, new Vector2(textX, statusY),
+                new Vector2(textX + textW * 0.85f, statusY + lineH), barR, phase + 0.36f);
+
+            var contentBottom = MathF.Max(avatarPos.Y + avatarSize + 6f * scale,
+                statusY + lineH + 4f * scale);
+            for (var row = 0; row < statsRows; row++)
             {
-                var cardMin = ImGui.GetCursorScreenPos();
-                var cardWidth = ImGui.GetContentRegionAvail().X;
-                var drawList = ImGui.GetWindowDrawList();
-                var lineH = ImGui.GetTextLineHeight();
-                var barR = lineH * 0.30f;
+                var rowW = contentWidth - 12f * scale;
+                var rowMin = new Vector2(cursor.X + 6f * scale, contentBottom);
+                SkeletonBlock(drawList, rowMin,
+                    new Vector2(rowMin.X + rowW * (row == 0 ? 0.7f : 0.5f),
+                        rowMin.Y + lineH), barR, phase + 0.5f + row * 0.15f);
+                contentBottom += lineH + 6f * scale;
+            }
 
-                ImGui.Dummy(new Vector2(cardWidth, bannerHeight));
-
-                var avatarPos = cardMin + new Vector2(10f * scale, bannerHeight - avatarSize * 0.45f);
-                ImGui.SetCursorScreenPos(avatarPos);
-                ImGui.Dummy(new Vector2(avatarSize));
-                SkeletonBlock(drawList, avatarPos, avatarPos + new Vector2(avatarSize),
-                    avatarSize * 0.5f, phase);
-
-                var textX = avatarPos.X + avatarSize + 10f * scale;
-                var textW = MathF.Max(60f * scale, cardMin.X + cardWidth - 10f * scale - textX);
-                var nameY = cardMin.Y + bannerHeight + 4f * scale;
-                SkeletonBlock(drawList, new Vector2(textX, nameY),
-                    new Vector2(textX + textW * 0.55f, nameY + lineH * 1.15f), barR, phase + 0.12f);
-                var metaY = nameY + lineH * 1.15f + 3f * scale;
-                SkeletonBlock(drawList, new Vector2(textX, metaY),
-                    new Vector2(textX + textW * 0.32f, metaY + lineH), barR, phase + 0.24f);
-                var statusY = metaY + lineH + 7f * scale;
-                SkeletonBlock(drawList, new Vector2(textX, statusY),
-                    new Vector2(textX + textW * 0.85f, statusY + lineH), barR, phase + 0.36f);
-
-                var contentBottom = MathF.Max(avatarPos.Y + avatarSize + 6f * scale,
-                    statusY + lineH + 4f * scale);
-                for (var row = 0; row < statsRows; row++)
-                {
-                    var rowW = cardWidth - 12f * scale;
-                    var rowMin = new Vector2(cardMin.X + 6f * scale, contentBottom);
-                    SkeletonBlock(drawList, rowMin,
-                        new Vector2(rowMin.X + rowW * (row == 0 ? 0.7f : 0.5f),
-                            rowMin.Y + lineH), barR, phase + 0.5f + row * 0.15f);
-                    contentBottom += lineH + 6f * scale;
-                }
-
-                ImGui.SetCursorScreenPos(new Vector2(cardMin.X, contentBottom));
-                ImGui.Dummy(Vector2.Zero);
-            }, accent, animatedBackdrop: false, id: "profile-hero-skeleton",
-            topBleed: (dl, cMin, cMax, _) =>
-            {
-                var bleedMax = new Vector2(cMax.X, cMin.Y + bleedHeight);
-                dl.PushClipRect(cMin, bleedMax, true);
-                Banner(dl, cMin, bleedMax, null, SpheneProfileTheme.Default,
-                    accent, accent, rounding: topRounding, corners: ImDrawFlags.RoundCornersTop);
-                SkeletonSheen(dl, cMin, bleedMax, phase);
-                dl.PopClipRect();
-                var fadeH = bleedHeight * HeroBannerBodyFade;
-                var fadeClear = ColorUtils.ToU32(ColorUtils.WithAlpha(
-                    Layout.AccentCardTint(accent), 0f));
-                var fadeSolid = ColorUtils.ToU32(Layout.AccentCardTint(accent));
-                dl.AddRectFilledMultiColor(new Vector2(cMin.X, bleedMax.Y - fadeH),
-                    bleedMax, fadeClear, fadeClear, fadeSolid, fadeSolid);
-            });
+            ImGui.SetCursorScreenPos(new Vector2(cursor.X, contentBottom));
+            ImGui.Dummy(Vector2.Zero);
         }
 
         /// <summary>

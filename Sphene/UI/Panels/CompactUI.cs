@@ -2426,9 +2426,20 @@ public class CompactUi : WindowMediatorSubscriberBase
         var avatarWrap = ResolvePopoutTexture(key, spheneProfile.ImageData.Value, ref _popoutAvatarBytes);
         var bannerWrap = ResolvePopoutTexture(key + ":banner", spheneProfile.BannerImageData.Value, ref _popoutBannerBytes);
 
+        // The banner bleeds to the full popout panel — its outer top corner
+        // shares the window's rounding; the clip above keeps the reveal edge.
+        var host = new SpheneUI.Profile.HeroHost(cardMin,
+            new Vector2(cardMin.X + fullW, _popoutPanelMax.Y),
+            ImGui.GetStyle().WindowRounding,
+            _popoutLeft ? ImDrawFlags.RoundCornersTopLeft : ImDrawFlags.RoundCornersTopRight);
+        var presence = pair.IsMutuallyVisible || pair.IsOnline
+            ? SpheneUI.Palette.NetworkActive
+            : (Vector4?)null;
+
         if (_spheneProfileManager.IsProfileLoading(pair.UserData))
         {
-            SpheneUI.Profile.HeroSkeleton(SpheneTheme.Current.AccentCyan, statsRows: 2);
+            SpheneUI.Profile.HeroSkeleton(SpheneTheme.Current.AccentCyan, statsRows: 2,
+                host: host);
         }
         else
         {
@@ -2447,7 +2458,8 @@ public class CompactUi : WindowMediatorSubscriberBase
                         Mediator.Publish(new OpenSpheneHubMessage(SpheneHubPage.Friends, Friend: pair));
                     }),
             ],
-            drawStats: _ => DrawPopoutMeta(pair));
+            drawStats: w => DrawPopoutMeta(pair, w),
+            host: host, presence: presence);
         }
 
         SpheneUI.ContentBounds.Pop();
@@ -2477,13 +2489,17 @@ public class CompactUi : WindowMediatorSubscriberBase
         }
     }
 
-    private void DrawPopoutMeta(Pair pair)
+    private void DrawPopoutMeta(Pair pair, float metaW)
     {
-        var metaW = ImGui.GetContentRegionAvail().X;
+        // ImGui resets the cursor X to the window's content edge after each
+        // item — re-anchor it before every line so the meta rows stay on the
+        // avatar's left edge.
+        var metaX = ImGui.GetCursorPosX();
         var online = pair.IsMutuallyVisible || pair.IsOnline;
         var statusText = "● " + (pair.IsMutuallyVisible ? "Visible" : pair.IsOnline ? "Online" : "Offline")
             + (pair.IsMutuallyVisible && !string.IsNullOrEmpty(pair.PlayerName) ? $" · {pair.PlayerName}" : string.Empty);
         var shownStatus = SpheneUI.Text.Ellipsize(statusText, metaW);
+        ImGui.SetCursorPosX(metaX);
         SpheneUI.Text.Colored(shownStatus,
             online ? SpheneUI.Palette.NetworkActive : SpheneUI.Colors.TextMuted);
         if (shownStatus.Length != statusText.Length)
@@ -2511,6 +2527,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         if (pairingLine.Length > 0)
         {
             var shown = SpheneUI.Text.Ellipsize(pairingLine, metaW);
+            ImGui.SetCursorPosX(metaX);
             SpheneUI.Text.Muted(shown);
             if (shown.Length != pairingLine.Length)
             {
@@ -2523,6 +2540,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         {
             var noteLine = $"Your note: {note}";
             var shown = SpheneUI.Text.Ellipsize(noteLine, metaW);
+            ImGui.SetCursorPosX(metaX);
             SpheneUI.Text.Muted(shown);
             if (shown.Length != noteLine.Length)
             {

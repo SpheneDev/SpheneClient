@@ -508,23 +508,30 @@ the Hub profile page, the Friends profile view, `StandaloneProfileUi`, and
   viewer's. `rounding`/`corners` override the theme rounding and restrict which
   corners round — the hero uses `RoundCornersTop` for its full-bleed edge.
 - `Profile.Hero(displayName, metaLine, profile, avatarWrap, bannerWrap,
-  theme, …)` — full-width profile header: banner backdrop, scrim, overlapping
-  avatar, name/status/tag slots, `actions` (`HeroAction` records) at the
-  banner's bottom-right and `drawStats` for full-width content beneath the
-  identity block. `actions` is the extension slot for future community
-  features (house travel, etc.).
-- **Full-bleed hero banner** — the hero banner bleeds into the card padding:
-  its left/right/top edges sit on the `AccentCard` outline, top corners
-  rounded at `AccentCardRounding` so they match the card silhouette exactly
-  (no separate banner radius), and the bottom edge dissolves into the card
-  body via a vertical
-  alpha ramp of the *card's own tint* (`Layout.AccentCardTint`, fraction
-  `HeroBannerBodyFade` = 45%). Do not re-introduce a hard banner edge or an
-  inset strip — the banner owns the card's top edge.
-  It is drawn through `AccentCard`'s `topBleed` chrome callback, which
-  receives the card's real outer rect — content callbacks run inside a
-  `ContentRegion` table cell, so `GetCursorScreenPos` there cannot be used
-  to reconstruct edge-aligned geometry.
+  theme, …)` — full-width profile header **without card chrome**: the banner
+  bleeds into its host surface (see below), the avatar half-overlaps the
+  banner edge with a surface-colored cut-out ring plus an optional
+  `presence` dot, name/status/tag slots underneath, `actions` (`HeroAction`
+  records) at the banner's bottom-right and `drawStats` for full-width
+  content beneath the identity block. `actions` is the extension slot for
+  future community features (house travel, etc.).
+- **Cardless full-bleed hero** — the hero is no longer wrapped in an
+  `AccentCard`. The banner's horizontal bounds come from `host` (a
+  `HeroHost` record: `Min`/`Max` + `CornerRounding`/`Corners` for drawn
+  panels like the CompactUI popout, whose outer top corner shares the
+  window rounding). With `host = null` — the page form — the banner bleeds
+  to the enclosing scroll child's full width; when the hero is the page's
+  first item it also covers the top padding so it lands flush on the pane
+  edge and scrolls away with the content. The bottom edge dissolves into
+  the window surface via an alpha ramp of `ImGuiCol.WindowBg` (fraction
+  `HeroBannerBodyFade` = 45%), which adapts per host (hub pages vs.
+  compact surfaces). A full-width hairline under the identity block
+  separates the cardless hero from page sections below; embedded `host`
+  hosts skip it. Mid-page previews pass their column rect as `host` so the
+  banner does not bleed over surrounding content.
+- `Profile.HeroSkeleton(accent, statsRows, host)` — loading twin with the
+  same cardless silhouette: same banner bleed + fade, pulsing placeholder
+  blocks for avatar/name/meta/status/stats.
 - `Profile.StatTile(...)` — the dashboard tile (icon plate + value + label)
   used where profile stats still make sense.
 - `Profile.HeroEdit` + the `edit:` parameter — own-profile edit mode: banner
