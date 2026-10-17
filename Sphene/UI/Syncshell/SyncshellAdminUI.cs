@@ -306,7 +306,8 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
         var railWidth = _embedded
             ? SpheneUI.Layout.NavRailWidth(navItems)
             : SpheneUI.Layout.NavRailSegmentedWidth(navItems);
-        SpheneUI.Layout.BeginNavRail("syncshell-admin", railWidth, _embedded);
+        SpheneUI.Layout.BeginNavRail("syncshell-admin", railWidth, _embedded,
+            backdropPattern: !_embedded);
         // Same top offset as the hub rail so both sidebars' first buttons
         // start at the same height when embedded.
         SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
@@ -639,7 +640,7 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
                     new Vector2(0f, tableOuterHeight));
                 if (table)
                 {
-                    ImGui.TableSetupColumn("Alias/UID/Note", ImGuiTableColumnFlags.None, 3);
+                    ImGui.TableSetupColumn("Handle/Note", ImGuiTableColumnFlags.None, 3);
                     ImGui.TableSetupColumn("Online/Name", ImGuiTableColumnFlags.None, 2);
                     ImGui.TableSetupColumn("Flags", ImGuiTableColumnFlags.None, 1);
                     ImGui.TableSetupColumn("Actions", ImGuiTableColumnFlags.None, 2);
@@ -855,8 +856,7 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
                         ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.ScrollY,
                         new Vector2(0f, banTableHeight)))
                 {
-                    ImGui.TableSetupColumn("UID", ImGuiTableColumnFlags.None, 1);
-                    ImGui.TableSetupColumn("Alias", ImGuiTableColumnFlags.None, 1);
+                    ImGui.TableSetupColumn("User", ImGuiTableColumnFlags.None, 1);
                     ImGui.TableSetupColumn("Banned By", ImGuiTableColumnFlags.None, 1);
                     ImGui.TableSetupColumn("Date", ImGuiTableColumnFlags.None, 2);
                     ImGui.TableSetupColumn("Reason", ImGuiTableColumnFlags.None, 3);
@@ -867,9 +867,7 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
                     foreach (var bannedUser in _bannedUsers.ToList())
                     {
                         ImGui.TableNextColumn();
-                        SpheneUI.Text.Plain(bannedUser.UID);
-                        ImGui.TableNextColumn();
-                        SpheneUI.Text.Plain(bannedUser.UserAlias ?? string.Empty);
+                        SpheneUI.Text.Plain(bannedUser.UserAliasOrUID);
                         ImGui.TableNextColumn();
                         SpheneUI.Text.Plain(bannedUser.BannedBy);
                         ImGui.TableNextColumn();

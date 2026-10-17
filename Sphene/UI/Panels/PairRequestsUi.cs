@@ -148,7 +148,7 @@ public sealed class PairRequestsUi : WindowMediatorSubscriberBase
 
         if (SpheneUI.Icons.Button(FontAwesomeIcon.User))
         {
-            Mediator.Publish(new ProfileOpenStandaloneMessage(pair));
+            Mediator.Publish(new OpenSpheneHubMessage(SpheneHubPage.Friends, Friend: pair));
         }
         SpheneUI.AttachTooltip("Open Profile");
         ImGui.SameLine();
@@ -190,7 +190,7 @@ public sealed class PairRequestsUi : WindowMediatorSubscriberBase
 
         if (SpheneUI.Icons.Button(FontAwesomeIcon.User))
         {
-            Mediator.Publish(new ProfileOpenStandaloneMessage(pair));
+            Mediator.Publish(new OpenSpheneHubMessage(SpheneHubPage.Friends, Friend: pair));
         }
         SpheneUI.AttachTooltip("Open Profile");
         ImGui.SameLine();

@@ -18,6 +18,7 @@ using Sphene.Services.ServerConfiguration;
 using Sphene.UI.Components;
 using Sphene.UI.Handlers;
 using Sphene.UI.Design;
+using Sphene.UI.Hub;
 using Sphene.WebAPI;
 using Sphene.WebAPI.Files;
 using Sphene.WebAPI.Files.Models;
@@ -87,6 +88,14 @@ public class CompactUi : WindowMediatorSubscriberBase
     private const string ControlPanelTitle = "Sphene Control Panel";
     // Stable fold-state key for the profile title bar collapse animation
     private const string ProfileFoldId = "###SpheneMainUI";
+
+    /// <summary>
+    /// Width the folded bar shrinks to: the hub-width identity card plus its
+    /// insets, the gap, and the close/fold buttons with right pad — unscaled,
+    /// as <see cref="SpheneUI.Chrome.UpdateCollapse"/> expects.
+    /// </summary>
+    private static float FoldedBarWidthUnscaled
+        => (SpheneHubUi.ProfileCardWidth + 14f * SpheneUI.Scale + 64f) / SpheneUI.Scale;
     // Unscaled height of the profile title bar (34 avatar + 2*6 padding)
     private const float ProfileBarHeight = 46f;
     /// <summary>Horizontal inset for header content rows — the window runs
@@ -100,6 +109,33 @@ public class CompactUi : WindowMediatorSubscriberBase
     
     private bool _showModalForUserAddition;
     private float _transferPartHeight;
+    private readonly TransferRateMeter _uploadRateMeter = new();
+    private readonly TransferRateMeter _downloadRateMeter = new();
+
+    // ---- profile popout: grows the window's own surface sideways instead of
+    // docking a separate window, so the reveal can never detach or overlap ----
+    private const float PopoutPanelWidth = 352f;
+    private const float PopoutSlideSeconds = 0.18f;
+    private const double PopoutDismissGraceSeconds = 0.2;
+    private const float PopoutSwapCoverSeconds = 0.07f;
+    private const float PopoutSwapRevealSeconds = 0.16f;
+    private Pair? _popoutPair;
+    private Pair? _popoutWarmPair;
+    // the pair actually drawn lags the activation target while a swap fade runs
+    private Pair? _popoutContentPair;
+    private float _popoutSwapCover;
+    private string? _popoutKey;
+    private float _popoutOpenT;
+    private float _popoutGrown;
+    private bool _popoutDismissed;
+    private bool _popoutForceClose;
+    private bool _popoutLeft;
+    private bool _popoutSideDecided;
+    private DateTime _popoutGraceUntil = DateTime.MinValue;
+    private Vector2 _popoutPanelMin;
+    private Vector2 _popoutPanelMax;
+    private byte[] _popoutAvatarBytes = [];
+    private byte[] _popoutBannerBytes = [];
     private bool _wasOpen;
     private bool _aprilFoolsHyperSyncEnabled;
     private DateTime _aprilFoolsHyperSyncActivatedAt = DateTime.MinValue;
@@ -324,7 +360,34 @@ public class CompactUi : WindowMediatorSubscriberBase
         Mediator.Subscribe<PenumbraModTransferAvailableMessage>(this, OnModSharingTransferAvailable);
         Mediator.Subscribe<PenumbraModTransferCompletedMessage>(this, OnModSharingTransferCompleted);
         Mediator.Subscribe<PenumbraModTransferDiscardedMessage>(this, OnModSharingTransferDiscarded);
-        Mediator.Subscribe<DisconnectedMessage>(this, _ => ClearPendingModSharing());
+        Mediator.Subscribe<DisconnectedMessage>(this, _ => { ClearPendingModSharing(); _popoutPair = null; _popoutForceClose = true; });
+
+        Mediator.Subscribe<ProfilePopoutPreload>(this, (msg) => _popoutWarmPair = msg.Pair);
+
+        Mediator.Subscribe<ProfilePopoutToggle>(this, (msg) =>
+        {
+            if (msg.Pair != null)
+            {
+                _popoutPair = msg.Pair;
+                _popoutDismissed = false;
+                _popoutForceClose = false;
+            }
+            else
+            {
+                _popoutDismissed = true;
+                _popoutGraceUntil = DateTime.UtcNow.AddSeconds(PopoutDismissGraceSeconds);
+            }
+        });
+
+        Mediator.Subscribe<ClearProfileDataMessage>(this, (msg) =>
+        {
+            if (_popoutKey != null
+                && (msg.UserData == null || string.Equals(msg.UserData.UID, _popoutContentPair?.UserData.UID, StringComparison.Ordinal)))
+            {
+                SpheneUI.Media.Evict(_popoutKey);
+                SpheneUI.Media.Evict(_popoutKey + ":banner");
+            }
+        });
 
         Mediator.Subscribe<CompactUiStickToSettingsMessage>(this, msg =>
         {
@@ -519,7 +582,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         // Enforce minimum window size for control panel
         SizeConstraints = new WindowSizeConstraints()
         {
-            MinimumSize = new(350, 400)
+            MinimumSize = new(425, 400)
         };
 
         // End of constructor
@@ -769,7 +832,8 @@ public class CompactUi : WindowMediatorSubscriberBase
             // The custom profile bar acts as the title bar, including its own
             // fold — collapsed height is exactly the bar so nothing shows below
             Flags |= ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoCollapse;
-            SpheneUI.Chrome.UpdateCollapse(this, ProfileFoldId, ProfileBarHeight);
+            SpheneUI.Chrome.UpdateCollapse(this, ProfileFoldId, ProfileBarHeight,
+                FoldedBarWidthUnscaled);
         }
         else
         {
@@ -798,6 +862,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         
         // Apply any pending window resize before the window is drawn
         UiSharedService.ApplyPendingWindowResize(ControlPanelTitle);
+        SchedulePopoutGeometry();
         base.PreDraw();
     }
 
@@ -886,7 +951,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                 SpheneUI.Text.Colored("Test Server Disclaimer", SpheneTheme.Current.CompactHeaderText);
                 ImGui.Separator();
                 SpheneUI.Text.Wrapped("You are about to connect to the Test Server.");
-                SpheneUI.Text.Wrapped("On the Test Server, a new UID is created automatically for you.");
+                SpheneUI.Text.Wrapped("On the Test Server, a new account is created automatically for you.");
                 SpheneUI.Text.Wrapped("Anything you do there has no effect on your main server account.");
                 SpheneUI.Text.Wrapped("If you find bugs, please report them on Discord.");
 
@@ -1006,7 +1071,37 @@ public class CompactUi : WindowMediatorSubscriberBase
 
     protected override void DrawInternal()
     {
-        DrawInternalBody();
+        // The profile popout widens this window on one side. The whole body
+        // renders into a child region pinned to the pre-popout rect — the
+        // grown strip is pure overlay, so existing content can never move
+        // or reflow while the window animates.
+        var popoutGrown = UpdatePopoutGrowth();
+
+        var wpos = ImGui.GetWindowPos();
+        var wsize = ImGui.GetWindowSize();
+
+        // Surface, blur and ambience cover the grown window — the popout
+        // strip shares the same chrome as the rest of the window
+        var theme = SpheneTheme.Current;
+        SpheneUI.Chrome.WindowBlur(theme.CompactEnableWindowBlur ? theme.CompactWindowBlurStrength : 0f);
+        var surfaceDrawList = ImGui.GetWindowDrawList();
+        var surfaceRounding = ImGui.GetStyle().WindowRounding;
+        SpheneUI.Chrome.DrawWindowSurface(surfaceDrawList, wpos, wpos + wsize, surfaceRounding);
+        DrawHalloweenBackground();
+
+        var bodyMin = new Vector2(wpos.X + (_popoutLeft ? popoutGrown : 0f), wpos.Y);
+        ImGui.SetCursorScreenPos(bodyMin);
+        if (ImGui.BeginChild("##compactBody", wsize - new Vector2(popoutGrown, 0f), false,
+                ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse | ImGuiWindowFlags.NoBackground))
+        {
+            DrawInternalBody();
+        }
+        ImGui.EndChild();
+
+        if (popoutGrown > 0.5f && _popoutPair != null)
+        {
+            DrawPopoutPanel(popoutGrown);
+        }
 
         // Window border ring above all content — the flush title bar fill
         // reaches the window edge and would otherwise cover the ring
@@ -1023,22 +1118,6 @@ public class CompactUi : WindowMediatorSubscriberBase
 
     private void DrawInternalBody()
     {
-        // Theme is already applied in PreDraw, no need to apply it again here
-
-        var theme = SpheneTheme.Current;
-        SpheneUI.Chrome.WindowBlur(theme.CompactEnableWindowBlur ? theme.CompactWindowBlurStrength : 0f);
-
-        // Self-drawn surface — the style radius stays correct even when ImGui
-        // has zeroed the native window rounding (viewport-owned)
-        var surfacePos = ImGui.GetWindowPos();
-        var surfaceMax = surfacePos + ImGui.GetWindowSize();
-        var surfaceRounding = ImGui.GetStyle().WindowRounding;
-        var surfaceDrawList = ImGui.GetWindowDrawList();
-        SpheneUI.Chrome.DrawWindowSurface(surfaceDrawList, surfacePos, surfaceMax, surfaceRounding);
-
-        // Draw Halloween background first (behind all content)
-        DrawHalloweenBackground();
-
         // The profile bar doubles as the title bar in custom-header mode
         var customHeader = !SpheneTheme.Current.CompactShowImGuiHeader;
         if (customHeader)
@@ -1690,8 +1769,8 @@ public class CompactUi : WindowMediatorSubscriberBase
                 }
                 else
                 {
-                    SpheneUI.Text.Wrapped($"You have successfully added {_lastAddedUser.UserData.AliasOrUID}. Set a local note for the user in the field below:");
-                    ImGui.InputTextWithHint("##noteforuser", $"Note for {_lastAddedUser.UserData.AliasOrUID}", ref _lastAddedUserComment, 100);
+                    SpheneUI.Text.Wrapped($"You have successfully added {_lastAddedUser.UserData.PreferredName}. Set a local note for the user in the field below:");
+                    ImGui.InputTextWithHint("##noteforuser", $"Note for {_lastAddedUser.UserData.PreferredName}", ref _lastAddedUserComment, 100);
                     if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Save, "Save Note"))
                     {
                         _serverManager.SetNoteForUid(_lastAddedUser.UserData.UID, _lastAddedUserComment);
@@ -1749,8 +1828,9 @@ public class CompactUi : WindowMediatorSubscriberBase
             _lastSize = size;
             if (!_stickEnabled)
                 _lastPosition = pos;
-            
-            Mediator.Publish(new CompactUiChange(_lastSize, _lastPosition));
+
+            // publish the live rect — the tracked position freezes while stuck
+            Mediator.Publish(new CompactUiChange(size, pos));
         }
     }
 
@@ -1989,7 +2069,9 @@ public class CompactUi : WindowMediatorSubscriberBase
             .SelectMany(d => d.Values)
             .Where(v => v != null)
             .ToList();
-        
+        var theme = Sphene.UI.Design.SpheneTheme.Current;
+        var drewRow = false;
+
         // Only show upload progress if there are active uploads
         if (currentUploads.Any())
         {
@@ -2000,9 +2082,12 @@ public class CompactUi : WindowMediatorSubscriberBase
 
             var uploadProgress = totalToUpload > 0 ? (float)totalUploaded / totalToUpload : 0f;
             var uploadText = $"{doneUploads}/{totalUploads} ({UiSharedService.ByteToString(totalUploaded)}/{UiSharedService.ByteToString(totalToUpload)})";
+            var uploadRate = FormatTransferRate(_uploadRateMeter.Sample(totalUploaded));
 
-            DrawTransferRow(FontAwesomeIcon.Upload, "Transmitting", uploadProgress, uploadText, true);
+            DrawTransferRow(FontAwesomeIcon.Upload, uploadProgress, uploadText, uploadRate, true);
+            drewRow = true;
         }
+        else _uploadRateMeter.Reset();
 
         // Only show download progress if there are active downloads
         if (currentDownloads.Any())
@@ -2014,70 +2099,447 @@ public class CompactUi : WindowMediatorSubscriberBase
 
             var downloadProgress = totalToDownload > 0 ? (float)totalDownloaded / totalToDownload : 0f;
             var downloadText = $"{doneDownloads}/{totalDownloads} ({UiSharedService.ByteToString(totalDownloaded)}/{UiSharedService.ByteToString(totalToDownload)})";
+            var downloadRate = FormatTransferRate(_downloadRateMeter.Sample(totalDownloaded));
 
-            DrawTransferRow(FontAwesomeIcon.Download, "Receiving", downloadProgress, downloadText, false);
+            DrawTransferRow(FontAwesomeIcon.Download, downloadProgress, downloadText, downloadRate, false);
+            drewRow = true;
         }
+        else _downloadRateMeter.Reset();
 
         // Show transmission preview in-place when enabled
-        var theme = Sphene.UI.Design.SpheneTheme.Current;
         if (theme.ShowTransmissionPreview)
         {
             if (!currentUploads.Any())
             {
-                var previewUpload = theme.TransmissionPreviewUploadFill / 100.0f;
-                DrawTransferRow(FontAwesomeIcon.Upload, "Transmitting", previewUpload,
-                    $"{theme.TransmissionPreviewUploadFill:F1}%", true);
+                DrawTransferRow(FontAwesomeIcon.Upload,
+                    theme.TransmissionPreviewUploadFill / 100.0f, null, null, true);
+                drewRow = true;
             }
 
             if (!currentDownloads.Any())
             {
-                var previewDownload = theme.TransmissionPreviewDownloadFill / 100.0f;
-                DrawTransferRow(FontAwesomeIcon.Download, "Receiving", previewDownload,
-                    $"{theme.TransmissionPreviewDownloadFill:F1}%", false);
+                DrawTransferRow(FontAwesomeIcon.Download,
+                    theme.TransmissionPreviewDownloadFill / 100.0f, null, null, false);
+                drewRow = true;
             }
+        }
+
+        // keep the last bar off the card's bottom edge
+        if (drewRow)
+            ImGui.Dummy(new Vector2(1f, SpheneUI.Spacing.X8.Scaled));
+    }
+
+    /// <summary>EMA-smoothed byte-rate tracker; re-seeds whenever the transfer
+    /// set changes so stale totals can't produce a spike.</summary>
+    private sealed class TransferRateMeter
+    {
+        private const double MinSampleInterval = 0.1;
+        private const double SmoothingPerSecond = 4.0;
+        private long _lastTotal;
+        private double _lastTime = -1.0;
+
+        public float Rate { get; private set; }
+
+        public float Sample(long totalBytes)
+        {
+            var now = ImGui.GetTime();
+            if (_lastTime < 0.0)
+            {
+                _lastTime = now;
+                _lastTotal = totalBytes;
+                return Rate;
+            }
+
+            var dt = now - _lastTime;
+            if (dt < MinSampleInterval) return Rate;
+            var instant = MathF.Max(0f, (float)((totalBytes - _lastTotal) / dt));
+            Rate += (instant - Rate) * MathF.Min(1f, (float)(dt * SmoothingPerSecond));
+            _lastTotal = totalBytes;
+            _lastTime = now;
+            return Rate;
+        }
+
+        public void Reset()
+        {
+            _lastTime = -1.0;
+            _lastTotal = 0;
+            Rate = 0f;
         }
     }
 
-    private static void DrawTransferRow(FontAwesomeIcon icon, string label,
-        float progress, string detail, bool isUpload)
+    private static string? FormatTransferRate(float bytesPerSecond)
+        => bytesPerSecond > 512f
+            ? $"{UiSharedService.ByteToString((long)bytesPerSecond)}/s"
+            : null;
+
+    private static void DrawTransferRow(FontAwesomeIcon icon, float progress,
+        string? detail, string? rateText, bool isUpload)
     {
         var theme = Sphene.UI.Design.SpheneTheme.Current;
-        var barH = theme.SeparateTransmissionBarStyles
+        var barH = MathF.Max(2f, theme.SeparateTransmissionBarStyles
             ? (isUpload ? theme.UploadTransmissionBarHeight : theme.DownloadTransmissionBarHeight)
-            : theme.CompactTransmissionBarHeight;
+            : theme.CompactTransmissionBarHeight);
         var lineH = ImGui.GetTextLineHeight();
         progress = Math.Clamp(progress, 0f, 1f);
 
-        // label line: icon + label left, percentage right-aligned
-        SpheneUI.Icons.Icon(icon, theme.CompactTextSecondary);
-        ImGui.SameLine(0, SpheneUI.Spacing.Inline.Scaled);
-        SpheneUI.Text.Colored(label, theme.CompactText);
-        var pct = $"{progress * 100f:F0}%";
-        var pctW = ImGui.CalcTextSize(pct).X;
+        // the glyph carries direction — icon column beside the bar, no label line
+        var iconH = lineH;
+        var rowH = MathF.Max(barH, iconH);
+        var gap = SpheneUI.Spacing.X8.Scaled;
         // Indent only pulls the left edge in — subtract the list padding again
         // for the right bound so the bar aligns with pair rows
         var availX = SpheneUI.Controls.BoundedAvailX()
             - theme.CompactPairListContentPadding;
-        var lineRight = ImGui.GetCursorPosX() + availX;
-        ImGui.SameLine(MathF.Max(ImGui.GetCursorPosX() + SpheneUI.Spacing.X4.Scaled,
-            lineRight - pctW));
-        SpheneUI.Text.Muted(pct);
 
-        var barW = theme.AutoTransmissionBarWidth
+        var pct = $"{progress * 100f:F0}%";
+        // rate and percent live beside the bar so they stay visible at any
+        // bar height — the in-bar overlay only carries the byte detail
+        var sideText = rateText != null ? $"{rateText} · {pct}" : pct;
+        var sideW = ImGui.CalcTextSize(sideText).X;
+        var overlay = barH >= lineH ? detail : null;
+
+        var barW = MathF.Max(2f, (theme.AutoTransmissionBarWidth
             ? MathF.Max(50f, availX)
-            : MathF.Min(theme.CompactTransmissionBarWidth, availX);
-        var barSize = new Vector2(barW, MathF.Max(2f, barH));
-        var barPos = ImGui.GetCursorScreenPos();
-        var overlay = barH >= lineH ? $"{detail} · {pct}" : null;
+            : MathF.Min(theme.CompactTransmissionBarWidth, availX))
+            - iconH - gap - gap - sideW);
 
-        ImGui.Dummy(barSize);
-        if (overlay == null)
-            SpheneUI.AttachTooltip($"{label}: {detail} — {pct}");
-        ImGui.SetCursorScreenPos(barPos);
-        SpheneUI.Controls.TransmissionBar(progress, barSize, overlay, isUpload);
+        var rowMin = ImGui.GetCursorScreenPos();
+        ImGui.Dummy(new Vector2(iconH + gap + barW + gap + sideW, rowH));
+
+        var lone = detail ?? rateText;
+        var tip = detail != null && rateText != null
+            ? $"{detail} · {rateText} · {pct}"
+            : lone != null ? $"{lone} · {pct}" : pct;
+        SpheneUI.AttachTooltip(tip);
+
+        ImGui.SetCursorScreenPos(new Vector2(rowMin.X, rowMin.Y + (rowH - iconH) * 0.5f));
+        SpheneUI.Icons.Icon(icon, theme.CompactTextSecondary);
+        ImGui.SetCursorScreenPos(new Vector2(rowMin.X + iconH + gap,
+            rowMin.Y + (rowH - barH) * 0.5f));
+        SpheneUI.Controls.TransmissionBar(progress, new Vector2(barW, barH), overlay, isUpload);
+        ImGui.SetCursorScreenPos(new Vector2(rowMin.X + iconH + gap + barW + gap,
+            rowMin.Y + (rowH - lineH) * 0.5f));
+        SpheneUI.Text.Muted(sideText);
+
+        // TransmissionBar advances the cursor itself — restore the row bottom
+        ImGui.SetCursorScreenPos(new Vector2(rowMin.X, rowMin.Y + rowH));
     }
 
-    
+    /// <summary>
+    /// Advances the popout animation and schedules the window's geometry via
+    /// SetNextWindowPos/Size so BOTH axes land atomically in the same Begin —
+    /// exactly how the fold drives window.Position/Size in PreDraw. Geometry
+    /// must never be written mid-frame: SetWindowPos applies immediately but
+    /// SetWindowSize defers one frame, splitting the axes slides the content.
+    /// Runs in PreDraw; the applied rect is reconstructed from the tracked
+    /// <see cref="_lastPosition"/>/<see cref="_lastSize"/> minus the grown
+    /// value carried by the previous frame — drags self-correct.
+    /// </summary>
+    private void SchedulePopoutGeometry()
+    {
+        var wantOpen = PopoutWantsOpen();
+        var active = wantOpen || _popoutOpenT > 0f || _popoutGrown > 0.001f || _popoutSideDecided;
+        if (!active || _lastSize.X <= 1f)
+        {
+            return;
+        }
+
+        var dt = ImGui.GetIO().DeltaTime;
+        _popoutOpenT = Math.Clamp(_popoutOpenT + (wantOpen ? dt : -dt) / PopoutSlideSeconds, 0f, 1f);
+
+        // pick the side once, while the strip still has zero width — sticking
+        // owns the position, so only right growth is possible then
+        if (!_popoutSideDecided)
+        {
+            var workPos = ImGui.GetMainViewport().WorkPos;
+            var workMax = workPos + ImGui.GetMainViewport().WorkSize;
+            var panelW = PopoutPanelWidth * SpheneUI.Scale;
+            var fitsRight = _lastPosition.X + _lastSize.X + panelW <= workMax.X;
+            var fitsLeft = !_stickEnabled && _lastPosition.X - panelW >= workPos.X;
+            _popoutLeft = !_stickEnabled && (_configService.Current.ProfilePopoutRight
+                ? !fitsRight && fitsLeft
+                : fitsLeft || !fitsRight);
+            _popoutSideDecided = true;
+        }
+
+        var eased = _popoutOpenT * _popoutOpenT * (3f - 2f * _popoutOpenT);
+        // ImGui floors window pos/size to whole pixels — schedule the strip as
+        // an integer so the applied rect is exact: the body lands back on
+        // baseX with zero sub-pixel drift and the base stays self-consistent
+        // frame over frame (a fractional grown would ratchet the base left).
+        var grown = MathF.Ceiling(PopoutPanelWidth * SpheneUI.Scale * eased);
+        // _lastPosition/_lastSize are captured inside the body child — they ARE
+        // the pinned base rect, the strip never leaks into them
+        var baseW = MathF.Round(_lastSize.X);
+        var baseX = MathF.Round(_lastPosition.X);
+        var baseY = MathF.Round(_lastPosition.Y);
+        if (_popoutLeft)
+        {
+            ImGui.SetNextWindowPos(new Vector2(baseX - grown, baseY), ImGuiCond.Always);
+        }
+        var nextSizeX = baseW + grown;
+        ImGui.SetNextWindowSize(new Vector2(nextSizeX, _lastSize.Y), ImGuiCond.Always);
+        _popoutGrown = grown;
+    }
+
+    /// <summary>True while the popout pair should stay expanded. Dismissal is
+    /// evaluated in <see cref="UpdatePopoutGrowth"/> where the window rect is valid.</summary>
+    private bool PopoutWantsOpen()
+        => _popoutPair != null && !_popoutForceClose
+            && (!_popoutDismissed || DateTime.UtcNow < _popoutGraceUntil);
+
+    /// <summary>
+    /// Reads the strip width applied at this frame's Begin, places the panel
+    /// rect against it and releases the pair once nothing is left. Returns
+    /// the grown strip width in pixels.
+    /// </summary>
+    private float UpdatePopoutGrowth()
+    {
+        WarmPopoutContent();
+
+        // folding re-owns the window geometry — the popout cannot outlive it
+        if (SpheneUI.Chrome.CollapseAmount(ProfileFoldId) > 0f)
+        {
+            _popoutPair = null;
+            _popoutWarmPair = null;
+            _popoutContentPair = null;
+            _popoutSwapCover = 0f;
+            _popoutKey = null;
+            _popoutOpenT = 0f;
+            _popoutGrown = 0f;
+            _popoutSideDecided = false;
+            return 0f;
+        }
+
+        var drawn = _popoutGrown;
+        var pos = ImGui.GetWindowPos();
+        var size = ImGui.GetWindowSize();
+        _popoutPanelMin = _popoutLeft
+            ? pos
+            : new Vector2(pos.X + size.X - drawn, pos.Y);
+        _popoutPanelMax = _popoutPanelMin + new Vector2(drawn, size.Y);
+
+        if (_popoutPair != null && !_popoutForceClose)
+        {
+            var mouseInPanel = drawn > 0.5f
+                && ImGui.IsMouseHoveringRect(_popoutPanelMin, _popoutPanelMax);
+            // right-click activates rows, so only left/middle clicks dismiss
+            var anyClick = ImGui.IsMouseClicked(ImGuiMouseButton.Left)
+                || ImGui.IsMouseClicked(ImGuiMouseButton.Middle);
+            if (anyClick && !mouseInPanel)
+            {
+                _popoutForceClose = true;
+            }
+            else if (!ImGui.IsMouseHoveringRect(pos, pos + size))
+            {
+                // the strip is part of the grown window — leaving the window
+                // region starts the grace countdown, re-entering cancels it
+                if (!_popoutDismissed)
+                {
+                    _popoutDismissed = true;
+                    _popoutGraceUntil = DateTime.UtcNow.AddSeconds(PopoutDismissGraceSeconds);
+                }
+            }
+            else
+            {
+                _popoutDismissed = false;
+            }
+        }
+
+        // pair switch while open: a surface-colored cover fades in, the card
+        // swaps to the new pair under full cover, then the cover fades back
+        // out — the strip itself never re-runs its growth animation
+        var dt = ImGui.GetIO().DeltaTime;
+        if (_popoutPair != null && !ReferenceEquals(_popoutContentPair, _popoutPair))
+        {
+            if (_popoutContentPair == null || drawn <= 1f)
+            {
+                _popoutContentPair = _popoutPair;
+                _popoutKey = $"popout:{_popoutPair.UserData.UID}";
+            }
+            else if ((_popoutSwapCover += dt / PopoutSwapCoverSeconds) >= 1f)
+            {
+                _popoutSwapCover = 1f;
+                _popoutContentPair = _popoutPair;
+                _popoutKey = $"popout:{_popoutPair.UserData.UID}";
+            }
+        }
+        else
+        {
+            _popoutSwapCover = MathF.Max(0f, _popoutSwapCover - dt / PopoutSwapRevealSeconds);
+        }
+
+        if (!PopoutWantsOpen() && _popoutOpenT <= 0f && drawn <= 0.01f)
+        {
+            _popoutPair = null;
+            _popoutWarmPair = null;
+            _popoutContentPair = null;
+            _popoutSwapCover = 0f;
+            _popoutKey = null;
+            _popoutSideDecided = false;
+            _popoutGrown = 0f;
+        }
+        return drawn;
+    }
+
+    /// <summary>
+    /// Pre-warms the popout's data path while the hover delay is still
+    /// running: the profile fetch starts on hover-arm, and avatar/banner
+    /// textures decode under the same cache keys the open panel uses —
+    /// growth then only reveals content instead of loading it.
+    /// </summary>
+    private void WarmPopoutContent()
+    {
+        var warm = _popoutWarmPair ?? _popoutPair;
+        if (warm == null)
+        {
+            return;
+        }
+        var profile = _spheneProfileManager.GetSpheneProfile(warm.UserData);
+        var key = $"popout:{warm.UserData.UID}";
+        ResolvePopoutTexture(key, profile.ImageData.Value, ref _popoutAvatarBytes);
+        ResolvePopoutTexture(key + ":banner", profile.BannerImageData.Value, ref _popoutBannerBytes);
+    }
+
+    private void DrawPopoutPanel(float grown)
+    {
+        var pair = _popoutContentPair;
+        if (pair == null) return;
+
+        var scale = SpheneUI.Scale;
+        var drawList = ImGui.GetWindowDrawList();
+        var fullW = PopoutPanelWidth * scale;
+        var pad = SpheneTheme.Current.CompactWindowPadding.X;
+        // the card's seam edge stays pinned to the content edge — the moving
+        // window border reveals it instead of the card sliding
+        var cardMin = new Vector2(
+            _popoutLeft ? _popoutPanelMax.X - fullW : _popoutPanelMin.X,
+            _popoutPanelMin.Y);
+
+        drawList.PushClipRect(_popoutPanelMin, _popoutPanelMax, true);
+        ImGui.SetCursorScreenPos(cardMin + new Vector2(pad, pad));
+        SpheneUI.ContentBounds.Push(new Vector2(cardMin.X + pad, cardMin.X + fullW - pad));
+
+        var spheneProfile = _spheneProfileManager.GetSpheneProfile(pair.UserData);
+        var friendTheme = spheneProfile.ProfileTheme.Value;
+        var key = _popoutKey!;
+        var avatarWrap = ResolvePopoutTexture(key, spheneProfile.ImageData.Value, ref _popoutAvatarBytes);
+        var bannerWrap = ResolvePopoutTexture(key + ":banner", spheneProfile.BannerImageData.Value, ref _popoutBannerBytes);
+
+        if (_spheneProfileManager.IsProfileLoading(pair.UserData))
+        {
+            SpheneUI.Profile.HeroSkeleton(SpheneTheme.Current.AccentCyan, statsRows: 2);
+        }
+        else
+        {
+            SpheneUI.Profile.Hero(
+            pair.UserData.PreferredName,
+            string.IsNullOrWhiteSpace(pair.UserData.Alias) ? string.Empty : "@" + pair.UserData.Alias,
+            spheneProfile, avatarWrap, bannerWrap, friendTheme,
+            SpheneTheme.Current.AccentCyan, SpheneTheme.Current.AccentBlue,
+            isNsfw: spheneProfile.IsNSFW,
+            actions:
+            [
+                new SpheneUI.Profile.HeroAction(FontAwesomeIcon.ArrowRight, "Profile",
+                    "Open the full profile in the Sphene hub", () =>
+                    {
+                        _popoutForceClose = true;
+                        Mediator.Publish(new OpenSpheneHubMessage(SpheneHubPage.Friends, Friend: pair));
+                    }),
+            ],
+            drawStats: _ => DrawPopoutMeta(pair));
+        }
+
+        SpheneUI.ContentBounds.Pop();
+        drawList.PopClipRect();
+
+        // seam hairline fades in once the grown column has real width
+        var seamWidth = 40f * scale;
+        if (grown > seamWidth)
+        {
+            var fade = MathF.Min(1f, grown / seamWidth - 1f);
+            var seamX = _popoutLeft ? _popoutPanelMax.X : _popoutPanelMin.X;
+            drawList.AddLine(
+                new Vector2(seamX, _popoutPanelMin.Y + 4f * scale),
+                new Vector2(seamX, _popoutPanelMax.Y - 4f * scale),
+                SpheneUI.ColorUtils.ToU32(new Vector4(1f, 1f, 1f, 0.08f * fade)), 1f);
+        }
+
+        // pair-swap cover: dips the strip toward the window surface while the
+        // card content changes underneath — the swap lands at full cover
+        if (_popoutSwapCover > 0.001f)
+        {
+            var cover = ImGui.GetStyle().Colors[(int)ImGuiCol.WindowBg];
+            cover.W *= _popoutSwapCover;
+            drawList.AddRectFilled(_popoutPanelMin, _popoutPanelMax,
+                SpheneUI.ColorUtils.ToU32(cover), ImGui.GetStyle().WindowRounding,
+                _popoutLeft ? ImDrawFlags.RoundCornersLeft : ImDrawFlags.RoundCornersRight);
+        }
+    }
+
+    private void DrawPopoutMeta(Pair pair)
+    {
+        var metaW = ImGui.GetContentRegionAvail().X;
+        var online = pair.IsMutuallyVisible || pair.IsOnline;
+        var statusText = "● " + (pair.IsMutuallyVisible ? "Visible" : pair.IsOnline ? "Online" : "Offline")
+            + (pair.IsMutuallyVisible && !string.IsNullOrEmpty(pair.PlayerName) ? $" · {pair.PlayerName}" : string.Empty);
+        var shownStatus = SpheneUI.Text.Ellipsize(statusText, metaW);
+        SpheneUI.Text.Colored(shownStatus,
+            online ? SpheneUI.Palette.NetworkActive : SpheneUI.Colors.TextMuted);
+        if (shownStatus.Length != statusText.Length)
+        {
+            SpheneUI.AttachTooltip(statusText);
+        }
+
+        var pairingLine = string.Empty;
+        void Part(string? s)
+        {
+            if (!string.IsNullOrEmpty(s))
+            {
+                pairingLine = pairingLine.Length == 0 ? s : pairingLine + " · " + s;
+            }
+        }
+        Part(pair.UserPair.IndividualPairStatus == API.Data.Enum.IndividualPairStatus.Bidirectional
+            ? "Direct pair" : null);
+        var groupCount = pair.UserPair.Groups.Count;
+        Part(groupCount > 0 ? $"via {groupCount} syncshell{(groupCount > 1 ? "s" : string.Empty)}" : null);
+        var ownPaused = pair.UserPair.OwnPermissions.IsPaused();
+        var otherPaused = pair.UserPair.OtherPermissions.IsPaused();
+        Part(ownPaused && otherPaused ? "You paused · they paused"
+            : ownPaused ? "You paused"
+            : otherPaused ? "They paused" : null);
+        if (pairingLine.Length > 0)
+        {
+            var shown = SpheneUI.Text.Ellipsize(pairingLine, metaW);
+            SpheneUI.Text.Muted(shown);
+            if (shown.Length != pairingLine.Length)
+            {
+                SpheneUI.AttachTooltip(pairingLine);
+            }
+        }
+
+        var note = _serverManager.GetNoteForUid(pair.UserData.UID);
+        if (!string.IsNullOrEmpty(note))
+        {
+            var noteLine = $"Your note: {note}";
+            var shown = SpheneUI.Text.Ellipsize(noteLine, metaW);
+            SpheneUI.Text.Muted(shown);
+            if (shown.Length != noteLine.Length)
+            {
+                SpheneUI.AttachTooltip(noteLine);
+            }
+        }
+    }
+
+    private static IDalamudTextureWrap? ResolvePopoutTexture(string key, byte[] data, ref byte[] cache)
+    {
+        if (!data.SequenceEqual(cache))
+        {
+            cache = data;
+            SpheneUI.Media.Evict(key);
+        }
+        return data.Length == 0 ? null : SpheneUI.Media.Texture(key, cache);
+    }
 
     private void DrawProfileHeader(float width)
     {
@@ -2091,100 +2553,79 @@ public class CompactUi : WindowMediatorSubscriberBase
         // matches the header card's outer rounding so the strip merges with its top edge
         var cornerRadius = 10.0f;
 
-        drawList.AddRectFilled(cardMin, cardMax,
-            SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(
-                new Vector4(0.02f, 0.02f, 0.04f, 1f), 0.5f)), cornerRadius,
-            ImDrawFlags.RoundCornersTop);
-
-        ImGui.SetCursorScreenPos(cardMin);
-        var clicked = ImGui.InvisibleButton("##compact-profile", new Vector2(width, cardH));
-        var hovered = ImGui.IsItemHovered();
-        if (clicked)
-        {
-            Mediator.Publish(new OpenSpheneHubMessage(SpheneHubPage.Profile));
-        }
+        // strip hover drives the backdrop anim only — clicks belong to the
+        // identity card alone
+        var stripHovered = ImGui.IsMouseHoveringRect(cardMin, cardMax) && ImGui.IsWindowHovered();
 
         // same row backdrop viewers see in their friends list, plus the accent
         var profile = CompactProfile();
         var theme = profile?.ProfileTheme.Value ?? SpheneProfileTheme.Default;
         var accent = theme.AccentColor(SpheneUI.Colors.Accent);
         _profileBarHoverT = Math.Clamp(
-            _profileBarHoverT + ImGui.GetIO().DeltaTime * 6f * (hovered ? 1f : -1f), 0f, 1f);
-        SpheneUI.Profile.RowBackdrop(drawList, cardMin, cardMax, accent, hovered,
+            _profileBarHoverT + ImGui.GetIO().DeltaTime * 6f * (stripHovered ? 1f : -1f), 0f, 1f);
+        SpheneUI.Profile.RowBackdrop(drawList, cardMin, cardMax, accent, stripHovered,
             _profileBarHoverT, theme, GetCompactRowImage(profile), cornerRadius,
             ImDrawFlags.RoundCornersTop);
 
-        if (hovered)
-        {
-            ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
-            drawList.AddRectFilled(cardMin, cardMax,
-                SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(Vector4.One, 0.06f)),
-                cornerRadius, ImDrawFlags.RoundCornersTop);
-        }
         drawList.AddRect(cardMin, cardMax,
             SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(Vector4.One, 0.10f)),
             cornerRadius, ImDrawFlags.RoundCornersTop);
 
-        DrawProfileIdentity(drawList, cardMin, cardH, width, HeaderContentPadX, profile, accent, hovered);
+        var idRect = DrawIdentityStrip(drawList, cardMin, cardMax, cornerRadius, profile, accent);
+        if (ImGui.IsMouseHoveringRect(idRect.Min, idRect.Max) && ImGui.IsWindowHovered())
+        {
+            ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
+            if (ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+            {
+                Mediator.Publish(new OpenSpheneHubMessage(SpheneHubPage.Profile));
+            }
+        }
 
         // move the layout cursor below the card so the card body continues underneath
         ImGui.SetCursorScreenPos(new Vector2(cardMin.X, cardMax.Y));
     }
 
     /// <summary>
-    /// Shared profile block for the compact header card and the title bar:
-    /// round avatar + accent halo + presence dot, display name and status line.
-    /// The caller owns the clickable/hover area — <paramref name="hovered"/>
-    /// decides whether the open-hub tooltip attaches.
+    /// Shared identity strip for the compact header card and the title bar:
+    /// the hub's identity card, inset into the caller's area and sized to
+    /// its content, so the banner backdrop keeps breathing around the
+    /// darker container. Click and bar-hover handling stay caller-owned —
+    /// the card's own rect decides its sheen and tooltip.
     /// </summary>
-    private void DrawProfileIdentity(ImDrawListPtr drawList, Vector2 areaMin, float areaHeight,
-        float areaWidth, float padX, SpheneProfileData? profile, Vector4 accent, bool hovered)
+    private (Vector2 Min, Vector2 Max) DrawIdentityStrip(ImDrawListPtr drawList,
+        Vector2 areaMin, Vector2 areaMax, float outerRadius,
+        SpheneProfileData? profile, Vector4 accent)
     {
         var scale = SpheneUI.Scale;
-        var avatarSize = MathF.Min(34f * scale, areaHeight - 10f * scale);
-        var avatarPos = new Vector2(areaMin.X + padX, areaMin.Y + (areaHeight - avatarSize) * 0.5f);
-
-        drawList.AddCircleFilled(avatarPos + new Vector2(avatarSize * 0.5f),
-            avatarSize * 0.5f + 2f * scale,
-            SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(accent, 0.30f)), 0);
-        ImGui.SetCursorScreenPos(avatarPos);
-        SpheneUI.Media.Avatar(GetCompactAvatarTexture(profile), avatarSize);
-
         var connected = _apiController.IsConnected;
         var paused = _apiController.IsConnectionPaused;
         var connColor = !connected ? SpheneTheme.Current.CompactServerStatusError
             : paused ? SpheneTheme.Current.CompactServerStatusWarning
             : SpheneTheme.Current.CompactServerStatusConnected;
         var connText = !connected ? "Offline" : paused ? "Paused" : "Online";
-        SpheneUI.Media.PresenceDot(drawList, avatarPos, avatarSize, connColor);
 
-        var textX = avatarPos.X + avatarSize + 9f * scale;
-        var textMaxW = MathF.Max(30f * scale, areaMin.X + areaWidth - textX - 8f * scale);
-        var lineH = ImGui.GetTextLineHeight();
-        var lineGap = 2f * scale;
-        var nameY = areaMin.Y + (areaHeight - lineH * 2f - lineGap) * 0.5f;
-
-        var playerName = _dalamudUtilService.GetPlayerName();
-        var displayName = string.IsNullOrEmpty(playerName)
-            || string.Equals(playerName, "--", StringComparison.Ordinal)
-            ? _apiController.UID : playerName;
         var (statusLine, statusColor) = ProfileStatusLine(profile);
-        var statusText = SpheneUI.Text.Ellipsize(statusLine, textMaxW);
-        drawList.AddText(new Vector2(textX, nameY),
-            SpheneUI.ColorUtils.ToU32(accent),
-            SpheneUI.Text.Ellipsize(displayName, textMaxW));
-        drawList.AddText(new Vector2(textX, nameY + lineH + lineGap),
-            SpheneUI.ColorUtils.ToU32(statusColor), statusText);
+        var padX = 6f * scale;
+        var content = new SpheneUI.Profile.IdentityContent(
+            GetCompactAvatarTexture(profile),
+            SpheneUI.Profile.OwnName(_apiController.OwnDisplayName, _apiController.OwnAlias),
+            accent, statusLine, statusColor,
+            connColor, connText, _apiController.OwnAlias, accent);
 
-        if (hovered)
-        {
-            var tip = $"{connText} — UID: {_apiController.UID}";
-            if (!string.Equals(statusText, statusLine, StringComparison.Ordinal))
-            {
-                tip = $"{statusLine}\n{tip}";
-            }
-            SpheneUI.AttachTooltip(tip + " — click to open the Sphene Hub");
-        }
+        // the hub dictates the card width — the compact strip only clamps to
+        // the space left of the bar buttons
+        var inset = 4f * scale;
+        var cardMin = areaMin + new Vector2(inset, inset);
+        var cardMax = new Vector2(cardMin.X + MathF.Min(
+                SpheneHubUi.ProfileCardWidth,
+                MathF.Max(0f, areaMax.X - cardMin.X - inset)),
+            areaMax.Y - inset);
+        var cardRadius = MathF.Max(0f, outerRadius - inset);
+        var cardHovered = ImGui.IsMouseHoveringRect(cardMin, cardMax)
+            && ImGui.IsWindowHovered();
+        SpheneUI.Profile.IdentityCard(drawList, cardMin, cardMax, padX, content, cardHovered,
+            cardRadius, ImDrawFlags.RoundCornersAll, " — click to open the Sphene Hub");
+        return (cardMin, cardMax);
     }
 
     /// <summary>
@@ -2235,34 +2676,37 @@ public class CompactUi : WindowMediatorSubscriberBase
         SpheneUI.Profile.RowBackdrop(drawList, barMin, barMax, accent, hovered,
             _profileBarHoverT, theme, GetCompactRowImage(profile), rounding, barCorners);
 
-        // Accent edge under the bar: a 3px strip can't carry the window's
+        // Accent edge under the bar: a thin strip can't carry the window's
         // corner radius (ImGui clamps rounding to half the rect height and
         // the corners poke past the folded silhouette), so clip to the bottom
         // band and stamp the whole rounded bar shape — the visible part
         // follows the corner curve exactly. Expanded = flat strip.
-        var accentLineH = 3f * scale;
+        var accentLineH = 1.0f * scale;
         drawList.PushClipRect(new Vector2(barMin.X, barMax.Y - accentLineH), barMax, true);
         drawList.AddRectFilled(barMin, barMax,
             SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(accent, 0.45f)),
             rounding, barCorners);
         drawList.PopClipRect();
 
-        var padX = 12f;
-        DrawProfileIdentity(drawList, barMin, barH, buttonsLeftX - barMin.X - 6f * scale,
-            padX, profile, accent, hovered);
+        var idRect = DrawIdentityStrip(drawList, barMin,
+            new Vector2(buttonsLeftX - 6f * scale, barMax.Y), rounding, profile, accent);
 
-        if (hovered)
+        // only the identity card itself opens the hub — the rest of the bar
+        // stays pure drag space
+        var inCard = ImGui.IsMouseHoveringRect(idRect.Min, idRect.Max)
+            && ImGui.IsWindowHovered() && !ImGui.IsAnyItemHovered();
+        if (inCard)
         {
             ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
         }
-        if (hovered && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+        if (inCard && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
         {
             _titleBarPressed = true;
         }
         if (_titleBarPressed && ImGui.IsMouseReleased(ImGuiMouseButton.Left))
         {
             _titleBarPressed = false;
-            if (inBar && ImGui.GetIO().MouseDragMaxDistanceSqr[(int)ImGuiMouseButton.Left] < 64f)
+            if (inCard && ImGui.GetIO().MouseDragMaxDistanceSqr[(int)ImGuiMouseButton.Left] < 64f)
             {
                 Mediator.Publish(new OpenSpheneHubMessage(SpheneHubPage.Profile));
             }
@@ -2300,8 +2744,31 @@ public class CompactUi : WindowMediatorSubscriberBase
         }
         SpheneUI.AttachTooltip(folded ? "Expand" : "Collapse");
 
-        currentX -= (buttonWidth + buttonSpacing);
+        // folded bar shrinks to identity card + close/fold — the auxiliary
+        // buttons fade out with the collapse animation and, while folding,
+        // no longer reserve bar space so the card keeps its hub width
+        var foldAmount = SpheneUI.Chrome.CollapseAmount(ProfileFoldId);
+        var essentialLeft = currentX;
+        if (foldAmount >= 1f)
+        {
+            return essentialLeft;
+        }
+        using var fadeAux = ImRaii.PushStyle(ImGuiStyleVar.Alpha,
+            ImGui.GetStyle().Alpha * (1f - foldAmount), foldAmount > 0f);
 
+        // fading buttons may slide under the identity card as the window
+        // shrinks — clip them at its right edge instead of overdrawing it
+        var buttonDrawList = ImGui.GetWindowDrawList();
+        if (foldAmount > 0f)
+        {
+            var cardW = MathF.Min(SpheneHubUi.ProfileCardWidth, MathF.Max(0f,
+                barMax.X - barMin.X - 14f * SpheneUI.Scale - 64f));
+            buttonDrawList.PushClipRect(
+                new Vector2(barMin.X + 6f * SpheneUI.Scale + cardW, barMin.Y),
+                barMax, true);
+        }
+
+        currentX -= (buttonWidth + buttonSpacing);
         ImGui.SetCursorScreenPos(new Vector2(currentX, buttonY));
         if (SpheneUI.Icons.Button(FontAwesomeIcon.Cog, null, null, null, null, ButtonStyleKeys.Compact_Settings))
         {
@@ -2358,7 +2825,13 @@ public class CompactUi : WindowMediatorSubscriberBase
             SpheneUI.AttachTooltip("Connect to Server");
         }
 
-        return currentX;
+        if (foldAmount > 0f)
+        {
+            buttonDrawList.PopClipRect();
+        }
+        // while folding, the card grows against the close/fold edge — the
+        // fading aux buttons stop claiming bar width
+        return foldAmount > 0f ? essentialLeft : currentX;
     }
 
     private void DrawAprilFoolsButton()
@@ -2391,17 +2864,8 @@ public class CompactUi : WindowMediatorSubscriberBase
         {
             return (GetUidText(), GetServerStatusColor());
         }
-        if (profile != null && !string.IsNullOrWhiteSpace(profile.StatusMessage))
-        {
-            return (profile.StatusMessage, SpheneUI.Colors.TextSecondary);
-        }
-        if (profile != null && !string.IsNullOrWhiteSpace(profile.Description)
-            && !string.Equals(profile.Description, SpheneProfileManager.NoDescriptionPlaceholder,
-                StringComparison.Ordinal))
-        {
-            return (profile.Description, SpheneUI.Colors.TextMuted);
-        }
-        return ("Set a status in your profile", SpheneUI.Colors.TextMuted);
+        var text = SpheneUI.Profile.StatusLineText(profile, out var color);
+        return (text, color);
     }
 
     private IDalamudTextureWrap? GetCompactAvatarTexture(SpheneProfileData? profile)
@@ -2555,15 +3019,16 @@ public class CompactUi : WindowMediatorSubscriberBase
             {
                 if (_tabMenu.Filter.IsNullOrEmpty()) return true;
                 return p.Key.UserData.AliasOrUID.Contains(_tabMenu.Filter, StringComparison.OrdinalIgnoreCase) ||
+                       (p.Key.UserData.DisplayName?.Contains(_tabMenu.Filter, StringComparison.OrdinalIgnoreCase) ?? false) ||
                        (p.Key.GetNote()?.Contains(_tabMenu.Filter, StringComparison.OrdinalIgnoreCase) ?? false) ||
                        (p.Key.PlayerName?.Contains(_tabMenu.Filter, StringComparison.OrdinalIgnoreCase) ?? false);
             })
             .ToDictionary(k => k.Key, k => k.Value);
 
+        // the row shows the display name — sort by the same value so the
+        // visible order matches what the eye scans
         string? AlphabeticalSort(KeyValuePair<Pair, List<GroupFullInfoDto>> u)
-            => (_configService.Current.ShowCharacterNameInsteadOfNotesForVisible && !string.IsNullOrEmpty(u.Key.PlayerName)
-                    ? (_configService.Current.PreferNotesOverNamesForVisible ? u.Key.GetNote() : u.Key.PlayerName)
-                    : (u.Key.GetNote() ?? u.Key.UserData.AliasOrUID));
+            => u.Key.UserData.PreferredName;
         bool FilterOnlineOrPausedSelf(KeyValuePair<Pair, List<GroupFullInfoDto>> u)
             => (!u.Key.IsEffectivelyOffline || (!u.Key.IsEffectivelyOffline && !_configService.Current.ShowOfflineUsersSeparately))
                 && !u.Key.UserPair.OwnPermissions.IsPaused();
@@ -2748,7 +3213,7 @@ public class CompactUi : WindowMediatorSubscriberBase
             ServerState.Connected => string.Empty,
             ServerState.NoSecretKey => "You have no secret key set for this current character. Open Settings -> Network Configuration and set a secret key for the current character. You can reuse the same secret key for multiple characters.",
             ServerState.MultiChara => "Your Character Configuration has multiple characters configured with same name and world. You will not be able to connect until you fix this issue. Remove the duplicates from the configuration in Settings -> Network Configuration -> Authentication & Characters and reconnect manually after.",
-            ServerState.OAuthMisconfigured => "OAuth2 is enabled but not fully configured, verify in the Settings -> Network Configuration that you have OAuth2 connected and, importantly, a UID assigned to your current character.",
+            ServerState.OAuthMisconfigured => "OAuth2 is enabled but not fully configured, verify in the Settings -> Network Configuration that you have OAuth2 connected and, importantly, an account assigned to your current character.",
             ServerState.OAuthLoginTokenStale => "Your OAuth2 login token is stale and cannot be used to renew. Go to the Settings -> Network Configuration and unlink then relink your OAuth2 configuration.",
             ServerState.NoAutoLogon => "This character has automatic login into Sphene disabled. Press the connect button to connect to Sphene.",
             _ => string.Empty

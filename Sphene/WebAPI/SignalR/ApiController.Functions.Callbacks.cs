@@ -218,6 +218,17 @@ public partial class ApiController
         return Task.CompletedTask;
     }
 
+    public Task Client_UserIdentityUpdated(UserDto dto)
+    {
+        Logger.LogDebug("Client_UserIdentityUpdated: {dto}", dto);
+        ExecuteSafely(() =>
+        {
+            _pairManager.UpdatePairIdentity(dto.User);
+            Mediator.Publish(new ClearProfileDataMessage(dto.User));
+        });
+        return Task.CompletedTask;
+    }
+
     public Task Client_UserUpdateSelfPairPermissions(UserPermissionsDto dto)
     {
         Logger.LogDebug("Client_UserUpdateSelfPairPermissions: {dto}", dto);
@@ -465,6 +476,12 @@ public partial class ApiController
     {
         if (_initialized) return;
         _spheneHub!.On(nameof(Client_UserUpdateProfile), act);
+    }
+
+    public void OnUserIdentityUpdated(Action<UserDto> act)
+    {
+        if (_initialized) return;
+        _spheneHub!.On(nameof(Client_UserIdentityUpdated), act);
     }
 
     public void OnUserUpdateSelfPairPermissions(Action<UserPermissionsDto> act)

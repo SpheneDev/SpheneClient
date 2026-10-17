@@ -70,6 +70,13 @@ public abstract class WindowMediatorSubscriberBase : Window, IMediatorSubscriber
     protected virtual bool ChromeHasTitleBar => true;
 
     /// <summary>
+    /// Draws the star-chart backdrop over the window surface, under all
+    /// content. Opt-in per window — off by default so small overlays and
+    /// helper windows stay clean.
+    /// </summary>
+    protected virtual bool ChromeWindowPattern => false;
+
+    /// <summary>
     /// Whether <see cref="DrawCollapsedContent"/> replaces
     /// <see cref="DrawInternal"/> for the entire fold animation instead of the
     /// fading-content behavior. Only sensible when <see cref="ChromeHasTitleBar"/>
@@ -214,6 +221,12 @@ public abstract class WindowMediatorSubscriberBase : Window, IMediatorSubscriber
         }
 
         var foldAmount = ChromeCollapsible ? SpheneUI.Chrome.CollapseAmount(ChromeId) : 0f;
+        if (ChromeWindowPattern && foldAmount < 1f)
+        {
+            var drawList = ImGui.GetWindowDrawList();
+            var windowPos = ImGui.GetWindowPos();
+            SpheneUI.Fx.Constellation(drawList, windowPos, windowPos + ImGui.GetWindowSize());
+        }
         if (foldAmount >= 1f || (DrawCollapsedDuringFold && foldAmount > 0f))
         {
             DrawCollapsedContent();

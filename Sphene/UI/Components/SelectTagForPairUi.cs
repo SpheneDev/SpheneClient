@@ -14,7 +14,6 @@ namespace Sphene.UI.Components;
 public class SelectTagForPairUi
 {
     private readonly TagHandler _tagHandler;
-    private readonly IdDisplayHandler _uidDisplayHandler;
     /// <summary>
     /// The group UI is always open for a specific pair. This defines which pair the UI is open for.
     /// </summary>
@@ -31,12 +30,11 @@ public class SelectTagForPairUi
     /// </summary>
     private string _tagNameToAdd = "";
 
-    public SelectTagForPairUi(TagHandler tagHandler, IdDisplayHandler uidDisplayHandler)
+    public SelectTagForPairUi(TagHandler tagHandler)
     {
         _show = false;
         _pair = null;
         _tagHandler = tagHandler;
-        _uidDisplayHandler = uidDisplayHandler;
     }
 
     public void Draw()
@@ -135,8 +133,8 @@ public class SelectTagForPairUi
         }
     }
 
-    private string PairName(Pair pair)
+    private static string PairName(Pair pair)
     {
-        return _uidDisplayHandler.GetPlayerText(pair).text;
+        return IdDisplayHandler.GetPlayerText(pair);
     }
 }

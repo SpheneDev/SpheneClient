@@ -375,6 +375,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
         new SpheneUI.Chrome.TitleBarButton(FontAwesomeIcon.Times, "Close", () => IsOpen = false),
     ];
 
+    protected override bool ChromeWindowPattern => true;
+
     protected override void DrawInternal()
     {
         SpheneUI.Lint.BeginFrame();
@@ -1063,9 +1065,9 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 PerformanceOptionBlock.DrawAutoPauseTriangleThresholdOption(_playerPerformanceConfigService, _uiShared, "PerformanceAutoPauseTriangleThreshold");
             }
         });
-        DrawSettingsCard("Whitelisted UIDs", () =>
+        DrawSettingsCard("Whitelisted Users", () =>
         {
-            var addUidTrailing = SpheneUI.Icons.TextButtonWidth(FontAwesomeIcon.Plus, "Add UID/Vanity ID to whitelist")
+            var addUidTrailing = SpheneUI.Icons.TextButtonWidth(FontAwesomeIcon.Plus, "Add handle to whitelist")
                 + ImGui.GetStyle().ItemSpacing.X + SpheneUI.Icons.Size(FontAwesomeIcon.QuestionCircle).X
                 + ImGui.GetStyle().ItemSpacing.X;
             ImGui.SetNextItemWidth(SpheneUI.Controls.BoundedAvailX() - addUidTrailing);
@@ -1073,7 +1075,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         ImGui.SameLine();
         using (ImRaii.Disabled(string.IsNullOrEmpty(_uidToAddForIgnore)))
         {
-            if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Plus, "Add UID/Vanity ID to whitelist"))
+            if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Plus, "Add handle to whitelist"))
             {
                 if (!_playerPerformanceConfigService.Current.UIDsToIgnore.Contains(_uidToAddForIgnore, StringComparer.Ordinal))
                 {
@@ -1083,10 +1085,10 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 _uidToAddForIgnore = string.Empty;
             }
         }
-        SpheneUI.Controls.HelpText("Hint: UIDs are case sensitive.");
+        SpheneUI.Controls.HelpText("Hint: handles are case sensitive.");
         var playerList = _playerPerformanceConfigService.Current.UIDsToIgnore;
         ImGui.SetNextItemWidth(ClampSettingsItemWidth(420f, 200f));
-        using (var lb = ImRaii.ListBox("UID whitelist"))
+        using (var lb = ImRaii.ListBox("Handle whitelist"))
         {
             if (lb)
             {
@@ -1104,18 +1106,11 @@ public class SettingsUi : WindowMediatorSubscriberBase
                             string.Equals(p.UserData.Alias, identifier, StringComparison.Ordinal));
                     }
                     
-                    var displayText = identifier;
-                    if (pair != null)
+                    var displayText = pair?.UserData.PreferredName ?? identifier;
+                    var note = pair?.GetNote();
+                    if (!string.IsNullOrEmpty(note))
                     {
-                        var note = pair.GetNote();
-                        if (!string.IsNullOrEmpty(note))
-                        {
-                            displayText = $"{identifier} ({note})";
-                        }
-                        else if (!string.IsNullOrEmpty(pair.UserData.Alias))
-                        {
-                            displayText = $"{identifier} ({pair.UserData.Alias})";
-                        }
+                        displayText = $"{displayText} ({note})";
                     }
                     
                     if (SpheneUI.Controls.Selectable(displayText + "##" + i, shouldBeSelected))
@@ -1127,7 +1122,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         }
         using (ImRaii.Disabled(_selectedEntry == -1))
         {
-            if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Trash, "Delete selected UID"))
+            if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Trash, "Delete selected entry"))
             {
                 _playerPerformanceConfigService.Current.UIDsToIgnore.RemoveAt(_selectedEntry);
                 _selectedEntry = -1;
@@ -1188,7 +1183,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 using var cardBound = SpheneUI.Layout.SuppressBound();
                 SpheneUI.Text.Wrapped(
                     "Your account and all associated files and data on the service will be deleted.");
-                SpheneUI.Text.Wrapped("Your UID will be removed from all pairing lists.");
+                SpheneUI.Text.Wrapped("Your entry will be removed from all pairing lists.");
                 SpheneUI.Text.Plain("Are you sure you want to continue?");
                 SpheneUI.Layout.Separator();
                 SpheneUI.Layout.VerticalSpace();
@@ -1297,11 +1292,11 @@ public class SettingsUi : WindowMediatorSubscriberBase
                         if (hasSetSecretKeysButNoUid)
                         {
                             SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
-                            SpheneUI.Text.Wrapped("Some entries have been detected that have previously been assigned secret keys but not UIDs. " +
+                            SpheneUI.Text.Wrapped("Some entries have been detected that have previously been assigned secret keys but no account. " +
                                 "Press this button below to attempt to convert those entries.");
                             using (ImRaii.Disabled(_secretKeysConversionTask != null && !_secretKeysConversionTask.IsCompleted))
                             {
-                                if (SpheneUI.Icons.TextButton(FontAwesomeIcon.ArrowsLeftRight, "Try to Convert Secret Keys to UIDs"))
+                                if (SpheneUI.Icons.TextButton(FontAwesomeIcon.ArrowsLeftRight, "Try to Convert Secret Keys to Accounts"))
                                 {
                                     var token = _secretKeysConversionCts?.Token ?? CancellationToken.None;
                                     _secretKeysConversionTask = ConvertSecretKeysToUIDs(selectedServer, token);
@@ -1309,7 +1304,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                             }
                             if (_secretKeysConversionTask != null && !_secretKeysConversionTask.IsCompleted)
                             {
-                                SpheneUI.Text.ColoredWrapped("Converting Secret Keys to UIDs", ImGuiColors.DalamudYellow);
+                                SpheneUI.Text.ColoredWrapped("Converting secret keys to accounts", ImGuiColors.DalamudYellow);
                             }
                             if (_secretKeysConversionTask != null && _secretKeysConversionTask.IsCompletedSuccessfully)
                             {
@@ -1333,7 +1328,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                                 }
                                 if (!_secretKeysConversionTask.Result.Success || _secretKeysConversionTask.Result.PartialSuccess)
                                 {
-                                    SpheneUI.Text.Wrapped("In case of conversion failures, please set the UIDs for the failed conversions manually.");
+                                    SpheneUI.Text.Wrapped("In case of conversion failures, please set the accounts for the failed conversions manually.");
                                 }
                             }
                         }
@@ -1478,7 +1473,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                         string warningText = string.Empty;
                         if (misManaged)
                         {
-                            warningText = "[MISMANAGED (" + (selectedServer.UseOAuth2 ? "No UID Set" : "No Secret Key Set") + ")]";
+                            warningText = "[MISMANAGED (" + (selectedServer.UseOAuth2 ? "No Account Set" : "No Secret Key Set") + ")]";
                             warningColor = ImGuiColors.DalamudRed;
                         }
                         if (selectedServer.Authentications.Where(e => e != item).Any(e => string.Equals(e.CharacterName, item.CharacterName, StringComparison.Ordinal)
@@ -1906,6 +1901,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         windowDrawList.AddLine(new Vector2(railMax.X - 0.5f, railMin.Y),
             new Vector2(railMax.X - 0.5f, railMax.Y),
             SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(Vector4.One, 0.06f)));
+        SpheneUI.Fx.RailMotes(windowDrawList, railMin, railMax);
         ImGui.PopClipRect();
         ImGui.SetCursorScreenPos(sidebarMin);
 
@@ -4031,7 +4027,6 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
             SpheneUI.Layout.Space(SpheneUI.Spacing.X10);
 
-            AppearanceOptionBlock.DrawShowCharacterNameInsteadOfNotesOption(_configService, _uiShared, Mediator, "AppearanceShowCharacterNameInsteadOfNotes");
             AppearanceOptionBlock.DrawShowVisibleUsersSeparatelyOption(_configService, _uiShared, Mediator, "AppearanceShowVisibleUsersSeparately");
             AppearanceOptionBlock.DrawShowVisibleSyncshellUsersOnlyInSyncshellsOption(_configService, _uiShared, Mediator, "AppearanceShowVisibleSyncshellUsersOnlyInSyncshells");
             AppearanceOptionBlock.DrawShowOfflineUsersSeparatelyOption(_configService, _uiShared, Mediator, "AppearanceShowOfflineUsersSeparately");
@@ -4042,12 +4037,11 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
         DrawSettingsCard("Profile Settings", () =>
         {
-            var showProfiles = AppearanceOptionBlock.DrawShowSpheneProfilesOnHoverOption(_configService, _uiShared, Mediator, "AppearanceShowSpheneProfilesOnHover");
+            var showProfiles = AppearanceOptionBlock.DrawShowSpheneProfilesOption(_configService, _uiShared, Mediator, "AppearanceShowSpheneProfiles");
             ImGui.Indent();
             using (ImRaii.Disabled(!showProfiles))
             {
                 AppearanceOptionBlock.DrawPopoutProfilesOnTheRightOption(_configService, _uiShared, Mediator, "AppearancePopoutProfilesOnTheRight");
-                AppearanceOptionBlock.DrawHoverDelayOption(_configService, _uiShared, "AppearanceHoverDelay");
             }
             ImGui.Unindent();
             AppearanceOptionBlock.DrawShowProfilesMarkedAsNsfwOption(_configService, _uiShared, Mediator, "AppearanceShowProfilesMarkedAsNsfw");
@@ -4888,7 +4882,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             themeChanged = true;
         }
         var compactControlPanelBg = theme.CompactControlPanelBg;
-        if (SpheneUI.Controls.ColorEdit("Control Panel UID Section", ref compactControlPanelBg))
+        if (SpheneUI.Controls.ColorEdit("Control Panel Account Section", ref compactControlPanelBg))
         {
             theme.CompactControlPanelBg = compactControlPanelBg;
             themeChanged = true;
@@ -5230,26 +5224,6 @@ public class SettingsUi : WindowMediatorSubscriberBase
         }
 
         SpheneUI.Layout.VerticalSpace();
-        if (SpheneUI.Controls.CollapsibleSection("Regulator ID"))
-        {
-            SpheneUI.Layout.Separator();
-
-            var uidColor = theme.CompactUidColor;
-            if (SpheneUI.Controls.ColorEdit("UID Text", ref uidColor))
-            {
-                theme.CompactUidColor = uidColor;
-                themeChanged = true;
-            }
-
-            SpheneUI.Layout.VerticalSpace();
-            var uidScale = theme.CompactUidFontScale;
-            if (SpheneUI.Controls.SliderFloat("UID Font Scale", ref uidScale, 0.5f, 2.0f, "%.2f"))
-            {
-                theme.CompactUidFontScale = uidScale;
-                themeChanged = true;
-            }
-            SpheneUI.Layout.VerticalSpace();
-        }
 
         
 

@@ -322,6 +322,22 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         return null;
     }
 
+    /// <summary>
+    /// Applies a pushed identity change (alias/display name) to a stored pair.
+    /// Re-keys the dictionary entry so consumers reading the key get the fresh UserData.
+    /// </summary>
+    public void UpdatePairIdentity(UserData user)
+    {
+        var existingPair = _allClientPairs.FirstOrDefault(f => string.Equals(f.Key.UID, user.UID, StringComparison.Ordinal));
+        if (Equals(existingPair, default(KeyValuePair<UserData, Pair>))) return;
+
+        var updated = existingPair.Key with { Alias = user.Alias, DisplayName = user.DisplayName };
+        if (!_allClientPairs.Remove(existingPair.Key, out var pair)) return;
+        _allClientPairs[updated] = pair;
+        pair.UpdateIdentity(updated);
+        RecreateLazy();
+    }
+
     public void AddUserPair(UserFullPairDto dto)
     {
         var created = false;
@@ -505,6 +521,7 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         }
 
         pair.CreateCachedPlayer(dto);
+        pair.SetGposeState(dto.IsInGpose);
 
         RecreateLazy();
     }

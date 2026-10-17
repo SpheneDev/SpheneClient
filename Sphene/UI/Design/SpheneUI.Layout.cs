@@ -211,7 +211,7 @@ public static partial class SpheneUI
         /// prominent cards.
         /// </summary>
         public static void SectionCard(Action content, string? title = null,
-            Vector4? accentColor = null, string? description = null, bool animatedBackdrop = false,
+            Vector4? accentColor = null, string? description = null, bool animatedBackdrop = true,
             string? id = null)
         {
             var scale = SpheneUI.Scale;
@@ -1400,6 +1400,7 @@ public static partial class SpheneUI
             public Vector2 WindowMin;
             public float WindowRight;
             public float WindowBottom;
+            public bool Pattern;
         }
 
         private static readonly Stack<NavRailState> NavRailStack = new();
@@ -1545,9 +1546,12 @@ public static partial class SpheneUI
         /// is rendered inside another window's content (e.g. Sphene Hub).
         /// <paramref name="topInset"/> reserves a pinned strip at the rail top —
         /// scrolled content is clipped below it (see <see cref="BeginScrollArea"/>).
+        /// <paramref name="backdropPattern"/> draws the star-chart backdrop
+        /// over the content region's backing gradient — that solid fill
+        /// would otherwise hide the window-level pattern entirely.
         /// </summary>
         public static float BeginNavRail(string id, float width, bool embedded = false,
-            float topInset = 0f)
+            float topInset = 0f, bool backdropPattern = false)
         {
             var windowPos = ImGui.GetWindowPos();
             var windowSize = ImGui.GetWindowSize();
@@ -1571,6 +1575,7 @@ public static partial class SpheneUI
             drawList.AddLine(new Vector2(railMax.X - 0.5f, railMin.Y),
                 new Vector2(railMax.X - 0.5f, railMax.Y),
                 ColorUtils.ToU32(ColorUtils.WithAlpha(Vector4.One, 0.09f)));
+            Fx.RailMotes(drawList, railMin, railMax);
             ImGui.PopClipRect();
 
             NavRailStack.Push(new NavRailState
@@ -1585,6 +1590,7 @@ public static partial class SpheneUI
                 WindowMin = windowPos,
                 WindowRight = windowPos.X + windowSize.X,
                 WindowBottom = windowPos.Y + windowSize.Y,
+                Pattern = backdropPattern,
             });
             // The nav child is inset by NavRailPadX on both sides so pills
             // keep a visible margin to the rail edges — enforced by the
@@ -1668,6 +1674,12 @@ public static partial class SpheneUI
             ImGui.PushClipRect(state.WindowMin, parentMax, false);
             Chrome.VerticalFade(ImGui.GetWindowDrawList(), contentMin, contentMin + size,
                 bgTop, bgBottom, 0f, topRightR, 0f, bottomRightR);
+            // The solid backing above hides the window-level backdrop — the
+            // rail host asks for the pattern to be repeated on top of it.
+            if (state.Pattern)
+            {
+                Fx.Constellation(ImGui.GetWindowDrawList(), contentMin, contentMin + size);
+            }
             ImGui.PopClipRect();
             NavContentScrollable.Push((scrollable, baseColor));
             if (scrollable)

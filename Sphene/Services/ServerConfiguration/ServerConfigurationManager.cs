@@ -1,4 +1,5 @@
 using Dalamud.Utility;
+using Sphene.API.Data;
 using Sphene.API.Routes;
 using Sphene.SpheneConfiguration;
 using Sphene.SpheneConfiguration.Models;
@@ -444,6 +445,13 @@ public class ServerConfigurationManager
         }
 
         return uid ?? string.Empty;
+    }
+
+    /// <summary>Preferred display name for a user: local note, then display name, then alias/UID.</summary>
+    internal string GetPreferredUserDisplayName(UserData user)
+    {
+        return GetPreferredUserDisplayName(user.UID,
+            string.IsNullOrWhiteSpace(user.DisplayName) ? user.AliasOrUID : user.DisplayName);
     }
 
     internal HashSet<string> GetServerAvailablePairTags()

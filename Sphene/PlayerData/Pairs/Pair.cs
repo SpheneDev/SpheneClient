@@ -501,7 +501,7 @@ public class Pair : DisposableMediatorSubscriberBase, IPairAcknowledgment
         args.AddMenuItem(new MenuItem()
         {
             Name = openProfileSeString,
-            OnClicked = (a) => Mediator.Publish(new ProfileOpenStandaloneMessage(this)),
+            OnClicked = (a) => Mediator.Publish(new OpenSpheneHubMessage(SpheneHubPage.Friends, Friend: this)),
             UseDefaultPrefix = false,
             PrefixChar = 'S',
             PrefixColor = 500
@@ -785,6 +785,15 @@ public class Pair : DisposableMediatorSubscriberBase, IPairAcknowledgment
             forced,
             forceRedrawIfDisabled,
             forceRedrawApplication: forceRedrawIfDisabled);
+    }
+
+    /// <summary>
+    /// Applies a pushed identity change (alias/display name) to this pair's stored UserData.
+    /// </summary>
+    public void UpdateIdentity(UserData user)
+    {
+        UserPair = UserPair with { User = user };
+        _onlineUserIdentDto = _onlineUserIdentDto == null ? null : _onlineUserIdentDto with { User = user };
     }
 
     public void CreateCachedPlayer(OnlineUserIdentDto? dto = null)

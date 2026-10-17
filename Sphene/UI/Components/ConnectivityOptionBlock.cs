@@ -30,7 +30,7 @@ public static class ConnectivityOptionBlock
                 + "- Current Gender" + Environment.NewLine
                 + "- Current Race" + Environment.NewLine
                 + "- Current Clan (this is not your Free Company, this is e.g. Keeper or Seeker for Miqo'te)" + SpheneUI.TooltipSeparator
-                + "The census data is only saved temporarily and will be removed from the server on disconnect. It is stored temporarily associated with your UID while you are connected." + SpheneUI.TooltipSeparator
+                + "The census data is only saved temporarily and will be removed from the server on disconnect. It is stored temporarily associated with your account while you are connected." + SpheneUI.TooltipSeparator
                 + "If you do not wish to participate in the statistical census, untick this box and reconnect to the server.");
         }
         finally
@@ -132,7 +132,7 @@ public static class ConnectivityOptionBlock
             if (!string.IsNullOrEmpty(discordUser) && selectedServer.Authentications.TrueForAll(u => string.IsNullOrEmpty(u.UID)))
             {
                 SpheneUI.Layout.Space(SpheneUI.Spacing.X10);
-                SpheneUI.Text.ColoredWrapped("You have enabled OAuth2 but no characters configured. Set the correct UIDs for your characters in \"Character Management\".", ImGuiColors.DalamudRed);
+                SpheneUI.Text.ColoredWrapped("You have enabled OAuth2 but no characters configured. Assign the correct accounts to your characters in \"Character Management\".", ImGuiColors.DalamudRed);
             }
 
         }

@@ -33,7 +33,8 @@ public static class UpdateOptionPanel
         SupporterIconLabelEdge,
         PanelTooltipPadding,
         PanelPairListContentPadding,
-        PanelPairRowLayout
+        PanelPairRowLayout,
+        ProfilePopoutRightClick
     }
 
     private static readonly IReadOnlySet<Link> SupporterFeatureLinks = new HashSet<Link>
@@ -56,6 +57,7 @@ public static class UpdateOptionPanel
         new("v.1.1.17", [Link.PanelPairListSeparatorPadding, Link.SupporterNameplateGlowColors]),
         new("v.1.1.18", [Link.ReopenSpheneHubOnStartup, Link.ReleaseNotesPage, Link.HubHomePage, Link.SupporterTitlePlacement, Link.SupporterIconLabelEdge]),
         new("v.1.1.19", [Link.PanelTooltipPadding, Link.PanelPairListContentPadding, Link.PanelPairRowLayout]),
+        new("v.1.1.20", [Link.ProfilePopoutRightClick]),
     ];
 
     private static readonly IReadOnlyDictionary<Link, string> LinkTitles = new Dictionary<Link, string>
@@ -80,7 +82,8 @@ public static class UpdateOptionPanel
         [Link.SupporterIconLabelEdge] = "Supporter: Icon label text outline (Default: Enabled)",
         [Link.PanelTooltipPadding] = "Panel: Tooltip Padding & more Panel Theme options (Default: 10/8)",
         [Link.PanelPairListContentPadding] = "Panel: Pair List Content Padding & redesigned folder headers (Default: 8)",
-        [Link.PanelPairRowLayout] = "Panel: Pair Row Padding, Rounding & Hover color (Defaults: 4 / inherit / subtle)"
+        [Link.PanelPairRowLayout] = "Panel: Pair Row Padding, Rounding & Hover color (Defaults: 4 / inherit / subtle)",
+        [Link.ProfilePopoutRightClick] = "Panel: Profile popout opens on right-click (hover delay removed)"
     };
 
     private static readonly IReadOnlyDictionary<Link, Action<SpheneConfigService, UiSharedService, SpheneMediator>> LinkDrawers
@@ -214,6 +217,11 @@ public static class UpdateOptionPanel
                 theme.NotifyThemeChanged();
             }
             SpheneUI.Controls.HelpText("Pair rows get their own styling: content padding insets avatar and buttons from the row edges, rounding shapes the row (use -1 to follow Child Surface Rounding), and the hover color is independent from the global Hover Highlight.");
+        },
+        [Link.ProfilePopoutRightClick] = (configService, uiShared, mediator) =>
+        {
+            AppearanceOptionBlock.DrawShowSpheneProfilesOption(configService, uiShared, mediator, "UpdateOptionShowSpheneProfiles");
+            SpheneUI.Controls.HelpText("Right-click a pair row to pop out the profile — it stays open until you click elsewhere or move the mouse off the window. The hover delay option was removed.");
         }
     };
 

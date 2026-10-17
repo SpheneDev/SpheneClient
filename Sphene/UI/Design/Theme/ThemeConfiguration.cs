@@ -57,7 +57,7 @@ public class ThemeConfiguration
     public Vector2 CompactSelectableTextAlign { get; set; } = new(0.0f, 0.0f);
     
     // CompactUI Specific Border Thickness
-    public float CompactWindowBorderSize { get; set; } = 1.0f;
+    public float CompactWindowBorderSize { get; set; } = 0.0f;
     public float CompactChildBorderSize { get; set; } = 1.0f;
     public float CompactPopupBorderSize { get; set; } = 1.0f;
     public float CompactFrameBorderSize { get; set; } = 0.0f;
@@ -80,7 +80,7 @@ public class ThemeConfiguration
     [ThemeRuntime]
     public bool ForceShowUpdateHint { get; set; } = false;
     public Vector4 CompactUpdateHintColor { get; set; } = new(1.0f, 0.8f, 0.2f, 1.0f);
-    public float CompactUpdateHintHeight { get; set; } = 24.0f;
+    public float CompactUpdateHintHeight { get; set; } = 28.0f;
     public float CompactUpdateHintPaddingY { get; set; } = 4.0f;
     
     // Progress Bar Appearance Settings
@@ -102,30 +102,30 @@ public class ThemeConfiguration
     public Vector4 CompactTransmissionBarBackground { get; set; } = new(0.1f, 0.1f, 0.15f, 0.8f);
     public Vector4 CompactTransmissionBarForeground { get; set; } = new(0.3f, 0.6f, 0.9f, 1.0f);
     public Vector4 CompactTransmissionBarBorder { get; set; } = new(0.3f, 0.3f, 0.4f, 1.0f);
-    public bool TransmissionUseGradient { get; set; } = false;
+    public bool TransmissionUseGradient { get; set; } = true;
     public Vector4 TransmissionGradientStart { get; set; } = new(0.2f, 0.5f, 0.9f, 1.0f);
     public Vector4 TransmissionGradientEnd { get; set; } = new(0.3f, 0.7f, 1.0f, 1.0f);
     
     // Separate per-bar styling toggle
-    public bool SeparateTransmissionBarStyles { get; set; } = false;
+    public bool SeparateTransmissionBarStyles { get; set; } = true;
     
     // Upload bar specific settings
-    public float UploadTransmissionBarRounding { get; set; } = 2.0f;
-    public float UploadTransmissionBarHeight { get; set; } = 8.0f;
+    public float UploadTransmissionBarRounding { get; set; } = 4.0f;
+    public float UploadTransmissionBarHeight { get; set; } = 12.0f;
     public Vector4 UploadTransmissionBarBackground { get; set; } = new(0.1f, 0.1f, 0.15f, 0.8f);
     public Vector4 UploadTransmissionBarForeground { get; set; } = new(0.2f, 0.5f, 0.9f, 1.0f);
     public Vector4 UploadTransmissionBarBorder { get; set; } = new(0.3f, 0.3f, 0.4f, 1.0f);
-    public Vector4 UploadTransmissionGradientStart { get; set; } = new(0.2f, 0.5f, 0.9f, 1.0f);
-    public Vector4 UploadTransmissionGradientEnd { get; set; } = new(0.3f, 0.7f, 1.0f, 1.0f);
+    public Vector4 UploadTransmissionGradientStart { get; set; } = new(0.483f, 0.200f, 0.900f, 1.000f);
+    public Vector4 UploadTransmissionGradientEnd { get; set; } = new(1.000f, 0.610f, 0.300f, 1.000f);
     
     // Download bar specific settings
-    public float DownloadTransmissionBarRounding { get; set; } = 2.0f;
-    public float DownloadTransmissionBarHeight { get; set; } = 8.0f;
+    public float DownloadTransmissionBarRounding { get; set; } = 4.0f;
+    public float DownloadTransmissionBarHeight { get; set; } = 12.0f;
     public Vector4 DownloadTransmissionBarBackground { get; set; } = new(0.1f, 0.1f, 0.15f, 0.8f);
     public Vector4 DownloadTransmissionBarForeground { get; set; } = new(0.3f, 0.6f, 0.9f, 1.0f);
     public Vector4 DownloadTransmissionBarBorder { get; set; } = new(0.3f, 0.3f, 0.4f, 1.0f);
-    public Vector4 DownloadTransmissionGradientStart { get; set; } = new(0.2f, 0.5f, 0.9f, 1.0f);
-    public Vector4 DownloadTransmissionGradientEnd { get; set; } = new(0.3f, 0.7f, 1.0f, 1.0f);
+    public Vector4 DownloadTransmissionGradientStart { get; set; } = new(0.482f, 0.200f, 0.902f, 1.000f);
+    public Vector4 DownloadTransmissionGradientEnd { get; set; } = new(0.300f, 1.000f, 0.803f, 1.000f);
     
     // Transmission Preview Controls (CompactUI preview location)
     [JsonIgnore]
@@ -161,7 +161,7 @@ public class ThemeConfiguration
     public Vector4 Border { get; set; } = new(0.3f, 0.3f, 0.4f, 1.0f);
     public Vector4 Hover { get; set; } = new(0.25f, 0.45f, 0.85f, 1.0f);
     public Vector4 Active { get; set; } = new(0.3f, 0.5f, 0.9f, 1.0f);
-    public Vector4 HeaderBg { get; set; } = new(0.2f, 0.4f, 0.8f, 0.3f);
+    public Vector4 HeaderBg { get; set; } = new(0.2f, 0.4f, 0.8f, 0.0f);
     
     // Extended Color Settings for complete customization
     // Window Colors
@@ -264,10 +264,8 @@ public class ThemeConfiguration
     public Vector4 CompactHover { get; set; } = new(0.3f, 0.5f, 0.9f, 0.8f);
     public Vector4 CompactActive { get; set; } = new(0.4f, 0.6f, 1.0f, 0.9f);
     public Vector4 CompactHeaderText { get; set; } = new(0.8f, 0.6f, 0.2f, 1.0f); // Golden header text for CompactUI
-    public float CompactUidFontScale { get; set; } = 1.0f;
-    
+
     // CompactUI Specific Status Colors
-    public Vector4 CompactUidColor { get; set; } = new(0.2f, 0.8f, 0.4f, 1.0f); // Green for UID display
     public Vector4 CompactServerStatusConnected { get; set; } = new(0.2f, 0.8f, 0.4f, 1.0f); // Green for connected
     public Vector4 CompactServerStatusWarning { get; set; } = new(1.0f, 0.8f, 0.2f, 1.0f); // Yellow for warnings
     public Vector4 CompactServerStatusError { get; set; } = new(0.8f, 0.2f, 0.2f, 1.0f); // Red for errors

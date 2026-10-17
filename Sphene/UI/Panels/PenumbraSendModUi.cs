@@ -294,7 +294,7 @@ public class PenumbraSendModUi : WindowMediatorSubscriberBase
             {
                 var uid = p.UserData.UID ?? string.Empty;
                 var aliasOrUid = p.UserData.AliasOrUID;
-                var displayName = _uiSharedService.GetPreferredUserDisplayName(uid, aliasOrUid);
+                var displayName = _uiSharedService.GetPreferredUserDisplayName(p.UserData);
                 return (Pair: p, Uid: uid, AliasOrUid: aliasOrUid, DisplayName: displayName);
             })
             .OrderBy(p => p.DisplayName, StringComparer.OrdinalIgnoreCase)

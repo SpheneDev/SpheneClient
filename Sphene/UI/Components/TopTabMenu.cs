@@ -266,14 +266,15 @@ public class TopTabMenu
     {
         var buttonSize = SpheneUI.Icons.TextButtonWidth(FontAwesomeIcon.UserPlus, "Add");
         ImGui.SetNextItemWidth(availableXWidth - buttonSize - spacingX);
-        SpheneUI.Controls.InputTextWithHint("##otheruid", "Other players UID/Alias", ref _pairToAdd, 20);
+        SpheneUI.Controls.InputTextWithHint("##otheruid", "@handle", ref _pairToAdd, 20);
         ImGui.SameLine();
-        var alreadyExisting = _pairManager.DirectPairs.Exists(p => string.Equals(p.UserData.UID, _pairToAdd, StringComparison.Ordinal) || string.Equals(p.UserData.Alias, _pairToAdd, StringComparison.Ordinal));
-        using (ImRaii.Disabled(alreadyExisting || string.IsNullOrEmpty(_pairToAdd)))
+        var pairInput = _pairToAdd.Trim().TrimStart('@');
+        var alreadyExisting = _pairManager.DirectPairs.Exists(p => string.Equals(p.UserData.UID, pairInput, StringComparison.Ordinal) || string.Equals(p.UserData.Alias, pairInput, StringComparison.OrdinalIgnoreCase));
+        using (ImRaii.Disabled(alreadyExisting || string.IsNullOrEmpty(pairInput)))
         {
             if (SpheneUI.Icons.TextButton(FontAwesomeIcon.UserPlus, "Add"))
             {
-                _ = _apiController.UserAddPair(new(new(_pairToAdd)));
+                _ = _apiController.UserAddPair(new(new(pairInput)));
                 _pairToAdd = string.Empty;
             }
         }
@@ -285,7 +286,7 @@ public class TopTabMenu
         var buttonSize = SpheneUI.Icons.TextButtonWidth(FontAwesomeIcon.Ban, "Clear");
         ImGui.SetNextItemWidth(availableWidth - buttonSize - spacingX);
         string filter = Filter;
-        if (SpheneUI.Controls.InputTextWithHint("##filter", "Filter for UID/notes", ref filter, 255))
+        if (SpheneUI.Controls.InputTextWithHint("##filter", "Filter for handle/notes", ref filter, 255))
         {
             Filter = filter;
         }
@@ -573,7 +574,7 @@ public class TopTabMenu
         var buttonX = (availableWidth - spacingX) / 2f;
         if (SpheneUI.Icons.TextButton(FontAwesomeIcon.UserCircle, "Edit Sphene Profile", buttonX))
             {
-                _spheneMediator.Publish(new UiToggleMessage(typeof(EditProfileUi)));
+                _spheneMediator.Publish(new OpenSpheneHubMessage(SpheneHubPage.Profile, EditProfile: true));
             }
             SpheneUI.AttachTooltip("Edit your Sphene Profile");
         ImGui.SameLine();

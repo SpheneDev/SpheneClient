@@ -1,5 +1,6 @@
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface;
+using Dalamud.Interface.ManagedFontAtlas;
 using Dalamud.Interface.Textures.TextureWraps;
 using Dalamud.Interface.Utility.Raii;
 using Sphene.Services;
@@ -45,6 +46,184 @@ public static partial class SpheneUI
             public bool AddingTag { get; set; }
             /// <summary>Set when the add-tag input opens so the hero can focus it once.</summary>
             public bool TagInputFocusPending { get; set; }
+
+            /// <summary>Own-profile: click the big name to edit the display name in place.</summary>
+            public string DisplayNameBuffer { get; set; } = string.Empty;
+            /// <summary>Commit callback for the display name (empty string = cleared).</summary>
+            public Action<string>? OnDisplayNameCommitted { get; set; }
+            /// <summary>Whether the name line is currently swapped for its input.</summary>
+            public bool EditingDisplayName { get; set; }
+            /// <summary>Set when the name input opens so the hero can focus it once.</summary>
+            public bool NameFocusPending { get; set; }
+            /// <summary>Input cap for the display name buffer.</summary>
+            public int DisplayNameMaxLength { get; set; } = 64;
+
+            /// <summary>Own-profile: click the "@" meta line to rename the handle in place.</summary>
+            public string HandleBuffer { get; set; } = string.Empty;
+            /// <summary>Commit callback for the handle rename; null disables handle editing.</summary>
+            public Action<string>? OnHandleCommitted { get; set; }
+            /// <summary>Whether the meta line is currently swapped for its input.</summary>
+            public bool EditingHandle { get; set; }
+            /// <summary>Set when the handle input opens so the hero can focus it once.</summary>
+            public bool HandleFocusPending { get; set; }
+            /// <summary>Cooldown gate — a locked handle shows the hint instead of opening the input.</summary>
+            public bool HandleLocked { get; set; }
+            /// <summary>Muted hint under the handle (rules / next rename date).</summary>
+            public string? HandleHint { get; set; }
+            /// <summary>Input cap for the handle buffer.</summary>
+            public int HandleMaxLength { get; set; } = 15;
+
+            /// <summary>Small feedback line under the identity block (rename result, cooldown notice).</summary>
+            public string? Feedback { get; set; }
+            /// <summary>Color for <see cref="Feedback"/>.</summary>
+            public Vector4 FeedbackColor { get; set; } = Colors.TextMuted;
+
+            /// <summary>Server-side display name — commits that match it are ignored.</summary>
+            public string? DisplayNameCurrent { get; set; }
+            /// <summary>Server-side handle without the "@" — commits that match it are ignored.</summary>
+            public string? HandleCurrent { get; set; }
+            /// <summary>Pending display-name value shown in the confirmation modal.</summary>
+            public string? PendingDisplayName { get; set; }
+            /// <summary>Pending handle value shown in the confirmation modal.</summary>
+            public string? PendingHandle { get; set; }
+            /// <summary>Muted detail line in the display-name confirmation modal.</summary>
+            public string? DisplayNameConfirmDetail { get; set; }
+            /// <summary>Muted detail line in the handle confirmation modal (e.g. the cooldown rule).</summary>
+            public string? HandleConfirmDetail { get; set; }
+            /// <summary>Confirmation modal guarding the display-name commit.</summary>
+            public Popups.ConfirmDialog DisplayNameConfirm { get; } = new();
+            /// <summary>Confirmation modal guarding the handle rename.</summary>
+            public Popups.ConfirmDialog HandleConfirm { get; } = new();
+        }
+
+        /// <summary>Content for <see cref="Identity"/>: the own-identity header strip.</summary>
+        public readonly record struct IdentityContent(
+            IDalamudTextureWrap? Avatar,
+            string Name,
+            Vector4 NameColor,
+            string StatusLine,
+            Vector4 StatusColor,
+            Vector4 PresenceColor,
+            string PresenceLabel,
+            string? Handle,
+            Vector4 Accent);
+
+        /// <summary>
+        /// Own-name chain for identity surfaces: the display name when set,
+        /// else the bare alias. Never the game character name — that is not
+        /// the Sphene-facing identity — and never the raw UID either: the
+        /// handle is the identity. The "@" belongs to the handle meta line,
+        /// not the name slot.
+        /// </summary>
+        public static string OwnName(string? displayName, string? alias)
+            => !string.IsNullOrWhiteSpace(displayName) ? displayName
+             : !string.IsNullOrWhiteSpace(alias) ? alias
+             : "--";
+
+        /// <summary>
+        /// Status line for the own-identity strip: the status message when
+        /// set, else a real description, else the set-a-status hint.
+        /// </summary>
+        public static string StatusLineText(SpheneProfileData? profile, out Vector4 color)
+        {
+            if (profile != null && !string.IsNullOrWhiteSpace(profile.StatusMessage))
+            {
+                color = Colors.TextSecondary;
+                return profile.StatusMessage;
+            }
+            if (profile != null && !string.IsNullOrWhiteSpace(profile.Description)
+                && !string.Equals(profile.Description, SpheneProfileManager.NoDescriptionPlaceholder,
+                    StringComparison.Ordinal))
+            {
+                color = Colors.TextMuted;
+                return profile.Description;
+            }
+            color = Colors.TextMuted;
+            return "Set a status in your profile";
+        }
+
+        private static readonly Vector4 IdentityScrimColor = new(0.02f, 0.02f, 0.04f, 1f);
+        private const float IdentityScrimAlpha = 0.55f;
+
+        /// <summary>
+        /// Dark scrim behind <see cref="Identity"/> — the same dim the hub
+        /// header card applies. Deliberately translucent: a caller's banner
+        /// or row backdrop underneath still reads through.
+        /// </summary>
+        public static void IdentityScrim(ImDrawListPtr drawList, Vector2 min, Vector2 max,
+            float rounding = 0f, ImDrawFlags corners = ImDrawFlags.RoundCornersAll)
+            => drawList.AddRectFilled(min, max,
+                ColorUtils.ToU32(ColorUtils.WithAlpha(IdentityScrimColor, IdentityScrimAlpha)),
+                rounding, corners);
+
+        /// <summary>
+        /// Self-contained own-identity card — <see cref="IdentityScrim"/>,
+        /// hover sheen, hairline and the <see cref="Identity"/> strip as one
+        /// darker container floating on the caller's backdrop. The caller
+        /// owns click handling and hover detection (bar variants must not
+        /// swallow drag presses).
+        /// </summary>
+        public static void IdentityCard(ImDrawListPtr drawList, Vector2 min, Vector2 max,
+            float padX, IdentityContent content, bool hovered, float rounding,
+            ImDrawFlags corners, string tooltipHint)
+        {
+            IdentityScrim(drawList, min, max, rounding, corners);
+            if (hovered)
+            {
+                drawList.AddRectFilled(min, max,
+                    ColorUtils.ToU32(ColorUtils.WithAlpha(Vector4.One, 0.06f)),
+                    rounding, corners);
+            }
+            drawList.AddRect(min, max,
+                ColorUtils.ToU32(ColorUtils.WithAlpha(Vector4.One, 0.10f)),
+                rounding, corners);
+            Identity(drawList, min, max.Y - min.Y, max.X - min.X, padX, content, hovered,
+                tooltipHint);
+        }
+
+        /// <summary>
+        /// Own-identity strip shared by the hub header card and the CompactUI
+        /// profile bar: accent-haloed avatar with presence dot, name and
+        /// status line. Draws no background — the caller's backdrop (row
+        /// image, <see cref="IdentityScrim"/>) stays visible behind it.
+        /// </summary>
+        public static void Identity(ImDrawListPtr drawList, Vector2 min, float height, float width,
+            float padX, IdentityContent content, bool hovered, string tooltipHint)
+        {
+            var scale = Scale;
+            var avatarSize = MathF.Min(34f * scale, height - 10f * scale);
+            var avatarPos = new Vector2(min.X + padX, min.Y + (height - avatarSize) * 0.5f);
+
+            drawList.AddCircleFilled(avatarPos + new Vector2(avatarSize * 0.5f),
+                avatarSize * 0.5f + 2f * scale,
+                ColorUtils.ToU32(ColorUtils.WithAlpha(content.Accent, 0.30f)), 0);
+            ImGui.SetCursorScreenPos(avatarPos);
+            Media.Avatar(content.Avatar, avatarSize);
+            Media.PresenceDot(drawList, avatarPos, avatarSize, content.PresenceColor);
+
+            var textX = avatarPos.X + avatarSize + 9f * scale;
+            var textMaxW = MathF.Max(30f * scale, min.X + width - textX - 8f * scale);
+            var lineH = ImGui.GetTextLineHeight();
+            var lineGap = 2f * scale;
+            var nameY = min.Y + (height - lineH * 2f - lineGap) * 0.5f;
+
+            var statusText = Text.Ellipsize(content.StatusLine, textMaxW);
+            drawList.AddText(new Vector2(textX, nameY),
+                ColorUtils.ToU32(content.NameColor), Text.Ellipsize(content.Name, textMaxW));
+            drawList.AddText(new Vector2(textX, nameY + lineH + lineGap),
+                ColorUtils.ToU32(content.StatusColor), statusText);
+
+            if (hovered)
+            {
+                var tip = string.IsNullOrEmpty(content.Handle)
+                    ? content.PresenceLabel
+                    : $"{content.PresenceLabel} — @{content.Handle}";
+                if (!string.Equals(statusText, content.StatusLine, StringComparison.Ordinal))
+                {
+                    tip = $"{content.StatusLine}\n{tip}";
+                }
+                AttachTooltip(tip + tooltipHint);
+            }
         }
 
         /// <summary>
@@ -146,7 +325,7 @@ public static partial class SpheneUI
         /// edge, name + meta + status + tags + optional stats row and actions.
         /// </summary>
         /// <param name="displayName">Primary name shown in the big font.</param>
-        /// <param name="metaLine">Secondary info (e.g. "UID: x") — shown as a tooltip when hovering the name, not rendered as a text line.</param>
+        /// <param name="metaLine">Secondary line under the name — "@handle" renders white, anything else muted. In edit mode a "@" line becomes the handle-rename entry point.</param>
         /// <param name="profile">Profile data for status/tags; may be a placeholder.</param>
         /// <param name="avatar">Avatar texture (caller caches per user).</param>
         /// <param name="banner">Optional banner texture — falls back to theme gradient.</param>
@@ -231,9 +410,11 @@ public static partial class SpheneUI
                     && !string.Equals(profile.Description,
                         SpheneProfileManager.NoDescriptionPlaceholder, StringComparison.Ordinal);
                 var textHeight = avatarSize * 0.55f + lineH * 1.2f + 6f * scale
+                    + (metaLine.Length > 0 ? lineH + 2f * scale : 0f)
                     + ((editing || hasStatus) ? lineH + 6f * scale : 0f)
                     + ((editing || hasTags) ? lineH + 12f * scale : 0f)
-                    + (editing ? lineH * 3f + 14f * scale : (hasDesc ? lineH * 2f : 0f));
+                    + (editing ? lineH * 3f + 14f * scale : (hasDesc ? lineH * 2f : 0f))
+                    + (!string.IsNullOrEmpty(edit?.Feedback) ? lineH * 1.5f : 0f);
 
                 ImGui.SetCursorScreenPos(textMin);
                 using (var textChild = ImRaii.Child("##profile-hero-text",
@@ -242,11 +423,9 @@ public static partial class SpheneUI
                 {
                     if (textChild)
                     {
-                        Text.Big(displayName, accent);
-                        if (!string.IsNullOrEmpty(metaLine))
-                        {
-                            AttachTooltip(metaLine);
-                        }
+                        var inputWidth = MathF.Max(140f, textMaxX - textMin.X);
+                        DrawHeroName(displayName, metaLine, accent, editing ? edit : null,
+                            inputWidth, scale);
                         var onNsfw = edit?.OnNsfwToggled;
                         var nsfwClickable = editing && onNsfw != null;
                         if (isNsfw || nsfwClickable)
@@ -254,7 +433,6 @@ public static partial class SpheneUI
                             DrawNsfwChip(isNsfw, nsfwClickable, scale,
                                 () => onNsfw?.Invoke(!isNsfw));
                         }
-                        var inputWidth = MathF.Max(140f, textMaxX - textMin.X);
                         if (editing)
                         {
                             var statusBuf = edit!.StatusBuffer;
@@ -378,7 +556,7 @@ public static partial class SpheneUI
                 }
                 ImGui.SetCursorScreenPos(new Vector2(cardMin.X, contentBottom));
                 ImGui.Dummy(Vector2.Zero);
-            }, accent, animatedBackdrop: theme.CardShimmer,
+            }, accent, animatedBackdrop: false,
             id: $"profile-hero-{displayName}",
             fxHover: theme.CardHover, fxIdle: theme.CardIdle,
             topBleed: (dl, cMin, cMax, cRounding) =>
@@ -399,6 +577,118 @@ public static partial class SpheneUI
                 dl.AddRectFilledMultiColor(new Vector2(cMin.X, bleedMax.Y - fadeH),
                     bleedMax, fadeClear, fadeClear, fadeSolid, fadeSolid);
             });
+        }
+
+        /// <summary>
+        /// Loading twin of <see cref="Hero"/>: same silhouette (banner bleed,
+        /// half-overlapping avatar, name/meta/status bars) drawn as pulsing
+        /// blocks with a traveling sheen. Hosts call this while the profile
+        /// fetch is in flight — when the real hero swaps in, geometry lines
+        /// up so the transition does not jump.
+        /// </summary>
+        /// <param name="accent">Tint for the banner placeholder and card ring.</param>
+        /// <param name="statsRows">Skeleton bars appended under the identity block, mirroring a caller's stats/meta lines.</param>
+        public static void HeroSkeleton(Vector4 accent, int statsRows = 0)
+        {
+            var scale = Scale;
+            var bannerHeight = HeroBannerHeight * scale;
+            var avatarSize = HeroAvatarSize * scale;
+            var bleedHeight = bannerHeight + Spacing.CardPadding.Scaled;
+            var topRounding = Layout.AccentCardRounding * scale;
+            var phase = (float)ImGui.GetTime();
+
+            Layout.AccentCard(() =>
+            {
+                var cardMin = ImGui.GetCursorScreenPos();
+                var cardWidth = ImGui.GetContentRegionAvail().X;
+                var drawList = ImGui.GetWindowDrawList();
+                var lineH = ImGui.GetTextLineHeight();
+                var barR = lineH * 0.30f;
+
+                ImGui.Dummy(new Vector2(cardWidth, bannerHeight));
+
+                var avatarPos = cardMin + new Vector2(10f * scale, bannerHeight - avatarSize * 0.45f);
+                ImGui.SetCursorScreenPos(avatarPos);
+                ImGui.Dummy(new Vector2(avatarSize));
+                SkeletonBlock(drawList, avatarPos, avatarPos + new Vector2(avatarSize),
+                    avatarSize * 0.5f, phase);
+
+                var textX = avatarPos.X + avatarSize + 10f * scale;
+                var textW = MathF.Max(60f * scale, cardMin.X + cardWidth - 10f * scale - textX);
+                var nameY = cardMin.Y + bannerHeight + 4f * scale;
+                SkeletonBlock(drawList, new Vector2(textX, nameY),
+                    new Vector2(textX + textW * 0.55f, nameY + lineH * 1.15f), barR, phase + 0.12f);
+                var metaY = nameY + lineH * 1.15f + 3f * scale;
+                SkeletonBlock(drawList, new Vector2(textX, metaY),
+                    new Vector2(textX + textW * 0.32f, metaY + lineH), barR, phase + 0.24f);
+                var statusY = metaY + lineH + 7f * scale;
+                SkeletonBlock(drawList, new Vector2(textX, statusY),
+                    new Vector2(textX + textW * 0.85f, statusY + lineH), barR, phase + 0.36f);
+
+                var contentBottom = MathF.Max(avatarPos.Y + avatarSize + 6f * scale,
+                    statusY + lineH + 4f * scale);
+                for (var row = 0; row < statsRows; row++)
+                {
+                    var rowW = cardWidth - 12f * scale;
+                    var rowMin = new Vector2(cardMin.X + 6f * scale, contentBottom);
+                    SkeletonBlock(drawList, rowMin,
+                        new Vector2(rowMin.X + rowW * (row == 0 ? 0.7f : 0.5f),
+                            rowMin.Y + lineH), barR, phase + 0.5f + row * 0.15f);
+                    contentBottom += lineH + 6f * scale;
+                }
+
+                ImGui.SetCursorScreenPos(new Vector2(cardMin.X, contentBottom));
+                ImGui.Dummy(Vector2.Zero);
+            }, accent, animatedBackdrop: false, id: "profile-hero-skeleton",
+            topBleed: (dl, cMin, cMax, _) =>
+            {
+                var bleedMax = new Vector2(cMax.X, cMin.Y + bleedHeight);
+                dl.PushClipRect(cMin, bleedMax, true);
+                Banner(dl, cMin, bleedMax, null, SpheneProfileTheme.Default,
+                    accent, accent, rounding: topRounding, corners: ImDrawFlags.RoundCornersTop);
+                SkeletonSheen(dl, cMin, bleedMax, phase);
+                dl.PopClipRect();
+                var fadeH = bleedHeight * HeroBannerBodyFade;
+                var fadeClear = ColorUtils.ToU32(ColorUtils.WithAlpha(
+                    Layout.AccentCardTint(accent), 0f));
+                var fadeSolid = ColorUtils.ToU32(Layout.AccentCardTint(accent));
+                dl.AddRectFilledMultiColor(new Vector2(cMin.X, bleedMax.Y - fadeH),
+                    bleedMax, fadeClear, fadeClear, fadeSolid, fadeSolid);
+            });
+        }
+
+        /// <summary>
+        /// One skeleton placeholder block: pulsing fill, a traveling diagonal
+        /// sheen clipped to the block, and a faint outline. <paramref name="phase"/>
+        /// offsets the sheen so stacked blocks do not flash in lockstep.
+        /// </summary>
+        private static void SkeletonBlock(ImDrawListPtr drawList, Vector2 min, Vector2 max,
+            float rounding, float phase)
+        {
+            var pulse = 0.055f + 0.03f * (0.5f + 0.5f * MathF.Sin(phase * 2.4f));
+            drawList.AddRectFilled(min, max,
+                ColorUtils.ToU32(ColorUtils.WithAlpha(Vector4.One, pulse)), rounding);
+            SkeletonSheen(drawList, min, max, phase);
+            drawList.AddRect(min, max,
+                ColorUtils.ToU32(ColorUtils.WithAlpha(Vector4.One, 0.06f)), rounding);
+        }
+
+        /// <summary>Diagonal light sweep moving left to right inside the rect.</summary>
+        private static void SkeletonSheen(ImDrawListPtr drawList, Vector2 min, Vector2 max,
+            float phase)
+        {
+            var w = max.X - min.X;
+            var sweepW = MathF.Max(20f * Scale, w * 0.4f);
+            var span = w + sweepW;
+            var x = min.X - sweepW + (phase * 70f * Scale % span);
+            var sheen = ColorUtils.WithAlpha(Vector4.One, 0.09f);
+            var clear = ColorUtils.WithAlpha(Vector4.One, 0f);
+            drawList.PushClipRect(min, max, true);
+            drawList.AddRectFilledMultiColor(
+                new Vector2(x - sweepW * 0.35f, min.Y), new Vector2(x + sweepW, max.Y),
+                ColorUtils.ToU32(clear), ColorUtils.ToU32(sheen),
+                ColorUtils.ToU32(clear), ColorUtils.ToU32(clear));
+            drawList.PopClipRect();
         }
 
         /// <summary>Measured size of the NSFW chip — grows by a check glyph when <paramref name="active"/>.</summary>
@@ -481,6 +771,300 @@ public static partial class SpheneUI
             {
                 onToggle();
             }
+        }
+
+        /// <summary>
+        /// Non-edit name line: the big font when it fits the column, the
+        /// display font (~26px) when it does not, ellipsized with a tooltip
+        /// as the last resort — long names never bleed past the card edge.
+        /// </summary>
+        private static void DrawFittedHeroName(string displayName, Vector4 accent, float availW)
+        {
+            var fitsBig = false;
+            if (UidFont is { } bigFont)
+            {
+                using (bigFont.Push())
+                {
+                    fitsBig = ImGui.CalcTextSize(displayName).X <= availW;
+                }
+            }
+            else
+            {
+                fitsBig = ImGui.CalcTextSize(displayName).X <= availW;
+            }
+            if (fitsBig)
+            {
+                Text.Big(displayName, accent);
+                return;
+            }
+
+            string shown;
+            if (SpheneUI.DisplayFont is { } displayFont)
+            {
+                using (displayFont.Push())
+                {
+                    shown = Text.Ellipsize(displayName, availW);
+                }
+                Text.Display(shown, accent);
+            }
+            else
+            {
+                shown = Text.Ellipsize(displayName, availW);
+                Text.Colored(shown, accent);
+            }
+            if (shown.Length != displayName.Length)
+            {
+                AttachTooltip(displayName);
+            }
+        }
+
+        /// <summary>
+        /// Name line plus the visible meta/handle line under it. In edit mode
+        /// (own profile) both become click-to-edit inputs committing through
+        /// <see cref="HeroEdit.OnDisplayNameCommitted"/> /
+        /// <see cref="HeroEdit.OnHandleCommitted"/>; a locked handle shows the
+        /// hint instead of opening the input.
+        /// </summary>
+        private static void DrawHeroName(string displayName, string metaLine,
+            Vector4 accent, HeroEdit? edit, float inputWidth, float scale)
+        {
+            var editing = edit?.Enabled == true;
+            if (editing && edit!.OnDisplayNameCommitted != null && edit.EditingDisplayName)
+            {
+                if (edit.NameFocusPending)
+                {
+                    ImGui.SetKeyboardFocusHere();
+                    edit.NameFocusPending = false;
+                }
+                // bare in-place edit: the input inherits the big name font and
+                // drops the frame chrome, so the line keeps its size — an
+                // accent underline marks it as the active edit
+                var committed = DrawInPlaceInput("##hero-displayname",
+                    "Display name — Enter applies, empty removes it", edit.DisplayNameBuffer,
+                    edit.DisplayNameMaxLength, ImGuiInputTextFlags.EnterReturnsTrue,
+                    inputWidth, accent, scale, out var nameBuf, out var nameCancelled, font: UidFont);
+                edit.DisplayNameBuffer = nameBuf;
+                if (nameCancelled)
+                {
+                    edit.EditingDisplayName = false;
+                    edit.DisplayNameBuffer = edit.DisplayNameCurrent ?? string.Empty;
+                }
+                else if (committed)
+                {
+                    edit.EditingDisplayName = false;
+                    var trimmed = nameBuf.Trim();
+                    if (!string.Equals(trimmed, edit.DisplayNameCurrent ?? string.Empty,
+                            StringComparison.Ordinal))
+                    {
+                        edit.PendingDisplayName = trimmed;
+                        edit.DisplayNameConfirm.Open(
+                            () => edit.OnDisplayNameCommitted?.Invoke(trimmed));
+                    }
+                }
+            }
+            else
+            {
+                DrawFittedHeroName(displayName, accent, ImGui.GetContentRegionAvail().X);
+                if (editing && edit!.OnDisplayNameCommitted != null)
+                {
+                    var nameHeight = ImGui.GetItemRectSize().Y;
+                    var hovered = ImGui.IsItemHovered();
+                    var clicked = ImGui.IsItemClicked();
+                    var pen = DrawEditPen(nameHeight, accent, scale);
+                    hovered |= pen.Hovered;
+                    clicked |= pen.Clicked;
+                    if (hovered)
+                    {
+                        ImGui.SetMouseCursor(ImGuiMouseCursor.TextInput);
+                    }
+                    if (clicked)
+                    {
+                        edit.EditingDisplayName = true;
+                        edit.NameFocusPending = true;
+                    }
+                }
+            }
+
+            var canEditHandle = editing && edit!.OnHandleCommitted != null
+                && metaLine.StartsWith('@');
+            if (canEditHandle && edit!.EditingHandle)
+            {
+                Text.Colored("@", Palette.CrystalWhite);
+                ImGui.SameLine(0f, 1f * scale);
+                // focus request must sit directly before the input — the "@"
+                // prefix item would otherwise consume it and the field never
+                // becomes active, leaving the edit stuck open
+                if (edit.HandleFocusPending)
+                {
+                    ImGui.SetKeyboardFocusHere();
+                    edit.HandleFocusPending = false;
+                }
+                var committed = DrawInPlaceInput("##hero-handle", null,
+                    edit.HandleBuffer, edit.HandleMaxLength,
+                    ImGuiInputTextFlags.EnterReturnsTrue | ImGuiInputTextFlags.CharsNoBlank,
+                    MathF.Max(120f, 160f * scale), accent, scale, out var handleBuf,
+                    out var handleCancelled);
+                edit.HandleBuffer = handleBuf;
+                if (handleCancelled)
+                {
+                    edit.EditingHandle = false;
+                    edit.HandleBuffer = edit.HandleCurrent ?? string.Empty;
+                }
+                else if (committed)
+                {
+                    edit.EditingHandle = false;
+                    var trimmed = handleBuf.Trim();
+                    if (trimmed.Length > 0 && !string.Equals(trimmed,
+                            edit.HandleCurrent ?? string.Empty, StringComparison.Ordinal))
+                    {
+                        edit.PendingHandle = trimmed;
+                        edit.HandleConfirm.Open(
+                            () => edit.OnHandleCommitted?.Invoke(trimmed));
+                    }
+                }
+                if (!string.IsNullOrEmpty(edit.HandleHint))
+                {
+                    Text.Muted(edit.HandleHint);
+                }
+            }
+            else if (metaLine.Length > 0)
+            {
+                var handleLine = metaLine.StartsWith('@');
+                Text.Colored(metaLine, handleLine ? Palette.CrystalWhite : Colors.TextMuted);
+                if (canEditHandle)
+                {
+                    var lineHeight = ImGui.GetItemRectSize().Y;
+                    var hovered = ImGui.IsItemHovered();
+                    var clicked = ImGui.IsItemClicked();
+                    var pen = DrawEditPen(lineHeight, accent, scale);
+                    hovered |= pen.Hovered;
+                    clicked |= pen.Clicked;
+                    if (hovered)
+                    {
+                        ImGui.SetMouseCursor(edit!.HandleLocked
+                            ? ImGuiMouseCursor.NotAllowed : ImGuiMouseCursor.TextInput);
+                    }
+                    if (clicked)
+                    {
+                        if (edit!.HandleLocked)
+                        {
+                            edit.Feedback = edit.HandleHint;
+                            edit.FeedbackColor = Colors.Warning;
+                        }
+                        else
+                        {
+                            edit.EditingHandle = true;
+                            edit.HandleFocusPending = true;
+                        }
+                    }
+                    AttachTooltip(edit!.HandleHint ?? "Click to rename your handle");
+                }
+                else if (handleLine)
+                {
+                    AttachTooltip("Handle — used for pair requests and profile lookup");
+                }
+            }
+
+            if (editing && canEditHandle && !edit!.EditingHandle && !edit.HandleLocked
+                && !string.IsNullOrEmpty(edit.HandleHint))
+            {
+                Text.Muted(edit.HandleHint);
+            }
+            if (!string.IsNullOrEmpty(edit?.Feedback))
+            {
+                Text.ColoredWrapped(edit!.Feedback!, edit.FeedbackColor);
+            }
+            if (edit != null)
+            {
+                edit.DisplayNameConfirm.Draw("hero-name", "Change display name?",
+                    string.IsNullOrWhiteSpace(edit.PendingDisplayName)
+                        ? "Remove your display name — you will be shown under your handle."
+                        : $"Your display name will change to \"{edit.PendingDisplayName}\".",
+                    confirmLabel: "Apply", icon: FontAwesomeIcon.Pen,
+                    confirmIcon: FontAwesomeIcon.Check,
+                    detail: edit.DisplayNameConfirmDetail);
+                edit.HandleConfirm.Draw("hero-handle", "Rename handle?",
+                    $"Your handle will change to \"@{edit.PendingHandle}\" — others pair and find you by it.",
+                    confirmLabel: "Rename", icon: FontAwesomeIcon.At,
+                    confirmIcon: FontAwesomeIcon.At,
+                    detail: edit.HandleConfirmDetail);
+            }
+        }
+
+        /// <summary>
+        /// Small pen glyph right of the last item marking the line as
+        /// click-to-edit — vertically centered against the line's height,
+        /// accent on hover, muted otherwise. Returns the pen's own hover/click
+        /// so callers can merge it with the text item's input state.
+        /// </summary>
+        private static (bool Hovered, bool Clicked) DrawEditPen(float lineHeight,
+            Vector4 accent, float scale)
+        {
+            ImGui.SameLine(0f, 5f * scale);
+            var pos = ImGui.GetCursorScreenPos();
+            using var font = Icons.PushFont();
+            var glyph = FontAwesomeIcon.Pen.ToIconString();
+            var size = ImGui.CalcTextSize(glyph);
+            pos += new Vector2(0f, MathF.Max(0f, (lineHeight - size.Y) * 0.5f));
+            ImGui.SetCursorScreenPos(pos);
+            ImGui.Dummy(size);
+            var hovered = ImGui.IsItemHovered();
+            var clicked = ImGui.IsItemClicked();
+            ImGui.GetWindowDrawList().AddText(pos,
+                ColorUtils.ToU32(hovered ? accent : Colors.TextMuted), glyph);
+            return (hovered, clicked);
+        }
+
+        /// <summary>
+        /// InputText that looks like the text it replaces: transparent frame,
+        /// zero padding and an accent caret-line — so click-to-edit keeps the
+        /// exact visual size of the line instead of swapping in a boxed field.
+        /// Returns true on Enter or a click-away that kept edits (caller routes
+        /// through the confirm dialog); <paramref name="cancelled"/> is set on
+        /// Escape or a click-away without changes — the caller then discards
+        /// the edit instead of saving it.
+        /// </summary>
+        private static bool DrawInPlaceInput(string id, string? hint, string value,
+            int maxLength, ImGuiInputTextFlags flags, float width, Vector4 accent,
+            float scale, out string outValue, out bool cancelled, IFontHandle? font = null)
+        {
+            var buf = value;
+            bool committed;
+            using (font?.Push())
+            using (ImRaii.PushColor(ImGuiCol.FrameBg, 0u)
+                       .Push(ImGuiCol.FrameBgHovered, 0u)
+                       .Push(ImGuiCol.FrameBgActive, 0u)
+                       .Push(ImGuiCol.Border, 0u))
+            using (ImRaii.PushStyle(ImGuiStyleVar.FramePadding, Vector2.Zero))
+            {
+                ImGui.SetNextItemWidth(width);
+                committed = hint != null
+                    ? ImGui.InputTextWithHint(id, hint, ref buf, maxLength, flags)
+                    : ImGui.InputText(id, ref buf, maxLength, flags);
+                cancelled = false;
+                if (!committed && ImGui.IsItemDeactivated())
+                {
+                    // deactivated with edits = click-away save; without = Esc or plain click-away
+                    if (ImGui.IsItemDeactivatedAfterEdit()) committed = true;
+                    else cancelled = true;
+                }
+                // a field that never gained focus (e.g. a focus request eaten by
+                // a sibling item) cannot deactivate — still let a click elsewhere
+                // drop the edit instead of leaving it stuck open
+                if (!committed && !cancelled
+                    && ImGui.IsMouseClicked(ImGuiMouseButton.Left)
+                    && !ImGui.IsItemHovered() && !ImGui.IsItemActive())
+                {
+                    cancelled = true;
+                }
+            }
+            var itemMin = ImGui.GetItemRectMin();
+            var itemMax = ImGui.GetItemRectMax();
+            ImGui.GetWindowDrawList().AddLine(
+                new Vector2(itemMin.X, itemMax.Y), new Vector2(itemMax.X, itemMax.Y),
+                ColorUtils.ToU32(accent), MathF.Max(1f, scale));
+            outValue = buf;
+            return committed;
         }
 
         /// <summary>

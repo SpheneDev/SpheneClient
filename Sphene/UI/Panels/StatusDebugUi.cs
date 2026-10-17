@@ -369,7 +369,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             });
 
             DrawSummaryRow("Server", () => SpheneUI.Text.Plain(_apiController.ServerInfo.ShardName ?? "Not connected"));
-            DrawSummaryRow("User UID", () => SpheneUI.Text.Plain(_apiController.UID ?? "Not logged in"));
+            DrawSummaryRow("User", () => SpheneUI.Text.Plain(_apiController.OwnAlias ?? "Not logged in"));
 
             var healthStatus = _healthMonitor.GetHealthStatus();
             DrawSummaryRow("Health", () =>
@@ -1079,10 +1079,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
 
     private static void DrawCharacterHeaderSummary(Pair pair)
     {
-        var uid = GetPairKey(pair);
         SpheneUI.Text.Plain(pair.UserData.AliasOrUID);
-        ImGui.SameLine();
-        SpheneUI.Text.Colored($"({uid})", ImGuiColors.DalamudGrey);
         SpheneUI.Layout.Separator();
 
         if (ImGui.BeginTable("##CharacterHeaderSummaryTable", 2, ImGuiTableFlags.SizingStretchProp))
@@ -1298,7 +1295,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
 
         var selectedUid = selectedPair.UserData.UID;
         var collectionId = selectedPair.GetPenumbraCollectionId();
-        SpheneUI.Text.Plain($"User: {selectedPair.UserData.AliasOrUID} ({selectedUid})");
+        SpheneUI.Text.Plain($"User: {selectedPair.UserData.AliasOrUID}");
         SpheneUI.Text.Plain($"Collection ID: {(collectionId == Guid.Empty ? "(none)" : collectionId.ToString())}");
         SpheneUI.Text.Plain($"Character Visible: {(selectedPair.IsVisible ? "Yes" : "No")}, Mutually Visible: {(selectedPair.IsMutuallyVisible ? "Yes" : "No")}");
 
@@ -2044,7 +2041,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         ImGui.SameLine();
         ImGui.SetNextItemWidth(220f * ImGuiHelpers.GlobalScale);
         SpheneUI.Controls.InputTextWithHint("##LogSearch", "Search...", ref _debugLogSearch, 128);
-        SpheneUI.AttachTooltip("Filters by text across message, details, and UID.");
+        SpheneUI.AttachTooltip("Filters by text across message, details, and handle.");
         ImGui.SameLine();
         SpheneUI.Controls.Checkbox("Apply details", ref _includeApplyChangeDetails);
         SpheneUI.AttachTooltip("Includes APPLY details for Info/Debug entries (can add a lot of text).");
@@ -2127,7 +2124,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             }
             ImGui.EndCombo();
         }
-        SpheneUI.AttachTooltip("Limits entries to a specific user (UID).");
+        SpheneUI.AttachTooltip("Limits entries to a specific user (handle).");
 
         ImGui.SameLine();
         SpheneUI.Controls.Checkbox("Ack session filter", ref _debugLogAckContextFilterEnabled);

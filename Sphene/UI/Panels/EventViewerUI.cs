@@ -146,7 +146,7 @@ internal class EventViewerUI : WindowMediatorSubscriberBase
             bool changedFilter = false;
             changedFilter |= SpheneUI.Controls.InputText("Search all columns", ref _filterFreeText, 50, preferredWidth: 200);
             changedFilter |= SpheneUI.Controls.InputText("Filter by Source", ref _filterSource, 50, preferredWidth: 200);
-            changedFilter |= SpheneUI.Controls.InputText("Filter by UID", ref _filterUid, 50, preferredWidth: 200);
+            changedFilter |= SpheneUI.Controls.InputText("Filter by user", ref _filterUid, 50, preferredWidth: 200);
             changedFilter |= SpheneUI.Controls.InputText("Filter by Character", ref _filterCharacter, 50, preferredWidth: 200);
             changedFilter |= SpheneUI.Controls.InputText("Filter by Event", ref _filterEvent, 50, preferredWidth: 200);
             if (changedFilter) _filteredEvents = RecreateFilter();
@@ -165,7 +165,7 @@ internal class EventViewerUI : WindowMediatorSubscriberBase
             ImGui.TableSetupColumn(string.Empty, ImGuiTableColumnFlags.NoSort);
             ImGui.TableSetupColumn("Time");
             ImGui.TableSetupColumn("Source");
-            ImGui.TableSetupColumn("UID");
+            ImGui.TableSetupColumn("User");
             ImGui.TableSetupColumn("Character");
             ImGui.TableSetupColumn("Event");
             ImGui.TableHeadersRow();

@@ -111,7 +111,7 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
     public Version CurrentClientVersion => _connectionDto?.CurrentClientVersion ?? new Version(0, 0, 0);
 
     public DefaultPermissionsDto? DefaultPermissions => _connectionDto?.DefaultPreferredPermissions ?? null;
-    public string DisplayName => _connectionDto?.User.AliasOrUID ?? string.Empty;
+    public string DisplayName => _connectionDto?.User.PreferredName ?? string.Empty;
 
     public bool IsConnected => ServerState == ServerState.Connected;
 
@@ -122,6 +122,14 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
     public bool IsModerator => _connectionDto?.IsModerator ?? false;
 
     public bool IsSupporter => _connectionDto?.IsSupporter ?? false;
+
+    public bool RequiresAliasSetup => _connectionDto?.RequiresAliasSetup ?? false;
+
+    public DateTime? AliasChangeAvailableAt => _connectionDto?.AliasChangeAvailableAt;
+
+    public string? OwnAlias => _connectionDto?.User.Alias;
+
+    public string? OwnDisplayName => _connectionDto?.User.DisplayName;
 
     public bool SupporterFeaturesEnabled => _connectionDto?.ServerInfo?.SupporterFeaturesEnabled ?? false;
 
@@ -636,6 +644,7 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
         OnUserGposeStateUpdate(dto => _ = Client_UserGposeStateUpdate(dto));
         OnUserReceiveUploadStatus(dto => _ = Client_UserReceiveUploadStatus(dto));
         OnUserUpdateProfile(dto => _ = Client_UserUpdateProfile(dto));
+        OnUserIdentityUpdated(dto => _ = Client_UserIdentityUpdated(dto));
         OnUserDefaultPermissionUpdate(dto => _ = Client_UserUpdateDefaultPermissions(dto));
         OnUpdateUserIndividualPairStatusDto(dto => _ = Client_UpdateUserIndividualPairStatusDto(dto));
         OnUserReceiveFileNotification(dto => _ = Client_UserReceiveFileNotification(dto));
@@ -696,6 +705,7 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
         _spheneHub.Remove(nameof(Client_UserGposeStateUpdate));
         _spheneHub.Remove(nameof(Client_UserReceiveUploadStatus));
         _spheneHub.Remove(nameof(Client_UserUpdateProfile));
+        _spheneHub.Remove(nameof(Client_UserIdentityUpdated));
         _spheneHub.Remove(nameof(Client_UserUpdateDefaultPermissions));
         _spheneHub.Remove(nameof(Client_UpdateUserIndividualPairStatusDto));
         _spheneHub.Remove(nameof(Client_UserReceiveFileNotification));
@@ -752,10 +762,22 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
             Logger.LogDebug("Pair online: {pair}", entry);
             _pairManager.MarkPairOnline(entry, sendNotif: false);
         }
+
+        if (_dalamudUtil.IsInGpose)
+        {
+            await UserUpdateGposeState(true).ConfigureAwait(false);
+        }
     }
 
     private async Task RefreshPairStateAfterReconnectAsync(bool forceCharacterDataReload)
     {
+        if (_connectionDto?.RequiresAliasSetup == true)
+        {
+            Logger.LogInformation("Identity setup required - deferring pair state until alias is set");
+            Mediator.Publish(new SwitchToIdentitySetupUiMessage());
+            return;
+        }
+
         var hasAnyPairs = _pairManager.DirectPairs.Count > 0 || _pairManager.GroupPairs.Count > 0;
         if (!hasAnyPairs)
         {

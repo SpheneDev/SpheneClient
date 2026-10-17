@@ -11,17 +11,15 @@ namespace Sphene.UI.Components;
 public class SelectPairForTagUi
 {
     private readonly TagHandler _tagHandler;
-    private readonly IdDisplayHandler _uidDisplayHandler;
     private string _filter = string.Empty;
     private bool _opened = false;
     private HashSet<string> _peopleInGroup = new(StringComparer.Ordinal);
     private bool _show = false;
     private string _tag = string.Empty;
 
-    public SelectPairForTagUi(TagHandler tagHandler, IdDisplayHandler uidDisplayHandler)
+    public SelectPairForTagUi(TagHandler tagHandler)
     {
         _tagHandler = tagHandler;
-        _uidDisplayHandler = uidDisplayHandler;
     }
 
     public void Draw(List<Pair> pairs)
@@ -87,8 +85,8 @@ public class SelectPairForTagUi
         _show = true;
     }
 
-    private string PairName(Pair pair)
+    private static string PairName(Pair pair)
     {
-        return _uidDisplayHandler.GetPlayerText(pair).text;
+        return IdDisplayHandler.GetPlayerText(pair);
     }
 }

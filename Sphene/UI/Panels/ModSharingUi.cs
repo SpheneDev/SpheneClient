@@ -264,7 +264,7 @@ public sealed class ModSharingUi : WindowMediatorSubscriberBase
             (FontAwesomeIcon.Download, "Receive Mods"),
             (FontAwesomeIcon.History, "Activity")
         ]);
-        SpheneUI.Layout.BeginNavRail("mod-sharing", railWidth);
+        SpheneUI.Layout.BeginNavRail("mod-sharing", railWidth, backdropPattern: true);
         // Same top offset as the hub rail so the first button sits at the
         // same height in both surfaces.
         SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);

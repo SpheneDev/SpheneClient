@@ -20,6 +20,7 @@ namespace Sphene.Services.Mediator;
 #pragma warning disable MA0048 // File name must match type name
 #pragma warning disable S2094
 public record SwitchToIntroUiMessage : MessageBase;
+public record SwitchToIdentitySetupUiMessage : MessageBase;
 public record SwitchToMainUiMessage : MessageBase;
 public record OpenSettingsUiMessage : MessageBase;
 public record DalamudLoginMessage : MessageBase;
@@ -88,9 +89,9 @@ public record PlayerUploadingMessage(GameObjectHandler Handler, bool IsUploading
 public record ClearProfileDataMessage(UserData? UserData = null) : MessageBase;
 public record CyclePauseMessage(UserData UserData) : MessageBase;
 public record PauseMessage(UserData UserData) : MessageBase;
-public record ProfilePopoutToggle(Pair? Pair) : MessageBase;
+public record ProfilePopoutToggle(Pair? Pair) : SameThreadMessage;
+public record ProfilePopoutPreload(Pair? Pair) : SameThreadMessage;
 public record CompactUiChange(Vector2 Size, Vector2 Position) : SameThreadMessage;
-public record ProfileOpenStandaloneMessage(Pair Pair) : MessageBase;
 public record RemoveWindowMessage(WindowMediatorSubscriberBase Window) : MessageBase;
 public record RefreshUiMessage : MessageBase;
 public record StructuralRefreshUiMessage : MessageBase;
@@ -126,7 +127,7 @@ public enum SpheneHubPage
     Settings = 6,
     Home = 7
 }
-public record OpenSpheneHubMessage(SpheneHubPage? Page = null, string? GroupGid = null, Pair? Friend = null) : MessageBase;
+public record OpenSpheneHubMessage(SpheneHubPage? Page = null, string? GroupGid = null, Pair? Friend = null, bool EditProfile = false) : MessageBase;
 public record DownloadLimitChangedMessage() : SameThreadMessage;
 public record CensusUpdateMessage(byte Gender, byte RaceId, byte TribeId) : MessageBase;
 public record TargetPairMessage(Pair Pair) : MessageBase;

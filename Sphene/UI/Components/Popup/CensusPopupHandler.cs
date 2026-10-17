@@ -31,7 +31,7 @@ public class CensusPopupHandler : IPopupHandler
         SpheneUI.Text.Wrapped("If you are seeing this popup you are updating from a Sphene version that did not collect census data. Please read the following carefully.");
         SpheneUI.Layout.Separator();
         SpheneUI.Text.Wrapped("Sphene Census is a data collecting service that can be used for statistical purposes. " +
-            "All data collected through Sphene Census is temporary and will be stored associated with your UID on the connected service as long as you are connected. " +
+            "All data collected through Sphene Census is temporary and will be stored associated with your account on the connected service as long as you are connected. " +
             "The data cannot be used for long term tracking of individuals.");
         SpheneUI.Text.Wrapped("If enabled, Sphene Census will collect following data:" + Environment.NewLine
             + "- Currently connected World" + Environment.NewLine

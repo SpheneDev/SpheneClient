@@ -31,10 +31,10 @@ public static partial class SpheneUI
 
         internal const float CardBorderThickness = 1.5f;
 
-        private const int SectionCardGlowRings = 8;
-        private const float SectionCardGlowRingStep = 9f;
-        private const float SectionCardGlowSpeed = 0.9f;
-        private const float SectionCardGlowBaseAlpha = 0.07f;
+        private const float CardBloomSpeed = 0.9f;
+        private const int CardBloomRingCount = 22;
+        private const float CardBloomRingStep = 2.2f;
+        private const float CardBloomRingAlpha = 0.07f;
         private const int SectionCardMoteCount = 3;
         private const float SectionCardMoteSpeed = 1.4f;
         private const float SectionCardMoteAlpha = 0.10f;
@@ -330,10 +330,11 @@ public static partial class SpheneUI
         internal static void WindowSurfaceGradient(out Vector4 topColor, out Vector4 bottomColor)
         {
             var bg = ImGui.GetStyle().Colors[(int)ImGuiCol.WindowBg];
-            var topAlpha = MathF.Min(bg.W * 1.05f, 1f);
-            topColor = new Vector4(MathF.Min(bg.X * 1.3f, 1f), MathF.Min(bg.Y * 1.3f, 1f),
-                MathF.Min(bg.Z * 1.35f, 1f), topAlpha);
-            bottomColor = new Vector4(bg.X * 0.8f, bg.Y * 0.8f, bg.Z * 0.85f, bg.W);
+            // Flat: any top/bottom difference quantizes into visible bands on
+            // large dark surfaces — the depth cue comes from rails and cards
+            // instead, and the nav-content backing samples the same tone.
+            topColor = bg;
+            bottomColor = bg;
         }
 
         /// <summary>Evaluates the window surface gradient color at a screen-space Y.</summary>
@@ -1144,8 +1145,9 @@ public static partial class SpheneUI
         }
 
         /// <summary>
-        /// Section card backdrop: breathing bloom anchored at the bottom-right
-        /// corner plus a few slow-twinkling motes near the top.
+        /// Section card backdrop: a breathing bloom that follows the
+        /// bottom-right corner arc, a few star glints riding it, and
+        /// slow-twinkling motes near the top.
         /// </summary>
         internal static void SectionCardBackdrop(ImDrawListPtr drawList, Vector2 min, Vector2 max,
             float rounding, Vector4 accent)
@@ -1163,19 +1165,7 @@ public static partial class SpheneUI
             // instead of leaving a dark gap in front of it.
             drawList.PushClipRect(min + new Vector2(1f, 1f), max - new Vector2(1f, 1f), true);
 
-            // Breathing bloom anchored at the corner arc center, faked with
-            // concentric alpha rings since ImGui has no radial gradients.
-            // Quadratic falloff keeps the outer edge soft and seamless.
-            var pulse = 0.65f + 0.35f * MathF.Sin(time * SectionCardGlowSpeed);
-            var bloomCenter = max - new Vector2(rounding, rounding);
-            for (var i = SectionCardGlowRings; i >= 1; i--)
-            {
-                var falloff = 1f - (i - 1f) / SectionCardGlowRings;
-                var alpha = SectionCardGlowBaseAlpha * falloff * falloff * pulse;
-                var ringColor = new Vector4(accent.X, accent.Y, accent.Z, alpha);
-                drawList.AddCircleFilled(bloomCenter, i * SectionCardGlowRingStep * scale,
-                    ColorUtils.ToU32(ringColor));
-            }
+            CardBloom(drawList, max, rounding, accent, time);
 
             // A few slow-twinkling motes scattered near the top of the card.
             for (var k = 0; k < SectionCardMoteCount; k++)
@@ -1197,8 +1187,99 @@ public static partial class SpheneUI
         }
 
         /// <summary>
-        /// Accent card backdrop: a soft top glow plus a slow golden shimmer
-        /// band sweeping across the card.
+        /// Breathing corner bloom: one radial fan centred on the
+        /// bottom-right arc centre whose rim is literally the card's
+        /// silhouette — along the bottom edge, around the corner arc, up
+        /// the right edge, then back around on the disc's own arc. Vertex
+        /// alpha follows the radial profile per point, so the glow is the
+        /// exact crop of a soft disc by the rounded card: round
+        /// everywhere, no clipped straight edges.
+        /// </summary>
+        private static void CardBloom(ImDrawListPtr drawList, Vector2 max,
+            float rounding, Vector4 accent, float time)
+        {
+            var scale = SpheneUI.Scale;
+            var pulse = 0.65f + 0.35f * MathF.Sin(time * CardBloomSpeed);
+            var center = max - new Vector2(rounding, rounding);
+            var reach = CardBloomRingCount * CardBloomRingStep * scale;
+            var right = max.X - 1f;
+            var bottom = max.Y - 1f;
+            var edgeDistX = right - center.X;
+            var edgeDistY = bottom - center.Y;
+            if (reach <= MathF.Max(edgeDistX, edgeDistY) + 4f)
+            {
+                return;
+            }
+
+            var chord = MathF.Sqrt(MathF.Max(1f, reach * reach - edgeDistY * edgeDistY));
+            var arcR = MathF.Max(1f, rounding - 1.5f);
+            Span<Vector2> rim = stackalloc Vector2[32];
+            var n = 0;
+            rim[n++] = new Vector2(center.X - chord, bottom);
+            rim[n++] = new Vector2(center.X, bottom);
+            const int arcSegs = 5;
+            for (var k = 0; k <= arcSegs; k++)
+            {
+                var a = MathF.PI * 0.5f * (1f - k / (float)arcSegs);
+                rim[n++] = center + new Vector2(MathF.Cos(a), MathF.Sin(a)) * arcR;
+            }
+            rim[n++] = new Vector2(right, center.Y);
+            rim[n++] = new Vector2(right, center.Y - chord);
+            var aRight = MathF.Atan2(-chord, edgeDistX);
+            var aBottom = MathF.Atan2(edgeDistY, -chord) - MathF.PI * 2f;
+            const int rimSegs = 11;
+            for (var k = 0; k <= rimSegs; k++)
+            {
+                var a = aRight + (aBottom - aRight) * (k / (float)rimSegs);
+                rim[n++] = center + new Vector2(MathF.Cos(a), MathF.Sin(a)) * reach;
+            }
+
+            var uvWhite = ImGui.GetFontTexUvWhitePixel();
+            const float mid = 0.45f;
+            drawList.PrimReserve(n * 9, 1 + n * 2);
+            var baseVtx = (int)drawList.VtxCurrentIdx;
+            drawList.PrimWriteVtx(center, uvWhite,
+                ColorUtils.ToU32(new Vector4(accent.X, accent.Y, accent.Z,
+                    CardBloomRingAlpha * pulse)));
+            for (var k = 0; k < n; k++)
+            {
+                var rel = rim[k] - center;
+                var d = rel.Length();
+                drawList.PrimWriteVtx(center + rel * mid, uvWhite,
+                    ColorUtils.ToU32(new Vector4(accent.X, accent.Y, accent.Z,
+                        BloomAlphaAt(d * mid, scale, pulse))));
+                drawList.PrimWriteVtx(rim[k], uvWhite,
+                    ColorUtils.ToU32(new Vector4(accent.X, accent.Y, accent.Z,
+                        BloomAlphaAt(d, scale, pulse))));
+            }
+            for (var k = 0; k < n; k++)
+            {
+                var m1 = (ushort)(baseVtx + 1 + k * 2);
+                var m2 = (ushort)(baseVtx + 1 + ((k + 1) % n) * 2);
+                var o1 = (ushort)(m1 + 1);
+                var o2 = (ushort)(m2 + 1);
+                drawList.PrimWriteIdx((ushort)baseVtx);
+                drawList.PrimWriteIdx(m1);
+                drawList.PrimWriteIdx(m2);
+                drawList.PrimWriteIdx(m1);
+                drawList.PrimWriteIdx(o1);
+                drawList.PrimWriteIdx(m2);
+                drawList.PrimWriteIdx(m2);
+                drawList.PrimWriteIdx(o1);
+                drawList.PrimWriteIdx(o2);
+            }
+        }
+
+        private static float BloomAlphaAt(float screenDist, float scale, float pulse)
+        {
+            var ringIndex = screenDist / (CardBloomRingStep * scale);
+            var falloff = Math.Clamp(1f - (ringIndex - 1f) / CardBloomRingCount, 0f, 1f);
+            return CardBloomRingAlpha * falloff * falloff * pulse;
+        }
+
+        /// <summary>
+        /// Accent card backdrop: a soft top glow plus the shared corner
+        /// bloom that follows the bottom-right arc.
         /// </summary>
         internal static void AccentCardBackdrop(ImDrawListPtr drawList, Vector2 min, Vector2 max,
             float rounding, Vector4 accent)
@@ -1219,19 +1300,10 @@ public static partial class SpheneUI
             var glow = ColorUtils.ToU32(new Vector4(accent.X, accent.Y, accent.Z, 0.08f));
             drawList.AddRectFilledMultiColor(min, new Vector2(max.X, min.Y + glowHeight), glow, glow, 0, 0);
 
-            var bandWidth = MathF.Min(90f * scale, width * 0.4f);
-            var travel = width + bandWidth * 2f;
-            var pos = time * AccentCardShimmerPixelsPerSecond * scale % travel;
-            var bandStart = min.X - bandWidth + pos;
-            var bandMid = bandStart + bandWidth * 0.5f;
-            var shimmer = ColorUtils.ToU32(new Vector4(0.95f, 0.82f, 0.45f, 0.05f));
-            drawList.AddRectFilledMultiColor(new Vector2(bandStart, min.Y), new Vector2(bandMid, max.Y), 0, shimmer, shimmer, 0);
-            drawList.AddRectFilledMultiColor(new Vector2(bandMid, min.Y), new Vector2(bandStart + bandWidth, max.Y), shimmer, 0, 0, shimmer);
+            CardBloom(drawList, max, rounding, accent, time);
 
             drawList.PopClipRect();
         }
-
-        private const float AccentCardShimmerPixelsPerSecond = 55f;
     }
 
     /// <summary>

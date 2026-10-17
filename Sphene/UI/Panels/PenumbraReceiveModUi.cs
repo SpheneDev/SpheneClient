@@ -443,7 +443,9 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
                 var name = notif.ModFolderName ?? string.Empty;
                 var senderUid = notif.Sender?.UID ?? string.Empty;
                 var senderAliasOrUid = notif.Sender?.AliasOrUID ?? string.Empty;
-                var sender = _uiSharedService.GetPreferredUserDisplayName(senderUid, senderAliasOrUid);
+                var sender = notif.Sender != null
+                    ? _uiSharedService.GetPreferredUserDisplayName(notif.Sender)
+                    : _uiSharedService.GetPreferredUserDisplayName(senderUid, senderAliasOrUid);
                 if (name.Contains(filter, StringComparison.OrdinalIgnoreCase) ||
                     sender.Contains(filter, StringComparison.OrdinalIgnoreCase) ||
                     senderAliasOrUid.Contains(filter, StringComparison.OrdinalIgnoreCase) ||
@@ -583,8 +585,9 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
 
                             var name = notif.ModFolderName ?? "Unknown";
                             var modInfo = notif.ModInfo?.FirstOrDefault();
-                            var senderName = _uiSharedService.GetPreferredUserDisplayName(
-                                notif.Sender?.UID ?? string.Empty, notif.Sender?.AliasOrUID ?? string.Empty);
+                            var senderName = notif.Sender != null
+                                ? _uiSharedService.GetPreferredUserDisplayName(notif.Sender)
+                                : string.Empty;
 
                             Vector4 color;
                             var icon = FontAwesomeIcon.Plus;
@@ -694,7 +697,9 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
                             {
                                 list = new List<FileTransferNotificationDto>();
                                 senderGroups[key] = list;
-                                var label = _uiSharedService.GetPreferredUserDisplayName(uid, aliasOrUid);
+                                var label = notif.Sender != null
+                                    ? _uiSharedService.GetPreferredUserDisplayName(notif.Sender)
+                                    : _uiSharedService.GetPreferredUserDisplayName(uid, aliasOrUid);
                                 senderLabels[key] = string.IsNullOrWhiteSpace(label) ? "Unknown" : label;
                             }
                             list.Add(notif);
@@ -780,9 +785,9 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
             }
             else
             {
-                var senderUid = _selectedNotification.Sender?.UID ?? string.Empty;
-                var senderAliasOrUid = _selectedNotification.Sender?.AliasOrUID ?? string.Empty;
-                var sender = _uiSharedService.GetPreferredUserDisplayName(senderUid, senderAliasOrUid);
+                var sender = _selectedNotification.Sender != null
+                    ? _uiSharedService.GetPreferredUserDisplayName(_selectedNotification.Sender)
+                    : "Unknown";
                 var modFolderName = _selectedNotification.ModFolderName ?? string.Empty;
                 var modInfo = _selectedNotification.ModInfo?.FirstOrDefault();
                 var isInstalled = _shrinkuPenumbraIpc.ModExists(modFolderName);

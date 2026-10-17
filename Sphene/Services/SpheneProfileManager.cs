@@ -52,6 +52,11 @@ public class SpheneProfileManager : MediatorSubscriberBase
         return (profile);
     }
 
+    /// <summary>True while <paramref name="data"/>'s profile is still being fetched from the server.</summary>
+    public bool IsProfileLoading(UserData data)
+        => !_spheneProfiles.TryGetValue(data, out var profile)
+            || ReferenceEquals(profile, _loadingProfileData);
+
     private async Task GetSpheneProfileFromService(UserData data)
     {
         try

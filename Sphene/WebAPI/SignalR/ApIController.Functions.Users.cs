@@ -1,4 +1,5 @@
 using Sphene.API.Data;
+using Sphene.API.Data.Enum;
 using Sphene.API.Dto;
 using Sphene.API.Dto.User;
 using Sphene.API.Dto.Visibility;
@@ -48,10 +49,14 @@ public partial class ApiController
         }
     }
 
+    /// <summary>Strips a leading "@handle" prefix users may paste along.</summary>
+    private static UserDto NormalizeIdentityInput(UserDto dto)
+        => dto with { User = dto.User with { UID = dto.User.UID.Trim().TrimStart('@') } };
+
     public async Task UserAddPair(UserDto user)
     {
         if (!IsConnected) return;
-        await _spheneHub!.SendAsync(nameof(UserAddPair), user).ConfigureAwait(false);
+        await _spheneHub!.SendAsync(nameof(UserAddPair), NormalizeIdentityInput(user)).ConfigureAwait(false);
     }
 
     public async Task UserDelete()
@@ -73,8 +78,9 @@ public partial class ApiController
 
     public async Task<UserProfileDto> UserGetProfile(UserDto dto)
     {
-        if (!IsConnected) return new UserProfileDto(dto.User, Disabled: false, IsNSFW: null, ProfilePictureBase64: null, Description: null);
-        return await _spheneHub!.InvokeAsync<UserProfileDto>(nameof(UserGetProfile), dto).ConfigureAwait(false);
+        var normalized = NormalizeIdentityInput(dto);
+        if (!IsConnected) return new UserProfileDto(normalized.User, Disabled: false, IsNSFW: null, ProfilePictureBase64: null, Description: null);
+        return await _spheneHub!.InvokeAsync<UserProfileDto>(nameof(UserGetProfile), normalized).ConfigureAwait(false);
     }
 
     // Track last push data time per session to debounce rapid successive pushes (e.g., after zoning)
@@ -152,6 +158,90 @@ public partial class ApiController
     {
         if (!IsConnected) return;
         await _spheneHub!.InvokeAsync(nameof(UserSetProfile), userDescription).ConfigureAwait(false);
+    }
+
+    public async Task<AliasAvailabilityResult> UserCheckAliasAvailability(string alias)
+    {
+        if (!IsConnected) return AliasAvailabilityResult.Invalid;
+        try
+        {
+            return await _spheneHub!.InvokeAsync<AliasAvailabilityResult>(nameof(UserCheckAliasAvailability), alias).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Failed to check alias availability for {alias}", alias);
+            return AliasAvailabilityResult.Invalid;
+        }
+    }
+
+    public async Task<SetAliasResult> UserSetAlias(string alias)
+    {
+        if (!IsConnected || _connectionDto == null) return SetAliasResult.Invalid;
+        try
+        {
+            var result = await _spheneHub!.InvokeAsync<SetAliasResult>(nameof(UserSetAlias), alias).ConfigureAwait(false);
+            if (result == SetAliasResult.Success)
+            {
+                _connectionDto = _connectionDto with
+                {
+                    User = _connectionDto.User with { Alias = alias.Trim() },
+                    RequiresAliasSetup = false,
+                };
+            }
+            return result;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to set alias {alias}", alias);
+            return SetAliasResult.Invalid;
+        }
+    }
+
+    public async Task<SetAliasResult> UserRenameAlias(string newAlias)
+    {
+        if (!IsConnected || _connectionDto == null) return SetAliasResult.Invalid;
+        try
+        {
+            var result = await _spheneHub!.InvokeAsync<SetAliasResult>(nameof(UserRenameAlias), newAlias).ConfigureAwait(false);
+            if (result == SetAliasResult.Success)
+            {
+                _connectionDto = _connectionDto with
+                {
+                    User = _connectionDto.User with { Alias = newAlias.Trim() },
+                    AliasChangeAvailableAt = DateTime.UtcNow.AddDays(Constants.AliasRenameCooldownDays),
+                };
+            }
+            return result;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to rename alias to {alias}", newAlias);
+            return SetAliasResult.Invalid;
+        }
+    }
+
+    public async Task UserSetDisplayName(string? displayName)
+    {
+        if (!IsConnected || _connectionDto == null) return;
+        try
+        {
+            await _spheneHub!.InvokeAsync(nameof(UserSetDisplayName), displayName).ConfigureAwait(false);
+            var normalized = string.IsNullOrWhiteSpace(displayName) ? null : displayName.Trim();
+            _connectionDto = _connectionDto with { User = _connectionDto.User with { DisplayName = normalized } };
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to set display name");
+        }
+    }
+
+    /// <summary>
+    /// Continues the deferred connect flow after the user completed mandatory identity setup.
+    /// </summary>
+    public async Task CompleteIdentitySetupAsync()
+    {
+        if (_connectionDto == null || !IsConnected) return;
+        await RefreshPairStateAfterReconnectAsync(forceCharacterDataReload: true).ConfigureAwait(false);
     }
 
     public async Task UserUpdateDefaultPermissions(DefaultPermissionsDto defaultPermissionsDto)

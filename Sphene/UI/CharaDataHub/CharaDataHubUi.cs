@@ -506,7 +506,7 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
             (FontAwesomeIcon.FileExport, "MCDF Export"),
             (FontAwesomeIcon.Cog, "Settings")
         ]);
-        SpheneUI.Layout.BeginNavRail("charadata", railWidth);
+        SpheneUI.Layout.BeginNavRail("charadata", railWidth, backdropPattern: true);
         // Same top offset as the hub rail so the first button sits at the
         // same height in both surfaces.
         SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
@@ -1001,7 +1001,7 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
     {
         using var id = ImRaii.PushId("sharedWithYouTab");
         DrawHelpFoldout("You can apply character data shared with you implicitly in this tab. Shared Character Data are Character Data entries that have \"Sharing\" set to \"Shared\" and you have access through those by meeting the access restrictions, " +
-                        "i.e. you were specified by your UID to gain access or are paired with the other user according to the Access Restrictions setting." + Environment.NewLine + Environment.NewLine
+                        "i.e. you were specified by your handle to gain access or are paired with the other user according to the Access Restrictions setting." + Environment.NewLine + Environment.NewLine
                         + "Filter if needed to find a specific entry, then just press on \"Apply to <actor>\" and it will download and apply the Character Data to the currently targeted GPose actor." + Environment.NewLine + Environment.NewLine
                         + "Note: Shared Data of Pairs you have paused will not be shown here.");
 
@@ -1016,7 +1016,7 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
         SpheneUI.Layout.Collapsible("Filters##shared", () =>
         {
             ImGui.SetNextItemWidth(SpheneUI.Controls.BoundedAvailX());
-            if (SpheneUI.Controls.InputTextWithHint("##filter", "Filter by UID/Note", ref _sharedWithYouOwnerFilter, 30))
+            if (SpheneUI.Controls.InputTextWithHint("##filter", "Filter by handle/note", ref _sharedWithYouOwnerFilter, 30))
             {
                 UpdateFilteredItems();
             }

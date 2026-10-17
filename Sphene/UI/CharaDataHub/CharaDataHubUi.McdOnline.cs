@@ -816,7 +816,7 @@ internal sealed partial class CharaDataHubUi
         {
             foreach (var user in updateDto.UserList)
             {
-                var userString = string.IsNullOrEmpty(user.Alias) ? user.UID : $"{user.Alias} ({user.UID})";
+                var userString = user.AliasOrUID;
                 if (SpheneUI.Controls.Selectable(userString, string.Equals(user.UID, _selectedSpecificUserIndividual, StringComparison.Ordinal)))
                 {
                     _selectedSpecificUserIndividual = user.UID;

@@ -125,7 +125,7 @@ public static class AppearanceOptionBlock
         try
         {
             var showUidInDtrTooltip = configService.Current.ShowUidInDtrTooltip;
-            if (SpheneUI.Controls.Toggle("Show UID in tooltip", ref showUidInDtrTooltip))
+            if (SpheneUI.Controls.Toggle("Show display name in tooltip", ref showUidInDtrTooltip))
             {
                 configService.Current.ShowUidInDtrTooltip = showUidInDtrTooltip;
                 configService.Save();
@@ -184,27 +184,6 @@ public static class AppearanceOptionBlock
                 configService.Current.UseFocusTarget = useFocusTarget;
                 configService.Save();
             }
-        }
-        finally
-        {
-            ImGui.PopID();
-        }
-    }
-
-    public static void DrawShowCharacterNameInsteadOfNotesOption(SpheneConfigService configService, UiSharedService uiShared, SpheneMediator mediator, string blockId = "ShowCharacterNameInsteadOfNotes")
-    {
-        ImGui.PushID(blockId);
-        try
-        {
-            var showNameInsteadOfNotes = configService.Current.ShowCharacterNameInsteadOfNotesForVisible;
-            if (SpheneUI.Controls.Toggle("Show character name instead of notes", ref showNameInsteadOfNotes))
-            {
-                configService.Current.ShowCharacterNameInsteadOfNotesForVisible = showNameInsteadOfNotes;
-                configService.Save();
-                mediator.Publish(new RefreshUiMessage());
-            }
-
-            SpheneUI.Controls.HelpText("When enabled, visible users will display their character name instead of your custom notes for them.");
         }
         finally
         {
@@ -317,20 +296,20 @@ public static class AppearanceOptionBlock
         }
     }
 
-    public static bool DrawShowSpheneProfilesOnHoverOption(SpheneConfigService configService, UiSharedService uiShared, SpheneMediator mediator, string blockId = "ShowSpheneProfilesOnHover")
+    public static bool DrawShowSpheneProfilesOption(SpheneConfigService configService, UiSharedService uiShared, SpheneMediator mediator, string blockId = "ShowSpheneProfiles")
     {
         ImGui.PushID(blockId);
         try
         {
             var showProfiles = configService.Current.ProfilesShow;
-            if (SpheneUI.Controls.Toggle("Show Sphene Profiles on Hover", ref showProfiles))
+            if (SpheneUI.Controls.Toggle("Show Sphene Profiles", ref showProfiles))
             {
                 mediator.Publish(new ClearProfileDataMessage());
                 configService.Current.ProfilesShow = showProfiles;
                 configService.Save();
             }
 
-            SpheneUI.Controls.HelpText("This will show the configured user profile after a set delay");
+            SpheneUI.Controls.HelpText("Right-click a pair row to pop out the configured user profile");
             return showProfiles;
         }
         finally
@@ -360,25 +339,6 @@ public static class AppearanceOptionBlock
         }
     }
 
-    public static void DrawHoverDelayOption(SpheneConfigService configService, UiSharedService uiShared, string blockId = "HoverDelay")
-    {
-        ImGui.PushID(blockId);
-        try
-        {
-            var profileDelay = configService.Current.ProfileDelay;
-            if (SpheneUI.Controls.SliderFloat("Hover Delay", ref profileDelay, 1, 10))
-            {
-                configService.Current.ProfileDelay = profileDelay;
-                configService.Save();
-            }
-
-            SpheneUI.Controls.HelpText("Delay until the profile should be displayed");
-        }
-        finally
-        {
-            ImGui.PopID();
-        }
-    }
 
     public static void DrawShowProfilesMarkedAsNsfwOption(SpheneConfigService configService, UiSharedService uiShared, SpheneMediator mediator, string blockId = "ShowProfilesMarkedAsNsfw")
     {

@@ -10,6 +10,7 @@ using Dalamud.Interface.Utility.Raii;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
 using Dalamud.Utility;
+using Sphene.API.Data;
 using Sphene.FileCache;
 using Sphene.Interop.Ipc;
 using Sphene.Localization;
@@ -184,6 +185,11 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
     public string GetPreferredUserDisplayName(string? uid, string? aliasOrUid)
     {
         return _serverConfigurationManager.GetPreferredUserDisplayName(uid, aliasOrUid);
+    }
+
+    public string GetPreferredUserDisplayName(UserData user)
+    {
+        return _serverConfigurationManager.GetPreferredUserDisplayName(user);
     }
 
 
@@ -655,7 +661,7 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
                 {
                     if (!_discordOAuthUIDs.IsCompleted)
                     {
-                        SpheneUI.Text.ColoredWrapped("Checking UIDs on Server", ImGuiColors.DalamudYellow);
+                        SpheneUI.Text.ColoredWrapped("Checking accounts on server", ImGuiColors.DalamudYellow);
                     }
                     else
                     {
@@ -664,12 +670,12 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
                         var vanity = string.IsNullOrEmpty(primaryUid.Value) ? "-" : primaryUid.Value;
                         if (foundUids > 0)
                         {
-                            SpheneUI.Text.ColoredWrapped($"Found {foundUids} associated UIDs on the server, Primary UID: {primaryUid.Key} (Vanity UID: {vanity})",
+                            SpheneUI.Text.ColoredWrapped($"Found {foundUids} accounts on the server (vanity id: {vanity})",
                                 ImGuiColors.HealerGreen);
                         }
                         else
                         {
-                            SpheneUI.Text.ColoredWrapped($"Found no UIDs associated to this linked OAuth2 account", ImGuiColors.DalamudRed);
+                            SpheneUI.Text.ColoredWrapped($"Found no accounts linked to this OAuth2 account", ImGuiColors.DalamudRed);
                         }
                     }
                 }
@@ -1347,22 +1353,22 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
         using (ImRaii.Disabled(_discordOAuthUIDs == null))
         {
             var aliasPairs = _discordOAuthUIDs?.Result?.Select(t => new UidAliasPair(t.Key, t.Value)).ToList() ?? [new UidAliasPair(item.UID ?? null, null)];
-            var uidComboName = "UID###" + item.CharacterName + item.WorldId + serverUri + indexOffset + aliasPairs.Count;
+            var uidComboName = "Account###" + item.CharacterName + item.WorldId + serverUri + indexOffset + aliasPairs.Count;
             SpheneUI.Controls.Combo(uidComboName, aliasPairs,
                 (v) =>
                 {
                     if (v is null)
-                        return "No UID set";
+                        return "No account set";
 
                     if (!string.IsNullOrEmpty(v.Alias))
                     {
-                        return $"{v.UID} ({v.Alias})";
+                        return v.Alias;
                     }
 
                     if (string.IsNullOrEmpty(v.UID))
-                        return "No UID set";
+                        return "No account set";
 
-                    return $"{v.UID}";
+                    return v.UID;
                 },
                 (v) =>
                 {
@@ -1377,7 +1383,7 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
 
         if (_discordOAuthUIDs == null)
         {
-            SpheneUI.AttachTooltip("Use the button above to update your UIDs from the service before you can assign UIDs to characters.");
+            SpheneUI.AttachTooltip("Use the button above to update your accounts from the service before you can assign them to characters.");
         }
     }
 
@@ -1403,7 +1409,7 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
         using (ImRaii.Disabled(string.IsNullOrEmpty(selectedServer.OAuthToken)))
         {
             if ((_discordOAuthUIDs == null || _discordOAuthUIDs.IsCompleted)
-                && SpheneUI.Icons.TextButton(FontAwesomeIcon.ArrowsSpin, "Update UIDs from Service")
+                && SpheneUI.Icons.TextButton(FontAwesomeIcon.ArrowsSpin, "Update accounts from service")
                 && !string.IsNullOrEmpty(selectedServer.OAuthToken))
             {
                 _discordOAuthUIDs = _serverConfigurationManager.GetUIDsWithDiscordToken(selectedServer.ServerUri, selectedServer.OAuthToken);

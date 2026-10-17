@@ -21,8 +21,6 @@ public class UiFactory
     private readonly SpheneMediator _spheneMediator;
     private readonly ApiController _apiController;
     private readonly PairManager _pairManager;
-    private readonly ServerConfigurationManager _serverConfigManager;
-    private readonly SpheneProfileManager _spheneProfileManager;
     private readonly PerformanceCollectorService _performanceCollectorService;
     private readonly DalamudUtilService _dalamudUtilService;
     private readonly FileDialogManager _fileDialogManager;
@@ -30,8 +28,7 @@ public class UiFactory
     private readonly SpheneConfigService _configService;
 
     public UiFactory(ILoggerFactory loggerFactory, SpheneMediator spheneMediator, ApiController apiController,
-        PairManager pairManager, ServerConfigurationManager serverConfigManager,
-        SpheneProfileManager spheneProfileManager, PerformanceCollectorService performanceCollectorService,
+        PairManager pairManager, PerformanceCollectorService performanceCollectorService,
         DalamudUtilService dalamudUtilService, FileDialogManager fileDialogManager, HousingOwnershipService housingOwnershipService,
         SpheneConfigService configService)
     {
@@ -39,8 +36,6 @@ public class UiFactory
         _spheneMediator = spheneMediator;
         _apiController = apiController;
         _pairManager = pairManager;
-        _serverConfigManager = serverConfigManager;
-        _spheneProfileManager = spheneProfileManager;
         _performanceCollectorService = performanceCollectorService;
         _dalamudUtilService = dalamudUtilService;
         _fileDialogManager = fileDialogManager;
@@ -52,12 +47,6 @@ public class UiFactory
     {
         return new SyncshellAdminUI(_loggerFactory.CreateLogger<SyncshellAdminUI>(), _spheneMediator,
             _apiController, _pairManager, _dalamudUtilService, dto, _performanceCollectorService, _fileDialogManager, _housingOwnershipService);
-    }
-
-    public StandaloneProfileUi CreateStandaloneProfileUi(Pair pair)
-    {
-        return new StandaloneProfileUi(_loggerFactory.CreateLogger<StandaloneProfileUi>(), _spheneMediator,
-            _serverConfigManager, _spheneProfileManager, _pairManager, pair, _performanceCollectorService);
     }
 
     public PermissionWindowUI CreatePermissionPopupUi(Pair pair)

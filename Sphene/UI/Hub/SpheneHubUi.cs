@@ -15,6 +15,7 @@ using Sphene.API.Dto.User;
 using Sphene.PlayerData.Pairs;
 using Sphene.Services;
 using Sphene.Services.Mediator;
+using Sphene.Services.ServerConfiguration;
 using Sphene.SpheneConfiguration;
 using Sphene.SpheneConfiguration.Models;
 using Sphene.UI.CharaDataHub;
@@ -77,6 +78,8 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
     private byte[] _friendBannerBytes = [];
     private readonly Dictionary<string, byte[]> _friendListImageBytes = new(StringComparer.Ordinal);
     private readonly Dictionary<string, byte[]> _friendRowImageBytes = new(StringComparer.Ordinal);
+    private string? _noteEditUid;
+    private string _noteEditBuffer = string.Empty;
     private List<AreaBoundSyncshellDto>? _areaBoundShells;
     private bool _areaBoundLoading;
     private bool _charaDataVisible;
@@ -84,6 +87,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
     private bool _suppressOpenStatePersist;
     private readonly SpheneConfigService _configService;
     private readonly AreaBoundSyncshellService _areaBoundService;
+    private readonly ServerConfigurationManager _serverConfigurationManager;
 
     // Rail swap animation: 0 = hub nav, 1 = settings nav. The hub list pans
     // up and out of the rail while the settings list pans in from below.
@@ -108,7 +112,8 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         DalamudUtilService dalamudUtilService, EditProfileUi editProfileUi,
         CharaDataHubUi charaDataHubUi, ModSharingUi modSharingUi, SettingsUi settingsUi,
         FileDialogManager fileDialogManager, ImageCropUi imageCropUi,
-        SpheneConfigService configService, AreaBoundSyncshellService areaBoundService)
+        SpheneConfigService configService, AreaBoundSyncshellService areaBoundService,
+        ServerConfigurationManager serverConfigurationManager)
         : base(logger, mediator, "Sphene Hub###SpheneHubUI", performanceCollectorService)
     {
         _apiController = apiController;
@@ -124,6 +129,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         _imageCropUi = imageCropUi;
         _configService = configService;
         _areaBoundService = areaBoundService;
+        _serverConfigurationManager = serverConfigurationManager;
         _settingsUi.SettingsPageChanged += OnSettingsPageChanged;
         _modSharingUi.SubPageChanged += OnModSharingPageChanged;
         _charaDataHubUi.SubPageChanged += OnCharaDataPageChanged;
@@ -151,6 +157,12 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             else if (msg.Page is { } page)
             {
                 SetPage(page);
+            }
+            if (msg.EditProfile)
+            {
+                _profileEditMode = true;
+                SeedHeroEditBuffers(_spheneProfileManager.GetSpheneProfile(
+                    new UserData(_apiController.UID)));
             }
             IsOpen = true;
         });
@@ -228,6 +240,8 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
 
     protected override bool ChromeHasTitleBar => false;
 
+    protected override bool ChromeWindowPattern => true;
+
     protected override bool DrawCollapsedDuringFold => true;
 
     protected override float ChromeCollapsedHeight
@@ -244,6 +258,14 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         SpheneUI.Layout.NavRailSegmentedWidth(SettingsUi.EmbeddedNavItems)
         - ImGui.GetStyle().WindowPadding.X
         + 48f * SpheneUI.Scale;
+
+    /// <summary>
+    /// Width of the header profile card — rail width plus window padding,
+    /// minus its insets. The compact identity strip matches this so both
+    /// surfaces show the same card size.
+    /// </summary>
+    internal static float ProfileCardWidth =>
+        CurrentRailWidth + ImGui.GetStyle().WindowPadding.X - 8f * SpheneUI.Scale;
 
     protected override float ChromeCollapsedWidth
     {
@@ -319,7 +341,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         var contentPadY = 8f * SpheneUI.Scale;
 
         SpheneUI.Layout.BeginNavRail("sphenehub", railWidth,
-            topInset: (contentPadY + pinZoneH) * railAnim);
+            topInset: (contentPadY + pinZoneH) * railAnim, backdropPattern: true);
         // Window pos inside the rail child — unlike the cursor this is not
         // shifted by the child's own scroll offset, so the pinned strip never
         // rides the scroll.
@@ -775,37 +797,17 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         // corner — same center, radius minus the inset.
         var cardRadius = MathF.Max(0f, ImGui.GetStyle().WindowRounding - 4f * scale);
 
-        // same scrim + hairline language as the breadcrumb pill
-        drawList.AddRectFilled(cardMin, cardMax,
-            SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(
-                new Vector4(0.02f, 0.02f, 0.04f, 1f), 0.55f)), cardRadius);
-
         ImGui.SetCursorScreenPos(cardMin);
         var clicked = ImGui.InvisibleButton("##hub-header-profile", new Vector2(cardW, cardH));
         var hovered = ImGui.IsItemHovered();
         if (hovered)
         {
             ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
-            drawList.AddRectFilled(cardMin, cardMax,
-                SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(Vector4.One, 0.06f)),
-                cardRadius);
         }
-        drawList.AddRect(cardMin, cardMax,
-            SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(Vector4.One, 0.10f)),
-            cardRadius);
         if (clicked)
         {
             SetPage(SpheneHubPage.Profile);
         }
-
-        var avatarSize = 34f * scale;
-        var avatarPos = new Vector2(cardMin.X + 6f * scale,
-            cardMin.Y + (cardH - avatarSize) * 0.5f);
-        drawList.AddCircleFilled(avatarPos + new Vector2(avatarSize * 0.5f),
-            avatarSize * 0.5f + 2f * scale,
-            SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(accent, 0.30f)), 0);
-        ImGui.SetCursorScreenPos(avatarPos);
-        SpheneUI.Media.Avatar(GetAvatarTexture(profile), avatarSize);
 
         var connected = _apiController.IsConnected;
         var paused = _apiController.IsConnectionPaused;
@@ -813,59 +815,18 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             : paused ? SpheneUI.Palette.NetworkWarning
             : SpheneUI.Palette.NetworkActive;
         var connText = !connected ? "Offline" : paused ? "Paused" : "Online";
-        SpheneUI.Media.PresenceDot(drawList, avatarPos, avatarSize, connColor);
 
-        var textX = avatarPos.X + avatarSize + 9f * scale;
-        var textMaxW = MathF.Max(30f * scale, cardMax.X - textX - 8f * scale);
-        var lineH = ImGui.GetTextLineHeight();
-        var lineGap = 2f * scale;
-        var nameY = cardMin.Y + (cardH - lineH * 2f - lineGap) * 0.5f;
+        var statusLine = SpheneUI.Profile.StatusLineText(profile, out var statusColor);
+        SpheneUI.Profile.IdentityCard(drawList, cardMin, cardMax, 6f * scale,
+            new SpheneUI.Profile.IdentityContent(
+                GetAvatarTexture(profile),
+                SpheneUI.Profile.OwnName(_apiController.OwnDisplayName, _apiController.OwnAlias),
+                SpheneUI.Colors.TextPrimary, statusLine, statusColor,
+                connColor, connText, _apiController.OwnAlias, accent),
+            hovered, cardRadius, ImDrawFlags.RoundCornersAll,
+            " — open your profile page");
 
-        var displayName = HeaderDisplayName();
-        var statusLine = HeaderStatusLine(profile, out var statusColor);
-        var statusText = Ellipsize(statusLine, textMaxW);
-        drawList.AddText(new Vector2(textX, nameY),
-            SpheneUI.ColorUtils.ToU32(SpheneUI.Colors.TextPrimary),
-            Ellipsize(displayName, textMaxW));
-        drawList.AddText(new Vector2(textX, nameY + lineH + lineGap),
-            SpheneUI.ColorUtils.ToU32(statusColor), statusText);
-
-        if (hovered)
-        {
-            var tip = $"{connText} — UID: {_apiController.UID}";
-            if (!string.Equals(statusText, statusLine, StringComparison.Ordinal))
-            {
-                tip = $"{statusLine}\n{tip}";
-            }
-            SpheneUI.AttachTooltip(tip + " — open your profile page");
-        }
         return clicked;
-    }
-
-    private string HeaderDisplayName()
-    {
-        var playerName = _dalamudUtilService.GetPlayerName();
-        return string.IsNullOrEmpty(playerName)
-            || string.Equals(playerName, "--", StringComparison.Ordinal)
-            ? _apiController.UID : playerName;
-    }
-
-    private static string HeaderStatusLine(SpheneProfileData profile, out Vector4 color)
-    {
-        if (!string.IsNullOrWhiteSpace(profile.StatusMessage))
-        {
-            color = SpheneUI.Colors.TextSecondary;
-            return profile.StatusMessage;
-        }
-        if (!string.IsNullOrWhiteSpace(profile.Description)
-            && !string.Equals(profile.Description, SpheneProfileManager.NoDescriptionPlaceholder,
-                StringComparison.Ordinal))
-        {
-            color = SpheneUI.Colors.TextMuted;
-            return profile.Description;
-        }
-        color = SpheneUI.Colors.TextMuted;
-        return "Set a status in your profile";
     }
 
     private void DrawHeaderActionsZone(Vector2 bandMin, float bandHeight, Vector2 bandMax)
@@ -1125,9 +1086,6 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         _ => "Hub",
     };
 
-    private static string Ellipsize(string text, float maxWidth)
-        => SpheneUI.Text.Ellipsize(text, maxWidth);
-
     private IDalamudTextureWrap? GetAvatarTexture(SpheneProfileData profile)
     {
         if (!profile.ImageData.Value.SequenceEqual(_lastAvatarBytes))
@@ -1192,6 +1150,25 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         return SpheneUI.Media.Texture(key, data);
     }
 
+    private string OwnHeroName()
+    {
+        var playerName = _dalamudUtilService.GetPlayerName();
+        var hasPlayerName = !string.IsNullOrEmpty(playerName)
+            && !string.Equals(playerName, "--", StringComparison.Ordinal);
+        return !string.IsNullOrWhiteSpace(_apiController.OwnDisplayName)
+            ? _apiController.OwnDisplayName
+            : !string.IsNullOrWhiteSpace(_apiController.OwnAlias)
+                ? _apiController.OwnAlias
+                : hasPlayerName ? playerName! : "--";
+    }
+
+    private string OwnHeroSubtitle()
+    {
+        return !string.IsNullOrWhiteSpace(_apiController.OwnAlias)
+            ? "@" + _apiController.OwnAlias
+            : "--";
+    }
+
     /// <summary>Start page: own community profile hero (theme + banner + stats) followed by the editor.</summary>
     private void DrawProfilePage(Vector4 accent)
     {
@@ -1201,10 +1178,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         var bannerWrap = GetBannerTexture(profile);
         var profileTheme = profile.ProfileTheme.Value;
 
-        var playerName = _dalamudUtilService.GetPlayerName();
-        var displayName = string.IsNullOrEmpty(playerName)
-            || string.Equals(playerName, "--", StringComparison.Ordinal)
-            ? _apiController.UID : playerName;
+        var displayName = OwnHeroName();
 
         _heroEdit.Enabled = _profileEditMode;
         _heroEdit.OnAvatarClicked = () => PickAndCropImage(ImageCropUi.CropKind.Avatar);
@@ -1221,6 +1195,35 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         _heroEdit.OnNsfwToggled = v => _ = _apiController.UserSetProfile(
             new UserProfileDto(new UserData(_apiController.UID), Disabled: false,
                 IsNSFW: v, ProfilePictureBase64: null, Description: null));
+        _heroEdit.DisplayNameMaxLength = Constants.DisplayNameMaxLength;
+        _heroEdit.HandleMaxLength = Constants.AliasMaxLength;
+        _heroEdit.OnDisplayNameCommitted = v =>
+        {
+            var normalized = v.Trim();
+            if (!string.Equals(normalized, _apiController.OwnDisplayName ?? string.Empty,
+                    StringComparison.Ordinal))
+            {
+                _ = _apiController.UserSetDisplayName(normalized.Length == 0 ? null : normalized);
+            }
+            _heroEdit.Feedback = normalized.Length == 0
+                ? "Display name cleared." : "Display name updated.";
+            _heroEdit.FeedbackColor = SpheneUI.Colors.Success;
+        };
+        var renameAt = _apiController.AliasChangeAvailableAt;
+        var renameLocked = renameAt.HasValue && renameAt.Value > DateTime.UtcNow;
+        _heroEdit.HandleLocked = renameLocked;
+        _heroEdit.HandleHint = renameLocked
+            ? $"Renames possible once every {Constants.AliasRenameCooldownDays} days — next rename {renameAt!.Value.ToLocalTime():g}."
+            : $"Handle — used for pair requests and profile lookup. Click to rename (once every {Constants.AliasRenameCooldownDays} days).";
+        _heroEdit.OnHandleCommitted = string.IsNullOrWhiteSpace(_apiController.OwnAlias)
+            ? null
+            : v => _ = RenameOwnAliasAsync(v);
+        _heroEdit.DisplayNameCurrent = _apiController.OwnDisplayName;
+        _heroEdit.HandleCurrent = _apiController.OwnAlias;
+        _heroEdit.DisplayNameConfirmDetail =
+            "Shown to everyone who can see your profile — your handle stays your identity.";
+        _heroEdit.HandleConfirmDetail =
+            $"Handles identify you for pair requests and profile lookup — renaming starts the {Constants.AliasRenameCooldownDays}-day cooldown.";
 
         var heroActions = new List<SpheneUI.Profile.HeroAction>
         {
@@ -1238,6 +1241,8 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             {
                 _profileEditMode = !_profileEditMode;
                 _heroEdit.AddingTag = false;
+                _heroEdit.EditingDisplayName = false;
+                _heroEdit.EditingHandle = false;
                 if (_profileEditMode)
                 {
                     SeedHeroEditBuffers(profile);
@@ -1248,7 +1253,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                 }
             }));
 
-        SpheneUI.Profile.Hero(displayName, $"UID: {_apiController.UID}", profile,
+        SpheneUI.Profile.Hero(displayName, OwnHeroSubtitle(), profile,
             pfpWrap, bannerWrap, profileTheme, accent, theme.AccentBlue,
             isNsfw: profile.IsNSFW, watermark: SpheneBrandIcons.SpheneLogo(),
             actions: heroActions,
@@ -1299,10 +1304,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             SeedStyleBuffers(profile.ProfileTheme.Value);
             _styleSeeded = true;
         }
-        var playerName = _dalamudUtilService.GetPlayerName();
-        var displayName = string.IsNullOrEmpty(playerName)
-            || string.Equals(playerName, "--", StringComparison.Ordinal)
-            ? _apiController.UID : playerName;
+        var displayName = OwnHeroName();
 
         var previewTheme = PreviewStyleTheme();
         var accent = previewTheme.AccentColor(pageAccent);
@@ -1429,7 +1431,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         {
             // the complete profile card, live-bound to the unsaved buffers —
             // exactly what viewers see (banner, avatar, name, status, tags)
-            SpheneUI.Profile.Hero(displayName, $"UID: {_apiController.UID}", profile,
+            SpheneUI.Profile.Hero(displayName, OwnHeroSubtitle(), profile,
                 GetAvatarTexture(profile), GetBannerTexture(profile), previewTheme,
                 pageAccent, SpheneTheme.Current.AccentBlue,
                 isNsfw: profile.IsNSFW, watermark: SpheneBrandIcons.SpheneLogo());
@@ -1585,6 +1587,32 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                 StringComparison.Ordinal)
                 ? string.Empty
                 : profile.Description;
+        _heroEdit.DisplayNameBuffer = _apiController.OwnDisplayName ?? string.Empty;
+        _heroEdit.HandleBuffer = _apiController.OwnAlias ?? string.Empty;
+        _heroEdit.EditingDisplayName = false;
+        _heroEdit.EditingHandle = false;
+        _heroEdit.Feedback = null;
+    }
+
+    private async Task RenameOwnAliasAsync(string newAlias)
+    {
+        var result = await _apiController.UserRenameAlias(newAlias).ConfigureAwait(false);
+        if (result == SetAliasResult.Success)
+        {
+            _heroEdit.HandleBuffer = newAlias;
+            _heroEdit.Feedback = $"Alias renamed to {newAlias}.";
+            _heroEdit.FeedbackColor = SpheneUI.Colors.Success;
+        }
+        else
+        {
+            _heroEdit.Feedback = result switch
+            {
+                SetAliasResult.Taken => "This alias is already taken.",
+                SetAliasResult.Cooldown => $"Renames are limited to once every {Constants.AliasRenameCooldownDays} days.",
+                _ => "Invalid alias — use 5-15 characters: letters, digits, . _ -",
+            };
+            _heroEdit.FeedbackColor = SpheneUI.Colors.Danger;
+        }
     }
 
     /// <summary>File-picks a PNG, then opens the interactive cropper; the cropped result is uploaded.</summary>
@@ -1684,7 +1712,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
 
             var lineH = ImGui.GetTextLineHeight();
             var textX = avatarPos.X + avatarSize + 14f * scale;
-            var statusLine = HeaderStatusLine(profile, out _);
+            var statusLine = SpheneUI.Profile.StatusLineText(profile, out _);
 
             // card's inner right edge — measured from the content region, not
             // the window, so pinned controls never overhang the card
@@ -1702,7 +1730,8 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             using (SpheneUI.DisplayFont.Push())
             {
                 SpheneUI.Text.Colored(
-                    $"Welcome back, {SpheneUI.Text.Ellipsize(HeaderDisplayName(), greetMaxW)}",
+                    $"Welcome back, {SpheneUI.Text.Ellipsize(SpheneUI.Profile.OwnName(
+                        _apiController.OwnDisplayName, _apiController.OwnAlias), greetMaxW)}",
                     SpheneUI.Colors.TextPrimary);
             }
             var titleMax = ImGui.GetItemRectMax();
@@ -2048,15 +2077,12 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
         }
 
-        var note = pair.GetNote();
-        var name = string.IsNullOrEmpty(note)
-            ? pair.UserData.AliasOrUID : $"{note} ({pair.UserData.AliasOrUID})";
         var statusColor = pair.IsMutuallyVisible || pair.IsOnline
             ? SpheneUI.Palette.NetworkActive : SpheneUI.Colors.TextMuted;
         var statusText = pair.IsMutuallyVisible ? "Visible" : pair.IsOnline ? "Online" : "Offline";
         SpheneUI.Profile.FriendRow(drawList, pos, width, rowH,
             new SpheneUI.Profile.FriendRowContent(
-                FriendListAvatar(pair.UserData.UID, profile), name,
+                FriendListAvatar(pair.UserData.UID, profile), pair.UserData.PreferredName,
                 $"\u25CF {statusText}", statusColor, profile.StatusMessage, profile.IsNSFW),
             friendAccent, hovered, t, profile.ProfileTheme.Value, friendRowAnim,
             8f * scale);
@@ -2085,15 +2111,12 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         }
         SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.Row);
 
-        SpheneUI.Profile.Hero(pair.UserData.AliasOrUID, $"UID: {pair.UserData.UID}", profile,
+        var friendSubtitle = !string.IsNullOrWhiteSpace(pair.UserData.Alias)
+            ? "@" + pair.UserData.Alias
+            : string.Empty;
+        SpheneUI.Profile.Hero(pair.UserData.PreferredName, friendSubtitle, profile,
             avatar, banner, friendTheme, accent, theme.AccentBlue,
-            isNsfw: profile.IsNSFW,
-            actions:
-            [
-                new SpheneUI.Profile.HeroAction(FontAwesomeIcon.ExternalLinkAlt, "Popout",
-                    "Open this profile in a separate window",
-                    () => Mediator.Publish(new ProfileOpenStandaloneMessage(pair)))
-            ]);
+            isNsfw: profile.IsNSFW);
 
         SpheneUI.Layout.SectionCard(() =>
         {
@@ -2107,9 +2130,39 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                 SpheneUI.Text.Muted($"({pair.PlayerName})");
             }
             var note = pair.GetNote();
-            if (!string.IsNullOrEmpty(note))
+            if (string.Equals(_noteEditUid, pair.UserData.UID, StringComparison.Ordinal))
             {
-                SpheneUI.Text.Muted($"Your note: {note}");
+                var noteInputWidth = MathF.Min(320f * SpheneUI.Scale,
+                    ImGui.GetContentRegionAvail().X);
+                ImGui.SetNextItemWidth(noteInputWidth);
+                if (SpheneUI.Controls.InputTextWithHint("##friendNoteEdit",
+                        "Your note for them", ref _noteEditBuffer, 100,
+                        ImGuiInputTextFlags.EnterReturnsTrue))
+                {
+                    _serverConfigurationManager.SetNoteForUid(pair.UserData.UID,
+                        _noteEditBuffer.Trim(), save: true);
+                    _noteEditUid = null;
+                }
+                if (ImGui.IsItemClicked(ImGuiMouseButton.Right))
+                {
+                    _noteEditUid = null;
+                }
+                SpheneUI.AttachTooltip("Hit ENTER to save\nRight click to cancel");
+            }
+            else
+            {
+                if (!string.IsNullOrEmpty(note))
+                {
+                    SpheneUI.Text.Muted($"Your note: {note}");
+                    ImGui.SameLine(0, SpheneUI.Spacing.X8.Scaled);
+                }
+                if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Pen,
+                        string.IsNullOrEmpty(note) ? "Add note" : "Edit"))
+                {
+                    _noteEditUid = pair.UserData.UID;
+                    _noteEditBuffer = note ?? string.Empty;
+                }
+                SpheneUI.AttachTooltip("Edit your note for " + pair.UserData.PreferredName);
             }
             if (pair.UserPair != null)
             {

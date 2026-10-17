@@ -20,10 +20,6 @@ public class IdDisplayHandler
     private readonly Dictionary<string, bool> _showIdForEntry = new(StringComparer.Ordinal);
     private string _editComment = string.Empty;
     private string _editEntry = string.Empty;
-    private bool _editIsUid = false;
-    private string _lastMouseOverUid = string.Empty;
-    private bool _popupShown = false;
-    private DateTime? _popupTime;
 
     public IdDisplayHandler(SpheneMediator mediator, ServerConfigurationManager serverManager, SpheneConfigService SpheneConfigService)
     {
@@ -55,18 +51,13 @@ public class IdDisplayHandler
 
             if (ImGui.IsItemClicked(ImGuiMouseButton.Right))
             {
-                if (_editIsUid)
-                {
-                    _serverManager.SetNoteForUid(_editEntry, _editComment, save: true);
-                }
-                else
+                if (!string.IsNullOrEmpty(_editEntry))
                 {
                     _serverManager.SetNoteForGid(_editEntry, _editComment, save: true);
                 }
 
                 _editComment = _serverManager.GetNoteForGid(group.GID) ?? string.Empty;
                 _editEntry = group.GID;
-                _editIsUid = false;
             }
         }
         else
@@ -88,100 +79,49 @@ public class IdDisplayHandler
         }
     }
 
-    public void DrawPairText(string id, Pair pair, float textPosX, Func<float> editBoxWidth)
+    public void DrawPairText(string id, Pair pair, float textPosX)
     {
         ImGui.SameLine(textPosX);
-        (bool textIsUid, string playerText) = GetPlayerText(pair);
-        if (!string.Equals(_editEntry, pair.UserData.UID, StringComparison.Ordinal))
+        ImGui.AlignTextToFramePadding();
+
+        using (ImRaii.PushColor(ImGuiCol.Text, SpheneTheme.Current.CompactPairsText))
         {
-            ImGui.AlignTextToFramePadding();
-
-            using (ImRaii.PushFont(UiBuilder.MonoFont, textIsUid))
-            using (ImRaii.PushColor(ImGuiCol.Text, SpheneTheme.Current.CompactPairsText))
-            {
-                SpheneUI.Text.Plain(playerText);
-            }
-
-            if (ImGui.IsItemHovered())
-            {
-                if (!string.Equals(_lastMouseOverUid, id))
-                {
-                    _popupTime = DateTime.UtcNow.AddSeconds(_SpheneConfigService.Current.ProfileDelay);
-                }
-
-                _lastMouseOverUid = id;
-
-                if (_popupTime > DateTime.UtcNow || !_SpheneConfigService.Current.ProfilesShow)
-                {
-                    ImGui.SetTooltip("Left click to switch between UID display and nick" + Environment.NewLine
-                        + "Right click to change nick for " + pair.UserData.AliasOrUID + Environment.NewLine
-                        + "Middle Mouse Button to open their profile in a separate window");
-                }
-                else if (_popupTime < DateTime.UtcNow && !_popupShown)
-                {
-                    _popupShown = true;
-                    _mediator.Publish(new ProfilePopoutToggle(pair));
-                }
-            }
-            else
-            {
-                if (string.Equals(_lastMouseOverUid, id))
-                {
-                    _mediator.Publish(new ProfilePopoutToggle(Pair: null));
-                    _lastMouseOverUid = string.Empty;
-                    _popupShown = false;
-                }
-            }
-
-            if (ImGui.IsItemClicked(ImGuiMouseButton.Left))
-            {
-                var prevState = textIsUid;
-                if (_showIdForEntry.ContainsKey(pair.UserData.UID))
-                {
-                    prevState = _showIdForEntry[pair.UserData.UID];
-                }
-                _showIdForEntry[pair.UserData.UID] = !prevState;
-            }
-
-            if (ImGui.IsItemClicked(ImGuiMouseButton.Right))
-            {
-                if (_editIsUid)
-                {
-                    _serverManager.SetNoteForUid(_editEntry, _editComment, save: true);
-                }
-                else
-                {
-                    _serverManager.SetNoteForGid(_editEntry, _editComment, save: true);
-                }
-
-                _editComment = pair.GetNote() ?? string.Empty;
-                _editEntry = pair.UserData.UID;
-                _editIsUid = true;
-            }
-
-            if (ImGui.IsItemClicked(ImGuiMouseButton.Middle))
-            {
-                _mediator.Publish(new ProfileOpenStandaloneMessage(pair));
-            }
+            SpheneUI.Text.Plain(GetPlayerText(pair));
         }
-        else
+
+        if (ImGui.IsItemHovered())
         {
-            ImGui.AlignTextToFramePadding();
-
-            ImGui.SetNextItemWidth(editBoxWidth.Invoke());
-            if (SpheneUI.Controls.InputTextWithHint("##" + pair.UserData.UID, "Nick/Notes", ref _editComment, 255, ImGuiInputTextFlags.EnterReturnsTrue))
-            {
-                _serverManager.SetNoteForUid(pair.UserData.UID, _editComment);
-                _serverManager.SaveNotes();
-                _editEntry = string.Empty;
-            }
-
-            if (ImGui.IsItemClicked(ImGuiMouseButton.Right))
-            {
-                _editEntry = string.Empty;
-            }
-            SpheneUI.AttachTooltip("Hit ENTER to save\nRight click to cancel");
+            var note = pair.GetNote();
+            var noteLine = string.IsNullOrEmpty(note)
+                ? string.Empty
+                : $"Note: {note}{Environment.NewLine}";
+            ImGui.SetTooltip(noteLine
+                + "Middle Mouse Button to open their profile in the hub");
         }
+
+        if (ImGui.IsItemClicked(ImGuiMouseButton.Middle))
+        {
+            _mediator.Publish(new OpenSpheneHubMessage(SpheneHubPage.Friends, Friend: pair));
+        }
+    }
+
+    /// <summary>
+    /// Row-level activation for the profile popout: a right-click anywhere on the
+    /// pair row opens it (the name text alone is too small a target, so
+    /// DrawUserPair reports the row click here). The preload warms the profile
+    /// fetch and texture decode in the same frame the toggle opens the strip.
+    /// Avatar areas are excluded by the caller — those keep the pair tooltip.
+    /// </summary>
+    public void PairRowActivated(Pair pair)
+    {
+        if (pair == null || !_SpheneConfigService.Current.ProfilesShow
+            || string.Equals(_editEntry, pair.UserData.UID, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _mediator.Publish(new ProfilePopoutPreload(pair));
+        _mediator.Publish(new ProfilePopoutToggle(pair));
     }
 
     public (bool isGid, string text) GetGroupText(GroupFullInfoDto group)
@@ -208,42 +148,12 @@ public class IdDisplayHandler
         return (textIsGid, groupText!);
     }
 
-    public (bool isUid, string text) GetPlayerText(Pair pair)
+    public static string GetPlayerText(Pair pair)
     {
-        var textIsUid = true;
-        bool showUidInsteadOfName = ShowUidInsteadOfName(pair);
-        string? playerText = _serverManager.GetNoteForUid(pair.UserData.UID);
-        if (!showUidInsteadOfName && playerText != null)
-        {
-            if (string.IsNullOrEmpty(playerText))
-            {
-                playerText = pair.UserData.AliasOrUID;
-            }
-            else
-            {
-                textIsUid = false;
-            }
-        }
-        else
-        {
-            playerText = pair.UserData.AliasOrUID;
-        }
-
-        if (_SpheneConfigService.Current.ShowCharacterNameInsteadOfNotesForVisible && pair.IsMutuallyVisible && !showUidInsteadOfName)
-        {
-            playerText = pair.PlayerName;
-            textIsUid = false;
-            if (_SpheneConfigService.Current.PreferNotesOverNamesForVisible)
-            {
-                var note = pair.GetNote();
-                if (note != null)
-                {
-                    playerText = note;
-                }
-            }
-        }
-
-        return (textIsUid, playerText!);
+        // the row name is always the display name — notes and character
+        // names never take over, and the raw UID is not a user-facing
+        // identity anymore (handle/display name are)
+        return pair.UserData.PreferredName;
     }
 
     internal void Clear()
@@ -254,19 +164,12 @@ public class IdDisplayHandler
 
     internal void OpenProfile(Pair entry)
     {
-        _mediator.Publish(new ProfileOpenStandaloneMessage(entry));
+        _mediator.Publish(new OpenSpheneHubMessage(SpheneHubPage.Friends, Friend: entry));
     }
 
     private bool ShowGidInsteadOfName(GroupFullInfoDto group)
     {
         _showIdForEntry.TryGetValue(group.GID, out var showidInsteadOfName);
-
-        return showidInsteadOfName;
-    }
-
-    private bool ShowUidInsteadOfName(Pair pair)
-    {
-        _showIdForEntry.TryGetValue(pair.UserData.UID, out var showidInsteadOfName);
 
         return showidInsteadOfName;
     }

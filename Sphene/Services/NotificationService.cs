@@ -55,7 +55,9 @@ public class NotificationService : DisposableMediatorSubscriberBase, IHostedServ
     {
         var uid = notification.Sender?.UID ?? string.Empty;
         var aliasOrUid = notification.Sender?.AliasOrUID ?? string.Empty;
-        var name = _serverConfigurationManager.GetPreferredUserDisplayName(uid, aliasOrUid);
+        var name = notification.Sender != null
+            ? _serverConfigurationManager.GetPreferredUserDisplayName(notification.Sender)
+            : _serverConfigurationManager.GetPreferredUserDisplayName(uid, aliasOrUid);
         return string.IsNullOrWhiteSpace(name) ? "Unknown" : name;
     }
 

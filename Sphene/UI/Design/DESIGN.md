@@ -686,6 +686,14 @@ primitives:
 - `Fx.Sheen(drawList, min, max, phase, bandWidth, tint)` — clipped
   traveling light band; cycle `phase = (time * speed) % 1.5` for a sweep
   with a rest interval (phases outside 0..1 draw nothing).
+- `Fx.Constellation(drawList, min, max)` — static star-chart window
+  backdrop: a sparse field of twinkling stars (a few accent-tinted),
+  faint chart lines between close neighbours and a handful of bright
+  stars with cross glints. Draw after the window surface, before
+  content; opt in per window via `ChromeWindowPattern`.
+- `Fx.RailMotes(drawList, min, max)` — slow aether motes drifting upward
+  inside a nav rail band; painted by `Layout.BeginNavRail` so every
+  sidebar shares it.
 - `Fx.Reset()` — clears cached animation state (wired into hub resets).
 
 ## Owner-selected row effects (`Profile.RowFx`)
